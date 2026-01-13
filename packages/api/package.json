@@ -1,0 +1,15 @@
+{
+  "name": "@repo/api",
+  "version": "0.0.0",
+  "main": "./src/root.ts",
+  "types": "./src/root.ts",
+  "exports": {
+    ".": "./src/root.ts",
+    "./src/root": "./src/root.ts",
+    "./src/trpc": "./src/trpc.ts"
+  },
+  "dependencies": {
+    "@trpc/server": "^11.8.1",
+    "zod": "^3.24.0"
+  }
+}
