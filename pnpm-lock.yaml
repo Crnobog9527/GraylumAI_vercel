@@ -127,6 +127,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.90.1
+        version: 2.90.1
       '@trpc/server':
         specifier: ^11.8.1
         version: 11.8.1(typescript@5.9.3)
