@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from '../../trpc';
+import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 

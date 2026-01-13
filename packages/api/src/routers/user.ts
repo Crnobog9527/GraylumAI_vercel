@@ -3,10 +3,12 @@ import { z } from 'zod';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
-    const [userProfile] = await ctx.supabase
+    const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
       .select('*')
-      .eq('id', ctx.user.id);
+      .eq('id', ctx.user.id)
+      .single();
+    if (error) throw error;
     return userProfile;
   }),
 
@@ -22,10 +24,12 @@ export const userRouter = router({
     }),
 
   getUserCredits: protectedProcedure.query(async ({ ctx }) => {
-    const [userProfile] = await ctx.supabase
+    const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
       .select('credits')
-      .eq('id', ctx.user.id);
+      .eq('id', ctx.user.id)
+      .single();
+    if (error) throw error;
     return userProfile?.credits ?? 0;
   }),
 });
