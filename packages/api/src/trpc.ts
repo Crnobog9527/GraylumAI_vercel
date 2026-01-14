@@ -1,16 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import { createClient } from '@supabase/supabase-js';
-import { createServerClient } from '@supabase/ssr';
 
-// Generic cookie interface (compatible with Next.js cookies())
-interface CookieStore {
-  getAll(): { name: string; value: string }[];
-}
-
-export const createTRPCContext = async (opts: {
-  headers: Headers;
-  cookies?: CookieStore;
-}) => {
+export const createTRPCContext = async (opts: { headers: Headers }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   // Use service role key for server-side operations (bypasses RLS)
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -20,7 +11,7 @@ export const createTRPCContext = async (opts: {
 
   let user = null;
 
-  // Method 1: Try to get token from Authorization header
+  // Get token from Authorization header
   const authHeader = opts.headers.get('Authorization') ?? '';
   const token = authHeader.replace('Bearer ', '');
 
@@ -28,25 +19,6 @@ export const createTRPCContext = async (opts: {
     const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
     if (!error && authUser) {
       user = authUser;
-    }
-  }
-
-  // Method 2: If no token in header, try to get user from cookies
-  if (!user && opts.cookies) {
-    const supabaseWithCookies = createServerClient(
-      supabaseUrl,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return opts.cookies!.getAll();
-          },
-        },
-      }
-    );
-    const { data: { user: cookieUser } } = await supabaseWithCookies.auth.getUser();
-    if (cookieUser) {
-      user = cookieUser;
     }
   }
 
