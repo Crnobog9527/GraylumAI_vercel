@@ -64,9 +64,10 @@
 | 401 Unauthorized | 缺少 Supabase middleware | 添加 middleware.ts 刷新 session | ✅ 已修复 |
 | 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ✅ 已修复 |
 | 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 supabase.auth.getUser(token) | ❌ 无效 |
-| 401 Unauthorized | 客户端 getSession() 返回 null，header 认证失效 | 改用 cookie-based 认证，服务端用 createServerClient | ⏳ 待验证 |
+| 401 Unauthorized | 客户端 getSession() 返回 null，header 认证失效 | 改用 cookie-based 认证，服务端用 createServerClient | ❌ 无效 |
 | ERR_PNPM_OUTDATED_LOCKFILE | 添加 @supabase/ssr 依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | ✅ 已修复 |
 | Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
+| 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + getUser(token) + service role key | ⏳ 待验证 |
 
 ### Bug Fix Commits
 | Commit | Description |
@@ -77,6 +78,7 @@
 | 023cac3 | fix: switch to cookie-based authentication for tRPC |
 | b9b44b7 | chore: update pnpm-lock.yaml for @supabase/ssr |
 | 86d828a | fix: use generic cookie interface instead of Next.js internal type |
+| 7842ba7 | fix: restore Authorization header and use service role key |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
