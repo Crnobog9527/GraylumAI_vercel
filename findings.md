@@ -22,13 +22,21 @@
 - Supabase 数据库使用 **snake_case** 命名（如 `user_id`, `created_at`）
 - 前端和 API 代码需要匹配数据库字段名
 
+### Cookie 存储问题 (关键发现)
+- **问题**：浏览器中完全没有 Supabase auth token cookie
+- **原因**：单例模式干扰了 `createBrowserClient` 的 cookie 存储机制
+- **解决方案**：
+  1. 移除单例模式，每次调用 `createClient()` 都创建新实例
+  2. `createBrowserClient` 会自动处理 cookie 存储
+  3. middleware.ts 中的 `getUser()` 调用会刷新 session 并同步 cookie
+
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
 | 使用 Authorization header 认证 | Cookie-based 认证在 tRPC 场景下不可靠 |
 | 使用 useRef 存储 access token | 避免 getSession() 的异步时机问题 |
 | 使用 service role key | 服务端操作需要绕过 RLS |
-| 使用单例模式的 Supabase 客户端 | 确保 session 状态一致 |
+| **不使用**单例模式的 Supabase 客户端 | 单例模式会干扰 cookie 存储机制 |
 | 字段名使用 snake_case | 匹配 Supabase 数据库表结构 |
 
 ## Issues Encountered
@@ -44,15 +52,16 @@
 | Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
 | 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + service role key | ⏳ 待验证 |
 | 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
+| 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
 
 ## Key Files Modified
 
 ### 认证相关
 | File | Changes |
 |------|---------|
-| apps/web/src/trpc/provider.tsx | Authorization header + useRef 存储 token |
-| apps/web/src/lib/supabase.ts | 单例模式 Supabase 客户端 |
-| apps/web/middleware.ts | Supabase session 刷新中间件 |
+| apps/web/src/trpc/provider.tsx | Authorization header + useRef 存储 token + onAuthStateChange |
+| apps/web/src/lib/supabase.ts | 移除单例模式，每次创建新 createBrowserClient 实例 |
+| apps/web/middleware.ts | Supabase session 刷新中间件 (getUser 同步 cookie) |
 | packages/api/src/trpc.ts | getUser(token) 验证 + service role key |
 
 ### 迁移相关

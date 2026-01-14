@@ -8,13 +8,12 @@ import { createClient } from '@/lib/supabase';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({}));
-  const supabaseRef = useRef(createClient());
-  // Store access token in ref for immediate access
+  // Store access token in ref for immediate access in headers()
   const accessTokenRef = useRef<string | null>(null);
 
-  // Initialize session on mount
+  // Initialize session on mount and listen for auth state changes
   useEffect(() => {
-    const supabase = supabaseRef.current;
+    const supabase = createClient();
 
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
