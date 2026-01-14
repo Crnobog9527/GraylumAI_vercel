@@ -3,25 +3,23 @@ import { createClient } from '@supabase/supabase-js';
 
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  // Use service role key for server-side operations (bypasses RLS)
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  // Create Supabase client for database operations
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   // Extract JWT token from Authorization header
-  const authHeader = opts.headers.get('authorization') ?? '';
+  const authHeader = opts.headers.get('Authorization') ?? '';
   const token = authHeader.replace('Bearer ', '');
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    global: {
-      headers: {
-        authorization: authHeader,
-      },
-    },
-  });
-
-  // Pass token directly to getUser() for server-side JWT validation
+  // Validate token and get user
   let user = null;
   if (token) {
-    const { data: { user: authUser } } = await supabase.auth.getUser(token);
-    user = authUser;
+    const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
+    if (!error && authUser) {
+      user = authUser;
+    }
   }
 
   return {
