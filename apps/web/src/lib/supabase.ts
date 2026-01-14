@@ -1,13 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
-let supabaseInstance: SupabaseClient | null = null;
-
-export function createClient(): SupabaseClient {
-  if (supabaseInstance) {
-    return supabaseInstance;
-  }
-
+export function createClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -15,6 +8,7 @@ export function createClient(): SupabaseClient {
     throw new Error('Missing Supabase environment variables');
   }
 
-  supabaseInstance = createBrowserClient(supabaseUrl, supabaseAnonKey);
-  return supabaseInstance;
+  // createBrowserClient automatically handles cookie storage
+  // Do NOT use singleton pattern - it interferes with cookie sync
+  return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }
