@@ -61,5 +61,6 @@ Bug 修复完成 - 等待验证 500 错误修复
 | 401 Unauthorized | cookie-based 认证无效，需要 Authorization header + service role key | 恢复 Authorization header，使用 getUser(token) 验证，使用 service role key | 已修复 |
 | 401 Unauthorized | getSession() 时机问题，headers() 调用时 session 可能未初始化 | async getSession() 直接在 headers() 中调用 + persistSession 配置 | 已修复 |
 | Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | 已修复 |
-| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id`，INSERT 时外键约束失败 | 在 protectedProcedure 中获取/创建 profile，使用 ctx.profileId | 已修复 |
-| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id`，INSERT 时外键约束失败 | 使用 ctx.profileId 代替 ctx.user.id | 已修复 |
+| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id`，INSERT 时外键约束失败 | 在 protectedProcedure 中获取 profile，使用 ctx.profileId | 待验证 |
+| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id`，INSERT 时外键约束失败 | 使用 ctx.profileId 代替 ctx.user.id | 待验证 |
+| 500 全局错误 (所有页面) | protectedProcedure 自动创建 profile 失败，profiles 表有额外必填字段 | 移除自动创建逻辑，只查询 profile | 已修复 |

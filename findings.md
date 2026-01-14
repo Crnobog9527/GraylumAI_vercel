@@ -69,73 +69,58 @@
 | 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
 | tRPC 请求无身份令牌 | useRef 时机问题 + 后端无 cookie 回退 | async getSession() + 后端双重提取 (header + cookie) | ⏳ 待验证 |
 | Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | ✅ 已修复 |
-| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取/创建 profile，使用 ctx.profileId | ✅ 已修复 |
-| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ✅ 已修复 |
+| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取 profile，使用 ctx.profileId | ⏳ 待验证 |
+| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ⏳ 待验证 |
+| 500 全局错误 (所有页面) | 自动创建 profile 失败 (profiles 表有额外必填字段) | 移除自动创建逻辑，只查询 profile | ✅ 已修复 |
 
-## 500 错误全局分析 (2024-01-14) - 已修复
+## 500 错误全局分析 (2024-01-14)
 
-### 现象
-- ✅ 登录页面：正常工作，无控制台错误
-- ✅ 模型页面 (`/models`)：正常工作，可以读写 `ai_models` 表
+### 第一次分析（tickets/invitations 页面 500 错误）
+
+**现象**：
+- ✅ 登录页面：正常工作
+- ✅ 模型页面 (`/models`)：正常工作
 - ❌ 工单页面 (`/tickets`)：500 Internal Server Error
 - ❌ 邀请码页面 (`/invitations`)：500 Internal Server Error
 
-### 根本原因分析（已更正）
+**原因**：外键引用 `profiles.id` 而非 `auth.users.id`
 
-**初始假设（错误）**：表不存在
+**解决方案**：使用 `ctx.profileId` 代替 `ctx.user.id`
 
-**实际原因**：外键约束不匹配
+### 第二次问题（全局 500 错误）⚠️
 
-| 表 | 字段 | 数据库外键引用 | 代码使用的值 |
-|---|------|---------------|-------------|
-| tickets | `user_id` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
-| ticket_replies | `user_id` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
-| invitations | `created_by` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
+**现象**：
+- ❌ 所有页面都报 500 Internal Server Error
+- ❌ chat.getConversations, model.updateModelConfig, ticket.*, invitation.* 全部失败
 
-**核心问题**：数据库表的外键引用 `profiles.id`，而代码使用的是 `auth.users.id`。当用户在 `profiles` 表中没有对应记录时，INSERT 操作会因外键约束失败而返回 500 错误。
-
-### 解决方案
-
-在 `protectedProcedure` 中间件中自动获取或创建用户的 profile：
-
+**原因**：在 protectedProcedure 中尝试自动创建 profile 失败
 ```typescript
-// packages/api/src/trpc.ts
-export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
-  // ... auth check ...
-
-  // Get or create user profile
-  const { data: profile } = await ctx.supabase
-    .from('profiles')
-    .select('id')
-    .eq('id', ctx.user.id)
-    .single();
-
-  if (!profile) {
-    // Create profile if not exists
-    const { data: newProfile } = await ctx.supabase
-      .from('profiles')
-      .insert({ id: ctx.user.id, email: ctx.user.email })
-      .select('id')
-      .single();
-    profileId = newProfile.id;
-  }
-
-  return next({ ctx: { ...ctx, profileId } });
-});
+// 问题代码：profiles 表可能有其他必填字段，导致插入失败
+const { data: newProfile, error: createError } = await ctx.supabase
+  .from('profiles')
+  .insert({
+    id: ctx.user.id,
+    email: ctx.user.email,  // 可能缺少其他必填字段
+  })
 ```
 
-然后在 routers 中使用 `ctx.profileId` 代替 `ctx.user.id`：
-
+**修复方案**：移除自动创建逻辑，只查询 profile
 ```typescript
-// Before (错误)
-.insert({ user_id: ctx.user.id, ... })
+// 修复后：不创建，只查询
+const { data: profile } = await ctx.supabase
+  .from('profiles')
+  .select('id')
+  .eq('id', ctx.user.id)
+  .single();
 
-// After (正确)
-.insert({ user_id: ctx.profileId, ... })
+if (profile) {
+  profileId = profile.id;
+}
+// 如果没有 profile，直接使用 ctx.user.id
 ```
 
 ### 修改的文件
-- `packages/api/src/trpc.ts` - 添加 profile 获取/创建逻辑
+- `packages/api/src/trpc.ts` - 移除自动创建 profile 逻辑
 - `packages/api/src/routers/ticket.ts` - 使用 ctx.profileId
 - `packages/api/src/routers/invitation.ts` - 使用 ctx.profileId
 

@@ -42,36 +42,21 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     });
   }
 
-  // Get or create user profile (foreign keys reference profiles.id, not auth.users.id)
+  // Try to get user profile (foreign keys reference profiles.id)
+  // In most Supabase setups, profiles.id = auth.users.id
   let profileId = ctx.user.id;
 
-  const { data: profile, error: profileError } = await ctx.supabase
+  const { data: profile } = await ctx.supabase
     .from('profiles')
     .select('id')
     .eq('id', ctx.user.id)
     .single();
 
-  if (profileError || !profile) {
-    // Profile doesn't exist, create one
-    const { data: newProfile, error: createError } = await ctx.supabase
-      .from('profiles')
-      .insert({
-        id: ctx.user.id,
-        email: ctx.user.email,
-      })
-      .select('id')
-      .single();
-
-    if (createError || !newProfile) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: `Failed to create user profile: ${createError?.message || 'Unknown error'}`,
-      });
-    }
-    profileId = newProfile.id;
-  } else {
+  if (profile) {
     profileId = profile.id;
   }
+  // If no profile exists, use ctx.user.id directly
+  // (assumes profiles.id = auth.users.id pattern)
 
   return next({
     ctx: {
