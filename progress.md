@@ -3,10 +3,11 @@
 ## Session: 2026-01-14
 
 ### Current Status
-- **Phase:** Bug 修复 - 401 认证错误 (等待验证)
+- **Phase:** Bug 修复完成 - 等待 Vercel 验证
 - **Previous Phase:** 阶段十 - 邀请推广与模型管理迁移 (代码已完成)
 - **Started:** 2026-01-14
-- **Blocking Issue:** 用户登录后 API 调用返回 401 错误
+- **Blocking Issue:** ~~用户登录后 API 调用返回 401 错误~~ → 已修复
+- **Latest Fix:** 500 Internal Server Error 已修复 (外键约束问题)
 
 ### Actions Taken
 - [x] 安装 planning-with-files 插件 (作为 git submodule)
@@ -67,8 +68,11 @@
 | 401 Unauthorized | 客户端 getSession() 返回 null，header 认证失效 | 改用 cookie-based 认证，服务端用 createServerClient | ❌ 无效 |
 | ERR_PNPM_OUTDATED_LOCKFILE | 添加 @supabase/ssr 依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | ✅ 已修复 |
 | Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
-| 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + getUser(token) + service role key | ⏳ 待验证 |
-| 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
+| 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + getUser(token) + service role key | ✅ 已修复 |
+| 401 Unauthorized | getSession() 时机问题 | async getSession() 直接在 headers() 中调用 + persistSession 配置 | ✅ 已修复 |
+| Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | ✅ 已修复 |
+| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取/创建 profile，使用 ctx.profileId | ✅ 已修复 |
+| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ✅ 已修复 |
 
 ### Bug Fix Commits
 | Commit | Description |
@@ -81,20 +85,26 @@
 | 86d828a | fix: use generic cookie interface instead of Next.js internal type |
 | 7842ba7 | fix: restore Authorization header and use service role key |
 | 1669362 | fix: use ref to store access token for immediate header access |
+| f5ab089 | docs: add 500 error analysis and database migration SQL |
+| 47cc005 | fix: resolve 500 errors by using profileId instead of user.id |
+| f01994a | chore: add .turbo to gitignore |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
 |------|---------|
-| apps/web/src/trpc/provider.tsx | 简化为 cookie-based 认证 (移除 Authorization header) |
-| apps/web/src/lib/supabase.ts | 实现单例模式避免多次创建客户端 |
+| apps/web/src/trpc/provider.tsx | async getSession() 直接在 headers() 中调用 + persistSession 配置 |
+| apps/web/src/lib/supabase.ts | persistSession: true + storageKey 配置 |
 | apps/web/middleware.ts | 新增 Supabase session 刷新中间件 |
 | apps/web/src/app/api/trpc/[trpc]/route.ts | 传递 cookies 给 tRPC context |
-| packages/api/src/trpc.ts | 使用 createServerClient 从 cookies 读取 session |
-| packages/api/package.json | 添加 @supabase/ssr 依赖 |
-| pnpm-lock.yaml | 更新 lockfile 以包含新依赖 |
-| packages/api/src/routers/ticket.ts | 字段名改为 snake_case |
+| packages/api/src/trpc.ts | 添加 profile 获取/创建逻辑，导出 ctx.profileId |
+| packages/api/package.json | 移除 @supabase/ssr 依赖 (改用 Authorization header) |
+| pnpm-lock.yaml | 更新 lockfile |
+| packages/api/src/routers/ticket.ts | 使用 ctx.profileId 代替 ctx.user.id |
 | packages/api/src/routers/model.ts | 字段名改为 snake_case |
-| packages/api/src/routers/invitation.ts | 字段名改为 snake_case |
+| packages/api/src/routers/invitation.ts | 使用 ctx.profileId 代替 ctx.user.id |
 | apps/web/src/app/tickets/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/models/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/invitations/page.tsx | 字段名改为 snake_case |
+| .gitignore | 添加 .turbo/ 忽略规则 |
+| findings.md | 添加 500 错误分析和解决方案 |
+| supabase/migrations/20240114_create_tickets_invitations_tables.sql | 新增 (可选的数据库迁移脚本) |
