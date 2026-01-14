@@ -1,29 +1,26 @@
 import { initTRPC, TRPCError } from '@trpc/server';
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 
-// Generic cookie interface (compatible with Next.js cookies())
-interface CookieStore {
-  getAll(): { name: string; value: string }[];
-}
-
-export const createTRPCContext = async (opts: {
-  headers: Headers;
-  cookies: CookieStore;
-}) => {
+export const createTRPCContext = async (opts: { headers: Headers }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  // Use service role key for server-side operations (bypasses RLS)
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  // Create Supabase server client with cookie access
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return opts.cookies.getAll();
-      },
-    },
-  });
+  // Create Supabase client for database operations
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Get user from session (reads from cookies)
-  const { data: { user } } = await supabase.auth.getUser();
+  // Extract JWT token from Authorization header
+  const authHeader = opts.headers.get('Authorization') ?? '';
+  const token = authHeader.replace('Bearer ', '');
+
+  // Validate token and get user
+  let user = null;
+  if (token) {
+    const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
+    if (!error && authUser) {
+      user = authUser;
+    }
+  }
 
   return {
     ...opts,

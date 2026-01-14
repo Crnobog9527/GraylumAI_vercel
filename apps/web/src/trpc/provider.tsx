@@ -10,12 +10,22 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({}));
   const supabaseRef = useRef(createClient());
 
-  // Cookie-based auth: cookies are automatically sent with requests
+  // Create tRPC client with Authorization header
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [
         httpBatchLink({
           url: '/api/trpc',
+          async headers() {
+            const supabase = supabaseRef.current;
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              return {
+                Authorization: `Bearer ${session.access_token}`,
+              };
+            }
+            return {};
+          },
         }),
       ],
     })
