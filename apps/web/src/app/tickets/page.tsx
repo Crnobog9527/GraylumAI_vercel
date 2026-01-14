@@ -69,7 +69,7 @@ export default function TicketsPage() {
 
       <div className="grid gap-4">
         {tickets && tickets.length > 0 ? (
-          tickets.map((ticket: { id: string; title: string; status: string; createdAt: string; ticket_replies?: { content: string }[] }) => (
+          tickets.map((ticket: { id: string; title: string; status: string; created_at: string; ticket_replies?: { content: string }[] }) => (
             <Card key={ticket.id}>
               <CardHeader>
                 <CardTitle>
@@ -77,7 +77,7 @@ export default function TicketsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-700">Created at: {new Date(ticket.createdAt).toLocaleString()}</p>
+                <p className="text-sm text-gray-700">Created at: {new Date(ticket.created_at).toLocaleString()}</p>
                 {ticket.ticket_replies?.[0]?.content && (
                   <p className="mt-2">{ticket.ticket_replies[0].content}</p>
                 )}
