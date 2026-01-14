@@ -1,18 +1,79 @@
 # Findings & Decisions
 
 ## Requirements
--
+- 完成 GraylumAI Phase 3 迁移（阶段九至十一）
+- 阶段九：工单系统与系统设置迁移
+- 阶段十：邀请推广与模型管理迁移
+- 阶段十一：管理后台与最终优化
 
 ## Research Findings
--
+
+### Supabase 认证机制
+1. **客户端认证**：使用 `@supabase/ssr` 的 `createBrowserClient` 创建客户端，session 存储在 cookies
+2. **服务端认证**：需要从 Authorization header 提取 JWT token，使用 `getUser(token)` 验证
+3. **Service Role Key**：服务端操作建议使用 `SUPABASE_SERVICE_ROLE_KEY` 绕过 RLS
+
+### tRPC 认证流程
+1. 客户端在 `httpBatchLink` 的 `headers()` 中添加 `Authorization: Bearer ${token}`
+2. 服务端在 `createTRPCContext` 中解析 header 并验证 token
+3. `protectedProcedure` 检查 `ctx.user` 是否存在
+
+### 数据库字段命名
+- Supabase 数据库使用 **snake_case** 命名（如 `user_id`, `created_at`）
+- 前端和 API 代码需要匹配数据库字段名
 
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
+| 使用 Authorization header 认证 | Cookie-based 认证在 tRPC 场景下不可靠 |
+| 使用 useRef 存储 access token | 避免 getSession() 的异步时机问题 |
+| 使用 service role key | 服务端操作需要绕过 RLS |
+| 使用单例模式的 Supabase 客户端 | 确保 session 状态一致 |
+| 字段名使用 snake_case | 匹配 Supabase 数据库表结构 |
 
 ## Issues Encountered
-| Issue | Resolution |
-|-------|------------|
+| Issue | Cause | Resolution | Status |
+|-------|-------|------------|--------|
+| 401 Unauthorized | tRPC 请求未携带认证头 | 在 provider.tsx 添加 Authorization header | ✅ 已修复 |
+| 401 Unauthorized | 数据库字段名不匹配 (camelCase vs snake_case) | 更新所有 router 和前端页面使用 snake_case | ✅ 已修复 |
+| 401 Unauthorized | 缺少 Supabase middleware | 添加 middleware.ts 刷新 session | ✅ 已修复 |
+| 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ✅ 已修复 |
+| 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 getUser(token) | ❌ 无效 |
+| 401 Unauthorized | 客户端 getSession() 返回 null | 改用 cookie-based 认证 | ❌ 无效 |
+| ERR_PNPM_OUTDATED_LOCKFILE | 添加依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | ✅ 已修复 |
+| Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
+| 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + service role key | ⏳ 待验证 |
+| 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
+
+## Key Files Modified
+
+### 认证相关
+| File | Changes |
+|------|---------|
+| apps/web/src/trpc/provider.tsx | Authorization header + useRef 存储 token |
+| apps/web/src/lib/supabase.ts | 单例模式 Supabase 客户端 |
+| apps/web/middleware.ts | Supabase session 刷新中间件 |
+| packages/api/src/trpc.ts | getUser(token) 验证 + service role key |
+
+### 迁移相关
+| File | Changes |
+|------|---------|
+| packages/api/src/routers/ticket.ts | 工单系统 API |
+| packages/api/src/routers/settings.ts | 系统设置 API |
+| packages/api/src/routers/model.ts | AI 模型管理 API |
+| packages/api/src/routers/invitation.ts | 邀请码管理 API |
+| apps/web/src/app/tickets/page.tsx | 工单页面 |
+| apps/web/src/app/models/page.tsx | 模型管理页面 |
+| apps/web/src/app/invitations/page.tsx | 邀请码页面 |
 
 ## Resources
--
+- [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
+- [tRPC React Query Setup](https://trpc.io/docs/client/react)
+- [Next.js App Router](https://nextjs.org/docs/app)
+
+## Environment Variables Required
+```
+NEXT_PUBLIC_SUPABASE_URL=<your-supabase-url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>  # Important for server-side auth
+```
