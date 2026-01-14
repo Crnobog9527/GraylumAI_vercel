@@ -66,6 +66,7 @@
 | 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 supabase.auth.getUser(token) | ❌ 无效 |
 | 401 Unauthorized | 客户端 getSession() 返回 null，header 认证失效 | 改用 cookie-based 认证，服务端用 createServerClient | ⏳ 待验证 |
 | ERR_PNPM_OUTDATED_LOCKFILE | 添加 @supabase/ssr 依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | ✅ 已修复 |
+| Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
 
 ### Bug Fix Commits
 | Commit | Description |
@@ -75,6 +76,7 @@
 | 8fae5e2 | fix: pass JWT token directly to getUser() for server-side validation |
 | 023cac3 | fix: switch to cookie-based authentication for tRPC |
 | b9b44b7 | chore: update pnpm-lock.yaml for @supabase/ssr |
+| 86d828a | fix: use generic cookie interface instead of Next.js internal type |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
