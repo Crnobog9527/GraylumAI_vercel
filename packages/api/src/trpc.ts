@@ -5,15 +5,24 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+  // Extract JWT token from Authorization header
+  const authHeader = opts.headers.get('authorization') ?? '';
+  const token = authHeader.replace('Bearer ', '');
+
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     global: {
       headers: {
-        authorization: opts.headers.get('authorization') ?? '',
+        authorization: authHeader,
       },
     },
   });
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Pass token directly to getUser() for server-side JWT validation
+  let user = null;
+  if (token) {
+    const { data: { user: authUser } } = await supabase.auth.getUser(token);
+    user = authUser;
+  }
 
   return {
     ...opts,
