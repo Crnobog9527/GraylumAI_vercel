@@ -69,6 +69,93 @@
 | 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
 | tRPC 请求无身份令牌 | useRef 时机问题 + 后端无 cookie 回退 | async getSession() + 后端双重提取 (header + cookie) | ⏳ 待验证 |
 | Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | ✅ 已修复 |
+| 500 Internal Server Error (tickets) | `tickets` 和 `ticket_replies` 表不存在于数据库 | 在 Supabase 创建缺失的表 | ⏳ 待修复 |
+| 500 Internal Server Error (invitations) | `invitations` 表不存在于数据库 | 在 Supabase 创建缺失的表 | ⏳ 待修复 |
+
+## 500 错误全局分析 (2024-01-14)
+
+### 现象
+- ✅ 登录页面：正常工作，无控制台错误
+- ✅ 模型页面 (`/models`)：正常工作，可以读写 `ai_models` 表
+- ❌ 工单页面 (`/tickets`)：500 Internal Server Error
+- ❌ 邀请码页面 (`/invitations`)：500 Internal Server Error
+
+### 根本原因分析
+
+| 页面 | 数据库操作 | 表名 | 状态 |
+|------|-----------|------|------|
+| Models | SELECT/UPDATE | `ai_models` | ✅ 表已存在 |
+| Tickets | SELECT/INSERT | `tickets`, `ticket_replies` | ❌ 表不存在 |
+| Invitations | SELECT/INSERT | `invitations` | ❌ 表不存在 |
+
+**核心问题**：`tickets`、`ticket_replies` 和 `invitations` 这三张表在 Supabase 数据库中不存在。
+
+### 代码分析对比
+
+**Models Router (正常工作)**:
+```typescript
+// 操作已存在的 ai_models 表
+await ctx.supabase.from('ai_models').select('*');
+await ctx.supabase.from('ai_models').update({ config }).eq('id', id);
+```
+
+**Tickets Router (500错误)**:
+```typescript
+// 尝试操作不存在的 tickets 和 ticket_replies 表
+await ctx.supabase.from('tickets').insert({ user_id, title, status });
+await ctx.supabase.from('ticket_replies').insert({ ticket_id, user_id, content });
+```
+
+**Invitations Router (500错误)**:
+```typescript
+// 尝试操作不存在的 invitations 表
+await ctx.supabase.from('invitations').insert({ code, created_by, status });
+```
+
+### 解决方案
+
+需要在 Supabase 数据库中创建以下表：
+
+**1. tickets 表**
+```sql
+CREATE TABLE tickets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+**2. ticket_replies 表**
+```sql
+CREATE TABLE ticket_replies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+**3. invitations 表**
+```sql
+CREATE TABLE invitations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT UNIQUE NOT NULL,
+  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  used_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### 实施步骤
+1. 登录 Supabase 控制台
+2. 进入 SQL Editor
+3. 执行上述 SQL 脚本创建表
+4. 验证 `/tickets` 和 `/invitations` 页面是否正常工作
 
 ## Key Files Modified
 
