@@ -6,7 +6,7 @@ export const userRouter = router({
     const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
       .select('*')
-      .eq('id', ctx.user.id)
+      .eq('id', ctx.profileId)
       .single();
     if (error) throw error;
     return userProfile;
@@ -18,7 +18,7 @@ export const userRouter = router({
       const { data, error } = await ctx.supabase
         .from('profiles')
         .update({ nickname: input.nickname, avatar_url: input.avatarUrl })
-        .eq('id', ctx.user.id);
+        .eq('id', ctx.profileId);
       if (error) throw error;
       return data;
     }),
@@ -27,7 +27,7 @@ export const userRouter = router({
     const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
       .select('credits')
-      .eq('id', ctx.user.id)
+      .eq('id', ctx.profileId)
       .single();
     if (error) throw error;
     return userProfile?.credits ?? 0;

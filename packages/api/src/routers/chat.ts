@@ -7,7 +7,7 @@ export const chatRouter = router({
     return ctx.supabase
       .from('conversations')
       .select('*')
-      .eq('user_id', ctx.user.id)
+      .eq('user_id', ctx.profileId)
       .order('created_at', { ascending: false });
   }),
 
@@ -19,7 +19,7 @@ export const chatRouter = router({
         .from('conversations')
         .select('id')
         .eq('id', input.conversationId)
-        .eq('user_id', ctx.user.id);
+        .eq('user_id', ctx.profileId);
 
       if (!convos || convos.length === 0) {
         throw new TRPCError({ code: 'FORBIDDEN' });
@@ -52,7 +52,7 @@ export const chatRouter = router({
       if (userMessageError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: userMessageError.message });
 
       // 2. Deduct credits (example)
-      // await ctx.supabase.rpc('deduct_credits', { user_id: ctx.user.id, amount: 1 });
+      // await ctx.supabase.rpc('deduct_credits', { user_id: ctx.profileId, amount: 1 });
 
       // 3. Echo a reply
       const { data: assistantMessage, error: assistantMessageError } = await ctx.supabase

@@ -111,7 +111,7 @@ export const creditsRouter = router({
     const { data: profile, error } = await ctx.supabase
       .from('profiles')
       .select('credits, credits_expiring_soon, credits_expiry_date')
-      .eq('id', ctx.user.id)
+      .eq('id', ctx.profileId)
       .single();
 
     if (error || !profile) {
@@ -143,7 +143,7 @@ export const creditsRouter = router({
       if (idempotencyKey) {
         const idempotencyCheck = await checkIdempotency(
           ctx.supabase,
-          ctx.user.id,
+          ctx.profileId,
           idempotencyKey
         );
         if (idempotencyCheck.exists) {
@@ -167,7 +167,7 @@ export const creditsRouter = router({
       const { data: profile, error: profileError } = await ctx.supabase
         .from('profiles')
         .select('credits, updated_at')
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .single();
 
       if (profileError || !profile) {
@@ -196,7 +196,7 @@ export const creditsRouter = router({
           credits: newCredits,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .eq('updated_at', profile.updated_at) // 乐观锁条件
         .select()
         .single();
@@ -213,7 +213,7 @@ export const creditsRouter = router({
         .from('credit_transactions')
         .insert({
           id: transactionId,
-          user_id: ctx.user.id,
+          user_id: ctx.profileId,
           type: 'consumption',
           amount: -amount, // 负数表示扣除
           balance_before: profile.credits,
@@ -256,7 +256,7 @@ export const creditsRouter = router({
       if (idempotencyKey) {
         const idempotencyCheck = await checkIdempotency(
           ctx.supabase,
-          ctx.user.id,
+          ctx.profileId,
           idempotencyKey
         );
         if (idempotencyCheck.exists) {
@@ -279,7 +279,7 @@ export const creditsRouter = router({
       const { data: profile, error: profileError } = await ctx.supabase
         .from('profiles')
         .select('credits, updated_at')
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .single();
 
       if (profileError || !profile) {
@@ -307,7 +307,7 @@ export const creditsRouter = router({
       const { data: updateResult, error: updateError } = await ctx.supabase
         .from('profiles')
         .update(updateData)
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .eq('updated_at', profile.updated_at)
         .select()
         .single();
@@ -324,7 +324,7 @@ export const creditsRouter = router({
         .from('credit_transactions')
         .insert({
           id: transactionId,
-          user_id: ctx.user.id,
+          user_id: ctx.profileId,
           type,
           amount: amount, // 正数表示增加
           balance_before: profile.credits,
@@ -366,7 +366,7 @@ export const creditsRouter = router({
       let query = ctx.supabase
         .from('credit_transactions')
         .select('*', { count: 'exact' })
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .order('created_at', { ascending: false })
         .limit(limit + 1); // 多取一条用于判断是否有下一页
 
@@ -450,7 +450,7 @@ export const creditsRouter = router({
       const { data: transactions, error } = await ctx.supabase
         .from('credit_transactions')
         .select('type, amount')
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .eq('status', 'completed')
         .gte('created_at', startDate.toISOString());
 
@@ -495,7 +495,7 @@ export const creditsRouter = router({
       const { data: profile } = await ctx.supabase
         .from('profiles')
         .select('credits')
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .single();
 
       const currentCredits = profile?.credits ?? 0;

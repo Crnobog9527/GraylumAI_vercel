@@ -72,6 +72,7 @@
 | 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取 profile，使用 ctx.profileId | ⏳ 待验证 |
 | 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ⏳ 待验证 |
 | 500 全局错误 (所有页面) | 自动创建 profile 失败 (profiles 表有额外必填字段) | 移除自动创建逻辑，只查询 profile | ✅ 已修复 |
+| 500 全局错误 (最终修复) | profiles 表需要添加 email 字段 + 所有 router 统一使用 profileId | 自动创建 profile(id+email) + 统一所有 router 使用 ctx.profileId | ⏳ 待验证 |
 
 ## 500 错误全局分析 (2024-01-14)
 
