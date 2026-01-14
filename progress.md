@@ -3,8 +3,10 @@
 ## Session: 2026-01-14
 
 ### Current Status
-- **Phase:** 阶段十 - 邀请推广与模型管理迁移 (等待 Vercel 验证)
+- **Phase:** Bug 修复 - 401 认证错误 (等待验证)
+- **Previous Phase:** 阶段十 - 邀请推广与模型管理迁移 (代码已完成)
 - **Started:** 2026-01-14
+- **Blocking Issue:** 用户登录后 API 调用返回 401 错误
 
 ### Actions Taken
 - [x] 安装 planning-with-files 插件 (作为 git submodule)
@@ -53,6 +55,30 @@
 | Test | Expected | Actual | Status |
 |------|----------|--------|--------|
 
-### Errors
-| Error | Resolution |
-|-------|------------|
+### Errors Encountered
+
+| Error | Cause | Resolution | Status |
+|-------|-------|------------|--------|
+| 401 Unauthorized | tRPC 请求未携带认证头 | 修改 provider.tsx 添加 authorization header | ✅ 已修复 |
+| 401 Unauthorized | 数据库字段名不匹配 (camelCase vs snake_case) | 更新所有 router 和前端页面使用 snake_case | ✅ 已修复 |
+| 401 Unauthorized | 缺少 Supabase middleware | 添加 middleware.ts 刷新 session | ✅ 已修复 |
+| 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ⏳ 待验证 |
+
+### Bug Fix Commits
+| Commit | Description |
+|--------|-------------|
+| 7289981 | fix: resolve 401 auth errors and snake_case column names |
+| ce6216a | fix: add middleware for Supabase auth session refresh |
+
+### Files Modified for Bug Fixes
+| File | Changes |
+|------|---------|
+| apps/web/src/trpc/provider.tsx | 添加 authorization header, 使用 useRef 保持 Supabase 实例 |
+| apps/web/src/lib/supabase.ts | 实现单例模式避免多次创建客户端 |
+| apps/web/middleware.ts | 新增 Supabase session 刷新中间件 |
+| packages/api/src/routers/ticket.ts | 字段名改为 snake_case |
+| packages/api/src/routers/model.ts | 字段名改为 snake_case |
+| packages/api/src/routers/invitation.ts | 字段名改为 snake_case |
+| apps/web/src/app/tickets/page.tsx | 字段名改为 snake_case |
+| apps/web/src/app/models/page.tsx | 字段名改为 snake_case |
+| apps/web/src/app/invitations/page.tsx | 字段名改为 snake_case |
