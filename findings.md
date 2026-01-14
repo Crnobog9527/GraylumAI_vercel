@@ -45,13 +45,13 @@
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
-| 使用 Authorization header 认证 | 主要认证方式，每次请求获取最新 token |
-| Cookie 作为回退机制 | 当 header 中没有 token 时，尝试从 cookies 获取 |
+| 使用 Authorization header 认证 | 唯一认证方式，每次请求获取最新 token |
 | `persistSession: true` | 确保 session 正确持久化到存储 |
 | `storageKey: 'sb-auth-token'` | 明确指定存储 key |
 | 使用 service role key | 服务端操作需要绕过 RLS |
 | **不使用**单例模式的 Supabase 客户端 | 单例模式会干扰 cookie 存储机制 |
 | 字段名使用 snake_case | 匹配 Supabase 数据库表结构 |
+| api 包不依赖 @supabase/ssr | 避免 Vercel 构建时模块解析问题 |
 
 ## Issues Encountered
 | Issue | Cause | Resolution | Status |
@@ -68,6 +68,7 @@
 | 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
 | 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
 | tRPC 请求无身份令牌 | useRef 时机问题 + 后端无 cookie 回退 | async getSession() + 后端双重提取 (header + cookie) | ⏳ 待验证 |
+| Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | ✅ 已修复 |
 
 ## Key Files Modified
 
@@ -76,9 +77,9 @@
 |------|---------|
 | apps/web/src/trpc/provider.tsx | async headers() 直接调用 getSession() 获取 token |
 | apps/web/src/lib/supabase.ts | 添加 persistSession + storageKey 配置 |
-| apps/web/src/app/api/trpc/[trpc]/route.ts | 传递 cookies 给 tRPC context |
+| apps/web/src/app/api/trpc/[trpc]/route.ts | 简化为只传递 headers |
 | apps/web/middleware.ts | Supabase session 刷新中间件 (getUser 同步 cookie) |
-| packages/api/src/trpc.ts | 双重提取：先从 header，再从 cookies |
+| packages/api/src/trpc.ts | 只从 Authorization header 提取 token |
 
 ### 迁移相关
 | File | Changes |
