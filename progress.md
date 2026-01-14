@@ -62,13 +62,15 @@
 | 401 Unauthorized | tRPC 请求未携带认证头 | 修改 provider.tsx 添加 authorization header | ✅ 已修复 |
 | 401 Unauthorized | 数据库字段名不匹配 (camelCase vs snake_case) | 更新所有 router 和前端页面使用 snake_case | ✅ 已修复 |
 | 401 Unauthorized | 缺少 Supabase middleware | 添加 middleware.ts 刷新 session | ✅ 已修复 |
-| 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ⏳ 待验证 |
+| 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ✅ 已修复 |
+| 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 supabase.auth.getUser(token) | ⏳ 待验证 |
 
 ### Bug Fix Commits
 | Commit | Description |
 |--------|-------------|
 | 7289981 | fix: resolve 401 auth errors and snake_case column names |
 | ce6216a | fix: add middleware for Supabase auth session refresh |
+| 8fae5e2 | fix: pass JWT token directly to getUser() for server-side validation |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
@@ -82,3 +84,4 @@
 | apps/web/src/app/tickets/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/models/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/invitations/page.tsx | 字段名改为 snake_case |
+| packages/api/src/trpc.ts | 修复 JWT token 传递给 getUser() |
