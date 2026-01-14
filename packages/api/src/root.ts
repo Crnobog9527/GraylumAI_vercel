@@ -4,6 +4,8 @@ import { userRouter } from './routers/user';
 import { creditsRouter } from './routers/credits';
 import { ticketRouter } from './routers/ticket';
 import { settingsRouter } from './routers/settings';
+import { modelRouter } from './routers/model';
+import { invitationRouter } from './routers/invitation';
 
 /**
  * 主路由器
@@ -16,6 +18,8 @@ export const appRouter = router({
   credits: creditsRouter,
   ticket: ticketRouter,
   settings: settingsRouter,
+  model: modelRouter,
+  invitation: invitationRouter,
 });
 
 /**
