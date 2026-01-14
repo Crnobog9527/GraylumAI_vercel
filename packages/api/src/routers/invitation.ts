@@ -26,7 +26,7 @@ export const invitationRouter = router({
         .from('invitations')
         .insert({
           code,
-          createdBy: ctx.user.id,
+          created_by: ctx.user.id,
           status: 'active',
         })
         .select()
@@ -63,7 +63,7 @@ export const invitationRouter = router({
       const { data, error } = await ctx.supabase
         .from('invitations')
         .select('*')
-        .order('createdAt', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });

@@ -9,7 +9,7 @@ export const ticketRouter = router({
       const { data: newTicket, error: ticketError } = await ctx.supabase
         .from('tickets')
         .insert({
-          userId: ctx.user.id,
+          user_id: ctx.user.id,
           title: input.title,
           status: 'open',
         })
@@ -17,14 +17,14 @@ export const ticketRouter = router({
         .single();
 
       if (ticketError || !newTicket) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create ticket.' });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ticketError?.message || 'Failed to create ticket.' });
       }
 
       await ctx.supabase
         .from('ticket_replies')
         .insert({
-          ticketId: newTicket.id,
-          userId: ctx.user.id,
+          ticket_id: newTicket.id,
+          user_id: ctx.user.id,
           content: input.content,
         });
 
@@ -35,8 +35,8 @@ export const ticketRouter = router({
     const { data, error } = await ctx.supabase
       .from('tickets')
       .select('*, ticket_replies(*)')
-      .eq('userId', ctx.user.id)
-      .order('createdAt', { ascending: false });
+      .eq('user_id', ctx.user.id)
+      .order('created_at', { ascending: false });
 
     if (error) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
@@ -51,7 +51,7 @@ export const ticketRouter = router({
         .from('tickets')
         .select('*, ticket_replies(*)')
         .eq('id', input.ticketId)
-        .eq('userId', ctx.user.id)
+        .eq('user_id', ctx.user.id)
         .single();
 
       if (error || !ticket) {
@@ -67,7 +67,7 @@ export const ticketRouter = router({
         .from('tickets')
         .select('id')
         .eq('id', input.ticketId)
-        .eq('userId', ctx.user.id)
+        .eq('user_id', ctx.user.id)
         .single();
 
       if (ticketError || !ticket) {
@@ -77,8 +77,8 @@ export const ticketRouter = router({
       const { data: newReply, error: replyError } = await ctx.supabase
         .from('ticket_replies')
         .insert({
-          ticketId: input.ticketId,
-          userId: ctx.user.id,
+          ticket_id: input.ticketId,
+          user_id: ctx.user.id,
           content: input.content,
         })
         .select()

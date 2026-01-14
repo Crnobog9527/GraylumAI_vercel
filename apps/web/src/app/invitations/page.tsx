@@ -6,10 +6,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
 interface Invitation {
   code: string;
-  createdBy: string;
-  usedBy: string | null;
+  created_by: string;
+  used_by: string | null;
   status: string;
-  createdAt: string;
+  created_at: string;
 }
 
 export default function InvitationsPage() {
@@ -42,10 +42,10 @@ export default function InvitationsPage() {
                 <CardTitle className="font-mono">Code: {invite.code}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p>Created By: {invite.createdBy}</p>
-                <p>Used By: {invite.usedBy || 'N/A'}</p>
+                <p>Created By: {invite.created_by}</p>
+                <p>Used By: {invite.used_by || 'N/A'}</p>
                 <p>Status: <span className={invite.status === 'active' ? 'text-green-600' : 'text-gray-500'}>{invite.status}</span></p>
-                <p>Created At: {new Date(invite.createdAt).toLocaleString()}</p>
+                <p>Created At: {new Date(invite.created_at).toLocaleString()}</p>
               </CardContent>
             </Card>
           ))
