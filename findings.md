@@ -69,10 +69,10 @@
 | 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
 | tRPC 请求无身份令牌 | useRef 时机问题 + 后端无 cookie 回退 | async getSession() + 后端双重提取 (header + cookie) | ⏳ 待验证 |
 | Can't resolve '@supabase/ssr' | api 包中 @supabase/ssr 在 Vercel 构建时无法解析 | 移除 cookie 回退，只使用 Authorization header | ✅ 已修复 |
-| 500 Internal Server Error (tickets) | `tickets` 和 `ticket_replies` 表不存在于数据库 | 在 Supabase 创建缺失的表 | ⏳ 待修复 |
-| 500 Internal Server Error (invitations) | `invitations` 表不存在于数据库 | 在 Supabase 创建缺失的表 | ⏳ 待修复 |
+| 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取/创建 profile，使用 ctx.profileId | ✅ 已修复 |
+| 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ✅ 已修复 |
 
-## 500 错误全局分析 (2024-01-14)
+## 500 错误全局分析 (2024-01-14) - 已修复
 
 ### 现象
 - ✅ 登录页面：正常工作，无控制台错误
@@ -80,82 +80,64 @@
 - ❌ 工单页面 (`/tickets`)：500 Internal Server Error
 - ❌ 邀请码页面 (`/invitations`)：500 Internal Server Error
 
-### 根本原因分析
+### 根本原因分析（已更正）
 
-| 页面 | 数据库操作 | 表名 | 状态 |
-|------|-----------|------|------|
-| Models | SELECT/UPDATE | `ai_models` | ✅ 表已存在 |
-| Tickets | SELECT/INSERT | `tickets`, `ticket_replies` | ❌ 表不存在 |
-| Invitations | SELECT/INSERT | `invitations` | ❌ 表不存在 |
+**初始假设（错误）**：表不存在
 
-**核心问题**：`tickets`、`ticket_replies` 和 `invitations` 这三张表在 Supabase 数据库中不存在。
+**实际原因**：外键约束不匹配
 
-### 代码分析对比
+| 表 | 字段 | 数据库外键引用 | 代码使用的值 |
+|---|------|---------------|-------------|
+| tickets | `user_id` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
+| ticket_replies | `user_id` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
+| invitations | `created_by` | `public.profiles.id` | `ctx.user.id` (auth.users.id) |
 
-**Models Router (正常工作)**:
-```typescript
-// 操作已存在的 ai_models 表
-await ctx.supabase.from('ai_models').select('*');
-await ctx.supabase.from('ai_models').update({ config }).eq('id', id);
-```
-
-**Tickets Router (500错误)**:
-```typescript
-// 尝试操作不存在的 tickets 和 ticket_replies 表
-await ctx.supabase.from('tickets').insert({ user_id, title, status });
-await ctx.supabase.from('ticket_replies').insert({ ticket_id, user_id, content });
-```
-
-**Invitations Router (500错误)**:
-```typescript
-// 尝试操作不存在的 invitations 表
-await ctx.supabase.from('invitations').insert({ code, created_by, status });
-```
+**核心问题**：数据库表的外键引用 `profiles.id`，而代码使用的是 `auth.users.id`。当用户在 `profiles` 表中没有对应记录时，INSERT 操作会因外键约束失败而返回 500 错误。
 
 ### 解决方案
 
-需要在 Supabase 数据库中创建以下表：
+在 `protectedProcedure` 中间件中自动获取或创建用户的 profile：
 
-**1. tickets 表**
-```sql
-CREATE TABLE tickets (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open',
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+```typescript
+// packages/api/src/trpc.ts
+export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
+  // ... auth check ...
+
+  // Get or create user profile
+  const { data: profile } = await ctx.supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', ctx.user.id)
+    .single();
+
+  if (!profile) {
+    // Create profile if not exists
+    const { data: newProfile } = await ctx.supabase
+      .from('profiles')
+      .insert({ id: ctx.user.id, email: ctx.user.email })
+      .select('id')
+      .single();
+    profileId = newProfile.id;
+  }
+
+  return next({ ctx: { ...ctx, profileId } });
+});
 ```
 
-**2. ticket_replies 表**
-```sql
-CREATE TABLE ticket_replies (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+然后在 routers 中使用 `ctx.profileId` 代替 `ctx.user.id`：
+
+```typescript
+// Before (错误)
+.insert({ user_id: ctx.user.id, ... })
+
+// After (正确)
+.insert({ user_id: ctx.profileId, ... })
 ```
 
-**3. invitations 表**
-```sql
-CREATE TABLE invitations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  code TEXT UNIQUE NOT NULL,
-  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  used_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-```
-
-### 实施步骤
-1. 登录 Supabase 控制台
-2. 进入 SQL Editor
-3. 执行上述 SQL 脚本创建表
-4. 验证 `/tickets` 和 `/invitations` 页面是否正常工作
+### 修改的文件
+- `packages/api/src/trpc.ts` - 添加 profile 获取/创建逻辑
+- `packages/api/src/routers/ticket.ts` - 使用 ctx.profileId
+- `packages/api/src/routers/invitation.ts` - 使用 ctx.profileId
 
 ## Key Files Modified
 

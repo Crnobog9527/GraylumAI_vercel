@@ -9,7 +9,7 @@ export const ticketRouter = router({
       const { data: newTicket, error: ticketError } = await ctx.supabase
         .from('tickets')
         .insert({
-          user_id: ctx.user.id,
+          user_id: ctx.profileId,
           title: input.title,
           status: 'open',
         })
@@ -24,7 +24,7 @@ export const ticketRouter = router({
         .from('ticket_replies')
         .insert({
           ticket_id: newTicket.id,
-          user_id: ctx.user.id,
+          user_id: ctx.profileId,
           content: input.content,
         });
 
@@ -35,7 +35,7 @@ export const ticketRouter = router({
     const { data, error } = await ctx.supabase
       .from('tickets')
       .select('*, ticket_replies(*)')
-      .eq('user_id', ctx.user.id)
+      .eq('user_id', ctx.profileId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -51,7 +51,7 @@ export const ticketRouter = router({
         .from('tickets')
         .select('*, ticket_replies(*)')
         .eq('id', input.ticketId)
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .single();
 
       if (error || !ticket) {
@@ -67,7 +67,7 @@ export const ticketRouter = router({
         .from('tickets')
         .select('id')
         .eq('id', input.ticketId)
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .single();
 
       if (ticketError || !ticket) {
@@ -78,7 +78,7 @@ export const ticketRouter = router({
         .from('ticket_replies')
         .insert({
           ticket_id: input.ticketId,
-          user_id: ctx.user.id,
+          user_id: ctx.profileId,
           content: input.content,
         })
         .select()

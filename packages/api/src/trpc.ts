@@ -41,10 +41,43 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       message: 'You must be logged in to access this resource',
     });
   }
+
+  // Get or create user profile (foreign keys reference profiles.id, not auth.users.id)
+  let profileId = ctx.user.id;
+
+  const { data: profile, error: profileError } = await ctx.supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', ctx.user.id)
+    .single();
+
+  if (profileError || !profile) {
+    // Profile doesn't exist, create one
+    const { data: newProfile, error: createError } = await ctx.supabase
+      .from('profiles')
+      .insert({
+        id: ctx.user.id,
+        email: ctx.user.email,
+      })
+      .select('id')
+      .single();
+
+    if (createError || !newProfile) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Failed to create user profile: ${createError?.message || 'Unknown error'}`,
+      });
+    }
+    profileId = newProfile.id;
+  } else {
+    profileId = profile.id;
+  }
+
   return next({
     ctx: {
       ...ctx,
       user: ctx.user,
+      profileId,
     },
   });
 });

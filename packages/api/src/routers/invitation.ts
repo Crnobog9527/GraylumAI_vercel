@@ -26,7 +26,7 @@ export const invitationRouter = router({
         .from('invitations')
         .insert({
           code,
-          created_by: ctx.user.id,
+          created_by: ctx.profileId,
           status: 'active',
         })
         .select()
