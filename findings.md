@@ -24,17 +24,31 @@
 
 ### Cookie 存储问题 (关键发现)
 - **问题**：浏览器中完全没有 Supabase auth token cookie
-- **原因**：单例模式干扰了 `createBrowserClient` 的 cookie 存储机制
+- **原因**：
+  1. 单例模式干扰了 `createBrowserClient` 的 cookie 存储机制
+  2. 缺少 `persistSession: true` 和 `storageKey` 配置
 - **解决方案**：
   1. 移除单例模式，每次调用 `createClient()` 都创建新实例
-  2. `createBrowserClient` 会自动处理 cookie 存储
+  2. 添加 `auth: { persistSession: true, storageKey: 'sb-auth-token' }` 配置
   3. middleware.ts 中的 `getUser()` 调用会刷新 session 并同步 cookie
+
+### tRPC 请求未携带身份令牌 (最新发现)
+- **问题**：401 错误因为 tRPC 请求没有携带 Supabase 的身份令牌
+- **原因**：
+  1. `useRef` 存储 token 有时机问题，首次请求时 token 可能还未初始化
+  2. 后端只从 Authorization header 提取身份，没有 cookie 回退机制
+- **解决方案**：
+  1. 前端 `headers()` 使用 async/await 直接调用 `getSession()` 获取最新 token
+  2. 后端 `createTRPCContext` 同时支持从 headers 和 cookies 提取用户身份
+  3. API route 传递 cookies 给 tRPC context
 
 ## Technical Decisions
 | Decision | Rationale |
 |----------|-----------|
-| 使用 Authorization header 认证 | Cookie-based 认证在 tRPC 场景下不可靠 |
-| 使用 useRef 存储 access token | 避免 getSession() 的异步时机问题 |
+| 使用 Authorization header 认证 | 主要认证方式，每次请求获取最新 token |
+| Cookie 作为回退机制 | 当 header 中没有 token 时，尝试从 cookies 获取 |
+| `persistSession: true` | 确保 session 正确持久化到存储 |
+| `storageKey: 'sb-auth-token'` | 明确指定存储 key |
 | 使用 service role key | 服务端操作需要绕过 RLS |
 | **不使用**单例模式的 Supabase 客户端 | 单例模式会干扰 cookie 存储机制 |
 | 字段名使用 snake_case | 匹配 Supabase 数据库表结构 |
@@ -53,16 +67,18 @@
 | 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + service role key | ⏳ 待验证 |
 | 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
 | 无 Supabase cookie | 单例模式干扰 createBrowserClient 的 cookie 存储 | 移除单例模式，每次创建新客户端实例 | ⏳ 待验证 |
+| tRPC 请求无身份令牌 | useRef 时机问题 + 后端无 cookie 回退 | async getSession() + 后端双重提取 (header + cookie) | ⏳ 待验证 |
 
 ## Key Files Modified
 
 ### 认证相关
 | File | Changes |
 |------|---------|
-| apps/web/src/trpc/provider.tsx | Authorization header + useRef 存储 token + onAuthStateChange |
-| apps/web/src/lib/supabase.ts | 移除单例模式，每次创建新 createBrowserClient 实例 |
+| apps/web/src/trpc/provider.tsx | async headers() 直接调用 getSession() 获取 token |
+| apps/web/src/lib/supabase.ts | 添加 persistSession + storageKey 配置 |
+| apps/web/src/app/api/trpc/[trpc]/route.ts | 传递 cookies 给 tRPC context |
 | apps/web/middleware.ts | Supabase session 刷新中间件 (getUser 同步 cookie) |
-| packages/api/src/trpc.ts | getUser(token) 验证 + service role key |
+| packages/api/src/trpc.ts | 双重提取：先从 header，再从 cookies |
 
 ### 迁移相关
 | File | Changes |
