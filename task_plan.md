@@ -59,3 +59,4 @@ Bug 修复 - 401 认证错误
 | ERR_PNPM_OUTDATED_LOCKFILE | 添加依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | 已修复 |
 | Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | 已修复 |
 | 401 Unauthorized | cookie-based 认证无效，需要 Authorization header + service role key | 恢复 Authorization header，使用 getUser(token) 验证，使用 service role key | 待验证 |
+| 401 Unauthorized | getSession() 时机问题，headers() 调用时 session 可能未初始化 | 使用 useRef 存储 token，onAuthStateChange 更新 | 待验证 |

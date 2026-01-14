@@ -68,6 +68,7 @@
 | ERR_PNPM_OUTDATED_LOCKFILE | 添加 @supabase/ssr 依赖后未更新 pnpm-lock.yaml | 运行 pnpm install 更新 lockfile | ✅ 已修复 |
 | Cannot find module 'next/dist/...' | api 包导入 Next.js 内部类型但没有 next 依赖 | 使用通用 CookieStore 接口替代 | ✅ 已修复 |
 | 401 Unauthorized | cookie-based 认证无效 | 恢复 Authorization header + getUser(token) + service role key | ⏳ 待验证 |
+| 401 Unauthorized | getSession() 时机问题 | 使用 useRef 存储 token + onAuthStateChange 更新 | ⏳ 待验证 |
 
 ### Bug Fix Commits
 | Commit | Description |
@@ -79,6 +80,7 @@
 | b9b44b7 | chore: update pnpm-lock.yaml for @supabase/ssr |
 | 86d828a | fix: use generic cookie interface instead of Next.js internal type |
 | 7842ba7 | fix: restore Authorization header and use service role key |
+| 1669362 | fix: use ref to store access token for immediate header access |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
