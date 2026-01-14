@@ -63,7 +63,8 @@
 | 401 Unauthorized | 数据库字段名不匹配 (camelCase vs snake_case) | 更新所有 router 和前端页面使用 snake_case | ✅ 已修复 |
 | 401 Unauthorized | 缺少 Supabase middleware | 添加 middleware.ts 刷新 session | ✅ 已修复 |
 | 401 Unauthorized | Supabase 客户端每次创建新实例导致 session 丢失 | 使用单例模式 + useRef 保持客户端实例 | ✅ 已修复 |
-| 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 supabase.auth.getUser(token) | ⏳ 待验证 |
+| 401 Unauthorized | 服务端 getUser() 未正确接收 JWT token | 直接传递 token 给 supabase.auth.getUser(token) | ❌ 无效 |
+| 401 Unauthorized | 客户端 getSession() 返回 null，header 认证失效 | 改用 cookie-based 认证，服务端用 createServerClient | ⏳ 待验证 |
 
 ### Bug Fix Commits
 | Commit | Description |
@@ -71,17 +72,20 @@
 | 7289981 | fix: resolve 401 auth errors and snake_case column names |
 | ce6216a | fix: add middleware for Supabase auth session refresh |
 | 8fae5e2 | fix: pass JWT token directly to getUser() for server-side validation |
+| 023cac3 | fix: switch to cookie-based authentication for tRPC |
 
 ### Files Modified for Bug Fixes
 | File | Changes |
 |------|---------|
-| apps/web/src/trpc/provider.tsx | 添加 authorization header, 使用 useRef 保持 Supabase 实例 |
+| apps/web/src/trpc/provider.tsx | 简化为 cookie-based 认证 (移除 Authorization header) |
 | apps/web/src/lib/supabase.ts | 实现单例模式避免多次创建客户端 |
 | apps/web/middleware.ts | 新增 Supabase session 刷新中间件 |
+| apps/web/src/app/api/trpc/[trpc]/route.ts | 传递 cookies 给 tRPC context |
+| packages/api/src/trpc.ts | 使用 createServerClient 从 cookies 读取 session |
+| packages/api/package.json | 添加 @supabase/ssr 依赖 |
 | packages/api/src/routers/ticket.ts | 字段名改为 snake_case |
 | packages/api/src/routers/model.ts | 字段名改为 snake_case |
 | packages/api/src/routers/invitation.ts | 字段名改为 snake_case |
 | apps/web/src/app/tickets/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/models/page.tsx | 字段名改为 snake_case |
 | apps/web/src/app/invitations/page.tsx | 字段名改为 snake_case |
-| packages/api/src/trpc.ts | 修复 JWT token 传递给 getUser() |
