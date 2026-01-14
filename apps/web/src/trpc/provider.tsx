@@ -9,33 +9,22 @@ import { createClient } from '@/lib/supabase';
 export default function Provider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({}));
   const supabaseRef = useRef(createClient());
+  // Store access token in ref for immediate access
+  const accessTokenRef = useRef<string | null>(null);
 
-  // Create tRPC client with Authorization header
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
-      links: [
-        httpBatchLink({
-          url: '/api/trpc',
-          async headers() {
-            const supabase = supabaseRef.current;
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.access_token) {
-              return {
-                Authorization: `Bearer ${session.access_token}`,
-              };
-            }
-            return {};
-          },
-        }),
-      ],
-    })
-  );
-
-  // Listen for auth state changes and invalidate queries when session changes
+  // Initialize session on mount
   useEffect(() => {
     const supabase = supabaseRef.current;
+
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      accessTokenRef.current = session?.access_token ?? null;
+    });
+
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event) => {
+      (event, session) => {
+        accessTokenRef.current = session?.access_token ?? null;
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
           queryClient.invalidateQueries();
         }
@@ -46,6 +35,26 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, [queryClient]);
+
+  // Create tRPC client with Authorization header
+  const [trpcClient] = useState(() =>
+    trpc.createClient({
+      links: [
+        httpBatchLink({
+          url: '/api/trpc',
+          headers() {
+            const token = accessTokenRef.current;
+            if (token) {
+              return {
+                Authorization: `Bearer ${token}`,
+              };
+            }
+            return {};
+          },
+        }),
+      ],
+    })
+  );
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
