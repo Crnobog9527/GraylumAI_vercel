@@ -73,6 +73,7 @@
 | 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ⏳ 待验证 |
 | 500 全局错误 (所有页面) | 自动创建 profile 失败 (profiles 表有额外必填字段) | 移除自动创建逻辑，只查询 profile | ✅ 已修复 |
 | 500 全局错误 (最终修复) | profiles 表需要添加 email 字段 + 所有 router 统一使用 profileId | 自动创建 profile(id+email) + 统一所有 router 使用 ctx.profileId | ✅ 已修复 |
+| Drizzle db:push 删除 email 列 | 数据库手动添加 email 列后，Drizzle schema 未同步更新 | 在 schema.ts 中添加 email 字段定义 | ✅ 已修复 |
 
 ## 500 错误全局分析 (2026-01-14)
 
@@ -160,6 +161,44 @@ ALTER TABLE profiles ADD COLUMN email TEXT;
 ```
 
 **验证状态**：✅ 用户已在数据库添加 email 字段
+
+## Drizzle Schema 同步问题 ⚠️ 重要经验
+
+### 问题描述
+运行 `pnpm db:push` 时，drizzle-kit 警告要删除 `email` 列：
+```
+Warning: Found data-loss statements:
+· You're about to delete email column in profiles table with 1 items
+THIS ACTION WILL CAUSE DATA LOSS AND CANNOT BE REVERTED
+```
+
+### 根本原因
+- 用户在 Supabase 控制台手动添加了 `email` 列
+- 但 Drizzle schema 文件 (`packages/db/schema.ts`) 中没有对应字段
+- `db:push` 试图让数据库与 schema 文件同步，所以想删除"多余"的列
+
+### 解决方案
+在 `packages/db/schema.ts` 中添加 email 字段：
+```typescript
+export const profiles = pgTable('profiles', {
+  id: uuid('id').primaryKey(),
+  email: text('email'), // 添加此字段
+  nickname: text('nickname'),
+  // ...
+});
+```
+
+### 教训与检查清单 ⚠️
+**修改数据库结构时必须同步更新两处：**
+1. ✅ Supabase 数据库（手动或 SQL）
+2. ✅ Drizzle schema 文件 (`packages/db/schema.ts`)
+
+**未来检查清单：**
+- [ ] 添加新列 → 更新 schema.ts
+- [ ] 删除列 → 更新 schema.ts
+- [ ] 修改列类型 → 更新 schema.ts
+- [ ] 添加外键 → 更新 schema.ts 的 references()
+- [ ] 运行 db:push 前检查警告信息
 
 ## Key Files Modified
 
