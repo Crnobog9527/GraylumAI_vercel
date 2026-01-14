@@ -1,10 +1,14 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import { createServerClient } from '@supabase/ssr';
-import type { ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
+
+// Generic cookie interface (compatible with Next.js cookies())
+interface CookieStore {
+  getAll(): { name: string; value: string }[];
+}
 
 export const createTRPCContext = async (opts: {
   headers: Headers;
-  cookies: ReadonlyRequestCookies;
+  cookies: CookieStore;
 }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
