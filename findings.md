@@ -72,9 +72,9 @@
 | 500 Internal Server Error (tickets) | 外键引用 `profiles.id` 而非 `auth.users.id` | 在 protectedProcedure 中获取 profile，使用 ctx.profileId | ⏳ 待验证 |
 | 500 Internal Server Error (invitations) | 外键引用 `profiles.id` 而非 `auth.users.id` | 使用 ctx.profileId 代替 ctx.user.id | ⏳ 待验证 |
 | 500 全局错误 (所有页面) | 自动创建 profile 失败 (profiles 表有额外必填字段) | 移除自动创建逻辑，只查询 profile | ✅ 已修复 |
-| 500 全局错误 (最终修复) | profiles 表需要添加 email 字段 + 所有 router 统一使用 profileId | 自动创建 profile(id+email) + 统一所有 router 使用 ctx.profileId | ⏳ 待验证 |
+| 500 全局错误 (最终修复) | profiles 表需要添加 email 字段 + 所有 router 统一使用 profileId | 自动创建 profile(id+email) + 统一所有 router 使用 ctx.profileId | ✅ 已修复 |
 
-## 500 错误全局分析 (2024-01-14)
+## 500 错误全局分析 (2026-01-14)
 
 ### 第一次分析（tickets/invitations 页面 500 错误）
 
@@ -124,6 +124,42 @@ if (profile) {
 - `packages/api/src/trpc.ts` - 移除自动创建 profile 逻辑
 - `packages/api/src/routers/ticket.ts` - 使用 ctx.profileId
 - `packages/api/src/routers/invitation.ts` - 使用 ctx.profileId
+
+### 第三次分析（综合全局分析）✅ 已解决
+
+**现象**：
+- ✅ 登录页面：正常工作
+- ✅ 模型页面 (`/models`)：正常工作（使用 publicProcedure）
+- ❌ 工单页面 (`/tickets`)：500 Internal Server Error
+- ❌ 邀请码页面 (`/invitations`)：500 Internal Server Error
+- ✅ Profile 自动创建：据报告成功
+
+**全局对比分析**：
+
+| 页面 | API 端点 | Procedure 类型 | 使用 ctx.profileId | 状态 |
+|------|---------|---------------|-------------------|------|
+| Models | `getAvailableModels` | **publicProcedure** | ❌ 不使用 | ✅ 正常 |
+| Tickets | `getTickets` | protectedProcedure | ✅ 查询过滤 | ❌ 500 |
+| Invitations | `getInvitationHistory` | protectedProcedure | ❌ 不过滤 | ❌ 500 |
+
+**根本原因**：
+1. `profiles` 表结构：`id, credits, created_at, nickname, avatar_url` - **缺少 email 字段**
+2. `protectedProcedure` 自动创建 profile 时尝试插入 `email` 字段
+3. INSERT 失败（列不存在），错误只是 `console.error` 记录
+4. `profileId` 保持为 `ctx.user.id`（auth.users.id）
+5. 后续操作涉及 FK 约束（引用 profiles.id）时失败
+
+**为什么 Models 页面能工作**：
+- `getAvailableModels` 使用 `publicProcedure`，完全不经过 `protectedProcedure` 中间件
+- 不需要认证，不涉及 profile 创建/查询逻辑
+
+**解决方案**：
+在 Supabase 数据库中添加 email 字段：
+```sql
+ALTER TABLE profiles ADD COLUMN email TEXT;
+```
+
+**验证状态**：✅ 用户已在数据库添加 email 字段
 
 ## Key Files Modified
 
