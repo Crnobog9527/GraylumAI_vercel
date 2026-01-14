@@ -4,7 +4,7 @@
  * 展示如何在 React 应用中使用 tRPC 积分 API
  */
 
-import { trpc } from '@/lib/trpc';
+import { trpc } from '@/trpc/client';
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
