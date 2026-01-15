@@ -369,3 +369,4 @@ UI 视觉一致性:
 | Can't resolve '@/components/ui/dialog' | Profile 页面使用了未创建的 Dialog 组件 | 安装 @radix-ui/react-dialog 并创建组件 | 已修复 |
 | Can't resolve '@/components/ui/select' | Profile 页面使用了未创建的 Select 组件 | 安装 @radix-ui/react-select 并创建组件 | 已修复 |
 | Can't resolve '@/components/ui/sheet' | Profile 页面使用了未创建的 Sheet 组件 | 安装 @radix-ui/react-dialog 并创建组件 | 已修复 |
+| Can't resolve '@radix-ui/react-*' (Codespaces) | Turbopack 模块解析问题 | 添加 Radix UI 到 next.config.ts transpilePackages | 已修复 |

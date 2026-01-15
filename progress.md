@@ -170,6 +170,7 @@
     - 创建 dialog.tsx (SecuritySettingsCard.tsx 使用)
     - 创建 select.tsx (TicketsPanel.tsx 使用)
     - 创建 sheet.tsx (profile/page.tsx 移动端侧边栏使用)
+  - [x] **修复模块解析错误**: 添加 Radix UI 到 transpilePackages (commit: c8d6605)
 - [ ] **登录页面错误 (待修复)** 🔴
   - [ ] ChunkLoadError: Failed to load chunk (login/global-error)
     - 原因: Turbopack/Webpack 在 GitHub Codespaces 环境中加载 chunk 失败
