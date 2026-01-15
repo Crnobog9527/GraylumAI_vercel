@@ -310,10 +310,92 @@ protectedProcedure  → 已登录用户可访问
 adminProcedure      → 仅管理员可访问（继承 protectedProcedure）
 ```
 
+---
+
+## UI 像素级复刻规则 ⚠️ 必须严格遵守
+
+> **规则文档**: `movetonew/UIfix_rule.md`
+
+### 核心原则
+1. **只改视觉，不改逻辑** - 不修改组件的 props、状态管理、事件处理
+2. **100% 复制样式** - className、CSS 变量、Tailwind 配置完全照搬
+3. **保持结构一致** - HTML 嵌套层级必须相同
+4. **优先级**: 核心页面 > 次要页面 > 边缘功能
+
+### ❌ 禁止修改
+- 组件的 TypeScript 接口（props 类型）
+- 状态管理逻辑（useState, useEffect）
+- 事件处理函数内部逻辑
+- tRPC 调用和数据获取
+- 路由配置
+
+### ✅ 只修改
+- `className` 属性
+- HTML 元素嵌套结构（仅限为了匹配样式）
+- CSS 文件内容
+- Tailwind 配置
+- 内联 `style` 属性（如果必要）
+
+### 🎯 质量标准
+- 并排对比新旧项目，肉眼无法分辨差异
+- 使用浏览器测量工具，间距误差 < 2px
+- 颜色值完全匹配（使用开发者工具取色）
+- 字体大小和粗细完全一致
+- 响应式断点行为一致
+
+### 旧项目关键文件
+| 文件 | 内容 |
+|------|------|
+| `src/theme.css` (376行) | CSS 变量定义 |
+| `src/components.css` (1224行) | 组件样式 |
+| `tailwind.config.js` | Tailwind 配置 |
+| `src/components/` | 所有组件 |
+
+### 组件优先级
+**P0 - 聊天系统**
+```
+src/components/chat/
+├── ChatSidebar.jsx     ✅ 已完成
+├── ChatHeader.jsx      ⬜ 待复刻
+├── MessageBubble.jsx   ✅ 已完成
+├── ChatInput.jsx       ✅ 已完成
+└── ModelSelector.jsx   ⬜ 待复刻
+```
+
+**P1 - 布局组件**
+```
+src/components/layout/
+├── AppHeader.jsx       ✅ 已完成
+└── GlobalBanner.jsx    ⬜ 待复刻
+```
+
+### 复刻流程（标准模板）
+1. 用户提供：旧项目页面截图 + 对应文件路径
+2. 分析旧项目代码（HTML 结构、className、CSS 类）
+3. 复制完整的 JSX 结构和 className
+4. 处理自定义 CSS 类（确保已在 globals.css 中）
+5. 验证：浏览器并排对比 + 开发者工具测量
+
+### 输出格式
+```markdown
+## ✅ [页面/组件名称] 复刻完成
+
+**复刻文件**:
+- 旧: src/pages/Chat.jsx
+- 新: apps/web/src/app/(app)/chat/page.tsx
+
+**涉及组件**: [列表]
+**关键修改**: [列表]
+**验证结果**: [检查清单]
+```
+
+---
+
 ## Resources
 - [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
 - [tRPC React Query Setup](https://trpc.io/docs/client/react)
 - [Next.js App Router](https://nextjs.org/docs/app)
+- **UI 复刻规则**: `movetonew/UIfix_rule.md`
 
 ## Environment Variables Required
 ```
