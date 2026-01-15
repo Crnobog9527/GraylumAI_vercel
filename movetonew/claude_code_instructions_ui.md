@@ -28,7 +28,7 @@
 **给 Claude Code 的指令**:
 
 ```
-请将 `/home/ubuntu/graylumAi-refactor/apps/web/tailwind.config.ts` 文件的 `theme.extend.colors` 部分更新为以下内容，以引入原有设计系统的颜色变量。
+请将 `GraylumAi-vercel/apps/web/tailwind.config.ts` 文件的 `theme.extend.colors` 部分更新为以下内容，以引入原有设计系统的颜色变量。
 
 ```typescript
 // ... 其他配置
@@ -108,7 +108,7 @@
 **给 Claude Code 的指令**:
 
 ```
-请将 `/home/ubuntu/graylumAi-refactor/apps/web/src/app/globals.css` 文件中的 `:root` 和 `.dark` 选择器下的 CSS 变量进行更新，以匹配原有设计系统的颜色。
+请将 `GraylumAi-vercel/apps/web/src/app/globals.css` 文件中的 `:root` 和 `.dark` 选择器下的 CSS 变量进行更新，以匹配原有设计系统的颜色。
 
 **请将 `globals.css` 的内容更新为以下内容：**
 
@@ -345,7 +345,7 @@ pre {
 **给 Claude Code 的指令**:
 
 ```
-请将 `/home/ubuntu/graylumAi-refactor/apps/web/tailwind.config.ts` 文件的 `theme.extend` 部分更新为以下内容，以引入原有设计系统的字体和间距变量。
+请将 `GraylumAi-vercel/apps/web/tailwind.config.ts` 文件的 `theme.extend` 部分更新为以下内容，以引入原有设计系统的字体和间距变量。
 
 ```typescript
 // ... 其他配置
@@ -425,7 +425,7 @@ pre {
 **给 Claude Code 的指令**:
 
 ```
-请在 `/home/ubuntu/graylumAi-refactor` 目录下执行以下 shell 命令：
+请在 `GraylumAi-vercel` 目录下执行以下 shell 命令：
 
 git add . && \
 git commit -m "feat: apply global styles and theme from old design system
@@ -461,7 +461,7 @@ git push origin refactor
 **给 Claude Code 的指令**:
 
 ```
-请修改 `/home/ubuntu/graylumAi-refactor/apps/web/src/components/ui/button.tsx` 文件，调整其样式以匹配旧项目的按钮风格。
+请修改 `GraylumAi-vercel/apps/web/src/components/ui/button.tsx` 文件，调整其样式以匹配旧项目的按钮风格。
 
 **`button.tsx` 文件中 `buttonVariants` 的修改示例：**
 
@@ -542,7 +542,7 @@ export { Button, buttonVariants }
 **给 Claude Code 的指令**:
 
 ```
-请修改 `/home/ubuntu/graylumAi-refactor/apps/web/src/components/ui/card.tsx` 文件，调整其样式以匹配旧项目的卡片风格。
+请修改 `GraylumAi-vercel/apps/web/src/components/ui/card.tsx` 文件，调整其样式以匹配旧项目的卡片风格。
 
 **`card.tsx` 文件中 `Card` 组件的修改示例：**
 
@@ -636,7 +636,7 @@ export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }
 **给 Claude Code 的指令**:
 
 ```
-请修改 `/home/ubuntu/graylumAi-refactor/apps/web/src/components/ui/input.tsx` 和 `/home/ubuntu/graylumAi-refactor/apps/web/src/components/ui/textarea.tsx` 文件，调整其样式以匹配旧项目的输入框风格。
+请修改 `GraylumAi-vercel/apps/web/src/components/ui/input.tsx` 和 `GraylumAi-vercel/apps/web/src/components/ui/textarea.tsx` 文件，调整其样式以匹配旧项目的输入框风格。
 
 **`input.tsx` 文件中 `Input` 组件的修改示例：**
 
@@ -714,7 +714,7 @@ export { Textarea }
 **给 Claude Code 的指令**:
 
 ```
-请在 `/home/ubuntu/graylumAi-refactor` 目录下执行以下 shell 命令：
+请在 `GraylumAi-vercel` 目录下执行以下 shell 命令：
 
 git add . && \
 git commit -m "feat: restore core UI component styles
@@ -750,7 +750,7 @@ git push origin refactor
 **给 Claude Code 的指令**:
 
 ```
-请将 `/home/ubuntu/graylumAi-refactor/apps/web/src/app/page.tsx` 文件的内容完全替换为以下代码，以调整聊天页面的布局。
+请将 `GraylumAi-vercel/apps/web/src/app/page.tsx` 文件的内容完全替换为以下代码，以调整聊天页面的布局。
 
 ```typescript
 'use client';
@@ -811,7 +811,7 @@ export default function HomePage() {
 **给 Claude Code 的指令**:
 
 ```
-请确保 `/home/ubuntu/graylumAi-refactor/apps/web/src/app/globals.css` 文件中包含以下滚动条样式。如果缺少，请添加。
+请确保 `GraylumAi-vercel/apps/web/src/app/globals.css` 文件中包含以下滚动条样式。如果缺少，请添加。
 
 ```css
 /* Webkit 浏览器滚动条 (Chrome, Safari, Edge) */
@@ -859,7 +859,7 @@ export default function HomePage() {
 **给 Claude Code 的指令**:
 
 ```
-请确保 `/home/ubuntu/graylumAi-refactor/apps/web/tailwind.config.ts` 文件的 `theme.extend` 部分包含以下过渡动画配置。如果缺少，请添加。
+请确保 `GraylumAi-vercel/apps/web/tailwind.config.ts` 文件的 `theme.extend` 部分包含以下过渡动画配置。如果缺少，请添加。
 
 ```typescript
 // ... 其他配置
@@ -896,7 +896,7 @@ export default function HomePage() {
 **给 Claude Code 的指令**:
 
 ```
-请在 `/home/ubuntu/graylumAi-refactor` 目录下执行以下 shell 命令：
+请在 `GraylumAi-vercel` 目录下执行以下 shell 命令：
 
 git add . && \
 git commit -m "feat: restore page layouts and interaction details
