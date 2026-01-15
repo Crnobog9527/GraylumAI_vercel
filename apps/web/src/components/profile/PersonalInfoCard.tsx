@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 // Mock user type
-interface MockUser {
+export interface MockUser {
   id?: string;
   email?: string;
   nickname?: string;
