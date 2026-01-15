@@ -7,6 +7,7 @@ export const profiles = pgTable('profiles', {
   email: text('email'), // User email from auth.users
   nickname: text('nickname'),
   avatarUrl: text('avatar_url'),
+  role: text('role', { enum: ['user', 'admin'] }).default('user').notNull(), // User role for access control
   credits: integer('credits').default(100).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

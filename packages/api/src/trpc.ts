@@ -44,10 +44,11 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
   // Try to get user profile (foreign keys reference profiles.id)
   let profileId = ctx.user.id;
+  let userRole: 'user' | 'admin' = 'user';
 
   const { data: profile, error: profileError } = await ctx.supabase
     .from('profiles')
-    .select('id')
+    .select('id, role')
     .eq('id', ctx.user.id)
     .single();
 
@@ -58,8 +59,9 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       .insert({
         id: ctx.user.id,
         email: ctx.user.email,
+        role: 'user', // Default role for new users
       })
-      .select('id')
+      .select('id, role')
       .single();
 
     if (createError) {
@@ -67,9 +69,11 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       console.error('Failed to create profile:', createError.message);
     } else if (newProfile) {
       profileId = newProfile.id;
+      userRole = newProfile.role || 'user';
     }
   } else {
     profileId = profile.id;
+    userRole = profile.role || 'user';
   }
 
   return next({
@@ -77,6 +81,22 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       ...ctx,
       user: ctx.user,
       profileId,
+      userRole,
     },
   });
+});
+
+/**
+ * Admin procedure - requires user to have admin role
+ * Extends protectedProcedure with additional role check
+ */
+export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (ctx.userRole !== 'admin') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You do not have permission to access this resource. Admin role required.',
+    });
+  }
+
+  return next({ ctx });
 });

@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 
@@ -14,13 +14,10 @@ export const modelRouter = router({
     return data;
   }),
 
-  updateModelConfig: protectedProcedure
+  // Admin only: Update AI model configuration
+  updateModelConfig: adminProcedure
     .input(z.object({ id: z.string().uuid(), config: z.any() }))
     .mutation(async ({ ctx, input }) => {
-      // TODO: Implement role-based access control (e.g., check if ctx.user.role === 'admin')
-      // For now, any authenticated user can update models, which is NOT recommended for production.
-      // You should add a check here to ensure only admins can update models.
-
       const { data, error } = await ctx.supabase
         .from('ai_models')
         .update({ config: input.config })
