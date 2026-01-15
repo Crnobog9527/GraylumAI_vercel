@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Menu, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,7 @@ const mockUser: MockUser = {
   created_date: '2024-06-15T08:00:00Z'
 };
 
-export default function ProfilePage() {
+function ProfilePageContent() {
   const searchParams = useSearchParams();
 
   // 从 URL 参数读取初始 tab
@@ -206,5 +206,17 @@ export default function ProfilePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
+        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+      </div>
+    }>
+      <ProfilePageContent />
+    </Suspense>
   );
 }
