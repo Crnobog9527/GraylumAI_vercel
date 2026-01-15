@@ -162,15 +162,15 @@
 | GlobalBanner | src/components/layout/GlobalBanner.jsx | apps/web/src/components/layout/GlobalBanner.tsx | ⬜ |
 | Sidebar | src/components/layout/ | apps/web/src/components/layout/Sidebar.tsx | ⬜ |
 
-#### Phase B: 聊天系统组件（P0 - 15个）
+#### Phase B: 聊天系统组件（P0 - 15个）- 核心组件已完成
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ChatSidebar.tsx | ⬜ |
+| ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ConversationList.tsx | ✅ |
 | ChatHeader | src/components/chat/ChatHeader.jsx | apps/web/src/components/chat/ChatHeader.tsx | ⬜ |
-| MessageBubble | src/components/chat/MessageBubble.jsx | apps/web/src/components/chat/MessageBubble.tsx | ⬜ |
-| ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatMessages.tsx | ⬜ |
-| ChatInput | src/components/chat/ChatInput.jsx | apps/web/src/components/chat/ChatInput.tsx | ⬜ |
-| ChatInputArea | src/components/chat/ChatInputArea.jsx | apps/web/src/components/chat/ChatInputArea.tsx | ⬜ |
+| MessageBubble | src/components/chat/MessageBubble.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
+| ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
+| ChatInput | src/components/chat/ChatInput.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
+| ChatInputArea | src/components/chat/ChatInputArea.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ModelSelector | src/components/chat/ModelSelector.jsx | apps/web/src/components/chat/ModelSelector.tsx | ⬜ |
 | ChatDebugPanel | - | apps/web/src/components/chat/ChatDebugPanel.tsx | ⬜ |
 | PromptModuleCard | - | apps/web/src/components/chat/PromptModuleCard.tsx | ⬜ |
@@ -240,7 +240,7 @@
 通用组件:
 | 组件 | 状态 |
 |------|------|
-| ConversationList.tsx | ⬜ |
+| ConversationList.tsx | ✅ |
 | CreditDisplay.tsx | ⬜ |
 | InviteDialog.tsx | ⬜ |
 | FeaturedModules.tsx | ⬜ |

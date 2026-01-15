@@ -3,8 +3,8 @@
 ## Session: 2026-01-15
 
 ### Current Status
-- **Phase:** Phase 4 完整 UI 还原 (Step 4.1-4.2 已完成)
-- **Next Step:** Step 4.3 UI 组件逐个还原
+- **Phase:** Phase 4 完整 UI 还原 (Step 4.1-4.3B 进行中)
+- **Next Step:** Step 4.3 继续其他组件还原
 - **Started:** 2026-01-15
 - **Blocking Issue:** 无
 
@@ -44,6 +44,11 @@
   - [x] 添加 `--success-bg/warning-bg/error-bg/info-bg` 状态背景色
   - [x] 添加 `--sidebar-*` 侧边栏变量和 `--chart-1~5` 图表颜色
   - [x] 添加组件类: btn, btn-primary, btn-secondary, card-clickable, card-featured, badge, skeleton, text-gradient
+- [x] **Phase 4 Step 4.3B 核心聊天组件** ✅
+  - [x] ChatInterface.tsx: 金色渐变用户消息气泡、AI 消息气泡、流式加载指示器、空状态、输入区域
+  - [x] ConversationList.tsx: 对话列表、活跃状态金色高亮、空状态
+  - [x] page.tsx: 侧边栏布局、欢迎页面、新建对话按钮
+  - [x] 提交代码 (commit: 6f05272)
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
