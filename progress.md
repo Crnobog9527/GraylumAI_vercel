@@ -96,6 +96,11 @@
     - 图标大小 w-20 h-20
     - 文字大小 text-2xl
     - 间距调整 mb-5 mb-2
+- [ ] **登录页面错误** 🔴
+  - [ ] ChunkLoadError: Failed to load chunk (login/global-error)
+    - 原因: Turbopack 开发服务器缓存问题
+    - 解决方案: 清除 .next 缓存并重启开发服务器
+    - 命令: `rm -rf apps/web/.next && pnpm dev`
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
