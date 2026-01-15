@@ -19,6 +19,7 @@ interface MockUser {
   total_credits_used?: number;
   total_credits_purchased?: number;
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
+  email_verified?: boolean;
   created_date?: string;
 }
 
