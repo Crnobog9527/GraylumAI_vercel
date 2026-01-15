@@ -3,7 +3,7 @@
 ## Session: 2026-01-15
 
 ### Current Status
-- **Phase:** 阶段十三已完成并验证 ✅
+- **Phase:** 阶段十二至十四（UI 还原）全部完成 ✅ **Phase 3 迁移完成！**
 - **Started:** 2026-01-15
 - **Blocking Issue:** 无
 
@@ -24,6 +24,12 @@
   - [x] 任务 13.3: 定制 Input/Textarea 组件样式 (背景色、聚焦效果)
   - [x] 任务 13.4: 提交阶段十三代码 (commit: 250c1cc)
   - [x] 验证: Vercel 部署成功
+- [x] **阶段十四完成** ✅
+  - [x] 任务 14.1: 调整聊天页面布局 (320px 侧边栏、bg-card、border-border)
+  - [x] 任务 14.2: 滚动条样式 (已在阶段十二配置)
+  - [x] 任务 14.3: 添加全局动画和过渡效果 (@keyframes + 工具类)
+  - [x] 任务 14.4: 提交阶段十四代码 (commit: 243d6da)
+  - [x] 验证: Vercel 部署成功
 
 ### Migration Progress
 
@@ -34,7 +40,7 @@
 | 阶段十一 | ✅ 已完成并验证 | 5/5 |
 | 阶段十二 | ✅ 已完成并验证 | 4/4 + 1 fix |
 | 阶段十三 | ✅ 已完成并验证 | 4/4 |
-| 阶段十四 | ⏳ 待开始 | 0/4 |
+| 阶段十四 | ✅ 已完成并验证 | 4/4 |
 
 ### UI 还原阶段概览
 | 阶段 | 目标 | 主要任务 |
@@ -58,6 +64,11 @@
 | Commit | Description |
 |--------|-------------|
 | 250c1cc | feat: customize core UI components with GraylumAI theme (Phase 13) |
+
+### Phase 14 Commits
+| Commit | Description |
+|--------|-------------|
+| 243d6da | feat: adjust page layout and add animations (Phase 14) |
 
 ---
 

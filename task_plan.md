@@ -7,9 +7,8 @@
 
 ## Current Phase
 阶段九、十、十一（业务逻辑）全部完成 ✅
-阶段十二（全局样式与主题还原）已完成 ✅
-阶段十三（核心 UI 组件样式还原）已完成 ✅
-阶段十四（页面布局与交互细节）待开始
+阶段十二、十三、十四（UI 还原）全部完成 ✅
+**Phase 3 迁移全部完成！**
 
 ## Phases
 
@@ -89,25 +88,24 @@
   - 卡片背景、边框、阴影正确显示
   - 输入框背景、聚焦效果正常
 
-### 阶段十四：页面布局与交互细节还原 ⏳ 待开始
+### 阶段十四：页面布局与交互细节还原 ✅ 已完成
 **目标**: 调整关键页面的布局并恢复特定的交互细节（动画、滚动条等）。
 
-- [ ] 任务 14.1：调整聊天页面布局
-  - 更新 `page.tsx` 主页布局
-  - 左侧栏宽度 w-80，应用 graylumBgPrimary 背景
-  - 分隔线使用 graylumBorderPrimary
-- [ ] 任务 14.2：恢复自定义滚动条样式
-  - 确认 `globals.css` 包含 Webkit 和 Firefox 滚动条样式
-  - 滚动条使用 --card, --muted, --primary 颜色
-- [ ] 任务 14.3：恢复全局动画和过渡效果
-  - 确认 `tailwind.config.ts` 包含过渡动画配置
-  - graylum-bounce, graylum-fast, graylum-normal, graylum-slow
-- [ ] 任务 14.4：提交第十四阶段成果
-- **Status:** ⏳ 待开始
-- **验证方法:**
-  - 检查聊天页面布局与旧项目一致
-  - 检查滚动条颜色和样式
-  - 检查按钮悬停、模态框动画效果
+- [x] 任务 14.1：调整聊天页面布局
+  - 更新 `page.tsx` 主页布局：320px 侧边栏、bg-card 背景、border-border 分隔线
+  - 添加 overflow 处理
+- [x] 任务 14.2：恢复自定义滚动条样式
+  - 已在阶段十二配置（Webkit + Firefox 滚动条样式）
+- [x] 任务 14.3：恢复全局动画和过渡效果
+  - 添加 @keyframes 动画（fade-in, slide-up/down, scale-in, pulse）
+  - 添加动画工具类（animate-graylum-*）
+  - 添加过渡工具类（transition-graylum-fast/normal/slow/bounce）
+- [x] 任务 14.4：提交第十四阶段成果
+- **Status:** ✅ 已完成并验证通过
+- **验证结果:**
+  - 聊天页面布局正确
+  - 滚动条样式正常
+  - 动画效果可用
 
 ---
 
