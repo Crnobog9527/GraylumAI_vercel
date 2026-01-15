@@ -3,8 +3,8 @@
 ## Session: 2026-01-15
 
 ### Current Status
-- **Phase:** Phase 4 完整 UI 还原 (Step 4.1-4.3B 进行中)
-- **Next Step:** Step 4.3 继续其他组件还原
+- **Phase:** Phase 4 完整 UI 还原 (Step 4.3-4.5 进行中)
+- **Next Step:** Step 4.3 继续聊天页面组件还原
 - **Started:** 2026-01-15
 - **Blocking Issue:** 无
 
@@ -96,6 +96,28 @@
     - 图标大小 w-20 h-20
     - 文字大小 text-2xl
     - 间距调整 mb-5 mb-2
+- [x] **Phase 4 Step 4.5 首页复刻** ✅
+  - [x] 创建 WelcomeBanner 组件 (apps/web/src/components/home/WelcomeBanner.tsx)
+    - 在线状态标签 (绿点 + "ONLINE")
+    - 欢迎语 "欢迎回来，{用户名}"
+    - 会员等级徽章 (Crown 图标 + 等级名称)
+    - 充值积分按钮 (金色渐变 + Zap 图标)
+  - [x] 创建 SixStepsGuide 组件 (apps/web/src/components/home/SixStepsGuide.tsx)
+    - "GROWTH STRATEGY" 微标签
+    - 主标题 "从零到百万粉丝" + 金色渐变 "6步打造爆款账号"
+    - 6个步骤卡片 (01-06，可点击悬停效果)
+    - "开始分析" + "自由对话" 双按钮
+  - [x] 创建 UpdatesSection 组件 (apps/web/src/components/home/UpdatesSection.tsx)
+    - "ANNOUNCEMENTS" 微标签 + "平台公告" 标题
+    - 公告卡片网格 (图标、标签、标题、描述、日期)
+    - 骨架屏加载状态
+  - [x] 重写 page.tsx 首页布局
+    - 动态背景系统 (6层叠加: 渐变层、金色光晕、紫色光晕、暖色光晕、网格纹理、暗角遮罩)
+    - 整合 AppHeader + WelcomeBanner + SixStepsGuide + UpdatesSection
+  - [x] 更新 globals.css
+    - 添加 `.card` 基础卡片样式
+    - 添加 `.heading-1/2/3/4` 标题样式
+  - [x] 提交代码 (commit: 62568f4)
 - [ ] **登录页面错误 (待修复)** 🔴
   - [ ] ChunkLoadError: Failed to load chunk (login/global-error)
     - 原因: Turbopack/Webpack 在 GitHub Codespaces 环境中加载 chunk 失败

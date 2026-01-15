@@ -225,9 +225,9 @@
 首页组件:
 | 组件 | 状态 |
 |------|------|
-| WelcomeBanner.tsx | ⬜ |
-| QuickStartGuide.tsx | ⬜ |
-| UpdatesSection.tsx | ⬜ |
+| WelcomeBanner.tsx | ✅ |
+| SixStepsGuide.tsx | ✅ |
+| UpdatesSection.tsx | ✅ |
 
 功能模块组件:
 | 组件 | 状态 |
@@ -282,9 +282,9 @@
 
 ### Step 4.5: 页面级布局还原
 
-| 页面 | 旧文件 | 新文件 | 状态 |
-|------|--------|--------|------|
-| 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ✅ |
+| 页面 | 旧文件 | 新文件 | 状态 | 备注 |
+|------|--------|--------|------|------|
+| 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ✅ | commit: 62568f4 |
 | 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/(app)/chat/page.tsx | ⬜ |
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
 | 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |
