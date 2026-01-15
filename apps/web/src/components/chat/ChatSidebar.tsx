@@ -8,7 +8,8 @@ import {
   MoreHorizontal,
   Trash2,
   Pencil,
-  Loader2
+  Loader2,
+  Settings2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -231,15 +232,16 @@ export function ChatSidebar({
         className="flex items-center justify-between px-4 py-2"
         style={{ borderBottom: '1px solid var(--border-primary)' }}
       >
-        <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+        <span className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
           全部对话
         </span>
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 px-2 text-xs rounded-lg"
+          className="h-7 px-2 text-xs rounded-lg flex items-center gap-1"
           style={{ color: 'var(--text-tertiary)' }}
         >
+          <Settings2 className="h-3.5 w-3.5" />
           管理
         </Button>
       </div>
