@@ -264,3 +264,93 @@ pre {
 :focus:not(:focus-visible) {
   outline: none;
 }
+
+/* GraylumAI Custom Animations */
+@keyframes graylum-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes graylum-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes graylum-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes graylum-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes graylum-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Animation utility classes */
+.animate-graylum-fade-in {
+  animation: graylum-fade-in var(--transition-normal) ease-out;
+}
+
+.animate-graylum-slide-up {
+  animation: graylum-slide-up var(--transition-normal) ease-out;
+}
+
+.animate-graylum-slide-down {
+  animation: graylum-slide-down var(--transition-normal) ease-out;
+}
+
+.animate-graylum-scale-in {
+  animation: graylum-scale-in var(--transition-normal) ease-out;
+}
+
+.animate-graylum-pulse {
+  animation: graylum-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Transition utility classes */
+.transition-graylum-fast {
+  transition: all var(--transition-fast);
+}
+
+.transition-graylum-normal {
+  transition: all var(--transition-normal);
+}
+
+.transition-graylum-slow {
+  transition: all var(--transition-slow);
+}
+
+.transition-graylum-bounce {
+  transition: all var(--transition-bounce);
+}
