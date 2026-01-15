@@ -1,5 +1,37 @@
 # Progress Log
 
+## Session: 2026-01-15
+
+### Current Status
+- **Phase:** 业务逻辑迁移完成，UI 还原规划完成
+- **Started:** 2026-01-15
+- **Blocking Issue:** 无
+
+### Actions Taken
+- [x] 阅读 `movetonew/claude_code_instructions_ui.md` UI 还原计划文档
+- [x] 将 UI 还原阶段（十二至十四）更新到 `task_plan.md`
+- [x] 提交更改 (commit: 8c8c073)
+
+### Migration Progress
+
+| 阶段 | 状态 | 完成任务 |
+|------|------|----------|
+| 阶段九 | ✅ 已完成并验证 | 4/4 |
+| 阶段十 | ✅ 已完成并验证 | 5/5 |
+| 阶段十一 | ✅ 已完成并验证 | 5/5 |
+| 阶段十二 | ⏳ 待开始 | 0/4 |
+| 阶段十三 | ⏳ 待开始 | 0/4 |
+| 阶段十四 | ⏳ 待开始 | 0/4 |
+
+### UI 还原阶段概览
+| 阶段 | 目标 | 主要任务 |
+|------|------|----------|
+| 阶段十二 | 全局样式与主题还原 | Tailwind CSS 颜色/字体/间距、Shadcn/ui 主题 CSS 变量 |
+| 阶段十三 | 核心 UI 组件样式还原 | Button、Card、Input、Textarea 组件样式定制 |
+| 阶段十四 | 页面布局与交互细节还原 | 聊天页面布局、滚动条、动画效果 |
+
+---
+
 ## Session: 2026-01-14
 
 ### Current Status
