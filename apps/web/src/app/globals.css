@@ -84,6 +84,24 @@
   --z-tooltip: 700;
   --z-toast: 800;
 
+  /* GraylumAI Direct Color Variables (matching old project) */
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #1A1A1A;
+  --bg-tertiary: #2A2A2A;
+  --bg-elevated: #3A3A3A;
+  --text-primary: #FFFFFF;
+  --text-secondary: #B0B0B0;
+  --text-tertiary: #808080;
+  --text-disabled: #606060;
+  --border-primary: #333333;
+  --border-secondary: #444444;
+  --color-primary: #FFD700;
+  --color-secondary: #FFA500;
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #3B82F6;
+
   /* Primary Color Transparency Variants */
   --color-primary-10: rgba(255, 215, 0, 0.1);
   --color-primary-20: rgba(255, 215, 0, 0.2);

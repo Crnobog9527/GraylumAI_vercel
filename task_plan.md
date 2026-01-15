@@ -158,14 +158,14 @@
 #### Phase A: 核心布局组件（P0）
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| AppHeader | src/components/layout/AppHeader.jsx | apps/web/src/components/layout/AppHeader.tsx | ⬜ |
+| AppHeader | src/components/layout/AppHeader.jsx | apps/web/src/components/layout/AppHeader.tsx | ✅ |
 | GlobalBanner | src/components/layout/GlobalBanner.jsx | apps/web/src/components/layout/GlobalBanner.tsx | ⬜ |
 | Sidebar | src/components/layout/ | apps/web/src/components/layout/Sidebar.tsx | ⬜ |
 
 #### Phase B: 聊天系统组件（P0 - 15个）- 核心组件已完成
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ConversationList.tsx | ✅ |
+| ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ChatSidebar.tsx | ✅ |
 | ChatHeader | src/components/chat/ChatHeader.jsx | apps/web/src/components/chat/ChatHeader.tsx | ⬜ |
 | MessageBubble | src/components/chat/MessageBubble.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
@@ -284,7 +284,7 @@
 
 | 页面 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ⬜ |
+| 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ✅ |
 | 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/(app)/chat/page.tsx | ⬜ |
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
 | 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |

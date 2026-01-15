@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Send, Loader2, Bot, MessageSquare, Copy, Check } from 'lucide-react';
+import { Send, Loader2, Bot, MessageSquare, Copy, Check, Paperclip, X, FileText, Image } from 'lucide-react';
 
 interface ChatInterfaceProps {
   conversationId: string;
@@ -37,14 +37,14 @@ function MessageBubble({
           <div
             className="rounded-2xl rounded-tr-md px-4 py-3"
             style={{
-              background: 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)',
-              color: 'hsl(var(--primary-foreground))',
+              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+              color: 'var(--bg-primary)',
             }}
           >
             <p className="whitespace-pre-wrap leading-relaxed font-medium">{content}</p>
           </div>
           {timestamp && (
-            <div className="text-xs text-right" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            <div className="text-xs text-right" style={{ color: 'var(--text-tertiary)' }}>
               {timestamp}
             </div>
           )}
@@ -63,22 +63,22 @@ function MessageBubble({
           border: '1px solid var(--color-primary-20)'
         }}
       >
-        <Bot className="h-5 w-5" style={{ color: 'hsl(var(--primary))' }} />
+        <Bot className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="prose prose-sm max-w-none prose-invert">
-          <p className="leading-relaxed" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          <p className="leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
             {content}
           </p>
         </div>
-        <div className="flex items-center gap-4 mt-3 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+        <div className="flex items-center gap-4 mt-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
           {timestamp && <span>{timestamp}</span>}
-          {copied && <span style={{ color: '#22C55E' }}>Copied</span>}
+          {copied && <span style={{ color: 'var(--success)' }}>已复制</span>}
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 hover:opacity-80 ml-auto"
-            style={{ color: copied ? '#22C55E' : 'hsl(var(--muted-foreground))' }}
+            style={{ color: copied ? 'var(--success)' : 'var(--text-tertiary)' }}
             onClick={handleCopy}
           >
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -100,13 +100,13 @@ function EmptyState() {
           border: '1px solid var(--color-primary-20)'
         }}
       >
-        <MessageSquare className="h-8 w-8" style={{ color: 'hsl(var(--primary))' }} />
+        <MessageSquare className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
       </div>
-      <h2 className="text-xl font-medium mb-2" style={{ color: 'hsl(var(--foreground))' }}>
-        Start a new conversation
+      <h2 className="text-xl font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+        开始新对话
       </h2>
-      <p style={{ color: 'hsl(var(--muted-foreground))' }}>
-        Enter your question below to begin
+      <p style={{ color: 'var(--text-tertiary)' }}>
+        在下方输入您的问题开始对话
       </p>
     </div>
   );
@@ -123,24 +123,24 @@ function StreamingIndicator() {
           border: '1px solid var(--color-primary-20)'
         }}
       >
-        <Bot className="h-5 w-5" style={{ color: 'hsl(var(--primary))' }} />
+        <Bot className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
       </div>
-      <div className="flex items-center gap-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
+      <div className="flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
         <span className="flex gap-1">
           <span
             className="w-2 h-2 rounded-full animate-bounce"
-            style={{ background: 'hsl(var(--primary))', animationDelay: '0ms' }}
+            style={{ background: 'var(--color-primary)', animationDelay: '0ms' }}
           />
           <span
             className="w-2 h-2 rounded-full animate-bounce"
-            style={{ background: 'hsl(var(--primary))', animationDelay: '150ms' }}
+            style={{ background: 'var(--color-primary)', animationDelay: '150ms' }}
           />
           <span
             className="w-2 h-2 rounded-full animate-bounce"
-            style={{ background: 'hsl(var(--primary))', animationDelay: '300ms' }}
+            style={{ background: 'var(--color-primary)', animationDelay: '300ms' }}
           />
         </span>
-        <span className="text-sm">AI is thinking...</span>
+        <span className="text-sm">AI 正在思考...</span>
       </div>
     </div>
   );
@@ -186,8 +186,8 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'hsl(var(--primary))' }} />
+      <div className="flex items-center justify-center h-full" style={{ background: 'var(--bg-primary)' }}>
+        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
       </div>
     );
   }
@@ -195,7 +195,7 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
   const messageList = messages?.data || [];
 
   return (
-    <div className="flex flex-col h-full" style={{ background: 'hsl(var(--background))' }}>
+    <div className="flex flex-col h-full" style={{ background: 'var(--bg-primary)' }}>
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto py-6 px-4">
@@ -217,34 +217,45 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
 
       {/* Input Area */}
       <div
-        className="p-4"
+        className="p-4 relative"
         style={{
-          borderTop: '1px solid hsl(var(--border))',
-          background: 'hsl(var(--card))'
+          borderTop: '1px solid var(--border-primary)',
+          background: 'var(--bg-secondary)',
+          zIndex: 1
         }}
       >
         <div className="max-w-3xl mx-auto">
           <div
-            className="relative rounded-2xl"
+            className="relative rounded-2xl chat-input-box"
             style={{
-              background: 'hsl(var(--background))',
-              border: '1px solid var(--color-primary-20)',
+              background: 'var(--bg-primary)',
+              border: '1px solid rgba(255, 215, 0, 0.15)',
             }}
           >
             <div className="flex items-end p-3">
+              {/* Attachment button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 shrink-0 hover:opacity-80"
+                style={{ color: 'var(--text-tertiary)' }}
+                disabled={sendMessage.isPending}
+              >
+                <Paperclip className="h-5 w-5" />
+              </Button>
               <Textarea
                 ref={textareaRef}
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Enter your message..."
+                placeholder="请输入您的问题..."
                 disabled={sendMessage.isPending}
                 className="flex-1 min-h-[44px] max-h-[120px] resize-none border-0 focus-visible:ring-0 py-2 px-2 text-base bg-transparent"
-                style={{ color: 'hsl(var(--foreground))' }}
+                style={{ color: 'var(--text-primary)' }}
                 rows={1}
               />
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
                   {newMessage.length}/4000
                 </span>
                 <Button
@@ -252,15 +263,15 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
                   disabled={!newMessage.trim() || sendMessage.isPending}
                   className="h-9 px-5 gap-2 rounded-xl font-medium"
                   style={{
-                    background: 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)',
-                    color: 'hsl(var(--primary-foreground))',
+                    background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                    color: 'var(--bg-primary)',
                   }}
                 >
                   {sendMessage.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <>
-                      Send
+                      发送
                       <Send className="h-4 w-4" />
                     </>
                   )}
@@ -268,9 +279,13 @@ export function ChatInterface({ conversationId }: ChatInterfaceProps) {
               </div>
             </div>
           </div>
-          <p className="text-xs text-center mt-3" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Press Enter to send, Shift + Enter for new line
-          </p>
+          {/* 温馨提示 hint */}
+          <div
+            className="mt-3 px-4 py-3 text-sm leading-relaxed text-center whitespace-pre-line"
+            style={{ color: 'var(--text-tertiary)' }}
+          >
+            温馨提示：按 Enter 发送消息，Shift + Enter 换行
+          </div>
         </div>
       </div>
     </div>

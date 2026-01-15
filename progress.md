@@ -49,6 +49,31 @@
   - [x] ConversationList.tsx: 对话列表、活跃状态金色高亮、空状态
   - [x] page.tsx: 侧边栏布局、欢迎页面、新建对话按钮
   - [x] 提交代码 (commit: 6f05272)
+- [x] **Phase 4 Step 4.3 像素级 UI 还原 (续)** ✅
+  - [x] 创建 AppHeader 组件 (apps/web/src/components/layout/AppHeader.tsx)
+    - 64px 高度、backdrop-blur-xl 背景
+    - 顶部金色装饰线 (渐变)
+    - Logo + 导航菜单 (首页/对话/功能广场/个人中心)
+    - 积分显示 (Sparkles 图标 + 数值)
+    - 用户头像下拉菜单 (个人中心/充值/设置/退出)
+  - [x] 创建 ChatSidebar 组件 (apps/web/src/components/chat/ChatSidebar.tsx)
+    - 256px (w-64) 宽度侧边栏
+    - "+ 新建对话" 大按钮 (金色渐变背景，黑色文字)
+    - "全部对话" + "管理" 头部栏
+    - 时间分组对话列表 (今天/昨天/本周/更早)
+    - 对话项悬停和选中状态
+    - 右键菜单 (重命名/删除)
+  - [x] 更新 ChatInterface 组件
+    - 添加附件按钮 (Paperclip 图标)
+    - 添加"温馨提示"文案
+    - 统一使用旧项目 CSS 变量 (--bg-primary, --text-primary 等)
+  - [x] 更新 page.tsx 布局
+    - 集成 AppHeader 顶部导航
+    - 集成 ChatSidebar 侧边栏
+    - 欢迎页面金色渐变 Logo
+  - [x] 更新 globals.css
+    - 添加直接颜色变量 (--bg-primary, --bg-secondary, --text-primary 等)
+    - 确保与旧项目完全兼容
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
