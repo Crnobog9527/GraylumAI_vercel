@@ -261,12 +261,15 @@
 #### P1 - 中频使用组件
 | 组件 | 状态 |
 |------|------|
-| Dropdown Menu | ⬜ |
-| Avatar | ⬜ |
+| Dropdown Menu | ✅ |
+| Avatar | 🔴 需创建 |
 | Badge | ⬜ |
 | Toast/Sonner | ⬜ |
 | Tooltip | ⬜ |
 | Separator | ⬜ |
+| Dialog | 🔴 需创建 |
+| Select | 🔴 需创建 |
+| Sheet | 🔴 需创建 |
 
 #### P2 - 其他组件
 | 组件 | 状态 |
@@ -286,7 +289,7 @@
 |------|--------|--------|------|------|
 | 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ✅ | commit: 62568f4 |
 | 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/chat/page.tsx | ✅ | commit: 06e9bfd |
-| 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
+| 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/profile/page.tsx | 🔴 | commit: e09d60d, 缺失 UI 组件 |
 | 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |
 | 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |
 | 模板页面 (/templates) | src/pages/Templates.jsx | apps/web/src/app/templates/page.tsx | ⬜ |
@@ -362,3 +365,7 @@ UI 视觉一致性:
 | Can't resolve '@/components/ui/dropdown-menu' | ChatSidebar 和 AppHeader 使用了未安装的 dropdown-menu 组件 | 安装 @radix-ui/react-dropdown-menu 并手动创建 dropdown-menu.tsx 组件 | 已修复 |
 | Can't resolve '@radix-ui/react-dropdown-menu' | pnpm-lock.yaml 未正确同步到 Vercel 构建环境 | 确保 pnpm-lock.yaml 已提交并重新触发部署 | 已修复 |
 | ChunkLoadError: Failed to load chunk (login/global-error) | Turbopack/Webpack 在 GitHub Codespaces 环境中加载 chunk 失败 | 待修复 - 可能是 Codespaces 网络/MIME 类型问题 | 待修复 |
+| Can't resolve '@/components/ui/avatar' | Profile 页面使用了未创建的 Avatar 组件 | 需安装 @radix-ui/react-avatar 并创建组件 | 待修复 |
+| Can't resolve '@/components/ui/dialog' | Profile 页面使用了未创建的 Dialog 组件 | 需安装 @radix-ui/react-dialog 并创建组件 | 待修复 |
+| Can't resolve '@/components/ui/select' | Profile 页面使用了未创建的 Select 组件 | 需安装 @radix-ui/react-select 并创建组件 | 待修复 |
+| Can't resolve '@/components/ui/sheet' | Profile 页面使用了未创建的 Sheet 组件 | 需安装 @radix-ui/react-dialog 并创建组件 | 待修复 |

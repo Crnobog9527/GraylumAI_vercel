@@ -154,6 +154,21 @@
     - 黄色警告提示文案
   - [x] 更新 ChatSidebar 组件 (添加管理按钮图标)
   - [x] 提交代码 (commit: 06e9bfd)
+- [ ] **Phase 4 Step 4.5 个人中心页面复刻** 🔴 构建错误
+  - [x] 创建 ProfileSidebar 组件 (左侧导航 6 个标签页)
+  - [x] 创建 PersonalInfoCard.tsx (用户头像、积分、订阅、统计、快捷操作)
+  - [x] 创建 SubscriptionCard.tsx (会员套餐、按月/按年、积分加油包)
+  - [x] 创建 CreditRecordsCard.tsx (积分概览、每日消耗趋势图、交易记录)
+  - [x] 创建 UsageHistoryCard.tsx (使用历史列表)
+  - [x] 创建 SecuritySettingsCard.tsx (登录方式、邮箱验证、修改密码)
+  - [x] 创建 TicketsPanel.tsx (工单列表、详情、创建表单)
+  - [x] 创建 profile/page.tsx (主页面整合)
+  - [x] 提交代码 (commit: e09d60d)
+  - [ ] **构建错误**: 缺失 4 个 Shadcn/ui 组件
+    - `@/components/ui/avatar` - PersonalInfoCard.tsx 使用
+    - `@/components/ui/dialog` - SecuritySettingsCard.tsx 使用
+    - `@/components/ui/select` - TicketsPanel.tsx 使用
+    - `@/components/ui/sheet` - profile/page.tsx 使用
 - [ ] **登录页面错误 (待修复)** 🔴
   - [ ] ChunkLoadError: Failed to load chunk (login/global-error)
     - 原因: Turbopack/Webpack 在 GitHub Codespaces 环境中加载 chunk 失败
