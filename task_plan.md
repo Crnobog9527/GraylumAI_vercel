@@ -8,7 +8,8 @@
 ## Current Phase
 阶段九、十、十一（业务逻辑）全部完成 ✅
 阶段十二（全局样式与主题还原）已完成 ✅
-阶段十三、十四（UI 还原）待开始
+阶段十三（核心 UI 组件样式还原）已完成 ✅
+阶段十四（页面布局与交互细节）待开始
 
 ## Phases
 
@@ -69,24 +70,24 @@
   |------|------|----------|------|
   | 字体 404 (Inter, JetBrains Mono) | @font-face URL 不完整 | 移除 @font-face，使用系统字体后备 | ✅ 已修复 |
 
-### 阶段十三：核心 UI 组件样式还原 ⏳ 待开始
+### 阶段十三：核心 UI 组件样式还原 ✅ 已完成
 **目标**: 针对 Shadcn/ui 的核心组件，根据原有 UI 的设计稿进行样式定制。
 
-- [ ] 任务 13.1：定制 Button 组件样式
-  - 修改 `button.tsx` 的 `buttonVariants`
-  - 应用 GraylumAI 主题色（default, outline, secondary, ghost, link）
-- [ ] 任务 13.2：定制 Card 组件样式
-  - 修改 `card.tsx` 组件
-  - 应用 graylumBgSecondary, graylumBorderPrimary, shadow-graylumMd
-- [ ] 任务 13.3：定制 Input 和 Textarea 组件样式
-  - 修改 `input.tsx` 和 `textarea.tsx`
-  - 应用 graylumBgTertiary, graylumBorderPrimary, graylumBorderFocus
-- [ ] 任务 13.4：提交第十三阶段成果
-- **Status:** ⏳ 待开始
-- **验证方法:**
-  - 检查所有按钮的颜色、圆角、悬停效果
-  - 检查卡片的背景、边框、阴影
-  - 检查输入框的背景、边框、聚焦效果
+- [x] 任务 13.1：定制 Button 组件样式
+  - 添加过渡动画 (`transition-all duration-200`)
+  - 添加悬停阴影 (`hover:shadow-lg`)、点击缩放 (`active:scale-[0.98]`)
+- [x] 任务 13.2：定制 Card 组件样式
+  - 添加边框 (`border-border`)、中等阴影 (`shadow-md`)
+  - 添加悬停阴影过渡 (`hover:shadow-lg`)
+- [x] 任务 13.3：定制 Input 和 Textarea 组件样式
+  - 添加背景色 (`bg-muted`)
+  - 添加聚焦环和边框高亮 (`focus-visible:ring-2 focus-visible:border-primary`)
+- [x] 任务 13.4：提交第十三阶段成果
+- **Status:** ✅ 已完成并验证通过
+- **验证结果:**
+  - 按钮颜色、悬停效果、点击反馈正常
+  - 卡片背景、边框、阴影正确显示
+  - 输入框背景、聚焦效果正常
 
 ### 阶段十四：页面布局与交互细节还原 ⏳ 待开始
 **目标**: 调整关键页面的布局并恢复特定的交互细节（动画、滚动条等）。
