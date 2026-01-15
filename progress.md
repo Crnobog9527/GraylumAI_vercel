@@ -74,6 +74,9 @@
   - [x] 更新 globals.css
     - 添加直接颜色变量 (--bg-primary, --bg-secondary, --text-primary 等)
     - 确保与旧项目完全兼容
+  - [x] 修复构建错误: Can't resolve '@/components/ui/dropdown-menu'
+    - 安装 @radix-ui/react-dropdown-menu 依赖
+    - 手动创建 dropdown-menu.tsx 组件
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
