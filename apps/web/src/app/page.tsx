@@ -1,175 +1,138 @@
 'use client';
 
-import { useState, useRef } from 'react';
 import { AppHeader } from '@/components/layout/AppHeader';
-import { ChatSidebar } from '@/components/chat/ChatSidebar';
-import { ChatInterface } from '@/components/chat/ChatInterface';
-import { MessageSquare, Sparkles, Paperclip, Send } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import WelcomeBanner from '@/components/home/WelcomeBanner';
+import SixStepsGuide from '@/components/home/SixStepsGuide';
+import UpdatesSection from '@/components/home/UpdatesSection';
 
+/**
+ * 首页组件
+ * 使用设计系统: 背景色、容器布局、动画效果
+ */
 export default function HomePage() {
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [inputMessage, setInputMessage] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const handleNewChat = () => {
-    // TODO: Create new conversation via tRPC mutation
-    setSelectedConversationId(null);
+  // TODO: 从 tRPC 获取用户数据
+  const user = {
+    full_name: 'office',
+    email: 'office@example.com',
+    membership_level: 'free',
+    membership_expiry_date: undefined
   };
 
-  const handleSend = () => {
-    if (!inputMessage.trim()) return;
-    // TODO: Create conversation and send message
-    console.log('Send:', inputMessage);
-    setInputMessage('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  // TODO: 从 tRPC 获取公告数据
+  const announcements = [
+    {
+      id: '1',
+      title: '应用上线特惠',
+      description: '黄金会员年卡 5 折，限量 100 名。',
+      icon: 'Megaphone',
+      tag: '限量优惠',
+      tag_color: 'red',
+      publish_date: '2026-01-06',
     }
-  };
+  ];
 
   return (
-    <div className="flex flex-col h-screen relative" style={{ background: 'var(--bg-primary)' }}>
-      {/* 背景光晕效果 - 左下角 */}
+    <div
+      className="min-h-screen relative overflow-hidden"
+      style={{ background: 'var(--bg-primary)' }}
+    >
+      {/* ============================================
+          动态背景系统 - 多层叠加效果
+          ============================================ */}
+
+      {/* 1. 基础渐变层 */}
       <div
-        className="fixed pointer-events-none"
+        className="absolute inset-0"
         style={{
-          left: '-10%',
-          bottom: '-20%',
-          width: '50%',
-          height: '60%',
-          background: 'radial-gradient(ellipse at center, rgba(255, 215, 0, 0.08) 0%, rgba(255, 165, 0, 0.04) 40%, transparent 70%)',
-          filter: 'blur(60px)',
-          zIndex: 0,
-        }}
-      />
-      {/* 背景光晕效果 - 右上角 */}
-      <div
-        className="fixed pointer-events-none"
-        style={{
-          right: '-10%',
-          top: '-10%',
-          width: '45%',
-          height: '50%',
-          background: 'radial-gradient(ellipse at center, rgba(255, 215, 0, 0.06) 0%, rgba(255, 165, 0, 0.03) 40%, transparent 70%)',
-          filter: 'blur(60px)',
-          zIndex: 0,
+          background: `linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-primary) 100%)`
         }}
       />
 
-      {/* Top Header */}
+      {/* 2. 右上角金色光晕 - 简化动画 */}
+      <div
+        className="absolute -top-32 -right-32 w-[500px] h-[500px] rounded-full opacity-40 blur-[100px]"
+        style={{
+          background: `linear-gradient(135deg, var(--color-secondary) 0%, var(--color-primary) 100%)`,
+          willChange: 'transform',
+          contain: 'layout paint',
+        }}
+      />
+
+      {/* 3. 左侧紫色光晕 - 静态 */}
+      <div
+        className="absolute top-1/4 -left-32 w-[400px] h-[400px] rounded-full opacity-20 blur-[80px]"
+        style={{
+          background: `rgba(139, 92, 246, 0.5)`,
+          contain: 'layout paint',
+        }}
+      />
+
+      {/* 4. 底部暖色光晕 - 静态 */}
+      <div
+        className="absolute -bottom-32 left-1/4 w-[500px] h-[300px] rounded-full opacity-30 blur-[100px]"
+        style={{
+          background: `var(--color-secondary)`,
+          contain: 'layout paint',
+        }}
+      />
+
+      {/* 5. 网格纹理层 - 静态 */}
+      <div
+        className="absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage: `linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)`,
+          backgroundSize: '50px 50px',
+          contain: 'layout paint',
+        }}
+      />
+
+      {/* 6. 暗角遮罩 */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse 80% 70% at 50% 50%, transparent 30%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0.6) 100%)',
+          contain: 'layout paint',
+        }}
+      />
+
+      {/* 动画样式定义 - 精简版 */}
+      <style>{`
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .card-clickable:hover {
+          border-color: var(--color-primary) !important;
+        }
+        .card-clickable:hover .heading-4 {
+          color: var(--color-primary) !important;
+        }
+        .card-clickable:hover svg {
+          color: var(--color-primary) !important;
+        }
+        .card-clickable:hover > div:first-child > div:first-child {
+          border-color: var(--color-primary) !important;
+        }
+      `}</style>
+
+      {/* ============================================
+          顶部导航
+          ============================================ */}
       <AppHeader />
 
-      {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden relative z-10">
-        {/* Left Sidebar */}
-        <ChatSidebar
-          onSelectConversation={setSelectedConversationId}
-          onNewChat={handleNewChat}
-          activeConversationId={selectedConversationId ?? undefined}
-        />
-
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col overflow-hidden relative">
-          {selectedConversationId ? (
-            <ChatInterface conversationId={selectedConversationId} />
-          ) : (
-            <div className="flex-1 flex flex-col">
-              {/* 欢迎区域 - 居中 */}
-              <div className="flex-1 flex flex-col items-center justify-center">
-                <div
-                  className="w-20 h-20 rounded-2xl flex items-center justify-center mb-5"
-                  style={{
-                    background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                    boxShadow: '0 0 40px rgba(255, 215, 0, 0.3)'
-                  }}
-                >
-                  <Sparkles className="h-10 w-10" style={{ color: 'var(--bg-primary)' }} />
-                </div>
-                <h2 className="text-2xl font-bold mb-2" style={{
-                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
-                }}>
-                  开始新对话
-                </h2>
-                <p className="text-base" style={{ color: 'var(--text-tertiary)' }}>
-                  选择一个对话或开始新的聊天
-                </p>
-              </div>
-
-              {/* 底部输入框 - 悬浮样式 */}
-              <div className="p-4 pb-6">
-                <div className="max-w-3xl mx-auto">
-                  {/* 输入框容器 */}
-                  <div
-                    className="relative rounded-2xl backdrop-blur-xl"
-                    style={{
-                      background: 'rgba(26, 26, 26, 0.8)',
-                      border: '1px solid rgba(255, 215, 0, 0.15)',
-                      boxShadow: '0 4px 24px rgba(0, 0, 0, 0.3)'
-                    }}
-                  >
-                    <div className="flex items-end p-3">
-                      {/* 左侧附件按钮 */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 hover:opacity-80"
-                        style={{ color: 'var(--text-tertiary)' }}
-                      >
-                        <Paperclip className="h-5 w-5" />
-                      </Button>
-
-                      {/* 中间输入框 */}
-                      <Textarea
-                        ref={textareaRef}
-                        value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder="请输入您的问题..."
-                        className="flex-1 min-h-[44px] max-h-[120px] resize-none border-0 focus-visible:ring-0 py-2 px-2 text-base bg-transparent"
-                        style={{ color: 'var(--text-primary)' }}
-                        rows={1}
-                      />
-
-                      {/* 右侧字数统计和发送按钮 */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
-                          {inputMessage.length}/2500
-                        </span>
-                        <Button
-                          onClick={handleSend}
-                          disabled={!inputMessage.trim()}
-                          className="h-9 px-5 gap-2 rounded-xl font-medium"
-                          style={{
-                            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                            color: 'var(--bg-primary)',
-                          }}
-                        >
-                          发送
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 温馨提示 */}
-                  <div
-                    className="mt-3 text-sm text-center"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    🔔 温馨提示：为了保证回复质量，请尽量详细描述您的问题
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+      {/* ============================================
+          内容层
+          ============================================ */}
+      <div
+        className="relative container mx-auto max-w-7xl"
+        style={{
+          zIndex: 'var(--z-base)',
+          padding: 'var(--space-xl) var(--space-lg)'
+        }}
+      >
+        <WelcomeBanner user={user} />
+        <SixStepsGuide />
+        <UpdatesSection announcements={announcements} />
       </div>
     </div>
   );
