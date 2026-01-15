@@ -4,7 +4,7 @@
 完成 GraylumAI 项目从阶段九到阶段十一的所有迁移工作，包括工单系统、系统设置、邀请推广、AI模型管理和管理后台。
 
 ## Current Phase
-阶段十一已完成 - 等待 Vercel 验证
+阶段九、十、十一全部完成 ✅
 
 ## Phases
 
@@ -25,14 +25,17 @@
 - **Status:** ✅ 已完成并验证通过
 - **验证结果:** models 和 invitations 页面正常访问，数据可写入数据库
 
-### 阶段十一：管理后台与最终优化 ✅ 代码已完成
+### 阶段十一：管理后台与最终优化 ✅ 已完成
 - [x] 任务 11.1：实现管理员角色权限控制 (adminProcedure)
 - [x] 任务 11.2：应用管理员权限到相关 API
 - [x] 任务 11.3：创建管理后台仪表盘 (admin/page.tsx)
 - [x] 任务 11.4：创建获取统计数据的 API (getStatistics)
-- [x] 任务 11.5：最终代码提交与部署准备 → 等待 Vercel 验证
-- **Status:** 代码已完成，等待数据库添加 role 字段和 Vercel 验证
-- **数据库操作:** 需要执行 SQL 添加 role 字段（见下方说明）
+- [x] 任务 11.5：最终代码提交与部署准备
+- [x] 修复：models/invitations 页面添加访问拒绝提示，getAvailableModels 改为 adminProcedure
+- **Status:** ✅ 已完成并验证通过
+- **验证结果:**
+  - 管理员可正常访问 /admin、/models、/invitations 页面
+  - 普通用户无法访问以上管理员页面，显示 Access Denied
 
 ## 执行流程
 

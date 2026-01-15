@@ -228,12 +228,19 @@ export const profiles = pgTable('profiles', {
 普通用户可以访问 `/models` 和 `/invitations` 页面，但无法提交操作。
 期望行为应该是像 `/admin` 页面一样，完全禁止普通用户访问。
 
-### 验证结果
+### 验证结果（修复前）
 | 页面 | 管理员访问 | 普通用户访问 | 普通用户操作 |
 |------|-----------|-------------|-------------|
 | `/admin` | ✅ 正常 | ❌ 显示 Access Denied | N/A |
 | `/models` | ✅ 正常 | ✅ 可访问 ❌ | ❌ 无法提交 |
 | `/invitations` | ✅ 正常 | ✅ 可访问 ❌ | ❌ 无法提交 |
+
+### 验证结果（修复后）✅
+| 页面 | 管理员访问 | 普通用户访问 |
+|------|-----------|-------------|
+| `/admin` | ✅ 正常 | ❌ 显示 Access Denied |
+| `/models` | ✅ 正常 | ❌ 显示 Access Denied |
+| `/invitations` | ✅ 正常 | ❌ 显示 Access Denied |
 
 ### 全局对比分析
 
@@ -241,7 +248,7 @@ export const profiles = pgTable('profiles', {
 | 页面 | API | 权限类型 | 状态 |
 |------|-----|---------|------|
 | admin | getStatistics | adminProcedure | ✅ 正确 |
-| models | getAvailableModels | **publicProcedure** | ❌ 应改为 adminProcedure |
+| models | getAvailableModels | adminProcedure | ✅ 已修复 |
 | models | updateModelConfig | adminProcedure | ✅ 正确 |
 | invitations | generateInvitationCode | adminProcedure | ✅ 正确 |
 | invitations | getInvitationHistory | adminProcedure | ✅ 正确 |
@@ -251,8 +258,8 @@ export const profiles = pgTable('profiles', {
 | 页面 | error 处理 | 访问控制 | 状态 |
 |------|-----------|---------|------|
 | admin/page.tsx | ✅ 检查 error，显示 Access Denied | ✅ 有 | ✅ 正确 |
-| models/page.tsx | ❌ 无 error 处理 | ❌ 无 | ❌ 需修复 |
-| invitations/page.tsx | ❌ 无 error 处理 | ❌ 无 | ❌ 需修复 |
+| models/page.tsx | ✅ 检查 error，显示 Access Denied | ✅ 有 | ✅ 已修复 |
+| invitations/page.tsx | ✅ 检查 error，显示 Access Denied | ✅ 有 | ✅ 已修复 |
 
 ### 根本原因
 1. **后端问题**：`model.getAvailableModels` 使用了 `publicProcedure` 而非 `adminProcedure`
