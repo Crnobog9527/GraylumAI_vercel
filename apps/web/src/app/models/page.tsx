@@ -14,7 +14,7 @@ interface AIModel {
 }
 
 export default function ModelsPage() {
-  const { data: models, isLoading, refetch } = trpc.model.getAvailableModels.useQuery();
+  const { data: models, isLoading, error, refetch } = trpc.model.getAvailableModels.useQuery();
   const updateModelMutation = trpc.model.updateModelConfig.useMutation({
     onSuccess: () => {
       refetch();
@@ -41,6 +41,23 @@ export default function ModelsPage() {
   };
 
   if (isLoading) return <div className="container mx-auto p-4">Loading models...</div>;
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <h1 className="text-2xl font-bold mb-4">AI Models Management</h1>
+        <Card className="bg-red-50 border-red-200">
+          <CardContent className="pt-6">
+            <p className="text-red-600">
+              {error.message === 'You do not have permission to access this resource. Admin role required.'
+                ? 'Access Denied: You need admin privileges to view this page.'
+                : `Error: ${error.message}`}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-4">

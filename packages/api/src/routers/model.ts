@@ -1,9 +1,10 @@
-import { router, publicProcedure, adminProcedure } from '../trpc';
+import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 
 export const modelRouter = router({
-  getAvailableModels: publicProcedure.query(async ({ ctx }) => {
+  // Admin only: Get all available AI models
+  getAvailableModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('ai_models')
       .select('*');

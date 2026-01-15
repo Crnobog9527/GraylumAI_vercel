@@ -222,6 +222,87 @@ export const profiles = pgTable('profiles', {
 | apps/web/src/app/models/page.tsx | 模型管理页面 |
 | apps/web/src/app/invitations/page.tsx | 邀请码页面 |
 
+## 管理员页面访问控制不一致问题 ⚠️ 重要经验
+
+### 问题描述
+普通用户可以访问 `/models` 和 `/invitations` 页面，但无法提交操作。
+期望行为应该是像 `/admin` 页面一样，完全禁止普通用户访问。
+
+### 验证结果
+| 页面 | 管理员访问 | 普通用户访问 | 普通用户操作 |
+|------|-----------|-------------|-------------|
+| `/admin` | ✅ 正常 | ❌ 显示 Access Denied | N/A |
+| `/models` | ✅ 正常 | ✅ 可访问 ❌ | ❌ 无法提交 |
+| `/invitations` | ✅ 正常 | ✅ 可访问 ❌ | ❌ 无法提交 |
+
+### 全局对比分析
+
+**后端 API 权限配置：**
+| 页面 | API | 权限类型 | 状态 |
+|------|-----|---------|------|
+| admin | getStatistics | adminProcedure | ✅ 正确 |
+| models | getAvailableModels | **publicProcedure** | ❌ 应改为 adminProcedure |
+| models | updateModelConfig | adminProcedure | ✅ 正确 |
+| invitations | generateInvitationCode | adminProcedure | ✅ 正确 |
+| invitations | getInvitationHistory | adminProcedure | ✅ 正确 |
+| invitations | validateInvitationCode | publicProcedure | ✅ 正确(注册用) |
+
+**前端页面权限处理：**
+| 页面 | error 处理 | 访问控制 | 状态 |
+|------|-----------|---------|------|
+| admin/page.tsx | ✅ 检查 error，显示 Access Denied | ✅ 有 | ✅ 正确 |
+| models/page.tsx | ❌ 无 error 处理 | ❌ 无 | ❌ 需修复 |
+| invitations/page.tsx | ❌ 无 error 处理 | ❌ 无 | ❌ 需修复 |
+
+### 根本原因
+1. **后端问题**：`model.getAvailableModels` 使用了 `publicProcedure` 而非 `adminProcedure`
+2. **前端问题**：`models/page.tsx` 和 `invitations/page.tsx` 没有检查 API 错误并显示访问拒绝信息
+
+### 修复方案
+
+**第一步：修复后端 API 权限（model.ts）**
+```typescript
+// 修改前
+getAvailableModels: publicProcedure.query(...)
+
+// 修改后
+getAvailableModels: adminProcedure.query(...)
+```
+
+**第二步：修复前端页面（models/page.tsx, invitations/page.tsx）**
+添加与 admin/page.tsx 相同的 error 处理逻辑：
+```typescript
+if (error) {
+  return (
+    <div className="container mx-auto p-4">
+      <h1>...</h1>
+      <Card className="bg-red-50 border-red-200">
+        <CardContent className="pt-6">
+          <p className="text-red-600">
+            {error.message === 'You do not have permission...'
+              ? 'Access Denied: You need admin privileges...'
+              : `Error: ${error.message}`}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+### 教训与检查清单 ⚠️
+**实现管理员功能时的完整检查：**
+- [ ] 后端：所有管理员 API 使用 `adminProcedure`
+- [ ] 前端：页面检查 API error 并显示访问拒绝信息
+- [ ] 测试：分别用管理员和普通用户测试页面访问
+
+**权限控制层次结构：**
+```
+publicProcedure     → 任何人可访问（公开数据、注册验证等）
+protectedProcedure  → 已登录用户可访问
+adminProcedure      → 仅管理员可访问（继承 protectedProcedure）
+```
+
 ## Resources
 - [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
 - [tRPC React Query Setup](https://trpc.io/docs/client/react)
