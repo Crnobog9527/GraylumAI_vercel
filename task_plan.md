@@ -221,10 +221,9 @@
 | AIPerformanceMonitor | src/components/admin/AIPerformanceMonitor.jsx | apps/web/src/components/admin/AIPerformanceMonitor.tsx | ⬜ |
 | MembershipPermissionsCard | src/components/admin/MembershipPermissionsCard.jsx | apps/web/src/components/admin/MembershipPermissionsCard.tsx | ⬜ |
 
-#### Phase E.2: 管理后台页面（P1 - 13个）
+#### Phase E.2: 管理后台页面（P1 - 12个）
 | 页面 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| 管理后台入口 | src/pages/Admin.jsx | apps/web/src/app/admin/layout.tsx | ⬜ |
 | 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ⬜ |
 | 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ⬜ |
 | 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ⬜ |
@@ -310,10 +309,9 @@
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/profile/page.tsx | ✅ | commit: e09d60d, d99b2c6 |
 | 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |
 
-#### 管理后台页面 (13个) - 进行中
+#### 管理后台页面 (12个) - 进行中
 | 页面 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| 管理后台布局 | src/pages/Admin.jsx | apps/web/src/app/admin/layout.tsx | ⬜ |
 | 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ⬜ |
 | 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ⬜ |
 | 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ⬜ |
