@@ -80,6 +80,22 @@
   - [x] 修复构建错误: Can't resolve '@radix-ui/react-dropdown-menu'
     - 确保 pnpm-lock.yaml 已提交 (commit: f91e21b 包含 637 行 lockfile 更新)
     - 重新触发 Vercel 部署
+- [x] **Phase 4 Step 4.3 像素级 UI 还原 (最终优化)** ✅
+  - [x] 背景光晕效果
+    - 左下角暗金色渐变光晕 (radial-gradient + blur)
+    - 右上角暗金色渐变光晕
+  - [x] 底部对话框像素级临摹
+    - 悬浮样式 (backdrop-blur-xl + 半透明背景)
+    - 左侧回形针附件按钮
+    - 中间占位文字 "请输入您的问题..."
+    - 右侧字数统计 "0/2500"
+    - 黄色渐变发送按钮 (纸飞机图标)
+  - [x] 温馨提示
+    - 🔔 黄色文字居中显示
+  - [x] 欢迎区域调整
+    - 图标大小 w-20 h-20
+    - 文字大小 text-2xl
+    - 间距调整 mb-5 mb-2
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
