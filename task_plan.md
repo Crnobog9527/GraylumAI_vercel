@@ -109,6 +109,219 @@
 
 ---
 
+## 🚀 Phase 4: 完整 UI 还原（未来工作）
+
+> **参考文档**: `movetonew/instruction_ui_all_v1.md`
+> **目标**: 将新架构项目的 UI 完全还原为旧项目（graylumAi-backup）的视觉样式，确保用户体验的连续性。
+
+### 前置条件
+- [ ] 阅读旧项目架构文档: https://github.com/Crnobog9527/graylumAi-backup/blob/main/.claude/ARCHITECTURE_ANALYSIS.md
+- [ ] 克隆旧项目仓库: https://github.com/Crnobog9527/graylumAi-backup
+
+### Step 4.1: 视觉系统分析与提取
+**目标**: 建立完整的视觉设计规范文档 (`VISUAL_DESIGN_SYSTEM.md`)
+
+扫描旧项目文件:
+- [ ] `src/theme.css` (376行) - 主题系统变量
+- [ ] `src/components.css` (1224行) - 组件样式库
+- [ ] `src/index.css` - 全局样式
+- [ ] `src/App.css` - 应用级样式
+- [ ] `tailwind.config.js` - Tailwind 配置
+
+提取设计元素:
+- [ ] 🎨 颜色系统（所有 CSS 变量）
+- [ ] 📏 间距系统（padding, margin, gap）
+- [ ] 🔤 字体系统（font-family, font-size, font-weight, line-height）
+- [ ] 🌑 阴影系统（box-shadow）
+- [ ] 📐 圆角系统（border-radius）
+- [ ] 🔲 边框系统（border-width, border-color）
+- [ ] 🎭 动画系统（transition, animation）
+- [ ] 📱 响应式断点（媒体查询规则）
+
+**输出文件**: `VISUAL_DESIGN_SYSTEM.md`
+
+### Step 4.2: 全局样式配置更新
+**目标**: 补充 Phase 12 中可能遗漏的样式
+
+- [ ] 对比旧项目 CSS 变量，补充遗漏项
+- [ ] 添加旧项目中的 @layer 定义
+- [ ] 复制自定义 Tailwind 类
+- [ ] 验证深色主题配置
+
+**修改文件**:
+- `apps/web/src/app/globals.css`
+
+### Step 4.3: UI 组件逐个还原（105 个组件）
+
+#### Phase A: 核心布局组件（P0）
+| 组件 | 旧文件 | 新文件 | 状态 |
+|------|--------|--------|------|
+| AppHeader | src/components/layout/AppHeader.jsx | apps/web/src/components/layout/AppHeader.tsx | ⬜ |
+| GlobalBanner | src/components/layout/GlobalBanner.jsx | apps/web/src/components/layout/GlobalBanner.tsx | ⬜ |
+| Sidebar | src/components/layout/ | apps/web/src/components/layout/Sidebar.tsx | ⬜ |
+
+#### Phase B: 聊天系统组件（P0 - 15个）
+| 组件 | 旧文件 | 新文件 | 状态 |
+|------|--------|--------|------|
+| ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ChatSidebar.tsx | ⬜ |
+| ChatHeader | src/components/chat/ChatHeader.jsx | apps/web/src/components/chat/ChatHeader.tsx | ⬜ |
+| MessageBubble | src/components/chat/MessageBubble.jsx | apps/web/src/components/chat/MessageBubble.tsx | ⬜ |
+| ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatMessages.tsx | ⬜ |
+| ChatInput | src/components/chat/ChatInput.jsx | apps/web/src/components/chat/ChatInput.tsx | ⬜ |
+| ChatInputArea | src/components/chat/ChatInputArea.jsx | apps/web/src/components/chat/ChatInputArea.tsx | ⬜ |
+| ModelSelector | src/components/chat/ModelSelector.jsx | apps/web/src/components/chat/ModelSelector.tsx | ⬜ |
+| ChatDebugPanel | - | apps/web/src/components/chat/ChatDebugPanel.tsx | ⬜ |
+| PromptModuleCard | - | apps/web/src/components/chat/PromptModuleCard.tsx | ⬜ |
+| PromptModuleGrid | - | apps/web/src/components/chat/PromptModuleGrid.tsx | ⬜ |
+| TemplateCard | - | apps/web/src/components/chat/TemplateCard.tsx | ⬜ |
+| TokenUsageStats | - | apps/web/src/components/chat/TokenUsageStats.tsx | ⬜ |
+| FileAttachmentCard | - | apps/web/src/components/chat/FileAttachmentCard.tsx | ⬜ |
+| ActiveModuleBanner | - | apps/web/src/components/chat/ActiveModuleBanner.tsx | ⬜ |
+
+#### Phase C: 用户资料组件（P1 - 5个）
+| 组件 | 旧文件 | 新文件 | 状态 |
+|------|--------|--------|------|
+| ProfileComponents | src/components/profile/ProfileComponents.jsx (1348行) | apps/web/src/components/profile/ProfileComponents.tsx | ⬜ |
+| PersonalInfoCard | src/components/profile/PersonalInfoCard.jsx | apps/web/src/components/profile/PersonalInfoCard.tsx | ⬜ |
+| AvatarCropper | src/components/profile/AvatarCropper.jsx | apps/web/src/components/profile/AvatarCropper.tsx | ⬜ |
+| CreditsDialog | src/components/profile/CreditsDialog.jsx | apps/web/src/components/profile/CreditsDialog.tsx | ⬜ |
+| TicketsPanel | src/components/profile/TicketsPanel.jsx | apps/web/src/components/profile/TicketsPanel.tsx | ⬜ |
+
+#### Phase D: 积分和工单组件（P1 - 10个）
+积分组件:
+| 组件 | 状态 |
+|------|------|
+| CreditBalance.tsx | ⬜ |
+| CreditPackageCard.tsx | ⬜ |
+
+工单组件:
+| 组件 | 状态 |
+|------|------|
+| TicketCard.tsx | ⬜ |
+| TicketInfo.tsx | ⬜ |
+| TicketStatusBadge.tsx | ⬜ |
+| TicketPriorityBadge.tsx | ⬜ |
+| TicketReplyForm.tsx | ⬜ |
+| TicketReplyList.tsx | ⬜ |
+| TicketClosedNotice.tsx | ⬜ |
+| LoadingSpinner.tsx | ⬜ |
+
+#### Phase E: 管理后台组件（P1 - 9个）
+| 组件 | 状态 |
+|------|------|
+| AdminSidebar | ⬜ |
+| StatsCard | ⬜ |
+| SystemStats | ⬜ |
+| UserManagement | ⬜ |
+| TicketManagement | ⬜ |
+| ModelManagement | ⬜ |
+| TemplateManagement | ⬜ |
+| AIPerformanceMonitor | ⬜ |
+| MembershipPermissionsCard | ⬜ |
+
+#### Phase F: 其他业务组件（P2）
+首页组件:
+| 组件 | 状态 |
+|------|------|
+| WelcomeBanner.tsx | ⬜ |
+| QuickStartGuide.tsx | ⬜ |
+| UpdatesSection.tsx | ⬜ |
+
+功能模块组件:
+| 组件 | 状态 |
+|------|------|
+| ModuleCard.tsx | ⬜ |
+| ModuleDetailDialog.tsx | ⬜ |
+| moduleIcons.tsx | ⬜ |
+| iconConfig.tsx | ⬜ |
+
+通用组件:
+| 组件 | 状态 |
+|------|------|
+| ConversationList.tsx | ⬜ |
+| CreditDisplay.tsx | ⬜ |
+| InviteDialog.tsx | ⬜ |
+| FeaturedModules.tsx | ⬜ |
+
+### Step 4.4: Shadcn/ui 基础组件样式覆盖（49个组件）
+
+#### P0 - 高频使用组件（Phase 13 已部分完成）
+| 组件 | 状态 | 备注 |
+|------|------|------|
+| Button | ✅ | Phase 13 已完成 |
+| Input | ✅ | Phase 13 已完成 |
+| Textarea | ✅ | Phase 13 已完成 |
+| Card | ✅ | Phase 13 已完成 |
+| Dialog | ⬜ | 需还原 |
+| Select | ⬜ | 需还原 |
+| Tabs | ⬜ | 需还原 |
+
+#### P1 - 中频使用组件
+| 组件 | 状态 |
+|------|------|
+| Dropdown Menu | ⬜ |
+| Avatar | ⬜ |
+| Badge | ⬜ |
+| Toast/Sonner | ⬜ |
+| Tooltip | ⬜ |
+| Separator | ⬜ |
+
+#### P2 - 其他组件
+| 组件 | 状态 |
+|------|------|
+| Accordion | ⬜ |
+| Alert | ⬜ |
+| Checkbox | ⬜ |
+| Progress | ⬜ |
+| Slider | ⬜ |
+| Switch | ⬜ |
+| Table | ⬜ |
+| ... (其余 30+ 组件) | ⬜ |
+
+### Step 4.5: 页面级布局还原
+
+| 页面 | 旧文件 | 新文件 | 状态 |
+|------|--------|--------|------|
+| 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ⬜ |
+| 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/(app)/chat/page.tsx | ⬜ |
+| 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
+| 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |
+| 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ⬜ |
+| 模板页面 (/templates) | src/pages/Templates.jsx | apps/web/src/app/templates/page.tsx | ⬜ |
+
+### Step 4.6: 细节打磨与最终验证
+
+#### 验收清单
+UI 视觉一致性:
+- [ ] 颜色系统 100% 匹配
+- [ ] 字体系统 100% 匹配
+- [ ] 间距系统 100% 匹配
+- [ ] 阴影效果 100% 匹配
+- [ ] 圆角系统 100% 匹配
+- [ ] 边框系统 100% 匹配
+- [ ] 动画效果 100% 匹配
+- [ ] 响应式布局 100% 匹配
+- [ ] 深色主题 100% 匹配
+
+组件还原完成度:
+- [ ] 105 个组件全部还原完成
+- [ ] 49 个 Shadcn/ui 组件样式已覆盖
+- [ ] 所有页面布局已还原
+
+代码质量检查:
+- [ ] TypeScript 无编译错误
+- [ ] ESLint 无警告
+- [ ] 组件逻辑未被破坏
+- [ ] 所有功能正常运行
+
+响应式测试:
+- [ ] 320px（移动端最小）
+- [ ] 768px（平板）
+- [ ] 1024px（桌面）
+- [ ] 1920px（大屏）
+
+---
+
 ## 执行流程
 
 每个阶段完成后：

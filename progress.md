@@ -4,6 +4,7 @@
 
 ### Current Status
 - **Phase:** 阶段十二至十四（UI 还原）全部完成 ✅ **Phase 3 迁移完成！**
+- **Next Phase:** Phase 4 完整 UI 还原（已规划，待执行）
 - **Started:** 2026-01-15
 - **Blocking Issue:** 无
 
@@ -30,6 +31,20 @@
   - [x] 任务 14.3: 添加全局动画和过渡效果 (@keyframes + 工具类)
   - [x] 任务 14.4: 提交阶段十四代码 (commit: 243d6da)
   - [x] 验证: Vercel 部署成功
+- [x] **Phase 4 规划完成** ✅
+  - [x] 研读 `movetonew/instruction_ui_all_v1.md` 完整 UI 还原文档
+  - [x] 将 Phase 4 (完整 UI 还原) 整合到 `task_plan.md`
+  - [x] Phase 4 包含 6 个 Step 和 105+ 个组件还原任务
+
+### Phase 4 规划概览
+| Step | 目标 | 主要任务 |
+|------|------|----------|
+| Step 4.1 | 视觉系统分析与提取 | 扫描旧项目，创建 VISUAL_DESIGN_SYSTEM.md |
+| Step 4.2 | 全局样式配置更新 | 补充 Phase 12 遗漏的 CSS 变量和 Tailwind 配置 |
+| Step 4.3 | UI 组件逐个还原 | 105 个组件分 6 阶段还原 (A-F) |
+| Step 4.4 | Shadcn/ui 组件覆盖 | 49 个基础组件样式调整 |
+| Step 4.5 | 页面级布局还原 | 6 个主要页面布局调整 |
+| Step 4.6 | 细节打磨与验证 | 响应式测试、深色主题、交互状态检查 |
 
 ### Migration Progress
 
@@ -41,6 +56,7 @@
 | 阶段十二 | ✅ 已完成并验证 | 4/4 + 1 fix |
 | 阶段十三 | ✅ 已完成并验证 | 4/4 |
 | 阶段十四 | ✅ 已完成并验证 | 4/4 |
+| **Phase 4** | ⏳ 已规划，待执行 | 6 Steps / 105+ 组件 |
 
 ### UI 还原阶段概览
 | 阶段 | 目标 | 主要任务 |
