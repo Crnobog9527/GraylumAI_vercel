@@ -360,3 +360,4 @@ UI 视觉一致性:
 | 500 (profiles 缺少 email) | profiles 表缺少 email 字段导致 profile 创建失败 | 在 Supabase 添加 email 列 + 更新 Drizzle schema | 已修复 |
 | Drizzle db:push 删除 email 列 | 数据库手动添加 email 列后，Drizzle schema 未同步更新 | 在 schema.ts 中添加 email 字段定义 | 已修复 |
 | Can't resolve '@/components/ui/dropdown-menu' | ChatSidebar 和 AppHeader 使用了未安装的 dropdown-menu 组件 | 安装 @radix-ui/react-dropdown-menu 并手动创建 dropdown-menu.tsx 组件 | 已修复 |
+| Can't resolve '@radix-ui/react-dropdown-menu' | pnpm-lock.yaml 未正确同步到 Vercel 构建环境 | 确保 pnpm-lock.yaml 已提交并重新触发部署 | 已修复 |

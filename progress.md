@@ -77,6 +77,9 @@
   - [x] 修复构建错误: Can't resolve '@/components/ui/dropdown-menu'
     - 安装 @radix-ui/react-dropdown-menu 依赖
     - 手动创建 dropdown-menu.tsx 组件
+  - [x] 修复构建错误: Can't resolve '@radix-ui/react-dropdown-menu'
+    - 确保 pnpm-lock.yaml 已提交 (commit: f91e21b 包含 637 行 lockfile 更新)
+    - 重新触发 Vercel 部署
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
