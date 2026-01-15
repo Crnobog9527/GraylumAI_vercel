@@ -44,29 +44,29 @@
 
 ## 🎨 UI 还原阶段
 
-### 阶段十二：全局样式与主题还原 ⏳ 待开始
+### 阶段十二：全局样式与主题还原 ✅ 已完成
 **目标**: 将原有设计系统中的全局颜色、字体、间距、圆角、阴影等变量，配置到 Tailwind CSS 和 Shadcn/ui 的主题中。
 
-- [ ] 任务 12.1：配置 Tailwind CSS 颜色变量
-  - 更新 `tailwind.config.ts` 的 `theme.extend.colors`
+- [x] 任务 12.1：配置 Tailwind CSS 颜色变量
+  - 使用 Tailwind v4 的 `@theme inline` 块配置（项目使用 v4，不需要 tailwind.config.ts）
   - 引入 GraylumAI 自定义颜色（graylumPrimary, graylumBgPrimary 等）
-- [ ] 任务 12.2：配置 Shadcn/ui 主题颜色
+- [x] 任务 12.2：配置 Shadcn/ui 主题颜色
   - 更新 `globals.css` 中的 CSS 变量（:root 和 .dark）
-  - 添加自定义字体（Inter, JetBrains Mono）
+  - 配置字体变量（使用系统字体后备方案）
   - 添加间距、圆角、阴影、过渡、z-index 变量
   - 添加全局基础样式（滚动条、选择样式、聚焦样式）
-- [ ] 任务 12.3：配置 Tailwind CSS 字体和间距
-  - 添加 fontFamily 配置
-  - 添加 spacing 配置
-  - 添加 borderRadius 配置
-  - 添加 boxShadow 配置
-  - 添加 transitionTimingFunction/transitionDuration 配置
-  - 添加 zIndex 配置
-- [ ] 任务 12.4：提交第十二阶段成果
-- **Status:** ⏳ 待开始
-- **验证方法:**
-  - 使用 `text-graylumPrimary` 或 `bg-graylumBgPrimary` 测试颜色
-  - 检查页面背景色、文字颜色、Shadcn/ui 组件主题
+- [x] 任务 12.3：配置 Tailwind CSS 字体和间距
+  - 通过 `@theme inline` 块添加所有配置
+- [x] 任务 12.4：提交第十二阶段成果
+- [x] 修复：字体加载 404 错误 - 移除 @font-face 声明
+- **Status:** ✅ 已完成并验证通过
+- **验证结果:**
+  - 页面背景色、文字颜色正确显示
+  - Shadcn/ui 组件主题颜色正确（黄色主题）
+- **遇到的错误:**
+  | 错误 | 原因 | 解决方案 | 状态 |
+  |------|------|----------|------|
+  | 字体 404 (Inter, JetBrains Mono) | @font-face URL 不完整 | 移除 @font-face，使用系统字体后备 | ✅ 已修复 |
 
 ### 阶段十三：核心 UI 组件样式还原 ⏳ 待开始
 **目标**: 针对 Shadcn/ui 的核心组件，根据原有 UI 的设计稿进行样式定制。
