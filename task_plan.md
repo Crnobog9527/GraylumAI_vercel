@@ -232,10 +232,10 @@
 功能模块组件:
 | 组件 | 状态 |
 |------|------|
-| ModuleCard.tsx | ⬜ |
+| ModuleCard.tsx | ✅ |
 | ModuleDetailDialog.tsx | ⬜ |
-| moduleIcons.tsx | ⬜ |
-| iconConfig.tsx | ⬜ |
+| FeaturedModules.tsx | ✅ |
+| iconConfig.tsx | ✅ |
 
 通用组件:
 | 组件 | 状态 |
@@ -288,7 +288,7 @@
 | 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/(app)/chat/page.tsx | ⬜ |
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
 | 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |
-| 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ⬜ |
+| 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |
 | 模板页面 (/templates) | src/pages/Templates.jsx | apps/web/src/app/templates/page.tsx | ⬜ |
 
 ### Step 4.6: 细节打磨与最终验证
