@@ -310,6 +310,32 @@ protectedProcedure  → 已登录用户可访问
 adminProcedure      → 仅管理员可访问（继承 protectedProcedure）
 ```
 
+## UI 还原阶段问题记录 (Phase 12-14)
+
+### 字体加载 404 错误 (Phase 12) ✅ 已修复
+
+**现象**：
+所有页面控制台显示 404 错误：
+```
+GET https://fonts.gstatic.com/s/inter/v13/... 404 (Not Found)
+GET https://fonts.gstatic.com/s/jetbrainsmono/v18/... 404 (Not Found)
+```
+
+**原因**：
+在 `globals.css` 中使用 `@font-face` 直接引用 Google Fonts 的 woff2 文件 URL，但 URL 不完整导致 404。
+
+**解决方案**：
+移除 `@font-face` 声明，使用系统字体后备方案。字体变量中已定义了完整的后备字体列表：
+```css
+--font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', ... sans-serif;
+--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', ... monospace;
+```
+
+**如需加载自定义字体的正确方式**：
+1. 使用 Next.js 的 `next/font` 模块（推荐）
+2. 在 `layout.tsx` 中引入 Google Fonts link
+3. 本地托管字体文件
+
 ## Resources
 - [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
 - [tRPC React Query Setup](https://trpc.io/docs/client/react)
