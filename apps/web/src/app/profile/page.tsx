@@ -15,7 +15,8 @@ import {
   UserProfileHeader,
   CreditsAndSubscriptionCards,
   UsageStatsCard,
-  QuickActionsCard
+  QuickActionsCard,
+  type MockUser
 } from '@/components/profile/PersonalInfoCard';
 import { SubscriptionCard, CreditStatsCard } from '@/components/profile/SubscriptionCard';
 import { CreditRecordsCard } from '@/components/profile/CreditRecordsCard';
@@ -24,7 +25,7 @@ import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard'
 import TicketsPanel from '@/components/profile/TicketsPanel';
 
 // Mock user data
-const mockUser = {
+const mockUser: MockUser = {
   id: '1',
   email: 'user@example.com',
   nickname: '测试用户',
@@ -33,7 +34,7 @@ const mockUser = {
   credits: 784,
   total_credits_used: 1256,
   total_credits_purchased: 2000,
-  subscription_tier: 'free' as const,
+  subscription_tier: 'free',
   email_verified: true,
   created_date: '2024-06-15T08:00:00Z'
 };
@@ -64,7 +65,7 @@ export default function ProfilePage() {
     setActiveTab('security');
   };
 
-  const handleUserUpdate = (updatedUser: typeof mockUser) => {
+  const handleUserUpdate = (updatedUser: MockUser) => {
     setLocalUser(updatedUser);
   };
 
