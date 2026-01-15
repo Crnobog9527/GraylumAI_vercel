@@ -68,7 +68,7 @@ export const creditsRouter = router({
     const { data: profile, error } = await ctx.supabase
       .from('profiles')
       .select('credits, credits_expiring_soon, credits_expiry_date')
-      .eq('id', ctx.user.id)
+      .eq('id', ctx.profileId)
       .single();
 
     if (error || !profile) {
@@ -97,7 +97,7 @@ export const creditsRouter = router({
 
       // 调用数据库 RPC 函数执行原子性操作
       const { data, error } = await ctx.supabase.rpc('deduct_credits_atomic', {
-        p_user_id: ctx.user.id,
+        p_user_id: ctx.profileId,
         p_amount: amount,
         p_reason: reason ?? null,
         p_reference_id: referenceId ?? null,
@@ -149,7 +149,7 @@ export const creditsRouter = router({
 
       // 调用数据库 RPC 函数执行原子性操作
       const { data, error } = await ctx.supabase.rpc('add_credits_atomic', {
-        p_user_id: ctx.user.id,
+        p_user_id: ctx.profileId,
         p_amount: amount,
         p_type: type,
         p_reason: reason ?? null,
@@ -195,7 +195,7 @@ export const creditsRouter = router({
       let query = ctx.supabase
         .from('credit_transactions')
         .select('*', { count: 'exact' })
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .order('created_at', { ascending: false })
         .limit(limit + 1);
 
@@ -258,7 +258,7 @@ export const creditsRouter = router({
       const { data: transactions, error } = await ctx.supabase
         .from('credit_transactions')
         .select('type, amount')
-        .eq('user_id', ctx.user.id)
+        .eq('user_id', ctx.profileId)
         .eq('status', 'completed')
         .gte('created_at', startDate.toISOString());
 
@@ -302,7 +302,7 @@ export const creditsRouter = router({
       const { data: profile } = await ctx.supabase
         .from('profiles')
         .select('credits')
-        .eq('id', ctx.user.id)
+        .eq('id', ctx.profileId)
         .single();
 
       const currentCredits = profile?.credits ?? 0;

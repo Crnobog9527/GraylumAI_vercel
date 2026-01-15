@@ -6,6 +6,7 @@ import { ticketRouter } from './routers/ticket';
 import { settingsRouter } from './routers/settings';
 import { modelRouter } from './routers/model';
 import { invitationRouter } from './routers/invitation';
+import { adminRouter } from './routers/admin';
 
 /**
  * 主路由器
@@ -20,6 +21,7 @@ export const appRouter = router({
   settings: settingsRouter,
   model: modelRouter,
   invitation: invitationRouter,
+  admin: adminRouter,
 });
 
 /**

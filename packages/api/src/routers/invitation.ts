@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from '../trpc';
+import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 
@@ -15,18 +15,15 @@ function generateInviteCode(length = 10): string {
 }
 
 export const invitationRouter = router({
-  generateInvitationCode: protectedProcedure
+  // Admin only: Generate new invitation code
+  generateInvitationCode: adminProcedure
     .mutation(async ({ ctx }) => {
-      // TODO: Implement role-based access control (e.g., check if ctx.user.role === 'admin')
-      // For now, any authenticated user can generate codes, which is NOT recommended for production.
-      // You should add a check here to ensure only admins can generate codes.
-
       const code = generateInviteCode();
       const { data, error } = await ctx.supabase
         .from('invitations')
         .insert({
           code,
-          created_by: ctx.user.id,
+          created_by: ctx.profileId,
           status: 'active',
         })
         .select()
@@ -38,6 +35,7 @@ export const invitationRouter = router({
       return data;
     }),
 
+  // Public: Validate invitation code (for registration)
   validateInvitationCode: publicProcedure
     .input(z.object({ code: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -54,12 +52,9 @@ export const invitationRouter = router({
       return data;
     }),
 
-  getInvitationHistory: protectedProcedure
+  // Admin only: View invitation history
+  getInvitationHistory: adminProcedure
     .query(async ({ ctx }) => {
-      // TODO: Implement role-based access control (e.g., check if ctx.user.role === 'admin')
-      // For now, any authenticated user can view history, which is NOT recommended for production.
-      // You should add a check here to ensure only admins can view history.
-
       const { data, error } = await ctx.supabase
         .from('invitations')
         .select('*')

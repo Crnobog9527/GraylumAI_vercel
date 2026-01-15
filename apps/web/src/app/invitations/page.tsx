@@ -13,7 +13,7 @@ interface Invitation {
 }
 
 export default function InvitationsPage() {
-  const { data: invitations, isLoading, refetch } = trpc.invitation.getInvitationHistory.useQuery();
+  const { data: invitations, isLoading, error, refetch } = trpc.invitation.getInvitationHistory.useQuery();
   const generateInvitationMutation = trpc.invitation.generateInvitationCode.useMutation({
     onSuccess: () => {
       refetch();
@@ -21,6 +21,23 @@ export default function InvitationsPage() {
   });
 
   if (isLoading) return <div className="container mx-auto p-4">Loading invitations...</div>;
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <h1 className="text-2xl font-bold mb-4">Invitation Management</h1>
+        <Card className="bg-red-50 border-red-200">
+          <CardContent className="pt-6">
+            <p className="text-red-600">
+              {error.message === 'You do not have permission to access this resource. Admin role required.'
+                ? 'Access Denied: You need admin privileges to view this page.'
+                : `Error: ${error.message}`}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-4">

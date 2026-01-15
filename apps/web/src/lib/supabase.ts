@@ -8,7 +8,10 @@ export function createClient() {
     throw new Error('Missing Supabase environment variables');
   }
 
-  // createBrowserClient automatically handles cookie storage
-  // Do NOT use singleton pattern - it interferes with cookie sync
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      storageKey: 'sb-auth-token',
+    },
+  });
 }

@@ -2,28 +2,18 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({}));
-  // Store access token in ref for immediate access in headers()
-  const accessTokenRef = useRef<string | null>(null);
 
-  // Initialize session on mount and listen for auth state changes
+  // Listen for auth state changes and invalidate queries
   useEffect(() => {
     const supabase = createClient();
-
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      accessTokenRef.current = session?.access_token ?? null;
-    });
-
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        accessTokenRef.current = session?.access_token ?? null;
+      (event) => {
         if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
           queryClient.invalidateQueries();
         }
@@ -36,16 +26,18 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   // Create tRPC client with Authorization header
+  // headers() is called on EVERY request, so we get fresh token each time
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [
         httpBatchLink({
           url: '/api/trpc',
-          headers() {
-            const token = accessTokenRef.current;
-            if (token) {
+          async headers() {
+            const supabase = createClient();
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
               return {
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${session.access_token}`,
               };
             }
             return {};

@@ -9,12 +9,12 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
   // Create Supabase client for database operations
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Extract JWT token from Authorization header
+  let user = null;
+
+  // Get token from Authorization header
   const authHeader = opts.headers.get('Authorization') ?? '';
   const token = authHeader.replace('Bearer ', '');
 
-  // Validate token and get user
-  let user = null;
   if (token) {
     const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
     if (!error && authUser) {
@@ -41,10 +41,62 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       message: 'You must be logged in to access this resource',
     });
   }
+
+  // Try to get user profile (foreign keys reference profiles.id)
+  let profileId = ctx.user.id;
+  let userRole: 'user' | 'admin' = 'user';
+
+  const { data: profile, error: profileError } = await ctx.supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('id', ctx.user.id)
+    .single();
+
+  if (!profile || profileError) {
+    // Profile doesn't exist, create one with id and email
+    const { data: newProfile, error: createError } = await ctx.supabase
+      .from('profiles')
+      .insert({
+        id: ctx.user.id,
+        email: ctx.user.email,
+        role: 'user', // Default role for new users
+      })
+      .select('id, role')
+      .single();
+
+    if (createError) {
+      // Log error but don't fail - use user.id as fallback
+      console.error('Failed to create profile:', createError.message);
+    } else if (newProfile) {
+      profileId = newProfile.id;
+      userRole = newProfile.role || 'user';
+    }
+  } else {
+    profileId = profile.id;
+    userRole = profile.role || 'user';
+  }
+
   return next({
     ctx: {
       ...ctx,
       user: ctx.user,
+      profileId,
+      userRole,
     },
   });
+});
+
+/**
+ * Admin procedure - requires user to have admin role
+ * Extends protectedProcedure with additional role check
+ */
+export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (ctx.userRole !== 'admin') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You do not have permission to access this resource. Admin role required.',
+    });
+  }
+
+  return next({ ctx });
 });
