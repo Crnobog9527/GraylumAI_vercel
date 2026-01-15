@@ -3,8 +3,8 @@
 ## Session: 2026-01-15
 
 ### Current Status
-- **Phase:** 阶段十二至十四（UI 还原）全部完成 ✅ **Phase 3 迁移完成！**
-- **Next Phase:** Phase 4 完整 UI 还原（已规划，待执行）
+- **Phase:** Phase 4 完整 UI 还原 (Step 4.1-4.2 已完成)
+- **Next Step:** Step 4.3 UI 组件逐个还原
 - **Started:** 2026-01-15
 - **Blocking Issue:** 无
 
@@ -35,6 +35,15 @@
   - [x] 研读 `movetonew/instruction_ui_all_v1.md` 完整 UI 还原文档
   - [x] 将 Phase 4 (完整 UI 还原) 整合到 `task_plan.md`
   - [x] Phase 4 包含 6 个 Step 和 105+ 个组件还原任务
+- [x] **Phase 4 Step 4.1 完成** ✅
+  - [x] 克隆旧项目仓库到 `/home/user/graylumAi-backup-ref/`
+  - [x] 分析 `src/theme.css`, `src/components.css`, `src/index.css`, `tailwind.config.js`
+  - [x] 创建 `movetonew/VISUAL_DESIGN_SYSTEM.md` 视觉设计规范文档
+- [x] **Phase 4 Step 4.2 完成** ✅
+  - [x] 添加 `--color-primary-10/20/30` 透明度变体
+  - [x] 添加 `--success-bg/warning-bg/error-bg/info-bg` 状态背景色
+  - [x] 添加 `--sidebar-*` 侧边栏变量和 `--chart-1~5` 图表颜色
+  - [x] 添加组件类: btn, btn-primary, btn-secondary, card-clickable, card-featured, badge, skeleton, text-gradient
 
 ### Phase 4 规划概览
 | Step | 目标 | 主要任务 |
@@ -56,7 +65,7 @@
 | 阶段十二 | ✅ 已完成并验证 | 4/4 + 1 fix |
 | 阶段十三 | ✅ 已完成并验证 | 4/4 |
 | 阶段十四 | ✅ 已完成并验证 | 4/4 |
-| **Phase 4** | ⏳ 已规划，待执行 | 6 Steps / 105+ 组件 |
+| **Phase 4** | 🚧 进行中 | Step 4.1-4.2 完成 |
 
 ### UI 还原阶段概览
 | 阶段 | 目标 | 主要任务 |

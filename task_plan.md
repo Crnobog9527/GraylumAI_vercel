@@ -115,41 +115,43 @@
 > **目标**: 将新架构项目的 UI 完全还原为旧项目（graylumAi-backup）的视觉样式，确保用户体验的连续性。
 
 ### 前置条件
-- [ ] 阅读旧项目架构文档: https://github.com/Crnobog9527/graylumAi-backup/blob/main/.claude/ARCHITECTURE_ANALYSIS.md
-- [ ] 克隆旧项目仓库: https://github.com/Crnobog9527/graylumAi-backup
+- [x] 阅读旧项目架构文档: https://github.com/Crnobog9527/graylumAi-backup/blob/main/.claude/ARCHITECTURE_ANALYSIS.md
+- [x] 克隆旧项目仓库: https://github.com/Crnobog9527/graylumAi-backup (位于 `/home/user/graylumAi-backup-ref/`)
 
-### Step 4.1: 视觉系统分析与提取
+### Step 4.1: 视觉系统分析与提取 ✅ 已完成
 **目标**: 建立完整的视觉设计规范文档 (`VISUAL_DESIGN_SYSTEM.md`)
 
 扫描旧项目文件:
-- [ ] `src/theme.css` (376行) - 主题系统变量
-- [ ] `src/components.css` (1224行) - 组件样式库
-- [ ] `src/index.css` - 全局样式
-- [ ] `src/App.css` - 应用级样式
-- [ ] `tailwind.config.js` - Tailwind 配置
+- [x] `src/theme.css` (376行) - 主题系统变量
+- [x] `src/components.css` (1224行) - 组件样式库
+- [x] `src/index.css` - 全局样式
+- [x] `tailwind.config.js` - Tailwind 配置
 
 提取设计元素:
-- [ ] 🎨 颜色系统（所有 CSS 变量）
-- [ ] 📏 间距系统（padding, margin, gap）
-- [ ] 🔤 字体系统（font-family, font-size, font-weight, line-height）
-- [ ] 🌑 阴影系统（box-shadow）
-- [ ] 📐 圆角系统（border-radius）
-- [ ] 🔲 边框系统（border-width, border-color）
-- [ ] 🎭 动画系统（transition, animation）
-- [ ] 📱 响应式断点（媒体查询规则）
+- [x] 🎨 颜色系统（所有 CSS 变量）
+- [x] 📏 间距系统（padding, margin, gap）
+- [x] 🔤 字体系统（font-family, font-size, font-weight, line-height）
+- [x] 🌑 阴影系统（box-shadow）
+- [x] 📐 圆角系统（border-radius）
+- [x] 🔲 边框系统（border-width, border-color）
+- [x] 🎭 动画系统（transition, animation）
+- [x] 📱 响应式断点（媒体查询规则）
 
-**输出文件**: `VISUAL_DESIGN_SYSTEM.md`
+**输出文件**: `movetonew/VISUAL_DESIGN_SYSTEM.md` ✅
 
-### Step 4.2: 全局样式配置更新
+### Step 4.2: 全局样式配置更新 ✅ 已完成
 **目标**: 补充 Phase 12 中可能遗漏的样式
 
-- [ ] 对比旧项目 CSS 变量，补充遗漏项
-- [ ] 添加旧项目中的 @layer 定义
-- [ ] 复制自定义 Tailwind 类
-- [ ] 验证深色主题配置
+- [x] 对比旧项目 CSS 变量，补充遗漏项
+  - 添加 `--color-primary-10/20/30` 透明度变体
+  - 添加 `--success-bg/warning-bg/error-bg/info-bg` 状态背景色
+  - 添加 `--sidebar-*` 侧边栏变量
+  - 添加 `--chart-1~5` 图表颜色
+- [x] 添加组件类 (btn, card, badge, skeleton, text-gradient)
+- [x] 验证深色主题配置
 
 **修改文件**:
-- `apps/web/src/app/globals.css`
+- `apps/web/src/app/globals.css` ✅
 
 ### Step 4.3: UI 组件逐个还原（105 个组件）
 
