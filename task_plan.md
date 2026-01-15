@@ -166,7 +166,7 @@
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
 | ChatSidebar | src/components/chat/ChatSidebar.jsx | apps/web/src/components/chat/ChatSidebar.tsx | ✅ |
-| ChatHeader | src/components/chat/ChatHeader.jsx | apps/web/src/components/chat/ChatHeader.tsx | ⬜ |
+| ChatHeader | src/components/chat/ChatHeader.jsx | apps/web/src/components/chat/ChatHeader.tsx | ✅ |
 | MessageBubble | src/components/chat/MessageBubble.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ChatInput | src/components/chat/ChatInput.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
@@ -285,7 +285,7 @@
 | 页面 | 旧文件 | 新文件 | 状态 | 备注 |
 |------|--------|--------|------|------|
 | 首页 (/) | src/pages/Home.jsx | apps/web/src/app/page.tsx | ✅ | commit: 62568f4 |
-| 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/(app)/chat/page.tsx | ⬜ |
+| 聊天页面 (/chat) | src/pages/Chat.jsx | apps/web/src/app/chat/page.tsx | ✅ | commit: 06e9bfd |
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/(app)/profile/page.tsx | ⬜ |
 | 管理后台 (/admin/*) | src/pages/Admin*.jsx | apps/web/src/app/(admin)/*/page.tsx | ⬜ |
 | 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |

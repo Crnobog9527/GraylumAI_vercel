@@ -140,6 +140,20 @@
     - 模块卡片网格 (4列响应式)
     - 分页组件
   - [x] 提交代码 (commit: 3f4395d)
+- [x] **Phase 4 Step 4.5 对话页面复刻** ✅
+  - [x] 创建 ChatHeader 组件 (apps/web/src/components/chat/ChatHeader.tsx)
+    - 对话标题显示/编辑功能
+    - 导出按钮 (管理员可见)
+    - 调试面板切换按钮 (管理员可见)
+  - [x] 创建 chat/page.tsx (apps/web/src/app/chat/page.tsx)
+    - 顶部 AppHeader 导航
+    - 左侧 ChatSidebar (新建对话、全部对话/管理、对话列表)
+    - 静态背景光晕效果
+    - 空状态 (开始新对话图标 + 提示)
+    - 底部输入区域 (附件按钮、输入框、字数统计、发送按钮)
+    - 黄色警告提示文案
+  - [x] 更新 ChatSidebar 组件 (添加管理按钮图标)
+  - [x] 提交代码 (commit: 06e9bfd)
 - [ ] **登录页面错误 (待修复)** 🔴
   - [ ] ChunkLoadError: Failed to load chunk (login/global-error)
     - 原因: Turbopack/Webpack 在 GitHub Codespaces 环境中加载 chunk 失败
