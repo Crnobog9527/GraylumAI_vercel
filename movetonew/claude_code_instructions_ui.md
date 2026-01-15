@@ -524,7 +524,7 @@ Button.displayName = "Button"
 
 export { Button, buttonVariants }
 ```
-```
+
 
 **预期输出**:
 - `button.tsx` 文件更新成功。
@@ -618,7 +618,7 @@ CardFooter.displayName = "CardFooter"
 
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }
 ```
-```
+
 
 **预期输出**:
 - `card.tsx` 文件更新成功。
@@ -696,7 +696,7 @@ Textarea.displayName = "Textarea"
 
 export { Textarea }
 ```
-```
+
 
 **预期输出**:
 - `input.tsx` 和 `textarea.tsx` 文件更新成功。
@@ -793,7 +793,7 @@ export default function HomePage() {
   );
 }
 ```
-```
+
 
 **预期输出**:
 - 文件写入成功。
@@ -841,7 +841,6 @@ export default function HomePage() {
   scrollbar-color: var(--muted) var(--card);
 }
 ```
-```
 
 **预期输出**:
 - `globals.css` 文件确认包含滚动条样式。
@@ -877,7 +876,6 @@ export default function HomePage() {
       },
 
 // ... 其他配置
-```
 ```
 
 **预期输出**:
