@@ -2,7 +2,18 @@
 
 > **Source**: Extracted from `graylumAi-backup` project
 > **Created**: 2026-01-15
+> **Updated**: 2026-01-19
 > **Purpose**: Reference document for UI restoration (Phase 4)
+
+## Tech Stack
+
+| Package | Version | Notes |
+|---------|---------|-------|
+| Next.js | 16.1.1 | App Router + Turbopack |
+| React | 19.2.3 | |
+| Tailwind CSS | 4.1.18 | v4 with @theme inline |
+| Shadcn/ui | latest | Radix UI primitives |
+| TypeScript | 5.9.3 | |
 
 ---
 

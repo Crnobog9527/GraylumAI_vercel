@@ -1,5 +1,26 @@
 # Findings & Decisions
 
+## Tech Stack Versions (Updated: 2026-01-19)
+
+| Category | Package | Version |
+|----------|---------|---------|
+| **Framework** | Next.js | 16.1.1 |
+| | React | 19.2.3 |
+| | TypeScript | 5.9.3 |
+| **Styling** | Tailwind CSS | 4.1.18 |
+| **State & Data** | @tanstack/react-query | 5.90.19 |
+| | @trpc/* | 11.8.1 |
+| **Database** | @supabase/supabase-js | 2.90.1 |
+| | drizzle-orm | 0.45.1 |
+| | postgres | 3.4.8 |
+| **Validation** | zod | 4.3.5 |
+| **UI** | lucide-react | 0.562.0 |
+| | @radix-ui/* | 1.1.x - 2.2.x |
+| **Build** | turbo | 2.7.5 |
+| | pnpm | 10.27.0 |
+
+---
+
 ## Requirements
 - 完成 GraylumAI Phase 3 迁移（阶段九至十一）
 - 阶段九：工单系统与系统设置迁移

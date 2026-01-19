@@ -1,7 +1,18 @@
 ## 🎨 UI 还原计划 - Claude Code 执行手册
 
-**文档版本**: 1.0
+**文档版本**: 1.1
 **生成日期**: 2026-01-14
+**更新日期**: 2026-01-19
+
+### Tech Stack Versions
+| Package | Version |
+|---------|---------|
+| Next.js | 16.1.1 |
+| React | 19.2.3 |
+| Tailwind CSS | 4.1.18 |
+| TypeScript | 5.9.3 |
+| lucide-react | 0.562.0 |
+| @radix-ui/* | 1.1.x - 2.2.x |
 
 ---
 

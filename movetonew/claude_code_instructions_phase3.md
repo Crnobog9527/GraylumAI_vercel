@@ -1,7 +1,20 @@
 ## 🚀 后续迁移计划 - Claude Code 执行手册 (续)
 
-**文档版本**: 3.0
+**文档版本**: 3.1
 **生成日期**: 2026-01-14
+**更新日期**: 2026-01-19
+
+### Tech Stack Versions
+| Package | Version |
+|---------|---------|
+| Next.js | 16.1.1 |
+| React | 19.2.3 |
+| TypeScript | 5.9.3 |
+| @trpc/* | 11.8.1 |
+| @supabase/supabase-js | 2.90.1 |
+| drizzle-orm | 0.45.1 |
+| zod | 4.3.5 |
+| turbo | 2.7.5 |
 
 ---
 
