@@ -1,5 +1,37 @@
 # Progress Log
 
+## Tech Stack Versions (Updated: 2026-01-19)
+
+| Category | Package | Version |
+|----------|---------|---------|
+| **Framework** | Next.js | 16.1.1 |
+| | React | 19.2.3 |
+| | TypeScript | 5.9.3 |
+| **Styling** | Tailwind CSS | 4.1.18 |
+| | @tailwindcss/postcss | 4.1.18 |
+| **State & Data** | @tanstack/react-query | 5.90.19 |
+| | @trpc/client | 11.8.1 |
+| | @trpc/server | 11.8.1 |
+| | @trpc/react-query | 11.8.1 |
+| **Database** | @supabase/supabase-js | 2.90.1 |
+| | @supabase/ssr | 0.8.0 |
+| | drizzle-orm | 0.45.1 |
+| | drizzle-kit | 0.31.8 |
+| | postgres | 3.4.8 |
+| | pg | 8.17.1 |
+| **Validation** | zod | 4.3.5 |
+| **UI Components** | lucide-react | 0.562.0 |
+| | @radix-ui/react-avatar | 1.1.11 |
+| | @radix-ui/react-dialog | 1.1.15 |
+| | @radix-ui/react-dropdown-menu | 2.1.16 |
+| | @radix-ui/react-select | 2.2.6 |
+| | class-variance-authority | 0.7.1 |
+| | tailwind-merge | 3.4.0 |
+| **Build Tools** | turbo | 2.7.5 |
+| | pnpm | 10.27.0 |
+
+---
+
 ## Session: 2026-01-15
 
 ### Current Status
