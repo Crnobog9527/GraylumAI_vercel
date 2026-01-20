@@ -35,7 +35,7 @@
 ## Session: 2026-01-20 (续)
 
 ### Current Status
-- **Phase:** Phase 4 Step 4.8 补充 Shadcn/ui 组件库 🚧 进行中
+- **Phase:** Phase 4 Step 4.8 补充 Shadcn/ui 组件库 ✅ 已完成
 - **Previous:** Step 4.7 提取复用组件 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
@@ -44,7 +44,7 @@
 
 **目标**: 按优先级分 3 个阶段补充 21 个 Shadcn/ui 组件
 
-**当前状态**: 已有 29 个 (14 原有 + 6 Phase A + 9 Phase B) → 目标 35 个
+**最终状态**: 35 个组件 (14 原有 + 6 Phase A + 9 Phase B + 6 Phase C) ✅
 
 #### 执行计划总览
 
@@ -52,8 +52,8 @@
 |------|--------|--------|--------|------|
 | Phase A | 🔴 高频 | 6 | 5 | ✅ 完成 |
 | Phase B | 🟡 中频 | 9 | 8 | ✅ 完成 |
-| Phase C | 🟢 低频 | 6 | 6 | ⬜ 待开始 |
-| **总计** | - | **21** | **19** | **15/21** |
+| Phase C | 🟢 低频 | 6 | 6 | ✅ 完成 |
+| **总计** | - | **21** | **19** | **21/21 ✅** |
 
 ---
 
@@ -92,25 +92,27 @@
 
 ---
 
-#### Phase C: 低频使用组件 (可选添加)
+#### Phase C: 低频使用组件 ✅ 已完成
 
 | 组件 | 用途 | 状态 |
 |------|------|------|
-| Accordion | FAQ/折叠面板 | ⬜ |
-| Collapsible | 可折叠容器 | ⬜ |
-| Context Menu | 右键菜单 | ⬜ |
-| Hover Card | 悬停预览卡片 | ⬜ |
-| Navigation Menu | 导航菜单 | ⬜ |
-| Menubar | 顶部菜单栏 | ⬜ |
+| Accordion | FAQ/折叠面板 | ✅ |
+| Collapsible | 可折叠容器 | ✅ |
+| Context Menu | 右键菜单 | ✅ |
+| Hover Card | 悬停预览卡片 | ✅ |
+| Navigation Menu | 导航菜单 | ✅ |
+| Menubar | 顶部菜单栏 | ✅ |
+
+**已安装依赖**: @radix-ui/react-accordion, @radix-ui/react-collapsible, @radix-ui/react-context-menu, @radix-ui/react-hover-card, @radix-ui/react-navigation-menu, @radix-ui/react-menubar
 
 ---
 
 #### 验收标准
 
-- [ ] TypeScript 编译通过
-- [ ] ESLint 检查通过
-- [ ] 支持深色主题 (CSS 变量)
-- [ ] 样式与项目主题一致
+- [x] TypeScript 编译通过
+- [x] ESLint 检查通过
+- [x] 支持深色主题 (CSS 变量)
+- [x] 样式与项目主题一致
 
 ---
 

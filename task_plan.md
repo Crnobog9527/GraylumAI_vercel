@@ -383,11 +383,11 @@
 
 ---
 
-### Step 4.8: 补充 Shadcn/ui 组件库 🚧 进行中
+### Step 4.8: 补充 Shadcn/ui 组件库 ✅ 已完成
 
 **目标**: 按优先级分阶段补充所有常用 Shadcn/ui 组件，构建完整的 UI 组件库
 
-**当前状态**: 已有 29 个组件 (14 + 6 + 9)，待补充 6 个组件
+**最终状态**: 35 个组件 (14 原有 + 6 Phase A + 9 Phase B + 6 Phase C)
 
 ---
 
@@ -426,22 +426,18 @@
 
 ---
 
-#### Phase C: 低频使用组件 (6个) - 可选添加
+#### Phase C: 低频使用组件 (6个) ✅ 已完成
 
 | 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
 |------|------|------|--------|------|------|
-| C1 | **Accordion** | accordion.tsx | `@radix-ui/react-accordion` | FAQ/折叠面板 | ⬜ |
-| C2 | **Collapsible** | collapsible.tsx | `@radix-ui/react-collapsible` | 可折叠容器 | ⬜ |
-| C3 | **Context Menu** | context-menu.tsx | `@radix-ui/react-context-menu` | 右键菜单 | ⬜ |
-| C4 | **Hover Card** | hover-card.tsx | `@radix-ui/react-hover-card` | 悬停预览卡 | ⬜ |
-| C5 | **Navigation Menu** | navigation-menu.tsx | `@radix-ui/react-navigation-menu` | 导航菜单 | ⬜ |
-| C6 | **Menubar** | menubar.tsx | `@radix-ui/react-menubar` | 顶部菜单栏 | ⬜ |
+| C1 | **Accordion** | accordion.tsx | `@radix-ui/react-accordion` | FAQ/折叠面板 | ✅ |
+| C2 | **Collapsible** | collapsible.tsx | `@radix-ui/react-collapsible` | 可折叠容器 | ✅ |
+| C3 | **Context Menu** | context-menu.tsx | `@radix-ui/react-context-menu` | 右键菜单 | ✅ |
+| C4 | **Hover Card** | hover-card.tsx | `@radix-ui/react-hover-card` | 悬停预览卡 | ✅ |
+| C5 | **Navigation Menu** | navigation-menu.tsx | `@radix-ui/react-navigation-menu` | 导航菜单 | ✅ |
+| C6 | **Menubar** | menubar.tsx | `@radix-ui/react-menubar` | 顶部菜单栏 | ✅ |
 
-**预计时间**: 2-3 小时
-**安装命令**:
-```bash
-pnpm add @radix-ui/react-accordion @radix-ui/react-collapsible @radix-ui/react-context-menu @radix-ui/react-hover-card @radix-ui/react-navigation-menu @radix-ui/react-menubar
-```
+**已安装依赖**: @radix-ui/react-accordion, @radix-ui/react-collapsible, @radix-ui/react-context-menu, @radix-ui/react-hover-card, @radix-ui/react-navigation-menu, @radix-ui/react-menubar
 
 ---
 
@@ -497,18 +493,18 @@ pnpm add @radix-ui/react-accordion @radix-ui/react-collapsible @radix-ui/react-c
 
 | 阶段 | 组件数 | 依赖安装 | 组件创建 | 验证测试 | 状态 |
 |------|--------|----------|----------|----------|------|
-| Phase A | 6 | 5个包 | 6个文件 | TypeScript + ESLint | ⬜ |
-| Phase B | 9 | 8个包 | 9个文件 | TypeScript + ESLint | ⬜ |
-| Phase C | 6 | 6个包 | 6个文件 | TypeScript + ESLint | ⬜ |
-| **总计** | **21** | **19个包** | **21个文件** | - | - |
+| Phase A | 6 | 5个包 | 6个文件 | TypeScript + ESLint | ✅ |
+| Phase B | 9 | 8个包 | 9个文件 | TypeScript + ESLint | ✅ |
+| Phase C | 6 | 6个包 | 6个文件 | TypeScript + ESLint | ✅ |
+| **总计** | **21** | **19个包** | **21个文件** | - | **✅ 完成** |
 
 #### 验收标准
 
-- [ ] 所有组件 TypeScript 编译通过
-- [ ] 所有组件 ESLint 检查通过
-- [ ] 组件支持深色主题 (使用 CSS 变量)
-- [ ] 组件样式与项目主题一致
-- [ ] 关键组件有使用示例
+- [x] 所有组件 TypeScript 编译通过
+- [x] 所有组件 ESLint 检查通过
+- [x] 组件支持深色主题 (使用 CSS 变量)
+- [x] 组件样式与项目主题一致
+- [ ] 关键组件有使用示例 (可选)
 
 ---
 
