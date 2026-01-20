@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import AdminSidebar from '@/components/admin/AdminSidebar';
+import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
@@ -78,14 +78,7 @@ export default function AdminInvitationsPage() {
 
   // Loading state
   if (statsLoading) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-        </div>
-      </div>
-    );
+    return <AdminLoadingState />;
   }
 
   const stats = statsData?.stats ?? { total: 0, rewarded: 0, rejected: 0, pending: 0, highRisk: 0, totalRewards: 0 };
@@ -94,11 +87,8 @@ export default function AdminInvitationsPage() {
   const recordList = (records ?? []) as InvitationRecord[];
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <AdminSidebar />
-
-      <div className="flex-1 p-8 overflow-auto">
-        {/* Page Header */}
+    <div className="p-8 overflow-auto">
+      {/* Page Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -372,7 +362,6 @@ export default function AdminInvitationsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
     </div>
   );
 }

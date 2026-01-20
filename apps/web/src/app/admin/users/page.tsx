@@ -23,7 +23,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import AdminSidebar from '@/components/admin/AdminSidebar';
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import AdminPageHeader from '@/components/admin/AdminPageHeader';
@@ -83,12 +82,9 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <AdminSidebar />
-
-      <div className="flex-1 p-8 overflow-auto">
-        {/* 页面标题 */}
-        <AdminPageHeader
+    <div className="p-8 overflow-auto">
+      {/* 页面标题 */}
+      <AdminPageHeader
           title="用户管理"
           subtitle="管理平台用户和积分"
           onRefresh={() => refetch()}
@@ -288,7 +284,6 @@ export default function AdminUsersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
     </div>
   );
 }
