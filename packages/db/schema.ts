@@ -188,6 +188,9 @@ export const membershipPlans = pgTable('membership_plans', {
   monthlyBonusCredits: integer('monthly_bonus_credits').default(0).notNull(),
   packageDiscount: integer('package_discount').default(100).notNull(), // 100 = no discount
   features: jsonb('features').default([]).notNull(), // Array of feature strings
+  historyRetentionDays: integer('history_retention_days').default(30).notNull(), // 对话历史保存天数
+  allowExport: text('allow_export').default('false').notNull(), // 允许导出对话
+  allowBatchExport: text('allow_batch_export').default('false').notNull(), // 允许批量导出
   isActive: text('is_active').default('true').notNull(),
   sortOrder: integer('sort_order').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

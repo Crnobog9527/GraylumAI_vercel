@@ -1159,6 +1159,9 @@ export const adminRouter = router({
       monthlyBonusCredits: z.number().int().min(0).optional(),
       packageDiscount: z.number().int().min(0).max(100).optional(),
       features: z.array(z.string()).optional(),
+      historyRetentionDays: z.number().int().min(1).max(365).optional(),
+      allowExport: z.enum(['true', 'false']).optional(),
+      allowBatchExport: z.enum(['true', 'false']).optional(),
       isActive: z.enum(['true', 'false']).optional(),
       sortOrder: z.number().int().min(0).optional(),
     }))
@@ -1175,6 +1178,9 @@ export const adminRouter = router({
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
       if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
       if (input.features !== undefined) updateData.features = input.features;
+      if (input.historyRetentionDays !== undefined) updateData.history_retention_days = input.historyRetentionDays;
+      if (input.allowExport !== undefined) updateData.allow_export = input.allowExport;
+      if (input.allowBatchExport !== undefined) updateData.allow_batch_export = input.allowBatchExport;
       if (input.isActive !== undefined) updateData.is_active = input.isActive;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
 
@@ -1210,6 +1216,114 @@ export const adminRouter = router({
       }
 
       return { success: true };
+    }),
+
+  /**
+   * Clean up expired conversations based on membership retention settings
+   */
+  cleanupExpiredConversations: adminProcedure
+    .mutation(async ({ ctx }) => {
+      // Get all membership plans with their retention settings
+      const { data: plans, error: plansError } = await ctx.supabase
+        .from('membership_plans')
+        .select('level, history_retention_days');
+
+      if (plansError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: plansError.message });
+      }
+
+      // Build retention map (default to 30 days if not set)
+      const retentionMap: Record<string, number> = { free: 7, pro: 30, gold: 90 };
+      plans?.forEach(plan => {
+        if (plan.level && plan.history_retention_days) {
+          retentionMap[plan.level] = plan.history_retention_days;
+        }
+      });
+
+      // Get all users with their membership levels
+      const { data: profiles, error: profilesError } = await ctx.supabase
+        .from('profiles')
+        .select('id, membership_level');
+
+      if (profilesError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: profilesError.message });
+      }
+
+      let totalDeleted = 0;
+      const now = new Date();
+
+      // For each user, delete conversations older than their retention period
+      for (const profile of profiles ?? []) {
+        const membershipLevel = profile.membership_level || 'free';
+        const retentionDays = retentionMap[membershipLevel] || 30;
+        const cutoffDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+
+        // Delete old conversations (messages will be cascade deleted)
+        const { count, error } = await ctx.supabase
+          .from('conversations')
+          .delete()
+          .eq('user_id', profile.id)
+          .lt('created_at', cutoffDate.toISOString())
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          console.error(`Failed to delete conversations for user ${profile.id}:`, error);
+          continue;
+        }
+
+        totalDeleted += count ?? 0;
+      }
+
+      return {
+        success: true,
+        deletedCount: totalDeleted,
+        message: `清理完成，已删除 ${totalDeleted} 个过期对话`,
+      };
+    }),
+
+  /**
+   * Get conversation cleanup statistics
+   */
+  getCleanupStats: adminProcedure
+    .query(async ({ ctx }) => {
+      // Get membership plans
+      const { data: plans } = await ctx.supabase
+        .from('membership_plans')
+        .select('level, history_retention_days');
+
+      const retentionMap: Record<string, number> = { free: 7, pro: 30, gold: 90 };
+      plans?.forEach(plan => {
+        if (plan.level && plan.history_retention_days) {
+          retentionMap[plan.level] = plan.history_retention_days;
+        }
+      });
+
+      // Count conversations by membership level that would be deleted
+      const now = new Date();
+      const stats: { level: string; retentionDays: number; expiredCount: number }[] = [];
+
+      for (const [level, days] of Object.entries(retentionMap)) {
+        const cutoffDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+        const { count } = await ctx.supabase
+          .from('conversations')
+          .select('id, profiles!inner(membership_level)', { count: 'exact', head: true })
+          .eq('profiles.membership_level', level)
+          .lt('created_at', cutoffDate.toISOString());
+
+        stats.push({
+          level,
+          retentionDays: days,
+          expiredCount: count ?? 0,
+        });
+      }
+
+      const totalExpired = stats.reduce((sum, s) => sum + s.expiredCount, 0);
+
+      return {
+        stats,
+        totalExpired,
+      };
     }),
 
   // ============================================
