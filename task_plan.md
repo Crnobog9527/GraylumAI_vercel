@@ -23,7 +23,7 @@
 **Phase 7 管理后台功能还原:** 🚧 进行中
 - Step 7.1: 功能差异分析 ✅ 完成 (2026-01-20)
 - Step 7.2: 系统设置还原 (35项) ✅ 完成 (2026-01-20)
-- Step 7.3: 会员套餐系统还原 ⬜ 待执行
+- Step 7.3: 会员套餐系统还原 ✅ 完成 (2026-01-20)
 - Step 7.4: 模型管理完善 ⬜ 待执行
 - Step 7.5: 邀请码管理完善 ⬜ 待执行
 - Step 7.6: 公告管理完善 ⬜ 待执行
@@ -796,22 +796,34 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 **修改文件:**
 - `apps/web/src/app/admin/settings/page.tsx` - 完全重写 (329行新增)
 
-### Step 7.3: 会员套餐系统还原 ⬜ 待执行
+### Step 7.3: 会员套餐系统还原 ✅ 完成
 
 **目标**: 还原完整的会员套餐管理
 
-**需要实现:**
-- [ ] 创建 membership_plans 数据库表
-- [ ] 创建 memberships tRPC router
-- [ ] 更新 admin/packages/page.tsx (双 Tab: 积分包 + 会员套餐)
+**已实现:**
+- [x] 创建 membership_plans 数据库表 (含 RLS 策略)
+- [x] 创建 membership plan CRUD 端点 (在 admin.ts 中)
+- [x] 更新 admin/packages/page.tsx (双 Tab: 积分加油包 + 会员等级)
+- [x] 种子数据: 免费版、Pro 专业版、Gold 黄金版
 
 **会员套餐字段:**
-- name, level (free/pro/gold)
-- monthly_price, yearly_price
-- monthly_credits, yearly_credits
-- monthly_bonus_credits
-- package_discount (百分比)
-- features (JSON 数组)
+- name - 等级名称
+- level - 等级类型 (free/pro/gold)
+- monthly_price, yearly_price - 月付/年付价格 (分)
+- monthly_credits, yearly_credits - 月/年积分额度
+- monthly_bonus_credits - 月奖励积分
+- package_discount - 加油包折扣百分比
+- features - 权益列表 (JSON 数组)
+- is_active - 是否启用
+- sort_order - 排序顺序
+
+**新增/修改文件:**
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| packages/db/schema.ts | 修改 | 新增 membershipPlans 表定义 |
+| packages/api/src/routers/admin.ts | 修改 | 新增 4 个会员套餐 CRUD 端点 |
+| apps/web/src/app/admin/packages/page.tsx | 重写 | 双 Tab UI (积分包 + 会员等级) |
+| supabase/migrations/20240121_create_membership_plans_table.sql | 新增 | 数据库迁移 + RLS 策略 |
 
 ### Step 7.4: 模型管理完善 ⬜ 待执行
 

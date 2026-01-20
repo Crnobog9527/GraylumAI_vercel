@@ -4,13 +4,21 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Package, Plus, Pencil, Trash2, Check, X,
-  DollarSign, Coins
+  DollarSign, Coins, Crown, Star
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -37,94 +45,237 @@ interface CreditPackage {
   created_at: string;
 }
 
+interface MembershipPlan {
+  id: string;
+  name: string;
+  level: 'free' | 'pro' | 'gold';
+  monthly_price: number;
+  yearly_price: number;
+  monthly_credits: number;
+  yearly_credits: number;
+  monthly_bonus_credits: number;
+  package_discount: number;
+  features: string[];
+  is_active: string;
+  sort_order: number;
+  created_at: string;
+}
+
+const levelColors = {
+  free: { bg: 'bg-gray-500/20', text: 'text-gray-400', label: '免费版' },
+  pro: { bg: 'bg-blue-500/20', text: 'text-blue-400', label: 'Pro 专业版' },
+  gold: { bg: 'bg-amber-500/20', text: 'text-amber-400', label: 'Gold 黄金版' },
+};
+
 export default function AdminPackagesPage() {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('credit-packages');
+
+  // Credit Package State
+  const [packageDialogOpen, setPackageDialogOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState<CreditPackage | null>(null);
-  const [formData, setFormData] = useState({
+  const [packageFormData, setPackageFormData] = useState({
     name: '',
     price: '',
     creditsAmount: '',
   });
 
-  const { data: packages, isLoading, error, refetch } = trpc.admin.getAllPackages.useQuery();
+  // Membership Plan State
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<MembershipPlan | null>(null);
+  const [planFormData, setPlanFormData] = useState({
+    name: '',
+    level: 'pro' as 'free' | 'pro' | 'gold',
+    monthlyPrice: '',
+    yearlyPrice: '',
+    monthlyCredits: '',
+    yearlyCredits: '',
+    monthlyBonusCredits: '',
+    packageDiscount: '100',
+    features: '',
+    sortOrder: '0',
+  });
 
+  // Queries
+  const { data: packages, isLoading: packagesLoading, error: packagesError, refetch: refetchPackages } = trpc.admin.getAllPackages.useQuery();
+  const { data: membershipPlans, isLoading: plansLoading, error: plansError, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
+
+  // Credit Package Mutations
   const createPackage = trpc.admin.createPackage.useMutation({
     onSuccess: () => {
-      refetch();
-      closeDialog();
+      refetchPackages();
+      closePackageDialog();
     }
   });
 
   const updatePackage = trpc.admin.updatePackage.useMutation({
     onSuccess: () => {
-      refetch();
-      closeDialog();
+      refetchPackages();
+      closePackageDialog();
     }
   });
 
   const deletePackage = trpc.admin.deletePackage.useMutation({
     onSuccess: () => {
-      refetch();
+      refetchPackages();
     }
   });
 
-  const openCreateDialog = () => {
+  // Membership Plan Mutations
+  const createMembershipPlan = trpc.admin.createMembershipPlan.useMutation({
+    onSuccess: () => {
+      refetchPlans();
+      closePlanDialog();
+    }
+  });
+
+  const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
+    onSuccess: () => {
+      refetchPlans();
+      closePlanDialog();
+    }
+  });
+
+  const deleteMembershipPlan = trpc.admin.deleteMembershipPlan.useMutation({
+    onSuccess: () => {
+      refetchPlans();
+    }
+  });
+
+  // Credit Package Handlers
+  const openCreatePackageDialog = () => {
     setEditingPackage(null);
-    setFormData({ name: '', price: '', creditsAmount: '' });
-    setDialogOpen(true);
+    setPackageFormData({ name: '', price: '', creditsAmount: '' });
+    setPackageDialogOpen(true);
   };
 
-  const openEditDialog = (pkg: CreditPackage) => {
+  const openEditPackageDialog = (pkg: CreditPackage) => {
     setEditingPackage(pkg);
-    setFormData({
+    setPackageFormData({
       name: pkg.name,
       price: (pkg.price / 100).toString(),
       creditsAmount: pkg.credits_amount.toString(),
     });
-    setDialogOpen(true);
+    setPackageDialogOpen(true);
   };
 
-  const closeDialog = () => {
-    setDialogOpen(false);
+  const closePackageDialog = () => {
+    setPackageDialogOpen(false);
     setEditingPackage(null);
-    setFormData({ name: '', price: '', creditsAmount: '' });
+    setPackageFormData({ name: '', price: '', creditsAmount: '' });
   };
 
-  const handleSubmit = () => {
-    const priceInCents = Math.round(parseFloat(formData.price) * 100);
-    const creditsAmount = parseInt(formData.creditsAmount);
+  const handlePackageSubmit = () => {
+    const priceInCents = Math.round(parseFloat(packageFormData.price) * 100);
+    const creditsAmount = parseInt(packageFormData.creditsAmount);
 
     if (editingPackage) {
       updatePackage.mutate({
         id: editingPackage.id,
-        name: formData.name,
+        name: packageFormData.name,
         price: priceInCents,
         creditsAmount,
       });
     } else {
       createPackage.mutate({
-        name: formData.name,
+        name: packageFormData.name,
         price: priceInCents,
         creditsAmount,
       });
     }
   };
 
-  const handleToggleActive = (pkg: CreditPackage) => {
+  const handlePackageToggleActive = (pkg: CreditPackage) => {
     updatePackage.mutate({
       id: pkg.id,
       active: pkg.active === 'true' ? 'false' : 'true',
     });
   };
 
-  const handleDelete = (pkg: CreditPackage) => {
+  const handlePackageDelete = (pkg: CreditPackage) => {
     if (confirm(`确定要删除 "${pkg.name}" 吗？`)) {
       deletePackage.mutate({ id: pkg.id });
     }
   };
 
+  // Membership Plan Handlers
+  const openCreatePlanDialog = () => {
+    setEditingPlan(null);
+    setPlanFormData({
+      name: '',
+      level: 'pro',
+      monthlyPrice: '',
+      yearlyPrice: '',
+      monthlyCredits: '',
+      yearlyCredits: '',
+      monthlyBonusCredits: '0',
+      packageDiscount: '100',
+      features: '',
+      sortOrder: '0',
+    });
+    setPlanDialogOpen(true);
+  };
+
+  const openEditPlanDialog = (plan: MembershipPlan) => {
+    setEditingPlan(plan);
+    setPlanFormData({
+      name: plan.name,
+      level: plan.level,
+      monthlyPrice: (plan.monthly_price / 100).toString(),
+      yearlyPrice: (plan.yearly_price / 100).toString(),
+      monthlyCredits: plan.monthly_credits.toString(),
+      yearlyCredits: plan.yearly_credits.toString(),
+      monthlyBonusCredits: plan.monthly_bonus_credits.toString(),
+      packageDiscount: plan.package_discount.toString(),
+      features: (plan.features || []).join('\n'),
+      sortOrder: plan.sort_order.toString(),
+    });
+    setPlanDialogOpen(true);
+  };
+
+  const closePlanDialog = () => {
+    setPlanDialogOpen(false);
+    setEditingPlan(null);
+  };
+
+  const handlePlanSubmit = () => {
+    const data = {
+      name: planFormData.name,
+      level: planFormData.level,
+      monthlyPrice: Math.round(parseFloat(planFormData.monthlyPrice || '0') * 100),
+      yearlyPrice: Math.round(parseFloat(planFormData.yearlyPrice || '0') * 100),
+      monthlyCredits: parseInt(planFormData.monthlyCredits || '0'),
+      yearlyCredits: parseInt(planFormData.yearlyCredits || '0'),
+      monthlyBonusCredits: parseInt(planFormData.monthlyBonusCredits || '0'),
+      packageDiscount: parseInt(planFormData.packageDiscount || '100'),
+      features: planFormData.features.split('\n').filter(f => f.trim()),
+      sortOrder: parseInt(planFormData.sortOrder || '0'),
+    };
+
+    if (editingPlan) {
+      updateMembershipPlan.mutate({
+        id: editingPlan.id,
+        ...data,
+      });
+    } else {
+      createMembershipPlan.mutate(data);
+    }
+  };
+
+  const handlePlanToggleActive = (plan: MembershipPlan) => {
+    updateMembershipPlan.mutate({
+      id: plan.id,
+      isActive: plan.is_active === 'true' ? 'false' : 'true',
+    });
+  };
+
+  const handlePlanDelete = (plan: MembershipPlan) => {
+    if (confirm(`确定要删除 "${plan.name}" 吗？`)) {
+      deleteMembershipPlan.mutate({ id: plan.id });
+    }
+  };
+
   // Loading state
-  if (isLoading) {
+  if (packagesLoading || plansLoading) {
     return (
       <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
         <AdminSidebar />
@@ -136,6 +287,7 @@ export default function AdminPackagesPage() {
   }
 
   // Error state
+  const error = packagesError || plansError;
   if (error) {
     return (
       <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -159,7 +311,9 @@ export default function AdminPackagesPage() {
   }
 
   const packageList = packages ?? [];
-  const activeCount = packageList.filter((p: CreditPackage) => p.active === 'true').length;
+  const planList = (membershipPlans ?? []) as MembershipPlan[];
+  const activePackageCount = packageList.filter((p: CreditPackage) => p.active === 'true').length;
+  const activePlanCount = planList.filter((p: MembershipPlan) => p.is_active === 'true').length;
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -170,185 +324,402 @@ export default function AdminPackagesPage() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              积分包管理
+              套餐管理
             </h1>
             <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              管理积分充值套餐
+              管理积分加油包和会员等级
             </p>
           </div>
-          <Button
-            onClick={openCreateDialog}
-            className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList
+            className="mb-6"
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
-            <Plus className="h-4 w-4 mr-2" />
-            创建套餐
-          </Button>
-        </div>
+            <TabsTrigger
+              value="credit-packages"
+              className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            >
+              <Package className="h-4 w-4 mr-2" />
+              积分加油包
+            </TabsTrigger>
+            <TabsTrigger
+              value="membership-plans"
+              className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            >
+              <Crown className="h-4 w-4 mr-2" />
+              会员等级
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-[var(--color-primary-20)]">
-                  <Package className="h-6 w-6 text-[var(--color-primary)]" />
-                </div>
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总套餐数</p>
-                  <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {packageList.length}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Credit Packages Tab */}
+          <TabsContent value="credit-packages">
+            <div className="flex justify-end mb-4">
+              <Button
+                onClick={openCreatePackageDialog}
+                className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                创建积分包
+              </Button>
+            </div>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-emerald-500/20">
-                  <Check className="h-6 w-6 text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已上架</p>
-                  <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {activeCount}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-[var(--color-primary-20)]">
+                      <Package className="h-6 w-6 text-[var(--color-primary)]" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总套餐数</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {packageList.length}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-rose-500/20">
-                  <X className="h-6 w-6 text-rose-400" />
-                </div>
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已下架</p>
-                  <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {packageList.length - activeCount}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-emerald-500/20">
+                      <Check className="h-6 w-6 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已上架</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {activePackageCount}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-        {/* Packages Table */}
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>套餐名称</TableHead>
-                  <TableHead>价格</TableHead>
-                  <TableHead>积分数量</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead className="w-[120px]">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {packageList.map((pkg: CreditPackage) => (
-                  <TableRow key={pkg.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="p-2 rounded-lg"
-                          style={{ background: 'var(--bg-tertiary)' }}
-                        >
-                          <Package className="h-4 w-4 text-[var(--color-primary)]" />
-                        </div>
-                        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {pkg.name}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <DollarSign className="h-4 w-4 text-emerald-400" />
-                        <span style={{ color: 'var(--text-primary)' }}>
-                          ¥{(pkg.price / 100).toFixed(2)}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Coins className="h-4 w-4 text-amber-400" />
-                        <span style={{ color: 'var(--text-primary)' }}>
-                          {pkg.credits_amount.toLocaleString()}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className={pkg.active === 'true'
-                          ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
-                          : 'bg-rose-500/20 text-rose-400 cursor-pointer'
-                        }
-                        onClick={() => handleToggleActive(pkg)}
-                      >
-                        {pkg.active === 'true' ? (
-                          <>
-                            <Check className="h-3 w-3 mr-1" />
-                            已上架
-                          </>
-                        ) : (
-                          <>
-                            <X className="h-3 w-3 mr-1" />
-                            已下架
-                          </>
-                        )}
-                      </Badge>
-                    </TableCell>
-                    <TableCell style={{ color: 'var(--text-tertiary)' }}>
-                      {new Date(pkg.created_at).toLocaleDateString('zh-CN')}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEditDialog(pkg)}
-                          className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(pkg)}
-                          className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {packageList.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
-                      暂无积分套餐，点击上方按钮创建
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-rose-500/20">
+                      <X className="h-6 w-6 text-rose-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已下架</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {packageList.length - activePackageCount}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-        {/* Create/Edit Dialog */}
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            {/* Packages Table */}
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>套餐名称</TableHead>
+                      <TableHead>价格</TableHead>
+                      <TableHead>积分数量</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>创建时间</TableHead>
+                      <TableHead className="w-[120px]">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {packageList.map((pkg: CreditPackage) => (
+                      <TableRow key={pkg.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="p-2 rounded-lg"
+                              style={{ background: 'var(--bg-tertiary)' }}
+                            >
+                              <Package className="h-4 w-4 text-[var(--color-primary)]" />
+                            </div>
+                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                              {pkg.name}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <DollarSign className="h-4 w-4 text-emerald-400" />
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              ¥{(pkg.price / 100).toFixed(2)}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Coins className="h-4 w-4 text-amber-400" />
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              {pkg.credits_amount.toLocaleString()}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={pkg.active === 'true'
+                              ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
+                              : 'bg-rose-500/20 text-rose-400 cursor-pointer'
+                            }
+                            onClick={() => handlePackageToggleActive(pkg)}
+                          >
+                            {pkg.active === 'true' ? (
+                              <>
+                                <Check className="h-3 w-3 mr-1" />
+                                已上架
+                              </>
+                            ) : (
+                              <>
+                                <X className="h-3 w-3 mr-1" />
+                                已下架
+                              </>
+                            )}
+                          </Badge>
+                        </TableCell>
+                        <TableCell style={{ color: 'var(--text-tertiary)' }}>
+                          {new Date(pkg.created_at).toLocaleDateString('zh-CN')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEditPackageDialog(pkg)}
+                              className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handlePackageDelete(pkg)}
+                              className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {packageList.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                          暂无积分套餐，点击上方按钮创建
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Membership Plans Tab */}
+          <TabsContent value="membership-plans">
+            <div className="flex justify-end mb-4">
+              <Button
+                onClick={openCreatePlanDialog}
+                className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                创建会员等级
+              </Button>
+            </div>
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-amber-500/20">
+                      <Crown className="h-6 w-6 text-amber-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总等级数</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {planList.length}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-emerald-500/20">
+                      <Check className="h-6 w-6 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已启用</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {activePlanCount}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-rose-500/20">
+                      <X className="h-6 w-6 text-rose-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已禁用</p>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        {planList.length - activePlanCount}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Membership Plans Table */}
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>会员等级</TableHead>
+                      <TableHead>月付价格</TableHead>
+                      <TableHead>年付价格</TableHead>
+                      <TableHead>月积分</TableHead>
+                      <TableHead>年积分</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="w-[120px]">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {planList.map((plan: MembershipPlan) => {
+                      const levelStyle = levelColors[plan.level] || levelColors.pro;
+                      return (
+                        <TableRow key={plan.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={`p-2 rounded-lg ${levelStyle.bg}`}
+                              >
+                                {plan.level === 'gold' ? (
+                                  <Crown className={`h-4 w-4 ${levelStyle.text}`} />
+                                ) : plan.level === 'pro' ? (
+                                  <Star className={`h-4 w-4 ${levelStyle.text}`} />
+                                ) : (
+                                  <Package className={`h-4 w-4 ${levelStyle.text}`} />
+                                )}
+                              </div>
+                              <div>
+                                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                                  {plan.name}
+                                </span>
+                                <Badge className={`ml-2 ${levelStyle.bg} ${levelStyle.text}`}>
+                                  {levelStyle.label}
+                                </Badge>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              ¥{(plan.monthly_price / 100).toFixed(2)}/月
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span style={{ color: 'var(--text-primary)' }}>
+                              ¥{(plan.yearly_price / 100).toFixed(2)}/年
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Coins className="h-4 w-4 text-amber-400" />
+                              <span style={{ color: 'var(--text-primary)' }}>
+                                {plan.monthly_credits.toLocaleString()}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Coins className="h-4 w-4 text-amber-400" />
+                              <span style={{ color: 'var(--text-primary)' }}>
+                                {plan.yearly_credits.toLocaleString()}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={plan.is_active === 'true'
+                                ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
+                                : 'bg-rose-500/20 text-rose-400 cursor-pointer'
+                              }
+                              onClick={() => handlePlanToggleActive(plan)}
+                            >
+                              {plan.is_active === 'true' ? (
+                                <>
+                                  <Check className="h-3 w-3 mr-1" />
+                                  已启用
+                                </>
+                              ) : (
+                                <>
+                                  <X className="h-3 w-3 mr-1" />
+                                  已禁用
+                                </>
+                              )}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openEditPlanDialog(plan)}
+                                className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handlePlanDelete(plan)}
+                                className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {planList.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                          暂无会员等级，点击上方按钮创建
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        {/* Credit Package Create/Edit Dialog */}
+        <Dialog open={packageDialogOpen} onOpenChange={setPackageDialogOpen}>
           <DialogContent
             className="max-w-md"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <DialogHeader>
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
-                {editingPackage ? '编辑套餐' : '创建套餐'}
+                {editingPackage ? '编辑积分包' : '创建积分包'}
               </DialogTitle>
             </DialogHeader>
 
@@ -356,8 +727,8 @@ export default function AdminPackagesPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>套餐名称</Label>
                 <Input
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  value={packageFormData.name}
+                  onChange={(e) => setPackageFormData({ ...packageFormData, name: e.target.value })}
                   placeholder="如：入门套餐"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
@@ -368,8 +739,8 @@ export default function AdminPackagesPage() {
                 <Input
                   type="number"
                   step="0.01"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                  value={packageFormData.price}
+                  onChange={(e) => setPackageFormData({ ...packageFormData, price: e.target.value })}
                   placeholder="如：9.9"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
@@ -379,8 +750,8 @@ export default function AdminPackagesPage() {
                 <Label style={{ color: 'var(--text-secondary)' }}>积分数量</Label>
                 <Input
                   type="number"
-                  value={formData.creditsAmount}
-                  onChange={(e) => setFormData({ ...formData, creditsAmount: e.target.value })}
+                  value={packageFormData.creditsAmount}
+                  onChange={(e) => setPackageFormData({ ...packageFormData, creditsAmount: e.target.value })}
                   placeholder="如：1000"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
@@ -390,17 +761,177 @@ export default function AdminPackagesPage() {
             <DialogFooter>
               <Button
                 variant="outline"
-                onClick={closeDialog}
+                onClick={closePackageDialog}
                 className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
               >
                 取消
               </Button>
               <Button
-                onClick={handleSubmit}
-                disabled={!formData.name || !formData.price || !formData.creditsAmount || createPackage.isPending || updatePackage.isPending}
+                onClick={handlePackageSubmit}
+                disabled={!packageFormData.name || !packageFormData.price || !packageFormData.creditsAmount || createPackage.isPending || updatePackage.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
               >
                 {createPackage.isPending || updatePackage.isPending ? '保存中...' : '保存'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Membership Plan Create/Edit Dialog */}
+        <Dialog open={planDialogOpen} onOpenChange={setPlanDialogOpen}>
+          <DialogContent
+            className="max-w-lg max-h-[90vh] overflow-y-auto"
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+          >
+            <DialogHeader>
+              <DialogTitle style={{ color: 'var(--text-primary)' }}>
+                {editingPlan ? '编辑会员等级' : '创建会员等级'}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>等级名称</Label>
+                  <Input
+                    value={planFormData.name}
+                    onChange={(e) => setPlanFormData({ ...planFormData, name: e.target.value })}
+                    placeholder="如：专业版"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>等级类型</Label>
+                  <Select
+                    value={planFormData.level}
+                    onValueChange={(value: 'free' | 'pro' | 'gold') => setPlanFormData({ ...planFormData, level: value })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value="free">免费版</SelectItem>
+                      <SelectItem value="pro">Pro 专业版</SelectItem>
+                      <SelectItem value="gold">Gold 黄金版</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (元)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={planFormData.monthlyPrice}
+                    onChange={(e) => setPlanFormData({ ...planFormData, monthlyPrice: e.target.value })}
+                    placeholder="如：9.9"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (元)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={planFormData.yearlyPrice}
+                    onChange={(e) => setPlanFormData({ ...planFormData, yearlyPrice: e.target.value })}
+                    placeholder="如：99"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>月积分额度</Label>
+                  <Input
+                    type="number"
+                    value={planFormData.monthlyCredits}
+                    onChange={(e) => setPlanFormData({ ...planFormData, monthlyCredits: e.target.value })}
+                    placeholder="如：1500"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>年积分额度</Label>
+                  <Input
+                    type="number"
+                    value={planFormData.yearlyCredits}
+                    onChange={(e) => setPlanFormData({ ...planFormData, yearlyCredits: e.target.value })}
+                    placeholder="如：20000"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>月奖励积分</Label>
+                  <Input
+                    type="number"
+                    value={planFormData.monthlyBonusCredits}
+                    onChange={(e) => setPlanFormData({ ...planFormData, monthlyBonusCredits: e.target.value })}
+                    placeholder="如：0"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>加油包折扣 (%)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={planFormData.packageDiscount}
+                    onChange={(e) => setPlanFormData({ ...planFormData, packageDiscount: e.target.value })}
+                    placeholder="如：100 (无折扣)"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>排序顺序</Label>
+                <Input
+                  type="number"
+                  value={planFormData.sortOrder}
+                  onChange={(e) => setPlanFormData({ ...planFormData, sortOrder: e.target.value })}
+                  placeholder="如：0"
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>会员权益 (每行一个)</Label>
+                <textarea
+                  value={planFormData.features}
+                  onChange={(e) => setPlanFormData({ ...planFormData, features: e.target.value })}
+                  placeholder="如：&#10;无限对话&#10;优先客服&#10;专属模型"
+                  rows={4}
+                  className="w-full px-3 py-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={closePlanDialog}
+                className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handlePlanSubmit}
+                disabled={!planFormData.name || createMembershipPlan.isPending || updateMembershipPlan.isPending}
+                className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+              >
+                {createMembershipPlan.isPending || updateMembershipPlan.isPending ? '保存中...' : '保存'}
               </Button>
             </DialogFooter>
           </DialogContent>

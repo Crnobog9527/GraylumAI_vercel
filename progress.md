@@ -72,11 +72,25 @@
 
 **修改文件:** `apps/web/src/app/admin/settings/page.tsx`
 
-#### 7.3+ 还原计划 (待执行)
+#### 7.3 会员套餐系统还原 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- membership_plans 数据库表 (含 RLS 策略)
+- tRPC CRUD 端点: getAllMembershipPlans, createMembershipPlan, updateMembershipPlan, deleteMembershipPlan
+- 更新 admin/packages/page.tsx (双 Tab: 积分包 + 会员等级)
+- 会员套餐完整表单 (10+ 字段: 名称、等级、月/年价格、月/年积分、奖励积分、折扣、权益列表)
+- 种子数据: 免费版、Pro 专业版、Gold 黄金版
+
+**修改文件:**
+- `packages/db/schema.ts` - 新增 membershipPlans 表定义
+- `packages/api/src/routers/admin.ts` - 新增 4 个会员套餐 CRUD 端点
+- `apps/web/src/app/admin/packages/page.tsx` - 完全重写 (双 Tab UI)
+- `supabase/migrations/20240121_create_membership_plans_table.sql` - 新增迁移
+
+#### 7.4+ 还原计划 (待执行)
 
 | 优先级 | 模块 | 任务 | 状态 |
 |--------|------|------|------|
-| P0 | Packages | 还原会员套餐系统 | ⬜ |
 | P1 | Models | 还原完整 CRUD + 测试功能 | ⬜ |
 | P1 | Invitations | 还原记录追踪 + 分析图表 | ⬜ |
 | P2 | Announcements | 还原精选模块管理 | ⬜ |

@@ -115,3 +115,22 @@ export const prompts = pgTable('prompts', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// --- 会员系统 ---
+
+export const membershipPlans = pgTable('membership_plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  level: text('level', { enum: ['free', 'pro', 'gold'] }).default('pro').notNull(),
+  monthlyPrice: integer('monthly_price').default(990).notNull(), // In cents
+  yearlyPrice: integer('yearly_price').default(9900).notNull(), // In cents
+  monthlyCredits: integer('monthly_credits').default(1500).notNull(),
+  yearlyCredits: integer('yearly_credits').default(20000).notNull(),
+  monthlyBonusCredits: integer('monthly_bonus_credits').default(0).notNull(),
+  packageDiscount: integer('package_discount').default(100).notNull(), // 100 = no discount
+  features: jsonb('features').default([]).notNull(), // Array of feature strings
+  isActive: text('is_active').default('true').notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
