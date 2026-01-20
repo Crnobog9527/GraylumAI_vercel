@@ -16,7 +16,8 @@
 - Step 5.1: 数据层完善 ✅ 完成 (ProfilePage + MarketplacePage mock 数据已替换)
 - Step 4.6: UI 视觉验证 ✅ 用户验证通过 (2026-01-20)
 
-**🎉 项目迁移全部完成，已进入可发布状态！**
+**Phase 6 安全加固:**
+- Step 6.1: Supabase RLS 策略 🚧 进行中 (2026-01-20)
 
 ## Phases
 
@@ -676,6 +677,60 @@
 #### 部署注意事项
 
 > **重要**: 需要在 Supabase 中执行 `20240117_create_modules_table.sql` 迁移脚本创建 `modules` 表后，MarketplacePage 才能正常从数据库获取数据。
+
+---
+
+### Step 6.1: Supabase RLS 安全策略 🚧 进行中
+
+**目标**: 为所有数据库表配置 Row Level Security 策略，确保数据访问安全
+
+---
+
+#### RLS 策略概览
+
+| 表名 | 用户权限 | 管理员权限 | 状态 |
+|------|----------|------------|------|
+| profiles | 读写自己的数据 | 读写所有数据 | ✅ |
+| conversations | CRUD 自己的对话 | 读取所有对话 | ✅ |
+| messages | CRUD 自己对话的消息 | 读取所有消息 | ✅ |
+| credit_transactions | 读取自己的记录 | 完全访问 | ✅ |
+| ai_models | 只读 | 完全访问 | ✅ |
+| system_settings | 只读 | 完全访问 | ✅ |
+| tickets | CRUD 自己的工单 | 完全访问 | ✅ |
+| ticket_replies | 读写自己工单的回复 | 完全访问 | ✅ |
+| credit_packages | 读取激活的套餐 | 完全访问 | ✅ |
+| invitations | 读取自己创建的 | 完全访问 | ✅ |
+| announcements | 读取激活的公告 | 完全访问 | ✅ |
+| prompts | 读取激活的提示词 | 完全访问 | ✅ |
+| modules | 读取激活的模块 | 完全访问 | ✅ |
+
+---
+
+#### 核心实现
+
+**辅助函数:**
+```sql
+CREATE OR REPLACE FUNCTION is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM profiles
+    WHERE id = auth.uid()
+    AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+**迁移文件:** `supabase/migrations/20240120_enable_rls_policies.sql`
+
+---
+
+#### 部署步骤
+
+1. 在 Supabase SQL Editor 中执行迁移脚本
+2. 验证 RLS 策略是否生效
+3. 测试普通用户和管理员的数据访问权限
 
 ---
 

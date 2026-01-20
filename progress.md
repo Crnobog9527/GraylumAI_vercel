@@ -35,11 +35,42 @@
 ## Session: 2026-01-20 (续2)
 
 ### Current Status
-- **Phase:** 🎉 项目迁移完成 - 已进入可发布状态
-- **Previous:** Step 5.1 数据层完善 ✅ 完成
+- **Phase:** Step 6.1 Supabase RLS 安全策略 🚧 进行中
+- **Previous:** UI 视觉验证 ✅ 通过
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
-- **UI 视觉验证:** ✅ 用户验证通过 (2026-01-20)
+
+---
+
+### Step 6.1 Supabase RLS 安全策略 (2026-01-20)
+
+**目标**: 为所有数据库表配置 Row Level Security 策略
+
+#### RLS 策略矩阵
+
+| 表名 | 用户权限 | 管理员权限 |
+|------|----------|------------|
+| profiles | 读写自己 | 全部 |
+| conversations | CRUD 自己 | 读取全部 |
+| messages | CRUD 自己对话 | 读取全部 |
+| credit_transactions | 读取自己 | 全部 |
+| ai_models | 只读 | 全部 |
+| system_settings | 只读 | 全部 |
+| tickets | CRUD 自己 | 全部 |
+| ticket_replies | 读写自己工单 | 全部 |
+| credit_packages | 读取激活 | 全部 |
+| invitations | 读取自己创建 | 全部 |
+| announcements | 读取激活 | 全部 |
+| prompts | 读取激活 | 全部 |
+| modules | 读取激活 | 全部 |
+
+#### 已创建文件
+- `supabase/migrations/20240120_enable_rls_policies.sql`
+
+#### 部署步骤
+1. [ ] 在 Supabase SQL Editor 执行迁移脚本
+2. [ ] 验证 RLS 策略生效
+3. [ ] 测试用户/管理员权限
 
 ---
 
