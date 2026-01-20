@@ -10,6 +10,11 @@
 阶段十二、十三、十四（UI 还原）全部完成 ✅
 **Phase 3 迁移全部完成！**
 
+**Phase 4 UI 还原 & Phase 5 数据层完善:**
+- Step 4.1 ~ 4.9: UI 组件还原 ✅ 完成 (73/73 组件)
+- Step 5.0: 组件-页面关联集成 ✅ 完成
+- Step 5.1: 数据层完善 ✅ 完成 (ProfilePage + MarketplacePage mock 数据已替换)
+
 ## Phases
 
 ### 阶段九：工单与系统设置迁移 ✅ 已完成
@@ -617,6 +622,57 @@
 | 页面 | 状态 | 备注 |
 |------|------|------|
 | 模板页面 (/templates) | 可选 | 功能已整合到 marketplace |
+
+---
+
+### Step 5.1: 数据层完善 ✅ 完成
+
+**目标**: 替换 mock 数据为真实 tRPC 查询
+
+---
+
+#### 完成状态 (2026-01-20)
+
+| 页面 | Mock 数据 | tRPC 替换 | 状态 |
+|------|----------|-----------|------|
+| ProfilePage | mockUser | user.getUserProfile + credits.getBalance + credits.getCreditsSummary | ✅ |
+| MarketplacePage | mockModules + mockFeaturedModules | modules.getModules + modules.getFeaturedModules | ✅ |
+
+---
+
+#### 新增基础设施
+
+**数据库表 (modules)**:
+- 迁移文件: `supabase/migrations/20240117_create_modules_table.sql`
+- 字段: id, title, description, icon, category, platform, usage_count, credits_cost, is_featured, image_url, badge_type, badge_text, credits_display, active, sort_order, created_at, updated_at
+- RLS: 允许读取 active=true 的模块
+- 种子数据: 8 条
+
+**tRPC 路由 (modulesRouter)**:
+| 端点 | 类型 | 用途 |
+|------|------|------|
+| getModules | query | 获取模块列表 (分类过滤、分页、排序) |
+| getFeaturedModules | query | 获取精选模块 |
+| getModuleById | query | 获取单个模块详情 |
+| incrementUsage | mutation | 增加模块使用次数 |
+
+---
+
+#### 修改文件清单
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `packages/api/src/routers/modules.ts` | 新增 | 模块 tRPC 路由 |
+| `packages/api/src/root.ts` | 修改 | 注册 modulesRouter |
+| `apps/web/src/app/profile/page.tsx` | 修改 | 替换 mockUser → tRPC |
+| `apps/web/src/app/marketplace/page.tsx` | 修改 | 替换 mockModules → tRPC |
+| `supabase/migrations/20240117_create_modules_table.sql` | 新增 | 数据库迁移 |
+
+---
+
+#### 部署注意事项
+
+> **重要**: 需要在 Supabase 中执行 `20240117_create_modules_table.sql` 迁移脚本创建 `modules` 表后，MarketplacePage 才能正常从数据库获取数据。
 
 ---
 
