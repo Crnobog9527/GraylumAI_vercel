@@ -2,13 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
-import { Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown } from 'lucide-react';
+import {
+  Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
+  Trash2, Download, Clock, AlertTriangle, CheckCircle
+} from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 // 完整的系统设置定义 (35项)
@@ -76,17 +80,86 @@ interface SettingData {
   id?: string;
 }
 
+interface MembershipPlan {
+  id: string;
+  name: string;
+  level: 'free' | 'pro' | 'gold';
+  history_retention_days: number;
+  allow_export: string;
+  allow_batch_export: string;
+}
+
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const { data: savedSettings, isLoading, refetch } = trpc.settings.getSystemSettings.useQuery();
+  const { data: membershipPlans, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
+  const { data: cleanupStats, refetch: refetchStats } = trpc.admin.getCleanupStats.useQuery();
 
   const updateSetting = trpc.settings.updateSystemSettings.useMutation({
     onSuccess: () => {
       refetch();
     },
   });
+
+  const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
+    onSuccess: () => {
+      refetchPlans();
+      toast.success('会员权限更新成功');
+    },
+    onError: () => {
+      toast.error('更新失败');
+    },
+  });
+
+  const cleanupConversations = trpc.admin.cleanupExpiredConversations.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.message);
+      refetchStats();
+    },
+    onError: () => {
+      toast.error('清理失败');
+    },
+  });
+
+  // Initialize membership settings from plans
+  useEffect(() => {
+    if (membershipPlans) {
+      const newSettings: Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }> = {};
+      (membershipPlans as MembershipPlan[]).forEach((plan: MembershipPlan) => {
+        newSettings[plan.id] = {
+          historyRetentionDays: plan.history_retention_days || 30,
+          allowExport: plan.allow_export === 'true',
+          allowBatchExport: plan.allow_batch_export === 'true',
+        };
+      });
+      setMembershipSettings(newSettings);
+    }
+  }, [membershipPlans]);
+
+  const handleSaveMembershipSetting = async (planId: string) => {
+    const setting = membershipSettings[planId];
+    if (!setting) return;
+
+    await updateMembershipPlan.mutateAsync({
+      id: planId,
+      historyRetentionDays: setting.historyRetentionDays,
+      allowExport: setting.allowExport ? 'true' : 'false',
+      allowBatchExport: setting.allowBatchExport ? 'true' : 'false',
+    });
+  };
+
+  const handleCleanup = async () => {
+    setCleaningUp(true);
+    try {
+      await cleanupConversations.mutateAsync();
+    } finally {
+      setCleaningUp(false);
+    }
+  };
 
   // 合并默认设置和已保存的设置
   useEffect(() => {
@@ -341,31 +414,234 @@ export default function AdminSettingsPage() {
 
         {/* Membership Tab */}
         <TabsContent value="membership">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                <Crown className="h-5 w-5 text-amber-500" />
-                会员权限配置
-              </CardTitle>
-              <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                配置不同会员等级的对话历史保存时间和导出权限
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div
-                className="p-6 rounded-lg text-center"
-                style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--border-primary)' }}
-              >
-                <Crown className="h-12 w-12 mx-auto mb-4 text-amber-500 opacity-50" />
-                <p style={{ color: 'var(--text-secondary)' }}>
-                  会员权限配置需要先在「积分包管理」中创建会员套餐
-                </p>
-                <p className="text-sm mt-2" style={{ color: 'var(--text-tertiary)' }}>
-                  请前往 Step 7.3 完成会员套餐系统后再配置此项
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            {/* Membership Plans Permissions */}
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                  <Crown className="h-5 w-5 text-amber-500" />
+                  会员等级权限配置
+                </CardTitle>
+                <CardDescription style={{ color: 'var(--text-tertiary)' }}>
+                  配置不同会员等级的对话历史保存时间和导出权限
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!membershipPlans || (membershipPlans as MembershipPlan[]).length === 0 ? (
+                  <div
+                    className="p-6 rounded-lg text-center"
+                    style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--border-primary)' }}
+                  >
+                    <Crown className="h-12 w-12 mx-auto mb-4 text-amber-500 opacity-50" />
+                    <p style={{ color: 'var(--text-secondary)' }}>
+                      暂无会员套餐，请先在「积分包管理」中创建会员套餐
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {(membershipPlans as MembershipPlan[]).map((plan: MembershipPlan) => {
+                      const setting = membershipSettings[plan.id] || { historyRetentionDays: 30, allowExport: false, allowBatchExport: false };
+                      const levelColors: Record<string, string> = {
+                        free: 'bg-gray-500/20 text-gray-400',
+                        pro: 'bg-blue-500/20 text-blue-400',
+                        gold: 'bg-amber-500/20 text-amber-400',
+                      };
+                      return (
+                        <div
+                          key={plan.id}
+                          className="p-4 rounded-lg"
+                          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
+                        >
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <Badge className={levelColors[plan.level] || 'bg-gray-500/20 text-gray-400'}>
+                                {plan.level.toUpperCase()}
+                              </Badge>
+                              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                                {plan.name}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() => handleSaveMembershipSetting(plan.id)}
+                              disabled={updateMembershipPlan.isPending}
+                              className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+                            >
+                              <Save className="h-3 w-3 mr-1" />
+                              保存
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                <Clock className="h-4 w-4 inline mr-1" />
+                                对话历史保存天数
+                              </Label>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={365}
+                                value={setting.historyRetentionDays}
+                                onChange={(e) => {
+                                  setMembershipSettings(prev => ({
+                                    ...prev,
+                                    [plan.id]: { ...prev[plan.id], historyRetentionDays: parseInt(e.target.value) || 30 }
+                                  }));
+                                }}
+                                className="mt-1 bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                              />
+                              <p className="text-xs mt-1" style={{ color: 'var(--text-disabled)' }}>
+                                超过此天数的对话将被自动清理
+                              </p>
+                            </div>
+                            <div>
+                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                <Download className="h-4 w-4 inline mr-1" />
+                                允许导出对话
+                              </Label>
+                              <div className="flex items-center gap-2 mt-2">
+                                <Switch
+                                  checked={setting.allowExport}
+                                  onCheckedChange={(checked) => {
+                                    setMembershipSettings(prev => ({
+                                      ...prev,
+                                      [plan.id]: { ...prev[plan.id], allowExport: checked }
+                                    }));
+                                  }}
+                                />
+                                <span className="text-sm" style={{ color: setting.allowExport ? 'var(--success)' : 'var(--text-disabled)' }}>
+                                  {setting.allowExport ? '已启用' : '已禁用'}
+                                </span>
+                              </div>
+                            </div>
+                            <div>
+                              <Label className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                <Download className="h-4 w-4 inline mr-1" />
+                                允许批量导出
+                              </Label>
+                              <div className="flex items-center gap-2 mt-2">
+                                <Switch
+                                  checked={setting.allowBatchExport}
+                                  onCheckedChange={(checked) => {
+                                    setMembershipSettings(prev => ({
+                                      ...prev,
+                                      [plan.id]: { ...prev[plan.id], allowBatchExport: checked }
+                                    }));
+                                  }}
+                                />
+                                <span className="text-sm" style={{ color: setting.allowBatchExport ? 'var(--success)' : 'var(--text-disabled)' }}>
+                                  {setting.allowBatchExport ? '已启用' : '已禁用'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Cleanup Section */}
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                  <Trash2 className="h-5 w-5 text-red-400" />
+                  对话历史清理
+                </CardTitle>
+                <CardDescription style={{ color: 'var(--text-tertiary)' }}>
+                  手动清理超过保存期限的对话历史记录
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div
+                  className="p-4 rounded-lg mb-4"
+                  style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-5 w-5 text-amber-400 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
+                        清理操作不可恢复
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--warning)', opacity: 0.8 }}>
+                        此操作将根据各会员等级设置的保存天数，删除所有用户超期的对话及其消息记录
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats */}
+                {cleanupStats && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    {cleanupStats.stats.map((stat) => (
+                      <div
+                        key={stat.level}
+                        className="p-3 rounded-lg"
+                        style={{ background: 'var(--bg-tertiary)' }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <Badge className={
+                            stat.level === 'free' ? 'bg-gray-500/20 text-gray-400' :
+                            stat.level === 'pro' ? 'bg-blue-500/20 text-blue-400' :
+                            'bg-amber-500/20 text-amber-400'
+                          }>
+                            {stat.level.toUpperCase()}
+                          </Badge>
+                          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                            {stat.retentionDays}天
+                          </span>
+                        </div>
+                        <p className="text-lg font-bold" style={{ color: stat.expiredCount > 0 ? 'var(--warning)' : 'var(--text-primary)' }}>
+                          {stat.expiredCount} 个过期
+                        </p>
+                      </div>
+                    ))}
+                    <div
+                      className="p-3 rounded-lg border-2"
+                      style={{ background: 'var(--bg-tertiary)', borderColor: cleanupStats.totalExpired > 0 ? 'var(--warning)' : 'var(--border-primary)' }}
+                    >
+                      <p className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>待清理总数</p>
+                      <p className="text-2xl font-bold" style={{ color: cleanupStats.totalExpired > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                        {cleanupStats.totalExpired}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-4">
+                  <Button
+                    variant="destructive"
+                    onClick={handleCleanup}
+                    disabled={cleaningUp || (cleanupStats?.totalExpired === 0)}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    {cleaningUp ? (
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
+                    {cleaningUp ? '清理中...' : '执行清理'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => refetchStats()}
+                    className="border-[var(--border-primary)] text-[var(--text-secondary)]"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    刷新统计
+                  </Button>
+                  {cleanupStats?.totalExpired === 0 && (
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="text-sm">暂无需要清理的对话</span>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

@@ -8,7 +8,11 @@ export const profiles = pgTable('profiles', {
   nickname: text('nickname'),
   avatarUrl: text('avatar_url'),
   role: text('role', { enum: ['user', 'admin'] }).default('user').notNull(), // User role for access control
+  status: text('status', { enum: ['active', 'disabled', 'banned'] }).default('active').notNull(), // Account status
+  membershipLevel: text('membership_level', { enum: ['free', 'pro', 'gold'] }).default('free').notNull(), // Membership level
   credits: integer('credits').default(100).notNull(),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  lastIp: text('last_ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -72,8 +76,13 @@ export const tickets = pgTable('tickets', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
+  description: text('description'), // 工单详细描述
+  category: text('category', { enum: ['bug', 'feature', 'question', 'account', 'billing', 'other'] }).default('other').notNull(), // 工单分类
+  priority: text('priority', { enum: ['low', 'medium', 'high', 'urgent'] }).default('medium').notNull(), // 优先级
+  attachments: jsonb('attachments').default([]), // 附件URL列表
   status: text('status', { enum: ['open', 'closed', 'in_progress'] }).default('open').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const ticketReplies = pgTable('ticket_replies', {
@@ -81,6 +90,8 @@ export const ticketReplies = pgTable('ticket_replies', {
   ticketId: uuid('ticket_id').references(() => tickets.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }), // User who replied
   content: text('content').notNull(),
+  isAdmin: text('is_admin').default('false').notNull(), // 是否管理员回复
+  attachments: jsonb('attachments').default([]), // 回复附件
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -89,6 +100,9 @@ export const creditPackages = pgTable('credit_packages', {
   name: text('name').notNull(),
   price: integer('price').notNull(), // In cents
   creditsAmount: integer('credits_amount').notNull(),
+  bonusCredits: integer('bonus_credits').default(0).notNull(), // 赠送积分
+  sortOrder: integer('sort_order').default(0).notNull(), // 排序顺序
+  isPopular: text('is_popular').default('false').notNull(), // 热门标识
   active: text('active').default('true').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -98,6 +112,17 @@ export const invitations = pgTable('invitations', {
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   usedBy: uuid('used_by').references(() => profiles.id, { onDelete: 'set null' }),
   status: text('status', { enum: ['active', 'used', 'expired'] }).default('active').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userActivityLogs = pgTable('user_activity_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
+  adminId: uuid('admin_id').references(() => profiles.id, { onDelete: 'set null' }),
+  action: text('action').notNull(),
+  actionType: text('action_type', { enum: ['status_change', 'role_change', 'membership_change', 'credit_adjustment', 'system'] }).default('system').notNull(),
+  details: jsonb('details').default({}),
+  ipAddress: text('ip_address'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -127,6 +152,15 @@ export const prompts = pgTable('prompts', {
   name: text('name').notNull(),
   description: text('description'),
   content: text('content').notNull(),
+  // 新增字段
+  systemPrompt: text('system_prompt'),
+  userPromptTemplate: text('user_prompt_template'),
+  modelId: uuid('model_id').references(() => aiModels.id, { onDelete: 'set null' }),
+  platform: text('platform', { enum: ['all', 'web', 'mobile', 'desktop', 'api'] }).default('all'),
+  features: text('features'), // JSON string array
+  userQuestions: text('user_questions'), // JSON string array
+  icon: text('icon').default('Wand2'),
+  // 原有字段
   category: text('category', { enum: ['general', 'assistant', 'creative', 'coding', 'translation', 'analysis'] }).default('general').notNull(),
   isSystem: text('is_system').default('false').notNull(),
   active: text('active').default('true').notNull(),
@@ -169,6 +203,9 @@ export const membershipPlans = pgTable('membership_plans', {
   monthlyBonusCredits: integer('monthly_bonus_credits').default(0).notNull(),
   packageDiscount: integer('package_discount').default(100).notNull(), // 100 = no discount
   features: jsonb('features').default([]).notNull(), // Array of feature strings
+  historyRetentionDays: integer('history_retention_days').default(30).notNull(), // 对话历史保存天数
+  allowExport: text('allow_export').default('false').notNull(), // 允许导出对话
+  allowBatchExport: text('allow_batch_export').default('false').notNull(), // 允许批量导出
   isActive: text('is_active').default('true').notNull(),
   sortOrder: integer('sort_order').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

@@ -40,21 +40,44 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import AdminSidebar from '@/components/admin/AdminSidebar';
+import AdminLoadingState from '@/components/admin/AdminLoadingState';
+import AdminErrorState from '@/components/admin/AdminErrorState';
 
 type PromptCategory = 'general' | 'assistant' | 'creative' | 'coding' | 'translation' | 'analysis';
+type Platform = 'all' | 'web' | 'mobile' | 'desktop' | 'api';
 
 interface Prompt {
   id: string;
   name: string;
   description: string | null;
   content: string;
+  system_prompt: string | null;
+  user_prompt_template: string | null;
+  model_id: string | null;
+  platform: Platform;
+  features: string | null;
+  user_questions: string | null;
+  icon: string;
   category: PromptCategory;
   is_system: string;
   active: string;
   sort_order: number;
   created_at: string;
 }
+
+const platformConfig: Record<Platform, string> = {
+  all: '全平台',
+  web: '网页端',
+  mobile: '移动端',
+  desktop: '桌面端',
+  api: 'API',
+};
+
+const iconOptions = [
+  'Wand2', 'Sparkles', 'MessageSquare', 'Code', 'Languages', 'BarChart3',
+  'Brain', 'Lightbulb', 'Rocket', 'Target', 'Zap', 'Star', 'Heart', 'BookOpen',
+  'PenTool', 'Camera', 'Music', 'Film', 'Globe', 'Search', 'Settings', 'Users',
+];
 
 const categoryConfig: Record<PromptCategory, { label: string; color: string; icon: React.ElementType }> = {
   general: { label: '通用', color: 'bg-slate-500/20 text-slate-400', icon: Layers },
@@ -73,9 +96,19 @@ export default function AdminPromptsPage() {
     name: '',
     description: '',
     content: '',
+    systemPrompt: '',
+    userPromptTemplate: '',
+    modelId: '',
+    platform: 'all' as Platform,
+    features: '',
+    userQuestions: '',
+    icon: 'Wand2',
     category: 'general' as PromptCategory,
     sortOrder: '0',
   });
+
+  // Fetch models for selector
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
 
   const { data, isLoading, error, refetch } = trpc.admin.getAllPrompts.useQuery({
     limit: 50,
@@ -108,10 +141,26 @@ export default function AdminPromptsPage() {
       name: '',
       description: '',
       content: '',
+      systemPrompt: '',
+      userPromptTemplate: '',
+      modelId: '',
+      platform: 'all',
+      features: '',
+      userQuestions: '',
+      icon: 'Wand2',
       category: 'general',
       sortOrder: '0',
     });
     setDialogOpen(true);
+  };
+
+  const parseJsonArray = (str: string | null): string[] => {
+    if (!str) return [];
+    try {
+      return JSON.parse(str);
+    } catch {
+      return [];
+    }
   };
 
   const openEditDialog = (prompt: Prompt) => {
@@ -120,6 +169,13 @@ export default function AdminPromptsPage() {
       name: prompt.name,
       description: prompt.description || '',
       content: prompt.content,
+      systemPrompt: prompt.system_prompt || '',
+      userPromptTemplate: prompt.user_prompt_template || '',
+      modelId: prompt.model_id || '',
+      platform: prompt.platform || 'all',
+      features: parseJsonArray(prompt.features).join('\n'),
+      userQuestions: parseJsonArray(prompt.user_questions).join('\n'),
+      icon: prompt.icon || 'Wand2',
       category: prompt.category,
       sortOrder: prompt.sort_order.toString(),
     });
@@ -133,13 +189,26 @@ export default function AdminPromptsPage() {
       name: '',
       description: '',
       content: '',
+      systemPrompt: '',
+      userPromptTemplate: '',
+      modelId: '',
+      platform: 'all',
+      features: '',
+      userQuestions: '',
+      icon: 'Wand2',
       category: 'general',
       sortOrder: '0',
     });
   };
 
+  const stringToArray = (str: string): string[] => {
+    return str.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  };
+
   const handleSubmit = () => {
     const sortOrder = parseInt(formData.sortOrder) || 0;
+    const featuresArray = stringToArray(formData.features);
+    const userQuestionsArray = stringToArray(formData.userQuestions);
 
     if (editingPrompt) {
       updatePrompt.mutate({
@@ -147,6 +216,13 @@ export default function AdminPromptsPage() {
         name: formData.name,
         description: formData.description || null,
         content: formData.content,
+        systemPrompt: formData.systemPrompt || null,
+        userPromptTemplate: formData.userPromptTemplate || null,
+        modelId: formData.modelId || null,
+        platform: formData.platform,
+        features: featuresArray.length > 0 ? featuresArray : null,
+        userQuestions: userQuestionsArray.length > 0 ? userQuestionsArray : null,
+        icon: formData.icon,
         category: formData.category,
         sortOrder,
       });
@@ -155,6 +231,13 @@ export default function AdminPromptsPage() {
         name: formData.name,
         description: formData.description || undefined,
         content: formData.content,
+        systemPrompt: formData.systemPrompt || undefined,
+        userPromptTemplate: formData.userPromptTemplate || undefined,
+        modelId: formData.modelId || undefined,
+        platform: formData.platform,
+        features: featuresArray.length > 0 ? featuresArray : undefined,
+        userQuestions: userQuestionsArray.length > 0 ? userQuestionsArray : undefined,
+        icon: formData.icon,
         category: formData.category,
         sortOrder,
       });
@@ -180,37 +263,12 @@ export default function AdminPromptsPage() {
 
   // Loading state
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-        </div>
-      </div>
-    );
+    return <AdminLoadingState />;
   }
 
   // Error state
   if (error) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 p-8">
-          <Card
-            className="max-w-md mx-auto mt-20"
-            style={{ background: 'var(--error-bg)', border: '1px solid var(--error)' }}
-          >
-            <CardContent className="pt-6">
-              <p style={{ color: 'var(--error)' }}>
-                {error.message.includes('Admin role required')
-                  ? '访问被拒绝：您需要管理员权限才能查看此页面。'
-                  : `错误: ${error.message}`}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
   const prompts = data?.prompts ?? [];
@@ -220,11 +278,8 @@ export default function AdminPromptsPage() {
   };
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <AdminSidebar />
-
-      <div className="flex-1 p-8 overflow-auto">
-        {/* Page Header */}
+    <div className="p-8 overflow-auto">
+      {/* Page Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -464,10 +519,11 @@ export default function AdminPromptsPage() {
               </DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+              {/* 基础信息 */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>名称</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>名称 *</Label>
                   <Input
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -485,7 +541,7 @@ export default function AdminPromptsPage() {
                     <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
                       {Object.entries(categoryConfig).map(([key, config]) => {
                         const IconComponent = config.icon;
                         return (
@@ -502,6 +558,60 @@ export default function AdminPromptsPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>图标</Label>
+                  <Select
+                    value={formData.icon}
+                    onValueChange={(v) => setFormData({ ...formData, icon: v })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      {iconOptions.map((icon) => (
+                        <SelectItem key={icon} value={icon}>{icon}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>适用平台</Label>
+                  <Select
+                    value={formData.platform}
+                    onValueChange={(v) => setFormData({ ...formData, platform: v as Platform })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      {Object.entries(platformConfig).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>指定模型</Label>
+                  <Select
+                    value={formData.modelId || 'none'}
+                    onValueChange={(v) => setFormData({ ...formData, modelId: v === 'none' ? '' : v })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue placeholder="不限制" />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value="none">不限制</SelectItem>
+                      {modelsData?.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>{model.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>描述 (可选)</Label>
                 <Input
@@ -512,15 +622,63 @@ export default function AdminPromptsPage() {
                 />
               </div>
 
+              {/* 提示词内容 */}
               <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>提示词内容</Label>
+                <Label style={{ color: 'var(--text-secondary)' }}>提示词内容 *</Label>
                 <Textarea
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                   placeholder="输入提示词内容..."
-                  rows={8}
+                  rows={4}
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] font-mono text-sm"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>系统提示词 (可选)</Label>
+                <Textarea
+                  value={formData.systemPrompt}
+                  onChange={(e) => setFormData({ ...formData, systemPrompt: e.target.value })}
+                  placeholder="AI 的角色定义和行为指导..."
+                  rows={3}
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] font-mono text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>用户提示词模板 (可选)</Label>
+                <Textarea
+                  value={formData.userPromptTemplate}
+                  onChange={(e) => setFormData({ ...formData, userPromptTemplate: e.target.value })}
+                  placeholder="用户消息的模板，使用 {{input}} 表示用户输入..."
+                  rows={3}
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] font-mono text-sm"
+                />
+              </div>
+
+              {/* 模块特点和用户问题 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>模块特点 (每行一个)</Label>
+                  <Textarea
+                    value={formData.features}
+                    onChange={(e) => setFormData({ ...formData, features: e.target.value })}
+                    placeholder="快速响应&#10;支持多语言&#10;专业准确"
+                    rows={4}
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>用户准备问题 (每行一个)</Label>
+                  <Textarea
+                    value={formData.userQuestions}
+                    onChange={(e) => setFormData({ ...formData, userQuestions: e.target.value })}
+                    placeholder="帮我写一篇文章&#10;翻译这段话&#10;解释这个概念"
+                    rows={4}
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] text-sm"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -555,7 +713,6 @@ export default function AdminPromptsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
     </div>
   );
 }

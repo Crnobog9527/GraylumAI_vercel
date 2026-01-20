@@ -45,7 +45,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import AdminSidebar from '@/components/admin/AdminSidebar';
+import AdminLoadingState from '@/components/admin/AdminLoadingState';
+import AdminErrorState from '@/components/admin/AdminErrorState';
 
 interface AIModel {
   id: string;
@@ -217,48 +218,20 @@ export default function AdminModelsPage() {
 
   // Loading state
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-        </div>
-      </div>
-    );
+    return <AdminLoadingState />;
   }
 
   // Error state
   if (error) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 p-8">
-          <Card
-            className="max-w-md mx-auto mt-20"
-            style={{ background: 'var(--error-bg)', border: '1px solid var(--error)' }}
-          >
-            <CardContent className="pt-6">
-              <p style={{ color: 'var(--error)' }}>
-                {error.message.includes('Admin role required')
-                  ? '访问被拒绝：您需要管理员权限才能查看此页面。'
-                  : `错误: ${error.message}`}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
   const modelList = (models ?? []) as AIModel[];
   const activeCount = modelList.filter(m => m.is_active === 'true').length;
 
   return (
-    <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <AdminSidebar />
-
-      <div className="flex-1 p-8 overflow-auto">
-        {/* Page Header */}
+    <div className="p-8 overflow-auto">
+      {/* Page Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -726,7 +699,6 @@ export default function AdminModelsPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </div>
     </div>
   );
 }
