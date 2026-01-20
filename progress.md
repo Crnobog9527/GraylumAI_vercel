@@ -32,13 +32,248 @@
 
 ---
 
+## Session: 2026-01-20 (续3)
+
+### Current Status
+- **Phase:** Phase 7 管理后台功能还原
+- **Previous:** Phase 6 安全加固 ✅ 完成
+- **Started:** 2026-01-20
+- **Blocking Issue:** 无
+- **安全加固:** ✅ RLS 策略 + Admin 权限屏障 已完成并验证
+
+---
+
+### 已发现的问题 (待修复)
+
+| # | 问题描述 | 影响范围 | 状态 |
+|---|----------|----------|------|
+| 1 | 除了仪表盘模块，点击其他模块后左边会出现 2 个侧边栏 | 管理后台所有子页面 | 🔴 待修复 |
+| 2 | 提示词/模块添加表单与原项目不一致，缺少：系统提示词、用户提示词模板、指定模型、适用平台、模块特点、用户准备问题、图标选择器等字段 | 管理后台-提示词模块页面 | 🔴 待修复 |
+| 3 | 积分包添加表单与原项目不一致，缺少：赠送积分、排序、热门标识（开启后前端购买界面有特殊UI装饰）、启用开关 | 管理后台-积分包页面 | 🔴 待修复 |
+| 4 | 财务统计模块与原项目不一致，原项目有：总成本/收入/盈利、API请求数、输入/输出Tokens统计及成本、Web Search次数、各模型渠道统计表（显示每个模型的tokens/请求数/成本/收入/盈利）、积分换算规则 | 管理后台-财务统计页面 | 🔴 待修复 |
+| 5 | 公告管理模块与原项目不一致，原项目有：全站横幅公告区、首页平台公告区、功能广场置顶模块区、首页引导设置（关联模块）、聊天页面设置（模型选择器开关+提示文案）；各区域有独立的添加弹窗和字段 | 管理后台-公告管理页面 | 🔴 待修复 |
+| 6 | 工单详情页与原项目不一致，缺少：工单ID显示、分类标签、提交用户信息、问题描述区、附件预览区、回复记录中用户/管理员身份区分（原项目有"管理员"徽章）、"标记已解决"按钮 | 管理后台-工单管理页面 | 🔴 待修复 |
+| 7 | 性能监控模块监控对象与原项目不一致，原项目"AI性能监控"有：总请求数、平均响应时间(P95)、缓存命中率、错误率、Token使用统计(输入/输出/缓存读取/创建)、成本统计(总成本/平均每次请求/缓存节省)、时间范围筛选、健康状态指示器 | 管理后台-性能监控页面 | 🔴 待修复 |
+| 8 | 系统设置-会员权限Tab未与已创建的会员等级关联（显示占位提示），缺少：各等级对话历史保存天数配置、批量导出对话开关、对话历史清理功能（手动执行清理过期对话） | 管理后台-系统设置-会员权限 | 🔴 待修复 |
+| 9 | 交易记录模块缺少搜索筛选功能（按用户搜索），且显示所有用户记录会有性能问题。建议：添加用户搜索框、分页加载、日期范围筛选、默认只显示汇总统计，点击用户后再展开明细 | 管理后台-交易记录页面 | 🔴 待修复 |
+| 10 | 用户管理模块功能单一（仅调整积分），需增强：用户详情面板（头像/昵称/邮箱/注册时间/最后登录/IP归属地）、账号状态管理（启用/禁用/封禁）、会员等级调整、角色权限修改、登录历史、使用统计（对话数/消耗积分）、操作日志 | 管理后台-用户管理页面 | 🔴 待修复 |
+| 11 | 仪表盘功能单一，需增强：建议添加更丰富的数据展示（今日/本周/本月数据对比、趋势图表、活跃用户排行、热门模型使用统计、收入趋势、系统健康状态、快捷操作入口等），提升管理体验 | 管理后台-仪表盘页面 | 🔴 待修复 |
+
+---
+
+### Phase 7: 管理后台功能还原 🚧 进行中
+
+**目标**: 还原旧项目管理后台的所有功能，确保功能完整性
+
+#### 7.1 功能差异分析 ✅ 完成 (2026-01-20)
+
+**旧项目备份:** `/home/user/graylumAi-backup-ref/`
+
+**代码量对比:**
+| 页面 | 旧项目 | 新项目 | 差异 |
+|------|--------|--------|------|
+| 总计 | 5784行 | 4270行 | -1514行 |
+
+**关键缺失功能:**
+1. **会员套餐系统** - 完全缺失 (月付/年付、会员等级、折扣、特权)
+2. **系统设置** - 64项缩减为6项 (缺失：计费、签到、推荐等)
+3. **模型管理** - 缺少 Token 分层定价、模型测试、完整 CRUD
+4. **邀请码管理** - 缺少记录追踪、风险评估、趋势图表
+5. **公告管理** - 缺少精选模块、首页指引、横幅样式
+
+#### 7.2 系统设置还原 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- 35 项系统设置 (6 个分类 Tab)
+- General: 3项 | Billing: 5项 | Checkin: 6项 | Referral: 10项 | Features: 11项
+- 会员权限 Tab 占位 (依赖 Step 7.3)
+
+**修改文件:** `apps/web/src/app/admin/settings/page.tsx`
+
+#### 7.3 会员套餐系统还原 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- membership_plans 数据库表 (含 RLS 策略)
+- tRPC CRUD 端点: getAllMembershipPlans, createMembershipPlan, updateMembershipPlan, deleteMembershipPlan
+- 更新 admin/packages/page.tsx (双 Tab: 积分包 + 会员等级)
+- 会员套餐完整表单 (10+ 字段: 名称、等级、月/年价格、月/年积分、奖励积分、折扣、权益列表)
+- 种子数据: 免费版、Pro 专业版、Gold 黄金版
+
+**修改文件:**
+- `packages/db/schema.ts` - 新增 membershipPlans 表定义
+- `packages/api/src/routers/admin.ts` - 新增 4 个会员套餐 CRUD 端点
+- `apps/web/src/app/admin/packages/page.tsx` - 完全重写 (双 Tab UI)
+- `supabase/migrations/20240121_create_membership_plans_table.sql` - 新增迁移
+
+#### 7.4 模型管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- ai_models 表新增完整字段 (model_id, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_costs)
+- tRPC CRUD 端点: getActiveModels, getAvailableModels, createModel, updateModel, deleteModel
+- 完整表单: 15+ 字段支持 (基础信息、Token限制、联网搜索、分层定价)
+- Token 成本设置: ≤200K 和 >200K 分层定价
+- RLS 策略: 用户可读已启用模型，管理员完全访问
+
+**修改文件:**
+- `packages/db/schema.ts` - 扩展 aiModels 表字段
+- `packages/api/src/routers/model.ts` - 重写，新增 4 个端点
+- `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
+- `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
+
+#### 7.5 邀请管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- invitation_records 数据库表 (含 RLS 策略)
+- tRPC 端点: getAllInvitationRecords, getInvitationStats, updateInvitationRecord, getMyInvitationRecords
+- 6 项统计卡片 (总邀请、已发放、待处理、已拒绝、高风险、发放积分)
+- 7 天邀请趋势图表 (recharts LineChart)
+- 风险分布图表 (recharts BarChart)
+- 邀请记录表格 (搜索 + 状态筛选)
+- 添加 recharts 依赖
+
+**修改文件:**
+- `packages/db/schema.ts` - 新增 invitationRecords 表
+- `packages/api/src/routers/invitation.ts` - 新增 4 个邀请记录端点
+- `apps/web/src/app/admin/invitations/page.tsx` - 完全重写 (379行)
+- `apps/web/package.json` - 添加 recharts 依赖
+- `supabase/migrations/20240123_create_invitation_records_table.sql` - 新增迁移
+
+#### 7.6 公告管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- announcements 表新增字段: announcement_type (homepage/banner), banner_style, banner_link, icon, iconColor, tag, tagColor
+- tRPC 端点更新: createAnnouncement, updateAnnouncement 支持新字段
+- 支持 6 种公告类型: info, warning, success, error, promo, announcement
+- 首页公告和横幅公告分类
+
+**修改文件:**
+- `packages/db/schema.ts` - 扩展 announcements 表字段
+- `packages/api/src/routers/admin.ts` - 更新 CRUD 端点支持新字段
+- `supabase/migrations/20240124_update_announcements_table.sql` - 新增迁移
+
+**待实现 (未来步骤):**
+- Featured Modules (置顶模块) - 需要新建 featured_modules 表和完整 CRUD
+- 首页引导设置 (home_guide_button_module_id)
+- 聊天页面设置 (chat_billing_hint, chat_show_model_selector)
+
+---
+
+### Phase 7 完成摘要
+- `packages/api/src/routers/model.ts` - 重写，新增 4 个端点
+- `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
+- `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
+
+#### 7.5+ 还原计划 (待执行)
+
+| 优先级 | 模块 | 任务 | 状态 |
+|--------|------|------|------|
+| P1 | Invitations | 还原记录追踪 + 分析图表 | ⬜ |
+| P2 | Announcements | 还原精选模块管理 | ⬜ |
+
+---
+
 ## Session: 2026-01-20 (续2)
 
 ### Current Status
-- **Phase:** Bug Fix - 部署后问题修复
-- **Previous:** Step 5.1 数据层完善 ✅ 完成
+- **Phase:** 🎉 项目迁移全部完成 - 已进入可发布状态
+- **Previous:** Step 6.2 Admin 权限校验修复 ✅ 已验证
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
+- **安全加固:** ✅ RLS 策略 + Admin 权限屏障 已完成并验证
+
+---
+
+### Step 6.2 权限校验问题修复 ✅ (2026-01-20)
+
+#### 发现的问题
+
+| 问题 | 现象 | 预期行为 | 状态 |
+|------|------|----------|------|
+| 权限检查期间显示管理界面 | 普通用户访问 /admin 时能看到 AdminSidebar | 验证期间只显示加载状态，失败后跳转 /access-denied | ✅ 已修复 |
+
+#### 问题分析
+- AdminGuard 在加载状态时仍然渲染 AdminSidebar
+- 用户在权限验证完成前能看到管理员界面结构
+
+#### 解决方案
+1. **创建 admin/layout.tsx** - 在 layout 级别包装 AdminGuard
+2. **修改 AdminGuard** - 加载/错误状态不显示任何管理界面，只显示中性的 "验证访问权限..." 提示
+3. **简化 admin/page.tsx** - 移除重复的 AdminSidebar 和权限检查逻辑
+
+#### 修改的文件
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `app/admin/layout.tsx` | 新增 | 统一包装 AdminGuard |
+| `components/admin/AdminGuard.tsx` | 修改 | 加载状态不显示管理界面 |
+| `app/admin/page.tsx` | 修改 | 移除 AdminSidebar 和错误处理 |
+
+---
+
+### Step 6.2 Admin 权限校验屏障 ✅ 完成 (2026-01-20)
+
+**目标**: 建立 tRPC 中间件安全屏障，非管理员自动跳转报错页面
+
+#### 实现内容
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| adminProcedure | packages/api/src/trpc.ts | tRPC 中间件，检查 role === 'admin' |
+| AdminGuard | components/admin/AdminGuard.tsx | 前端权限守卫，FORBIDDEN 时重定向 |
+| access-denied | app/access-denied/page.tsx | 403 权限拒绝页面 |
+
+#### 权限校验流程
+```
+请求 → adminProcedure → role检查 → FORBIDDEN → AdminGuard → /access-denied
+```
+
+#### 受保护的路由
+- `admin.ts` - 16 个端点
+- `model.ts` - 2 个端点
+- `invitation.ts` - 2 个端点
+- `settings.ts` - 2 个端点
+
+---
+
+### Step 6.1 Supabase RLS 安全策略 ✅ 完成 (2026-01-20)
+
+**目标**: 为所有数据库表配置 Row Level Security 策略
+
+#### RLS 策略矩阵
+
+| 表名 | 用户权限 | 管理员权限 |
+|------|----------|------------|
+| profiles | 读写自己 | 全部 |
+| conversations | CRUD 自己 | 读取全部 |
+| messages | CRUD 自己对话 | 读取全部 |
+| credit_transactions | 读取自己 | 全部 |
+| ai_models | 只读 | 全部 |
+| system_settings | 只读 | 全部 |
+| tickets | CRUD 自己 | 全部 |
+| ticket_replies | 读写自己工单 | 全部 |
+| credit_packages | 读取激活 | 全部 |
+| invitations | 读取自己创建 | 全部 |
+| announcements | 读取激活 | 全部 |
+| prompts | 读取激活 | 全部 |
+| modules | 读取激活 | 全部 |
+
+#### 已创建文件
+- `supabase/migrations/20240120_enable_rls_policies.sql`
+
+#### 部署步骤
+1. [x] 在 Supabase SQL Editor 执行迁移脚本 ✅
+2. [x] 验证 RLS 策略生效 ✅
+3. [x] 测试用户/管理员权限 ✅
+
+---
+
+### UI 视觉验证 ✅ 通过 (2026-01-20)
+
+| 验证项 | 状态 |
+|--------|------|
+| 颜色系统匹配 | ✅ 通过 |
+| 字体系统匹配 | ✅ 通过 |
+| 间距系统匹配 | ✅ 通过 |
+| 响应式布局 | ✅ 通过 |
 
 ---
 
@@ -50,6 +285,7 @@
 |------|------|------|
 | 功能广场 404 | AppHeader 链接 `/features` 但页面路径是 `/marketplace` | ✅ 已修复 |
 | Vercel 环境变量警告 | turbo.json 缺少 DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY, POSTGRES_URL_NON_POOLING 声明 | ✅ 已修复 |
+| /credits 404 | WelcomeBanner 充值按钮链接 `/credits` 但页面不存在 | ✅ 已修复 |
 
 #### 修复内容
 
@@ -60,6 +296,10 @@
 **2. Vercel 环境变量警告修复**
 - 文件: `turbo.json`
 - 修改: 添加 `globalEnv` 配置声明所需环境变量
+
+**3. /credits 404 修复**
+- 文件: `apps/web/src/components/home/WelcomeBanner.tsx`
+- 修改: 将充值按钮链接从 `/credits` 改为 `/profile?tab=subscription`
 
 ---
 

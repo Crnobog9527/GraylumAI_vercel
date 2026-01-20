@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
-  Bot, Settings2, Zap, DollarSign, Check, X,
-  MoreVertical
+  Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
+  Check, X, Loader2, Globe
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -28,70 +36,163 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import AdminSidebar from '@/components/admin/AdminSidebar';
 
 interface AIModel {
   id: string;
   name: string;
-  provider: string;
   model_id: string;
-  enabled: boolean;
-  credits_per_message: number;
-  config: Record<string, unknown>;
+  provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
+  api_key?: string;
+  api_endpoint?: string;
+  description?: string;
+  max_tokens: number;
+  input_limit: number;
+  enable_web_search: string;
+  input_token_cost: number;
+  output_token_cost: number;
+  input_token_cost_above_200k: number;
+  output_token_cost_above_200k: number;
+  web_search_cost: number;
+  is_active: string;
+  config?: Record<string, unknown>;
   created_at: string;
 }
 
+const providerIcons = {
+  anthropic: Sparkles,
+  google: Brain,
+  openai: Zap,
+  custom: Bot,
+  builtin: Globe,
+};
+
 const providerColors: Record<string, string> = {
-  openai: 'bg-emerald-500/20 text-emerald-400',
   anthropic: 'bg-amber-500/20 text-amber-400',
+  openai: 'bg-emerald-500/20 text-emerald-400',
   google: 'bg-blue-500/20 text-blue-400',
-  default: 'bg-violet-500/20 text-violet-400',
+  custom: 'bg-violet-500/20 text-violet-400',
+  builtin: 'bg-cyan-500/20 text-cyan-400',
+};
+
+const initialFormData = {
+  name: '',
+  modelId: '',
+  provider: 'anthropic' as const,
+  apiKey: '',
+  apiEndpoint: '',
+  description: '',
+  maxTokens: 4096,
+  inputLimit: 180000,
+  enableWebSearch: false,
+  inputTokenCost: 0,
+  outputTokenCost: 0,
+  inputTokenCostAbove200k: 0,
+  outputTokenCostAbove200k: 0,
+  webSearchCost: 0,
 };
 
 export default function AdminModelsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<AIModel | null>(null);
-  const [configJson, setConfigJson] = useState('');
-  const [configError, setConfigError] = useState('');
+  const [formData, setFormData] = useState(initialFormData);
 
   const { data: models, isLoading, error, refetch } = trpc.model.getAvailableModels.useQuery();
 
-  const updateConfig = trpc.model.updateModelConfig.useMutation({
+  const createModel = trpc.model.createModel.useMutation({
     onSuccess: () => {
       refetch();
-      setDialogOpen(false);
-      setSelectedModel(null);
-      setConfigJson('');
-      setConfigError('');
+      closeDialog();
     },
-    onError: (err) => {
-      setConfigError(err.message);
-    }
   });
 
-  const openConfigDialog = (model: AIModel) => {
-    setSelectedModel(model);
-    setConfigJson(JSON.stringify(model.config || {}, null, 2));
-    setConfigError('');
+  const updateModel = trpc.model.updateModel.useMutation({
+    onSuccess: () => {
+      refetch();
+      closeDialog();
+    },
+  });
+
+  const deleteModel = trpc.model.deleteModel.useMutation({
+    onSuccess: () => {
+      refetch();
+      setDeleteDialogOpen(false);
+      setSelectedModel(null);
+    },
+  });
+
+  const resetForm = () => {
+    setFormData(initialFormData);
+    setSelectedModel(null);
+  };
+
+  const closeDialog = () => {
+    setDialogOpen(false);
+    resetForm();
+  };
+
+  const openCreateDialog = () => {
+    resetForm();
     setDialogOpen(true);
   };
 
-  const handleSaveConfig = () => {
-    if (!selectedModel) return;
+  const openEditDialog = (model: AIModel) => {
+    setSelectedModel(model);
+    setFormData({
+      name: model.name || '',
+      modelId: model.model_id || '',
+      provider: model.provider || 'anthropic',
+      apiKey: model.api_key || '',
+      apiEndpoint: model.api_endpoint || '',
+      description: model.description || '',
+      maxTokens: model.max_tokens || 4096,
+      inputLimit: model.input_limit || 180000,
+      enableWebSearch: model.enable_web_search === 'true',
+      inputTokenCost: (model.input_token_cost || 0) / 100,
+      outputTokenCost: (model.output_token_cost || 0) / 100,
+      inputTokenCostAbove200k: (model.input_token_cost_above_200k || 0) / 100,
+      outputTokenCostAbove200k: (model.output_token_cost_above_200k || 0) / 100,
+      webSearchCost: (model.web_search_cost || 0) / 100,
+    });
+    setDialogOpen(true);
+  };
 
-    try {
-      const parsedConfig = JSON.parse(configJson);
-      updateConfig.mutate({
+  const handleSubmit = () => {
+    if (selectedModel) {
+      updateModel.mutate({
         id: selectedModel.id,
-        config: parsedConfig,
+        ...formData,
       });
-    } catch {
-      setConfigError('JSON 格式无效');
+    } else {
+      createModel.mutate(formData);
+    }
+  };
+
+  const handleToggleActive = (model: AIModel) => {
+    updateModel.mutate({
+      id: model.id,
+      isActive: model.is_active !== 'true',
+    });
+  };
+
+  const handleDelete = (model: AIModel) => {
+    setSelectedModel(model);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedModel) {
+      deleteModel.mutate({ id: selectedModel.id });
     }
   };
 
@@ -130,7 +231,8 @@ export default function AdminModelsPage() {
     );
   }
 
-  const modelList = models ?? [];
+  const modelList = (models ?? []) as AIModel[];
+  const activeCount = modelList.filter(m => m.is_active === 'true').length;
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -147,9 +249,16 @@ export default function AdminModelsPage() {
               管理可用的 AI 模型和配置
             </p>
           </div>
+          <Button
+            onClick={openCreateDialog}
+            className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            添加模型
+          </Button>
         </div>
 
-        {/* Models Stats */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-6">
@@ -171,12 +280,12 @@ export default function AdminModelsPage() {
             <CardContent className="p-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 rounded-xl bg-emerald-500/20">
-                  <Zap className="h-6 w-6 text-emerald-400" />
+                  <Check className="h-6 w-6 text-emerald-400" />
                 </div>
                 <div>
                   <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已启用</p>
                   <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {modelList.filter((m: AIModel) => m.enabled).length}
+                    {activeCount}
                   </p>
                 </div>
               </div>
@@ -192,7 +301,7 @@ export default function AdminModelsPage() {
                 <div>
                   <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>已禁用</p>
                   <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {modelList.filter((m: AIModel) => !m.enabled).length}
+                    {modelList.length - activeCount}
                   </p>
                 </div>
               </div>
@@ -209,14 +318,16 @@ export default function AdminModelsPage() {
                   <TableHead>模型名称</TableHead>
                   <TableHead>提供商</TableHead>
                   <TableHead>模型 ID</TableHead>
-                  <TableHead>积分消耗</TableHead>
+                  <TableHead>Token 限制</TableHead>
+                  <TableHead>联网搜索</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead className="w-[80px]">操作</TableHead>
+                  <TableHead className="w-[120px]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {modelList.map((model: AIModel) => {
-                  const providerColor = providerColors[model.provider?.toLowerCase()] || providerColors.default;
+                {modelList.map((model) => {
+                  const Icon = providerIcons[model.provider] || Bot;
+                  const providerColor = providerColors[model.provider] || providerColors.custom;
                   return (
                     <TableRow key={model.id}>
                       <TableCell>
@@ -225,11 +336,18 @@ export default function AdminModelsPage() {
                             className="p-2 rounded-lg"
                             style={{ background: 'var(--bg-tertiary)' }}
                           >
-                            <Bot className="h-4 w-4 text-[var(--color-primary)]" />
+                            <Icon className="h-4 w-4 text-[var(--color-primary)]" />
                           </div>
-                          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                            {model.name}
-                          </span>
+                          <div>
+                            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                              {model.name}
+                            </span>
+                            {model.description && (
+                              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                                {model.description.substring(0, 40)}...
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -245,59 +363,67 @@ export default function AdminModelsPage() {
                           {model.model_id}
                         </code>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <DollarSign className="h-4 w-4 text-amber-400" />
-                          <span style={{ color: 'var(--text-primary)' }}>
-                            {model.credits_per_message ?? 1}
-                          </span>
-                        </div>
+                      <TableCell style={{ color: 'var(--text-secondary)' }}>
+                        {model.max_tokens?.toLocaleString()} / {(model.input_limit / 1000).toFixed(0)}K
                       </TableCell>
                       <TableCell>
-                        {model.enabled ? (
-                          <Badge className="bg-emerald-500/20 text-emerald-400">
-                            <Check className="h-3 w-3 mr-1" />
+                        {model.enable_web_search === 'true' ? (
+                          <Badge className="bg-cyan-500/20 text-cyan-400">
+                            <Globe className="h-3 w-3 mr-1" />
                             已启用
                           </Badge>
                         ) : (
-                          <Badge className="bg-rose-500/20 text-rose-400">
-                            <X className="h-3 w-3 mr-1" />
-                            已禁用
-                          </Badge>
+                          <span style={{ color: 'var(--text-disabled)' }}>-</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="end"
-                            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+                        <Badge
+                          className={model.is_active === 'true'
+                            ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
+                            : 'bg-rose-500/20 text-rose-400 cursor-pointer'
+                          }
+                          onClick={() => handleToggleActive(model)}
+                        >
+                          {model.is_active === 'true' ? (
+                            <>
+                              <Check className="h-3 w-3 mr-1" />
+                              已启用
+                            </>
+                          ) : (
+                            <>
+                              <X className="h-3 w-3 mr-1" />
+                              已禁用
+                            </>
+                          )}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openEditDialog(model)}
+                            className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                           >
-                            <DropdownMenuItem
-                              onClick={() => openConfigDialog(model)}
-                              className="cursor-pointer text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-                            >
-                              <Settings2 className="h-4 w-4 mr-2" />
-                              编辑配置
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(model)}
+                            className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
                 })}
                 {modelList.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
-                      暂无 AI 模型
+                    <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                      暂无 AI 模型，点击上方按钮添加
                     </TableCell>
                   </TableRow>
                 )}
@@ -306,77 +432,281 @@ export default function AdminModelsPage() {
           </CardContent>
         </Card>
 
-        {/* Config Edit Dialog */}
+        {/* Create/Edit Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
-            className="max-w-lg"
+            className="max-w-lg max-h-[90vh] overflow-y-auto"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <DialogHeader>
-              <DialogTitle style={{ color: 'var(--text-primary)' }}>编辑模型配置</DialogTitle>
+              <DialogTitle style={{ color: 'var(--text-primary)' }}>
+                {selectedModel ? '编辑模型' : '添加模型'}
+              </DialogTitle>
             </DialogHeader>
 
-            {selectedModel && (
-              <div className="space-y-4 py-4">
-                {/* Model Info */}
-                <div
-                  className="p-4 rounded-lg"
-                  style={{ background: 'var(--bg-tertiary)' }}
+            <div className="space-y-4 py-4">
+              {/* Basic Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>显示名称</Label>
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Claude 4.5 Sonnet"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>模型 ID</Label>
+                  <Input
+                    value={formData.modelId}
+                    onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
+                    placeholder="claude-4.5-sonnet"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>提供商</Label>
+                <Select
+                  value={formData.provider}
+                  onValueChange={(value: typeof formData.provider) => setFormData({ ...formData, provider: value })}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-[var(--color-primary-20)]">
-                      <Bot className="h-5 w-5 text-[var(--color-primary)]" />
+                  <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="google">Google (Gemini)</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                    <SelectItem value="builtin">内置 (支持联网)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>API Key</Label>
+                <Input
+                  type="password"
+                  value={formData.apiKey}
+                  onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+                  placeholder="sk-..."
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>API Endpoint (可选)</Label>
+                <Input
+                  value={formData.apiEndpoint}
+                  onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
+                  placeholder="https://api.example.com/v1"
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>最大输出 Token</Label>
+                  <Input
+                    type="number"
+                    value={formData.maxTokens}
+                    onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) || 4096 })}
+                    min={256}
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>上下文限制</Label>
+                  <Input
+                    type="number"
+                    value={formData.inputLimit}
+                    onChange={(e) => setFormData({ ...formData, inputLimit: parseInt(e.target.value) || 180000 })}
+                    min={1000}
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>描述</Label>
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="模型简介..."
+                  rows={2}
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
+              </div>
+
+              <div
+                className="flex items-center justify-between p-3 rounded-lg"
+                style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
+              >
+                <div>
+                  <Label style={{ color: 'var(--text-primary)' }}>启用联网搜索</Label>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    {formData.provider === 'builtin'
+                      ? '使用平台内置LLM的联网能力'
+                      : '通过OpenRouter实现联网搜索'}
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.enableWebSearch}
+                  onCheckedChange={(checked) => setFormData({ ...formData, enableWebSearch: checked })}
+                />
+              </div>
+
+              {/* Token Cost Settings */}
+              <div
+                className="p-4 rounded-lg space-y-4"
+                style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)' }}
+              >
+                <Label className="text-amber-400 font-medium">Token 成本设置</Label>
+
+                {/* ≤200K tokens */}
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-300 font-medium">≤ 200K tokens</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">输入成本 ($/1M)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.inputTokenCost}
+                        onChange={(e) => setFormData({ ...formData, inputTokenCost: parseFloat(e.target.value) || 0 })}
+                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
+                      />
                     </div>
-                    <div>
-                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                        {selectedModel.name}
-                      </p>
-                      <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                        {selectedModel.provider} / {selectedModel.model_id}
-                      </p>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">输出成本 ($/1M)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.outputTokenCost}
+                        onChange={(e) => setFormData({ ...formData, outputTokenCost: parseFloat(e.target.value) || 0 })}
+                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
+                      />
                     </div>
                   </div>
                 </div>
 
-                {/* Config JSON Editor */}
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>配置 (JSON)</Label>
-                  <Textarea
-                    value={configJson}
-                    onChange={(e) => {
-                      setConfigJson(e.target.value);
-                      setConfigError('');
-                    }}
-                    className="min-h-[200px] font-mono text-sm bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                    placeholder="{}"
-                  />
-                  {configError && (
-                    <p className="text-sm" style={{ color: 'var(--error)' }}>
-                      {configError}
-                    </p>
-                  )}
+                {/* >200K tokens */}
+                <div className="space-y-2 pt-2 border-t border-amber-500/20">
+                  <p className="text-xs text-amber-300 font-medium">&gt; 200K tokens</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">输入成本 ($/1M)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.inputTokenCostAbove200k}
+                        onChange={(e) => setFormData({ ...formData, inputTokenCostAbove200k: parseFloat(e.target.value) || 0 })}
+                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">输出成本 ($/1M)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.outputTokenCostAbove200k}
+                        onChange={(e) => setFormData({ ...formData, outputTokenCostAbove200k: parseFloat(e.target.value) || 0 })}
+                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Web Search Cost */}
+                <div className="space-y-2 pt-2 border-t border-amber-500/20">
+                  <p className="text-xs text-amber-300 font-medium">联网搜索成本</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">搜索成本 ($/1K次)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.webSearchCost}
+                        onChange={(e) => setFormData({ ...formData, webSearchCost: parseFloat(e.target.value) || 0 })}
+                        className="h-9 bg-[var(--bg-tertiary)] border-amber-500/30 text-[var(--text-primary)]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-amber-200">每次成本</Label>
+                      <div
+                        className="h-9 px-3 flex items-center rounded-md"
+                        style={{ background: 'var(--bg-tertiary)' }}
+                      >
+                        <span className="text-amber-400 font-medium">
+                          ${((formData.webSearchCost || 0) / 1000).toFixed(4)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
 
             <DialogFooter>
               <Button
                 variant="outline"
-                onClick={() => setDialogOpen(false)}
+                onClick={closeDialog}
                 className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
               >
                 取消
               </Button>
               <Button
-                onClick={handleSaveConfig}
-                disabled={updateConfig.isPending}
+                onClick={handleSubmit}
+                disabled={!formData.name || !formData.modelId || createModel.isPending || updateModel.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
               >
-                {updateConfig.isPending ? '保存中...' : '保存配置'}
+                {(createModel.isPending || updateModel.isPending) ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    保存中...
+                  </>
+                ) : (
+                  selectedModel ? '更新' : '创建'
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <AlertDialogHeader>
+              <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>删除模型</AlertDialogTitle>
+              <AlertDialogDescription style={{ color: 'var(--text-tertiary)' }}>
+                确定要删除模型 &quot;{selectedModel?.name}&quot; 吗？此操作无法撤销。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                取消
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmDelete}
+                className="bg-rose-600 text-white hover:bg-rose-700"
+              >
+                {deleteModel.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    删除中...
+                  </>
+                ) : (
+                  '确认删除'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

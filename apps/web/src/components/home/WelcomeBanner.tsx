@@ -88,7 +88,7 @@ export default function WelcomeBanner({ user }: WelcomeBannerProps) {
       </div>
 
       {/* 充值按钮 */}
-      <Link href="/credits">
+      <Link href="/profile?tab=subscription">
         <button
           className="btn btn-primary"
           style={{

@@ -489,7 +489,14 @@ export const adminRouter = router({
     .input(z.object({
       title: z.string().min(1).max(200),
       content: z.string().min(1).max(5000),
-      type: z.enum(['info', 'warning', 'success', 'error']).default('info'),
+      type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
+      announcementType: z.enum(['homepage', 'banner']).default('homepage'),
+      bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      bannerLink: z.string().optional(),
+      icon: z.string().default('Megaphone'),
+      iconColor: z.string().default('text-blue-500'),
+      tag: z.string().optional(),
+      tagColor: z.string().default('blue'),
       priority: z.number().int().min(0).max(100).default(0),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
@@ -501,6 +508,13 @@ export const adminRouter = router({
           title: input.title,
           content: input.content,
           type: input.type,
+          announcement_type: input.announcementType,
+          banner_style: input.bannerStyle ?? input.type,
+          banner_link: input.bannerLink,
+          icon: input.icon,
+          icon_color: input.iconColor,
+          tag: input.tag,
+          tag_color: input.tagColor,
           priority: input.priority,
           active: 'true',
           start_date: input.startDate ?? new Date().toISOString(),
@@ -525,7 +539,14 @@ export const adminRouter = router({
       id: z.string().uuid(),
       title: z.string().min(1).max(200).optional(),
       content: z.string().min(1).max(5000).optional(),
-      type: z.enum(['info', 'warning', 'success', 'error']).optional(),
+      type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      announcementType: z.enum(['homepage', 'banner']).optional(),
+      bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      bannerLink: z.string().optional(),
+      icon: z.string().optional(),
+      iconColor: z.string().optional(),
+      tag: z.string().optional(),
+      tagColor: z.string().optional(),
       priority: z.number().int().min(0).max(100).optional(),
       active: z.enum(['true', 'false']).optional(),
       startDate: z.string().optional(),
@@ -538,6 +559,13 @@ export const adminRouter = router({
       if (input.title !== undefined) updateData.title = input.title;
       if (input.content !== undefined) updateData.content = input.content;
       if (input.type !== undefined) updateData.type = input.type;
+      if (input.announcementType !== undefined) updateData.announcement_type = input.announcementType;
+      if (input.bannerStyle !== undefined) updateData.banner_style = input.bannerStyle;
+      if (input.bannerLink !== undefined) updateData.banner_link = input.bannerLink;
+      if (input.icon !== undefined) updateData.icon = input.icon;
+      if (input.iconColor !== undefined) updateData.icon_color = input.iconColor;
+      if (input.tag !== undefined) updateData.tag = input.tag;
+      if (input.tagColor !== undefined) updateData.tag_color = input.tagColor;
       if (input.priority !== undefined) updateData.priority = input.priority;
       if (input.active !== undefined) updateData.active = input.active;
       if (input.startDate !== undefined) updateData.start_date = input.startDate;
@@ -882,6 +910,141 @@ export const adminRouter = router({
         packages: packageStats,
         dailyChart: dailyChartData,
       };
+    }),
+
+  // ============================================
+  // Performance Monitoring
+  // ============================================
+
+// ============================================
+  // Membership Plans Management
+  // ============================================
+
+  /**
+   * Get all membership plans
+   */
+  getAllMembershipPlans: adminProcedure
+    .query(async ({ ctx }) => {
+      const { data, error } = await ctx.supabase
+        .from('membership_plans')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return data ?? [];
+    }),
+
+  /**
+   * Create a new membership plan
+   */
+  createMembershipPlan: adminProcedure
+    .input(z.object({
+      name: z.string().min(1).max(100),
+      level: z.enum(['free', 'pro', 'gold']).default('pro'),
+      monthlyPrice: z.number().int().min(0), // In cents
+      yearlyPrice: z.number().int().min(0), // In cents
+      monthlyCredits: z.number().int().min(0),
+      yearlyCredits: z.number().int().min(0),
+      monthlyBonusCredits: z.number().int().min(0).default(0),
+      packageDiscount: z.number().int().min(0).max(100).default(100),
+      features: z.array(z.string()).default([]),
+      sortOrder: z.number().int().min(0).default(0),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('membership_plans')
+        .insert({
+          name: input.name,
+          level: input.level,
+          monthly_price: input.monthlyPrice,
+          yearly_price: input.yearlyPrice,
+          monthly_credits: input.monthlyCredits,
+          yearly_credits: input.yearlyCredits,
+          monthly_bonus_credits: input.monthlyBonusCredits,
+          package_discount: input.packageDiscount,
+          features: input.features,
+          is_active: 'true',
+          sort_order: input.sortOrder,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return data;
+    }),
+
+  /**
+   * Update a membership plan
+   */
+  updateMembershipPlan: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      name: z.string().min(1).max(100).optional(),
+      level: z.enum(['free', 'pro', 'gold']).optional(),
+      monthlyPrice: z.number().int().min(0).optional(),
+      yearlyPrice: z.number().int().min(0).optional(),
+      monthlyCredits: z.number().int().min(0).optional(),
+      yearlyCredits: z.number().int().min(0).optional(),
+      monthlyBonusCredits: z.number().int().min(0).optional(),
+      packageDiscount: z.number().int().min(0).max(100).optional(),
+      features: z.array(z.string()).optional(),
+      isActive: z.enum(['true', 'false']).optional(),
+      sortOrder: z.number().int().min(0).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const updateData: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (input.name !== undefined) updateData.name = input.name;
+      if (input.level !== undefined) updateData.level = input.level;
+      if (input.monthlyPrice !== undefined) updateData.monthly_price = input.monthlyPrice;
+      if (input.yearlyPrice !== undefined) updateData.yearly_price = input.yearlyPrice;
+      if (input.monthlyCredits !== undefined) updateData.monthly_credits = input.monthlyCredits;
+      if (input.yearlyCredits !== undefined) updateData.yearly_credits = input.yearlyCredits;
+      if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;
+      if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
+      if (input.features !== undefined) updateData.features = input.features;
+      if (input.isActive !== undefined) updateData.is_active = input.isActive;
+      if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
+
+      const { data, error } = await ctx.supabase
+        .from('membership_plans')
+        .update(updateData)
+        .eq('id', input.id)
+        .select()
+        .single();
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return data;
+    }),
+
+  /**
+   * Delete a membership plan
+   */
+  deleteMembershipPlan: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('membership_plans')
+        .delete()
+        .eq('id', input.id);
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return { success: true };
     }),
 
   // ============================================
