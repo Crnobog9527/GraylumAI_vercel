@@ -50,6 +50,7 @@
 |------|------|------|
 | 功能广场 404 | AppHeader 链接 `/features` 但页面路径是 `/marketplace` | ✅ 已修复 |
 | Vercel 环境变量警告 | turbo.json 缺少 DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY, POSTGRES_URL_NON_POOLING 声明 | ✅ 已修复 |
+| /credits 404 | WelcomeBanner 充值按钮链接 `/credits` 但页面不存在 | ✅ 已修复 |
 
 #### 修复内容
 
@@ -60,6 +61,10 @@
 **2. Vercel 环境变量警告修复**
 - 文件: `turbo.json`
 - 修改: 添加 `globalEnv` 配置声明所需环境变量
+
+**3. /credits 404 修复**
+- 文件: `apps/web/src/components/home/WelcomeBanner.tsx`
+- 修改: 将充值按钮链接从 `/credits` 改为 `/profile?tab=subscription`
 
 ---
 
