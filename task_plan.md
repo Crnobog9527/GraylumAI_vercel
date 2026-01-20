@@ -211,8 +211,8 @@
 #### Phase E: 管理后台组件（P1 - 9个）
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| AdminSidebar | src/components/admin/AdminSidebar.jsx | apps/web/src/components/admin/AdminSidebar.tsx | ⬜ |
-| StatsCard | src/components/admin/StatsCard.jsx | apps/web/src/components/admin/StatsCard.tsx | ⬜ |
+| AdminSidebar | src/components/admin/AdminSidebar.jsx | apps/web/src/components/admin/AdminSidebar.tsx | ✅ |
+| StatsCard | src/components/admin/StatsCard.jsx | apps/web/src/components/admin/StatsCard.tsx | ✅ |
 | SystemStats | src/components/admin/SystemStats.jsx | apps/web/src/components/admin/SystemStats.tsx | ⬜ |
 | UserManagement | src/components/admin/UserManagement.jsx | apps/web/src/components/admin/UserManagement.tsx | ⬜ |
 | TicketManagement | src/components/admin/TicketManagement.jsx | apps/web/src/components/admin/TicketManagement.tsx | ⬜ |
@@ -221,21 +221,21 @@
 | AIPerformanceMonitor | src/components/admin/AIPerformanceMonitor.jsx | apps/web/src/components/admin/AIPerformanceMonitor.tsx | ⬜ |
 | MembershipPermissionsCard | src/components/admin/MembershipPermissionsCard.jsx | apps/web/src/components/admin/MembershipPermissionsCard.tsx | ⬜ |
 
-#### Phase E.2: 管理后台页面（P1 - 12个）
-| 页面 | 旧文件 | 新文件 | 状态 |
-|------|--------|--------|------|
-| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ⬜ |
-| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ⬜ |
-| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ⬜ |
-| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ⬜ |
-| 模块/提示词管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | ⬜ |
-| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ⬜ |
-| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | ⬜ |
-| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | ⬜ |
-| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | ⬜ |
-| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | ⬜ |
-| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ⬜ |
-| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | ⬜ |
+#### Phase E.2: 管理后台页面（P1 - 12个）✅ 页面结构完成
+| 页面 | 旧文件 | 新文件 | 状态 | 备注 |
+|------|--------|--------|------|------|
+| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ | 完整 |
+| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ | 完整 |
+| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ✅ | 完整 |
+| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ✅ | 完整 |
+| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ✅ | 完整 |
+| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ✅ | 完整 |
+| 模块/提示词管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | 📝 | 占位 |
+| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | 📝 | 占位 |
+| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | 📝 | 占位 |
+| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | 📝 | 占位 |
+| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | 📝 | 占位 |
+| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | 📝 | 占位 |
 
 #### Phase F: 其他业务组件（P2）
 首页组件:
@@ -279,13 +279,16 @@
 |------|------|
 | Dropdown Menu | ✅ |
 | Avatar | ✅ |
-| Badge | ⬜ |
+| Badge | ✅ |
 | Toast/Sonner | ⬜ |
 | Tooltip | ⬜ |
 | Separator | ⬜ |
 | Dialog | ✅ |
 | Select | ✅ |
 | Sheet | ✅ |
+| Tabs | ✅ |
+| Table | ✅ |
+| Scroll Area | ✅ |
 
 #### P2 - 其他组件
 | 组件 | 状态 |
@@ -296,7 +299,6 @@
 | Progress | ⬜ |
 | Slider | ⬜ |
 | Switch | ⬜ |
-| Table | ⬜ |
 | ... (其余 30+ 组件) | ⬜ |
 
 ### Step 4.5: 页面级布局还原
@@ -309,21 +311,23 @@
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/profile/page.tsx | ✅ | commit: e09d60d, d99b2c6 |
 | 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |
 
-#### 管理后台页面 (12个) - 进行中 (2/12 完成)
-| 页面 | 旧文件 | 新文件 | 状态 |
-|------|--------|--------|------|
-| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ |
-| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ |
-| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ⬜ |
-| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ⬜ |
-| 模块管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | ⬜ |
-| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ⬜ |
-| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | ⬜ |
-| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | ⬜ |
-| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | ⬜ |
-| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | ⬜ |
-| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ⬜ |
-| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | ⬜ |
+#### 管理后台页面 (12个) - 已完成 (12/12 页面结构)
+| 页面 | 旧文件 | 新文件 | 状态 | 备注 |
+|------|--------|--------|------|------|
+| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ | 完整实现 |
+| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ | 完整实现 |
+| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ✅ | 完整实现 |
+| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ✅ | 完整实现 |
+| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ✅ | 完整实现 |
+| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ✅ | 完整实现 |
+| 模块管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | 📝 | 占位页面 |
+| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | 📝 | 占位页面 |
+| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | 📝 | 占位页面 |
+| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | 📝 | 占位页面 |
+| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | 📝 | 占位页面 |
+| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | 📝 | 占位页面 |
+
+> **说明**: 📝 占位页面显示 "Coming Soon"，等待对应 API 开发后再完善功能
 
 #### 待完成页面
 | 页面 | 旧文件 | 新文件 | 状态 |
