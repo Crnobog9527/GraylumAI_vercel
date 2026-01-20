@@ -89,6 +89,9 @@ export const creditPackages = pgTable('credit_packages', {
   name: text('name').notNull(),
   price: integer('price').notNull(), // In cents
   creditsAmount: integer('credits_amount').notNull(),
+  bonusCredits: integer('bonus_credits').default(0).notNull(), // 赠送积分
+  sortOrder: integer('sort_order').default(0).notNull(), // 排序顺序
+  isPopular: text('is_popular').default('false').notNull(), // 热门标识
   active: text('active').default('true').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

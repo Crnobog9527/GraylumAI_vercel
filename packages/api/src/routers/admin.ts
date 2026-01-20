@@ -337,6 +337,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('credit_packages')
         .select('*')
+        .order('sort_order', { ascending: true })
         .order('price', { ascending: true });
 
       if (error) {
@@ -354,6 +355,10 @@ export const adminRouter = router({
       name: z.string().min(1).max(100),
       price: z.number().int().positive(), // In cents
       creditsAmount: z.number().int().positive(),
+      bonusCredits: z.number().int().min(0).default(0),
+      sortOrder: z.number().int().min(0).default(0),
+      isPopular: z.enum(['true', 'false']).default('false'),
+      active: z.enum(['true', 'false']).default('true'),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
@@ -362,7 +367,10 @@ export const adminRouter = router({
           name: input.name,
           price: input.price,
           credits_amount: input.creditsAmount,
-          active: 'true',
+          bonus_credits: input.bonusCredits,
+          sort_order: input.sortOrder,
+          is_popular: input.isPopular,
+          active: input.active,
         })
         .select()
         .single();
@@ -383,6 +391,9 @@ export const adminRouter = router({
       name: z.string().min(1).max(100).optional(),
       price: z.number().int().positive().optional(),
       creditsAmount: z.number().int().positive().optional(),
+      bonusCredits: z.number().int().min(0).optional(),
+      sortOrder: z.number().int().min(0).optional(),
+      isPopular: z.enum(['true', 'false']).optional(),
       active: z.enum(['true', 'false']).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -390,6 +401,9 @@ export const adminRouter = router({
       if (input.name) updateData.name = input.name;
       if (input.price) updateData.price = input.price;
       if (input.creditsAmount) updateData.credits_amount = input.creditsAmount;
+      if (input.bonusCredits !== undefined) updateData.bonus_credits = input.bonusCredits;
+      if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
+      if (input.isPopular) updateData.is_popular = input.isPopular;
       if (input.active) updateData.active = input.active;
 
       const { data, error } = await ctx.supabase

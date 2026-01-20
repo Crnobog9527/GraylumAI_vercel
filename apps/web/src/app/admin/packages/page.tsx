@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Package, Plus, Pencil, Trash2, Check, X,
-  DollarSign, Coins, Crown, Star
+  DollarSign, Coins, Crown, Star, Flame, Gift, ArrowUpDown
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,6 +42,9 @@ interface CreditPackage {
   name: string;
   price: number;
   credits_amount: number;
+  bonus_credits: number;
+  sort_order: number;
+  is_popular: string;
   active: string;
   created_at: string;
 }
@@ -78,6 +81,10 @@ export default function AdminPackagesPage() {
     name: '',
     price: '',
     creditsAmount: '',
+    bonusCredits: '0',
+    sortOrder: '0',
+    isPopular: 'false',
+    active: 'true',
   });
 
   // Membership Plan State
@@ -145,7 +152,15 @@ export default function AdminPackagesPage() {
   // Credit Package Handlers
   const openCreatePackageDialog = () => {
     setEditingPackage(null);
-    setPackageFormData({ name: '', price: '', creditsAmount: '' });
+    setPackageFormData({
+      name: '',
+      price: '',
+      creditsAmount: '',
+      bonusCredits: '0',
+      sortOrder: '0',
+      isPopular: 'false',
+      active: 'true',
+    });
     setPackageDialogOpen(true);
   };
 
@@ -155,6 +170,10 @@ export default function AdminPackagesPage() {
       name: pkg.name,
       price: (pkg.price / 100).toString(),
       creditsAmount: pkg.credits_amount.toString(),
+      bonusCredits: (pkg.bonus_credits || 0).toString(),
+      sortOrder: (pkg.sort_order || 0).toString(),
+      isPopular: pkg.is_popular || 'false',
+      active: pkg.active || 'true',
     });
     setPackageDialogOpen(true);
   };
@@ -162,12 +181,22 @@ export default function AdminPackagesPage() {
   const closePackageDialog = () => {
     setPackageDialogOpen(false);
     setEditingPackage(null);
-    setPackageFormData({ name: '', price: '', creditsAmount: '' });
+    setPackageFormData({
+      name: '',
+      price: '',
+      creditsAmount: '',
+      bonusCredits: '0',
+      sortOrder: '0',
+      isPopular: 'false',
+      active: 'true',
+    });
   };
 
   const handlePackageSubmit = () => {
     const priceInCents = Math.round(parseFloat(packageFormData.price) * 100);
     const creditsAmount = parseInt(packageFormData.creditsAmount);
+    const bonusCredits = parseInt(packageFormData.bonusCredits || '0');
+    const sortOrder = parseInt(packageFormData.sortOrder || '0');
 
     if (editingPackage) {
       updatePackage.mutate({
@@ -175,12 +204,20 @@ export default function AdminPackagesPage() {
         name: packageFormData.name,
         price: priceInCents,
         creditsAmount,
+        bonusCredits,
+        sortOrder,
+        isPopular: packageFormData.isPopular as 'true' | 'false',
+        active: packageFormData.active as 'true' | 'false',
       });
     } else {
       createPackage.mutate({
         name: packageFormData.name,
         price: priceInCents,
         creditsAmount,
+        bonusCredits,
+        sortOrder,
+        isPopular: packageFormData.isPopular as 'true' | 'false',
+        active: packageFormData.active as 'true' | 'false',
       });
     }
   };
@@ -398,8 +435,10 @@ export default function AdminPackagesPage() {
                       <TableHead>套餐名称</TableHead>
                       <TableHead>价格</TableHead>
                       <TableHead>积分数量</TableHead>
+                      <TableHead>赠送积分</TableHead>
+                      <TableHead>排序</TableHead>
+                      <TableHead>标签</TableHead>
                       <TableHead>状态</TableHead>
-                      <TableHead>创建时间</TableHead>
                       <TableHead className="w-[120px]">操作</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -436,6 +475,34 @@ export default function AdminPackagesPage() {
                           </div>
                         </TableCell>
                         <TableCell>
+                          {(pkg.bonus_credits || 0) > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <Gift className="h-4 w-4 text-pink-400" />
+                              <span className="text-pink-400">
+                                +{pkg.bonus_credits.toLocaleString()}
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-disabled)' }}>-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <ArrowUpDown className="h-3 w-3" style={{ color: 'var(--text-tertiary)' }} />
+                            <span style={{ color: 'var(--text-secondary)' }}>
+                              {pkg.sort_order || 0}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {pkg.is_popular === 'true' && (
+                            <Badge className="bg-orange-500/20 text-orange-400">
+                              <Flame className="h-3 w-3 mr-1" />
+                              热门
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge
                             className={pkg.active === 'true'
                               ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
@@ -455,9 +522,6 @@ export default function AdminPackagesPage() {
                               </>
                             )}
                           </Badge>
-                        </TableCell>
-                        <TableCell style={{ color: 'var(--text-tertiary)' }}>
-                          {new Date(pkg.created_at).toLocaleDateString('zh-CN')}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
@@ -483,7 +547,7 @@ export default function AdminPackagesPage() {
                     ))}
                     {packageList.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                        <TableCell colSpan={8} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                           暂无积分套餐，点击上方按钮创建
                         </TableCell>
                       </TableRow>
@@ -687,7 +751,7 @@ export default function AdminPackagesPage() {
         {/* Credit Package Create/Edit Dialog */}
         <Dialog open={packageDialogOpen} onOpenChange={setPackageDialogOpen}>
           <DialogContent
-            className="max-w-md"
+            className="max-w-lg max-h-[90vh] overflow-y-auto"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <DialogHeader>
@@ -707,27 +771,125 @@ export default function AdminPackagesPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>价格 (元)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={packageFormData.price}
-                  onChange={(e) => setPackageFormData({ ...packageFormData, price: e.target.value })}
-                  placeholder="如：9.9"
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>价格 (元)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={packageFormData.price}
+                    onChange={(e) => setPackageFormData({ ...packageFormData, price: e.target.value })}
+                    placeholder="如：9.9"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>积分数量</Label>
+                  <Input
+                    type="number"
+                    value={packageFormData.creditsAmount}
+                    onChange={(e) => setPackageFormData({ ...packageFormData, creditsAmount: e.target.value })}
+                    placeholder="如：1000"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>积分数量</Label>
-                <Input
-                  type="number"
-                  value={packageFormData.creditsAmount}
-                  onChange={(e) => setPackageFormData({ ...packageFormData, creditsAmount: e.target.value })}
-                  placeholder="如：1000"
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>
+                    <div className="flex items-center gap-2">
+                      <Gift className="h-4 w-4 text-pink-400" />
+                      赠送积分
+                    </div>
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={packageFormData.bonusCredits}
+                    onChange={(e) => setPackageFormData({ ...packageFormData, bonusCredits: e.target.value })}
+                    placeholder="如：100"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    购买时额外赠送的积分
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="h-4 w-4" />
+                      排序顺序
+                    </div>
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={packageFormData.sortOrder}
+                    onChange={(e) => setPackageFormData({ ...packageFormData, sortOrder: e.target.value })}
+                    placeholder="如：0"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    数字越小排序越靠前
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>热门标识</Label>
+                  <Select
+                    value={packageFormData.isPopular}
+                    onValueChange={(value) => setPackageFormData({ ...packageFormData, isPopular: value })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value="false">
+                        <span className="flex items-center gap-2">
+                          <X className="h-4 w-4" />
+                          普通
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="true">
+                        <span className="flex items-center gap-2">
+                          <Flame className="h-4 w-4 text-orange-400" />
+                          热门推荐
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>上架状态</Label>
+                  <Select
+                    value={packageFormData.active}
+                    onValueChange={(value) => setPackageFormData({ ...packageFormData, active: value })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value="true">
+                        <span className="flex items-center gap-2">
+                          <Check className="h-4 w-4 text-emerald-400" />
+                          已上架
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="false">
+                        <span className="flex items-center gap-2">
+                          <X className="h-4 w-4 text-rose-400" />
+                          已下架
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
