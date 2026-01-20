@@ -489,7 +489,14 @@ export const adminRouter = router({
     .input(z.object({
       title: z.string().min(1).max(200),
       content: z.string().min(1).max(5000),
-      type: z.enum(['info', 'warning', 'success', 'error']).default('info'),
+      type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
+      announcementType: z.enum(['homepage', 'banner']).default('homepage'),
+      bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      bannerLink: z.string().optional(),
+      icon: z.string().default('Megaphone'),
+      iconColor: z.string().default('text-blue-500'),
+      tag: z.string().optional(),
+      tagColor: z.string().default('blue'),
       priority: z.number().int().min(0).max(100).default(0),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
@@ -501,6 +508,13 @@ export const adminRouter = router({
           title: input.title,
           content: input.content,
           type: input.type,
+          announcement_type: input.announcementType,
+          banner_style: input.bannerStyle ?? input.type,
+          banner_link: input.bannerLink,
+          icon: input.icon,
+          icon_color: input.iconColor,
+          tag: input.tag,
+          tag_color: input.tagColor,
           priority: input.priority,
           active: 'true',
           start_date: input.startDate ?? new Date().toISOString(),
@@ -525,7 +539,14 @@ export const adminRouter = router({
       id: z.string().uuid(),
       title: z.string().min(1).max(200).optional(),
       content: z.string().min(1).max(5000).optional(),
-      type: z.enum(['info', 'warning', 'success', 'error']).optional(),
+      type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      announcementType: z.enum(['homepage', 'banner']).optional(),
+      bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
+      bannerLink: z.string().optional(),
+      icon: z.string().optional(),
+      iconColor: z.string().optional(),
+      tag: z.string().optional(),
+      tagColor: z.string().optional(),
       priority: z.number().int().min(0).max(100).optional(),
       active: z.enum(['true', 'false']).optional(),
       startDate: z.string().optional(),
@@ -538,6 +559,13 @@ export const adminRouter = router({
       if (input.title !== undefined) updateData.title = input.title;
       if (input.content !== undefined) updateData.content = input.content;
       if (input.type !== undefined) updateData.type = input.type;
+      if (input.announcementType !== undefined) updateData.announcement_type = input.announcementType;
+      if (input.bannerStyle !== undefined) updateData.banner_style = input.bannerStyle;
+      if (input.bannerLink !== undefined) updateData.banner_link = input.bannerLink;
+      if (input.icon !== undefined) updateData.icon = input.icon;
+      if (input.iconColor !== undefined) updateData.icon_color = input.iconColor;
+      if (input.tag !== undefined) updateData.tag = input.tag;
+      if (input.tagColor !== undefined) updateData.tag_color = input.tagColor;
       if (input.priority !== undefined) updateData.priority = input.priority;
       if (input.active !== undefined) updateData.active = input.active;
       if (input.startDate !== undefined) updateData.start_date = input.startDate;

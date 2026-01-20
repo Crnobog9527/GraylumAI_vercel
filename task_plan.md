@@ -20,13 +20,13 @@
 - Step 6.1: Supabase RLS 策略 ✅ 完成 (2026-01-20)
 - Step 6.2: Admin 权限校验屏障 ✅ 完成 (2026-01-20)
 
-**Phase 7 管理后台功能还原:** 🚧 进行中
+**Phase 7 管理后台功能还原:** ✅ 完成
 - Step 7.1: 功能差异分析 ✅ 完成 (2026-01-20)
 - Step 7.2: 系统设置还原 (35项) ✅ 完成 (2026-01-20)
 - Step 7.3: 会员套餐系统还原 ✅ 完成 (2026-01-20)
 - Step 7.4: 模型管理完善 ✅ 完成 (2026-01-20)
 - Step 7.5: 邀请管理完善 ✅ 完成 (2026-01-20)
-- Step 7.6: 公告管理完善 ⬜ 待执行
+- Step 7.6: 公告管理完善 ✅ 完成 (2026-01-20)
 
 ## Phases
 
@@ -855,41 +855,61 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 | apps/web/src/app/admin/models/page.tsx | 重写 | 完整表单 + 分层定价 UI |
 | supabase/migrations/20240122_update_ai_models_table.sql | 新增 | 数据库迁移 + RLS 策略 |
 
-### Step 7.5: 邀请码管理完善 ⬜ 待执行
+### Step 7.5: 邀请码管理完善 ✅ 完成
 
 **目标**: 还原邀请记录追踪和分析功能
 
-**需要实现:**
-- [ ] 创建 invitation_records 数据库表
-- [ ] 更新 invitation tRPC router (记录追踪)
-- [ ] 添加 Recharts 图表组件
-- [ ] 重写 admin/invitations/page.tsx
+**已实现:**
+- [x] 创建 invitation_records 数据库表
+- [x] 更新 invitation tRPC router (记录追踪)
+- [x] 添加 Recharts 图表组件
+- [x] 重写 admin/invitations/page.tsx
 
 **邀请记录字段:**
 - inviter_id, invitee_id
 - inviter_email, invitee_email
 - status (pending/registered/rewarded/rejected)
 - risk_level, block_reason
-- inviter_reward
+- inviter_reward, invitee_reward
+- ip_address, user_agent
+- created_at, rewarded_at
 
-### Step 7.6: 公告管理完善 ⬜ 待执行
+**新增/修改文件:**
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| packages/db/schema.ts | 修改 | 新增 invitationRecords 表定义 |
+| packages/api/src/routers/invitation.ts | 修改 | 新增记录查询/统计/更新端点 |
+| apps/web/src/app/admin/invitations/page.tsx | 重写 | 6 卡片 + 趋势图 + 风险图 + 记录表 |
+| apps/web/package.json | 修改 | 新增 recharts 依赖 |
+| supabase/migrations/20240123_create_invitation_records_table.sql | 新增 | 数据库迁移 + RLS 策略 |
 
-**目标**: 还原精选模块管理功能
+### Step 7.6: 公告管理完善 ✅ 完成
 
-**需要实现:**
-- [ ] 创建 featured_modules 数据库表
-- [ ] 更新 admin tRPC router (精选模块 CRUD)
-- [ ] 重写 admin/announcements/page.tsx (多 Tab)
+**目标**: 还原公告横幅支持和增强字段
 
-**精选模块字段:**
-- title, description
-- icon, icon_color
-- image_url
-- link_url, link_module_id
-- badge_type, badge_text
-- card_style, banner_style
-- credits_display
-- sort_order, active
+**已实现:**
+- [x] 扩展 announcements 表 (添加横幅支持)
+- [x] 更新 admin tRPC router (新增字段支持)
+- [x] 创建数据库迁移
+
+**新增公告字段:**
+- announcement_type (homepage/banner) - 公告类型
+- banner_style (info/warning/success/error/promo/announcement) - 横幅样式
+- banner_link - 横幅链接
+- icon, icon_color - 图标和颜色
+- tag, tag_color - 标签和颜色
+
+**新增/修改文件:**
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| packages/db/schema.ts | 修改 | 扩展 announcements 表字段 |
+| packages/api/src/routers/admin.ts | 修改 | 公告端点支持新字段 |
+| supabase/migrations/20240124_update_announcements_table.sql | 新增 | 数据库迁移 + 索引 |
+
+**后续可选:**
+- 精选模块管理 (需要新表 featured_modules)
+- 首页引导设置
+- 聊天页面设置
 
 ---
 

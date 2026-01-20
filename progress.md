@@ -120,7 +120,27 @@
 - `apps/web/package.json` - 添加 recharts 依赖
 - `supabase/migrations/20240123_create_invitation_records_table.sql` - 新增迁移
 
-#### 7.6 公告管理完善 ⬜ 待执行
+#### 7.6 公告管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- announcements 表新增字段: announcement_type (homepage/banner), banner_style, banner_link, icon, iconColor, tag, tagColor
+- tRPC 端点更新: createAnnouncement, updateAnnouncement 支持新字段
+- 支持 6 种公告类型: info, warning, success, error, promo, announcement
+- 首页公告和横幅公告分类
+
+**修改文件:**
+- `packages/db/schema.ts` - 扩展 announcements 表字段
+- `packages/api/src/routers/admin.ts` - 更新 CRUD 端点支持新字段
+- `supabase/migrations/20240124_update_announcements_table.sql` - 新增迁移
+
+**待实现 (未来步骤):**
+- Featured Modules (置顶模块) - 需要新建 featured_modules 表和完整 CRUD
+- 首页引导设置 (home_guide_button_module_id)
+- 聊天页面设置 (chat_billing_hint, chat_show_model_selector)
+
+---
+
+### Phase 7 完成摘要
 - `packages/api/src/routers/model.ts` - 重写，新增 4 个端点
 - `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
 - `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
