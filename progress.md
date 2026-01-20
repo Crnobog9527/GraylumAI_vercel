@@ -35,11 +35,40 @@
 ## Session: 2026-01-20 (续)
 
 ### Current Status
-- **Phase:** Phase 4 Step 4.9 剩余业务组件还原 🚧 进行中
-- **Previous:** Step 4.8 补充 Shadcn/ui 组件库 ✅ 完成
+- **Phase:** Step 5.0 组件-页面关联集成 🚧 进行中
+- **Previous:** Step 4.9 剩余业务组件还原 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
-- **整体完成率:** 90% (72/80 组件)
+- **UI 组件完成率:** 100% (73/73 组件)
+- **关联集成进度:** 0% (待开始)
+
+---
+
+### Step 5.0 组件-页面关联集成 🚧 进行中
+
+**目标**: 将已复刻的 UI 组件与路由、状态管理、数据层完整对接
+
+#### 关联状态分析 (2026-01-20)
+
+| 分类 | 问题描述 | 状态 |
+|------|----------|------|
+| 🔴 路由关联 | AppHeader 下拉菜单无导航、ProfileSidebar 登出未实现 | ⬜ 待修复 |
+| 🟡 全局状态 | 无 Zustand，组件间状态隔离 | ⬜ 待创建 |
+| 🟡 数据流 | ChatPage/ProfilePage/MarketplacePage 使用 mock 或 TODO | ⬜ 待对接 |
+| 🟠 交互反馈 | ChatSidebar 删除/重命名是 TODO | ⬜ 待完成 |
+
+#### 执行阶段
+
+| 阶段 | 内容 | 优先级 | 状态 |
+|------|------|--------|------|
+| Phase 5.1 | 路由关联修复 | P0 Critical | ⬜ |
+| Phase 5.2 | 全局状态管理 (Zustand) | P1 Important | ⬜ |
+| Phase 5.3 | 数据流关联 (tRPC) | P1 Important | ⬜ |
+| Phase 5.4 | 交互反馈完善 | P2 Medium | ⬜ |
+
+---
+
+### Step 4.9 剩余业务组件还原 ✅ 完成
 
 ### Step 4.8 Shadcn/ui 组件补充进度
 

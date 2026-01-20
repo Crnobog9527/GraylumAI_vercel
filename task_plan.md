@@ -620,6 +620,101 @@
 
 ---
 
+### Step 5.0: 组件-页面关联集成 🚧 进行中
+
+**目标**: 将已复刻的 UI 组件与路由、状态管理、数据层完整对接，实现完整的交互功能
+
+---
+
+#### 关联状态分析报告 (2026-01-20)
+
+| 分类 | 问题数 | 严重程度 | 状态 |
+|------|--------|----------|------|
+| 路由关联 | 3 | 🔴 Critical | ⬜ 待修复 |
+| 全局状态 | 1 | 🟡 Important | ⬜ 待创建 |
+| 数据流关联 | 4 | 🟡 Important | ⬜ 待修复 |
+| 交互反馈 | 3 | 🟠 Medium | ⬜ 待完成 |
+
+---
+
+#### Phase 5.1: 路由关联修复 (P0 Critical)
+
+**问题清单:**
+
+| 组件 | 问题 | 修复方案 | 状态 |
+|------|------|----------|------|
+| AppHeader 下拉菜单 | 4个菜单项无导航功能 | 添加 `<Link>` 或 `onClick` + `useRouter` | ⬜ |
+| ProfileSidebar | 导入 `useRouter` 但未使用 | 实现侧边栏项目点击跳转 | ⬜ |
+| ProfileSidebar 登出 | TODO: 未实现登出逻辑 | 调用 Supabase signOut + 跳转 | ⬜ |
+
+**需要修改的文件:**
+- `apps/web/src/components/layout/AppHeader.tsx` (Lines 151-179)
+- `apps/web/src/components/profile/ProfileSidebar.tsx`
+
+---
+
+#### Phase 5.2: 全局状态管理 (P1 Important)
+
+**当前问题:**
+- 无 Zustand 或其他全局状态管理
+- 各组件使用独立的 `useState`，无法跨组件共享状态
+
+**需要创建的 Stores:**
+
+| Store | 用途 | 状态 |
+|-------|------|------|
+| useChatStore | 当前对话 ID、对话列表刷新触发器 | ⬜ |
+| useUserStore | 用户信息、积分余额缓存 | ⬜ (可选) |
+| useUIStore | 侧边栏收起状态 | ⬜ (可选) |
+
+**优先级:** 先实现 `useChatStore`，其他可选
+
+---
+
+#### Phase 5.3: 数据流关联 (P1 Important)
+
+**问题清单:**
+
+| 页面/组件 | 问题 | 修复方案 | 状态 |
+|-----------|------|----------|------|
+| ChatPage | handleSend/handleSaveTitle 是 TODO | 实现 tRPC mutation | ⬜ |
+| ProfilePage | 使用 mock 数据 | 替换为 trpc.user.getProfile | ⬜ |
+| MarketplacePage | 使用 mock modules 数组 | 替换为 trpc.modules.getAll | ⬜ |
+| ChatInterface | 使用 refetch() | 改用 utils.invalidate() 模式 | ⬜ |
+
+**需要修改的文件:**
+- `apps/web/src/app/chat/page.tsx` (Lines 23-45)
+- `apps/web/src/app/profile/page.tsx` (Lines 28-40)
+- `apps/web/src/app/marketplace/page.tsx` (Lines 27-100)
+- `apps/web/src/components/chat/ChatInterface.tsx` (Line 156)
+
+---
+
+#### Phase 5.4: 交互反馈完善 (P2 Medium)
+
+**问题清单:**
+
+| 组件 | 功能 | 问题 | 修复方案 | 状态 |
+|------|------|------|----------|------|
+| ChatSidebar | 删除对话 | TODO 未实现 | 实现 delete mutation + invalidate | ⬜ |
+| ChatSidebar | 重命名对话 | TODO 未实现 | 实现 rename mutation + 弹窗 | ⬜ |
+| ChatHeader | 保存标题 | TODO 未实现 | 实现 updateTitle mutation | ⬜ |
+
+**需要修改的文件:**
+- `apps/web/src/components/chat/ChatSidebar.tsx` (Lines 197-201)
+- `apps/web/src/components/chat/ChatHeader.tsx`
+
+---
+
+#### 执行顺序
+
+```
+Phase 5.1 (P0) → Phase 5.2 (P1) → Phase 5.3 (P1) → Phase 5.4 (P2)
+   路由修复      全局状态        数据流对接       交互反馈
+```
+
+---
+
 ### Step 4.6: 细节打磨与最终验证 ✅ 已完成
 
 #### 验收清单
