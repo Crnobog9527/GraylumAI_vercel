@@ -84,10 +84,29 @@ const providerColors: Record<string, string> = {
   builtin: 'bg-cyan-500/20 text-cyan-400',
 };
 
-const initialFormData = {
+type ProviderType = 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
+
+interface FormData {
+  name: string;
+  modelId: string;
+  provider: ProviderType;
+  apiKey: string;
+  apiEndpoint: string;
+  description: string;
+  maxTokens: number;
+  inputLimit: number;
+  enableWebSearch: boolean;
+  inputTokenCost: number;
+  outputTokenCost: number;
+  inputTokenCostAbove200k: number;
+  outputTokenCostAbove200k: number;
+  webSearchCost: number;
+}
+
+const initialFormData: FormData = {
   name: '',
   modelId: '',
-  provider: 'anthropic' as const,
+  provider: 'anthropic',
   apiKey: '',
   apiEndpoint: '',
   description: '',
