@@ -102,6 +102,29 @@
 - `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
 - `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
 
+#### 7.5 邀请管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- invitation_records 数据库表 (含 RLS 策略)
+- tRPC 端点: getAllInvitationRecords, getInvitationStats, updateInvitationRecord, getMyInvitationRecords
+- 6 项统计卡片 (总邀请、已发放、待处理、已拒绝、高风险、发放积分)
+- 7 天邀请趋势图表 (recharts LineChart)
+- 风险分布图表 (recharts BarChart)
+- 邀请记录表格 (搜索 + 状态筛选)
+- 添加 recharts 依赖
+
+**修改文件:**
+- `packages/db/schema.ts` - 新增 invitationRecords 表
+- `packages/api/src/routers/invitation.ts` - 新增 4 个邀请记录端点
+- `apps/web/src/app/admin/invitations/page.tsx` - 完全重写 (379行)
+- `apps/web/package.json` - 添加 recharts 依赖
+- `supabase/migrations/20240123_create_invitation_records_table.sql` - 新增迁移
+
+#### 7.6 公告管理完善 ⬜ 待执行
+- `packages/api/src/routers/model.ts` - 重写，新增 4 个端点
+- `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
+- `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
+
 #### 7.5+ 还原计划 (待执行)
 
 | 优先级 | 模块 | 任务 | 状态 |

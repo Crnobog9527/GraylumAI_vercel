@@ -129,6 +129,26 @@ export const prompts = pgTable('prompts', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// --- 邀请记录 ---
+
+export const invitationRecords = pgTable('invitation_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  inviteCode: text('invite_code').notNull(),
+  inviterId: uuid('inviter_id').references(() => profiles.id, { onDelete: 'set null' }),
+  inviterEmail: text('inviter_email'),
+  inviteeId: uuid('invitee_id').references(() => profiles.id, { onDelete: 'set null' }),
+  inviteeEmail: text('invitee_email'),
+  status: text('status', { enum: ['pending', 'registered', 'rewarded', 'rejected'] }).default('pending').notNull(),
+  riskLevel: text('risk_level', { enum: ['low', 'medium', 'high'] }).default('low').notNull(),
+  blockReason: text('block_reason'),
+  inviterReward: integer('inviter_reward').default(0).notNull(),
+  inviteeReward: integer('invitee_reward').default(0).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  rewardedAt: timestamp('rewarded_at', { withTimezone: true }),
+});
+
 // --- 会员系统 ---
 
 export const membershipPlans = pgTable('membership_plans', {
