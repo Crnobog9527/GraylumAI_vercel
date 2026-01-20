@@ -387,7 +387,7 @@
 
 **目标**: 按优先级分阶段补充所有常用 Shadcn/ui 组件，构建完整的 UI 组件库
 
-**当前状态**: 已有 20 个组件 (14 + 6)，待补充 15 个组件
+**当前状态**: 已有 29 个组件 (14 + 6 + 9)，待补充 6 个组件
 
 ---
 
@@ -408,25 +408,21 @@
 
 ---
 
-#### Phase B: 中频使用组件 (9个) - 按需添加
+#### Phase B: 中频使用组件 (9个) ✅ 已完成
 
 | 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
 |------|------|------|--------|------|------|
-| B1 | **Alert** | alert.tsx | 无依赖 | 警告/提示框 | ⬜ |
-| B2 | **Alert Dialog** | alert-dialog.tsx | `@radix-ui/react-alert-dialog` | 危险操作确认 | ⬜ |
-| B3 | **Separator** | separator.tsx | `@radix-ui/react-separator` | 分隔线 | ⬜ |
-| B4 | **Slider** | slider.tsx | `@radix-ui/react-slider` | 数值滑动条 | ⬜ |
-| B5 | **Radio Group** | radio-group.tsx | `@radix-ui/react-radio-group` | 单选按钮组 | ⬜ |
-| B6 | **Popover** | popover.tsx | `@radix-ui/react-popover` | 弹出框 | ⬜ |
-| B7 | **Aspect Ratio** | aspect-ratio.tsx | `@radix-ui/react-aspect-ratio` | 固定宽高比容器 | ⬜ |
-| B8 | **Toggle** | toggle.tsx | `@radix-ui/react-toggle` | 切换按钮 | ⬜ |
-| B9 | **Toggle Group** | toggle-group.tsx | `@radix-ui/react-toggle-group` | 切换按钮组 | ⬜ |
+| B1 | **Alert** | alert.tsx | 无依赖 | 警告/提示框 | ✅ |
+| B2 | **Alert Dialog** | alert-dialog.tsx | `@radix-ui/react-alert-dialog` | 危险操作确认 | ✅ |
+| B3 | **Separator** | separator.tsx | `@radix-ui/react-separator` | 分隔线 | ✅ |
+| B4 | **Slider** | slider.tsx | `@radix-ui/react-slider` | 数值滑动条 | ✅ |
+| B5 | **Radio Group** | radio-group.tsx | `@radix-ui/react-radio-group` | 单选按钮组 | ✅ |
+| B6 | **Popover** | popover.tsx | `@radix-ui/react-popover` | 弹出框 | ✅ |
+| B7 | **Aspect Ratio** | aspect-ratio.tsx | `@radix-ui/react-aspect-ratio` | 固定宽高比容器 | ✅ |
+| B8 | **Toggle** | toggle.tsx | `@radix-ui/react-toggle` | 切换按钮 | ✅ |
+| B9 | **Toggle Group** | toggle-group.tsx | `@radix-ui/react-toggle-group` | 切换按钮组 | ✅ |
 
-**预计时间**: 2-3 小时
-**安装命令**:
-```bash
-pnpm add @radix-ui/react-alert-dialog @radix-ui/react-separator @radix-ui/react-slider @radix-ui/react-radio-group @radix-ui/react-popover @radix-ui/react-aspect-ratio @radix-ui/react-toggle @radix-ui/react-toggle-group
-```
+**已安装依赖**: @radix-ui/react-alert-dialog, @radix-ui/react-separator, @radix-ui/react-slider, @radix-ui/react-radio-group, @radix-ui/react-popover, @radix-ui/react-aspect-ratio, @radix-ui/react-toggle, @radix-ui/react-toggle-group
 
 ---
 

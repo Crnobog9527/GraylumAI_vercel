@@ -44,16 +44,16 @@
 
 **目标**: 按优先级分 3 个阶段补充 21 个 Shadcn/ui 组件
 
-**当前状态**: 已有 20 个 (14 原有 + 6 新增) → 目标 35 个
+**当前状态**: 已有 29 个 (14 原有 + 6 Phase A + 9 Phase B) → 目标 35 个
 
 #### 执行计划总览
 
 | 阶段 | 优先级 | 组件数 | 依赖包 | 状态 |
 |------|--------|--------|--------|------|
 | Phase A | 🔴 高频 | 6 | 5 | ✅ 完成 |
-| Phase B | 🟡 中频 | 9 | 8 | ⬜ 待开始 |
+| Phase B | 🟡 中频 | 9 | 8 | ✅ 完成 |
 | Phase C | 🟢 低频 | 6 | 6 | ⬜ 待开始 |
-| **总计** | - | **21** | **19** | **6/21** |
+| **总计** | - | **21** | **19** | **15/21** |
 
 ---
 
@@ -74,19 +74,21 @@
 
 ---
 
-#### Phase B: 中频使用组件 (按需添加)
+#### Phase B: 中频使用组件 ✅ 已完成
 
-| 组件 | 用途 | 状态 |
-|------|------|------|
-| Alert | 警告/提示框 | ⬜ |
-| Alert Dialog | 危险操作确认 | ⬜ |
-| Separator | 分隔线 | ⬜ |
-| Slider | 数值滑动条 | ⬜ |
-| Radio Group | 单选按钮组 | ⬜ |
-| Popover | 弹出框 | ⬜ |
-| Aspect Ratio | 固定宽高比容器 | ⬜ |
-| Toggle | 切换按钮 | ⬜ |
-| Toggle Group | 切换按钮组 | ⬜ |
+| 组件 | 文件 | 用途 | 状态 |
+|------|------|------|------|
+| Alert | alert.tsx | 警告/提示框 | ✅ |
+| Alert Dialog | alert-dialog.tsx | 危险操作确认 | ✅ |
+| Separator | separator.tsx | 分隔线 | ✅ |
+| Slider | slider.tsx | 数值滑动条 | ✅ |
+| Radio Group | radio-group.tsx | 单选按钮组 | ✅ |
+| Popover | popover.tsx | 弹出框 | ✅ |
+| Aspect Ratio | aspect-ratio.tsx | 固定宽高比容器 | ✅ |
+| Toggle | toggle.tsx | 切换按钮 | ✅ |
+| Toggle Group | toggle-group.tsx | 切换按钮组 | ✅ |
+
+**已安装依赖**: @radix-ui/react-alert-dialog, @radix-ui/react-separator, @radix-ui/react-slider, @radix-ui/react-radio-group, @radix-ui/react-popover, @radix-ui/react-aspect-ratio, @radix-ui/react-toggle, @radix-ui/react-toggle-group
 
 ---
 
