@@ -20,7 +20,13 @@
 - Step 6.1: Supabase RLS 策略 ✅ 完成 (2026-01-20)
 - Step 6.2: Admin 权限校验屏障 ✅ 完成 (2026-01-20)
 
-**🎉 项目迁移全部完成，已进入可发布状态！**
+**Phase 7 管理后台功能还原:** 🚧 进行中
+- Step 7.1: 功能差异分析 ✅ 完成 (2026-01-20)
+- Step 7.2: 系统设置还原 (64项) ⬜ 待执行
+- Step 7.3: 会员套餐系统还原 ⬜ 待执行
+- Step 7.4: 模型管理完善 ⬜ 待执行
+- Step 7.5: 邀请码管理完善 ⬜ 待执行
+- Step 7.6: 公告管理完善 ⬜ 待执行
 
 ## Phases
 
@@ -740,6 +746,125 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ### Step 6.2: Admin 权限校验屏障 ✅ 完成
 
 **目标**: 建立 tRPC 中间件安全屏障，非管理员访问受保护资源时跳转到专用错误页面
+
+---
+
+## Phase 7: 管理后台功能还原 🚧 进行中
+
+> **参考项目**: `/home/user/graylumAi-backup-ref/`
+> **目标**: 还原旧项目管理后台的所有功能，确保与原版功能完全一致
+
+### Step 7.1: 功能差异分析 ✅ 完成
+
+**代码量对比:**
+| 页面 | 旧项目 (行数) | 新项目 (行数) | 差异 |
+|------|---------------|---------------|------|
+| Announcements | 1117 | 567 | -550 |
+| Models | 740 | 383 | -357 |
+| Packages | 767 | 411 | -356 |
+| Invitations | 352 | 191 | -161 |
+| Settings | 366 | 218 | -148 |
+| **总计** | **5784** | **4270** | **-1514** |
+
+**关键缺失功能清单:**
+1. 会员套餐系统 (完全缺失)
+2. 系统设置 64项 → 6项 (90%缩减)
+3. 模型管理 CRUD + 测试功能
+4. 邀请码记录追踪 + 风险评估
+5. 精选模块管理
+
+### Step 7.2: 系统设置还原 ⬜ 待执行
+
+**目标**: 还原完整的 64 项系统设置
+
+**缺失的设置分类:**
+| 分类 | 设置数量 | 示例 |
+|------|----------|------|
+| 计费设置 | 5 | token成本、首购奖励 |
+| 功能开关 | 6 | 智能路由、智能搜索 |
+| 限制设置 | 3 | 最大消息数、字符限制 |
+| 签到奖励 | 6 | 5天周期、月度奖励 |
+| 推荐系统 | 10 | 奖励、返利、IP限制 |
+
+**实现任务:**
+- [ ] 更新 Drizzle schema (system_settings 表)
+- [ ] 更新 settings tRPC router (完整 CRUD)
+- [ ] 重写 admin/settings/page.tsx (6个分类 Tab)
+- [ ] 添加设置验证逻辑
+
+### Step 7.3: 会员套餐系统还原 ⬜ 待执行
+
+**目标**: 还原完整的会员套餐管理
+
+**需要实现:**
+- [ ] 创建 membership_plans 数据库表
+- [ ] 创建 memberships tRPC router
+- [ ] 更新 admin/packages/page.tsx (双 Tab: 积分包 + 会员套餐)
+
+**会员套餐字段:**
+- name, level (free/pro/gold)
+- monthly_price, yearly_price
+- monthly_credits, yearly_credits
+- monthly_bonus_credits
+- package_discount (百分比)
+- features (JSON 数组)
+
+### Step 7.4: 模型管理完善 ⬜ 待执行
+
+**目标**: 还原完整的模型 CRUD 和测试功能
+
+**需要实现:**
+- [ ] 添加 createModel, deleteModel tRPC mutations
+- [ ] 添加 testModel tRPC mutation
+- [ ] 更新模型表字段 (分层定价)
+- [ ] 重写 admin/models/page.tsx (完整表单 + 测试)
+
+**模型字段更新:**
+- input_token_cost (基础)
+- output_token_cost (基础)
+- input_token_cost_above_200k (大量)
+- output_token_cost_above_200k (大量)
+- web_search_cost
+- max_tokens
+- input_limit
+
+### Step 7.5: 邀请码管理完善 ⬜ 待执行
+
+**目标**: 还原邀请记录追踪和分析功能
+
+**需要实现:**
+- [ ] 创建 invitation_records 数据库表
+- [ ] 更新 invitation tRPC router (记录追踪)
+- [ ] 添加 Recharts 图表组件
+- [ ] 重写 admin/invitations/page.tsx
+
+**邀请记录字段:**
+- inviter_id, invitee_id
+- inviter_email, invitee_email
+- status (pending/registered/rewarded/rejected)
+- risk_level, block_reason
+- inviter_reward
+
+### Step 7.6: 公告管理完善 ⬜ 待执行
+
+**目标**: 还原精选模块管理功能
+
+**需要实现:**
+- [ ] 创建 featured_modules 数据库表
+- [ ] 更新 admin tRPC router (精选模块 CRUD)
+- [ ] 重写 admin/announcements/page.tsx (多 Tab)
+
+**精选模块字段:**
+- title, description
+- icon, icon_color
+- image_url
+- link_url, link_module_id
+- badge_type, badge_text
+- card_style, banner_style
+- credits_display
+- sort_order, active
+
+---
 
 ---
 

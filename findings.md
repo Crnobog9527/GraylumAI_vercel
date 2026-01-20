@@ -516,11 +516,113 @@ CREATE TABLE prompts (
 
 ---
 
+---
+
+## 管理后台功能差异分析 (2026-01-20)
+
+### 代码量对比
+
+| 页面 | 旧项目 (行数) | 新项目 (行数) | 差异 | 状态 |
+|------|---------------|---------------|------|------|
+| Dashboard | 210 | 215 | +5 | ✅ 基本一致 |
+| Announcements | 1117 | 567 | **-550** | ⚠️ 功能缺失 |
+| Models | 740 | 383 | **-357** | ⚠️ 功能缺失 |
+| Packages | 767 | 411 | **-356** | ⚠️ 功能缺失 |
+| Invitations | 352 | 191 | **-161** | ⚠️ 功能缺失 |
+| Settings | 366 | 218 | **-148** | ⚠️ 功能缺失 |
+| Finance | 360 | 378 | +18 | ✅ 基本一致 |
+| Performance | 57 | 366 | +309 | ✅ 已增强 |
+| Prompts | 590 | 561 | -29 | ✅ 基本一致 |
+| Tickets | 493 | 383 | -110 | ⚠️ 功能缺失 |
+| Transactions | 286 | 303 | +17 | ✅ 基本一致 |
+| Users | 302 | 294 | -8 | ✅ 基本一致 |
+| **总计** | **5784** | **4270** | **-1514** | - |
+
+### 关键功能缺失详情
+
+#### 1. 公告管理 (AdminAnnouncements)
+**缺失功能：**
+- 精选模块管理 (FeaturedModule)
+- 首页指引配置 (HomepageGuide)
+- 横幅样式选项 (6种样式)
+- 图标选择器 (lucide 图标集)
+- 模块链接配置 (link_module_id, link_url)
+- 卡片样式配置 (card_style)
+- 徽章配置 (badge_type, badge_text)
+
+#### 2. 模型管理 (AdminModels)
+**缺失功能：**
+- Token 成本分层定价 (≤200K vs >200K)
+- Web 搜索成本配置
+- 模型测试功能
+- 完整 CRUD 操作 (目前仅配置更新)
+- 最大 Token 限制配置
+- 输入限制配置
+
+#### 3. 积分包管理 (AdminPackages)
+**缺失功能：**
+- **会员套餐系统完全缺失**
+  - 会员等级 (free, pro, gold)
+  - 月付/年付定价
+  - 会员专属积分赠送
+  - 会员购买折扣
+  - 会员特权列表
+- 人气标签 (is_popular)
+- 额外赠送积分 (bonus_credits)
+- 排序管理
+
+#### 4. 邀请码管理 (AdminInvitations)
+**缺失功能：**
+- 邀请记录追踪 (inviter → invitee)
+- 邀请人/被邀请人邮箱
+- 奖励金额统计 (inviter_reward)
+- 风险评估系统 (risk_level, block_reason)
+- 7天趋势图表
+- 风险分布图表
+- 状态过滤和搜索
+
+#### 5. 系统设置 (AdminSettings)
+**缺失功能 (64项 → 6项)：**
+
+| 分类 | 缺失设置项 |
+|------|-----------|
+| 计费设置 | token 成本、首购奖励、价格等 (5项) |
+| 功能开关 | 智能路由、智能搜索、免费层级等 (6项) |
+| 限制设置 | 最大消息数、输入字符限制等 (3项) |
+| 签到奖励 | 5天周期奖励、月度奖励等 (6项) |
+| 推荐系统 | 奖励、返利、绑定、限制等 (10项) |
+| 其他 | 支持邮箱、维护模式等 |
+
+### 架构差异
+
+| 方面 | 旧项目 (Base44) | 新项目 (Next.js/tRPC) |
+|------|-----------------|----------------------|
+| API | REST via base44.entities | tRPC procedures |
+| 权限检查 | 组件内检查 | tRPC resolver 中检查 |
+| 数据操作 | 完整 CRUD | 部分 CRUD |
+| 状态管理 | React Query + state | tRPC useQuery hooks |
+| 图表库 | Recharts | 未使用 |
+| 国际化 | LanguageProvider | 硬编码中文 |
+
+### 还原优先级
+
+| 优先级 | 模块 | 原因 |
+|--------|------|------|
+| P0 | Settings - 计费/功能开关 | 影响核心业务逻辑 |
+| P0 | Packages - 会员系统 | 影响盈利模式 |
+| P1 | Models - 完整 CRUD | 影响 AI 调用配置 |
+| P1 | Invitations - 记录追踪 | 影响用户增长分析 |
+| P2 | Announcements - 精选模块 | 影响首页展示 |
+| P2 | Settings - 签到/推荐 | 增长运营功能 |
+
+---
+
 ## Resources
 - [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
 - [tRPC React Query Setup](https://trpc.io/docs/client/react)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - **UI 复刻规则**: `movetonew/UIfix_rule.md`
+- **旧项目备份**: `/home/user/graylumAi-backup-ref/`
 
 ## Environment Variables Required
 ```
