@@ -127,6 +127,15 @@ export const prompts = pgTable('prompts', {
   name: text('name').notNull(),
   description: text('description'),
   content: text('content').notNull(),
+  // 新增字段
+  systemPrompt: text('system_prompt'),
+  userPromptTemplate: text('user_prompt_template'),
+  modelId: uuid('model_id').references(() => aiModels.id, { onDelete: 'set null' }),
+  platform: text('platform', { enum: ['all', 'web', 'mobile', 'desktop', 'api'] }).default('all'),
+  features: text('features'), // JSON string array
+  userQuestions: text('user_questions'), // JSON string array
+  icon: text('icon').default('Wand2'),
+  // 原有字段
   category: text('category', { enum: ['general', 'assistant', 'creative', 'coding', 'translation', 'analysis'] }).default('general').notNull(),
   isSystem: text('is_system').default('false').notNull(),
   active: text('active').default('true').notNull(),

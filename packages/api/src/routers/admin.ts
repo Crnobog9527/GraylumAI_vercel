@@ -700,6 +700,15 @@ export const adminRouter = router({
       name: z.string().min(1).max(100),
       description: z.string().max(500).optional(),
       content: z.string().min(1).max(10000),
+      // New fields
+      systemPrompt: z.string().max(10000).optional(),
+      userPromptTemplate: z.string().max(10000).optional(),
+      modelId: z.string().uuid().optional(),
+      platform: z.enum(['all', 'web', 'mobile', 'desktop', 'api']).default('all'),
+      features: z.array(z.string()).optional(),
+      userQuestions: z.array(z.string()).optional(),
+      icon: z.string().max(50).default('Wand2'),
+      // Original fields
       category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).default('general'),
       sortOrder: z.number().int().min(0).max(1000).default(0),
     }))
@@ -710,6 +719,13 @@ export const adminRouter = router({
           name: input.name,
           description: input.description ?? null,
           content: input.content,
+          system_prompt: input.systemPrompt ?? null,
+          user_prompt_template: input.userPromptTemplate ?? null,
+          model_id: input.modelId ?? null,
+          platform: input.platform,
+          features: input.features ? JSON.stringify(input.features) : null,
+          user_questions: input.userQuestions ? JSON.stringify(input.userQuestions) : null,
+          icon: input.icon,
           category: input.category,
           sort_order: input.sortOrder,
           is_system: 'false',
@@ -735,6 +751,15 @@ export const adminRouter = router({
       name: z.string().min(1).max(100).optional(),
       description: z.string().max(500).nullable().optional(),
       content: z.string().min(1).max(10000).optional(),
+      // New fields
+      systemPrompt: z.string().max(10000).nullable().optional(),
+      userPromptTemplate: z.string().max(10000).nullable().optional(),
+      modelId: z.string().uuid().nullable().optional(),
+      platform: z.enum(['all', 'web', 'mobile', 'desktop', 'api']).optional(),
+      features: z.array(z.string()).nullable().optional(),
+      userQuestions: z.array(z.string()).nullable().optional(),
+      icon: z.string().max(50).optional(),
+      // Original fields
       category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).optional(),
       sortOrder: z.number().int().min(0).max(1000).optional(),
       active: z.enum(['true', 'false']).optional(),
@@ -746,6 +771,13 @@ export const adminRouter = router({
       if (input.name !== undefined) updateData.name = input.name;
       if (input.description !== undefined) updateData.description = input.description;
       if (input.content !== undefined) updateData.content = input.content;
+      if (input.systemPrompt !== undefined) updateData.system_prompt = input.systemPrompt;
+      if (input.userPromptTemplate !== undefined) updateData.user_prompt_template = input.userPromptTemplate;
+      if (input.modelId !== undefined) updateData.model_id = input.modelId;
+      if (input.platform !== undefined) updateData.platform = input.platform;
+      if (input.features !== undefined) updateData.features = input.features ? JSON.stringify(input.features) : null;
+      if (input.userQuestions !== undefined) updateData.user_questions = input.userQuestions ? JSON.stringify(input.userQuestions) : null;
+      if (input.icon !== undefined) updateData.icon = input.icon;
       if (input.category !== undefined) updateData.category = input.category;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
       if (input.active !== undefined) updateData.active = input.active;
