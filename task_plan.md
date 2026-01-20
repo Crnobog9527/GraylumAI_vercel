@@ -383,6 +383,141 @@
 
 ---
 
+### Step 4.8: 补充 Shadcn/ui 组件库 ⬜ 待开始
+
+**目标**: 按优先级分阶段补充所有常用 Shadcn/ui 组件，构建完整的 UI 组件库
+
+**当前状态**: 已有 14 个组件，待补充 21 个组件
+
+---
+
+#### Phase A: 高频使用组件 (6个) - 必须添加
+
+| 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
+|------|------|------|--------|------|------|
+| A1 | **Toast (Sonner)** | sonner.tsx | `sonner` | 操作成功/失败提示 | ⬜ |
+| A2 | **Tooltip** | tooltip.tsx | `@radix-ui/react-tooltip` | 图标按钮悬停说明 | ⬜ |
+| A3 | **Checkbox** | checkbox.tsx | `@radix-ui/react-checkbox` | 表单复选框 | ⬜ |
+| A4 | **Switch** | switch.tsx | `@radix-ui/react-switch` | 设置开关切换 | ⬜ |
+| A5 | **Progress** | progress.tsx | `@radix-ui/react-progress` | 上传/处理进度 | ⬜ |
+| A6 | **Skeleton** | skeleton.tsx | 无依赖 | 骨架屏加载 | ⬜ |
+
+**预计时间**: 1-2 小时
+**安装命令**:
+```bash
+pnpm add sonner @radix-ui/react-tooltip @radix-ui/react-checkbox @radix-ui/react-switch @radix-ui/react-progress
+```
+
+---
+
+#### Phase B: 中频使用组件 (9个) - 按需添加
+
+| 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
+|------|------|------|--------|------|------|
+| B1 | **Alert** | alert.tsx | 无依赖 | 警告/提示框 | ⬜ |
+| B2 | **Alert Dialog** | alert-dialog.tsx | `@radix-ui/react-alert-dialog` | 危险操作确认 | ⬜ |
+| B3 | **Separator** | separator.tsx | `@radix-ui/react-separator` | 分隔线 | ⬜ |
+| B4 | **Slider** | slider.tsx | `@radix-ui/react-slider` | 数值滑动条 | ⬜ |
+| B5 | **Radio Group** | radio-group.tsx | `@radix-ui/react-radio-group` | 单选按钮组 | ⬜ |
+| B6 | **Popover** | popover.tsx | `@radix-ui/react-popover` | 弹出框 | ⬜ |
+| B7 | **Aspect Ratio** | aspect-ratio.tsx | `@radix-ui/react-aspect-ratio` | 固定宽高比容器 | ⬜ |
+| B8 | **Toggle** | toggle.tsx | `@radix-ui/react-toggle` | 切换按钮 | ⬜ |
+| B9 | **Toggle Group** | toggle-group.tsx | `@radix-ui/react-toggle-group` | 切换按钮组 | ⬜ |
+
+**预计时间**: 2-3 小时
+**安装命令**:
+```bash
+pnpm add @radix-ui/react-alert-dialog @radix-ui/react-separator @radix-ui/react-slider @radix-ui/react-radio-group @radix-ui/react-popover @radix-ui/react-aspect-ratio @radix-ui/react-toggle @radix-ui/react-toggle-group
+```
+
+---
+
+#### Phase C: 低频使用组件 (6个) - 可选添加
+
+| 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
+|------|------|------|--------|------|------|
+| C1 | **Accordion** | accordion.tsx | `@radix-ui/react-accordion` | FAQ/折叠面板 | ⬜ |
+| C2 | **Collapsible** | collapsible.tsx | `@radix-ui/react-collapsible` | 可折叠容器 | ⬜ |
+| C3 | **Context Menu** | context-menu.tsx | `@radix-ui/react-context-menu` | 右键菜单 | ⬜ |
+| C4 | **Hover Card** | hover-card.tsx | `@radix-ui/react-hover-card` | 悬停预览卡 | ⬜ |
+| C5 | **Navigation Menu** | navigation-menu.tsx | `@radix-ui/react-navigation-menu` | 导航菜单 | ⬜ |
+| C6 | **Menubar** | menubar.tsx | `@radix-ui/react-menubar` | 顶部菜单栏 | ⬜ |
+
+**预计时间**: 2-3 小时
+**安装命令**:
+```bash
+pnpm add @radix-ui/react-accordion @radix-ui/react-collapsible @radix-ui/react-context-menu @radix-ui/react-hover-card @radix-ui/react-navigation-menu @radix-ui/react-menubar
+```
+
+---
+
+#### 组件完成后文件结构
+
+```
+/components/ui/
+├── 已有 (14个)
+│   ├── avatar.tsx
+│   ├── badge.tsx
+│   ├── button.tsx
+│   ├── card.tsx
+│   ├── dialog.tsx
+│   ├── dropdown-menu.tsx
+│   ├── input.tsx
+│   ├── label.tsx
+│   ├── scroll-area.tsx
+│   ├── select.tsx
+│   ├── sheet.tsx
+│   ├── table.tsx
+│   ├── tabs.tsx
+│   └── textarea.tsx
+│
+├── Phase A - 高频 (6个)
+│   ├── sonner.tsx (Toast)
+│   ├── tooltip.tsx
+│   ├── checkbox.tsx
+│   ├── switch.tsx
+│   ├── progress.tsx
+│   └── skeleton.tsx
+│
+├── Phase B - 中频 (9个)
+│   ├── alert.tsx
+│   ├── alert-dialog.tsx
+│   ├── separator.tsx
+│   ├── slider.tsx
+│   ├── radio-group.tsx
+│   ├── popover.tsx
+│   ├── aspect-ratio.tsx
+│   ├── toggle.tsx
+│   └── toggle-group.tsx
+│
+└── Phase C - 低频 (6个)
+    ├── accordion.tsx
+    ├── collapsible.tsx
+    ├── context-menu.tsx
+    ├── hover-card.tsx
+    ├── navigation-menu.tsx
+    └── menubar.tsx
+```
+
+#### 执行计划
+
+| 阶段 | 组件数 | 依赖安装 | 组件创建 | 验证测试 | 状态 |
+|------|--------|----------|----------|----------|------|
+| Phase A | 6 | 5个包 | 6个文件 | TypeScript + ESLint | ⬜ |
+| Phase B | 9 | 8个包 | 9个文件 | TypeScript + ESLint | ⬜ |
+| Phase C | 6 | 6个包 | 6个文件 | TypeScript + ESLint | ⬜ |
+| **总计** | **21** | **19个包** | **21个文件** | - | - |
+
+#### 验收标准
+
+- [ ] 所有组件 TypeScript 编译通过
+- [ ] 所有组件 ESLint 检查通过
+- [ ] 组件支持深色主题 (使用 CSS 变量)
+- [ ] 组件样式与项目主题一致
+- [ ] 关键组件有使用示例
+
+---
+
 ### Step 4.6: 细节打磨与最终验证 ✅ 已完成
 
 #### 验收清单

@@ -35,12 +35,85 @@
 ## Session: 2026-01-20 (续)
 
 ### Current Status
-- **Phase:** Phase 4 Step 4.7 提取复用组件 ✅ 完成
-- **Goal:** 将 12 个管理后台页面中的重复代码提取为可复用组件
-- **Completed:** 2026-01-20
+- **Phase:** Phase 4 Step 4.8 补充 Shadcn/ui 组件库 ⬜ 待开始
+- **Previous:** Step 4.7 提取复用组件 ✅ 完成
+- **Started:** 2026-01-20
 - **Blocking Issue:** 无
 
-### Step 4.7 提取复用组件完成
+### Step 4.8 Shadcn/ui 组件补充计划
+
+**目标**: 按优先级分 3 个阶段补充 21 个 Shadcn/ui 组件，构建完整 UI 组件库
+
+**当前状态**: 已有 14 个 → 目标 35 个
+
+#### 执行计划总览
+
+| 阶段 | 优先级 | 组件数 | 依赖包 | 状态 |
+|------|--------|--------|--------|------|
+| Phase A | 🔴 高频 | 6 | 5 | ⬜ |
+| Phase B | 🟡 中频 | 9 | 8 | ⬜ |
+| Phase C | 🟢 低频 | 6 | 6 | ⬜ |
+| **总计** | - | **21** | **19** | - |
+
+---
+
+#### Phase A: 高频使用组件 (必须添加)
+
+| 组件 | 用途 | 依赖 | 状态 |
+|------|------|------|------|
+| Toast (Sonner) | 操作成功/失败提示 | sonner | ⬜ |
+| Tooltip | 图标按钮悬停说明 | @radix-ui/react-tooltip | ⬜ |
+| Checkbox | 表单复选框 | @radix-ui/react-checkbox | ⬜ |
+| Switch | 设置开关切换 | @radix-ui/react-switch | ⬜ |
+| Progress | 上传/处理进度 | @radix-ui/react-progress | ⬜ |
+| Skeleton | 骨架屏加载 | 无依赖 | ⬜ |
+
+**安装命令**:
+```bash
+pnpm add sonner @radix-ui/react-tooltip @radix-ui/react-checkbox @radix-ui/react-switch @radix-ui/react-progress
+```
+
+---
+
+#### Phase B: 中频使用组件 (按需添加)
+
+| 组件 | 用途 | 状态 |
+|------|------|------|
+| Alert | 警告/提示框 | ⬜ |
+| Alert Dialog | 危险操作确认 | ⬜ |
+| Separator | 分隔线 | ⬜ |
+| Slider | 数值滑动条 | ⬜ |
+| Radio Group | 单选按钮组 | ⬜ |
+| Popover | 弹出框 | ⬜ |
+| Aspect Ratio | 固定宽高比容器 | ⬜ |
+| Toggle | 切换按钮 | ⬜ |
+| Toggle Group | 切换按钮组 | ⬜ |
+
+---
+
+#### Phase C: 低频使用组件 (可选添加)
+
+| 组件 | 用途 | 状态 |
+|------|------|------|
+| Accordion | FAQ/折叠面板 | ⬜ |
+| Collapsible | 可折叠容器 | ⬜ |
+| Context Menu | 右键菜单 | ⬜ |
+| Hover Card | 悬停预览卡片 | ⬜ |
+| Navigation Menu | 导航菜单 | ⬜ |
+| Menubar | 顶部菜单栏 | ⬜ |
+
+---
+
+#### 验收标准
+
+- [ ] TypeScript 编译通过
+- [ ] ESLint 检查通过
+- [ ] 支持深色主题 (CSS 变量)
+- [ ] 样式与项目主题一致
+
+---
+
+### Step 4.7 提取复用组件 ✅ 完成
 
 **已创建组件:**
 
