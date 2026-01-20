@@ -72,7 +72,7 @@
 ### 管理后台页面进度
 | 页面 | 状态 | 备注 |
 |------|------|------|
-| 仪表盘 `/admin` | ✅ 已完成 | 集成 AdminSidebar + StatsCard |
+| 仪表盘 `/admin` | ✅ 已验证 | Codespaces 测试通过 |
 | 用户管理 `/admin/users` | ⬜ | |
 | 工单管理 `/admin/tickets` | ⬜ | |
 | AI模型管理 `/admin/models` | ⬜ | |
