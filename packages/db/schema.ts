@@ -42,10 +42,23 @@ export const creditTransactions = pgTable('credit_transactions', {
 export const aiModels = pgTable('ai_models', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  provider: text('provider'),
-  endpoint: text('endpoint'),
+  modelId: text('model_id').notNull(),
+  provider: text('provider', { enum: ['anthropic', 'openai', 'google', 'custom', 'builtin'] }).default('anthropic').notNull(),
+  apiKey: text('api_key'),
+  apiEndpoint: text('api_endpoint'),
+  description: text('description'),
+  maxTokens: integer('max_tokens').default(4096).notNull(),
+  inputLimit: integer('input_limit').default(180000).notNull(),
+  enableWebSearch: text('enable_web_search').default('false').notNull(),
+  inputTokenCost: integer('input_token_cost').default(0).notNull(), // Per 1M tokens, in micro-dollars
+  outputTokenCost: integer('output_token_cost').default(0).notNull(),
+  inputTokenCostAbove200k: integer('input_token_cost_above_200k').default(0).notNull(),
+  outputTokenCostAbove200k: integer('output_token_cost_above_200k').default(0).notNull(),
+  webSearchCost: integer('web_search_cost').default(0).notNull(), // Per 1K searches
+  isActive: text('is_active').default('true').notNull(),
   config: jsonb('config'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const systemSettings = pgTable('system_settings', {

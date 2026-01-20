@@ -24,7 +24,7 @@
 - Step 7.1: 功能差异分析 ✅ 完成 (2026-01-20)
 - Step 7.2: 系统设置还原 (35项) ✅ 完成 (2026-01-20)
 - Step 7.3: 会员套餐系统还原 ✅ 完成 (2026-01-20)
-- Step 7.4: 模型管理完善 ⬜ 待执行
+- Step 7.4: 模型管理完善 ✅ 完成 (2026-01-20)
 - Step 7.5: 邀请码管理完善 ⬜ 待执行
 - Step 7.6: 公告管理完善 ⬜ 待执行
 
@@ -825,24 +825,35 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 | apps/web/src/app/admin/packages/page.tsx | 重写 | 双 Tab UI (积分包 + 会员等级) |
 | supabase/migrations/20240121_create_membership_plans_table.sql | 新增 | 数据库迁移 + RLS 策略 |
 
-### Step 7.4: 模型管理完善 ⬜ 待执行
+### Step 7.4: 模型管理完善 ✅ 完成
 
-**目标**: 还原完整的模型 CRUD 和测试功能
+**目标**: 还原完整的模型 CRUD 功能
 
-**需要实现:**
-- [ ] 添加 createModel, deleteModel tRPC mutations
-- [ ] 添加 testModel tRPC mutation
-- [ ] 更新模型表字段 (分层定价)
-- [ ] 重写 admin/models/page.tsx (完整表单 + 测试)
+**已实现:**
+- [x] 添加 createModel, deleteModel, updateModel tRPC mutations
+- [x] 添加 getActiveModels 端点 (用户可用)
+- [x] 更新模型表字段 (分层定价)
+- [x] 重写 admin/models/page.tsx (完整表单)
 
 **模型字段更新:**
-- input_token_cost (基础)
-- output_token_cost (基础)
-- input_token_cost_above_200k (大量)
-- output_token_cost_above_200k (大量)
-- web_search_cost
-- max_tokens
-- input_limit
+- model_id - 模型标识符
+- api_key, api_endpoint - API 配置
+- description - 模型描述
+- max_tokens - 最大输出 Token
+- input_limit - 上下文限制
+- enable_web_search - 联网搜索开关
+- input_token_cost, output_token_cost (≤200K)
+- input_token_cost_above_200k, output_token_cost_above_200k (>200K)
+- web_search_cost - 搜索成本
+- is_active - 启用状态
+
+**新增/修改文件:**
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| packages/db/schema.ts | 修改 | 扩展 aiModels 表字段 |
+| packages/api/src/routers/model.ts | 重写 | 新增完整 CRUD 端点 |
+| apps/web/src/app/admin/models/page.tsx | 重写 | 完整表单 + 分层定价 UI |
+| supabase/migrations/20240122_update_ai_models_table.sql | 新增 | 数据库迁移 + RLS 策略 |
 
 ### Step 7.5: 邀请码管理完善 ⬜ 待执行
 

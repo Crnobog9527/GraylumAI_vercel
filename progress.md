@@ -87,11 +87,25 @@
 - `apps/web/src/app/admin/packages/page.tsx` - 完全重写 (双 Tab UI)
 - `supabase/migrations/20240121_create_membership_plans_table.sql` - 新增迁移
 
-#### 7.4+ 还原计划 (待执行)
+#### 7.4 模型管理完善 ✅ 完成 (2026-01-20)
+
+**已完成:**
+- ai_models 表新增完整字段 (model_id, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_costs)
+- tRPC CRUD 端点: getActiveModels, getAvailableModels, createModel, updateModel, deleteModel
+- 完整表单: 15+ 字段支持 (基础信息、Token限制、联网搜索、分层定价)
+- Token 成本设置: ≤200K 和 >200K 分层定价
+- RLS 策略: 用户可读已启用模型，管理员完全访问
+
+**修改文件:**
+- `packages/db/schema.ts` - 扩展 aiModels 表字段
+- `packages/api/src/routers/model.ts` - 重写，新增 4 个端点
+- `apps/web/src/app/admin/models/page.tsx` - 完全重写 (714行)
+- `supabase/migrations/20240122_update_ai_models_table.sql` - 新增迁移
+
+#### 7.5+ 还原计划 (待执行)
 
 | 优先级 | 模块 | 任务 | 状态 |
 |--------|------|------|------|
-| P1 | Models | 还原完整 CRUD + 测试功能 | ⬜ |
 | P1 | Invitations | 还原记录追踪 + 分析图表 | ⬜ |
 | P2 | Announcements | 还原精选模块管理 | ⬜ |
 
