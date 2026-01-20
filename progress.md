@@ -36,9 +36,35 @@
 
 ### Current Status
 - **Phase:** 🎉 项目迁移全部完成 - 已进入可发布状态
-- **Previous:** Step 6.2 Admin 权限校验屏障 ✅ 完成
+- **Previous:** Step 6.2 Admin 权限校验修复 ✅
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
+
+---
+
+### Step 6.2 权限校验问题修复 ✅ (2026-01-20)
+
+#### 发现的问题
+
+| 问题 | 现象 | 预期行为 | 状态 |
+|------|------|----------|------|
+| 权限检查期间显示管理界面 | 普通用户访问 /admin 时能看到 AdminSidebar | 验证期间只显示加载状态，失败后跳转 /access-denied | ✅ 已修复 |
+
+#### 问题分析
+- AdminGuard 在加载状态时仍然渲染 AdminSidebar
+- 用户在权限验证完成前能看到管理员界面结构
+
+#### 解决方案
+1. **创建 admin/layout.tsx** - 在 layout 级别包装 AdminGuard
+2. **修改 AdminGuard** - 加载/错误状态不显示任何管理界面，只显示中性的 "验证访问权限..." 提示
+3. **简化 admin/page.tsx** - 移除重复的 AdminSidebar 和权限检查逻辑
+
+#### 修改的文件
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `app/admin/layout.tsx` | 新增 | 统一包装 AdminGuard |
+| `components/admin/AdminGuard.tsx` | 修改 | 加载状态不显示管理界面 |
+| `app/admin/page.tsx` | 修改 | 移除 AdminSidebar 和错误处理 |
 
 ---
 

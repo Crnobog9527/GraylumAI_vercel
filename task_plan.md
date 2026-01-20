@@ -797,12 +797,24 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 
 ---
 
-#### 新增文件
+#### 新增/修改文件
 
 | 文件 | 用途 |
 |------|------|
 | `apps/web/src/app/access-denied/page.tsx` | 403 权限拒绝页面 |
 | `apps/web/src/components/admin/AdminGuard.tsx` | 管理员权限守卫组件 |
+| `apps/web/src/app/admin/layout.tsx` | Admin layout，统一包装 AdminGuard |
+
+---
+
+#### Bug Fix: 权限检查期间显示管理界面
+
+**问题**: 普通用户访问 /admin 时，在权限验证期间能看到 AdminSidebar
+**原因**: AdminGuard 在加载状态时仍然渲染 AdminSidebar
+**解决方案**:
+1. 创建 `admin/layout.tsx` 在 layout 级别统一包装 AdminGuard
+2. 修改 AdminGuard 加载状态只显示中性的 "验证访问权限..." 提示，不显示任何管理界面
+3. 简化 `admin/page.tsx` 移除重复的 AdminSidebar 和权限检查逻辑
 
 ---
 
