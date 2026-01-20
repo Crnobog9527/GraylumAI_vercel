@@ -29,6 +29,14 @@ interface User {
   created_at: string;
 }
 
+interface TopUser {
+  id: string;
+  email: string;
+  nickname: string | null;
+  avatar_url: string | null;
+  credits: number;
+}
+
 interface TrendData {
   date: string;
   day: string;
@@ -427,7 +435,7 @@ export default function AdminDashboardPage() {
           <CardContent>
             {stats?.users.topUsers && stats.users.topUsers.length > 0 ? (
               <div className="space-y-3">
-                {stats.users.topUsers.map((user: User, index: number) => (
+                {stats.users.topUsers.map((user: TopUser, index: number) => (
                   <div key={user.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors">
                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
                       index === 0 ? 'bg-amber-500/20 text-amber-400' :
