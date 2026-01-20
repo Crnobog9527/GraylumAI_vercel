@@ -36,9 +36,10 @@
 
 ### Current Status
 - **Phase:** 🎉 项目迁移全部完成 - 已进入可发布状态
-- **Previous:** Step 6.2 Admin 权限校验修复 ✅
+- **Previous:** Step 6.2 Admin 权限校验修复 ✅ 已验证
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
+- **安全加固:** ✅ RLS 策略 + Admin 权限屏障 已完成并验证
 
 ---
 
