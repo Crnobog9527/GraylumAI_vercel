@@ -1664,19 +1664,19 @@ export const adminRouter = router({
         const cutoffDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
 
         // Delete old conversations (messages will be cascade deleted)
-        const { count, error } = await ctx.supabase
+        const { data, error } = await ctx.supabase
           .from('conversations')
           .delete()
           .eq('user_id', profile.id)
           .lt('created_at', cutoffDate.toISOString())
-          .select('*', { count: 'exact', head: true });
+          .select('id');
 
         if (error) {
           console.error(`Failed to delete conversations for user ${profile.id}:`, error);
           continue;
         }
 
-        totalDeleted += count ?? 0;
+        totalDeleted += data?.length ?? 0;
       }
 
       return {
