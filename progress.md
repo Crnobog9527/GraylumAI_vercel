@@ -39,7 +39,7 @@
 - **Previous:** Step 4.8 补充 Shadcn/ui 组件库 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
-- **整体完成率:** 82.5% (66/80 组件)
+- **整体完成率:** 90% (72/80 组件)
 
 ### Step 4.8 Shadcn/ui 组件补充进度
 
@@ -127,17 +127,17 @@
 |------|--------|--------|--------|
 | UI 组件 (Shadcn) | 39 | 0 | 100% ✅ |
 | 布局组件 | 2/2 | 0 | 100% ✅ |
-| 聊天组件 | 6/12 | 6 | 50% |
+| 聊天组件 | 12/12 | 0 | 100% ✅ |
 | 用户资料组件 | 7/7 | 0 | 100% ✅ |
 | 管理后台组件 | 6/13 | 7 | 46% |
 | 首页组件 | 3/3 | 0 | 100% ✅ |
 | 模块/市场组件 | 3/4 | 1 | 75% |
-| **总计** | **66** | **14** | **82.5%** |
+| **总计** | **72** | **8** | **90%** |
 
 #### 已完成组件 ✅
 
 **布局**: AppHeader, GlobalBanner
-**聊天**: ChatSidebar, ChatHeader, ChatInterface, ConversationList, ModelSelector, ChatDebugPanel
+**聊天**: ChatSidebar, ChatHeader, ChatInterface, ConversationList, ModelSelector, ChatDebugPanel, PromptModuleCard, PromptModuleGrid, TemplateCard, TokenUsageStats, FileAttachmentCard, ActiveModuleBanner
 **用户资料**: ProfileSidebar, PersonalInfoCard, CreditRecordsCard, SecuritySettingsCard, SubscriptionCard, TicketsPanel, UsageHistoryCard
 **管理后台**: AdminSidebar, StatsCard, AdminErrorState, AdminLoadingState, AdminPageHeader, StatsCardGrid
 **首页**: WelcomeBanner, SixStepsGuide, UpdatesSection
@@ -145,13 +145,13 @@
 
 #### 待完成组件 (14个)
 
-**P0 - 聊天系统** (6个):
-- [ ] PromptModuleCard - 提示词模块卡片
-- [ ] PromptModuleGrid - 提示词模块网格
-- [ ] TemplateCard - 模板卡片
-- [ ] TokenUsageStats - Token 使用统计
-- [ ] FileAttachmentCard - 文件附件卡片
-- [ ] ActiveModuleBanner - 活跃模块横幅
+**P0 - 聊天系统** (6个) ✅ 已完成:
+- [x] PromptModuleCard - 提示词模块卡片
+- [x] PromptModuleGrid - 提示词模块网格
+- [x] TemplateCard - 模板卡片
+- [x] TokenUsageStats - Token 使用统计
+- [x] FileAttachmentCard - 文件附件卡片
+- [x] ActiveModuleBanner - 活跃模块横幅
 
 **P1 - 管理后台** (7个):
 - [ ] SystemStats, UserManagement, TicketManagement

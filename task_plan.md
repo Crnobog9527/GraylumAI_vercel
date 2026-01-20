@@ -520,13 +520,13 @@
 |------|--------|--------|--------|
 | UI 组件 (Shadcn) | 39 | 0 | 100% ✅ |
 | 布局组件 | 2/2 | 0 | 100% ✅ |
-| 聊天组件 | 6/12 | 6 | 50% |
+| 聊天组件 | 12/12 | 0 | 100% ✅ |
 | 用户资料组件 | 7/7 | 0 | 100% ✅ |
 | 管理后台组件 | 6/13 | 7 | 46% |
 | 首页组件 | 3/3 | 0 | 100% ✅ |
 | 模块组件 | 2/3 | 1 | 67% |
 | 市场组件 | 1/1 | 0 | 100% ✅ |
-| **总计** | **66** | **14** | **82.5%** |
+| **总计** | **72** | **8** | **90%** |
 
 ---
 
@@ -536,13 +536,19 @@
 - ✅ AppHeader.tsx
 - ✅ GlobalBanner.tsx
 
-**聊天组件 (6/12)**:
+**聊天组件 (12/12)** ✅:
 - ✅ ChatSidebar.tsx
 - ✅ ChatHeader.tsx
 - ✅ ChatInterface.tsx
 - ✅ ConversationList.tsx
 - ✅ ModelSelector.tsx
 - ✅ ChatDebugPanel.tsx
+- ✅ PromptModuleCard.tsx (新增)
+- ✅ PromptModuleGrid.tsx (新增)
+- ✅ TemplateCard.tsx (新增)
+- ✅ TokenUsageStats.tsx (新增)
+- ✅ FileAttachmentCard.tsx (新增)
+- ✅ ActiveModuleBanner.tsx (新增)
 
 **用户资料组件 (7/7)**:
 - ✅ ProfileSidebar.tsx
@@ -577,15 +583,15 @@
 
 #### 待完成组件清单 (14个)
 
-**P0 - 聊天系统组件** (6个):
+**P0 - 聊天系统组件** (6个) ✅ 已完成:
 | 组件 | 用途 | 状态 |
 |------|------|------|
-| PromptModuleCard | 提示词模块卡片 | ⬜ |
-| PromptModuleGrid | 提示词模块网格 | ⬜ |
-| TemplateCard | 模板卡片 | ⬜ |
-| TokenUsageStats | Token 使用统计 | ⬜ |
-| FileAttachmentCard | 文件附件卡片 | ⬜ |
-| ActiveModuleBanner | 活跃模块横幅 | ⬜ |
+| PromptModuleCard | 提示词模块卡片 | ✅ |
+| PromptModuleGrid | 提示词模块网格 | ✅ |
+| TemplateCard | 模板卡片 | ✅ |
+| TokenUsageStats | Token 使用统计 | ✅ |
+| FileAttachmentCard | 文件附件卡片 | ✅ |
+| ActiveModuleBanner | 活跃模块横幅 | ✅ |
 
 **P1 - 管理后台组件** (7个):
 | 组件 | 用途 | 状态 |
