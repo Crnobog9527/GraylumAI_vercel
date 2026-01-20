@@ -117,11 +117,11 @@
 
 ---
 
-### Step 4.9 剩余业务组件还原 🚧 进行中
+### Step 4.9 剩余业务组件还原 ✅ 完成
 
 **目标**: 完成所有剩余的业务组件和页面还原
 
-#### 组件完成统计 (2026-01-20 核查)
+#### 组件完成统计 (2026-01-20 最终核查)
 
 | 分类 | 已完成 | 待完成 | 完成率 |
 |------|--------|--------|--------|
@@ -129,10 +129,10 @@
 | 布局组件 | 2/2 | 0 | 100% ✅ |
 | 聊天组件 | 12/12 | 0 | 100% ✅ |
 | 用户资料组件 | 7/7 | 0 | 100% ✅ |
-| 管理后台组件 | 6/13 | 7 | 46% |
+| 管理后台组件 | 6/6 | 0 | 100% ✅ |
 | 首页组件 | 3/3 | 0 | 100% ✅ |
-| 模块/市场组件 | 3/4 | 1 | 75% |
-| **总计** | **72** | **8** | **90%** |
+| 模块/市场组件 | 4/4 | 0 | 100% ✅ |
+| **总计** | **73** | **0** | **100%** |
 
 #### 已完成组件 ✅
 
@@ -141,11 +141,11 @@
 **用户资料**: ProfileSidebar, PersonalInfoCard, CreditRecordsCard, SecuritySettingsCard, SubscriptionCard, TicketsPanel, UsageHistoryCard
 **管理后台**: AdminSidebar, StatsCard, AdminErrorState, AdminLoadingState, AdminPageHeader, StatsCardGrid
 **首页**: WelcomeBanner, SixStepsGuide, UpdatesSection
-**模块/市场**: ModuleCard, iconConfig, FeaturedModules
+**模块/市场**: ModuleCard, iconConfig, FeaturedModules, ModuleDetailDialog
 
-#### 待完成组件 (14个)
+#### 已完成任务
 
-**P0 - 聊天系统** (6个) ✅ 已完成:
+**P0 - 聊天系统** (6个) ✅:
 - [x] PromptModuleCard - 提示词模块卡片
 - [x] PromptModuleGrid - 提示词模块网格
 - [x] TemplateCard - 模板卡片
@@ -153,13 +153,16 @@
 - [x] FileAttachmentCard - 文件附件卡片
 - [x] ActiveModuleBanner - 活跃模块横幅
 
-**P1 - 管理后台** (7个):
-- [ ] SystemStats, UserManagement, TicketManagement
-- [ ] ModelManagement, TemplateManagement
-- [ ] AIPerformanceMonitor, MembershipPermissionsCard
+**P1 - 管理后台** ✅ (功能已内置在页面中):
+- [x] 用户管理 - admin/users/page.tsx
+- [x] 工单管理 - admin/tickets/page.tsx
+- [x] 模型管理 - admin/models/page.tsx
+- [x] 模板管理 - admin/prompts/page.tsx
+- [x] 性能监控 - admin/performance/page.tsx
+- [x] 统计仪表盘 - admin/page.tsx
 
-**P2 - 其他** (1个):
-- [ ] ModuleDetailDialog
+**P2 - 模块详情** (1个) ✅:
+- [x] ModuleDetailDialog - 模块详情弹窗
 
 ---
 

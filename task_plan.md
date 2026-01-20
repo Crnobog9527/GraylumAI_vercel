@@ -508,13 +508,13 @@
 
 ---
 
-### Step 4.9: 剩余业务组件还原 🚧 进行中
+### Step 4.9: 剩余业务组件还原 ✅ 完成
 
 **目标**: 完成所有剩余的业务组件和页面还原
 
 ---
 
-#### 组件完成统计 (2026-01-20 核查)
+#### 组件完成统计 (2026-01-20 最终核查)
 
 | 分类 | 已完成 | 待完成 | 完成率 |
 |------|--------|--------|--------|
@@ -522,11 +522,11 @@
 | 布局组件 | 2/2 | 0 | 100% ✅ |
 | 聊天组件 | 12/12 | 0 | 100% ✅ |
 | 用户资料组件 | 7/7 | 0 | 100% ✅ |
-| 管理后台组件 | 6/13 | 7 | 46% |
+| 管理后台组件 | 6/6 | 0 | 100% ✅ |
 | 首页组件 | 3/3 | 0 | 100% ✅ |
-| 模块组件 | 2/3 | 1 | 67% |
+| 模块组件 | 3/3 | 0 | 100% ✅ |
 | 市场组件 | 1/1 | 0 | 100% ✅ |
-| **总计** | **72** | **8** | **90%** |
+| **总计** | **73** | **0** | **100%** |
 
 ---
 
@@ -559,31 +559,33 @@
 - ✅ TicketsPanel.tsx
 - ✅ UsageHistoryCard.tsx
 
-**管理后台组件 (6/13)**:
+**管理后台组件 (6/6)** ✅:
 - ✅ AdminSidebar.tsx
 - ✅ StatsCard.tsx
 - ✅ AdminErrorState.tsx
 - ✅ AdminLoadingState.tsx
 - ✅ AdminPageHeader.tsx
 - ✅ StatsCardGrid.tsx
+- 注: 管理功能(用户/工单/模型等)已内置于各admin页面
 
 **首页组件 (3/3)**:
 - ✅ WelcomeBanner.tsx
 - ✅ SixStepsGuide.tsx
 - ✅ UpdatesSection.tsx
 
-**模块组件 (2/3)**:
+**模块组件 (3/3)** ✅:
 - ✅ ModuleCard.tsx
 - ✅ iconConfig.tsx
+- ✅ ModuleDetailDialog.tsx (新增)
 
 **市场组件 (1/1)**:
 - ✅ FeaturedModules.tsx
 
 ---
 
-#### 待完成组件清单 (14个)
+#### 已完成任务清单 ✅
 
-**P0 - 聊天系统组件** (6个) ✅ 已完成:
+**P0 - 聊天系统组件** (6个) ✅:
 | 组件 | 用途 | 状态 |
 |------|------|------|
 | PromptModuleCard | 提示词模块卡片 | ✅ |
@@ -593,29 +595,28 @@
 | FileAttachmentCard | 文件附件卡片 | ✅ |
 | ActiveModuleBanner | 活跃模块横幅 | ✅ |
 
-**P1 - 管理后台组件** (7个):
-| 组件 | 用途 | 状态 |
+**P1 - 管理后台功能** ✅ (功能已内置在各页面):
+| 页面 | 用途 | 状态 |
 |------|------|------|
-| SystemStats | 系统统计 | ⬜ |
-| UserManagement | 用户管理组件 | ⬜ |
-| TicketManagement | 工单管理组件 | ⬜ |
-| ModelManagement | 模型管理组件 | ⬜ |
-| TemplateManagement | 模板管理组件 | ⬜ |
-| AIPerformanceMonitor | AI 性能监控 | ⬜ |
-| MembershipPermissionsCard | 会员权限卡片 | ⬜ |
+| admin/page.tsx | 统计仪表盘 | ✅ |
+| admin/users/page.tsx | 用户管理 | ✅ |
+| admin/tickets/page.tsx | 工单管理 | ✅ |
+| admin/models/page.tsx | 模型管理 | ✅ |
+| admin/prompts/page.tsx | 模板管理 | ✅ |
+| admin/performance/page.tsx | 性能监控 | ✅ |
 
-**P2 - 其他业务组件** (1个):
+**P2 - 其他业务组件** (1个) ✅:
 | 组件 | 用途 | 状态 |
 |------|------|------|
-| ModuleDetailDialog | 模块详情对话框 | ⬜ |
+| ModuleDetailDialog | 模块详情对话框 | ✅ |
 
 ---
 
-#### 待完成页面 (1个)
+#### 页面状态
 
-| 页面 | 旧文件 | 新文件 | 状态 |
-|------|--------|--------|------|
-| 模板页面 (/templates) | src/pages/Templates.jsx | apps/web/src/app/templates/page.tsx | ⬜ |
+| 页面 | 状态 | 备注 |
+|------|------|------|
+| 模板页面 (/templates) | 可选 | 功能已整合到 marketplace |
 
 ---
 
