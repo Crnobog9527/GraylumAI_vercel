@@ -221,21 +221,21 @@
 | AIPerformanceMonitor | src/components/admin/AIPerformanceMonitor.jsx | apps/web/src/components/admin/AIPerformanceMonitor.tsx | ⬜ |
 | MembershipPermissionsCard | src/components/admin/MembershipPermissionsCard.jsx | apps/web/src/components/admin/MembershipPermissionsCard.tsx | ⬜ |
 
-#### Phase E.2: 管理后台页面（P1 - 12个）✅ 全部完成
+#### Phase E.2: 管理后台页面（P1 - 12个）✅ 全部完成并验证
 | 页面 | 旧文件 | 新文件 | 状态 | 备注 |
 |------|--------|--------|------|------|
-| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ | 完整 |
-| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ | 完整 |
-| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ✅ | 完整 |
-| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ✅ | 完整 |
-| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ✅ | 完整 |
-| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ✅ | 完整 |
-| 模块/提示词管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | ✅ | 完整 CRUD + 分类 |
-| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | ✅ | 完整 CRUD |
-| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | ✅ | 交易列表 + 过滤 |
-| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | ✅ | 财务仪表盘 |
-| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | ✅ | 完整 CRUD |
-| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | ✅ | 性能仪表盘 |
+| 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ | 已验证 |
+| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ | 已验证 |
+| 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ✅ | 已验证 |
+| AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ✅ | 已验证 |
+| 邀请码管理 | src/pages/AdminInvitations.jsx | apps/web/src/app/admin/invitations/page.tsx | ✅ | 已验证 (key 已修复) |
+| 系统设置 | src/pages/AdminSettings.jsx | apps/web/src/app/admin/settings/page.tsx | ✅ | 已验证 |
+| 模块/提示词管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | ✅ | 已验证 (表已创建) |
+| 积分包管理 | src/pages/AdminPackages.jsx | apps/web/src/app/admin/packages/page.tsx | ✅ | 已验证 |
+| 交易记录 | src/pages/AdminTransactions.jsx | apps/web/src/app/admin/transactions/page.tsx | ✅ | 已验证 (查询已修复) |
+| 财务统计 | src/pages/AdminFinance.jsx | apps/web/src/app/admin/finance/page.tsx | ✅ | 已验证 |
+| 公告管理 | src/pages/AdminAnnouncements.jsx | apps/web/src/app/admin/announcements/page.tsx | ✅ | 已验证 (表已创建) |
+| 性能监控 | src/pages/AdminPerformance.jsx | apps/web/src/app/admin/performance/page.tsx | ✅ | 已验证 |
 
 #### Phase F: 其他业务组件（P2）
 首页组件:

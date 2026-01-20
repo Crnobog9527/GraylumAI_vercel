@@ -35,11 +35,18 @@
 ## Session: 2026-01-20
 
 ### Current Status
-- **Phase:** Phase 4 Step 4.5 管理后台页面复刻 ✅ 完成
+- **Phase:** Phase 4 Step 4.5 管理后台页面复刻 ✅ 完成并验证
 - **Completed:** 12/12 管理后台页面全部完成（包含完整 API 支持）
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
 - **Next Step:** Phase 4 Step 4.6 细节打磨与验证
+
+### 页面验证修复 (2026-01-20)
+- [x] 创建 `announcements` 表 (Supabase)
+- [x] 创建 `prompts` 表 (Supabase)
+- [x] 修复 `credit_transactions` 查询（移除显式外键引用）
+- [x] 修复 `invitations` 页面 React key 警告（使用 code 作为 key）
+- [x] 删除遗留测试页面 `/models`, `/tickets`, `/invitations`（功能已整合到 admin）
 
 ### 6个占位页面完成 (2026-01-20)
 - [x] `/admin/transactions` - 交易记录页面（完整 CRUD + API）
