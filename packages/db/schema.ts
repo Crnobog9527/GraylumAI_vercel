@@ -87,3 +87,31 @@ export const invitations = pgTable('invitations', {
   status: text('status', { enum: ['active', 'used', 'expired'] }).default('active').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const announcements = pgTable('announcements', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  type: text('type', { enum: ['info', 'warning', 'success', 'error'] }).default('info').notNull(),
+  priority: integer('priority').default(0).notNull(),
+  active: text('active').default('true').notNull(),
+  startDate: timestamp('start_date', { withTimezone: true }).defaultNow(),
+  endDate: timestamp('end_date', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const prompts = pgTable('prompts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  description: text('description'),
+  content: text('content').notNull(),
+  category: text('category', { enum: ['general', 'assistant', 'creative', 'coding', 'translation', 'analysis'] }).default('general').notNull(),
+  isSystem: text('is_system').default('false').notNull(),
+  active: text('active').default('true').notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});

@@ -450,6 +450,72 @@ src/components/layout/
 
 ---
 
+---
+
+## 数据库表结构 (2026-01-20 更新)
+
+### 核心表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `profiles` | id, email, nickname, avatar_url, role, credits, created_at | 用户资料 |
+| `conversations` | id, user_id, title, model_id, created_at | 对话 |
+| `messages` | id, conversation_id, role, content, created_at | 消息 |
+| `credit_transactions` | id, user_id, amount, type, description, created_at | 积分交易 |
+
+### 配置表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `ai_models` | id, name, provider, endpoint, config, created_at | AI 模型配置 |
+| `system_settings` | key, value | 系统设置 (JSONB) |
+
+### 业务表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `tickets` | id, user_id, title, status, created_at | 工单 |
+| `ticket_replies` | id, ticket_id, user_id, content, created_at | 工单回复 |
+| `credit_packages` | id, name, price, credits_amount, active, created_at | 积分包 |
+| `invitations` | code, created_by, used_by, status, created_at | 邀请码 |
+| `announcements` | id, title, content, type, priority, active, start_date, end_date, created_by, created_at, updated_at | 公告 |
+| `prompts` | id, name, description, content, category, is_system, active, sort_order, created_by, created_at, updated_at | 提示词模块 |
+
+### 新增表详情 (2026-01-20)
+
+**announcements (公告表)**
+```sql
+CREATE TABLE announcements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  type TEXT DEFAULT 'info' NOT NULL,  -- 'info', 'warning', 'success', 'error'
+  priority INTEGER DEFAULT 0 NOT NULL,
+  active TEXT DEFAULT 'true' NOT NULL,
+  start_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  end_date TIMESTAMP WITH TIME ZONE,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+```
+
+**prompts (提示词表)**
+```sql
+CREATE TABLE prompts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  category TEXT DEFAULT 'general' NOT NULL,  -- 'general', 'assistant', 'creative', 'coding', 'translation', 'analysis'
+  is_system TEXT DEFAULT 'false' NOT NULL,
+  active TEXT DEFAULT 'true' NOT NULL,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+```
+
+---
+
 ## Resources
 - [Supabase SSR Auth Guide](https://supabase.com/docs/guides/auth/server-side)
 - [tRPC React Query Setup](https://trpc.io/docs/client/react)
