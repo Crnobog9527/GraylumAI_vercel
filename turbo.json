@@ -1,5 +1,12 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "POSTGRES_URL_NON_POOLING",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

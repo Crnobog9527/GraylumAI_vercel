@@ -32,6 +32,37 @@
 
 ---
 
+## Session: 2026-01-20 (续2)
+
+### Current Status
+- **Phase:** Bug Fix - 部署后问题修复
+- **Previous:** Step 5.1 数据层完善 ✅ 完成
+- **Started:** 2026-01-20
+- **Blocking Issue:** 无
+
+---
+
+### 部署后问题修复 (2026-01-20)
+
+#### 发现的问题
+
+| 问题 | 原因 | 状态 |
+|------|------|------|
+| 功能广场 404 | AppHeader 链接 `/features` 但页面路径是 `/marketplace` | ✅ 已修复 |
+| Vercel 环境变量警告 | turbo.json 缺少 DATABASE_URL, SUPABASE_SERVICE_ROLE_KEY, POSTGRES_URL_NON_POOLING 声明 | ✅ 已修复 |
+
+#### 修复内容
+
+**1. 功能广场 404 修复**
+- 文件: `apps/web/src/components/layout/AppHeader.tsx`
+- 修改: 将 `href: '/features'` 改为 `href: '/marketplace'`
+
+**2. Vercel 环境变量警告修复**
+- 文件: `turbo.json`
+- 修改: 添加 `globalEnv` 配置声明所需环境变量
+
+---
+
 ## Session: 2026-01-20 (续)
 
 ### Current Status
