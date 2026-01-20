@@ -80,7 +80,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, role, credits, created_at', { count: 'exact' })
+        .select('id, email, nickname, avatar_url, role, credits, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
