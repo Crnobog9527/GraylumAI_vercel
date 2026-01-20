@@ -309,11 +309,11 @@
 | 用户资料 (/profile) | src/pages/Profile.jsx | apps/web/src/app/profile/page.tsx | ✅ | commit: e09d60d, d99b2c6 |
 | 市场页面 (/marketplace) | src/pages/Marketplace.jsx | apps/web/src/app/marketplace/page.tsx | ✅ | commit: 3f4395d |
 
-#### 管理后台页面 (12个) - 进行中 (1/12 完成)
+#### 管理后台页面 (12个) - 进行中 (2/12 完成)
 | 页面 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
 | 仪表盘 | src/pages/AdminDashboard.jsx | apps/web/src/app/admin/page.tsx | ✅ |
-| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ⬜ |
+| 用户管理 | src/pages/AdminUsers.jsx | apps/web/src/app/admin/users/page.tsx | ✅ |
 | 工单管理 | src/pages/AdminTickets.jsx | apps/web/src/app/admin/tickets/page.tsx | ⬜ |
 | AI模型管理 | src/pages/AdminModels.jsx | apps/web/src/app/admin/models/page.tsx | ⬜ |
 | 模块管理 | src/pages/AdminPrompts.jsx | apps/web/src/app/admin/prompts/page.tsx | ⬜ |

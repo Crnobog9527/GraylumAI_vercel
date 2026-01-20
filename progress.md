@@ -58,6 +58,12 @@
   - [x] AdminSidebar - 管理后台侧边栏
   - [x] StatsCard - 统计卡片
   - [x] scroll-area.tsx - 滚动区域组件
+  - [x] table.tsx - 表格组件
+  - [x] badge.tsx - 徽章组件
+- [x] **用户管理页面复刻** ✅
+  - [x] 用户列表表格（搜索、Avatar、角色徽章）
+  - [x] 积分调整对话框（增加/减少积分）
+  - [x] 暗色主题适配
 
 ### 工作流程改进 ⚠️ 重要经验
 **正确的 UI 复刻流程：**
@@ -73,7 +79,7 @@
 | 页面 | 状态 | 备注 |
 |------|------|------|
 | 仪表盘 `/admin` | ✅ 已验证 | Codespaces 测试通过 |
-| 用户管理 `/admin/users` | ⬜ | |
+| 用户管理 `/admin/users` | ✅ 已完成 | Table + Badge 组件 |
 | 工单管理 `/admin/tickets` | ⬜ | |
 | AI模型管理 `/admin/models` | ⬜ | |
 | 模块管理 `/admin/prompts` | ⬜ | |
