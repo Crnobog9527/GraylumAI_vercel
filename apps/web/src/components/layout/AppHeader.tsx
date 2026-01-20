@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Home,
   MessageSquare,
@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { createClient } from '@/lib/supabase';
 
 // Navigation items configuration
 const navItems = [
@@ -33,7 +34,22 @@ const navItems = [
 
 export function AppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [credits] = useState(100); // TODO: Get from user context
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <header
@@ -148,34 +164,42 @@ export function AppHeader() {
                 border: '1px solid var(--border-primary)'
               }}
             >
-              <DropdownMenuItem
-                className="gap-2 rounded-lg cursor-pointer"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                <User className="h-4 w-4" />
-                <span>个人中心</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="gap-2 rounded-lg cursor-pointer"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                <CreditCard className="h-4 w-4" />
-                <span>充值积分</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="gap-2 rounded-lg cursor-pointer"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                <Settings className="h-4 w-4" />
-                <span>设置</span>
-              </DropdownMenuItem>
+              <Link href="/profile">
+                <DropdownMenuItem
+                  className="gap-2 rounded-lg cursor-pointer"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <User className="h-4 w-4" />
+                  <span>个人中心</span>
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/profile?tab=subscription">
+                <DropdownMenuItem
+                  className="gap-2 rounded-lg cursor-pointer"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <CreditCard className="h-4 w-4" />
+                  <span>充值积分</span>
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/profile?tab=settings">
+                <DropdownMenuItem
+                  className="gap-2 rounded-lg cursor-pointer"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>设置</span>
+                </DropdownMenuItem>
+              </Link>
               <DropdownMenuSeparator style={{ background: 'var(--border-primary)' }} />
               <DropdownMenuItem
                 className="gap-2 rounded-lg cursor-pointer"
                 style={{ color: 'var(--error)' }}
+                onClick={handleLogout}
+                disabled={isLoggingOut}
               >
                 <LogOut className="h-4 w-4" />
-                <span>退出登录</span>
+                <span>{isLoggingOut ? '退出中...' : '退出登录'}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

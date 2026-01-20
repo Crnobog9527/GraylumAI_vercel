@@ -333,6 +333,44 @@ adminProcedure      → 仅管理员可访问（继承 protectedProcedure）
 
 ---
 
+## UI 复刻工作流程 ⚠️ 重要经验 (2026-01-20)
+
+### 正确的工作流程
+
+```
+1. 页面优先原则
+   └── 先复刻 **页面布局**（整体结构）
+   └── 在复刻页面时 **按需创建组件**
+   └── 组件随页面一起验证
+
+2. 组件创建时机
+   └── 当页面需要某个组件时再创建
+   └── 创建后立即集成到页面
+   └── 验证组件在页面中的效果
+```
+
+### 避免的错误做法
+
+| 错误做法 | 问题 |
+|----------|------|
+| ❌ 先批量创建组件 | 组件可能不符合实际需求 |
+| ❌ 组件创建后不集成 | 无法验证组件效果 |
+| ❌ 脱离页面上下文开发 | 样式可能与整体不协调 |
+
+### 推荐流程示例
+
+**复刻管理后台页面时：**
+```
+1. 读取旧项目 AdminDashboard.jsx
+2. 分析页面结构：AdminSidebar + 主内容区
+3. 创建/更新 AdminSidebar 组件
+4. 创建/更新 StatsCard 组件
+5. 重写 admin/page.tsx，集成组件
+6. 验证整体效果
+```
+
+---
+
 ## UI 像素级复刻规则 ⚠️ 必须严格遵守
 
 > **规则文档**: `movetonew/UIfix_rule.md`
@@ -408,6 +446,72 @@ src/components/layout/
 **涉及组件**: [列表]
 **关键修改**: [列表]
 **验证结果**: [检查清单]
+```
+
+---
+
+---
+
+## 数据库表结构 (2026-01-20 更新)
+
+### 核心表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `profiles` | id, email, nickname, avatar_url, role, credits, created_at | 用户资料 |
+| `conversations` | id, user_id, title, model_id, created_at | 对话 |
+| `messages` | id, conversation_id, role, content, created_at | 消息 |
+| `credit_transactions` | id, user_id, amount, type, description, created_at | 积分交易 |
+
+### 配置表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `ai_models` | id, name, provider, endpoint, config, created_at | AI 模型配置 |
+| `system_settings` | key, value | 系统设置 (JSONB) |
+
+### 业务表
+| 表名 | 字段 | 用途 |
+|------|------|------|
+| `tickets` | id, user_id, title, status, created_at | 工单 |
+| `ticket_replies` | id, ticket_id, user_id, content, created_at | 工单回复 |
+| `credit_packages` | id, name, price, credits_amount, active, created_at | 积分包 |
+| `invitations` | code, created_by, used_by, status, created_at | 邀请码 |
+| `announcements` | id, title, content, type, priority, active, start_date, end_date, created_by, created_at, updated_at | 公告 |
+| `prompts` | id, name, description, content, category, is_system, active, sort_order, created_by, created_at, updated_at | 提示词模块 |
+
+### 新增表详情 (2026-01-20)
+
+**announcements (公告表)**
+```sql
+CREATE TABLE announcements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  type TEXT DEFAULT 'info' NOT NULL,  -- 'info', 'warning', 'success', 'error'
+  priority INTEGER DEFAULT 0 NOT NULL,
+  active TEXT DEFAULT 'true' NOT NULL,
+  start_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  end_date TIMESTAMP WITH TIME ZONE,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+```
+
+**prompts (提示词表)**
+```sql
+CREATE TABLE prompts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  category TEXT DEFAULT 'general' NOT NULL,  -- 'general', 'assistant', 'creative', 'coding', 'translation', 'analysis'
+  is_system TEXT DEFAULT 'false' NOT NULL,
+  active TEXT DEFAULT 'true' NOT NULL,
+  sort_order INTEGER DEFAULT 0 NOT NULL,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
 ```
 
 ---

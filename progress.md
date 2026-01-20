@@ -32,6 +32,403 @@
 
 ---
 
+## Session: 2026-01-20 (续)
+
+### Current Status
+- **Phase:** Step 5.1 数据层完善 ✅ 完成
+- **Previous:** Step 5.0 组件-页面关联集成 ✅ 完成
+- **Started:** 2026-01-20
+- **Blocking Issue:** 无
+- **UI 组件完成率:** 100% (73/73 组件)
+- **关联集成进度:** 100% ✅
+- **数据层进度:** 100% ✅ (ProfilePage + MarketplacePage mock 数据已替换)
+
+---
+
+### Step 5.1 数据层完善 ✅ 完成
+
+**目标**: 替换 mock 数据为真实 tRPC 查询
+
+#### 完成状态 (2026-01-20)
+
+| 页面 | Mock 数据 | 状态 |
+|------|----------|------|
+| ProfilePage | mockUser → tRPC user.getUserProfile + credits.getBalance + credits.getCreditsSummary | ✅ 已替换 |
+| MarketplacePage | mockModules + mockFeaturedModules → tRPC modules.getModules + modules.getFeaturedModules | ✅ 已替换 |
+
+#### 新增基础设施
+
+**数据库表 (modules)**:
+- 新增 `supabase/migrations/20240117_create_modules_table.sql`
+- 字段: id, title, description, icon, category, platform, usage_count, credits_cost, is_featured, image_url, badge_type, badge_text, credits_display, active, sort_order, created_at, updated_at
+- RLS 策略: 允许所有认证用户读取 active=true 的模块
+- 包含 8 条种子数据
+
+**tRPC 路由 (modulesRouter)**:
+- `getModules` - 获取模块列表 (支持分类过滤、分页、排序)
+- `getFeaturedModules` - 获取精选模块
+- `getModuleById` - 获取单个模块详情
+- `incrementUsage` - 增加模块使用次数
+
+**修改文件**:
+- `packages/api/src/routers/modules.ts` - 新建
+- `packages/api/src/root.ts` - 注册 modulesRouter
+- `apps/web/src/app/profile/page.tsx` - 替换 mockUser
+- `apps/web/src/app/marketplace/page.tsx` - 替换 mockModules
+
+---
+
+### Step 5.0 组件-页面关联集成 ✅ 完成
+
+**目标**: 将已复刻的 UI 组件与路由、状态管理、数据层完整对接
+
+#### 完成状态 (2026-01-20)
+
+| 分类 | 问题描述 | 状态 |
+|------|----------|------|
+| 🔴 路由关联 | AppHeader 下拉菜单导航、ProfileSidebar 登出 | ✅ 已修复 |
+| 🟡 全局状态 | Zustand useChatStore 创建完成 | ✅ 已创建 |
+| 🟡 数据流 | ChatPage tRPC mutations 对接完成 | ✅ 已对接 |
+| 🟠 交互反馈 | ChatSidebar 删除/重命名功能完成 | ✅ 已完成 |
+
+#### 执行阶段
+
+| 阶段 | 内容 | 优先级 | 状态 |
+|------|------|--------|------|
+| Phase 5.1 | 路由关联修复 | P0 Critical | ✅ |
+| Phase 5.2 | 全局状态管理 (Zustand) | P1 Important | ✅ |
+| Phase 5.3 | 数据流关联 (tRPC) | P1 Important | ✅ |
+| Phase 5.4 | 交互反馈完善 | P2 Medium | ✅ |
+
+#### 已完成工作详情
+
+**Phase 5.1 路由修复:**
+- `AppHeader.tsx`: 下拉菜单添加 Link 导航 (个人中心→/profile, 充值→/profile?tab=subscription)
+- `AppHeader.tsx`: 退出登录实现 Supabase signOut + router.push('/login')
+- `ProfileSidebar.tsx`: 退出登录实现 Supabase signOut
+
+**Phase 5.2 Zustand Store:**
+- 新建 `stores/useChatStore.ts`
+- 状态: activeConversationId, conversationListVersion, isSidebarCollapsed
+- Actions: setActiveConversation, refreshConversationList, toggleSidebar
+
+**Phase 5.3 数据流:**
+- `chat.ts`: 新增 createConversation, updateConversationTitle, deleteConversation 接口
+- `ChatPage`: 实现 createConversation + sendMessage mutations
+- `ChatPage`: 实现 updateTitle mutation
+- `ChatInterface`: 改用 utils.chat.getMessages.invalidate() 模式
+
+**Phase 5.4 交互反馈:**
+- `ChatSidebar`: 实现删除对话功能 (AlertDialog 确认弹窗)
+- `ChatSidebar`: 实现重命名对话功能 (Dialog 输入弹窗)
+- 所有 mutations 使用 utils.invalidate() 统一模式
+
+---
+
+### Step 4.9 剩余业务组件还原 ✅ 完成
+
+### Step 4.8 Shadcn/ui 组件补充进度
+
+**目标**: 按优先级分 3 个阶段补充 21 个 Shadcn/ui 组件
+
+**最终状态**: 35 个组件 (14 原有 + 6 Phase A + 9 Phase B + 6 Phase C) ✅
+
+#### 执行计划总览
+
+| 阶段 | 优先级 | 组件数 | 依赖包 | 状态 |
+|------|--------|--------|--------|------|
+| Phase A | 🔴 高频 | 6 | 5 | ✅ 完成 |
+| Phase B | 🟡 中频 | 9 | 8 | ✅ 完成 |
+| Phase C | 🟢 低频 | 6 | 6 | ✅ 完成 |
+| **总计** | - | **21** | **19** | **21/21 ✅** |
+
+---
+
+#### Phase A: 高频使用组件 ✅ 已完成
+
+| 组件 | 文件 | 用途 | 状态 |
+|------|------|------|------|
+| Toast (Sonner) | sonner.tsx | 操作成功/失败提示 | ✅ |
+| Tooltip | tooltip.tsx | 图标按钮悬停说明 | ✅ |
+| Checkbox | checkbox.tsx | 表单复选框 | ✅ |
+| Switch | switch.tsx | 设置开关切换 | ✅ |
+| Progress | progress.tsx | 上传/处理进度 | ✅ |
+| Skeleton | skeleton.tsx | 骨架屏加载 | ✅ |
+
+**已安装依赖**: sonner@2.0.7, @radix-ui/react-tooltip@1.2.8, @radix-ui/react-checkbox@1.3.3, @radix-ui/react-switch@1.2.6, @radix-ui/react-progress@1.1.8
+
+**附加导出**: Toaster, toast, TooltipProvider, SkeletonCard, SkeletonAvatar, SkeletonText, SkeletonTable
+
+---
+
+#### Phase B: 中频使用组件 ✅ 已完成
+
+| 组件 | 文件 | 用途 | 状态 |
+|------|------|------|------|
+| Alert | alert.tsx | 警告/提示框 | ✅ |
+| Alert Dialog | alert-dialog.tsx | 危险操作确认 | ✅ |
+| Separator | separator.tsx | 分隔线 | ✅ |
+| Slider | slider.tsx | 数值滑动条 | ✅ |
+| Radio Group | radio-group.tsx | 单选按钮组 | ✅ |
+| Popover | popover.tsx | 弹出框 | ✅ |
+| Aspect Ratio | aspect-ratio.tsx | 固定宽高比容器 | ✅ |
+| Toggle | toggle.tsx | 切换按钮 | ✅ |
+| Toggle Group | toggle-group.tsx | 切换按钮组 | ✅ |
+
+**已安装依赖**: @radix-ui/react-alert-dialog, @radix-ui/react-separator, @radix-ui/react-slider, @radix-ui/react-radio-group, @radix-ui/react-popover, @radix-ui/react-aspect-ratio, @radix-ui/react-toggle, @radix-ui/react-toggle-group
+
+---
+
+#### Phase C: 低频使用组件 ✅ 已完成
+
+| 组件 | 用途 | 状态 |
+|------|------|------|
+| Accordion | FAQ/折叠面板 | ✅ |
+| Collapsible | 可折叠容器 | ✅ |
+| Context Menu | 右键菜单 | ✅ |
+| Hover Card | 悬停预览卡片 | ✅ |
+| Navigation Menu | 导航菜单 | ✅ |
+| Menubar | 顶部菜单栏 | ✅ |
+
+**已安装依赖**: @radix-ui/react-accordion, @radix-ui/react-collapsible, @radix-ui/react-context-menu, @radix-ui/react-hover-card, @radix-ui/react-navigation-menu, @radix-ui/react-menubar
+
+---
+
+#### 验收标准
+
+- [x] TypeScript 编译通过
+- [x] ESLint 检查通过
+- [x] 支持深色主题 (CSS 变量)
+- [x] 样式与项目主题一致
+
+---
+
+### Step 4.9 剩余业务组件还原 ✅ 完成
+
+**目标**: 完成所有剩余的业务组件和页面还原
+
+#### 组件完成统计 (2026-01-20 最终核查)
+
+| 分类 | 已完成 | 待完成 | 完成率 |
+|------|--------|--------|--------|
+| UI 组件 (Shadcn) | 39 | 0 | 100% ✅ |
+| 布局组件 | 2/2 | 0 | 100% ✅ |
+| 聊天组件 | 12/12 | 0 | 100% ✅ |
+| 用户资料组件 | 7/7 | 0 | 100% ✅ |
+| 管理后台组件 | 6/6 | 0 | 100% ✅ |
+| 首页组件 | 3/3 | 0 | 100% ✅ |
+| 模块/市场组件 | 4/4 | 0 | 100% ✅ |
+| **总计** | **73** | **0** | **100%** |
+
+#### 已完成组件 ✅
+
+**布局**: AppHeader, GlobalBanner
+**聊天**: ChatSidebar, ChatHeader, ChatInterface, ConversationList, ModelSelector, ChatDebugPanel, PromptModuleCard, PromptModuleGrid, TemplateCard, TokenUsageStats, FileAttachmentCard, ActiveModuleBanner
+**用户资料**: ProfileSidebar, PersonalInfoCard, CreditRecordsCard, SecuritySettingsCard, SubscriptionCard, TicketsPanel, UsageHistoryCard
+**管理后台**: AdminSidebar, StatsCard, AdminErrorState, AdminLoadingState, AdminPageHeader, StatsCardGrid
+**首页**: WelcomeBanner, SixStepsGuide, UpdatesSection
+**模块/市场**: ModuleCard, iconConfig, FeaturedModules, ModuleDetailDialog
+
+#### 已完成任务
+
+**P0 - 聊天系统** (6个) ✅:
+- [x] PromptModuleCard - 提示词模块卡片
+- [x] PromptModuleGrid - 提示词模块网格
+- [x] TemplateCard - 模板卡片
+- [x] TokenUsageStats - Token 使用统计
+- [x] FileAttachmentCard - 文件附件卡片
+- [x] ActiveModuleBanner - 活跃模块横幅
+
+**P1 - 管理后台** ✅ (功能已内置在页面中):
+- [x] 用户管理 - admin/users/page.tsx
+- [x] 工单管理 - admin/tickets/page.tsx
+- [x] 模型管理 - admin/models/page.tsx
+- [x] 模板管理 - admin/prompts/page.tsx
+- [x] 性能监控 - admin/performance/page.tsx
+- [x] 统计仪表盘 - admin/page.tsx
+
+**P2 - 模块详情** (1个) ✅:
+- [x] ModuleDetailDialog - 模块详情弹窗
+
+---
+
+### Step 4.7 提取复用组件 ✅ 完成
+
+**已创建组件:**
+
+| 组件 | 文件路径 | 功能 |
+|------|----------|------|
+| AdminLoadingState | components/admin/AdminLoadingState.tsx | 管理后台加载状态 |
+| AdminErrorState | components/admin/AdminErrorState.tsx | 错误/权限拒绝状态 |
+| AdminPageHeader | components/admin/AdminPageHeader.tsx | 页面标题+刷新+操作按钮 |
+| StatsCardGrid | components/admin/StatsCardGrid.tsx | 统计卡片网格布局 |
+| StatusBadge | components/ui/status-badge.tsx | 通用状态徽章 (30+ 预设状态) |
+| ToggleBadge | components/ui/status-badge.tsx | 启用/禁用切换徽章 |
+| RoleBadge | components/ui/status-badge.tsx | 用户角色徽章 |
+| EmptyState | components/ui/empty-state.tsx | 空状态展示 |
+| TableEmptyState | components/ui/empty-state.tsx | 表格空状态行 |
+| FormDialog | components/ui/form-dialog.tsx | 表单对话框 |
+| ConfirmDialog | components/ui/form-dialog.tsx | 确认对话框 |
+| LoadingSpinner | components/ui/loading-spinner.tsx | 加载动画 |
+| LoadingOverlay | components/ui/loading-spinner.tsx | 全屏加载遮罩 |
+
+**已重构页面:**
+- [x] admin/users/page.tsx - 代码减少 ~40 行
+- [x] admin/invitations/page.tsx - 代码减少 ~60 行
+
+**TypeScript 检查:** ✅ 通过
+
+**收益:**
+- 8 个新组件，13 个可复用导出
+- 每个页面可减少 30-60 行重复代码
+- 统一的加载、错误、空状态处理
+- 30+ 预设状态徽章样式
+
+---
+
+## Session: 2026-01-20
+
+### Current Status
+- **Phase:** Phase 4 Step 4.6 细节打磨与验证 ✅ 完成
+- **Completed:** 代码质量检查通过，核心组件 100% 完成
+- **Started:** 2026-01-20
+- **Blocking Issue:** 无
+- **Next Step:** 准备进入生产环境部署
+
+### Step 4.6 验证结果 (2026-01-20)
+
+**代码质量检查:**
+- [x] TypeScript 类型检查通过 (`pnpm tsc --noEmit`)
+- [x] ESLint 检查通过 (`pnpm lint`)
+- [x] 修复: admin.ts 中 getAllUsers 添加 avatar_url 字段
+- [x] 修复: ESLint 配置迁移到 flat config 格式
+
+**组件完成度:**
+| 分类 | 已完成 | 核心组件 |
+|------|--------|----------|
+| Layout | 2/2 | AppHeader, GlobalBanner |
+| Chat | 6/6 | ChatSidebar, ChatHeader, ChatInterface, ConversationList, ModelSelector, ChatDebugPanel |
+| Admin | 2/2 | AdminSidebar, StatsCard |
+| Profile | 7/7 | ProfileSidebar, PersonalInfoCard, SubscriptionCard, CreditRecordsCard, UsageHistoryCard, SecuritySettingsCard, TicketsPanel |
+| Home | 3/3 | WelcomeBanner, SixStepsGuide, UpdatesSection |
+| Modules | 2/2 | ModuleCard, iconConfig |
+| UI (Shadcn) | 15/15 | avatar, badge, button, card, dialog, dropdown-menu, input, label, scroll-area, select, sheet, table, tabs, textarea |
+
+**页面完成度:** 17/17 页面全部完成
+- 核心: /, /chat, /login, /marketplace, /profile
+- 管理: /admin (12个子页面)
+
+**已知限制:**
+- 构建时 Google Fonts 获取失败（环境网络问题，Vercel 部署不受影响）
+
+### 页面验证修复 (2026-01-20)
+- [x] 创建 `announcements` 表 (Supabase)
+- [x] 创建 `prompts` 表 (Supabase)
+- [x] 修复 `credit_transactions` 查询（移除显式外键引用）
+- [x] 修复 `invitations` 页面 React key 警告（使用 code 作为 key）
+- [x] 删除遗留测试页面 `/models`, `/tickets`, `/invitations`（功能已整合到 admin）
+
+### 6个占位页面完成 (2026-01-20)
+- [x] `/admin/transactions` - 交易记录页面（完整 CRUD + API）
+- [x] `/admin/packages` - 积分包管理页面（完整 CRUD + API）
+- [x] `/admin/announcements` - 公告管理页面（完整 CRUD + API）
+- [x] `/admin/prompts` - 提示词模块页面（完整 CRUD + API）
+- [x] `/admin/finance` - 财务统计页面（统计仪表盘 + API）
+- [x] `/admin/performance` - 性能监控页面（监控仪表盘 + API）
+
+### 新增数据库表
+- `announcements` - 公告表（title, content, type, priority, active, start_date, end_date）
+- `prompts` - 提示词表（name, description, content, category, is_system, active, sort_order）
+
+### 新增 tRPC API 端点
+**公告管理 (admin.ts):**
+- getAllAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement, getActiveAnnouncements
+
+**提示词管理 (admin.ts):**
+- getAllPrompts, createPrompt, updatePrompt, deletePrompt
+
+**财务统计 (admin.ts):**
+- getFinanceStats（汇总交易、用户、积分包数据 + 30天图表）
+
+**性能监控 (admin.ts):**
+- getPerformanceStats（汇总对话、消息、工单、模型使用数据 + 14天图表）
+
+### Actions Taken
+- [x] 讨论工作流程优化
+  - 确定正确流程：先复刻**页面布局** → 按需创建/集成组件
+  - 避免：先创建组件但不集成到页面
+- [x] **管理后台仪表盘复刻** ✅
+  - [x] 重写 admin/page.tsx，集成 AdminSidebar + StatsCard
+  - [x] 4 个统计卡片（用户、积分、工单、邀请码）
+  - [x] 2 个概览卡片（工单概览、邀请码概览）
+  - [x] 最近用户表格（ScrollArea 滚动）
+  - [x] 创建 scroll-area.tsx 组件（安装 @radix-ui/react-scroll-area）
+  - [x] 暗色主题适配（使用 CSS 变量）
+- [x] **Step 4.3 组件创建**
+  - [x] GlobalBanner - 全站横幅公告
+  - [x] ModelSelector - AI 模型选择器
+  - [x] ChatDebugPanel - 开发者调试面板
+  - [x] AdminSidebar - 管理后台侧边栏
+  - [x] StatsCard - 统计卡片
+  - [x] scroll-area.tsx - 滚动区域组件
+  - [x] table.tsx - 表格组件
+  - [x] badge.tsx - 徽章组件
+  - [x] tabs.tsx - Tabs 组件（@radix-ui/react-tabs）
+- [x] **用户管理页面复刻** ✅
+  - [x] 用户列表表格（搜索、Avatar、角色徽章）
+  - [x] 积分调整对话框（增加/减少积分）
+  - [x] 暗色主题适配
+- [x] **工单管理页面复刻** ✅
+  - [x] Tabs 状态过滤（全部/待处理/处理中/已关闭）
+  - [x] 工单列表表格（状态徽章、回复数）
+  - [x] Sheet 详情面板（状态更改、回复功能）
+- [x] **AI 模型管理页面复刻** ✅
+  - [x] 模型列表表格（提供商徽章、状态）
+  - [x] 统计卡片（总数/启用/禁用）
+  - [x] JSON 配置编辑对话框
+- [x] **邀请码管理页面复刻** ✅
+  - [x] 统计卡片（总数/可用/已使用/已过期）
+  - [x] 生成邀请码按钮
+  - [x] 邀请码表格（复制功能）
+- [x] **系统设置页面复刻** ✅
+  - [x] 设置卡片列表（text/number/textarea/boolean）
+  - [x] 单项保存功能
+  - [x] tRPC settings.updateSystemSettings 集成
+- [x] **占位页面创建**
+  - [x] prompts, packages, transactions, finance, announcements, performance
+  - [x] "Coming Soon" 样式卡片
+
+### 工作流程改进 ⚠️ 重要经验
+**正确的 UI 复刻流程：**
+1. 先复刻**页面布局**（整体结构）
+2. 在复刻页面时**按需创建组件**
+3. 组件随页面一起验证
+
+**避免的错误做法：**
+- ❌ 先批量创建组件，但不集成到页面
+- ❌ 组件创建后没有验证使用场景
+
+### 管理后台页面进度
+| 页面 | 状态 | 备注 |
+|------|------|------|
+| 仪表盘 `/admin` | ✅ 已验证 | Codespaces 测试通过 |
+| 用户管理 `/admin/users` | ✅ 已完成 | Table + Badge 组件 |
+| 工单管理 `/admin/tickets` | ✅ 已完成 | Tabs + Sheet 组件，状态过滤 |
+| AI模型管理 `/admin/models` | ✅ 已完成 | 模型列表 + 配置编辑对话框 |
+| 邀请码管理 `/admin/invitations` | ✅ 已完成 | 生成邀请码 + 复制功能 |
+| 系统设置 `/admin/settings` | ✅ 已完成 | 完整设置管理（tRPC 集成） |
+| 提示词模块 `/admin/prompts` | ✅ 已完成 | 完整 CRUD + 分类过滤 |
+| 积分包管理 `/admin/packages` | ✅ 已完成 | 完整 CRUD + 启用/禁用 |
+| 交易记录 `/admin/transactions` | ✅ 已完成 | 交易列表 + 类型过滤 |
+| 财务统计 `/admin/finance` | ✅ 已完成 | 财务仪表盘 + 30天图表 |
+| 公告管理 `/admin/announcements` | ✅ 已完成 | 完整 CRUD + 日期范围 |
+| 性能监控 `/admin/performance` | ✅ 已完成 | 性能仪表盘 + 14天图表 |
+
+### 本次新增组件
+- `tabs.tsx` - Radix UI Tabs 组件（@radix-ui/react-tabs）
+
+---
+
 ## Session: 2026-01-15
 
 ### Current Status

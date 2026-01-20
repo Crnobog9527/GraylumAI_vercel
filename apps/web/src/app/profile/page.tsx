@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Menu, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,21 +23,7 @@ import { CreditRecordsCard } from '@/components/profile/CreditRecordsCard';
 import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import TicketsPanel from '@/components/profile/TicketsPanel';
-
-// Mock user data
-const mockUser: MockUser = {
-  id: '1',
-  email: 'user@example.com',
-  nickname: '测试用户',
-  full_name: '测试用户',
-  avatar_url: '',
-  credits: 784,
-  total_credits_used: 1256,
-  total_credits_purchased: 2000,
-  subscription_tier: 'free',
-  email_verified: true,
-  created_date: '2024-06-15T08:00:00Z'
-};
+import { trpc } from '@/trpc/client';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -53,8 +39,33 @@ function ProfilePageContent() {
 
   const [activeTab, setActiveTab] = useState<ProfileTab>(getInitialTab);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
-  const [localUser, setLocalUser] = useState(mockUser);
-  const [isLoading] = useState(false);
+
+  // tRPC queries for real data
+  const { data: userProfile, isLoading: isProfileLoading } = trpc.user.getUserProfile.useQuery();
+  const { data: creditsBalance, isLoading: isBalanceLoading } = trpc.credits.getBalance.useQuery();
+  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+
+  const isLoading = isProfileLoading || isBalanceLoading || isSummaryLoading;
+
+  // Map tRPC data to MockUser interface for component compatibility
+  const userData: MockUser = useMemo(() => ({
+    id: userProfile?.id ?? '',
+    email: userProfile?.email ?? '',
+    nickname: userProfile?.nickname ?? '用户',
+    full_name: userProfile?.full_name ?? userProfile?.nickname ?? '用户',
+    avatar_url: userProfile?.avatar_url ?? '',
+    credits: creditsBalance?.credits ?? 0,
+    total_credits_used: creditsSummary?.totalSpent ?? 0,
+    total_credits_purchased: creditsSummary?.totalEarned ?? 0,
+    subscription_tier: (userProfile as any)?.subscription_tier ?? 'free',
+    email_verified: (userProfile as any)?.email_verified ?? false,
+    created_date: userProfile?.created_at ?? new Date().toISOString(),
+  }), [userProfile, creditsBalance, creditsSummary]);
+
+  const [localUser, setLocalUser] = useState<MockUser | null>(null);
+
+  // Sync localUser with userData when data loads
+  const effectiveUser = localUser ?? userData;
 
   const handleNavigateToCreateTicket = () => {
     setTicketInitialView('create');
@@ -167,14 +178,14 @@ function ProfilePageContent() {
           <div className="flex-1 min-w-0">
             {activeTab === 'profile' && (
               <>
-                <UserProfileHeader user={localUser} onUserUpdate={handleUserUpdate} />
+                <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
                 <CreditsAndSubscriptionCards
-                  user={localUser}
+                  user={effectiveUser}
                   onNavigateToSubscription={() => setActiveTab('subscription')}
                 />
-                <UsageStatsCard user={localUser} />
+                <UsageStatsCard user={effectiveUser} />
                 <QuickActionsCard
-                  user={localUser}
+                  user={effectiveUser}
                   onNavigateToTickets={handleNavigateToCreateTicket}
                   onNavigateToSecurity={handleNavigateToSecurity}
                 />
@@ -183,20 +194,20 @@ function ProfilePageContent() {
 
             {activeTab === 'subscription' && (
               <>
-                <SubscriptionCard user={localUser} />
-                <CreditStatsCard user={localUser} />
+                <SubscriptionCard user={effectiveUser} />
+                <CreditStatsCard user={effectiveUser} />
               </>
             )}
 
-            {activeTab === 'credits' && <CreditRecordsCard user={localUser} />}
+            {activeTab === 'credits' && <CreditRecordsCard user={effectiveUser} />}
 
-            {activeTab === 'history' && <UsageHistoryCard user={localUser} />}
+            {activeTab === 'history' && <UsageHistoryCard user={effectiveUser} />}
 
-            {activeTab === 'security' && <SecuritySettingsCard user={localUser} />}
+            {activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
 
             {activeTab === 'tickets' && (
               <TicketsPanel
-                user={localUser}
+                user={effectiveUser}
                 key={`${activeTab}-${ticketInitialView}`}
                 initialView={ticketInitialView}
                 onViewChange={(v) => setTicketInitialView(v as 'list' | 'create')}

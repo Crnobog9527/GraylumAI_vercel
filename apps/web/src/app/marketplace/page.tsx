@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -12,6 +12,7 @@ import {
 import { AppHeader } from '@/components/layout/AppHeader';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import ModuleCard from '@/components/modules/ModuleCard';
+import { trpc } from '@/trpc/client';
 
 const categories = [
   { id: 'all', label: '全部功能' },
@@ -23,126 +24,29 @@ const categories = [
   { id: 'other', label: '其他分类' }
 ];
 
-// TODO: 从 tRPC 获取模块数据
-const mockModules = [
-  {
-    id: '1',
-    title: 'S级直播带货话术专家',
-    description: '一键生成 S 级直播带货话术，可原创可仿写，省去 90% 写话术的时间，再也不...',
-    icon: 'Zap',
-    category: 'marketing',
-    platform: '抖音、TikTok',
-    usage_count: 1200
-  },
-  {
-    id: '2',
-    title: '小红书爆款文案仿写专家',
-    description: '上传想要仿写的文案以及想要表达的主旨，1 分钟一键复刻爆款结构！',
-    icon: 'PenTool',
-    category: 'writing',
-    platform: '小红书',
-    usage_count: 890
-  },
-  {
-    id: '3',
-    title: 'Tiktok爆款短视频口播稿创作专家',
-    description: '一键生成专业的视频口播稿，支持多种风格和时长',
-    icon: 'Video',
-    category: 'video',
-    platform: '抖音、TIKTOK',
-    usage_count: 1950
-  },
-  {
-    id: '4',
-    title: '爆款脚本创作专家',
-    description: '这是专为自媒体创作者打造的视频爆款脚本创作专家，针对AI创作常见的文案呆...',
-    icon: 'Video',
-    category: 'video',
-    platform: '通用',
-    usage_count: 1800
-  },
-  {
-    id: '5',
-    title: 'Youtube口播稿创作专家',
-    description: '根据你的选题与主旨，一键生成定制化的中长视频口播稿，并且会自动控制信息...',
-    icon: 'Video',
-    category: 'video',
-    platform: 'Youtube、B站',
-    usage_count: 620
-  },
-  {
-    id: '6',
-    title: '账号商业策略分析专家',
-    description: '一键战略分析你的社交媒体赛道定位与差异化竞争力，并提供定制化建议。',
-    icon: 'Sparkles',
-    category: 'marketing',
-    platform: '通用',
-    usage_count: 5400
-  },
-  {
-    id: '7',
-    title: '传统宣传片策划方案专家',
-    description: '通过用户上传的资料，自动产出传统宣传片、汇报片、主题片等类型影片的文案...',
-    icon: 'MessageSquare',
-    category: 'video',
-    platform: '传统宣传片、主题片、汇报片等',
-    usage_count: 320
-  },
-  {
-    id: '8',
-    title: '活动拍摄脚本创作大师',
-    description: '通过用户上传的活动资料以及拍摄配置资源，自动产出专业级的配音文案、拍摄...',
-    icon: 'Lightbulb',
-    category: 'video',
-    platform: '通用',
-    usage_count: 180
-  }
-];
-
-// TODO: 从 tRPC 获取精选模块
-const mockFeaturedModules = [
-  {
-    id: 'f1',
-    title: '社交媒体账号定位分析',
-    description: '你是否想要开启社交媒体的副业，但是非常迷惘不知道从何开始？立即咨询我们的超级 AI，获取孵化了全网超过 1000 万粉丝账号的同款商业分析！',
-    icon: '💬',
-    image_url: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&q=80',
-    badge_type: 'recommend' as const,
-    badge_text: '账号定位、商业变现分析',
-    credits_display: '进阶会员',
-    usage_count: 0
-  },
-  {
-    id: 'f2',
-    title: 'Tiktok爆款短视频口播稿创作专家',
-    description: '一键生成专业的视频口播稿，支持多种风格和时长。',
-    icon: '🎵',
-    image_url: 'https://images.unsplash.com/photo-1611162616475-46b635cb6868?w=800&q=80',
-    badge_type: 'hot' as const,
-    badge_text: '热门',
-    credits_display: '免费试用',
-    usage_count: 0
-  }
-];
-
 export default function MarketplacePage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [sortOrder, setSortOrder] = useState('newest');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'popular'>('newest');
   const [page, setPage] = useState(1);
   const itemsPerPage = 12;
 
-  const filteredModules = useMemo(() => {
-    return mockModules.filter((module) => {
-      if (selectedCategory === 'all') return true;
-      if (selectedCategory === 'other') {
-        return ['tool', 'analysis', 'coding', 'creative', 'audio'].includes(module.category);
-      }
-      return module.category === selectedCategory;
-    });
-  }, [selectedCategory]);
+  // Fetch modules from tRPC
+  const { data: modulesData, isLoading: isModulesLoading } = trpc.modules.getModules.useQuery({
+    category: selectedCategory,
+    limit: itemsPerPage,
+    offset: (page - 1) * itemsPerPage,
+    sortBy: sortOrder,
+  });
 
-  const totalPages = Math.ceil(filteredModules.length / itemsPerPage);
-  const displayedModules = filteredModules.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+  // Fetch featured modules from tRPC
+  const { data: featuredModules, isLoading: isFeaturedLoading } = trpc.modules.getFeaturedModules.useQuery({
+    limit: 4,
+  });
+
+  const isLoading = isModulesLoading || isFeaturedLoading;
+  const modules = modulesData?.modules ?? [];
+  const totalModules = modulesData?.total ?? 0;
+  const totalPages = Math.ceil(totalModules / itemsPerPage);
 
   return (
     <div
@@ -303,7 +207,19 @@ export default function MarketplacePage() {
         </div>
 
         {/* 精选推荐 */}
-        <FeaturedModules featuredModules={mockFeaturedModules} />
+        {!isFeaturedLoading && featuredModules && featuredModules.length > 0 && (
+          <FeaturedModules featuredModules={featuredModules.map(m => ({
+            id: m.id,
+            title: m.title,
+            description: m.description ?? '',
+            icon: m.icon ?? '✨',
+            image_url: m.image_url ?? '',
+            badge_type: (m.badge_type as 'hot' | 'new' | 'recommend') ?? 'recommend',
+            badge_text: m.badge_text ?? '',
+            credits_display: m.credits_display ?? '',
+            usage_count: m.usage_count ?? 0,
+          }))} />
+        )}
 
         {/* 筛选栏 */}
         <div
@@ -340,7 +256,7 @@ export default function MarketplacePage() {
 
           <div className="flex items-center gap-3">
             <span className="text-xs hidden md:block" style={{ color: 'var(--text-disabled)' }}>
-              共 {filteredModules.length} 个工具
+              共 {totalModules} 个工具
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -385,26 +301,39 @@ export default function MarketplacePage() {
         </div>
 
         {/* 模块卡片网格 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
-          {displayedModules.map((module, index) => (
-            <div
-              key={module.id}
-              className="module-card-animate"
-              style={{ animationDelay: `${index * 0.06}s`, opacity: 0 }}
-            >
-              <ModuleCard
-                module={module}
-                onShowDetail={() => {
-                  // TODO: 实现详情弹窗
-                  console.log('Show detail:', module);
-                }}
-              />
-            </div>
-          ))}
-        </div>
+        {isModulesLoading ? (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
+            {modules.map((module, index) => (
+              <div
+                key={module.id}
+                className="module-card-animate"
+                style={{ animationDelay: `${index * 0.06}s`, opacity: 0 }}
+              >
+                <ModuleCard
+                  module={{
+                    id: module.id,
+                    title: module.title,
+                    description: module.description ?? '',
+                    icon: module.icon ?? 'Sparkles',
+                    category: module.category,
+                    platform: module.platform ?? '',
+                    usage_count: module.usage_count ?? 0,
+                  }}
+                  onShowDetail={() => {
+                    console.log('Show detail:', module);
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 空状态 */}
-        {filteredModules.length === 0 && (
+        {!isModulesLoading && modules.length === 0 && (
           <div
             className="text-center py-24 rounded-3xl"
             style={{

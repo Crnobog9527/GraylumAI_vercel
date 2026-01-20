@@ -1,10 +1,11 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, Crown, Wallet, History, Shield, Headphones, LogOut
 } from 'lucide-react';
+import { createClient } from '@/lib/supabase';
 
 export type ProfileTab = 'profile' | 'subscription' | 'credits' | 'history' | 'security' | 'tickets';
 
@@ -28,10 +29,22 @@ const ProfileSidebar = memo(function ProfileSidebar({
   onTabChange,
   onLogout
 }: ProfileSidebarProps) {
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
   const handleLogout = async () => {
-    // TODO: Implement logout via tRPC
-    if (onLogout) {
-      onLogout();
+    setIsLoggingOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      if (onLogout) {
+        onLogout();
+      }
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setIsLoggingOut(false);
     }
   };
 
@@ -90,13 +103,14 @@ const ProfileSidebar = memo(function ProfileSidebar({
       <div className="pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors"
+          disabled={isLoggingOut}
+          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
           style={{ color: 'var(--text-tertiary)' }}
-          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error)'}
-          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-tertiary)'}
+          onMouseEnter={(e) => !isLoggingOut && (e.currentTarget.style.color = 'var(--error)')}
+          onMouseLeave={(e) => !isLoggingOut && (e.currentTarget.style.color = 'var(--text-tertiary)')}
         >
           <LogOut className="h-4 w-4" />
-          退出登录
+          {isLoggingOut ? '退出中...' : '退出登录'}
         </button>
       </div>
     </div>

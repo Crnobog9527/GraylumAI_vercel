@@ -1,35 +1,79 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
 import { MessageSquare, Paperclip, Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { trpc } from '@/trpc/client';
+import { useChatStore } from '@/stores';
 
 export default function ChatPage() {
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const utils = trpc.useUtils();
+
+  // Fetch conversations
+  const { data: conversationsData } = trpc.chat.getConversations.useQuery();
+  const conversations = conversationsData?.data || [];
+
+  // Get current conversation
+  const currentConversation = activeConversationId
+    ? conversations.find((c) => c.id === activeConversationId)
+    : null;
+
+  // Mutations
+  const createConversation = trpc.chat.createConversation.useMutation({
+    onSuccess: (data) => {
+      utils.chat.getConversations.invalidate();
+      setActiveConversation(data.id);
+      refreshConversationList();
+    },
+  });
+
+  const sendMessage = trpc.chat.sendMessage.useMutation({
+    onSuccess: () => {
+      utils.chat.getMessages.invalidate({ conversationId: activeConversationId! });
+      setInputMessage('');
+    },
+  });
+
+  const updateTitle = trpc.chat.updateConversationTitle.useMutation({
+    onSuccess: () => {
+      utils.chat.getConversations.invalidate();
+      setIsEditingTitle(false);
+    },
+  });
+
+  const isStreaming = createConversation.isPending || sendMessage.isPending;
 
   const maxInputCharacters = 2500;
   const chatBillingHint = '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
 
   const handleNewChat = () => {
-    setSelectedConversationId(null);
+    setActiveConversation(null);
     setInputMessage('');
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputMessage.trim() || isStreaming) return;
-    // TODO: Create conversation and send message
-    console.log('Send:', inputMessage);
-    setInputMessage('');
+
+    if (!activeConversationId) {
+      // Create new conversation first
+      const newConv = await createConversation.mutateAsync({ title: inputMessage.slice(0, 50) });
+      // Then send message
+      sendMessage.mutate({ conversationId: newConv.id, content: inputMessage });
+    } else {
+      // Send to existing conversation
+      sendMessage.mutate({ conversationId: activeConversationId, content: inputMessage });
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -40,14 +84,19 @@ export default function ChatPage() {
   };
 
   const handleSaveTitle = () => {
-    // TODO: Save title via tRPC
-    setIsEditingTitle(false);
+    if (!activeConversationId || !editingTitleValue.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+    updateTitle.mutate({ conversationId: activeConversationId, title: editingTitleValue.trim() });
   };
 
-  // Mock current conversation
-  const currentConversation = selectedConversationId
-    ? { id: selectedConversationId, title: '对话 ' + selectedConversationId }
-    : null;
+  // Set editing title value when editing starts
+  useEffect(() => {
+    if (isEditingTitle && currentConversation) {
+      setEditingTitleValue(currentConversation.title || '');
+    }
+  }, [isEditingTitle, currentConversation]);
 
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg-primary)' }}>
@@ -68,9 +117,9 @@ export default function ChatPage() {
 
         {/* 左侧边栏 - 对话列表 */}
         <ChatSidebar
-          onSelectConversation={setSelectedConversationId}
+          onSelectConversation={setActiveConversation}
           onNewChat={handleNewChat}
-          activeConversationId={selectedConversationId ?? undefined}
+          activeConversationId={activeConversationId ?? undefined}
         />
 
         {/* 主聊天区域 */}
