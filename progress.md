@@ -35,12 +35,46 @@
 ## Session: 2026-01-20 (续)
 
 ### Current Status
-- **Phase:** Step 5.0 组件-页面关联集成 ✅ 完成
-- **Previous:** Step 4.9 剩余业务组件还原 ✅ 完成
+- **Phase:** Step 5.1 数据层完善 ✅ 完成
+- **Previous:** Step 5.0 组件-页面关联集成 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
 - **UI 组件完成率:** 100% (73/73 组件)
 - **关联集成进度:** 100% ✅
+- **数据层进度:** 100% ✅ (ProfilePage + MarketplacePage mock 数据已替换)
+
+---
+
+### Step 5.1 数据层完善 ✅ 完成
+
+**目标**: 替换 mock 数据为真实 tRPC 查询
+
+#### 完成状态 (2026-01-20)
+
+| 页面 | Mock 数据 | 状态 |
+|------|----------|------|
+| ProfilePage | mockUser → tRPC user.getUserProfile + credits.getBalance + credits.getCreditsSummary | ✅ 已替换 |
+| MarketplacePage | mockModules + mockFeaturedModules → tRPC modules.getModules + modules.getFeaturedModules | ✅ 已替换 |
+
+#### 新增基础设施
+
+**数据库表 (modules)**:
+- 新增 `supabase/migrations/20240117_create_modules_table.sql`
+- 字段: id, title, description, icon, category, platform, usage_count, credits_cost, is_featured, image_url, badge_type, badge_text, credits_display, active, sort_order, created_at, updated_at
+- RLS 策略: 允许所有认证用户读取 active=true 的模块
+- 包含 8 条种子数据
+
+**tRPC 路由 (modulesRouter)**:
+- `getModules` - 获取模块列表 (支持分类过滤、分页、排序)
+- `getFeaturedModules` - 获取精选模块
+- `getModuleById` - 获取单个模块详情
+- `incrementUsage` - 增加模块使用次数
+
+**修改文件**:
+- `packages/api/src/routers/modules.ts` - 新建
+- `packages/api/src/root.ts` - 注册 modulesRouter
+- `apps/web/src/app/profile/page.tsx` - 替换 mockUser
+- `apps/web/src/app/marketplace/page.tsx` - 替换 mockModules
 
 ---
 
