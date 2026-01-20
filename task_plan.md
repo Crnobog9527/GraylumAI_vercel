@@ -18,6 +18,7 @@
 
 **Phase 6 安全加固:**
 - Step 6.1: Supabase RLS 策略 ✅ 完成 (2026-01-20)
+- Step 6.2: Admin 权限校验屏障 ✅ 完成 (2026-01-20)
 
 **🎉 项目迁移全部完成，已进入可发布状态！**
 
@@ -733,6 +734,75 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 1. 在 Supabase SQL Editor 中执行迁移脚本
 2. 验证 RLS 策略是否生效
 3. 测试普通用户和管理员的数据访问权限
+
+---
+
+### Step 6.2: Admin 权限校验屏障 ✅ 完成
+
+**目标**: 建立 tRPC 中间件安全屏障，非管理员访问受保护资源时跳转到专用错误页面
+
+---
+
+#### 实现架构
+
+```
+用户请求 → tRPC adminProcedure → 检查 profiles.role
+                                    ↓
+                            role !== 'admin'
+                                    ↓
+                         throw FORBIDDEN (403)
+                                    ↓
+                    前端 AdminGuard 捕获错误
+                                    ↓
+                      router.replace('/access-denied')
+```
+
+---
+
+#### 核心实现
+
+**1. tRPC 中间件 (packages/api/src/trpc.ts)**
+```typescript
+export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (ctx.userRole !== 'admin') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You do not have permission to access this resource. Admin role required.',
+    });
+  }
+  return next({ ctx });
+});
+```
+
+**2. 权限守卫组件 (components/admin/AdminGuard.tsx)**
+- 调用 tRPC 验证管理员权限
+- FORBIDDEN 错误自动重定向到 `/access-denied`
+- 显示加载状态 "验证管理员权限..."
+
+**3. 权限拒绝页面 (app/access-denied/page.tsx)**
+- 专业的 403 错误页面设计
+- 显示 "访问被拒绝" 和 "ERROR 403 - FORBIDDEN"
+- 提供 "返回上一页" 和 "返回首页" 按钮
+
+---
+
+#### 受保护的 API 路由
+
+| 路由文件 | 使用 adminProcedure 的端点 |
+|----------|---------------------------|
+| admin.ts | getStatistics, getAllUsers, adjustUserCredits, getAllTickets, updateTicketStatus, replyToTicket, getAllAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement, getAllPrompts, createPrompt, updatePrompt, deletePrompt, getFinanceStats, getPerformanceStats |
+| model.ts | getAvailableModels, updateModelConfig |
+| invitation.ts | generateInvitationCode, getInvitationHistory |
+| settings.ts | getSystemSettings, updateSystemSettings |
+
+---
+
+#### 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `apps/web/src/app/access-denied/page.tsx` | 403 权限拒绝页面 |
+| `apps/web/src/components/admin/AdminGuard.tsx` | 管理员权限守卫组件 |
 
 ---
 

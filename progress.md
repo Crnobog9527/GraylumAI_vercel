@@ -36,9 +36,34 @@
 
 ### Current Status
 - **Phase:** 🎉 项目迁移全部完成 - 已进入可发布状态
-- **Previous:** Step 6.1 Supabase RLS 安全策略 ✅ 完成
+- **Previous:** Step 6.2 Admin 权限校验屏障 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
+
+---
+
+### Step 6.2 Admin 权限校验屏障 ✅ 完成 (2026-01-20)
+
+**目标**: 建立 tRPC 中间件安全屏障，非管理员自动跳转报错页面
+
+#### 实现内容
+
+| 组件 | 文件 | 功能 |
+|------|------|------|
+| adminProcedure | packages/api/src/trpc.ts | tRPC 中间件，检查 role === 'admin' |
+| AdminGuard | components/admin/AdminGuard.tsx | 前端权限守卫，FORBIDDEN 时重定向 |
+| access-denied | app/access-denied/page.tsx | 403 权限拒绝页面 |
+
+#### 权限校验流程
+```
+请求 → adminProcedure → role检查 → FORBIDDEN → AdminGuard → /access-denied
+```
+
+#### 受保护的路由
+- `admin.ts` - 16 个端点
+- `model.ts` - 2 个端点
+- `invitation.ts` - 2 个端点
+- `settings.ts` - 2 个端点
 
 ---
 
