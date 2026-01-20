@@ -2,8 +2,10 @@
 
 import { trpc } from '@/trpc/client';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { useState } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Users, Bot, Wand2, MessageSquare, Coins, TrendingUp, Activity, Ticket } from 'lucide-react';
+import AdminSidebar from '@/components/admin/AdminSidebar';
+import StatsCard from '@/components/admin/StatsCard';
 
 interface User {
   id: string;
@@ -15,263 +17,240 @@ interface User {
 }
 
 export default function AdminDashboardPage() {
-  const { data: stats, isLoading, error, refetch } = trpc.admin.getStatistics.useQuery();
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'users' | 'tickets'>('overview');
+  const { data: stats, isLoading, error } = trpc.admin.getStatistics.useQuery();
 
+  // 加载状态
   if (isLoading) {
     return (
-      <div className="container mx-auto p-4">
-        <h1 className="text-2xl font-bold mb-4">Admin Dashboard</h1>
-        <p>Loading statistics...</p>
+      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
+        <AdminSidebar />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
+        </div>
       </div>
     );
   }
 
+  // 错误状态 - 权限拒绝
   if (error) {
     return (
-      <div className="container mx-auto p-4">
-        <h1 className="text-2xl font-bold mb-4">Admin Dashboard</h1>
-        <Card className="bg-red-50 border-red-200">
-          <CardContent className="pt-6">
-            <p className="text-red-600">
-              {error.message === 'You do not have permission to access this resource. Admin role required.'
-                ? 'Access Denied: You need admin privileges to view this page.'
-                : `Error: ${error.message}`}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
+        <AdminSidebar />
+        <div className="flex-1 p-8">
+          <Card
+            className="max-w-md mx-auto mt-20"
+            style={{
+              background: 'var(--error-bg)',
+              border: '1px solid var(--error)'
+            }}
+          >
+            <CardContent className="pt-6">
+              <p style={{ color: 'var(--error)' }}>
+                {error.message === 'You do not have permission to access this resource. Admin role required.'
+                  ? '访问被拒绝：您需要管理员权限才能查看此页面。'
+                  : `错误: ${error.message}`}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-        <Button onClick={() => refetch()} variant="outline">
-          Refresh
-        </Button>
-      </div>
+    <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
+      <AdminSidebar />
 
-      {/* Tab Navigation */}
-      <div className="flex gap-2 mb-6">
-        <Button
-          variant={selectedTab === 'overview' ? 'default' : 'outline'}
-          onClick={() => setSelectedTab('overview')}
-        >
-          Overview
-        </Button>
-        <Button
-          variant={selectedTab === 'users' ? 'default' : 'outline'}
-          onClick={() => setSelectedTab('users')}
-        >
-          Recent Users
-        </Button>
-        <Button
-          variant={selectedTab === 'tickets' ? 'default' : 'outline'}
-          onClick={() => setSelectedTab('tickets')}
-        >
-          Quick Links
-        </Button>
-      </div>
+      <div className="flex-1 p-8 overflow-auto">
+        {/* 页面标题 */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            管理后台仪表盘
+          </h1>
+          <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
+            平台运营数据概览
+          </p>
+        </div>
 
-      {selectedTab === 'overview' && (
-        <>
-          {/* Statistics Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
-            {/* Users Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">Total Users</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">{stats?.users.total ?? 0}</p>
-              </CardContent>
-            </Card>
+        {/* 统计卡片网格 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatsCard
+            title="总用户数"
+            value={stats?.users.total ?? 0}
+            icon={Users}
+            color="primary"
+            trend="up"
+            trendValue="+12%"
+          />
+          <StatsCard
+            title="系统积分"
+            value={(stats?.credits.totalInSystem ?? 0).toLocaleString()}
+            icon={Coins}
+            color="amber"
+          />
+          <StatsCard
+            title="待处理工单"
+            value={stats?.tickets.open ?? 0}
+            subtitle={`${stats?.tickets.inProgress ?? 0} 处理中 / ${stats?.tickets.total ?? 0} 总计`}
+            icon={Ticket}
+            color="rose"
+          />
+          <StatsCard
+            title="有效邀请码"
+            value={stats?.invitations.active ?? 0}
+            subtitle={`${stats?.invitations.used ?? 0} 已使用 / ${stats?.invitations.total ?? 0} 总计`}
+            icon={TrendingUp}
+            color="emerald"
+          />
+        </div>
 
-            {/* Credits Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">Total Credits</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold">{stats?.credits.totalInSystem.toLocaleString() ?? 0}</p>
-              </CardContent>
-            </Card>
-
-            {/* Tickets Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">Open Tickets</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-orange-600">{stats?.tickets.open ?? 0}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {stats?.tickets.inProgress ?? 0} in progress / {stats?.tickets.total ?? 0} total
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Invitations Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-500">Active Invitations</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-bold text-green-600">{stats?.invitations.active ?? 0}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {stats?.invitations.used ?? 0} used / {stats?.invitations.total ?? 0} total
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Detailed Breakdown */}
-          <div className="grid gap-4 md:grid-cols-2">
-            {/* Tickets Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Tickets Overview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Open</span>
-                    <span className="font-medium text-orange-600">{stats?.tickets.open ?? 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>In Progress</span>
-                    <span className="font-medium text-blue-600">{stats?.tickets.inProgress ?? 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Closed</span>
-                    <span className="font-medium text-green-600">{stats?.tickets.closed ?? 0}</span>
-                  </div>
-                  <hr className="my-2" />
-                  <div className="flex justify-between font-bold">
-                    <span>Total</span>
-                    <span>{stats?.tickets.total ?? 0}</span>
-                  </div>
+        {/* 详细信息卡片 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* 工单概览 */}
+          <Card
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-primary)'
+            }}
+          >
+            <CardHeader>
+              <CardTitle
+                className="flex items-center gap-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <Ticket className="h-5 w-5 text-[var(--color-primary)]" />
+                工单概览
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>待处理</span>
+                  <span className="font-semibold text-orange-400">{stats?.tickets.open ?? 0}</span>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Invitations Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Invitations Overview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Active</span>
-                    <span className="font-medium text-green-600">{stats?.invitations.active ?? 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Used</span>
-                    <span className="font-medium text-blue-600">{stats?.invitations.used ?? 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Expired</span>
-                    <span className="font-medium text-gray-500">{stats?.invitations.expired ?? 0}</span>
-                  </div>
-                  <hr className="my-2" />
-                  <div className="flex justify-between font-bold">
-                    <span>Total</span>
-                    <span>{stats?.invitations.total ?? 0}</span>
-                  </div>
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>处理中</span>
+                  <span className="font-semibold text-blue-400">{stats?.tickets.inProgress ?? 0}</span>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </>
-      )}
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>已关闭</span>
+                  <span className="font-semibold text-emerald-400">{stats?.tickets.closed ?? 0}</span>
+                </div>
+                <div
+                  className="pt-3 mt-3 flex justify-between items-center font-bold"
+                  style={{ borderTop: '1px solid var(--border-primary)' }}
+                >
+                  <span style={{ color: 'var(--text-primary)' }}>总计</span>
+                  <span style={{ color: 'var(--text-primary)' }}>{stats?.tickets.total ?? 0}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {selectedTab === 'users' && (
-        <Card>
+          {/* 邀请码概览 */}
+          <Card
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-primary)'
+            }}
+          >
+            <CardHeader>
+              <CardTitle
+                className="flex items-center gap-2"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <TrendingUp className="h-5 w-5 text-[var(--color-primary)]" />
+                邀请码概览
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>有效</span>
+                  <span className="font-semibold text-emerald-400">{stats?.invitations.active ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>已使用</span>
+                  <span className="font-semibold text-blue-400">{stats?.invitations.used ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span style={{ color: 'var(--text-secondary)' }}>已过期</span>
+                  <span className="font-semibold" style={{ color: 'var(--text-disabled)' }}>{stats?.invitations.expired ?? 0}</span>
+                </div>
+                <div
+                  className="pt-3 mt-3 flex justify-between items-center font-bold"
+                  style={{ borderTop: '1px solid var(--border-primary)' }}
+                >
+                  <span style={{ color: 'var(--text-primary)' }}>总计</span>
+                  <span style={{ color: 'var(--text-primary)' }}>{stats?.invitations.total ?? 0}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* 最近用户 */}
+        <Card
+          style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-primary)'
+          }}
+        >
           <CardHeader>
-            <CardTitle>Recent Users</CardTitle>
+            <CardTitle
+              className="flex items-center gap-2"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <Users className="h-5 w-5 text-[var(--color-primary)]" />
+              最近注册用户
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {stats?.users.recentUsers && stats.users.recentUsers.length > 0 ? (
-              <div className="overflow-x-auto">
+              <ScrollArea className="h-[300px]">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 px-2">Email</th>
-                      <th className="text-left py-2 px-2">Nickname</th>
-                      <th className="text-left py-2 px-2">Role</th>
-                      <th className="text-right py-2 px-2">Credits</th>
-                      <th className="text-left py-2 px-2">Created</th>
+                    <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                      <th className="text-left py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>邮箱</th>
+                      <th className="text-left py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>昵称</th>
+                      <th className="text-left py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>角色</th>
+                      <th className="text-right py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>积分</th>
+                      <th className="text-left py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>注册时间</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stats.users.recentUsers.map((user: User) => (
-                      <tr key={user.id} className="border-b hover:bg-gray-50">
-                        <td className="py-2 px-2">{user.email}</td>
-                        <td className="py-2 px-2">{user.nickname || '-'}</td>
-                        <td className="py-2 px-2">
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
+                      <tr
+                        key={user.id}
+                        className="hover:bg-[var(--bg-tertiary)] transition-colors"
+                        style={{ borderBottom: '1px solid var(--border-primary)' }}
+                      >
+                        <td className="py-3 px-2" style={{ color: 'var(--text-primary)' }}>{user.email}</td>
+                        <td className="py-3 px-2" style={{ color: 'var(--text-secondary)' }}>{user.nickname || '-'}</td>
+                        <td className="py-3 px-2">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            user.role === 'admin'
+                              ? 'bg-[var(--color-primary-20)] text-[var(--color-primary)]'
+                              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                           }`}>
-                            {user.role}
+                            {user.role === 'admin' ? '管理员' : '用户'}
                           </span>
                         </td>
-                        <td className="py-2 px-2 text-right">{user.credits}</td>
-                        <td className="py-2 px-2 text-gray-500">
-                          {new Date(user.created_at).toLocaleDateString()}
+                        <td className="py-3 px-2 text-right" style={{ color: 'var(--text-primary)' }}>{user.credits}</td>
+                        <td className="py-3 px-2" style={{ color: 'var(--text-tertiary)' }}>
+                          {new Date(user.created_at).toLocaleDateString('zh-CN')}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollArea>
             ) : (
-              <p className="text-gray-500">No users found.</p>
+              <p className="text-center py-8" style={{ color: 'var(--text-disabled)' }}>暂无用户数据</p>
             )}
           </CardContent>
         </Card>
-      )}
-
-      {selectedTab === 'tickets' && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="text-lg">Manage Invitations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600 mb-4">Generate new invitation codes and view history.</p>
-              <Button onClick={() => window.location.href = '/invitations'} className="w-full">
-                Go to Invitations
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="text-lg">AI Models</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600 mb-4">Configure and manage AI model settings.</p>
-              <Button onClick={() => window.location.href = '/models'} className="w-full">
-                Go to Models
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader>
-              <CardTitle className="text-lg">Support Tickets</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600 mb-4">View and respond to user support tickets.</p>
-              <Button onClick={() => window.location.href = '/tickets'} className="w-full">
-                Go to Tickets
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
