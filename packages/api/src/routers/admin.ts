@@ -131,18 +131,34 @@ export const adminRouter = router({
   getAllTickets: adminProcedure
     .input(z.object({
       status: z.enum(['open', 'in_progress', 'closed']).optional(),
+      category: z.enum(['bug', 'feature', 'question', 'account', 'billing', 'other']).optional(),
+      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
     }))
     .query(async ({ ctx, input }) => {
+      // 查询工单并关联用户信息和回复（包含回复者信息）
       let query = ctx.supabase
         .from('tickets')
-        .select('*, ticket_replies(*)', { count: 'exact' })
+        .select(`
+          *,
+          user:profiles!tickets_user_id_fkey(id, email, nickname, avatar_url, role),
+          ticket_replies(
+            *,
+            user:profiles!ticket_replies_user_id_fkey(id, email, nickname, avatar_url, role)
+          )
+        `, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
       if (input.status) {
         query = query.eq('status', input.status);
+      }
+      if (input.category) {
+        query = query.eq('category', input.category);
+      }
+      if (input.priority) {
+        query = query.eq('priority', input.priority);
       }
 
       const { data, error, count } = await query;
@@ -169,7 +185,10 @@ export const adminRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('tickets')
-        .update({ status: input.status })
+        .update({
+          status: input.status,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', input.ticketId)
         .select()
         .single();
@@ -196,6 +215,7 @@ export const adminRouter = router({
           ticket_id: input.ticketId,
           user_id: ctx.profileId,
           content: input.content,
+          is_admin: 'true', // 标记为管理员回复
         })
         .select()
         .single();
@@ -203,6 +223,12 @@ export const adminRouter = router({
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
+
+      // 同时更新工单的 updated_at
+      await ctx.supabase
+        .from('tickets')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', input.ticketId);
 
       return data;
     }),

@@ -72,8 +72,13 @@ export const tickets = pgTable('tickets', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
+  description: text('description'), // 工单详细描述
+  category: text('category', { enum: ['bug', 'feature', 'question', 'account', 'billing', 'other'] }).default('other').notNull(), // 工单分类
+  priority: text('priority', { enum: ['low', 'medium', 'high', 'urgent'] }).default('medium').notNull(), // 优先级
+  attachments: jsonb('attachments').default([]), // 附件URL列表
   status: text('status', { enum: ['open', 'closed', 'in_progress'] }).default('open').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const ticketReplies = pgTable('ticket_replies', {
@@ -81,6 +86,8 @@ export const ticketReplies = pgTable('ticket_replies', {
   ticketId: uuid('ticket_id').references(() => tickets.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }), // User who replied
   content: text('content').notNull(),
+  isAdmin: text('is_admin').default('false').notNull(), // 是否管理员回复
+  attachments: jsonb('attachments').default([]), // 回复附件
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
