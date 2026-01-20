@@ -853,7 +853,7 @@ export const adminRouter = router({
       // Get all transactions for analysis
       const { data: transactions } = await ctx.supabase
         .from('credit_transactions')
-        .select('amount, type, created_at')
+        .select('amount, type, created_at, description')
         .order('created_at', { ascending: false });
 
       // Get credit packages for revenue calculation
@@ -865,6 +865,33 @@ export const adminRouter = router({
       const { data: users } = await ctx.supabase
         .from('profiles')
         .select('credits, created_at');
+
+      // Get AI models for cost configuration
+      const { data: models } = await ctx.supabase
+        .from('ai_models')
+        .select('*')
+        .order('name', { ascending: true });
+
+      // Get messages for API request count estimate
+      const { data: messages } = await ctx.supabase
+        .from('messages')
+        .select('id, role, created_at, conversation_id');
+
+      // Get conversations with model info
+      const { data: conversations } = await ctx.supabase
+        .from('conversations')
+        .select('id, model_id, created_at');
+
+      // Get system settings for credits conversion rules
+      const { data: settings } = await ctx.supabase
+        .from('system_settings')
+        .select('*')
+        .in('key', [
+          'input_credits_per_1k',
+          'output_credits_per_1k',
+          'web_search_credits',
+          'new_user_credits',
+        ]);
 
       // Calculate overall stats
       const now = new Date();
@@ -950,11 +977,77 @@ export const adminRouter = router({
           ...data,
         }));
 
+      // API/Model statistics
+      const apiStats = {
+        totalRequests: messages?.filter(m => m.role === 'assistant').length ?? 0,
+        totalConversations: conversations?.length ?? 0,
+        messagesThisMonth: messages?.filter(m => new Date(m.created_at) >= thirtyDaysAgo).length ?? 0,
+        messagesThisWeek: messages?.filter(m => new Date(m.created_at) >= sevenDaysAgo).length ?? 0,
+      };
+
+      // Model statistics with usage count
+      const modelUsageMap: Record<string, number> = {};
+      conversations?.forEach(conv => {
+        if (conv.model_id) {
+          modelUsageMap[conv.model_id] = (modelUsageMap[conv.model_id] || 0) + 1;
+        }
+      });
+
+      const modelStats = models?.map(model => ({
+        id: model.id,
+        name: model.name,
+        modelId: model.model_id,
+        provider: model.provider,
+        isActive: model.is_active,
+        inputTokenCost: model.input_token_cost,
+        outputTokenCost: model.output_token_cost,
+        inputTokenCostAbove200k: model.input_token_cost_above_200k,
+        outputTokenCostAbove200k: model.output_token_cost_above_200k,
+        webSearchCost: model.web_search_cost,
+        maxTokens: model.max_tokens,
+        conversationCount: modelUsageMap[model.id] || 0,
+      })) ?? [];
+
+      // Revenue estimation from purchases (credits sold * estimated price)
+      // Assume average credit package price for estimation
+      const avgCreditPackagePrice = packages && packages.length > 0
+        ? packages.reduce((sum, p) => sum + p.price, 0) / packages.length
+        : 0;
+      const avgCreditPackageAmount = packages && packages.length > 0
+        ? packages.reduce((sum, p) => sum + p.credits_amount, 0) / packages.length
+        : 1;
+      const pricePerCredit = avgCreditPackageAmount > 0 ? avgCreditPackagePrice / avgCreditPackageAmount : 0;
+
+      const financeOverview = {
+        estimatedRevenue: Math.round(transactionStats.totalPurchases * pricePerCredit), // in cents
+        creditsConsumed: transactionStats.totalDeductions,
+        creditsPurchased: transactionStats.totalPurchases,
+        creditsGiven: transactionStats.totalAdditions,
+        netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalPurchases - transactionStats.totalDeductions,
+      };
+
+      // Credits conversion rules from settings
+      const settingsMap: Record<string, unknown> = {};
+      settings?.forEach(s => {
+        settingsMap[s.key] = s.value;
+      });
+
+      const creditsRules = {
+        inputCreditsPerK: settingsMap['input_credits_per_1k'] ?? 1,
+        outputCreditsPerK: settingsMap['output_credits_per_1k'] ?? 3,
+        webSearchCredits: settingsMap['web_search_credits'] ?? 5,
+        newUserCredits: settingsMap['new_user_credits'] ?? 100,
+      };
+
       return {
         transactions: transactionStats,
         users: userStats,
         packages: packageStats,
         dailyChart: dailyChartData,
+        apiStats,
+        modelStats,
+        financeOverview,
+        creditsRules,
       };
     }),
 
