@@ -383,30 +383,28 @@
 
 ---
 
-### Step 4.8: 补充 Shadcn/ui 组件库 ⬜ 待开始
+### Step 4.8: 补充 Shadcn/ui 组件库 🚧 进行中
 
 **目标**: 按优先级分阶段补充所有常用 Shadcn/ui 组件，构建完整的 UI 组件库
 
-**当前状态**: 已有 14 个组件，待补充 21 个组件
+**当前状态**: 已有 20 个组件 (14 + 6)，待补充 15 个组件
 
 ---
 
-#### Phase A: 高频使用组件 (6个) - 必须添加
+#### Phase A: 高频使用组件 (6个) ✅ 已完成
 
 | 序号 | 组件 | 文件 | 依赖包 | 用途 | 状态 |
 |------|------|------|--------|------|------|
-| A1 | **Toast (Sonner)** | sonner.tsx | `sonner` | 操作成功/失败提示 | ⬜ |
-| A2 | **Tooltip** | tooltip.tsx | `@radix-ui/react-tooltip` | 图标按钮悬停说明 | ⬜ |
-| A3 | **Checkbox** | checkbox.tsx | `@radix-ui/react-checkbox` | 表单复选框 | ⬜ |
-| A4 | **Switch** | switch.tsx | `@radix-ui/react-switch` | 设置开关切换 | ⬜ |
-| A5 | **Progress** | progress.tsx | `@radix-ui/react-progress` | 上传/处理进度 | ⬜ |
-| A6 | **Skeleton** | skeleton.tsx | 无依赖 | 骨架屏加载 | ⬜ |
+| A1 | **Toast (Sonner)** | sonner.tsx | `sonner` | 操作成功/失败提示 | ✅ |
+| A2 | **Tooltip** | tooltip.tsx | `@radix-ui/react-tooltip` | 图标按钮悬停说明 | ✅ |
+| A3 | **Checkbox** | checkbox.tsx | `@radix-ui/react-checkbox` | 表单复选框 | ✅ |
+| A4 | **Switch** | switch.tsx | `@radix-ui/react-switch` | 设置开关切换 | ✅ |
+| A5 | **Progress** | progress.tsx | `@radix-ui/react-progress` | 上传/处理进度 | ✅ |
+| A6 | **Skeleton** | skeleton.tsx | 无依赖 | 骨架屏加载 | ✅ |
 
-**预计时间**: 1-2 小时
-**安装命令**:
-```bash
-pnpm add sonner @radix-ui/react-tooltip @radix-ui/react-checkbox @radix-ui/react-switch @radix-ui/react-progress
-```
+**已安装依赖**: sonner, @radix-ui/react-tooltip, @radix-ui/react-checkbox, @radix-ui/react-switch, @radix-ui/react-progress
+
+**附加导出**: Toaster, toast, SkeletonCard, SkeletonAvatar, SkeletonText, SkeletonTable, TooltipProvider
 
 ---
 
