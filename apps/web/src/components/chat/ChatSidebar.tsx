@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { useChatStore } from '@/stores';
 import {
   Plus,
   MessageSquare,
@@ -12,12 +13,30 @@ import {
   Settings2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface ChatSidebarProps {
   onSelectConversation: (id: string) => void;
@@ -185,7 +204,35 @@ export function ChatSidebar({
   onNewChat,
   activeConversationId
 }: ChatSidebarProps) {
+  const { setActiveConversation } = useChatStore();
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const utils = trpc.useUtils();
   const { data: conversations, isLoading } = trpc.chat.getConversations.useQuery();
+
+  const deleteConversation = trpc.chat.deleteConversation.useMutation({
+    onSuccess: () => {
+      utils.chat.getConversations.invalidate();
+      if (activeConversationId === selectedConvId) {
+        setActiveConversation(null);
+        onNewChat();
+      }
+      setDeleteDialogOpen(false);
+      setSelectedConvId(null);
+    },
+  });
+
+  const renameConversation = trpc.chat.updateConversationTitle.useMutation({
+    onSuccess: () => {
+      utils.chat.getConversations.invalidate();
+      setRenameDialogOpen(false);
+      setSelectedConvId(null);
+      setRenameValue('');
+    },
+  });
 
   const conversationList = conversations?.data || [];
   const groupedConversations = useMemo(
@@ -194,13 +241,32 @@ export function ChatSidebar({
   );
 
   const handleDelete = (id: string) => {
-    // TODO: Implement delete mutation
-    console.log('Delete conversation:', id);
+    setSelectedConvId(id);
+    setDeleteDialogOpen(true);
   };
 
   const handleRename = (id: string) => {
-    // TODO: Implement rename modal
-    console.log('Rename conversation:', id);
+    const conv = conversationList.find(c => c.id === id);
+    setSelectedConvId(id);
+    setRenameValue(conv?.title || '');
+    setRenameDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (selectedConvId) {
+      deleteConversation.mutate({ conversationId: selectedConvId });
+    }
+  };
+
+  const confirmRename = () => {
+    if (selectedConvId && renameValue.trim()) {
+      renameConversation.mutate({ conversationId: selectedConvId, title: renameValue.trim() });
+    }
+  };
+
+  const handleSelectConversation = (id: string) => {
+    setActiveConversation(id);
+    onSelectConversation(id);
   };
 
   return (
@@ -281,7 +347,7 @@ export function ChatSidebar({
                     key={conv.id}
                     conversation={conv}
                     isActive={activeConversationId === conv.id}
-                    onSelect={() => onSelectConversation(conv.id)}
+                    onSelect={() => handleSelectConversation(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -298,7 +364,7 @@ export function ChatSidebar({
                     key={conv.id}
                     conversation={conv}
                     isActive={activeConversationId === conv.id}
-                    onSelect={() => onSelectConversation(conv.id)}
+                    onSelect={() => handleSelectConversation(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -315,7 +381,7 @@ export function ChatSidebar({
                     key={conv.id}
                     conversation={conv}
                     isActive={activeConversationId === conv.id}
-                    onSelect={() => onSelectConversation(conv.id)}
+                    onSelect={() => handleSelectConversation(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -332,7 +398,7 @@ export function ChatSidebar({
                     key={conv.id}
                     conversation={conv}
                     isActive={activeConversationId === conv.id}
-                    onSelect={() => onSelectConversation(conv.id)}
+                    onSelect={() => handleSelectConversation(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -342,6 +408,65 @@ export function ChatSidebar({
           </div>
         )}
       </div>
+
+      {/* Rename Dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <DialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>重命名对话</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            placeholder="输入新标题"
+            className="bg-[var(--bg-primary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+            onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRenameDialogOpen(false)}
+              className="border-[var(--border-primary)] text-[var(--text-secondary)]"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={confirmRename}
+              disabled={!renameValue.trim() || renameConversation.isPending}
+              style={{
+                background: 'var(--color-primary)',
+                color: 'var(--bg-primary)',
+              }}
+            >
+              {renameConversation.isPending ? '保存中...' : '保存'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>确认删除</AlertDialogTitle>
+            <AlertDialogDescription style={{ color: 'var(--text-tertiary)' }}>
+              此操作将永久删除该对话及所有消息记录，且无法恢复。确定要继续吗？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-[var(--border-primary)] text-[var(--text-secondary)]">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteConversation.isPending}
+              style={{ background: 'var(--error)', color: 'white' }}
+            >
+              {deleteConversation.isPending ? '删除中...' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

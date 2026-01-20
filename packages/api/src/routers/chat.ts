@@ -11,6 +11,56 @@ export const chatRouter = router({
       .order('created_at', { ascending: false });
   }),
 
+  createConversation: protectedProcedure
+    .input(z.object({ title: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('conversations')
+        .insert({
+          user_id: ctx.profileId,
+          title: input.title || '新对话',
+        })
+        .select()
+        .single();
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      return data;
+    }),
+
+  updateConversationTitle: protectedProcedure
+    .input(z.object({ conversationId: z.string().uuid(), title: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('conversations')
+        .update({ title: input.title })
+        .eq('id', input.conversationId)
+        .eq('user_id', ctx.profileId)
+        .select()
+        .single();
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      return data;
+    }),
+
+  deleteConversation: protectedProcedure
+    .input(z.object({ conversationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      // Delete messages first (foreign key constraint)
+      await ctx.supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', input.conversationId);
+
+      const { error } = await ctx.supabase
+        .from('conversations')
+        .delete()
+        .eq('id', input.conversationId)
+        .eq('user_id', ctx.profileId);
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      return { success: true };
+    }),
+
   getMessages: protectedProcedure
     .input(z.object({ conversationId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {

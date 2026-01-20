@@ -35,36 +35,59 @@
 ## Session: 2026-01-20 (续)
 
 ### Current Status
-- **Phase:** Step 5.0 组件-页面关联集成 🚧 进行中
+- **Phase:** Step 5.0 组件-页面关联集成 ✅ 完成
 - **Previous:** Step 4.9 剩余业务组件还原 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
 - **UI 组件完成率:** 100% (73/73 组件)
-- **关联集成进度:** 0% (待开始)
+- **关联集成进度:** 100% ✅
 
 ---
 
-### Step 5.0 组件-页面关联集成 🚧 进行中
+### Step 5.0 组件-页面关联集成 ✅ 完成
 
 **目标**: 将已复刻的 UI 组件与路由、状态管理、数据层完整对接
 
-#### 关联状态分析 (2026-01-20)
+#### 完成状态 (2026-01-20)
 
 | 分类 | 问题描述 | 状态 |
 |------|----------|------|
-| 🔴 路由关联 | AppHeader 下拉菜单无导航、ProfileSidebar 登出未实现 | ⬜ 待修复 |
-| 🟡 全局状态 | 无 Zustand，组件间状态隔离 | ⬜ 待创建 |
-| 🟡 数据流 | ChatPage/ProfilePage/MarketplacePage 使用 mock 或 TODO | ⬜ 待对接 |
-| 🟠 交互反馈 | ChatSidebar 删除/重命名是 TODO | ⬜ 待完成 |
+| 🔴 路由关联 | AppHeader 下拉菜单导航、ProfileSidebar 登出 | ✅ 已修复 |
+| 🟡 全局状态 | Zustand useChatStore 创建完成 | ✅ 已创建 |
+| 🟡 数据流 | ChatPage tRPC mutations 对接完成 | ✅ 已对接 |
+| 🟠 交互反馈 | ChatSidebar 删除/重命名功能完成 | ✅ 已完成 |
 
 #### 执行阶段
 
 | 阶段 | 内容 | 优先级 | 状态 |
 |------|------|--------|------|
-| Phase 5.1 | 路由关联修复 | P0 Critical | ⬜ |
-| Phase 5.2 | 全局状态管理 (Zustand) | P1 Important | ⬜ |
-| Phase 5.3 | 数据流关联 (tRPC) | P1 Important | ⬜ |
-| Phase 5.4 | 交互反馈完善 | P2 Medium | ⬜ |
+| Phase 5.1 | 路由关联修复 | P0 Critical | ✅ |
+| Phase 5.2 | 全局状态管理 (Zustand) | P1 Important | ✅ |
+| Phase 5.3 | 数据流关联 (tRPC) | P1 Important | ✅ |
+| Phase 5.4 | 交互反馈完善 | P2 Medium | ✅ |
+
+#### 已完成工作详情
+
+**Phase 5.1 路由修复:**
+- `AppHeader.tsx`: 下拉菜单添加 Link 导航 (个人中心→/profile, 充值→/profile?tab=subscription)
+- `AppHeader.tsx`: 退出登录实现 Supabase signOut + router.push('/login')
+- `ProfileSidebar.tsx`: 退出登录实现 Supabase signOut
+
+**Phase 5.2 Zustand Store:**
+- 新建 `stores/useChatStore.ts`
+- 状态: activeConversationId, conversationListVersion, isSidebarCollapsed
+- Actions: setActiveConversation, refreshConversationList, toggleSidebar
+
+**Phase 5.3 数据流:**
+- `chat.ts`: 新增 createConversation, updateConversationTitle, deleteConversation 接口
+- `ChatPage`: 实现 createConversation + sendMessage mutations
+- `ChatPage`: 实现 updateTitle mutation
+- `ChatInterface`: 改用 utils.chat.getMessages.invalidate() 模式
+
+**Phase 5.4 交互反馈:**
+- `ChatSidebar`: 实现删除对话功能 (AlertDialog 确认弹窗)
+- `ChatSidebar`: 实现重命名对话功能 (Dialog 输入弹窗)
+- 所有 mutations 使用 utils.invalidate() 统一模式
 
 ---
 

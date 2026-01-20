@@ -147,10 +147,11 @@ function StreamingIndicator() {
 }
 
 export function ChatInterface({ conversationId }: ChatInterfaceProps) {
-  const { data: messages, isLoading, refetch } = trpc.chat.getMessages.useQuery({ conversationId });
+  const utils = trpc.useUtils();
+  const { data: messages, isLoading } = trpc.chat.getMessages.useQuery({ conversationId });
   const sendMessage = trpc.chat.sendMessage.useMutation({
     onSuccess: () => {
-      refetch();
+      utils.chat.getMessages.invalidate({ conversationId });
       setNewMessage('');
     },
   });
