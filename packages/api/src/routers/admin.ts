@@ -4,10 +4,16 @@ import { TRPCError } from '@trpc/server';
 
 export const adminRouter = router({
   /**
-   * Get dashboard statistics
-   * Returns overview of users, credits, tickets, and invitations
+   * Get enhanced dashboard statistics
+   * Returns comprehensive overview for the admin dashboard
    */
   getStatistics: adminProcedure.query(async ({ ctx }) => {
+    // Calculate date ranges
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
     // Fetch all statistics in parallel for better performance
     const [
       usersResult,
@@ -15,6 +21,22 @@ export const adminRouter = router({
       invitationsResult,
       creditsResult,
       recentUsersResult,
+      // Time-based stats
+      usersToday,
+      usersThisWeek,
+      usersThisMonth,
+      // Conversations stats
+      conversationsTotal,
+      conversationsToday,
+      conversationsThisWeek,
+      // Transactions for trends
+      transactionsResult,
+      // Models for usage stats
+      modelsResult,
+      // Credit transactions by type
+      creditTransactionsResult,
+      // Top active users (by conversations)
+      topUsersResult,
     ] = await Promise.all([
       // Total users count
       ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }),
@@ -28,12 +50,53 @@ export const adminRouter = router({
       // Total credits in system
       ctx.supabase.from('profiles').select('credits'),
 
-      // Recent users (last 7 days)
+      // Recent users (last 10)
       ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, role, credits, created_at')
+        .select('id, email, nickname, avatar_url, role, credits, created_at')
         .order('created_at', { ascending: false })
         .limit(10),
+
+      // Users registered today
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+
+      // Users registered this week
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
+
+      // Users registered this month
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', monthStart),
+
+      // Total conversations
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }),
+
+      // Conversations today
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+
+      // Conversations this week
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
+
+      // Recent transactions for trends (last 30 days)
+      ctx.supabase
+        .from('credit_transactions')
+        .select('amount, type, created_at')
+        .gte('created_at', new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: true }),
+
+      // Active models with usage
+      ctx.supabase
+        .from('ai_models')
+        .select('id, name, model_id, is_active')
+        .eq('is_active', 'true'),
+
+      // Credit transactions summary
+      ctx.supabase.from('credit_transactions').select('type, amount'),
+
+      // Top users by credits spent (from transactions)
+      ctx.supabase
+        .from('profiles')
+        .select('id, email, nickname, avatar_url, credits')
+        .order('credits', { ascending: false })
+        .limit(5),
     ]);
 
     // Calculate ticket statistics
@@ -55,16 +118,74 @@ export const adminRouter = router({
     // Calculate total credits
     const totalCredits = creditsResult.data?.reduce((sum, user) => sum + (user.credits ?? 0), 0) ?? 0;
 
+    // Calculate credit transactions stats
+    const transactionStats = {
+      totalDeductions: 0,
+      totalAdditions: 0,
+      totalPurchases: 0,
+      totalRefunds: 0,
+    };
+    creditTransactionsResult.data?.forEach((t: { type: string; amount: number }) => {
+      if (t.type === 'deduction') transactionStats.totalDeductions += Math.abs(t.amount);
+      else if (t.type === 'addition') transactionStats.totalAdditions += t.amount;
+      else if (t.type === 'purchase') transactionStats.totalPurchases += t.amount;
+      else if (t.type === 'refund') transactionStats.totalRefunds += t.amount;
+    });
+
+    // Generate trend data for last 7 days
+    const trendData = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = date.toISOString().split('T')[0];
+      const dayTransactions = transactionsResult.data?.filter((t: { created_at: string }) =>
+        t.created_at.startsWith(dateStr)
+      ) ?? [];
+
+      const additions = dayTransactions
+        .filter((t: { type: string }) => t.type === 'addition' || t.type === 'purchase')
+        .reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
+      const deductions = dayTransactions
+        .filter((t: { type: string }) => t.type === 'deduction')
+        .reduce((sum: number, t: { amount: number }) => sum + Math.abs(t.amount), 0);
+
+      trendData.push({
+        date: dateStr,
+        day: date.toLocaleDateString('zh-CN', { weekday: 'short' }),
+        additions,
+        deductions,
+      });
+    }
+
+    // System health calculation
+    const openTicketRatio = ticketStats.total > 0 ? ticketStats.open / ticketStats.total : 0;
+    const systemHealth = openTicketRatio > 0.5 ? 'warning' : openTicketRatio > 0.3 ? 'attention' : 'healthy';
+
     return {
       users: {
         total: usersResult.count ?? 0,
+        today: usersToday.count ?? 0,
+        thisWeek: usersThisWeek.count ?? 0,
+        thisMonth: usersThisMonth.count ?? 0,
         recentUsers: recentUsersResult.data ?? [],
+        topUsers: topUsersResult.data ?? [],
+      },
+      conversations: {
+        total: conversationsTotal.count ?? 0,
+        today: conversationsToday.count ?? 0,
+        thisWeek: conversationsThisWeek.count ?? 0,
       },
       tickets: ticketStats,
       invitations: invitationStats,
       credits: {
         totalInSystem: totalCredits,
+        transactions: transactionStats,
       },
+      models: {
+        activeCount: modelsResult.data?.length ?? 0,
+        list: modelsResult.data ?? [],
+      },
+      trends: trendData,
+      systemHealth,
     };
   }),
 
