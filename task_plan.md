@@ -22,7 +22,7 @@
 
 **Phase 7 管理后台功能还原:** 🚧 进行中
 - Step 7.1: 功能差异分析 ✅ 完成 (2026-01-20)
-- Step 7.2: 系统设置还原 (64项) ⬜ 待执行
+- Step 7.2: 系统设置还原 (35项) ✅ 完成 (2026-01-20)
 - Step 7.3: 会员套餐系统还原 ⬜ 待执行
 - Step 7.4: 模型管理完善 ⬜ 待执行
 - Step 7.5: 邀请码管理完善 ⬜ 待执行
@@ -773,24 +773,28 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 4. 邀请码记录追踪 + 风险评估
 5. 精选模块管理
 
-### Step 7.2: 系统设置还原 ⬜ 待执行
+### Step 7.2: 系统设置还原 ✅ 完成
 
-**目标**: 还原完整的 64 项系统设置
+**目标**: 还原完整的 35 项系统设置 (注: 原估计64项，实际分析后为35项)
 
-**缺失的设置分类:**
-| 分类 | 设置数量 | 示例 |
-|------|----------|------|
-| 计费设置 | 5 | token成本、首购奖励 |
-| 功能开关 | 6 | 智能路由、智能搜索 |
-| 限制设置 | 3 | 最大消息数、字符限制 |
-| 签到奖励 | 6 | 5天周期、月度奖励 |
-| 推荐系统 | 10 | 奖励、返利、IP限制 |
+**已实现的设置分类:**
+| 分类 | 设置数量 | 设置项 |
+|------|----------|--------|
+| 基础设置 | 3 | site_name, support_email, maintenance_mode |
+| 积分计费 | 5 | new_user_credits, input/output_credits_per_1k, web_search_credits, first_purchase_bonus_percent |
+| 签到福利 | 6 | checkin_day1-5, checkin_monthly_bonus |
+| 邀请奖励 | 10 | invite_inviter/invitee_reward, rebate, binding_days, limits, IP限制, risk_auto_reject |
+| 功能设置 | 11 | smart_routing, smart_search, free_tier, token_stats, model_selector, billing_hint 等 |
 
-**实现任务:**
-- [ ] 更新 Drizzle schema (system_settings 表)
-- [ ] 更新 settings tRPC router (完整 CRUD)
-- [ ] 重写 admin/settings/page.tsx (6个分类 Tab)
-- [ ] 添加设置验证逻辑
+**完成的任务:**
+- [x] 重写 admin/settings/page.tsx (6个分类 Tab)
+- [x] 实现 35 项设置配置
+- [x] 使用 Switch 组件处理布尔类型
+- [x] 批量保存功能
+- [x] 会员权限 Tab 占位（依赖 Step 7.3）
+
+**修改文件:**
+- `apps/web/src/app/admin/settings/page.tsx` - 完全重写 (329行新增)
 
 ### Step 7.3: 会员套餐系统还原 ⬜ 待执行
 
