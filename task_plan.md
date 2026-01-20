@@ -829,3 +829,5 @@ UI 视觉一致性 (待用户验证):
 | Can't resolve '@/components/ui/select' | Profile 页面使用了未创建的 Select 组件 | 安装 @radix-ui/react-select 并创建组件 | 已修复 |
 | Can't resolve '@/components/ui/sheet' | Profile 页面使用了未创建的 Sheet 组件 | 安装 @radix-ui/react-dialog 并创建组件 | 已修复 |
 | Can't resolve '@radix-ui/react-*' (Codespaces) | Turbopack 模块解析问题 | 添加 Radix UI 到 next.config.ts transpilePackages | 已修复 |
+| 功能广场 404 | AppHeader 链接 `/features` 但页面路径是 `/marketplace` | 修改 AppHeader.tsx 链接为 `/marketplace` | 已修复 |
+| Vercel 环境变量警告 | turbo.json 缺少环境变量声明 | 在 turbo.json 添加 globalEnv 配置 | 已修复 |
