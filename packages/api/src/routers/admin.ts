@@ -222,7 +222,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*, profiles!credit_transactions_user_id_fkey(id, email, nickname)', { count: 'exact' })
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 

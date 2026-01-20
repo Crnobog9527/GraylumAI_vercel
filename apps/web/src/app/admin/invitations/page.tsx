@@ -210,7 +210,7 @@ export default function AdminInvitationsPage() {
                   const statusInfo = statusConfig[invitation.status];
                   const StatusIcon = statusInfo.icon;
                   return (
-                    <TableRow key={invitation.id}>
+                    <TableRow key={invitation.code}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <div
