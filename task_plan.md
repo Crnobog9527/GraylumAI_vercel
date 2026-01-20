@@ -334,6 +334,55 @@
 |------|--------|--------|------|
 | 模板页面 (/templates) | src/pages/Templates.jsx | apps/web/src/app/templates/page.tsx | ⬜ |
 
+### Step 4.7: 提取复用组件 ✅ 已完成
+
+**目标**: 将 12 个管理后台页面中重复的代码模式提取为可复用组件，减少 40-50% 重复代码
+
+#### 已提取组件列表
+
+| 优先级 | 组件 | 文件路径 | 复用次数 | 状态 |
+|--------|------|----------|----------|------|
+| P0 | AdminLoadingState | components/admin/AdminLoadingState.tsx | 12 | ✅ |
+| P0 | AdminErrorState | components/admin/AdminErrorState.tsx | 12 | ✅ |
+| P0 | AdminPageHeader | components/admin/AdminPageHeader.tsx | 12 | ✅ |
+| P0 | StatusBadge | components/ui/status-badge.tsx | 8+ | ✅ |
+| P1 | EmptyState | components/ui/empty-state.tsx | 11+ | ✅ |
+| P1 | StatsCardGrid | components/admin/StatsCardGrid.tsx | 8 | ✅ |
+| P1 | FormDialog | components/ui/form-dialog.tsx | 5+ | ✅ |
+| P1 | LoadingSpinner | components/ui/loading-spinner.tsx | 12+ | ✅ |
+| P2 | FilterTabs | components/ui/filter-tabs.tsx | 3 | ⬜ 可选 |
+| P2 | TableIconCell | components/ui/table-icon-cell.tsx | 10+ | ⬜ 可选 |
+
+#### 重构后文件结构
+
+```
+/components/
+├── admin/
+│   ├── AdminSidebar.tsx (已有)
+│   ├── StatsCard.tsx (已有)
+│   ├── AdminLoadingState.tsx ✅ 新增
+│   ├── AdminErrorState.tsx ✅ 新增
+│   ├── AdminPageHeader.tsx ✅ 新增
+│   └── StatsCardGrid.tsx ✅ 新增
+└── ui/
+    ├── status-badge.tsx ✅ 新增 (含 StatusBadge, ToggleBadge, RoleBadge)
+    ├── empty-state.tsx ✅ 新增 (含 EmptyState, TableEmptyState)
+    ├── form-dialog.tsx ✅ 新增 (含 FormDialog, ConfirmDialog)
+    └── loading-spinner.tsx ✅ 新增 (含 LoadingSpinner, LoadingOverlay, InlineLoading)
+```
+
+#### 已重构页面示例
+- `admin/users/page.tsx` - 使用 AdminLoadingState, AdminErrorState, AdminPageHeader, RoleBadge, TableEmptyState
+- `admin/invitations/page.tsx` - 使用 AdminLoadingState, AdminErrorState, AdminPageHeader, StatsCardGrid, StatusBadge, TableEmptyState
+
+#### 实现效果
+- **代码减少**: 每个页面减少约 30-50 行重复代码
+- **维护性提升**: 修改一处即可全局生效
+- **一致性保证**: 统一的样式和行为
+- **TypeScript 检查**: ✅ 通过
+
+---
+
 ### Step 4.6: 细节打磨与最终验证 ✅ 已完成
 
 #### 验收清单

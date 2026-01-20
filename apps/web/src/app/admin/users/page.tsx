@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
@@ -25,6 +24,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import AdminSidebar from '@/components/admin/AdminSidebar';
+import AdminLoadingState from '@/components/admin/AdminLoadingState';
+import AdminErrorState from '@/components/admin/AdminErrorState';
+import AdminPageHeader from '@/components/admin/AdminPageHeader';
+import { RoleBadge } from '@/components/ui/status-badge';
+import { TableEmptyState } from '@/components/ui/empty-state';
 
 interface User {
   id: string;
@@ -70,37 +74,12 @@ export default function AdminUsersPage() {
 
   // 加载状态
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-        </div>
-      </div>
-    );
+    return <AdminLoadingState />;
   }
 
   // 错误状态
   if (error) {
-    return (
-      <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <AdminSidebar />
-        <div className="flex-1 p-8">
-          <Card
-            className="max-w-md mx-auto mt-20"
-            style={{ background: 'var(--error-bg)', border: '1px solid var(--error)' }}
-          >
-            <CardContent className="pt-6">
-              <p style={{ color: 'var(--error)' }}>
-                {error.message.includes('Admin role required')
-                  ? '访问被拒绝：您需要管理员权限才能查看此页面。'
-                  : `错误: ${error.message}`}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
   return (
@@ -109,16 +88,11 @@ export default function AdminUsersPage() {
 
       <div className="flex-1 p-8 overflow-auto">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-              用户管理
-            </h1>
-            <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              管理平台用户和积分
-            </p>
-          </div>
-        </div>
+        <AdminPageHeader
+          title="用户管理"
+          subtitle="管理平台用户和积分"
+          onRefresh={() => refetch()}
+        />
 
         {/* 搜索框 */}
         <div className="mb-6">
@@ -166,9 +140,7 @@ export default function AdminUsersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={u.role === 'admin' ? 'default' : 'secondary'}>
-                        {u.role === 'admin' ? '管理员' : '用户'}
-                      </Badge>
+                      <RoleBadge role={u.role} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
@@ -198,11 +170,7 @@ export default function AdminUsersPage() {
                   </TableRow>
                 ))}
                 {filteredUsers.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
-                      未找到用户
-                    </TableCell>
-                  </TableRow>
+                  <TableEmptyState colSpan={5} message="未找到用户" />
                 )}
               </TableBody>
             </Table>

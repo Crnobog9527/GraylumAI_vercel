@@ -32,6 +32,48 @@
 
 ---
 
+## Session: 2026-01-20 (续)
+
+### Current Status
+- **Phase:** Phase 4 Step 4.7 提取复用组件 ✅ 完成
+- **Goal:** 将 12 个管理后台页面中的重复代码提取为可复用组件
+- **Completed:** 2026-01-20
+- **Blocking Issue:** 无
+
+### Step 4.7 提取复用组件完成
+
+**已创建组件:**
+
+| 组件 | 文件路径 | 功能 |
+|------|----------|------|
+| AdminLoadingState | components/admin/AdminLoadingState.tsx | 管理后台加载状态 |
+| AdminErrorState | components/admin/AdminErrorState.tsx | 错误/权限拒绝状态 |
+| AdminPageHeader | components/admin/AdminPageHeader.tsx | 页面标题+刷新+操作按钮 |
+| StatsCardGrid | components/admin/StatsCardGrid.tsx | 统计卡片网格布局 |
+| StatusBadge | components/ui/status-badge.tsx | 通用状态徽章 (30+ 预设状态) |
+| ToggleBadge | components/ui/status-badge.tsx | 启用/禁用切换徽章 |
+| RoleBadge | components/ui/status-badge.tsx | 用户角色徽章 |
+| EmptyState | components/ui/empty-state.tsx | 空状态展示 |
+| TableEmptyState | components/ui/empty-state.tsx | 表格空状态行 |
+| FormDialog | components/ui/form-dialog.tsx | 表单对话框 |
+| ConfirmDialog | components/ui/form-dialog.tsx | 确认对话框 |
+| LoadingSpinner | components/ui/loading-spinner.tsx | 加载动画 |
+| LoadingOverlay | components/ui/loading-spinner.tsx | 全屏加载遮罩 |
+
+**已重构页面:**
+- [x] admin/users/page.tsx - 代码减少 ~40 行
+- [x] admin/invitations/page.tsx - 代码减少 ~60 行
+
+**TypeScript 检查:** ✅ 通过
+
+**收益:**
+- 8 个新组件，13 个可复用导出
+- 每个页面可减少 30-60 行重复代码
+- 统一的加载、错误、空状态处理
+- 30+ 预设状态徽章样式
+
+---
+
 ## Session: 2026-01-20
 
 ### Current Status
