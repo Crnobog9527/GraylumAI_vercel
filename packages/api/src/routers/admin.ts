@@ -76,17 +76,35 @@ export const adminRouter = router({
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
       search: z.string().optional(),
+      status: z.enum(['active', 'disabled', 'banned']).optional(),
+      membershipLevel: z.enum(['free', 'pro', 'gold']).optional(),
+      role: z.enum(['user', 'admin']).optional(),
     }))
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, avatar_url, role, credits, created_at', { count: 'exact' })
+        .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
       // Apply search filter if provided
       if (input.search) {
         query = query.or(`email.ilike.%${input.search}%,nickname.ilike.%${input.search}%`);
+      }
+
+      // Apply status filter
+      if (input.status) {
+        query = query.eq('status', input.status);
+      }
+
+      // Apply membership level filter
+      if (input.membershipLevel) {
+        query = query.eq('membership_level', input.membershipLevel);
+      }
+
+      // Apply role filter
+      if (input.role) {
+        query = query.eq('role', input.role);
       }
 
       const { data, error, count } = await query;
@@ -109,8 +127,22 @@ export const adminRouter = router({
     .input(z.object({
       userId: z.string().uuid(),
       role: z.enum(['user', 'admin']),
+      reason: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Get current role
+      const { data: profile, error: profileError } = await ctx.supabase
+        .from('profiles')
+        .select('role, nickname, email')
+        .eq('id', input.userId)
+        .single();
+
+      if (profileError || !profile) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const previousRole = profile.role;
+
       const { data, error } = await ctx.supabase
         .from('profiles')
         .update({ role: input.role })
@@ -121,6 +153,19 @@ export const adminRouter = router({
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
+
+      // Log the activity
+      await ctx.supabase.from('user_activity_logs').insert({
+        user_id: input.userId,
+        admin_id: ctx.profileId,
+        action: `角色变更: ${previousRole} → ${input.role}`,
+        action_type: 'role_change',
+        details: {
+          previousRole,
+          newRole: input.role,
+          reason: input.reason,
+        },
+      });
 
       return data;
     }),
@@ -344,10 +389,249 @@ export const adminRouter = router({
         description: `[Admin] ${input.reason}`,
       });
 
+      // Log the activity
+      await ctx.supabase.from('user_activity_logs').insert({
+        user_id: input.userId,
+        admin_id: ctx.profileId,
+        action: `积分调整: ${input.amount > 0 ? '+' : ''}${input.amount}`,
+        action_type: 'credit_adjustment',
+        details: {
+          previousCredits: profile.credits,
+          newCredits,
+          adjustment: input.amount,
+          reason: input.reason,
+        },
+      });
+
       return {
         previousCredits: profile.credits,
         newCredits,
         adjustment: input.amount,
+      };
+    }),
+
+  // ============================================
+  // User Management (Enhanced)
+  // ============================================
+
+  /**
+   * Get detailed user info with usage statistics
+   */
+  getUserDetails: adminProcedure
+    .input(z.object({
+      userId: z.string().uuid(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Get user profile with all fields
+      const { data: profile, error: profileError } = await ctx.supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', input.userId)
+        .single();
+
+      if (profileError || !profile) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      // Get usage statistics in parallel
+      const [
+        conversationsResult,
+        messagesResult,
+        creditsSpentResult,
+        ticketsResult,
+      ] = await Promise.all([
+        // Total conversations
+        ctx.supabase
+          .from('conversations')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', input.userId),
+
+        // Total messages
+        ctx.supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', input.userId), // This will need adjustment based on actual schema
+
+        // Credits spent (deductions)
+        ctx.supabase
+          .from('credit_transactions')
+          .select('amount')
+          .eq('user_id', input.userId)
+          .eq('type', 'deduction'),
+
+        // Tickets created
+        ctx.supabase
+          .from('tickets')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', input.userId),
+      ]);
+
+      // Calculate total credits spent
+      const totalCreditsSpent = creditsSpentResult.data?.reduce(
+        (sum, t) => sum + Math.abs(t.amount), 0
+      ) ?? 0;
+
+      // Get recent activity logs
+      const { data: recentLogs } = await ctx.supabase
+        .from('user_activity_logs')
+        .select('*')
+        .eq('user_id', input.userId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      return {
+        profile,
+        stats: {
+          totalConversations: conversationsResult.count ?? 0,
+          totalMessages: messagesResult.count ?? 0,
+          totalCreditsSpent,
+          totalTickets: ticketsResult.count ?? 0,
+        },
+        recentActivity: recentLogs ?? [],
+      };
+    }),
+
+  /**
+   * Update user status (active/disabled/banned)
+   */
+  updateUserStatus: adminProcedure
+    .input(z.object({
+      userId: z.string().uuid(),
+      status: z.enum(['active', 'disabled', 'banned']),
+      reason: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get current status
+      const { data: profile, error: profileError } = await ctx.supabase
+        .from('profiles')
+        .select('status, nickname, email')
+        .eq('id', input.userId)
+        .single();
+
+      if (profileError || !profile) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const previousStatus = profile.status;
+
+      // Update status
+      const { data, error } = await ctx.supabase
+        .from('profiles')
+        .update({ status: input.status })
+        .eq('id', input.userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      // Log the activity
+      await ctx.supabase.from('user_activity_logs').insert({
+        user_id: input.userId,
+        admin_id: ctx.profileId,
+        action: `账号状态变更: ${previousStatus} → ${input.status}`,
+        action_type: 'status_change',
+        details: {
+          previousStatus,
+          newStatus: input.status,
+          reason: input.reason,
+        },
+      });
+
+      return data;
+    }),
+
+  /**
+   * Update user membership level
+   */
+  updateUserMembership: adminProcedure
+    .input(z.object({
+      userId: z.string().uuid(),
+      membershipLevel: z.enum(['free', 'pro', 'gold']),
+      reason: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get current membership
+      const { data: profile, error: profileError } = await ctx.supabase
+        .from('profiles')
+        .select('membership_level, nickname, email')
+        .eq('id', input.userId)
+        .single();
+
+      if (profileError || !profile) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const previousLevel = profile.membership_level;
+
+      // Update membership level
+      const { data, error } = await ctx.supabase
+        .from('profiles')
+        .update({ membership_level: input.membershipLevel })
+        .eq('id', input.userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      // Log the activity
+      await ctx.supabase.from('user_activity_logs').insert({
+        user_id: input.userId,
+        admin_id: ctx.profileId,
+        action: `会员等级变更: ${previousLevel} → ${input.membershipLevel}`,
+        action_type: 'membership_change',
+        details: {
+          previousLevel,
+          newLevel: input.membershipLevel,
+          reason: input.reason,
+        },
+      });
+
+      return data;
+    }),
+
+  /**
+   * Get user activity logs
+   */
+  getUserActivityLogs: adminProcedure
+    .input(z.object({
+      userId: z.string().uuid().optional(),
+      actionType: z.enum(['status_change', 'role_change', 'membership_change', 'credit_adjustment', 'system']).optional(),
+      limit: z.number().min(1).max(100).default(20),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ ctx, input }) => {
+      let query = ctx.supabase
+        .from('user_activity_logs')
+        .select(`
+          *,
+          user:profiles!user_activity_logs_user_id_fkey(id, email, nickname, avatar_url),
+          admin:profiles!user_activity_logs_admin_id_fkey(id, email, nickname, avatar_url)
+        `, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(input.offset, input.offset + input.limit - 1);
+
+      if (input.userId) {
+        query = query.eq('user_id', input.userId);
+      }
+
+      if (input.actionType) {
+        query = query.eq('action_type', input.actionType);
+      }
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return {
+        logs: data ?? [],
+        total: count ?? 0,
+        hasMore: (count ?? 0) > input.offset + input.limit,
       };
     }),
 

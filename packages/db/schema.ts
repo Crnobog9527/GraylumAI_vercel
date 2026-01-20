@@ -8,7 +8,11 @@ export const profiles = pgTable('profiles', {
   nickname: text('nickname'),
   avatarUrl: text('avatar_url'),
   role: text('role', { enum: ['user', 'admin'] }).default('user').notNull(), // User role for access control
+  status: text('status', { enum: ['active', 'disabled', 'banned'] }).default('active').notNull(), // Account status
+  membershipLevel: text('membership_level', { enum: ['free', 'pro', 'gold'] }).default('free').notNull(), // Membership level
   credits: integer('credits').default(100).notNull(),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  lastIp: text('last_ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -108,6 +112,17 @@ export const invitations = pgTable('invitations', {
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   usedBy: uuid('used_by').references(() => profiles.id, { onDelete: 'set null' }),
   status: text('status', { enum: ['active', 'used', 'expired'] }).default('active').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userActivityLogs = pgTable('user_activity_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
+  adminId: uuid('admin_id').references(() => profiles.id, { onDelete: 'set null' }),
+  action: text('action').notNull(),
+  actionType: text('action_type', { enum: ['status_change', 'role_change', 'membership_change', 'credit_adjustment', 'system'] }).default('system').notNull(),
+  details: jsonb('details').default({}),
+  ipAddress: text('ip_address'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
