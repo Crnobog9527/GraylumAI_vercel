@@ -1,10 +1,10 @@
 # Findings & Decisions
 
-## Tech Stack Versions (Updated: 2026-01-19)
+## Tech Stack Versions (Updated: 2026-01-21)
 
 | Category | Package | Version |
 |----------|---------|---------|
-| **Framework** | Next.js | 16.1.1 |
+| **Framework** | Next.js | 16.1.4 |
 | | React | 19.2.3 |
 | | TypeScript | 5.9.3 |
 | **Styling** | Tailwind CSS | 4.1.18 |
