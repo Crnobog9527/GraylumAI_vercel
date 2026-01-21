@@ -275,7 +275,7 @@ export const aiRouter = router({
             conversationId: idempotencyCheck.result.conversationId,
             content: cachedResponse.content,
             modelUsed: 'cached',
-            usage: { inputTokens: 0, outputTokens: 0 },
+            usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
             cost: { creditsDeducted: 0, costUsd: 0, costBreakdown: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, search: 0, total: 0 } },
             stopReason: 'end_turn',
             createdAt: cachedResponse.created_at,
