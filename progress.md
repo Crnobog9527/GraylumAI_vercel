@@ -35,10 +35,37 @@
 ## Session: 2026-01-21
 
 ### Current Status
-- **Phase:** Phase 8 AI 重构执行计划制定 🆕 待执行
-- **Previous:** Phase 7 管理后台功能还原 ✅ 完成
+- **Phase:** Phase 9 AI 对话系统重构实施 🆕 待执行
+- **Previous:** Phase 8 AI 重构执行计划制定 ✅ 完成
 - **Started:** 2026-01-21
 - **Blocking Issue:** 无
+- **执行计划:** `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建
+
+---
+
+### Phase 9 实施阶段规划 ✅ 已完成 (2026-01-21)
+
+**目标**: 将 AI 对话系统从旧架构迁移到新架构 (tRPC + Drizzle ORM + Supabase)
+
+#### 五个实施阶段
+
+| 阶段 | 目标 | 主要交付物 | 状态 |
+|------|------|-----------|------|
+| 9.1 | Schema & Types | 数据库表、类型定义、RLS 策略 | ⬜ |
+| 9.2 | tRPC Procedures | 安全中间件、AI 路由、计费服务 | ⬜ |
+| 9.3 | AI Engine | Token 计数、Prompt Caching、流式传输 | ⬜ |
+| 9.4 | Frontend Integration | 对话界面、流式渲染、Hook 封装 | ⬜ |
+| 9.5 | Testing & Security | 单元/集成测试、安全审计报告 | ⬜ |
+
+#### 成功指标
+
+| 类别 | 指标 | 目标值 |
+|------|------|--------|
+| 功能 | AI 对话成功率 | >99% |
+| 成本 | Token 计费误差 | <2% |
+| 成本 | 缓存命中率 | >60% |
+| 安全 | 高危漏洞数 | 0 |
+| 质量 | 测试覆盖率 | >80% |
 
 ---
 

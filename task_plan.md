@@ -33,6 +33,15 @@
 - 输出文档: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建 (2026-01-21)
 - Step 8.1 ~ 8.8: 分阶段编写执行计划文档 ✅ 全部完成
 
+**Phase 9 AI 对话系统重构实施:** 🆕 待执行
+- 参考文档: `movetonew/GraylumAI_分阶段重构执行计划.md`
+- 参考文档: `AI_REFACTOR_DESIGN_BRIEF.md`
+- 阶段一: Schema & Types (数据库与类型定义) ⬜
+- 阶段二: tRPC Procedures (后端核心逻辑) ⬜
+- 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜
+- 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜
+- 阶段五: Testing & Security (测试与安全审计) ⬜
+
 ## 已发现的问题 (修复进度: 13/13) ✅ 全部完成
 
 | # | 问题描述 | 影响范围 | 状态 |
@@ -775,144 +784,132 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ## Phase 8: AI 重构执行计划制定 ✅ 已完成
 
 > **参考文档**: `movetonew/制定分阶段重构执行计划指导方法.md`
-> **输出文档**: `movetonew/GraylumAI_分阶段重构执行计划.md`
+> **输出文档**: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ (2026-01-21)
 > **目标**: 根据 `AI_REFACTOR_DESIGN_BRIEF.md` 简报，制定完整的 AI 系统重构执行计划
 
-### Step 8.1: 项目概览与架构决策 ⬜ 待执行
+### Step 8.1 ~ 8.8: 执行计划编写 ✅ 全部完成
 
-**目标**: 编写执行计划的第一、二章节
+**已完成内容:**
+- [x] 项目概览 (重构范围、核心目标、技术债务、风险评估)
+- [x] 架构决策记录 ADR (4 个关键决策)
+- [x] 阶段一计划: Schema & Types
+- [x] 阶段二计划: tRPC Procedures
+- [x] 阶段三计划: AI Engine & Optimization
+- [x] 阶段四计划: Frontend Integration
+- [x] 阶段五计划: Testing & Security
+- [x] 风险缓解与回滚方案
+- [x] 成功指标定义
 
-#### 任务清单
-- [ ] 阅读 `AI_REFACTOR_DESIGN_BRIEF.md` 设计简报
-- [ ] 研读现有代码架构 (tRPC, Drizzle ORM, Supabase)
-- [ ] 编写"项目概览"章节
-  - [ ] 重构范围总结
-  - [ ] 核心目标（3-5 条）
-  - [ ] 技术债务清单
-  - [ ] 风险评估
-- [ ] 编写"架构决策记录 (ADR)"章节
-  - [ ] 为什么选择 tRPC 而非 REST API？
-  - [ ] 为什么使用 Drizzle ORM 而非 Prisma？
-  - [ ] AI 智能路由的设计原则
-  - [ ] 成本优化的核心策略
+---
 
-### Step 8.2: 阶段一执行计划 - 数据库与类型定义 ⬜ 待执行
+## Phase 9: AI 对话系统重构实施 🆕 待执行
 
-**目标**: 编写 Schema & Types 阶段的详细执行计划
+> **参考文档**: `movetonew/GraylumAI_分阶段重构执行计划.md`
+> **设计简报**: `AI_REFACTOR_DESIGN_BRIEF.md`
+> **目标**: 将 AI 对话系统从旧架构迁移到新架构，实现完整的 AI 对话功能
 
-#### 交付物规划
-- [ ] `schema/models.ts` - AI 模型配置表
-- [ ] `schema/billing_history.ts` - 计费历史表（支持退费/补偿）
-- [ ] `schema/usage_logs.ts` - 使用日志表（Token 级精度）
-- [ ] `types/ai.ts` - AI 请求/响应的全栈共享类型
-- [ ] `types/billing.ts` - 计费相关类型定义
+### 9.1 阶段一: Schema & Types (数据库与类型定义) ⬜ 待执行
 
-#### 技术要求
-- [ ] 所有表 RLS 策略定义
-- [ ] Drizzle 迁移文件
-- [ ] 索引优化方案
-- [ ] Zod Schema 验证
+**目标**: 建立 AI 系统所需的数据库表和 TypeScript 类型定义
+
+#### 交付物
+- [ ] `packages/db/schema/token-stats.ts` - Token 统计表
+- [ ] `packages/db/schema/billing-history.ts` - 计费历史表
+- [ ] `packages/api/src/types/ai.ts` - AI 请求/响应类型
+- [ ] `packages/api/src/types/billing.ts` - 计费相关类型
+- [ ] `supabase/migrations/xxx_create_ai_tables.sql` - 迁移文件
+- [ ] RLS 策略定义
 
 #### 验证标准
 - [ ] 数据库迁移无错误执行
-- [ ] RLS 策略测试通过
+- [ ] RLS 策略测试通过 (用户隔离)
 - [ ] TypeScript 无 `any` 警告
-- [ ] 外键关系正确
 - [ ] 索引查询 <100ms
 
-### Step 8.3: 阶段二执行计划 - 后端核心逻辑 ⬜ 待执行
+### 9.2 阶段二: tRPC Procedures (后端核心逻辑) ⬜ 待执行
 
-**目标**: 编写 tRPC Procedures 阶段的详细执行计划
+**目标**: 实现 AI 对话的后端 API 和计费服务
 
-#### 交付物规划
-- [ ] `server/trpc/middleware/auth.ts` - protectedProcedure 中间件
-- [ ] `server/trpc/middleware/admin.ts` - adminProcedure 中间件
-- [ ] `server/trpc/routers/ai.ts` - AI 对话核心路由
-- [ ] `server/trpc/services/billing.ts` - 原子化计费服务
-- [ ] `server/trpc/services/ai-router.ts` - AI 智能路由逻辑
+#### 交付物
+- [ ] `packages/api/src/middleware/securityChecks.ts` - 安全检查中间件
+- [ ] `packages/api/src/routers/ai.ts` - AI 对话核心路由
+- [ ] `packages/api/src/services/billing.ts` - 原子化计费服务 (预扣-结算-退费)
+- [ ] `packages/api/src/services/modelRouter.ts` - AI 智能路由逻辑
+- [ ] `packages/api/src/services/tokenCounter.ts` - Token 计数服务
 
-#### 技术要求
-- [ ] 数据库事务（BEGIN...COMMIT）
-- [ ] 预扣-结算-退费三段式逻辑
-- [ ] 联网判断和模型选择算法
-- [ ] 请求去重和幂等性保护
+#### 验证标准
+- [ ] 未登录用户无法调用 (返回 401)
+- [ ] 积分不足正确拒绝 (PRECONDITION_FAILED)
+- [ ] 计费事务在异常时正确回滚
+- [ ] 重复请求不会重复扣费 (幂等性)
 
-### Step 8.4: 阶段三执行计划 - AI 引擎与成本优化 ⬜ 待执行
+### 9.3 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜ 待执行
 
-**目标**: 编写 AI Engine & Optimization 阶段的详细执行计划
+**目标**: 实现 AI 调用核心引擎和成本优化模块
 
-#### 交付物规划
-- [ ] `lib/ai/token-counter.ts` - Token 统计模块
-- [ ] `lib/ai/context-compressor.ts` - 上下文滑动窗口
-- [ ] `lib/ai/stream-handler.ts` - SSE 流式传输
-- [ ] `lib/ai/cost-calculator.ts` - 成本计算器
-- [ ] `lib/ai/cache-manager.ts` - 响应缓存系统
+#### 交付物
+- [ ] `packages/api/src/lib/ai/tokenCounter.ts` - Token 计数 (官方 API)
+- [ ] `packages/api/src/lib/ai/contextManager.ts` - 上下文滑动窗口
+- [ ] `packages/api/src/lib/ai/promptCaching.ts` - Prompt Caching 构建器
+- [ ] `packages/api/src/lib/ai/streamHandler.ts` - SSE 流式传输
+- [ ] `packages/api/src/lib/ai/costCalculator.ts` - 成本计算器
+- [ ] `packages/api/src/lib/ai/contentModeration.ts` - 内容审查
 
-#### 技术要求
-- [ ] Token 统计误差 <2%（使用 tiktoken）
-- [ ] 上下文压缩保留关键信息
-- [ ] SSE 支持中断和重连
+#### 验证标准
+- [ ] Token 统计与 API 计费误差 <2%
+- [ ] 压缩后上下文保持对话连贯性
+- [ ] 流式输出在网络中断后能恢复
 - [ ] 缓存命中率 >30%
 
-### Step 8.5: 阶段四执行计划 - 前端集成与 UI 还原 ⬜ 待执行
+### 9.4 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜ 待执行
 
-**目标**: 编写 Frontend Integration 阶段的详细执行计划
+**目标**: 将前端对话界面接入新的 tRPC API
 
-#### 交付物规划
-- [ ] `components/chat/ChatInterface.tsx` - 对话界面（接入新 tRPC）
-- [ ] `components/chat/MessageStream.tsx` - 流式消息渲染
-- [ ] `components/chat/InterruptButton.tsx` - 中断控制
-- [ ] `hooks/useAIChat.ts` - 封装 AI 对话逻辑
-- [ ] `hooks/useStreamResponse.ts` - 流式响应处理
+#### 交付物
+- [ ] `apps/web/src/components/chat/ChatInterface.tsx` - 对话界面 (接入新 tRPC)
+- [ ] `apps/web/src/components/chat/MessageStream.tsx` - 流式消息渲染
+- [ ] `apps/web/src/components/chat/InterruptButton.tsx` - 中断控制
+- [ ] `apps/web/src/components/chat/TokenUsageDisplay.tsx` - Token 用量显示
+- [ ] `apps/web/src/hooks/useAIChat.ts` - 封装 AI 对话逻辑
+- [ ] `apps/web/src/hooks/useStreamResponse.ts` - 流式响应处理
 
-#### 技术要求
-- [ ] tRPC React Query hooks
-- [ ] 逐字输出（打字机效果）
-- [ ] 中断正确取消 API 请求
-- [ ] 实时 Token 消耗和成本显示
+#### 验证标准
+- [ ] 界面与设计稿一致
+- [ ] 流式输出延迟 <50ms (60fps)
+- [ ] 中断按钮点击后 <100ms 停止
+- [ ] Token/成本显示实时更新
 
-### Step 8.6: 阶段五执行计划 - 测试与安全审计 ⬜ 待执行
+### 9.5 阶段五: Testing & Security (测试与安全审计) ⬜ 待执行
 
-**目标**: 编写 Testing & Security 阶段的详细执行计划
+**目标**: 完成测试覆盖和安全审计
 
-#### 交付物规划
+#### 交付物
 - [ ] `__tests__/unit/billing.test.ts` - 计费逻辑单元测试
-- [ ] `__tests__/unit/token-counter.test.ts` - Token 统计测试
+- [ ] `__tests__/unit/tokenCounter.test.ts` - Token 统计测试
 - [ ] `__tests__/integration/ai-chat.test.ts` - 对话流程集成测试
 - [ ] `__tests__/e2e/user-journey.spec.ts` - 端到端测试
 - [ ] `docs/SECURITY_AUDIT.md` - 安全审计报告
 
-#### 技术要求
+#### 验证标准
 - [ ] 单元测试覆盖率 >80%
-- [ ] 并发场景测试（10 用户）
-- [ ] RLS 权限隔离测试
-- [ ] SQL 注入和 XSS 测试
+- [ ] 并发测试无数据竞争
+- [ ] RLS 测试确认用户数据隔离
+- [ ] 安全扫描无高危漏洞
 
-### Step 8.7: 风险缓解与回滚方案 ⬜ 待执行
+### 成功指标
 
-**目标**: 编写执行计划的风险管理章节
-
-#### 任务清单
-- [ ] 编写"风险缓解策略"章节
-  - [ ] 每个阶段可能的风险
-  - [ ] 对应的应对方案
-- [ ] 编写"回滚方案"章节
-  - [ ] 各阶段失败的回退策略
-  - [ ] 数据迁移的回滚脚本
-- [ ] 编写"成功指标"章节
-  - [ ] 项目完成后的 KPI
-  - [ ] 性能基准测试指标
-
-### Step 8.8: 整合输出与验收 ⬜ 待执行
-
-**目标**: 整合所有章节，输出完整的执行计划文档
-
-#### 任务清单
-- [ ] 整合所有章节为完整文档
-- [ ] 添加时间估算（可选）
-- [ ] 格式化 Markdown（支持折叠章节）
-- [ ] 确保所有清单项可勾选（`- [ ]`）
-- [ ] 保存到 `movetonew/GraylumAI_分阶段重构执行计划.md`
+| 类别 | 指标 | 目标值 |
+|------|------|--------|
+| 功能 | AI 对话成功率 | >99% |
+| 功能 | 平均响应时间 | <2s |
+| 功能 | 流式首字节时间 | <500ms |
+| 成本 | Token 计费误差 | <2% |
+| 成本 | 缓存命中率 | >60% |
+| 成本 | 成本节省 | >30% |
+| 安全 | 高危漏洞数 | 0 |
+| 安全 | RLS 绕过尝试 | 0 |
+| 质量 | 测试覆盖率 | >80% |
+| 质量 | TypeScript 严格模式 | 100% |
 
 ---
 
