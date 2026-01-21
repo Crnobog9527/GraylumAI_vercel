@@ -33,7 +33,7 @@
 - 输出文档: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建 (2026-01-21)
 - Step 8.1 ~ 8.8: 分阶段编写执行计划文档 ✅ 全部完成
 
-**Phase 9 AI 对话系统重构实施:** 🔄 进行中
+**Phase 9 AI 对话系统重构实施:** ✅ 已完成
 - 参考文档: `movetonew/GraylumAI_分阶段重构执行计划.md`
 - 参考文档: `AI_REFACTOR_DESIGN_BRIEF.md`
 - 阶段一: Schema & Types (数据库与类型定义) ✅ 已完成 (2026-01-21)
@@ -60,7 +60,12 @@
   - 流式消息渲染 (apps/web/src/components/ai/MessageStream.tsx)
   - Token 使用显示 (apps/web/src/components/ai/TokenUsageDisplay.tsx)
   - 中断按钮 (apps/web/src/components/ai/InterruptButton.tsx)
-- 阶段五: Testing & Security (测试与安全审计) ⬜
+- 阶段五: Testing & Security (测试与安全审计) ✅ 已完成 (2026-01-21)
+  - Vitest 测试配置 (packages/api/vitest.config.ts)
+  - 计费服务测试 (packages/api/src/services/__tests__/billing.test.ts)
+  - Token 计数测试 (packages/api/src/services/__tests__/tokenCounter.test.ts)
+  - 成本计算器测试 (packages/api/src/services/__tests__/costCalculator.test.ts)
+  - 安全审计文档 (docs/SECURITY_AUDIT_PHASE9.md)
 
 ## 已发现的问题 (修复进度: 13/13) ✅ 全部完成
 

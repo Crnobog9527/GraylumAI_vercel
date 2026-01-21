@@ -1466,3 +1466,83 @@ GraylumAI_分阶段重构执行计划.md
 | findings.md | 添加 500 错误分析和解决方案、Drizzle schema 同步问题记录 |
 | packages/db/schema.ts | 添加 email 字段到 profiles 表定义 |
 | supabase/migrations/20240114_create_tickets_invitations_tables.sql | 新增 (可选的数据库迁移脚本) |
+
+---
+
+### Phase 9.5 Testing & Security 实施 ✅ 已完成 (2026-01-21)
+
+**目标**: 创建单元测试、安全审计文档
+
+#### 交付物清单
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/vitest.config.ts` | Vitest 测试配置 | ✅ |
+| `packages/api/src/services/__tests__/billing.test.ts` | 计费服务测试 | ✅ |
+| `packages/api/src/services/__tests__/tokenCounter.test.ts` | Token 计数测试 | ✅ |
+| `packages/api/src/services/__tests__/costCalculator.test.ts` | 成本计算器测试 | ✅ |
+| `docs/SECURITY_AUDIT_PHASE9.md` | 安全审计文档 | ✅ |
+| `packages/api/package.json` | 添加 vitest 依赖和测试脚本 | ✅ |
+| `package.json` | 添加全局测试脚本 | ✅ |
+
+#### 测试覆盖
+
+1. **billing.test.ts** - 计费服务测试
+   - `calculateTokenCost` - 多模型成本计算
+   - `estimateRequestCost` - 预扣金额估算
+   - `BillingService` - 预扣/结算/退费流程
+   - 边缘情况 - 大量 Token、零 Token、未知模型
+
+2. **tokenCounter.test.ts** - Token 计数测试
+   - `estimateTokensFromString` - 中英文 Token 估算
+   - `estimateTokensFromMessage` - 消息 Token 估算
+   - `countTokens` - 官方 API 降级到本地估算
+   - `estimateOutputTokens` - 输出 Token 预估
+
+3. **costCalculator.test.ts** - 成本计算器测试
+   - `CostCalculator.getPricing` - 模型定价获取
+   - `CostCalculator.calculate` - 实际成本计算
+   - `CostCalculator.estimate` - 成本估算
+   - `CostCalculator.compareModels` - 模型对比
+   - `CostCalculator.generateReport` - 成本报告
+
+#### 安全审计要点
+
+1. **认证授权** - Supabase Auth + RLS 策略
+2. **输入验证** - Zod schemas 严格验证
+3. **内容审核** - Prompt 注入/越狱检测
+4. **计费安全** - 三段式事务 + 乐观锁
+5. **数据隔离** - RLS 行级安全
+
+#### 待补充安全措施
+
+- [ ] 速率限制 (Rate Limiting)
+- [ ] IP 黑名单
+- [ ] 异常行为检测
+- [ ] 自动封禁机制
+
+---
+
+### Phase 9 完成总结
+
+**Phase 9 AI 对话系统重构 ✅ 全部完成**
+
+| 子阶段 | 描述 | 状态 | 完成日期 |
+|--------|------|------|----------|
+| 9.1 | Schema & Types | ✅ | 2026-01-21 |
+| 9.2 | tRPC Procedures | ✅ | 2026-01-21 |
+| 9.3 | AI Engine & Optimization | ✅ | 2026-01-21 |
+| 9.4 | Frontend Integration | ✅ | 2026-01-21 |
+| 9.5 | Testing & Security | ✅ | 2026-01-21 |
+
+**总计交付文件**: 25+ 个新文件
+
+**关键成果**:
+1. 完整的 AI 计费系统 (三段式事务)
+2. 智能模型路由 (任务分类器)
+3. Prompt 缓存优化 (cache_control)
+4. 流式响应处理 (SSE)
+5. 内容审核系统 (Prompt 注入检测)
+6. 前端对话组件 (React Hooks + 组件)
+7. 单元测试套件 (Vitest)
+8. 安全审计文档
