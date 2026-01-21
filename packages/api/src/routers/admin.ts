@@ -335,7 +335,7 @@ export const adminRouter = router({
       }
 
       // 获取所有工单的用户 ID
-      const userIds = [...new Set(ticketsData.map(t => t.user_id).filter(Boolean))];
+      const userIds = Array.from(new Set(ticketsData.map(t => t.user_id).filter(Boolean)));
       const ticketIds = ticketsData.map(t => t.id);
 
       // 分步查询：获取用户信息
