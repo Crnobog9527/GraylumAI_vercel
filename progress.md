@@ -36,11 +36,60 @@
 
 ### Current Status
 - **Phase:** Phase 9 AI 对话系统重构实施 🔄 进行中
-- **Sub-Phase:** 9.2 tRPC Procedures ✅ 已完成
+- **Sub-Phase:** 9.3 AI Engine & Optimization ✅ 已完成
 - **Previous:** Phase 8 AI 重构执行计划制定 ✅ 完成
 - **Started:** 2026-01-21
 - **Blocking Issue:** 无
 - **执行计划:** `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建
+
+---
+
+### Phase 9.3 AI Engine & Optimization 实施 ✅ 已完成 (2026-01-21)
+
+**目标**: 创建 AI 引擎核心服务，包括缓存构建器、上下文管理器、流式处理器等
+
+#### 交付物清单
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/services/promptCacheBuilder.ts` | Prompt 缓存构建器 (cache_control) | ✅ |
+| `packages/api/src/services/contextManager.ts` | 上下文滑动窗口管理器 | ✅ |
+| `packages/api/src/services/streamHandler.ts` | SSE 流式响应处理器 | ✅ |
+| `packages/api/src/services/contentModerator.ts` | 内容审核服务 | ✅ |
+| `packages/api/src/services/costCalculator.ts` | 成本计算器 (多模型定价) | ✅ |
+| `packages/api/src/services/index.ts` | 服务统一导出 | ✅ |
+
+#### 核心功能
+
+1. **Prompt 缓存构建器** (`promptCacheBuilder.ts`)
+   - 动态缓存断点 (1024/2048/4096 Token 阈值)
+   - 系统提示词缓存
+   - 稳定区域消息缓存
+   - 缓存节省统计
+
+2. **上下文管理器** (`contextManager.ts`)
+   - 滑动窗口策略 (稳定区域 + 动态区域)
+   - 对话摘要生成
+   - Token 预算管理 (150K 上限)
+   - 历史消息清理
+
+3. **流式响应处理器** (`streamHandler.ts`)
+   - Claude API SSE 解析
+   - 前端友好事件格式
+   - 中断支持 (AbortController)
+   - 错误恢复
+
+4. **内容审核服务** (`contentModerator.ts`)
+   - Prompt 注入检测 (10+ 规则)
+   - 有害内容检测
+   - PII 泄露检测与脱敏
+   - 恶意代码检测
+
+5. **成本计算器** (`costCalculator.ts`)
+   - 多模型定价支持 (Sonnet/Haiku/Opus)
+   - 缓存节省计算
+   - 成本报告生成
+   - 模型对比
 
 ---
 
@@ -135,7 +184,7 @@
 |------|------|-----------|------|
 | 9.1 | Schema & Types | 数据库表、类型定义、RLS 策略 | ✅ |
 | 9.2 | tRPC Procedures | 安全中间件、AI 路由、计费服务 | ✅ |
-| 9.3 | AI Engine | Token 计数、Prompt Caching、流式传输 | ⬜ |
+| 9.3 | AI Engine | Token 计数、Prompt Caching、流式传输 | ✅ |
 | 9.4 | Frontend Integration | 对话界面、流式渲染、Hook 封装 | ⬜ |
 | 9.5 | Testing & Security | 单元/集成测试、安全审计报告 | ⬜ |
 

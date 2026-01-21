@@ -47,7 +47,12 @@
   - Token 计数服务 (packages/api/src/services/tokenCounter.ts)
   - 智能模型路由 (packages/api/src/services/modelRouter.ts)
   - AI 对话路由 (packages/api/src/routers/ai.ts)
-- 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜
+- 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ✅ 已完成 (2026-01-21)
+  - Prompt 缓存构建器 (packages/api/src/services/promptCacheBuilder.ts)
+  - 上下文滑动窗口管理器 (packages/api/src/services/contextManager.ts)
+  - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
+  - 内容审核服务 (packages/api/src/services/contentModerator.ts)
+  - 成本计算器 (packages/api/src/services/costCalculator.ts)
 - 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜
 - 阶段五: Testing & Security (测试与安全审计) ⬜
 
