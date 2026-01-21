@@ -7,7 +7,6 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  type CostBreakdown,
   BILLING_CONSTANTS,
   MODEL_PRICING,
   type SupportedModelId,
@@ -15,7 +14,7 @@ import {
   BillingNotFoundError,
   InvalidBillingOperationError,
 } from '../types/billing';
-import { type TokenUsage } from '../types/ai';
+import { type TokenUsage, type CostBreakdown } from '../types/ai';
 
 // ============================================
 // 类型定义
