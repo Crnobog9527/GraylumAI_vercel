@@ -335,7 +335,7 @@ export const adminRouter = router({
       }
 
       // 获取所有工单的用户 ID
-      const userIds = [...new Set(ticketsData.map(t => t.user_id).filter(Boolean))];
+      const userIds = Array.from(new Set(ticketsData.map(t => t.user_id).filter(Boolean)));
       const ticketIds = ticketsData.map(t => t.id);
 
       // 分步查询：获取用户信息
@@ -354,7 +354,7 @@ export const adminRouter = router({
         .order('created_at', { ascending: true });
 
       // 获取回复者用户信息
-      const replyUserIds = [...new Set((repliesData ?? []).map(r => r.user_id).filter(Boolean))];
+      const replyUserIds = Array.from(new Set((repliesData ?? []).map(r => r.user_id).filter(Boolean)));
       const { data: replyUsersData } = replyUserIds.length > 0
         ? await ctx.supabase
             .from('profiles')
