@@ -303,17 +303,10 @@ export const adminRouter = router({
       offset: z.number().min(0).default(0),
     }))
     .query(async ({ ctx, input }) => {
-      // 查询工单并关联用户信息和回复（包含回复者信息）
+      // 查询工单（不使用外键关联，改为分步查询以避免 schema cache 问题）
       let query = ctx.supabase
         .from('tickets')
-        .select(`
-          *,
-          user:profiles!tickets_user_id_fkey(id, email, nickname, avatar_url, role),
-          ticket_replies(
-            *,
-            user:profiles!ticket_replies_user_id_fkey(id, email, nickname, avatar_url, role)
-          )
-        `, { count: 'exact' })
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -327,14 +320,66 @@ export const adminRouter = router({
         query = query.eq('priority', input.priority);
       }
 
-      const { data, error, count } = await query;
+      const { data: ticketsData, error, count } = await query;
 
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
+      if (!ticketsData || ticketsData.length === 0) {
+        return {
+          tickets: [],
+          total: count ?? 0,
+          hasMore: false,
+        };
+      }
+
+      // 获取所有工单的用户 ID
+      const userIds = [...new Set(ticketsData.map(t => t.user_id).filter(Boolean))];
+      const ticketIds = ticketsData.map(t => t.id);
+
+      // 分步查询：获取用户信息
+      const { data: usersData } = userIds.length > 0
+        ? await ctx.supabase
+            .from('profiles')
+            .select('id, email, nickname, avatar_url, role')
+            .in('id', userIds)
+        : { data: [] };
+
+      // 分步查询：获取工单回复
+      const { data: repliesData } = await ctx.supabase
+        .from('ticket_replies')
+        .select('*')
+        .in('ticket_id', ticketIds)
+        .order('created_at', { ascending: true });
+
+      // 获取回复者用户信息
+      const replyUserIds = [...new Set((repliesData ?? []).map(r => r.user_id).filter(Boolean))];
+      const { data: replyUsersData } = replyUserIds.length > 0
+        ? await ctx.supabase
+            .from('profiles')
+            .select('id, email, nickname, avatar_url, role')
+            .in('id', replyUserIds)
+        : { data: [] };
+
+      // 构建用户映射
+      const usersMap = new Map((usersData ?? []).map(u => [u.id, u]));
+      const replyUsersMap = new Map((replyUsersData ?? []).map(u => [u.id, u]));
+
+      // 组装工单数据
+      const tickets = ticketsData.map(ticket => ({
+        ...ticket,
+        user: ticket.user_id ? usersMap.get(ticket.user_id) ?? null : null,
+        ticket_replies: (repliesData ?? [])
+          .filter(r => r.ticket_id === ticket.id)
+          .map(reply => ({
+            ...reply,
+            user: reply.user_id ? replyUsersMap.get(reply.user_id) ?? null : null,
+          })),
+      }));
+
       return {
-        tickets: data ?? [],
+        tickets,
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };

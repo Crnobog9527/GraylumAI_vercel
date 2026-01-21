@@ -43,7 +43,7 @@
 
 ---
 
-### 已发现的问题 (修复进度: 12/12) ✅ 全部完成
+### 已发现的问题 (修复进度: 13/13) ✅ 全部完成
 
 | # | 问题描述 | 影响范围 | 状态 |
 |---|----------|----------|------|
@@ -59,6 +59,7 @@
 | 10 | 用户管理模块功能单一（仅调整积分），需增强：用户详情面板（头像/昵称/邮箱/注册时间/最后登录/IP归属地）、账号状态管理（启用/禁用/封禁）、会员等级调整、角色权限修改、登录历史、使用统计（对话数/消耗积分）、操作日志 | 管理后台-用户管理页面 | ✅ 已修复 |
 | 11 | 仪表盘功能单一，需增强：建议添加更丰富的数据展示（今日/本周/本月数据对比、趋势图表、活跃用户排行、热门模型使用统计、收入趋势、系统健康状态、快捷操作入口等），提升管理体验 | 管理后台-仪表盘页面 | ✅ 已修复 |
 | 12 | 管理后台侧边栏在页面切换时会短暂闪现两个侧边栏（#1 问题未完全修复） | 管理后台所有子页面 | ✅ 已修复 |
+| 13 | 工单管理页面报错：Could not find a relationship between 'tickets' and 'profiles' in the schema cache | 管理后台-工单管理页面 | ✅ 已修复 |
 
 #### 问题修复记录
 
@@ -184,6 +185,16 @@
 - 修复: 从 AdminLoadingState 和 AdminErrorState 移除 AdminSidebar，只保留内容区域
 - 修改: components/admin/AdminLoadingState.tsx - 移除 flex 容器和 AdminSidebar
 - 修改: components/admin/AdminErrorState.tsx - 移除 flex 容器和 AdminSidebar
+
+**问题 #13 - 工单管理 Schema Cache 错误 ✅** (2026-01-21)
+- 错误: `Could not find a relationship between 'tickets' and 'profiles' in the schema cache`
+- 原因: Supabase 查询使用显式外键名 `profiles!tickets_user_id_fkey`，但数据库 schema cache 中没有此外键约束
+- 修复: 改用分步查询方式，先查工单，再单独查用户信息和回复，避免依赖数据库外键约束
+- 修改: packages/api/src/routers/admin.ts - getAllTickets 查询重写
+  - 移除显式外键关联查询
+  - 添加分步查询获取用户信息 (profiles)
+  - 添加分步查询获取工单回复 (ticket_replies)
+  - 使用 Map 构建用户映射，组装完整数据
 
 ---
 
