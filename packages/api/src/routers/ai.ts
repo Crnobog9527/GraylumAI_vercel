@@ -383,14 +383,24 @@ export const aiRouter = router({
           credits: actualCredits,
         });
 
-        // 15. 记录使用日志
+        // 15. 记录使用日志 (P1-9: 补全日志信息)
         const latencyMs = Date.now() - startTime;
+        // 从请求头获取 IP 和 User-Agent
+        const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
+          ?? ctx.headers?.get?.('x-real-ip')
+          ?? ctx.req?.ip
+          ?? 'unknown';
+        const userAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
+
         await billingService.recordUsageLog({
           conversationId: conversation.id,
+          requestId, // P1-9: 添加 request_id
           modelId: modelConfig.modelId,
           status: 'success',
           inputLength: input.message.length,
           latencyMs,
+          ipAddress, // P1-9: 添加 IP 地址
+          userAgent, // P1-9: 添加 User-Agent
           metadata: { routingReason },
         });
 
@@ -416,17 +426,84 @@ export const aiRouter = router({
           error instanceof Error ? error.message : 'AI 调用失败'
         );
 
-        // 记录失败日志
+        // 记录失败日志 (P1-9: 补全日志信息)
+        const failLatencyMs = Date.now() - startTime;
+        const failIpAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
+          ?? ctx.headers?.get?.('x-real-ip')
+          ?? ctx.req?.ip
+          ?? 'unknown';
+        const failUserAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
+
         await billingService.recordUsageLog({
           conversationId: conversation.id,
+          requestId, // P1-9: 添加 request_id
           modelId: modelConfig.modelId,
           status: 'failed',
           errorMessage: error instanceof Error ? error.message : 'Unknown error',
           inputLength: input.message.length,
-          latencyMs: Date.now() - startTime,
+          latencyMs: failLatencyMs,
+          ipAddress: failIpAddress, // P1-9: 添加 IP 地址
+          userAgent: failUserAgent, // P1-9: 添加 User-Agent
         });
 
         throw error;
+      }
+    }),
+
+  /**
+   * 中断请求并结算已消耗的 tokens
+   * 用于流式响应被用户中断时的计费结算
+   */
+  abortRequest: protectedProcedure
+    .input(z.object({
+      requestId: z.string().uuid(),
+      preDeductId: z.string().uuid(),
+      consumedTokens: z.object({
+        inputTokens: z.number().min(0),
+        outputTokens: z.number().min(0),
+      }),
+      modelId: z.string(),
+      reason: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const billingService = new BillingService({
+        supabase: ctx.supabase,
+        userId: ctx.profileId,
+      });
+
+      try {
+        const result = await billingService.settleAbort(
+          input.preDeductId,
+          input.consumedTokens,
+          input.modelId,
+          input.reason ?? '用户中断'
+        );
+
+        // 记录中断日志
+        await billingService.recordUsageLog({
+          requestId: input.requestId,
+          modelId: input.modelId,
+          status: 'failed',
+          errorMessage: input.reason ?? '用户中断',
+          metadata: {
+            aborted: true,
+            consumedTokens: input.consumedTokens,
+            refundedCredits: result.refundedCredits,
+          },
+        });
+
+        return {
+          success: true,
+          consumedCredits: result.consumedCredits,
+          refundedCredits: result.refundedCredits,
+          balanceAfter: result.balanceAfter,
+        };
+      } catch (error) {
+        console.error('Abort request failed:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : '中断结算失败',
+        });
       }
     }),
 

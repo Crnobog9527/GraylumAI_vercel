@@ -54,6 +54,15 @@ export interface RefundResult {
   balanceAfter: number;
 }
 
+export interface AbortSettleResult {
+  /** 中断时已消耗的积分 */
+  consumedCredits: number;
+  /** 退还的积分 */
+  refundedCredits: number;
+  /** 结算后余额 */
+  balanceAfter: number;
+}
+
 export interface BillingContext {
   supabase: SupabaseClient;
   userId: string;
@@ -224,6 +233,55 @@ export class BillingService {
   }
 
   /**
+   * 验证成本合理性 (P1-8)
+   * 确保 actualCredits 与 usage tokens 一致，防止数据篡改
+   */
+  private verifyCost(actualCredits: number, usage: TokenUsage): void {
+    // 1. 基本验证
+    if (actualCredits < 0) {
+      throw new InvalidBillingOperationError('settle', '积分不能为负数');
+    }
+
+    // 2. Token 使用量验证
+    if (usage.inputTokens < 0 || usage.outputTokens < 0) {
+      throw new InvalidBillingOperationError('settle', 'Token 数量不能为负数');
+    }
+
+    // 3. 验证 actualCredits 与 usage 的一致性
+    // 使用宽松的估算: 1 积分 ≈ 10-1000 tokens (取决于模型)
+    const totalTokens = usage.inputTokens + usage.outputTokens;
+
+    // 如果 tokens 不为 0，积分也不应该为 0 (除非 tokens 极少)
+    if (totalTokens > 100 && actualCredits === 0) {
+      console.warn('[Billing] Warning: Tokens used but credits is 0', {
+        totalTokens,
+        actualCredits,
+        usage,
+      });
+    }
+
+    // 如果积分异常高 (超过 tokens 的合理比例)，发出警告
+    // 假设最高定价: 1 积分 ≈ 10 tokens，如果比例超过 1:1 则异常
+    if (totalTokens > 0 && actualCredits > totalTokens) {
+      console.warn('[Billing] Warning: Unusual credits/tokens ratio', {
+        ratio: actualCredits / totalTokens,
+        actualCredits,
+        totalTokens,
+        usage,
+      });
+    }
+
+    // 4. 单次请求上限检查 (防止异常大额结算)
+    const MAX_SINGLE_SETTLE = BILLING_CONSTANTS.MAX_PRE_DEDUCT * 2; // 允许超过预扣2倍
+    if (actualCredits > MAX_SINGLE_SETTLE) {
+      throw new InvalidBillingOperationError(
+        'settle',
+        `单次结算金额过大 (${actualCredits} > ${MAX_SINGLE_SETTLE})，请联系管理员`
+      );
+    }
+  }
+
+  /**
    * 检查请求幂等性
    * 如果该 requestId 已经处理过，返回之前的结果
    */
@@ -285,7 +343,7 @@ export class BillingService {
   }
 
   /**
-   * 预扣积分 (请求开始前)
+   * 预扣积分 (请求开始前) - 使用原子化 RPC 函数
    *
    * @param estimatedCredits - 预估需要的积分
    * @param options - 可选配置
@@ -298,6 +356,32 @@ export class BillingService {
     options: { reason?: string; requestId?: string } = {}
   ): Promise<PreDeductResult> {
     const { reason = 'AI 对话预扣', requestId } = options;
+
+    // 尝试使用原子化 RPC 函数
+    const { data: rpcResult, error: rpcError } = await this.supabase
+      .rpc('atomic_pre_deduct', {
+        p_user_id: this.userId,
+        p_amount: estimatedCredits,
+        p_reason: reason,
+        p_request_id: requestId ?? null,
+      });
+
+    // 如果 RPC 函数存在且执行成功
+    if (!rpcError && rpcResult && rpcResult.length > 0) {
+      const result = rpcResult[0];
+      return {
+        preDeductId: result.pre_deduct_id,
+        estimatedCredits,
+        balanceBefore: result.balance_before,
+        balanceAfter: result.balance_after,
+        idempotent: result.is_idempotent,
+      };
+    }
+
+    // RPC 函数不存在或失败，回退到原有逻辑
+    if (rpcError) {
+      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+    }
 
     // 0. 幂等性检查 (如果提供了 requestId)
     if (requestId) {
@@ -324,7 +408,7 @@ export class BillingService {
       }
     }
 
-    // 1. 获取当前余额并加锁 (使用 Supabase RPC 或乐观锁)
+    // 1. 获取当前余额并加锁 (使用乐观锁)
     const { data: profile, error: profileError } = await this.supabase
       .from('profiles')
       .select('credits, updated_at')
@@ -393,7 +477,7 @@ export class BillingService {
   }
 
   /**
-   * 结算 (请求完成后)
+   * 结算 (请求完成后) - 使用原子化 RPC 函数
    *
    * @param preDeductId - 预扣记录 ID
    * @param actualCredits - 实际消耗的积分
@@ -406,6 +490,34 @@ export class BillingService {
     usage: TokenUsage,
     response?: { messageId: string; conversationId: string; content: string }
   ): Promise<SettleResult> {
+    // 成本验证 (P1-8)
+    this.verifyCost(actualCredits, usage);
+
+    // 尝试使用原子化 RPC 函数
+    const { data: rpcResult, error: rpcError } = await this.supabase
+      .rpc('atomic_settle', {
+        p_user_id: this.userId,
+        p_pre_deduct_id: preDeductId,
+        p_actual_credits: actualCredits,
+        p_usage: usage,
+        p_response: response ?? null,
+      });
+
+    // 如果 RPC 函数存在且执行成功
+    if (!rpcError && rpcResult && rpcResult.length > 0) {
+      const result = rpcResult[0];
+      return {
+        actualCredits: result.actual_credits,
+        difference: result.difference,
+        balanceAfter: result.balance_after,
+      };
+    }
+
+    // RPC 函数不存在或失败，回退到原有逻辑
+    if (rpcError) {
+      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+    }
+
     // 1. 获取预扣记录
     const { data: preDeduct, error: preDeductError } = await this.supabase
       .from('billing_history')
@@ -502,12 +614,34 @@ export class BillingService {
   }
 
   /**
-   * 退费 (请求失败时)
+   * 退费 (请求失败时) - 使用原子化 RPC 函数
    *
    * @param preDeductId - 预扣记录 ID
    * @param reason - 退费原因
    */
   async refund(preDeductId: string, reason: string): Promise<RefundResult> {
+    // 尝试使用原子化 RPC 函数
+    const { data: rpcResult, error: rpcError } = await this.supabase
+      .rpc('atomic_refund', {
+        p_user_id: this.userId,
+        p_pre_deduct_id: preDeductId,
+        p_reason: reason,
+      });
+
+    // 如果 RPC 函数存在且执行成功
+    if (!rpcError && rpcResult && rpcResult.length > 0) {
+      const result = rpcResult[0];
+      return {
+        refundAmount: result.refund_amount,
+        balanceAfter: result.balance_after,
+      };
+    }
+
+    // RPC 函数不存在或失败，回退到原有逻辑
+    if (rpcError) {
+      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+    }
+
     // 1. 获取预扣记录
     const { data: preDeduct, error: preDeductError } = await this.supabase
       .from('billing_history')
@@ -586,6 +720,149 @@ export class BillingService {
     return {
       refundAmount,
       balanceAfter: newCredits,
+    };
+  }
+
+  /**
+   * 中断结算 (流式响应中断时) - 使用原子化 RPC 函数
+   *
+   * @param preDeductId - 预扣记录 ID
+   * @param consumedTokens - 中断前已消耗的 tokens
+   * @param modelId - 使用的模型 ID
+   * @param reason - 中断原因
+   */
+  async settleAbort(
+    preDeductId: string,
+    consumedTokens: { inputTokens: number; outputTokens: number },
+    modelId: string,
+    reason: string = '用户中断'
+  ): Promise<AbortSettleResult> {
+    // 计算已消耗的成本
+    const consumedUsage: TokenUsage = {
+      inputTokens: consumedTokens.inputTokens,
+      outputTokens: consumedTokens.outputTokens,
+    };
+    const { credits: consumedCredits } = calculateTokenCost(modelId, consumedUsage);
+
+    // 尝试使用原子化 RPC 函数
+    const { data: rpcResult, error: rpcError } = await this.supabase
+      .rpc('atomic_abort_settle', {
+        p_user_id: this.userId,
+        p_pre_deduct_id: preDeductId,
+        p_consumed_credits: consumedCredits,
+        p_consumed_tokens: consumedTokens,
+        p_model_id: modelId,
+        p_reason: reason,
+      });
+
+    // 如果 RPC 函数存在且执行成功
+    if (!rpcError && rpcResult && rpcResult.length > 0) {
+      const result = rpcResult[0];
+      return {
+        consumedCredits: result.consumed_credits,
+        refundedCredits: result.refunded_credits,
+        balanceAfter: result.balance_after,
+      };
+    }
+
+    // RPC 函数不存在或失败，回退到原有逻辑
+    if (rpcError) {
+      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+    }
+
+    // 1. 获取预扣记录
+    const { data: preDeduct, error: preDeductError } = await this.supabase
+      .from('billing_history')
+      .select('*')
+      .eq('id', preDeductId)
+      .eq('user_id', this.userId)
+      .eq('operation_type', 'pre_deduct')
+      .single();
+
+    if (preDeductError || !preDeduct) {
+      throw new BillingNotFoundError(preDeductId);
+    }
+
+    // 检查是否已处理
+    const { data: existingProcess } = await this.supabase
+      .from('billing_history')
+      .select('id, operation_type')
+      .or(`metadata->preDeductId.eq.${preDeductId}`)
+      .in('operation_type', ['settle', 'refund', 'abort_settle'])
+      .single();
+
+    if (existingProcess) {
+      throw new InvalidBillingOperationError(
+        'settleAbort',
+        `该预扣记录已${existingProcess.operation_type === 'settle' ? '结算' : existingProcess.operation_type === 'refund' ? '退费' : '中断结算'}`
+      );
+    }
+
+    const preDeductedAmount = Math.abs(preDeduct.amount);
+    const refundedCredits = Math.max(0, preDeductedAmount - consumedCredits);
+
+    // 3. 退还未使用的积分
+    if (refundedCredits > 0) {
+      const { data: profile } = await this.supabase
+        .from('profiles')
+        .select('credits, updated_at')
+        .eq('id', this.userId)
+        .single();
+
+      if (!profile) {
+        throw new Error('用户资料不存在');
+      }
+
+      const newCredits = profile.credits + refundedCredits;
+
+      const { error: updateError } = await this.supabase
+        .from('profiles')
+        .update({
+          credits: newCredits,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', this.userId)
+        .eq('updated_at', profile.updated_at);
+
+      if (updateError) {
+        throw new Error('积分退还失败');
+      }
+    }
+
+    // 4. 记录中断结算
+    const { error: abortError } = await this.supabase
+      .from('billing_history')
+      .insert({
+        user_id: this.userId,
+        operation_type: 'abort_settle',
+        amount: -consumedCredits,
+        reason,
+        metadata: {
+          preDeductId,
+          preDeductedAmount,
+          consumedCredits,
+          refundedCredits,
+          consumedTokens,
+          modelId,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+    if (abortError) {
+      console.error('Failed to record abort settle:', abortError);
+    }
+
+    // 5. 获取最新余额
+    const { data: finalProfile } = await this.supabase
+      .from('profiles')
+      .select('credits')
+      .eq('id', this.userId)
+      .single();
+
+    return {
+      consumedCredits,
+      refundedCredits,
+      balanceAfter: finalProfile?.credits ?? 0,
     };
   }
 

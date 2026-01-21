@@ -2,10 +2,11 @@
  * Security Checks Middleware
  *
  * AI 调用前的安全检查中间件
- * 包括: 速率限制、消费熔断、余额预检
+ * 包括: 速率限制、消费熔断、余额预检、请求签名验证
  */
 
 import { TRPCError } from '@trpc/server';
+import { createHmac, timingSafeEqual } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ============================================
@@ -27,6 +28,15 @@ export interface CircuitBreakerResult {
   reason?: string;
   currentSpend?: number;
   limit?: number;
+}
+
+export interface RequestSignatureParams {
+  /** 请求签名 (HMAC-SHA256) */
+  signature: string;
+  /** 请求时间戳 (ISO 8601 格式) */
+  timestamp: string;
+  /** 请求体摘要 (用于签名验证) */
+  bodyDigest?: string;
 }
 
 // ============================================
@@ -57,6 +67,18 @@ export const CIRCUIT_BREAKER_CONFIG = {
   dailyLimit: 50000,
   // 熔断冷却时间 (毫秒)
   cooldownMs: 5 * 60 * 1000, // 5 分钟
+};
+
+/**
+ * 请求签名配置
+ */
+export const SIGNATURE_CONFIG = {
+  // 签名有效期 (毫秒) - 30秒
+  maxTimestampAge: 30 * 1000,
+  // 签名算法
+  algorithm: 'sha256' as const,
+  // 签名前缀
+  prefix: 'GRAYLUM-HMAC-SHA256',
 };
 
 // ============================================
@@ -292,6 +314,159 @@ export function checkInputSecurity(message: string): void {
   }
 }
 
+// ============================================
+// 请求签名验证
+// ============================================
+
+/**
+ * 生成请求签名
+ * 用于客户端签名生成 (也可用于服务端验证时生成期望签名)
+ *
+ * @param secretKey - 签名密钥 (应从环境变量获取)
+ * @param timestamp - ISO 8601 时间戳
+ * @param bodyDigest - 请求体摘要 (可选)
+ * @param userId - 用户 ID (可选，增加签名唯一性)
+ */
+export function generateSignature(
+  secretKey: string,
+  timestamp: string,
+  bodyDigest?: string,
+  userId?: string
+): string {
+  // 构建签名消息
+  const parts = [
+    SIGNATURE_CONFIG.prefix,
+    timestamp,
+    userId ?? '',
+    bodyDigest ?? '',
+  ];
+  const message = parts.join('\n');
+
+  // 生成 HMAC-SHA256 签名
+  const hmac = createHmac(SIGNATURE_CONFIG.algorithm, secretKey);
+  hmac.update(message);
+  return hmac.digest('hex');
+}
+
+/**
+ * 验证请求时间戳
+ * 防止重放攻击
+ */
+export function verifyTimestamp(timestamp: string): { valid: boolean; reason?: string } {
+  try {
+    const requestTime = new Date(timestamp).getTime();
+    const now = Date.now();
+
+    // 检查时间戳是否有效
+    if (isNaN(requestTime)) {
+      return { valid: false, reason: '无效的时间戳格式' };
+    }
+
+    // 检查时间戳是否在有效范围内
+    const age = Math.abs(now - requestTime);
+    if (age > SIGNATURE_CONFIG.maxTimestampAge) {
+      return {
+        valid: false,
+        reason: `请求已过期 (超过 ${SIGNATURE_CONFIG.maxTimestampAge / 1000} 秒)`,
+      };
+    }
+
+    // 检查是否来自未来 (允许 5 秒的时钟偏差)
+    if (requestTime > now + 5000) {
+      return { valid: false, reason: '请求时间戳无效 (来自未来)' };
+    }
+
+    return { valid: true };
+  } catch {
+    return { valid: false, reason: '时间戳解析失败' };
+  }
+}
+
+/**
+ * 验证请求签名
+ * 使用 HMAC-SHA256 + 时间戳验证
+ *
+ * @param params - 签名参数
+ * @param userId - 用户 ID
+ * @returns 验证结果
+ */
+export function verifyRequestSignature(
+  params: RequestSignatureParams,
+  userId: string
+): { valid: boolean; reason?: string } {
+  // 获取签名密钥 (从环境变量)
+  const secretKey = process.env.API_SIGNATURE_SECRET;
+
+  // 如果未配置签名密钥，跳过验证 (开发环境)
+  if (!secretKey) {
+    console.warn('[Security] API_SIGNATURE_SECRET not configured, skipping signature verification');
+    return { valid: true };
+  }
+
+  // 1. 验证时间戳
+  const timestampResult = verifyTimestamp(params.timestamp);
+  if (!timestampResult.valid) {
+    return timestampResult;
+  }
+
+  // 2. 验证签名
+  const expectedSignature = generateSignature(
+    secretKey,
+    params.timestamp,
+    params.bodyDigest,
+    userId
+  );
+
+  try {
+    // 使用 timing-safe 比较防止时序攻击
+    const signatureBuffer = Buffer.from(params.signature, 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+
+    if (signatureBuffer.length !== expectedBuffer.length) {
+      return { valid: false, reason: '签名长度无效' };
+    }
+
+    if (!timingSafeEqual(signatureBuffer, expectedBuffer)) {
+      return { valid: false, reason: '签名验证失败' };
+    }
+
+    return { valid: true };
+  } catch {
+    return { valid: false, reason: '签名验证错误' };
+  }
+}
+
+/**
+ * 请求签名验证中间件
+ * 在敏感操作 (如计费相关) 时调用
+ */
+export async function checkRequestSignature(
+  params: RequestSignatureParams | undefined,
+  userId: string
+): Promise<void> {
+  // 如果未提供签名参数，检查是否强制要求签名
+  const requireSignature = process.env.REQUIRE_API_SIGNATURE === 'true';
+
+  if (!params) {
+    if (requireSignature) {
+      throw new TRPCError({
+        code: 'UNAUTHORIZED',
+        message: '缺少请求签名',
+      });
+    }
+    return; // 不强制要求时，跳过验证
+  }
+
+  const result = verifyRequestSignature(params, userId);
+
+  if (!result.valid) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: result.reason ?? '签名验证失败',
+    });
+  }
+}
+
 /**
  * 内容安全检查 (输出)
  * 检测 AI 输出中的敏感内容
@@ -324,4 +499,9 @@ export default {
   checkUserStatus,
   checkInputSecurity,
   checkOutputSecurity,
+  // 签名验证
+  generateSignature,
+  verifyTimestamp,
+  verifyRequestSignature,
+  checkRequestSignature,
 };

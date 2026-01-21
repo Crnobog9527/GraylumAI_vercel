@@ -36,6 +36,14 @@ export interface ChatState {
   isStreaming: boolean;
   error: Error | null;
   modelUsed: string | null;
+  /** 当前请求的追踪信息 (用于中断结算) */
+  currentRequest: {
+    requestId: string;
+    preDeductId: string;
+    modelId: string;
+    inputTokens: number;
+    receivedContent: string;
+  } | null;
 }
 
 export interface SendMessageOptions {
@@ -65,6 +73,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
     isStreaming: false,
     error: null,
     modelUsed: null,
+    currentRequest: null,
   });
 
   // Abort controller for cancellation
@@ -167,20 +176,52 @@ export function useAIChat(options: UseAIChatOptions = {}) {
     [state.conversationId, utils.ai.estimateCost]
   );
 
+  // 中断请求 mutation
+  const abortRequestMutation = trpc.ai.abortRequest.useMutation({
+    onSuccess: () => {
+      // 刷新余额
+      utils.credits.getBalance.invalidate();
+    },
+  });
+
   /**
-   * 中断响应
+   * 中断响应并结算已消耗的 tokens
    */
-  const abort = useCallback(() => {
+  const abort = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+
+    // 如果有当前请求信息，进行中断结算
+    const currentRequest = state.currentRequest;
+    if (currentRequest) {
+      try {
+        // 估算已接收内容的 tokens (约 4 字符/token)
+        const estimatedOutputTokens = Math.ceil(currentRequest.receivedContent.length / 4);
+
+        await abortRequestMutation.mutateAsync({
+          requestId: currentRequest.requestId,
+          preDeductId: currentRequest.preDeductId,
+          consumedTokens: {
+            inputTokens: currentRequest.inputTokens,
+            outputTokens: estimatedOutputTokens,
+          },
+          modelId: currentRequest.modelId,
+          reason: '用户中断',
+        });
+      } catch (error) {
+        console.error('Failed to settle abort:', error);
+      }
+    }
+
     setState((prev) => ({
       ...prev,
       isLoading: false,
       isStreaming: false,
+      currentRequest: null,
     }));
-  }, []);
+  }, [state.currentRequest, abortRequestMutation]);
 
   /**
    * 加载对话历史
@@ -228,6 +269,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
       isStreaming: false,
       error: null,
       modelUsed: null,
+      currentRequest: null,
     });
   }, []);
 
