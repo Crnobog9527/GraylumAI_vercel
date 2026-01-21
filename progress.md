@@ -35,11 +35,49 @@
 ## Session: 2026-01-21
 
 ### Current Status
-- **Phase:** Phase 9 AI 对话系统重构实施 🆕 待执行
+- **Phase:** Phase 9 AI 对话系统重构实施 🔄 进行中
+- **Sub-Phase:** 9.1 Schema & Types ✅ 已完成
 - **Previous:** Phase 8 AI 重构执行计划制定 ✅ 完成
 - **Started:** 2026-01-21
 - **Blocking Issue:** 无
 - **执行计划:** `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建
+
+---
+
+### Phase 9.1 Schema & Types 实施 ✅ 已完成 (2026-01-21)
+
+**目标**: 创建数据库表定义、类型定义和 RLS 策略
+
+#### 交付物清单
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/db/schema.ts` | 新增 token_stats, billing_history, ai_usage_logs 表 | ✅ |
+| `packages/api/src/types/ai.ts` | AI 请求/响应 Zod schemas 和 TypeScript 类型 | ✅ |
+| `packages/api/src/types/billing.ts` | 计费相关类型和错误类 | ✅ |
+| `packages/api/src/types/index.ts` | 类型统一导出 | ✅ |
+| `packages/db/migrations/0001_ai_billing_tables.sql` | 迁移 SQL + RLS 策略 | ✅ |
+
+#### 数据库表新增
+
+1. **token_stats** - Token 使用统计表
+   - 记录每次 AI 对话的 Token 消耗
+   - 支持精确计费 (decimal(12,6) 美元)
+   - 支持缓存命中追踪
+
+2. **billing_history** - 计费历史表
+   - 三段式计费: pre_deduct → settle → refund
+   - 完整的操作审计追踪
+
+3. **ai_usage_logs** - AI 使用日志表
+   - 请求状态追踪 (success, failed, timeout, rate_limited, moderation_blocked)
+   - 安全审计和异常检测
+
+#### RLS 策略
+
+- 用户只能访问自己的数据
+- 管理员可以访问所有数据
+- 防止积分负值 (CHECK 约束)
 
 ---
 
@@ -51,7 +89,7 @@
 
 | 阶段 | 目标 | 主要交付物 | 状态 |
 |------|------|-----------|------|
-| 9.1 | Schema & Types | 数据库表、类型定义、RLS 策略 | ⬜ |
+| 9.1 | Schema & Types | 数据库表、类型定义、RLS 策略 | ✅ |
 | 9.2 | tRPC Procedures | 安全中间件、AI 路由、计费服务 | ⬜ |
 | 9.3 | AI Engine | Token 计数、Prompt Caching、流式传输 | ⬜ |
 | 9.4 | Frontend Integration | 对话界面、流式渲染、Hook 封装 | ⬜ |

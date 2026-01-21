@@ -33,10 +33,14 @@
 - 输出文档: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建 (2026-01-21)
 - Step 8.1 ~ 8.8: 分阶段编写执行计划文档 ✅ 全部完成
 
-**Phase 9 AI 对话系统重构实施:** 🆕 待执行
+**Phase 9 AI 对话系统重构实施:** 🔄 进行中
 - 参考文档: `movetonew/GraylumAI_分阶段重构执行计划.md`
 - 参考文档: `AI_REFACTOR_DESIGN_BRIEF.md`
-- 阶段一: Schema & Types (数据库与类型定义) ⬜
+- 阶段一: Schema & Types (数据库与类型定义) ✅ 已完成 (2026-01-21)
+  - 新增 token_stats, billing_history, ai_usage_logs 表定义
+  - 创建 AI 类型 (packages/api/src/types/ai.ts)
+  - 创建计费类型 (packages/api/src/types/billing.ts)
+  - 创建迁移 SQL + RLS 策略
 - 阶段二: tRPC Procedures (后端核心逻辑) ⬜
 - 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜
 - 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜

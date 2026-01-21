@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal } from 'drizzle-orm/pg-core';
 
 // --- 核心表 ---
 
@@ -210,4 +210,61 @@ export const membershipPlans = pgTable('membership_plans', {
   sortOrder: integer('sort_order').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// --- AI 对话计费表 ---
+
+/**
+ * Token 统计表 - 记录每次 AI 对话的 Token 使用情况
+ * 用于精确计费、成本分析和使用追踪
+ */
+export const tokenStats = pgTable('token_stats', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+  modelUsed: text('model_used').notNull(), // 实际使用的模型 ID (如 claude-sonnet-4-20250514)
+  inputTokens: integer('input_tokens').notNull(), // 输入 Token 数
+  outputTokens: integer('output_tokens').notNull(), // 输出 Token 数
+  cachedTokens: integer('cached_tokens').default(0).notNull(), // 缓存命中的 Token 数
+  cacheCreationTokens: integer('cache_creation_tokens').default(0).notNull(), // 缓存创建的 Token 数
+  webSearchCount: integer('web_search_count').default(0).notNull(), // Web 搜索次数
+  totalCostUsd: decimal('total_cost_usd', { precision: 12, scale: 6 }).notNull(), // 美元成本 (精确到微美元)
+  totalCredits: integer('total_credits').notNull(), // 消耗的积分
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * 计费历史表 - 记录三段式计费的每一步操作
+ * 预扣 (pre_deduct) → 结算 (settle) → 退费 (refund)
+ */
+export const billingHistory = pgTable('billing_history', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  transactionId: uuid('transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
+  operationType: text('operation_type', { enum: ['pre_deduct', 'settle', 'refund'] }).notNull(),
+  amount: integer('amount').notNull(), // 积分变动量 (预扣为负，退费为正)
+  reason: text('reason'), // 操作原因描述
+  metadata: jsonb('metadata'), // 额外元数据 (如 usage 信息、preDeductId 等)
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * AI 使用日志表 - 详细记录每次 AI 调用
+ * 用于调试、安全审计和异常检测
+ */
+export const aiUsageLogs = pgTable('ai_usage_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  requestId: text('request_id'), // Claude API 返回的请求 ID
+  modelId: text('model_id').notNull(), // 请求的模型 ID
+  status: text('status', { enum: ['success', 'failed', 'timeout', 'rate_limited', 'moderation_blocked'] }).notNull(),
+  errorMessage: text('error_message'), // 失败时的错误信息
+  inputLength: integer('input_length'), // 输入字符长度 (估算)
+  latencyMs: integer('latency_ms'), // 请求延迟 (毫秒)
+  ipAddress: text('ip_address'), // 客户端 IP
+  userAgent: text('user_agent'), // 客户端 User-Agent
+  metadata: jsonb('metadata'), // 其他调试信息
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
