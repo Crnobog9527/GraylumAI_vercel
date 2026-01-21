@@ -53,7 +53,13 @@
   - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
   - 内容审核服务 (packages/api/src/services/contentModerator.ts)
   - 成本计算器 (packages/api/src/services/costCalculator.ts)
-- 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜
+- 阶段四: Frontend Integration (前端集成与 UI 还原) ✅ 已完成 (2026-01-21)
+  - AI 对话核心 Hook (apps/web/src/hooks/useAIChat.ts)
+  - SSE 流式响应 Hook (apps/web/src/hooks/useStreamResponse.ts)
+  - 对话界面主组件 (apps/web/src/components/ai/ChatInterface.tsx)
+  - 流式消息渲染 (apps/web/src/components/ai/MessageStream.tsx)
+  - Token 使用显示 (apps/web/src/components/ai/TokenUsageDisplay.tsx)
+  - 中断按钮 (apps/web/src/components/ai/InterruptButton.tsx)
 - 阶段五: Testing & Security (测试与安全审计) ⬜
 
 ## 已发现的问题 (修复进度: 13/13) ✅ 全部完成
