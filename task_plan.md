@@ -49,31 +49,67 @@
   - AI 对话路由 (packages/api/src/routers/ai.ts)
 - 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ✅ 已完成 (2026-01-21)
 
-**Phase 10 安全与合规审计:** 🔄 进行中
+**Phase 10 安全与合规审计:** ✅ 已完成
 - 目标: 全面检查系统安全性、计费正确性、合规性
-- 开始时间: 2026-01-21
+- 完成时间: 2026-01-21
+- 总体评分: 3.1/5 (部分达标)
 
-检查清单:
-| # | 检查项 | 描述 | 状态 |
-|---|--------|------|------|
-| 1 | 后端计算流程 | 积分计算逻辑必须在 tRPC 后端完成 | ⬜ |
-| 2 | 配置对齐 | 费率实时读取 models 表的 token_rate 字段 | ⬜ |
-| 3 | 逻辑严密性 | 积分和钱的逻辑在后端完成最终校验 | ⬜ |
-| 4 | 代码一致性 | 沿用 Drizzle Schema 和 tRPC 规范 | ⬜ |
-| 5 | 数据共享 | 新功能与管理后台数据库层完全共享 | ⬜ |
-| 6 | 积分实时显示 | Header 组件积分从 user.getProfile 获取 | ⬜ |
-| 7 | Sidebar 切换 | 点击切换对话，聊天窗口随之更新 | ⬜ |
-| 8 | 路由系统 | 所有页面跳转使用 Next.js 路由 | ⬜ |
-| 9 | 接口安全 | tRPC 权限、请求签名、速率限制 | ⬜ |
-| 10 | 计费反作弊 | 余额防御、消费熔断、Service Role 隔离 | ⬜ |
-| 11 | 内容合规 | 双向内容审查、Prompt 注入防御 | ⬜ |
-| 12 | 数据隐私 | 多租户隔离、敏感数据脱敏 | ⬜ |
-| 13 | 环境安全 | CORS 限制、环境变量审计 | ⬜ |
-| 14 | 事务安全 | 行级锁、CHECK 约束、预扣机制 | ⬜ |
-| 15 | 智能路由 | 关键词预判联网搜索 | ⬜ |
-| 16 | 上下文压缩 | 滑动窗口、保留策略、Prompt Caching | ⬜ |
-| 17 | 异常处理 | 幂等性、对账日志 | ⬜ |
-| 18 | 前端交互 | 流式中断信号与积分结算 | ⬜ |
+检查清单 (18/18 完成):
+| # | 检查项 | 描述 | 状态 | 结果 |
+|---|--------|------|------|------|
+| 1 | 后端计算流程 | 积分计算逻辑必须在 tRPC 后端完成 | ✅ | 通过 |
+| 2 | 配置对齐 | 费率实时读取 models 表的 token_rate 字段 | ✅ | 🔴 硬编码 |
+| 3 | 逻辑严密性 | 积分和钱的逻辑在后端完成最终校验 | ✅ | ⚠️ settle未验证 |
+| 4 | 代码一致性 | 沿用 Drizzle Schema 和 tRPC 规范 | ✅ | 通过 |
+| 5 | 数据共享 | 新功能与管理后台数据库层完全共享 | ✅ | 通过 |
+| 6 | 积分实时显示 | Header 组件积分从 user.getProfile 获取 | ✅ | 🔴 硬编码100 |
+| 7 | Sidebar 切换 | 点击切换对话，聊天窗口随之更新 | ✅ | 通过 |
+| 8 | 路由系统 | 所有页面跳转使用 Next.js 路由 | ✅ | ⚠️ 2处window.location |
+| 9 | 接口安全 | tRPC 权限、请求签名、速率限制 | ✅ | ⚠️ 缺请求签名 |
+| 10 | 计费反作弊 | 余额防御、消费熔断、Service Role 隔离 | ✅ | 通过 |
+| 11 | 内容合规 | 双向内容审查、Prompt 注入防御 | ✅ | 通过 |
+| 12 | 数据隐私 | 多租户隔离、敏感数据脱敏 | ✅ | 🔴 RLS缺失 |
+| 13 | 环境安全 | CORS 限制、环境变量审计 | ✅ | 通过 |
+| 14 | 事务安全 | 行级锁、CHECK 约束、预扣机制 | ✅ | ⚠️ 非原子 |
+| 15 | 智能路由 | 关键词预判联网搜索 | ✅ | ⚠️ 关键词不完整 |
+| 16 | 上下文压缩 | 滑动窗口、保留策略、Prompt Caching | ✅ | ⚠️ 阈值53% |
+| 17 | 异常处理 | 幂等性、对账日志 | ✅ | 🔴 缺幂等性 |
+| 18 | 前端交互 | 流式中断信号与积分结算 | ✅ | 🔴 未正确集成 |
+
+**Phase 11 安全审计问题修复:** ⬜ 待执行
+- 目标: 修复 Phase 10 发现的安全和功能问题
+- 参考文档: `findings.md` - Phase 10 安全与合规审计发现
+
+### 11.1 P0 紧急修复 (必须完成)
+
+| # | 任务 | 位置 | 交付物 |
+|---|------|------|--------|
+| 1 | 修复 Header 积分显示 | AppHeader.tsx:38 | 调用 trpc.credits.getBalance |
+| 2 | 添加关键表 RLS 策略 | migrations/ | profiles, conversations, tickets 等 RLS 迁移 |
+| 3 | 实现请求幂等性 | ai.ts, billing.ts | requestId 生成 + idempotencyKey 检查 |
+| 4 | 费率从数据库读取 | billing.ts, costCalculator.ts | getModelPricing() 函数 |
+| 5 | 修复流式中断 | useAIChat.ts, ai.ts | 中断时部分结算 |
+| 6 | 计费事务原子化 | billing.ts | 使用 Supabase RPC 函数 |
+
+### 11.2 P1 重要修复 (计划完成)
+
+| # | 任务 | 位置 | 交付物 |
+|---|------|------|--------|
+| 7 | 请求签名/时间戳 | securityChecks.ts | HMAC-SHA256 签名验证 |
+| 8 | settle() 成本验证 | billing.ts:229 | 添加 calculateTokenCost 验证 |
+| 9 | 补全日志信息 | ai.ts:353 | request_id, ip_address, user_agent |
+| 10 | 修复路由 window.location | login/page.tsx, SixStepsGuide.tsx | 改用 router.push() |
+| 11 | 统一上下文配置 | contextManager.ts, promptCacheBuilder.ts | 阈值60%, 稳定区域3轮 |
+| 12 | 智能路由关键词扩展 | modelRouter.ts | 添加实时数据关键词 |
+
+### 11.3 P2 持续优化 (可选)
+
+| # | 任务 | 描述 |
+|---|------|------|
+| 13 | 递归摘要算法 | 多层摘要链式压缩 |
+| 14 | 软删除机制 | is_deleted 字段 + RLS 校验 |
+| 15 | Redis 速率限制 | 替代内存存储 |
+| 16 | .env.example | 环境变量文档 |
   - Prompt 缓存构建器 (packages/api/src/services/promptCacheBuilder.ts)
   - 上下文滑动窗口管理器 (packages/api/src/services/contextManager.ts)
   - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
