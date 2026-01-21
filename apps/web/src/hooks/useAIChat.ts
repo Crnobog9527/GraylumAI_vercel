@@ -112,7 +112,7 @@ export function useAIChat(options: UseAIChatOptions = {}) {
     onError: (error) => {
       // 将 tRPC 错误转换为标准 Error 对象
       const errorObj = new Error(error.message);
-      errorObj.name = error.name ?? 'TRPCError';
+      errorObj.name = 'TRPCError';
       setState((prev) => ({
         ...prev,
         isLoading: false,
