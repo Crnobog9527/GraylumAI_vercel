@@ -7,7 +7,8 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "turbo test",
+    "test:api": "pnpm --filter @repo/api test:run",
     "db:push": "drizzle-kit push --config=packages/db/drizzle.config.ts"
   },
   "keywords": [],

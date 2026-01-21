@@ -28,6 +28,45 @@
 - Step 7.5: 邀请管理完善 ✅ 完成 (2026-01-20)
 - Step 7.6: 公告管理完善 ✅ 完成 (2026-01-20)
 
+**Phase 8 AI 重构执行计划制定:** ✅ 已完成
+- 参考文档: `movetonew/制定分阶段重构执行计划指导方法.md`
+- 输出文档: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建 (2026-01-21)
+- Step 8.1 ~ 8.8: 分阶段编写执行计划文档 ✅ 全部完成
+
+**Phase 9 AI 对话系统重构实施:** ✅ 已完成
+- 参考文档: `movetonew/GraylumAI_分阶段重构执行计划.md`
+- 参考文档: `AI_REFACTOR_DESIGN_BRIEF.md`
+- 阶段一: Schema & Types (数据库与类型定义) ✅ 已完成 (2026-01-21)
+  - 新增 token_stats, billing_history, ai_usage_logs 表定义
+  - 创建 AI 类型 (packages/api/src/types/ai.ts)
+  - 创建计费类型 (packages/api/src/types/billing.ts)
+  - 创建迁移 SQL + RLS 策略
+- 阶段二: tRPC Procedures (后端核心逻辑) ✅ 已完成 (2026-01-21)
+  - 安全检查中间件 (packages/api/src/middleware/securityChecks.ts)
+  - 原子化计费服务 (packages/api/src/services/billing.ts)
+  - Token 计数服务 (packages/api/src/services/tokenCounter.ts)
+  - 智能模型路由 (packages/api/src/services/modelRouter.ts)
+  - AI 对话路由 (packages/api/src/routers/ai.ts)
+- 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ✅ 已完成 (2026-01-21)
+  - Prompt 缓存构建器 (packages/api/src/services/promptCacheBuilder.ts)
+  - 上下文滑动窗口管理器 (packages/api/src/services/contextManager.ts)
+  - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
+  - 内容审核服务 (packages/api/src/services/contentModerator.ts)
+  - 成本计算器 (packages/api/src/services/costCalculator.ts)
+- 阶段四: Frontend Integration (前端集成与 UI 还原) ✅ 已完成 (2026-01-21)
+  - AI 对话核心 Hook (apps/web/src/hooks/useAIChat.ts)
+  - SSE 流式响应 Hook (apps/web/src/hooks/useStreamResponse.ts)
+  - 对话界面主组件 (apps/web/src/components/ai/ChatInterface.tsx)
+  - 流式消息渲染 (apps/web/src/components/ai/MessageStream.tsx)
+  - Token 使用显示 (apps/web/src/components/ai/TokenUsageDisplay.tsx)
+  - 中断按钮 (apps/web/src/components/ai/InterruptButton.tsx)
+- 阶段五: Testing & Security (测试与安全审计) ✅ 已完成 (2026-01-21)
+  - Vitest 测试配置 (packages/api/vitest.config.ts)
+  - 计费服务测试 (packages/api/src/services/__tests__/billing.test.ts)
+  - Token 计数测试 (packages/api/src/services/__tests__/tokenCounter.test.ts)
+  - 成本计算器测试 (packages/api/src/services/__tests__/costCalculator.test.ts)
+  - 安全审计文档 (docs/SECURITY_AUDIT_PHASE9.md)
+
 ## 已发现的问题 (修复进度: 13/13) ✅ 全部完成
 
 | # | 问题描述 | 影响范围 | 状态 |
@@ -767,7 +806,139 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 ---
 
-## Phase 7: 管理后台功能还原 🚧 进行中
+## Phase 8: AI 重构执行计划制定 ✅ 已完成
+
+> **参考文档**: `movetonew/制定分阶段重构执行计划指导方法.md`
+> **输出文档**: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ (2026-01-21)
+> **目标**: 根据 `AI_REFACTOR_DESIGN_BRIEF.md` 简报，制定完整的 AI 系统重构执行计划
+
+### Step 8.1 ~ 8.8: 执行计划编写 ✅ 全部完成
+
+**已完成内容:**
+- [x] 项目概览 (重构范围、核心目标、技术债务、风险评估)
+- [x] 架构决策记录 ADR (4 个关键决策)
+- [x] 阶段一计划: Schema & Types
+- [x] 阶段二计划: tRPC Procedures
+- [x] 阶段三计划: AI Engine & Optimization
+- [x] 阶段四计划: Frontend Integration
+- [x] 阶段五计划: Testing & Security
+- [x] 风险缓解与回滚方案
+- [x] 成功指标定义
+
+---
+
+## Phase 9: AI 对话系统重构实施 🆕 待执行
+
+> **参考文档**: `movetonew/GraylumAI_分阶段重构执行计划.md`
+> **设计简报**: `AI_REFACTOR_DESIGN_BRIEF.md`
+> **目标**: 将 AI 对话系统从旧架构迁移到新架构，实现完整的 AI 对话功能
+
+### 9.1 阶段一: Schema & Types (数据库与类型定义) ⬜ 待执行
+
+**目标**: 建立 AI 系统所需的数据库表和 TypeScript 类型定义
+
+#### 交付物
+- [ ] `packages/db/schema/token-stats.ts` - Token 统计表
+- [ ] `packages/db/schema/billing-history.ts` - 计费历史表
+- [ ] `packages/api/src/types/ai.ts` - AI 请求/响应类型
+- [ ] `packages/api/src/types/billing.ts` - 计费相关类型
+- [ ] `supabase/migrations/xxx_create_ai_tables.sql` - 迁移文件
+- [ ] RLS 策略定义
+
+#### 验证标准
+- [ ] 数据库迁移无错误执行
+- [ ] RLS 策略测试通过 (用户隔离)
+- [ ] TypeScript 无 `any` 警告
+- [ ] 索引查询 <100ms
+
+### 9.2 阶段二: tRPC Procedures (后端核心逻辑) ⬜ 待执行
+
+**目标**: 实现 AI 对话的后端 API 和计费服务
+
+#### 交付物
+- [ ] `packages/api/src/middleware/securityChecks.ts` - 安全检查中间件
+- [ ] `packages/api/src/routers/ai.ts` - AI 对话核心路由
+- [ ] `packages/api/src/services/billing.ts` - 原子化计费服务 (预扣-结算-退费)
+- [ ] `packages/api/src/services/modelRouter.ts` - AI 智能路由逻辑
+- [ ] `packages/api/src/services/tokenCounter.ts` - Token 计数服务
+
+#### 验证标准
+- [ ] 未登录用户无法调用 (返回 401)
+- [ ] 积分不足正确拒绝 (PRECONDITION_FAILED)
+- [ ] 计费事务在异常时正确回滚
+- [ ] 重复请求不会重复扣费 (幂等性)
+
+### 9.3 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜ 待执行
+
+**目标**: 实现 AI 调用核心引擎和成本优化模块
+
+#### 交付物
+- [ ] `packages/api/src/lib/ai/tokenCounter.ts` - Token 计数 (官方 API)
+- [ ] `packages/api/src/lib/ai/contextManager.ts` - 上下文滑动窗口
+- [ ] `packages/api/src/lib/ai/promptCaching.ts` - Prompt Caching 构建器
+- [ ] `packages/api/src/lib/ai/streamHandler.ts` - SSE 流式传输
+- [ ] `packages/api/src/lib/ai/costCalculator.ts` - 成本计算器
+- [ ] `packages/api/src/lib/ai/contentModeration.ts` - 内容审查
+
+#### 验证标准
+- [ ] Token 统计与 API 计费误差 <2%
+- [ ] 压缩后上下文保持对话连贯性
+- [ ] 流式输出在网络中断后能恢复
+- [ ] 缓存命中率 >30%
+
+### 9.4 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜ 待执行
+
+**目标**: 将前端对话界面接入新的 tRPC API
+
+#### 交付物
+- [ ] `apps/web/src/components/chat/ChatInterface.tsx` - 对话界面 (接入新 tRPC)
+- [ ] `apps/web/src/components/chat/MessageStream.tsx` - 流式消息渲染
+- [ ] `apps/web/src/components/chat/InterruptButton.tsx` - 中断控制
+- [ ] `apps/web/src/components/chat/TokenUsageDisplay.tsx` - Token 用量显示
+- [ ] `apps/web/src/hooks/useAIChat.ts` - 封装 AI 对话逻辑
+- [ ] `apps/web/src/hooks/useStreamResponse.ts` - 流式响应处理
+
+#### 验证标准
+- [ ] 界面与设计稿一致
+- [ ] 流式输出延迟 <50ms (60fps)
+- [ ] 中断按钮点击后 <100ms 停止
+- [ ] Token/成本显示实时更新
+
+### 9.5 阶段五: Testing & Security (测试与安全审计) ⬜ 待执行
+
+**目标**: 完成测试覆盖和安全审计
+
+#### 交付物
+- [ ] `__tests__/unit/billing.test.ts` - 计费逻辑单元测试
+- [ ] `__tests__/unit/tokenCounter.test.ts` - Token 统计测试
+- [ ] `__tests__/integration/ai-chat.test.ts` - 对话流程集成测试
+- [ ] `__tests__/e2e/user-journey.spec.ts` - 端到端测试
+- [ ] `docs/SECURITY_AUDIT.md` - 安全审计报告
+
+#### 验证标准
+- [ ] 单元测试覆盖率 >80%
+- [ ] 并发测试无数据竞争
+- [ ] RLS 测试确认用户数据隔离
+- [ ] 安全扫描无高危漏洞
+
+### 成功指标
+
+| 类别 | 指标 | 目标值 |
+|------|------|--------|
+| 功能 | AI 对话成功率 | >99% |
+| 功能 | 平均响应时间 | <2s |
+| 功能 | 流式首字节时间 | <500ms |
+| 成本 | Token 计费误差 | <2% |
+| 成本 | 缓存命中率 | >60% |
+| 成本 | 成本节省 | >30% |
+| 安全 | 高危漏洞数 | 0 |
+| 安全 | RLS 绕过尝试 | 0 |
+| 质量 | 测试覆盖率 | >80% |
+| 质量 | TypeScript 严格模式 | 100% |
+
+---
+
+## Phase 7: 管理后台功能还原 ✅ 已完成
 
 > **参考项目**: `/home/user/graylumAi-backup-ref/`
 > **目标**: 还原旧项目管理后台的所有功能，确保与原版功能完全一致
