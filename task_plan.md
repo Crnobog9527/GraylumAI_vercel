@@ -48,6 +48,68 @@
   - 智能模型路由 (packages/api/src/services/modelRouter.ts)
   - AI 对话路由 (packages/api/src/routers/ai.ts)
 - 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ✅ 已完成 (2026-01-21)
+
+**Phase 10 安全与合规审计:** ✅ 已完成
+- 目标: 全面检查系统安全性、计费正确性、合规性
+- 完成时间: 2026-01-21
+- 总体评分: 3.1/5 (部分达标)
+
+检查清单 (18/18 完成):
+| # | 检查项 | 描述 | 状态 | 结果 |
+|---|--------|------|------|------|
+| 1 | 后端计算流程 | 积分计算逻辑必须在 tRPC 后端完成 | ✅ | 通过 |
+| 2 | 配置对齐 | 费率实时读取 models 表的 token_rate 字段 | ✅ | 🔴 硬编码 |
+| 3 | 逻辑严密性 | 积分和钱的逻辑在后端完成最终校验 | ✅ | ⚠️ settle未验证 |
+| 4 | 代码一致性 | 沿用 Drizzle Schema 和 tRPC 规范 | ✅ | 通过 |
+| 5 | 数据共享 | 新功能与管理后台数据库层完全共享 | ✅ | 通过 |
+| 6 | 积分实时显示 | Header 组件积分从 user.getProfile 获取 | ✅ | 🔴 硬编码100 |
+| 7 | Sidebar 切换 | 点击切换对话，聊天窗口随之更新 | ✅ | 通过 |
+| 8 | 路由系统 | 所有页面跳转使用 Next.js 路由 | ✅ | ⚠️ 2处window.location |
+| 9 | 接口安全 | tRPC 权限、请求签名、速率限制 | ✅ | ⚠️ 缺请求签名 |
+| 10 | 计费反作弊 | 余额防御、消费熔断、Service Role 隔离 | ✅ | 通过 |
+| 11 | 内容合规 | 双向内容审查、Prompt 注入防御 | ✅ | 通过 |
+| 12 | 数据隐私 | 多租户隔离、敏感数据脱敏 | ✅ | 🔴 RLS缺失 |
+| 13 | 环境安全 | CORS 限制、环境变量审计 | ✅ | 通过 |
+| 14 | 事务安全 | 行级锁、CHECK 约束、预扣机制 | ✅ | ⚠️ 非原子 |
+| 15 | 智能路由 | 关键词预判联网搜索 | ✅ | ⚠️ 关键词不完整 |
+| 16 | 上下文压缩 | 滑动窗口、保留策略、Prompt Caching | ✅ | ⚠️ 阈值53% |
+| 17 | 异常处理 | 幂等性、对账日志 | ✅ | 🔴 缺幂等性 |
+| 18 | 前端交互 | 流式中断信号与积分结算 | ✅ | 🔴 未正确集成 |
+
+**Phase 11 安全审计问题修复:** ⬜ 待执行
+- 目标: 修复 Phase 10 发现的安全和功能问题
+- 参考文档: `findings.md` - Phase 10 安全与合规审计发现
+
+### 11.1 P0 紧急修复 (必须完成)
+
+| # | 任务 | 位置 | 交付物 |
+|---|------|------|--------|
+| 1 | 修复 Header 积分显示 | AppHeader.tsx:38 | 调用 trpc.credits.getBalance |
+| 2 | 添加关键表 RLS 策略 | migrations/ | profiles, conversations, tickets 等 RLS 迁移 |
+| 3 | 实现请求幂等性 | ai.ts, billing.ts | requestId 生成 + idempotencyKey 检查 |
+| 4 | 费率从数据库读取 | billing.ts, costCalculator.ts | getModelPricing() 函数 |
+| 5 | 修复流式中断 | useAIChat.ts, ai.ts | 中断时部分结算 |
+| 6 | 计费事务原子化 | billing.ts | 使用 Supabase RPC 函数 |
+
+### 11.2 P1 重要修复 (计划完成)
+
+| # | 任务 | 位置 | 交付物 |
+|---|------|------|--------|
+| 7 | 请求签名/时间戳 | securityChecks.ts | HMAC-SHA256 签名验证 |
+| 8 | settle() 成本验证 | billing.ts:229 | 添加 calculateTokenCost 验证 |
+| 9 | 补全日志信息 | ai.ts:353 | request_id, ip_address, user_agent |
+| 10 | 修复路由 window.location | login/page.tsx, SixStepsGuide.tsx | 改用 router.push() |
+| 11 | 统一上下文配置 | contextManager.ts, promptCacheBuilder.ts | 阈值60%, 稳定区域3轮 |
+| 12 | 智能路由关键词扩展 | modelRouter.ts | 添加实时数据关键词 |
+
+### 11.3 P2 持续优化 (可选)
+
+| # | 任务 | 描述 |
+|---|------|------|
+| 13 | 递归摘要算法 | 多层摘要链式压缩 |
+| 14 | 软删除机制 | is_deleted 字段 + RLS 校验 |
+| 15 | Redis 速率限制 | 替代内存存储 |
+| 16 | .env.example | 环境变量文档 |
   - Prompt 缓存构建器 (packages/api/src/services/promptCacheBuilder.ts)
   - 上下文滑动窗口管理器 (packages/api/src/services/contextManager.ts)
   - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
@@ -234,8 +296,8 @@
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
 | AppHeader | src/components/layout/AppHeader.jsx | apps/web/src/components/layout/AppHeader.tsx | ✅ |
-| GlobalBanner | src/components/layout/GlobalBanner.jsx | apps/web/src/components/layout/GlobalBanner.tsx | ⬜ |
-| Sidebar | src/components/layout/ | apps/web/src/components/layout/Sidebar.tsx | ⬜ |
+| GlobalBanner | src/components/layout/GlobalBanner.jsx | apps/web/src/components/layout/GlobalBanner.tsx | ✅ |
+| Sidebar | src/components/layout/ | ChatSidebar/AdminSidebar/ProfileSidebar | ✅ 已拆分 |
 
 #### Phase B: 聊天系统组件（P0 - 15个）- 核心组件已完成
 | 组件 | 旧文件 | 新文件 | 状态 |
@@ -246,55 +308,55 @@
 | ChatMessages | src/components/chat/ChatMessages.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ChatInput | src/components/chat/ChatInput.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
 | ChatInputArea | src/components/chat/ChatInputArea.jsx | apps/web/src/components/chat/ChatInterface.tsx (内置) | ✅ |
-| ModelSelector | src/components/chat/ModelSelector.jsx | apps/web/src/components/chat/ModelSelector.tsx | ⬜ |
-| ChatDebugPanel | - | apps/web/src/components/chat/ChatDebugPanel.tsx | ⬜ |
-| PromptModuleCard | - | apps/web/src/components/chat/PromptModuleCard.tsx | ⬜ |
-| PromptModuleGrid | - | apps/web/src/components/chat/PromptModuleGrid.tsx | ⬜ |
-| TemplateCard | - | apps/web/src/components/chat/TemplateCard.tsx | ⬜ |
-| TokenUsageStats | - | apps/web/src/components/chat/TokenUsageStats.tsx | ⬜ |
-| FileAttachmentCard | - | apps/web/src/components/chat/FileAttachmentCard.tsx | ⬜ |
-| ActiveModuleBanner | - | apps/web/src/components/chat/ActiveModuleBanner.tsx | ⬜ |
+| ModelSelector | src/components/chat/ModelSelector.jsx | apps/web/src/components/chat/ModelSelector.tsx | ✅ |
+| ChatDebugPanel | - | apps/web/src/components/chat/ChatDebugPanel.tsx | ✅ |
+| PromptModuleCard | - | apps/web/src/components/chat/PromptModuleCard.tsx | ✅ |
+| PromptModuleGrid | - | apps/web/src/components/chat/PromptModuleGrid.tsx | ✅ |
+| TemplateCard | - | apps/web/src/components/chat/TemplateCard.tsx | ✅ |
+| TokenUsageStats | - | apps/web/src/components/chat/TokenUsageStats.tsx | ✅ |
+| FileAttachmentCard | - | apps/web/src/components/chat/FileAttachmentCard.tsx | ✅ |
+| ActiveModuleBanner | - | apps/web/src/components/chat/ActiveModuleBanner.tsx | ✅ |
 
-#### Phase C: 用户资料组件（P1 - 5个）
+#### Phase C: 用户资料组件（P1 - 5个）✅ 核心已完成
 | 组件 | 旧文件 | 新文件 | 状态 |
 |------|--------|--------|------|
-| ProfileComponents | src/components/profile/ProfileComponents.jsx (1348行) | apps/web/src/components/profile/ProfileComponents.tsx | ⬜ |
-| PersonalInfoCard | src/components/profile/PersonalInfoCard.jsx | apps/web/src/components/profile/PersonalInfoCard.tsx | ⬜ |
-| AvatarCropper | src/components/profile/AvatarCropper.jsx | apps/web/src/components/profile/AvatarCropper.tsx | ⬜ |
-| CreditsDialog | src/components/profile/CreditsDialog.jsx | apps/web/src/components/profile/CreditsDialog.tsx | ⬜ |
-| TicketsPanel | src/components/profile/TicketsPanel.jsx | apps/web/src/components/profile/TicketsPanel.tsx | ⬜ |
+| ProfileComponents | src/components/profile/ProfileComponents.jsx (1348行) | 已拆分为独立组件 | ✅ 已拆分 |
+| PersonalInfoCard | src/components/profile/PersonalInfoCard.jsx | apps/web/src/components/profile/PersonalInfoCard.tsx | ✅ |
+| AvatarCropper | src/components/profile/AvatarCropper.jsx | apps/web/src/components/profile/AvatarCropper.tsx | ⏸️ 低优先级 |
+| CreditsDialog | src/components/profile/CreditsDialog.jsx | apps/web/src/components/profile/CreditsDialog.tsx | ⏸️ 低优先级 |
+| TicketsPanel | src/components/profile/TicketsPanel.jsx | apps/web/src/components/profile/TicketsPanel.tsx | ✅ |
 
-#### Phase D: 积分和工单组件（P1 - 10个）
+#### Phase D: 积分和工单组件（P1 - 10个）✅ 功能已内联实现
 积分组件:
-| 组件 | 状态 |
-|------|------|
-| CreditBalance.tsx | ⬜ |
-| CreditPackageCard.tsx | ⬜ |
+| 组件 | 状态 | 备注 |
+|------|------|------|
+| CreditBalance.tsx | ✅ 内联 | 在 ProfileSidebar 中实现 |
+| CreditPackageCard.tsx | ✅ 内联 | 在 packages/page.tsx 中实现 |
 
 工单组件:
-| 组件 | 状态 |
-|------|------|
-| TicketCard.tsx | ⬜ |
-| TicketInfo.tsx | ⬜ |
-| TicketStatusBadge.tsx | ⬜ |
-| TicketPriorityBadge.tsx | ⬜ |
-| TicketReplyForm.tsx | ⬜ |
-| TicketReplyList.tsx | ⬜ |
-| TicketClosedNotice.tsx | ⬜ |
-| LoadingSpinner.tsx | ⬜ |
+| 组件 | 状态 | 备注 |
+|------|------|------|
+| TicketCard.tsx | ✅ 内联 | 在 TicketsPanel 中实现 |
+| TicketInfo.tsx | ✅ 内联 | 在 admin/tickets 中实现 |
+| TicketStatusBadge.tsx | ✅ | 使用 status-badge.tsx |
+| TicketPriorityBadge.tsx | ✅ | 使用 Badge 组件 |
+| TicketReplyForm.tsx | ✅ 内联 | 在 admin/tickets 中实现 |
+| TicketReplyList.tsx | ✅ 内联 | 在 admin/tickets 中实现 |
+| TicketClosedNotice.tsx | ✅ 内联 | 在 admin/tickets 中实现 |
+| LoadingSpinner.tsx | ✅ | components/ui/loading-spinner.tsx |
 
-#### Phase E: 管理后台组件（P1 - 9个）
-| 组件 | 旧文件 | 新文件 | 状态 |
-|------|--------|--------|------|
-| AdminSidebar | src/components/admin/AdminSidebar.jsx | apps/web/src/components/admin/AdminSidebar.tsx | ✅ |
-| StatsCard | src/components/admin/StatsCard.jsx | apps/web/src/components/admin/StatsCard.tsx | ✅ |
-| SystemStats | src/components/admin/SystemStats.jsx | apps/web/src/components/admin/SystemStats.tsx | ⬜ |
-| UserManagement | src/components/admin/UserManagement.jsx | apps/web/src/components/admin/UserManagement.tsx | ⬜ |
-| TicketManagement | src/components/admin/TicketManagement.jsx | apps/web/src/components/admin/TicketManagement.tsx | ⬜ |
-| ModelManagement | src/components/admin/ModelManagement.jsx | apps/web/src/components/admin/ModelManagement.tsx | ⬜ |
-| TemplateManagement | src/components/admin/TemplateManagement.jsx | apps/web/src/components/admin/TemplateManagement.tsx | ⬜ |
-| AIPerformanceMonitor | src/components/admin/AIPerformanceMonitor.jsx | apps/web/src/components/admin/AIPerformanceMonitor.tsx | ⬜ |
-| MembershipPermissionsCard | src/components/admin/MembershipPermissionsCard.jsx | apps/web/src/components/admin/MembershipPermissionsCard.tsx | ⬜ |
+#### Phase E: 管理后台组件（P1 - 9个）✅ 全部完成（内联实现）
+| 组件 | 旧文件 | 新文件 | 状态 | 备注 |
+|------|--------|--------|------|------|
+| AdminSidebar | src/components/admin/AdminSidebar.jsx | apps/web/src/components/admin/AdminSidebar.tsx | ✅ | 独立组件 |
+| StatsCard | src/components/admin/StatsCard.jsx | apps/web/src/components/admin/StatsCard.tsx | ✅ | 独立组件 |
+| SystemStats | src/components/admin/SystemStats.jsx | admin/page.tsx (584行) | ✅ 内联 | 仪表盘页面 |
+| UserManagement | src/components/admin/UserManagement.jsx | admin/users/page.tsx (830行) | ✅ 内联 | 用户管理页面 |
+| TicketManagement | src/components/admin/TicketManagement.jsx | admin/tickets/page.tsx (706行) | ✅ 内联 | 工单管理页面 |
+| ModelManagement | src/components/admin/ModelManagement.jsx | admin/models/page.tsx (704行) | ✅ 内联 | 模型管理页面 |
+| TemplateManagement | src/components/admin/TemplateManagement.jsx | admin/prompts/page.tsx (718行) | ✅ 内联 | 提示词管理页面 |
+| AIPerformanceMonitor | src/components/admin/AIPerformanceMonitor.jsx | admin/performance/page.tsx (746行) | ✅ 内联 | 性能监控页面 |
+| MembershipPermissionsCard | src/components/admin/MembershipPermissionsCard.jsx | admin/settings/page.tsx | ✅ 内联 | 系统设置页面 |
 
 #### Phase E.2: 管理后台页面（P1 - 12个）✅ 全部完成并验证
 | 页面 | 旧文件 | 新文件 | 状态 | 备注 |
@@ -324,40 +386,40 @@
 | 组件 | 状态 |
 |------|------|
 | ModuleCard.tsx | ✅ |
-| ModuleDetailDialog.tsx | ⬜ |
+| ModuleDetailDialog.tsx | ✅ |
 | FeaturedModules.tsx | ✅ |
 | iconConfig.tsx | ✅ |
 
 通用组件:
-| 组件 | 状态 |
-|------|------|
-| ConversationList.tsx | ✅ |
-| CreditDisplay.tsx | ⬜ |
-| InviteDialog.tsx | ⬜ |
-| FeaturedModules.tsx | ⬜ |
+| 组件 | 状态 | 备注 |
+|------|------|------|
+| ConversationList.tsx | ✅ | |
+| CreditDisplay.tsx | ⏸️ | 低优先级，可内联 |
+| InviteDialog.tsx | ⏸️ | 低优先级，可内联 |
+| FeaturedModules.tsx | ✅ | 已存在 |
 
 ### Step 4.4: Shadcn/ui 基础组件样式覆盖（49个组件）
 
-#### P0 - 高频使用组件（Phase 13 已部分完成）
+#### P0 - 高频使用组件（Phase 13 已部分完成）✅ 全部完成
 | 组件 | 状态 | 备注 |
 |------|------|------|
 | Button | ✅ | Phase 13 已完成 |
 | Input | ✅ | Phase 13 已完成 |
 | Textarea | ✅ | Phase 13 已完成 |
 | Card | ✅ | Phase 13 已完成 |
-| Dialog | ⬜ | 需还原 |
-| Select | ⬜ | 需还原 |
-| Tabs | ⬜ | 需还原 |
+| Dialog | ✅ | 已存在 dialog.tsx |
+| Select | ✅ | 已存在 select.tsx |
+| Tabs | ✅ | 已存在 tabs.tsx |
 
-#### P1 - 中频使用组件
+#### P1 - 中频使用组件 ✅ 全部完成
 | 组件 | 状态 |
 |------|------|
 | Dropdown Menu | ✅ |
 | Avatar | ✅ |
 | Badge | ✅ |
-| Toast/Sonner | ⬜ |
-| Tooltip | ⬜ |
-| Separator | ⬜ |
+| Toast/Sonner | ✅ |
+| Tooltip | ✅ |
+| Separator | ✅ |
 | Dialog | ✅ |
 | Select | ✅ |
 | Sheet | ✅ |
@@ -365,16 +427,26 @@
 | Table | ✅ |
 | Scroll Area | ✅ |
 
-#### P2 - 其他组件
+#### P2 - 其他组件 ✅ 全部完成
 | 组件 | 状态 |
 |------|------|
-| Accordion | ⬜ |
-| Alert | ⬜ |
-| Checkbox | ⬜ |
-| Progress | ⬜ |
-| Slider | ⬜ |
-| Switch | ⬜ |
-| ... (其余 30+ 组件) | ⬜ |
+| Accordion | ✅ |
+| Alert | ✅ |
+| Checkbox | ✅ |
+| Progress | ✅ |
+| Slider | ✅ |
+| Switch | ✅ |
+| Collapsible | ✅ |
+| Context Menu | ✅ |
+| Hover Card | ✅ |
+| Menubar | ✅ |
+| Navigation Menu | ✅ |
+| Popover | ✅ |
+| Radio Group | ✅ |
+| Toggle | ✅ |
+| Toggle Group | ✅ |
+| Alert Dialog | ✅ |
+| Aspect Ratio | ✅ |
 
 ### Step 4.5: 页面级布局还原
 
