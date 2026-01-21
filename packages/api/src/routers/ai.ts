@@ -232,8 +232,8 @@ async function callClaudeAPI(params: {
     usage: {
       inputTokens: data.usage.input_tokens,
       outputTokens: data.usage.output_tokens,
-      cacheCreationTokens: data.usage.cache_creation_input_tokens,
-      cacheReadTokens: data.usage.cache_read_input_tokens,
+      cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
     },
     stopReason: data.stop_reason,
   };
