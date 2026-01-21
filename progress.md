@@ -1382,6 +1382,35 @@ GraylumAI_分阶段重构执行计划.md
 | 阶段九 | ✅ 已完成并验证 | 4/4 |
 | 阶段十 | ✅ 已完成并验证 | 5/5 |
 | 阶段十一 | ✅ 已完成并验证 | 5/5 |
+| **Phase 9 AI 重构** | ✅ 已完成 | 5/5 子阶段 |
+
+### Files Created/Modified (Phase 9 AI 重构)
+| File | Action |
+|------|--------|
+| packages/db/schema.ts | Modified (新增 token_stats, billing_history, ai_usage_logs 表) |
+| packages/db/migrations/0001_ai_billing_tables.sql | Created |
+| packages/api/src/types/ai.ts | Created |
+| packages/api/src/types/billing.ts | Created |
+| packages/api/src/services/billing.ts | Created |
+| packages/api/src/services/tokenCounter.ts | Created |
+| packages/api/src/services/modelRouter.ts | Created |
+| packages/api/src/services/promptCacheBuilder.ts | Created |
+| packages/api/src/services/contextManager.ts | Created |
+| packages/api/src/services/streamHandler.ts | Created |
+| packages/api/src/services/contentModerator.ts | Created |
+| packages/api/src/services/costCalculator.ts | Created |
+| packages/api/src/routers/ai.ts | Created |
+| apps/web/src/hooks/useAIChat.ts | Created |
+| apps/web/src/hooks/useStreamResponse.ts | Created |
+| apps/web/src/components/ai/ChatInterface.tsx | Created |
+| apps/web/src/components/ai/MessageStream.tsx | Created |
+| apps/web/src/components/ai/TokenUsageDisplay.tsx | Created |
+| apps/web/src/components/ai/InterruptButton.tsx | Created |
+| packages/api/vitest.config.ts | Created |
+| packages/api/src/services/__tests__/billing.test.ts | Created |
+| packages/api/src/services/__tests__/tokenCounter.test.ts | Created |
+| packages/api/src/services/__tests__/costCalculator.test.ts | Created |
+| docs/SECURITY_AUDIT_PHASE9.md | Created |
 
 ### Files Created/Modified (Phase 10)
 | File | Action |
@@ -1399,6 +1428,11 @@ GraylumAI_分阶段重构执行计划.md
 | 05a52b9 | chore: add movetonew folder for migration work |
 | fe230ec | feat: migrate ticket system and system settings (Phase 9) |
 | 847f8f1 | feat: migrate invitation and AI model management (Phase 10) |
+| 3acc3ad | feat: implement Phase 9.1 Schema & Types for AI billing system |
+| f93ace2 | feat: implement Phase 9.2 tRPC Procedures for AI chat system |
+| f7c0823 | feat: implement Phase 9.3 AI Engine & Optimization |
+| 0f2e6e6 | feat: implement Phase 9.4 Frontend Integration for AI chat |
+| 807d325 | feat: implement Phase 9.5 Testing & Security for AI system |
 
 ### Test Results
 | Test | Expected | Actual | Status |
