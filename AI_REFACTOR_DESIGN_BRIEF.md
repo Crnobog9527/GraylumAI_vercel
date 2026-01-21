@@ -895,7 +895,7 @@ export async function callWithSearchAndFetch(
 
 > **来源**:
 > - [PDF Support - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/pdf-support)
-> - [Vision - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/vision)
+> - [Vision - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/vision)
 
 **设计目标**: 与 Claude 官方对话体验一致的文件上传功能。
 
@@ -922,7 +922,7 @@ export async function callWithSearchAndFetch(
 /**
  * 文件上传处理服务
  * @see https://platform.claude.com/docs/en/build-with-claude/pdf-support
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/vision
+ * @see https://platform.claude.com/docs/en/build-with-claude/vision
  */
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
