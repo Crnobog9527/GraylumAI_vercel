@@ -354,7 +354,7 @@ export const adminRouter = router({
         .order('created_at', { ascending: true });
 
       // 获取回复者用户信息
-      const replyUserIds = [...new Set((repliesData ?? []).map(r => r.user_id).filter(Boolean))];
+      const replyUserIds = Array.from(new Set((repliesData ?? []).map(r => r.user_id).filter(Boolean)));
       const { data: replyUsersData } = replyUserIds.length > 0
         ? await ctx.supabase
             .from('profiles')
