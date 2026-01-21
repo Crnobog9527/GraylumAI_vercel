@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PlayCircle, Target, Search, Compass, FileText, Settings, TrendingUp } from 'lucide-react';
 
 /**
@@ -52,12 +53,13 @@ interface SixStepsGuideProps {
 }
 
 export default function SixStepsGuide({ onStartAnalysis }: SixStepsGuideProps) {
+  const router = useRouter();
   const handleStartAnalysis = () => {
     if (onStartAnalysis) {
       onStartAnalysis();
     } else {
       // Default: navigate to chat
-      window.location.href = '/chat';
+      router.push('/chat');
     }
   };
 
