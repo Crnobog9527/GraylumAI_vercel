@@ -388,7 +388,6 @@ export const aiRouter = router({
         // 从请求头获取 IP 和 User-Agent
         const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
           ?? ctx.headers?.get?.('x-real-ip')
-          ?? ctx.req?.ip
           ?? 'unknown';
         const userAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
 
@@ -430,7 +429,6 @@ export const aiRouter = router({
         const failLatencyMs = Date.now() - startTime;
         const failIpAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
           ?? ctx.headers?.get?.('x-real-ip')
-          ?? ctx.req?.ip
           ?? 'unknown';
         const failUserAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
 
