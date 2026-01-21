@@ -12,12 +12,12 @@
 
 | 功能 | 文档链接 |
 |------|----------|
-| 提示词缓存 | [Prompt Caching](https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching) |
-| 流式消息 | [Streaming](https://platform.claude.com/docs/zh-CN/build-with-claude/streaming) |
-| Token 计数 | [Token Counting](https://platform.claude.com/docs/zh-CN/build-with-claude/token-counting) |
-| 视觉功能 | [Vision](https://platform.claude.com/docs/zh-CN/build-with-claude/vision) |
-| Web 搜索工具 | [Web Search Tool](https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool) |
-| 使用情况与成本 | [Usage Cost API](https://platform.claude.com/docs/zh-CN/build-with-claude/usage-cost-api) |
+| 提示词缓存 | [Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
+| 流式消息 | [Streaming](https://platform.claude.com/docs/en/build-with-claude/streaming) |
+| Token 计数 | [Token Counting](https://platform.claude.com/docs/en/build-with-claude/token-counting) |
+| 视觉功能 | [Vision](https://platform.claude.com/docs/en/build-with-claude/vision) |
+| Web 搜索工具 | [Web Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool) |
+| 使用情况与成本 | [Usage Cost API](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api) |
 
 ---
 
@@ -179,7 +179,7 @@ function inlineTaskClassifier(message: string, turns: number): ModelId {
 
 #### 4.2.1 Token 计数：使用官方 API
 
-> **来源**: [Token Counting - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/token-counting)
+> **来源**: [Token Counting - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/token-counting)
 
 **❌ 旧方案 (不准确):**
 ```typescript
@@ -194,7 +194,7 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages/count_tokens';
 
 /**
  * 使用官方 count_tokens API 精确计算 Token 数
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/token-counting
+ * @see https://platform.claude.com/docs/en/build-with-claude/token-counting
  *
  * 特点:
  * - 免费使用，但有速率限制 (2000 req/min)
@@ -236,7 +236,7 @@ export function estimateTokensLocal(text: string): number {
 
 #### 4.2.2 Prompt Caching 优化
 
-> **来源**: [Prompt Caching - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching)
+> **来源**: [Prompt Caching - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 
 **官方规格:**
 | 参数 | Claude Sonnet | Claude Haiku |
@@ -257,7 +257,7 @@ export function estimateTokensLocal(text: string): number {
 
 /**
  * 构建带缓存控制的消息
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching
+ * @see https://platform.claude.com/docs/en/build-with-claude/prompt-caching
  */
 
 // 缓存配置 (根据模型动态调整)
@@ -365,7 +365,7 @@ export function buildCachedMessages(
 
 ### 4.3 Web 搜索集成
 
-> **来源**: [Web Search Tool - Claude Docs](https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool)
+> **来源**: [Web Search Tool - Claude Docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool)
 
 **官方规格:**
 - **定价**: $10 per 1,000 searches + 标准 Token 费用
@@ -378,7 +378,7 @@ export function buildCachedMessages(
 
 /**
  * Web 搜索工具配置
- * @see https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool
+ * @see https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
  */
 
 // 工具定义 (必须使用此格式)
@@ -449,7 +449,7 @@ export function calculateSearchCost(searchCount: number): number {
 
 ### 4.4 流式传输架构
 
-> **来源**: [Streaming - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/streaming)
+> **来源**: [Streaming - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/streaming)
 
 **SSE 事件序列:**
 ```
@@ -473,7 +473,7 @@ message_start → content_block_start → content_block_delta* → content_block
 
 /**
  * 流式响应 API
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/streaming
+ * @see https://platform.claude.com/docs/en/build-with-claude/streaming
  */
 
 export async function POST(req: Request) {
@@ -578,7 +578,7 @@ export async function POST(req: Request) {
 
 ### 4.5 Vision (视觉) 支持
 
-> **来源**: [Vision - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/vision)
+> **来源**: [Vision - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/vision)
 
 **支持格式:** JPEG, PNG, GIF, WebP
 
@@ -591,7 +591,7 @@ export async function POST(req: Request) {
 
 /**
  * 图片消息构建
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/vision
+ * @see https://platform.claude.com/docs/en/build-with-claude/vision
  *
  * 重要: media_type 必须与实际图片格式匹配！
  */
@@ -642,7 +642,7 @@ function detectMediaType(base64Header: string): MediaType {
 
 ### 4.6 计费一致性方案：Drizzle 事务 + 官方定价
 
-> **来源**: [Usage Cost API - Claude Docs](https://platform.claude.com/docs/zh-CN/build-with-claude/usage-cost-api)
+> **来源**: [Usage Cost API - Claude Docs](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api)
 
 **官方定价 (Per Million Tokens):**
 | 模型 | 输入 | 输出 | 缓存写入 (5m) | 缓存读取 |
@@ -691,7 +691,7 @@ interface BillingParams {
 
 /**
  * 原子计费事务
- * @see https://platform.claude.com/docs/zh-CN/build-with-claude/usage-cost-api
+ * @see https://platform.claude.com/docs/en/build-with-claude/usage-cost-api
  */
 export async function atomicBilling(params: BillingParams) {
   const { userId, conversationId, modelId, usage, webSearchCount = 0 } = params;
@@ -775,13 +775,13 @@ export async function atomicBilling(params: BillingParams) {
 
 | 优先级 | 模块 | 预估工作量 | 依赖 | 官方文档 |
 |--------|------|-----------|------|----------|
-| **P0** | AI 模型调用 (callAIModel) | 3-4h | 无 | [Vision](https://platform.claude.com/docs/zh-CN/build-with-claude/vision) |
-| **P0** | 流式响应 API | 2-3h | P0-1 | [Streaming](https://platform.claude.com/docs/zh-CN/build-with-claude/streaming) |
-| **P0** | 计费事务 (atomicBilling) | 2h | P0-1 | [Usage Cost API](https://platform.claude.com/docs/zh-CN/build-with-claude/usage-cost-api) |
-| **P1** | Token 计数集成 | 1h | P0 完成 | [Token Counting](https://platform.claude.com/docs/zh-CN/build-with-claude/token-counting) |
-| **P1** | Prompt Caching 集成 | 2h | P0 完成 | [Prompt Caching](https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching) |
+| **P0** | AI 模型调用 (callAIModel) | 3-4h | 无 | [Vision](https://platform.claude.com/docs/en/build-with-claude/vision) |
+| **P0** | 流式响应 API | 2-3h | P0-1 | [Streaming](https://platform.claude.com/docs/en/build-with-claude/streaming) |
+| **P0** | 计费事务 (atomicBilling) | 2h | P0-1 | [Usage Cost API](https://platform.claude.com/docs/en/build-with-claude/usage-cost-api) |
+| **P1** | Token 计数集成 | 1h | P0 完成 | [Token Counting](https://platform.claude.com/docs/en/build-with-claude/token-counting) |
+| **P1** | Prompt Caching 集成 | 2h | P0 完成 | [Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
 | **P1** | 上下文管理与压缩 | 3h | P1 完成 | - |
-| **P2** | Web 搜索集成 | 2h | P0 完成 | [Web Search Tool](https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool) |
+| **P2** | Web 搜索集成 | 2h | P0 完成 | [Web Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool) |
 | **P2** | 智能路由 (内联版) | 1h | P0 完成 | - |
 | **P3** | Token 预算管理 | 1h | P1 完成 | - |
 
@@ -842,13 +842,13 @@ ALTER TABLE conversations ADD COLUMN total_tokens_used INTEGER DEFAULT 0;
 
 | 修订项 | 旧版本 | 新版本 | 依据 |
 |--------|--------|--------|------|
-| Token 估算 | `chars/4` 硬编码 | 官方 `count_tokens` API | [Token Counting](https://platform.claude.com/docs/zh-CN/build-with-claude/token-counting) |
-| 缓存最小 Token | 1024 固定 | Sonnet 1024, Haiku 2048 | [Prompt Caching](https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching) |
-| 缓存定价 | 90% 折扣 | 读取 0.1x, 写入 1.25x | [Prompt Caching](https://platform.claude.com/docs/zh-CN/build-with-claude/prompt-caching) |
-| 搜索费用 | 5 积分固定 | $10/1000 次 | [Web Search Tool](https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool) |
-| 流式事件 | 简化描述 | 完整 SSE 事件类型 | [Streaming](https://platform.claude.com/docs/zh-CN/build-with-claude/streaming) |
-| Web 搜索 | 模糊描述 | 官方工具定义 + Beta Header | [Web Search Tool](https://platform.claude.com/docs/zh-CN/agents-and-tools/tool-use/web-search-tool) |
-| Vision | 未涉及 | media_type 匹配规则 | [Vision](https://platform.claude.com/docs/zh-CN/build-with-claude/vision) |
+| Token 估算 | `chars/4` 硬编码 | 官方 `count_tokens` API | [Token Counting](https://platform.claude.com/docs/en/build-with-claude/token-counting) |
+| 缓存最小 Token | 1024 固定 | Sonnet 1024, Haiku 2048 | [Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
+| 缓存定价 | 90% 折扣 | 读取 0.1x, 写入 1.25x | [Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
+| 搜索费用 | 5 积分固定 | $10/1000 次 | [Web Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool) |
+| 流式事件 | 简化描述 | 完整 SSE 事件类型 | [Streaming](https://platform.claude.com/docs/en/build-with-claude/streaming) |
+| Web 搜索 | 模糊描述 | 官方工具定义 + Beta Header | [Web Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool) |
+| Vision | 未涉及 | media_type 匹配规则 | [Vision](https://platform.claude.com/docs/en/build-with-claude/vision) |
 
 ---
 
