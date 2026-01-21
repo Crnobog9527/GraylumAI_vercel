@@ -8,6 +8,7 @@
 import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
 import {
   AIRequestSchema,
   type AIResponse,
@@ -19,8 +20,9 @@ import {
 } from '../middleware/securityChecks';
 import {
   BillingService,
-  calculateTokenCost,
+  calculateTokenCostWithPricing,
   estimateRequestCost,
+  getModelPricing,
 } from '../services/billing';
 import { selectModel, getAvailableModels } from '../services/modelRouter';
 import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
@@ -249,10 +251,37 @@ export const aiRouter = router({
     .input(AIRequestSchema)
     .mutation(async ({ ctx, input }): Promise<AIResponse> => {
       const startTime = Date.now();
+      // 生成或使用客户端提供的 requestId (用于幂等性)
+      const requestId = input.requestId ?? randomUUID();
       const billingService = new BillingService({
         supabase: ctx.supabase,
         userId: ctx.profileId,
       });
+
+      // 0. 幂等性检查 - 如果请求已完成，直接返回缓存结果
+      const idempotencyCheck = await billingService.checkIdempotency(requestId);
+      if (idempotencyCheck.exists && idempotencyCheck.result) {
+        console.log(`[Idempotency] Returning cached response for request ${requestId}`);
+        // 获取完整的缓存响应
+        const { data: cachedResponse } = await ctx.supabase
+          .from('messages')
+          .select('id, content, created_at')
+          .eq('id', idempotencyCheck.result.messageId)
+          .single();
+
+        if (cachedResponse) {
+          return {
+            messageId: cachedResponse.id,
+            conversationId: idempotencyCheck.result.conversationId,
+            content: cachedResponse.content,
+            modelUsed: 'cached',
+            usage: { inputTokens: 0, outputTokens: 0 },
+            cost: { creditsDeducted: 0, costUsd: 0, costBreakdown: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, search: 0, total: 0 } },
+            stopReason: 'end_turn',
+            createdAt: cachedResponse.created_at,
+          };
+        }
+      }
 
       // 1. 输入安全检查
       checkInputSecurity(input.message);
@@ -291,8 +320,8 @@ export const aiRouter = router({
         estimatedCost
       );
 
-      // 7. 预扣积分
-      const preDeductResult = await billingService.preDeduct(estimatedCost);
+      // 7. 预扣积分 (带幂等性 Key)
+      const preDeductResult = await billingService.preDeduct(estimatedCost, { requestId });
 
       try {
         // 8. 构建消息
@@ -325,17 +354,23 @@ export const aiRouter = router({
           );
         }
 
-        // 12. 计算实际成本
-        const { credits: actualCredits, costUsd, breakdown } = calculateTokenCost(
-          modelConfig.modelId,
-          aiResponse.usage
+        // 12. 计算实际成本 (使用数据库动态定价)
+        const pricing = await getModelPricing(ctx.supabase, modelConfig.modelId);
+        const { credits: actualCredits, costUsd, breakdown } = calculateTokenCostWithPricing(
+          aiResponse.usage,
+          pricing
         );
 
-        // 13. 结算
+        // 13. 结算 (包含响应信息用于幂等性缓存)
         await billingService.settle(
           preDeductResult.preDeductId,
           actualCredits,
-          aiResponse.usage
+          aiResponse.usage,
+          {
+            messageId: savedMessages.assistantMessageId,
+            conversationId: conversation.id,
+            content: aiResponse.content,
+          }
         );
 
         // 14. 记录统计

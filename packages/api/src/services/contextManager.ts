@@ -21,10 +21,10 @@ const CONTEXT_CONFIG = {
   MAX_CONTEXT_TOKENS: 150000,
   // 最大历史轮次
   MAX_HISTORY_TURNS: 50,
-  // 摘要触发阈值 (Token 数)
-  SUMMARY_THRESHOLD: 80000,
-  // 稳定区域大小 (轮次)
-  STABLE_REGION_TURNS: 5,
+  // 摘要触发阈值 (Token 数) - 60% of MAX_CONTEXT_TOKENS
+  SUMMARY_THRESHOLD: 90000, // 150000 * 0.6 = 90000
+  // 稳定区域大小 (轮次) - 与 promptCacheBuilder 保持一致
+  STABLE_REGION_TURNS: 3,
   // 动态区域大小 (轮次)
   DYNAMIC_REGION_TURNS: 10,
   // 摘要最大 Token 数

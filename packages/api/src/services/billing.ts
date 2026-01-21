@@ -26,6 +26,21 @@ export interface PreDeductResult {
   estimatedCredits: number;
   balanceBefore: number;
   balanceAfter: number;
+  /** 如果是重复请求，返回之前的响应 */
+  idempotent?: boolean;
+}
+
+export interface IdempotencyCheckResult {
+  /** 是否已存在该请求 */
+  exists: boolean;
+  /** 如果存在，返回之前的预扣记录ID */
+  preDeductId?: string;
+  /** 如果已完成，返回结果 */
+  result?: {
+    messageId: string;
+    conversationId: string;
+    content: string;
+  };
 }
 
 export interface SettleResult {
@@ -45,19 +60,100 @@ export interface BillingContext {
 }
 
 // ============================================
+// 模型定价查询 (从数据库读取)
+// ============================================
+
+/** 模型定价信息 */
+export interface ModelPricingInfo {
+  inputPer1M: number;      // 每百万输入 Token 成本 (美元)
+  outputPer1M: number;     // 每百万输出 Token 成本 (美元)
+  cacheWritePer1M?: number; // 缓存写入成本
+  cacheReadPer1M?: number;  // 缓存读取成本
+  searchPer1K?: number;     // 每千次搜索成本
+}
+
+/** 定价缓存 (避免每次请求都查询数据库) */
+const pricingCache = new Map<string, { pricing: ModelPricingInfo; expiry: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+
+/**
+ * 从数据库获取模型定价
+ * @param supabase - Supabase 客户端
+ * @param modelId - 模型 ID (Claude API model ID, 如 'claude-sonnet-4-20250514')
+ */
+export async function getModelPricing(
+  supabase: SupabaseClient,
+  modelId: string
+): Promise<ModelPricingInfo> {
+  // 1. 检查缓存
+  const cached = pricingCache.get(modelId);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.pricing;
+  }
+
+  // 2. 从数据库查询
+  const { data: model, error } = await supabase
+    .from('ai_models')
+    .select('input_token_cost, output_token_cost, web_search_cost')
+    .eq('model_id', modelId)
+    .eq('is_active', 'true')
+    .single();
+
+  if (error || !model) {
+    // 数据库查询失败，使用硬编码后备
+    console.warn(`[Billing] Model ${modelId} not found in database, using fallback pricing`);
+    const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
+    return fallback;
+  }
+
+  // 3. 转换数据库格式 (微美元 → 美元)
+  // 数据库存储: 每百万 Token 的微美元成本 (如 3000000 = $3.00)
+  const pricing: ModelPricingInfo = {
+    inputPer1M: (model.input_token_cost ?? 0) / 1_000_000,
+    outputPer1M: (model.output_token_cost ?? 0) / 1_000_000,
+    // 缓存定价使用标准比例 (写入=1.25x输入, 读取=0.1x输入)
+    cacheWritePer1M: ((model.input_token_cost ?? 0) / 1_000_000) * 1.25,
+    cacheReadPer1M: ((model.input_token_cost ?? 0) / 1_000_000) * 0.1,
+    searchPer1K: (model.web_search_cost ?? 0) / 1_000,
+  };
+
+  // 4. 如果数据库定价为0，使用硬编码后备
+  if (pricing.inputPer1M === 0 || pricing.outputPer1M === 0) {
+    console.warn(`[Billing] Model ${modelId} has zero pricing, using fallback`);
+    const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
+    return fallback;
+  }
+
+  // 5. 缓存结果
+  pricingCache.set(modelId, { pricing, expiry: Date.now() + CACHE_TTL });
+
+  return pricing;
+}
+
+// ============================================
 // 成本计算工具
 // ============================================
 
 /**
- * 计算 Token 成本 (积分)
+ * 计算 Token 成本 (积分) - 使用硬编码定价 (后备)
+ * @deprecated 建议使用 calculateTokenCostWithPricing 传入动态定价
  */
 export function calculateTokenCost(
   modelId: string,
   usage: TokenUsage
 ): { credits: number; costUsd: number; breakdown: CostBreakdown } {
-  // 获取模型定价
+  // 获取模型定价 (硬编码后备)
   const pricing = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
+  return calculateTokenCostWithPricing(usage, pricing);
+}
 
+/**
+ * 计算 Token 成本 (积分) - 使用传入的定价信息
+ */
+export function calculateTokenCostWithPricing(
+  usage: TokenUsage,
+  pricing: ModelPricingInfo
+): { credits: number; costUsd: number; breakdown: CostBreakdown } {
   // 计算各项成本 (美元)
   const inputCostUsd = (usage.inputTokens / 1_000_000) * pricing.inputPer1M;
   const outputCostUsd = (usage.outputTokens / 1_000_000) * pricing.outputPer1M;
@@ -128,6 +224,50 @@ export class BillingService {
   }
 
   /**
+   * 检查请求幂等性
+   * 如果该 requestId 已经处理过，返回之前的结果
+   */
+  async checkIdempotency(requestId: string): Promise<IdempotencyCheckResult> {
+    // 检查是否已有该 requestId 的预扣记录
+    const { data: existingRecord } = await this.supabase
+      .from('billing_history')
+      .select('id, metadata')
+      .eq('user_id', this.userId)
+      .eq('operation_type', 'pre_deduct')
+      .contains('metadata', { requestId })
+      .single();
+
+    if (!existingRecord) {
+      return { exists: false };
+    }
+
+    // 检查是否已结算（已完成的请求）
+    const { data: settleRecord } = await this.supabase
+      .from('billing_history')
+      .select('metadata')
+      .eq('user_id', this.userId)
+      .eq('operation_type', 'settle')
+      .contains('metadata', { preDeductId: existingRecord.id })
+      .single();
+
+    if (settleRecord) {
+      // 请求已完成，返回之前的结果
+      const metadata = settleRecord.metadata as Record<string, unknown>;
+      return {
+        exists: true,
+        preDeductId: existingRecord.id,
+        result: metadata?.response as IdempotencyCheckResult['result'],
+      };
+    }
+
+    // 请求正在处理中
+    return {
+      exists: true,
+      preDeductId: existingRecord.id,
+    };
+  }
+
+  /**
    * 获取用户当前余额
    */
   async getBalance(): Promise<number> {
@@ -148,10 +288,42 @@ export class BillingService {
    * 预扣积分 (请求开始前)
    *
    * @param estimatedCredits - 预估需要的积分
-   * @param reason - 预扣原因
+   * @param options - 可选配置
+   * @param options.reason - 预扣原因
+   * @param options.requestId - 幂等性 Key (用于防止重复扣费)
    * @returns 预扣记录 ID 和相关信息
    */
-  async preDeduct(estimatedCredits: number, reason: string = 'AI 对话预扣'): Promise<PreDeductResult> {
+  async preDeduct(
+    estimatedCredits: number,
+    options: { reason?: string; requestId?: string } = {}
+  ): Promise<PreDeductResult> {
+    const { reason = 'AI 对话预扣', requestId } = options;
+
+    // 0. 幂等性检查 (如果提供了 requestId)
+    if (requestId) {
+      const idempotencyCheck = await this.checkIdempotency(requestId);
+      if (idempotencyCheck.exists) {
+        // 请求已存在，返回之前的记录
+        console.log(`[Idempotency] Request ${requestId} already exists, returning cached result`);
+
+        // 获取之前的预扣信息
+        const { data: existingPreDeduct } = await this.supabase
+          .from('billing_history')
+          .select('metadata')
+          .eq('id', idempotencyCheck.preDeductId)
+          .single();
+
+        const metadata = existingPreDeduct?.metadata as Record<string, number> | null;
+        return {
+          preDeductId: idempotencyCheck.preDeductId!,
+          estimatedCredits,
+          balanceBefore: metadata?.balance_before ?? 0,
+          balanceAfter: metadata?.balance_after ?? 0,
+          idempotent: true,
+        };
+      }
+    }
+
     // 1. 获取当前余额并加锁 (使用 Supabase RPC 或乐观锁)
     const { data: profile, error: profileError } = await this.supabase
       .from('profiles')
@@ -188,7 +360,7 @@ export class BillingService {
       throw new Error('积分更新冲突，请重试');
     }
 
-    // 4. 记录预扣历史
+    // 4. 记录预扣历史 (包含 requestId 用于幂等性检查)
     const { data: billingRecord, error: billingError } = await this.supabase
       .from('billing_history')
       .insert({
@@ -200,6 +372,7 @@ export class BillingService {
           balance_before: currentCredits,
           balance_after: newCredits,
           timestamp: new Date().toISOString(),
+          ...(requestId && { requestId }), // 存储 requestId 用于幂等性检查
         },
       })
       .select('id')
@@ -225,11 +398,13 @@ export class BillingService {
    * @param preDeductId - 预扣记录 ID
    * @param actualCredits - 实际消耗的积分
    * @param usage - Token 使用详情
+   * @param response - 响应信息 (用于幂等性缓存)
    */
   async settle(
     preDeductId: string,
     actualCredits: number,
-    usage: TokenUsage
+    usage: TokenUsage,
+    response?: { messageId: string; conversationId: string; content: string }
   ): Promise<SettleResult> {
     // 1. 获取预扣记录
     const { data: preDeduct, error: preDeductError } = await this.supabase
@@ -289,7 +464,7 @@ export class BillingService {
       }
     }
 
-    // 3. 记录结算
+    // 3. 记录结算 (包含 response 用于幂等性缓存)
     const { error: settleError } = await this.supabase
       .from('billing_history')
       .insert({
@@ -304,6 +479,7 @@ export class BillingService {
           difference,
           usage,
           timestamp: new Date().toISOString(),
+          ...(response && { response }), // 存储响应用于幂等性返回
         },
       });
 

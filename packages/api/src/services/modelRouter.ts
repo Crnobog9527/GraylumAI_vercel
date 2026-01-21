@@ -67,6 +67,28 @@ const COMPLEX_TASK_KEYWORDS = [
 ];
 
 /**
+ * 实时数据关键词 (需要 Web Search)
+ */
+const REALTIME_DATA_KEYWORDS = [
+  // 中文关键词
+  /新闻|热点|热搜|热门/,
+  /天气|气温|降水|下雨|下雪/,
+  /股票|股价|涨跌|行情|大盘/,
+  /实时|最新|今天|今日|当前|现在/,
+  /比赛|赛事|比分|战绩|排名/,
+  /价格|报价|汇率|油价|金价/,
+  /疫情|病例|确诊/,
+  /选举|投票|选情/,
+  // 英文关键词
+  /news|breaking|headline/i,
+  /weather|temperature|forecast|rain|snow/i,
+  /stock|price|market|trading|nasdaq|dow/i,
+  /latest|current|today|now|real-?time/i,
+  /score|match|game|sport|nba|nfl/i,
+  /exchange rate|currency|bitcoin|crypto/i,
+];
+
+/**
  * 默认模型配置 (当数据库配置不可用时)
  */
 const DEFAULT_MODELS = {
@@ -99,6 +121,18 @@ const DEFAULT_MODELS = {
 // ============================================
 // 任务分类器
 // ============================================
+
+/**
+ * 检测消息是否需要实时数据 (Web Search)
+ */
+export function needsRealtimeData(message: string): boolean {
+  for (const pattern of REALTIME_DATA_KEYWORDS) {
+    if (pattern.test(message)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * 内联任务分类器

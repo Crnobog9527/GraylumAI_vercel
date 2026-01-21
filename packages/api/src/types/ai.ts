@@ -71,6 +71,8 @@ export const AIRequestSchema = z.object({
   modelId: z.string().uuid().optional(),
   enableWebSearch: z.boolean().optional().default(false),
   attachments: z.array(AttachmentSchema).optional(),
+  // 幂等性 Key - 用于防止重复请求
+  requestId: z.string().uuid().optional(),
   // 可选的上下文配置
   contextConfig: z.object({
     maxHistoryTurns: z.number().min(0).max(50).optional(),

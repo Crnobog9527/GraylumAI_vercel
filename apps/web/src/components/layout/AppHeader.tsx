@@ -12,7 +12,8 @@ import {
   ChevronDown,
   LogOut,
   Settings,
-  CreditCard
+  CreditCard,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase';
+import { useCreditsBalance } from '@/hooks/use-credits';
 
 // Navigation items configuration
 const navItems = [
@@ -35,7 +37,7 @@ const navItems = [
 export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
-  const [credits] = useState(100); // TODO: Get from user context
+  const { credits, isLoading: isCreditsLoading } = useCreditsBalance();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
@@ -128,9 +130,13 @@ export function AppHeader() {
               border: '1px solid var(--color-primary-20)'
             }}
           >
-            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+            {isCreditsLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
+            ) : (
+              <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+            )}
             <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-              {credits}
+              {isCreditsLoading ? '--' : credits}
             </span>
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
               积分
