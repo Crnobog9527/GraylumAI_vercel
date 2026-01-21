@@ -48,6 +48,32 @@
   - 智能模型路由 (packages/api/src/services/modelRouter.ts)
   - AI 对话路由 (packages/api/src/routers/ai.ts)
 - 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ✅ 已完成 (2026-01-21)
+
+**Phase 10 安全与合规审计:** 🔄 进行中
+- 目标: 全面检查系统安全性、计费正确性、合规性
+- 开始时间: 2026-01-21
+
+检查清单:
+| # | 检查项 | 描述 | 状态 |
+|---|--------|------|------|
+| 1 | 后端计算流程 | 积分计算逻辑必须在 tRPC 后端完成 | ⬜ |
+| 2 | 配置对齐 | 费率实时读取 models 表的 token_rate 字段 | ⬜ |
+| 3 | 逻辑严密性 | 积分和钱的逻辑在后端完成最终校验 | ⬜ |
+| 4 | 代码一致性 | 沿用 Drizzle Schema 和 tRPC 规范 | ⬜ |
+| 5 | 数据共享 | 新功能与管理后台数据库层完全共享 | ⬜ |
+| 6 | 积分实时显示 | Header 组件积分从 user.getProfile 获取 | ⬜ |
+| 7 | Sidebar 切换 | 点击切换对话，聊天窗口随之更新 | ⬜ |
+| 8 | 路由系统 | 所有页面跳转使用 Next.js 路由 | ⬜ |
+| 9 | 接口安全 | tRPC 权限、请求签名、速率限制 | ⬜ |
+| 10 | 计费反作弊 | 余额防御、消费熔断、Service Role 隔离 | ⬜ |
+| 11 | 内容合规 | 双向内容审查、Prompt 注入防御 | ⬜ |
+| 12 | 数据隐私 | 多租户隔离、敏感数据脱敏 | ⬜ |
+| 13 | 环境安全 | CORS 限制、环境变量审计 | ⬜ |
+| 14 | 事务安全 | 行级锁、CHECK 约束、预扣机制 | ⬜ |
+| 15 | 智能路由 | 关键词预判联网搜索 | ⬜ |
+| 16 | 上下文压缩 | 滑动窗口、保留策略、Prompt Caching | ⬜ |
+| 17 | 异常处理 | 幂等性、对账日志 | ⬜ |
+| 18 | 前端交互 | 流式中断信号与积分结算 | ⬜ |
   - Prompt 缓存构建器 (packages/api/src/services/promptCacheBuilder.ts)
   - 上下文滑动窗口管理器 (packages/api/src/services/contextManager.ts)
   - SSE 流式响应处理器 (packages/api/src/services/streamHandler.ts)
