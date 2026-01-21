@@ -36,11 +36,55 @@
 
 ### Current Status
 - **Phase:** Phase 9 AI 对话系统重构实施 🔄 进行中
-- **Sub-Phase:** 9.1 Schema & Types ✅ 已完成
+- **Sub-Phase:** 9.2 tRPC Procedures ✅ 已完成
 - **Previous:** Phase 8 AI 重构执行计划制定 ✅ 完成
 - **Started:** 2026-01-21
 - **Blocking Issue:** 无
 - **执行计划:** `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建
+
+---
+
+### Phase 9.2 tRPC Procedures 实施 ✅ 已完成 (2026-01-21)
+
+**目标**: 创建后端核心逻辑，包括安全中间件、计费服务和 AI 路由
+
+#### 交付物清单
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/middleware/securityChecks.ts` | 安全检查中间件 (速率限制、消费熔断、余额预检) | ✅ |
+| `packages/api/src/services/billing.ts` | 原子化计费服务 (预扣→结算→退费) | ✅ |
+| `packages/api/src/services/tokenCounter.ts` | Token 计数服务 (官方API + 本地估算) | ✅ |
+| `packages/api/src/services/modelRouter.ts` | AI 智能模型路由 (任务分类器) | ✅ |
+| `packages/api/src/routers/ai.ts` | AI 对话核心路由 | ✅ |
+| `packages/api/src/root.ts` | 注册 aiRouter | ✅ |
+
+#### 核心功能
+
+1. **安全中间件** (`securityChecks.ts`)
+   - 速率限制 (60次/分钟)
+   - 消费熔断 (小时/日限额)
+   - 余额预检
+   - 输入/输出安全检查 (Prompt 注入检测)
+
+2. **计费服务** (`billing.ts`)
+   - 三段式计费: 预扣 → 结算 → 退费
+   - 成本计算器 (支持多模型定价)
+   - Token 统计记录
+   - 使用日志记录
+
+3. **智能模型路由** (`modelRouter.ts`)
+   - 内联任务分类器 (规则引擎)
+   - 对话锁定模型支持
+   - 系统默认模型配置
+   - 智能路由开关
+
+4. **AI 路由** (`ai.ts`)
+   - `sendMessage` - 发送消息 (完整计费流程)
+   - `estimateCost` - 成本预估
+   - `getAvailableModels` - 获取可用模型
+   - `getConversationMessages` - 获取对话历史
+   - `getTokenStats` - Token 使用统计
 
 ---
 
@@ -90,7 +134,7 @@
 | 阶段 | 目标 | 主要交付物 | 状态 |
 |------|------|-----------|------|
 | 9.1 | Schema & Types | 数据库表、类型定义、RLS 策略 | ✅ |
-| 9.2 | tRPC Procedures | 安全中间件、AI 路由、计费服务 | ⬜ |
+| 9.2 | tRPC Procedures | 安全中间件、AI 路由、计费服务 | ✅ |
 | 9.3 | AI Engine | Token 计数、Prompt Caching、流式传输 | ⬜ |
 | 9.4 | Frontend Integration | 对话界面、流式渲染、Hook 封装 | ⬜ |
 | 9.5 | Testing & Security | 单元/集成测试、安全审计报告 | ⬜ |

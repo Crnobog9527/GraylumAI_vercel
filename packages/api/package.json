@@ -6,7 +6,13 @@
   "exports": {
     ".": "./src/root.ts",
     "./src/root": "./src/root.ts",
-    "./src/trpc": "./src/trpc.ts"
+    "./src/trpc": "./src/trpc.ts",
+    "./src/types": "./src/types/index.ts",
+    "./src/types/ai": "./src/types/ai.ts",
+    "./src/types/billing": "./src/types/billing.ts",
+    "./src/services/billing": "./src/services/billing.ts",
+    "./src/services/tokenCounter": "./src/services/tokenCounter.ts",
+    "./src/services/modelRouter": "./src/services/modelRouter.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

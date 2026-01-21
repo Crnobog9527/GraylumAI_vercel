@@ -8,6 +8,7 @@ import { modelRouter } from './routers/model';
 import { invitationRouter } from './routers/invitation';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
+import { aiRouter } from './routers/ai';
 
 /**
  * 主路由器
@@ -24,6 +25,7 @@ export const appRouter = router({
   invitation: invitationRouter,
   admin: adminRouter,
   modules: modulesRouter,
+  ai: aiRouter,
 });
 
 /**

@@ -41,7 +41,12 @@
   - 创建 AI 类型 (packages/api/src/types/ai.ts)
   - 创建计费类型 (packages/api/src/types/billing.ts)
   - 创建迁移 SQL + RLS 策略
-- 阶段二: tRPC Procedures (后端核心逻辑) ⬜
+- 阶段二: tRPC Procedures (后端核心逻辑) ✅ 已完成 (2026-01-21)
+  - 安全检查中间件 (packages/api/src/middleware/securityChecks.ts)
+  - 原子化计费服务 (packages/api/src/services/billing.ts)
+  - Token 计数服务 (packages/api/src/services/tokenCounter.ts)
+  - 智能模型路由 (packages/api/src/services/modelRouter.ts)
+  - AI 对话路由 (packages/api/src/routers/ai.ts)
 - 阶段三: AI Engine & Optimization (AI 引擎与成本优化) ⬜
 - 阶段四: Frontend Integration (前端集成与 UI 还原) ⬜
 - 阶段五: Testing & Security (测试与安全审计) ⬜
