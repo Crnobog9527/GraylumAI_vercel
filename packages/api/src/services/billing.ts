@@ -204,6 +204,8 @@ export function estimateRequestCost(
   const usage: TokenUsage = {
     inputTokens: estimatedInputTokens,
     outputTokens: estimatedOutputTokens,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
   };
 
   const { credits } = calculateTokenCost(modelId, usage);
@@ -740,6 +742,8 @@ export class BillingService {
     const consumedUsage: TokenUsage = {
       inputTokens: consumedTokens.inputTokens,
       outputTokens: consumedTokens.outputTokens,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
     };
     const { credits: consumedCredits } = calculateTokenCost(modelId, consumedUsage);
 
