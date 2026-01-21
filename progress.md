@@ -32,10 +32,90 @@
 
 ---
 
+## Session: 2026-01-21
+
+### Current Status
+- **Phase:** Phase 8 AI 重构执行计划制定 🆕 待执行
+- **Previous:** Phase 7 管理后台功能还原 ✅ 完成
+- **Started:** 2026-01-21
+- **Blocking Issue:** 无
+
+---
+
+### Phase 8 执行计划制定 ✅ 已完成 (2026-01-21)
+
+**目标**: 制定《GraylumAI 分阶段重构执行计划》
+
+**参考文档**: `movetonew/制定分阶段重构执行计划指导方法.md`
+**输出文档**: `movetonew/GraylumAI_分阶段重构执行计划.md` ✅ 已创建
+
+#### 执行计划概览
+
+| Step | 目标 | 主要内容 | 状态 |
+|------|------|----------|------|
+| Step 8.1 | 项目概览与架构决策 | 重构范围、核心目标、技术债务、ADR | ✅ |
+| Step 8.2 | 阶段一: 数据库与类型定义 | Schema & Types 详细计划 | ✅ |
+| Step 8.3 | 阶段二: 后端核心逻辑 | tRPC Procedures 详细计划 | ✅ |
+| Step 8.4 | 阶段三: AI 引擎与成本优化 | AI Engine 详细计划 | ✅ |
+| Step 8.5 | 阶段四: 前端集成与 UI 还原 | Frontend Integration 详细计划 | ✅ |
+| Step 8.6 | 阶段五: 测试与安全审计 | Testing & Security 详细计划 | ✅ |
+| Step 8.7 | 风险缓解与回滚方案 | 风险管理章节 | ✅ |
+| Step 8.8 | 整合输出与验收 | 完整文档输出 | ✅ |
+
+#### 执行计划文档结构
+
+```
+GraylumAI_分阶段重构执行计划.md
+├── 一、项目概览
+│   ├── 1.1 重构范围总结
+│   ├── 1.2 核心目标 (5条)
+│   ├── 1.3 技术债务清单 (6项)
+│   └── 1.4 风险评估 (6项)
+├── 二、架构决策记录 (ADR)
+│   ├── ADR-001: tRPC vs REST API
+│   ├── ADR-002: Drizzle ORM vs Prisma
+│   ├── ADR-003: AI 智能路由设计
+│   └── ADR-004: 成本优化策略
+├── 三、分阶段执行计划
+│   ├── 阶段一: Schema & Types (6交付物)
+│   ├── 阶段二: tRPC Procedures (5交付物)
+│   ├── 阶段三: AI Engine (6交付物)
+│   ├── 阶段四: Frontend Integration (6交付物)
+│   └── 阶段五: Testing & Security (6交付物)
+├── 四、风险缓解策略 (每阶段)
+├── 五、回滚方案 (每阶段)
+├── 六、成功指标
+│   ├── 功能指标
+│   ├── 成本指标
+│   ├── 安全指标
+│   └── 质量指标
+└── 七、依赖与前置条件
+```
+
+#### 重构目标概要
+
+根据 `AI_REFACTOR_DESIGN_BRIEF.md` 简报:
+- **迁移目标**: 将 AI 对话系统从 Base44 云函数迁移到新架构
+- **技术栈**: tRPC + Drizzle ORM + Supabase + Claude API
+- **核心目标**:
+  - 严格成本控制 (Token 计费、智能路由)
+  - 安全规范 (RLS 策略、权限控制)
+  - 稳定可靠 (事务、幂等性、回滚)
+
+#### 五个执行阶段
+
+1. **Schema & Types** - 数据库表 + 类型定义
+2. **tRPC Procedures** - 后端核心逻辑 + 计费服务
+3. **AI Engine & Optimization** - Token 统计 + 缓存 + 流式传输
+4. **Frontend Integration** - 对话界面 + 打字机效果
+5. **Testing & Security** - 单元/集成/E2E 测试 + 安全审计
+
+---
+
 ## Session: 2026-01-20 (续3)
 
 ### Current Status
-- **Phase:** Phase 7 管理后台功能还原
+- **Phase:** Phase 7 管理后台功能还原 ✅ 已完成
 - **Previous:** Phase 6 安全加固 ✅ 完成
 - **Started:** 2026-01-20
 - **Blocking Issue:** 无
