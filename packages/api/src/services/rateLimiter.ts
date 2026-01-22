@@ -1,10 +1,15 @@
 /**
  * Rate Limiter Service
  *
- * 支持内存和 Redis 两种存储后端的速率限制器
- * 生产环境推荐使用 Redis 以支持分布式部署
+ * 内存速率限制器，适用于单实例部署
  *
- * 注意: Redis 使用动态导入以避免 Next.js 客户端打包问题
+ * 生产环境分布式部署建议:
+ * - 使用 Vercel KV (基于 Upstash Redis)
+ * - 或使用 Upstash Rate Limit (@upstash/ratelimit)
+ * - 或在独立的 Node.js 服务中使用 ioredis
+ *
+ * @see https://vercel.com/docs/storage/vercel-kv
+ * @see https://github.com/upstash/ratelimit
  */
 
 import { TRPCError } from '@trpc/server';
@@ -36,14 +41,6 @@ export interface RateLimitResult {
 }
 
 export interface RateLimiterOptions {
-  /** Redis 连接配置 (可选，不提供则使用内存存储) */
-  redis?: {
-    host?: string;
-    port?: number;
-    password?: string;
-    db?: number;
-    url?: string;
-  };
   /** 速率限制配置 */
   configs: Record<string, RateLimitConfig>;
   /** 键前缀 */
@@ -51,24 +48,16 @@ export interface RateLimiterOptions {
 }
 
 // ============================================
-// 抽象存储接口
-// ============================================
-
-interface RateLimitStore {
-  /** 增加计数并检查是否超限 */
-  increment(key: string, windowMs: number): Promise<{ count: number; resetTime: number }>;
-  /** 清理过期数据 */
-  cleanup?(): Promise<void>;
-  /** 关闭连接 */
-  close?(): Promise<void>;
-}
-
-// ============================================
 // 内存存储实现
 // ============================================
 
-class MemoryStore implements RateLimitStore {
-  private store = new Map<string, { count: number; resetTime: number }>();
+interface RateLimitRecord {
+  count: number;
+  resetTime: number;
+}
+
+class MemoryStore {
+  private store = new Map<string, RateLimitRecord>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -76,13 +65,13 @@ class MemoryStore implements RateLimitStore {
     this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
   }
 
-  async increment(key: string, windowMs: number): Promise<{ count: number; resetTime: number }> {
+  increment(key: string, windowMs: number): RateLimitRecord {
     const now = Date.now();
     const record = this.store.get(key);
 
     if (!record || now > record.resetTime) {
       // 新窗口
-      const newRecord = {
+      const newRecord: RateLimitRecord = {
         count: 1,
         resetTime: now + windowMs,
       };
@@ -95,7 +84,7 @@ class MemoryStore implements RateLimitStore {
     return { count: record.count, resetTime: record.resetTime };
   }
 
-  async cleanup(): Promise<void> {
+  cleanup(): void {
     const now = Date.now();
     for (const [key, record] of this.store.entries()) {
       if (now > record.resetTime) {
@@ -104,111 +93,18 @@ class MemoryStore implements RateLimitStore {
     }
   }
 
-  async close(): Promise<void> {
+  close(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
     this.store.clear();
   }
-}
 
-// ============================================
-// Redis 存储实现 (动态加载)
-// ============================================
-
-/**
- * Lua 脚本用于原子性的计数器递增
- */
-const INCREMENT_SCRIPT = `
-  local key = KEYS[1]
-  local window_ms = tonumber(ARGV[1])
-  local now = tonumber(ARGV[2])
-
-  -- 获取当前记录
-  local data = redis.call('GET', key)
-
-  if data then
-    local record = cjson.decode(data)
-    if now > record.resetTime then
-      -- 窗口已过期，重置
-      record = { count = 1, resetTime = now + window_ms }
-    else
-      -- 增加计数
-      record.count = record.count + 1
-    end
-    redis.call('SET', key, cjson.encode(record))
-    redis.call('PEXPIRE', key, window_ms)
-    return cjson.encode(record)
-  else
-    -- 新记录
-    local record = { count = 1, resetTime = now + window_ms }
-    redis.call('SET', key, cjson.encode(record))
-    redis.call('PEXPIRE', key, window_ms)
-    return cjson.encode(record)
-  end
-`;
-
-/**
- * 创建 Redis 存储 (动态导入 ioredis)
- */
-async function createRedisStore(
-  options: RateLimiterOptions['redis'],
-  keyPrefix: string = 'ratelimit:'
-): Promise<RateLimitStore> {
-  // 动态导入 ioredis 以避免客户端打包问题
-  const { default: Redis } = await import('ioredis');
-
-  let client: InstanceType<typeof Redis>;
-
-  if (options?.url) {
-    client = new Redis(options.url);
-  } else {
-    client = new Redis({
-      host: options?.host ?? 'localhost',
-      port: options?.port ?? 6379,
-      password: options?.password,
-      db: options?.db ?? 0,
-      lazyConnect: true,
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times: number) => {
-        if (times > 3) return null;
-        return Math.min(times * 100, 3000);
-      },
-    });
+  /** 获取当前存储大小 (用于监控) */
+  get size(): number {
+    return this.store.size;
   }
-
-  // 错误处理
-  client.on('error', (err: Error) => {
-    console.error('[RateLimiter] Redis connection error:', err.message);
-  });
-
-  return {
-    async increment(key: string, windowMs: number): Promise<{ count: number; resetTime: number }> {
-      const fullKey = keyPrefix + key;
-      const now = Date.now();
-
-      try {
-        const result = await client.eval(
-          INCREMENT_SCRIPT,
-          1,
-          fullKey,
-          windowMs.toString(),
-          now.toString()
-        ) as string;
-
-        return JSON.parse(result);
-      } catch (error) {
-        // Redis 不可用时，降级到允许请求 (fail-open)
-        console.warn('[RateLimiter] Redis error, allowing request:', error);
-        return { count: 1, resetTime: now + windowMs };
-      }
-    },
-
-    async close(): Promise<void> {
-      await client.quit();
-    },
-  };
 }
 
 // ============================================
@@ -216,50 +112,14 @@ async function createRedisStore(
 // ============================================
 
 export class RateLimiter {
-  private store: RateLimitStore | null = null;
-  private storePromise: Promise<RateLimitStore> | null = null;
+  private store: MemoryStore;
   private configs: Record<string, RateLimitConfig>;
   private keyPrefix: string;
-  private redisOptions?: RateLimiterOptions['redis'];
 
   constructor(options: RateLimiterOptions) {
     this.configs = options.configs;
     this.keyPrefix = options.keyPrefix ?? 'ratelimit:';
-    this.redisOptions = options.redis;
-  }
-
-  /**
-   * 延迟初始化存储
-   */
-  private async getStore(): Promise<RateLimitStore> {
-    if (this.store) {
-      return this.store;
-    }
-
-    if (this.storePromise) {
-      return this.storePromise;
-    }
-
-    if (this.redisOptions) {
-      // 异步创建 Redis 存储
-      this.storePromise = createRedisStore(this.redisOptions, this.keyPrefix)
-        .then((store) => {
-          this.store = store;
-          console.log('[RateLimiter] Using Redis store');
-          return store;
-        })
-        .catch((error) => {
-          console.warn('[RateLimiter] Failed to create Redis store, using Memory store:', error);
-          this.store = new MemoryStore();
-          return this.store;
-        });
-      return this.storePromise;
-    }
-
-    // 使用内存存储
     this.store = new MemoryStore();
-    console.log('[RateLimiter] Using Memory store (not recommended for production)');
-    return this.store;
   }
 
   /**
@@ -269,7 +129,7 @@ export class RateLimiter {
    * @param type - 限制类型 (如 'ai', 'ai_stream')
    * @returns 速率限制结果
    */
-  async check(identifier: string, type: string): Promise<RateLimitResult> {
+  check(identifier: string, type: string): RateLimitResult {
     const config = this.configs[type];
 
     if (!config) {
@@ -283,9 +143,8 @@ export class RateLimiter {
       };
     }
 
-    const store = await this.getStore();
-    const key = `${type}:${identifier}`;
-    const { count, resetTime } = await store.increment(key, config.windowMs);
+    const key = `${this.keyPrefix}${type}:${identifier}`;
+    const { count, resetTime } = this.store.increment(key, config.windowMs);
 
     const allowed = count <= config.maxRequests;
     const remaining = Math.max(0, config.maxRequests - count);
@@ -308,8 +167,8 @@ export class RateLimiter {
    * @param type - 限制类型
    * @throws TRPCError 当超过限制时
    */
-  async checkOrThrow(identifier: string, type: string): Promise<RateLimitResult> {
-    const result = await this.check(identifier, type);
+  checkOrThrow(identifier: string, type: string): RateLimitResult {
+    const result = this.check(identifier, type);
 
     if (!result.allowed) {
       throw new TRPCError({
@@ -322,11 +181,17 @@ export class RateLimiter {
   }
 
   /**
+   * 获取当前存储大小 (用于监控)
+   */
+  getStoreSize(): number {
+    return this.store.size;
+  }
+
+  /**
    * 关闭速率限制器
    */
-  async close(): Promise<void> {
-    const store = await this.getStore();
-    await store.close?.();
+  close(): void {
+    this.store.close();
   }
 }
 
@@ -364,25 +229,7 @@ let rateLimiterInstance: RateLimiter | null = null;
  */
 export function getRateLimiter(): RateLimiter {
   if (!rateLimiterInstance) {
-    // 从环境变量读取 Redis 配置
-    const redisUrl = process.env.REDIS_URL;
-    const redisHost = process.env.REDIS_HOST;
-    const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : undefined;
-    const redisPassword = process.env.REDIS_PASSWORD;
-    const redisDb = process.env.REDIS_DB ? parseInt(process.env.REDIS_DB, 10) : undefined;
-
-    const redisConfig = redisUrl || redisHost
-      ? {
-          url: redisUrl,
-          host: redisHost,
-          port: redisPort,
-          password: redisPassword,
-          db: redisDb,
-        }
-      : undefined;
-
     rateLimiterInstance = new RateLimiter({
-      redis: redisConfig,
       configs: DEFAULT_RATE_LIMIT_CONFIGS,
       keyPrefix: 'graylum:ratelimit:',
     });
@@ -394,12 +241,12 @@ export function getRateLimiter(): RateLimiter {
 /**
  * 检查速率限制 (便捷函数)
  */
-export async function checkRateLimitWithRedis(
+export function checkRateLimitWithRedis(
   userId: string,
   type: string = 'ai'
-): Promise<void> {
+): void {
   const limiter = getRateLimiter();
-  await limiter.checkOrThrow(userId, type);
+  limiter.checkOrThrow(userId, type);
 }
 
 export default RateLimiter;

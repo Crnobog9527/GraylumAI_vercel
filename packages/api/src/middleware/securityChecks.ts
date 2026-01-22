@@ -82,69 +82,27 @@ export const SIGNATURE_CONFIG = {
 };
 
 // ============================================
-// 速率限制器 (支持内存和 Redis)
+// 速率限制器
 // ============================================
 
-import { getRateLimiter, checkRateLimitWithRedis } from '../services/rateLimiter';
-
-// 内存速率限制存储 (降级方案)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+import { getRateLimiter } from '../services/rateLimiter';
 
 /**
  * 检查速率限制
  *
- * 优先使用 Redis (如果配置了)，否则降级到内存存储
+ * 使用内存存储的速率限制器
+ * 生产环境分布式部署建议使用 Vercel KV 或 Upstash
  */
-export async function checkRateLimit(
+export function checkRateLimit(
   userId: string,
   type: keyof typeof RATE_LIMIT_CONFIG = 'ai'
-): Promise<void> {
-  // 如果配置了 Redis，使用 Redis 速率限制器
-  const useRedis = process.env.REDIS_URL || process.env.REDIS_HOST;
-
-  if (useRedis) {
-    try {
-      await checkRateLimitWithRedis(userId, type);
-      return;
-    } catch (error) {
-      // 如果是速率限制错误，直接抛出
-      if (error instanceof TRPCError && error.code === 'TOO_MANY_REQUESTS') {
-        throw error;
-      }
-      // 其他错误，降级到内存存储
-      console.warn('[RateLimit] Redis error, falling back to memory store:', error);
-    }
-  }
-
-  // 内存存储方案
-  const config = RATE_LIMIT_CONFIG[type];
-  const key = `${type}:${userId}`;
-  const now = Date.now();
-
-  const record = rateLimitStore.get(key);
-
-  if (!record || now > record.resetTime) {
-    // 新窗口
-    rateLimitStore.set(key, {
-      count: 1,
-      resetTime: now + config.windowMs,
-    });
-    return;
-  }
-
-  if (record.count >= config.maxRequests) {
-    const retryAfter = Math.ceil((record.resetTime - now) / 1000);
-    throw new TRPCError({
-      code: 'TOO_MANY_REQUESTS',
-      message: `请求过于频繁，请在 ${retryAfter} 秒后重试`,
-    });
-  }
-
-  record.count += 1;
+): void {
+  const limiter = getRateLimiter();
+  limiter.checkOrThrow(userId, type);
 }
 
 /**
- * 导出 Redis 速率限制器实例获取函数
+ * 导出速率限制器实例获取函数
  */
 export { getRateLimiter } from '../services/rateLimiter';
 
