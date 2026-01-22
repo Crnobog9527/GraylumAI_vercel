@@ -76,7 +76,22 @@
 |---|------|--------|---------|------|
 | 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 1h | 🔜 下一步 |
 | 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | 2h | ⏳ 待执行 |
-| 1.3 | 创建 AI 成本追踪仪表板 | /admin/costs 页面 | 3h | ⏳ 待执行 |
+| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | 4h | ⏳ 待执行 |
+
+**任务 1.3 详细设计**:
+
+`/admin/costs` 页面包含 3 个 Tab：
+
+| Tab | 数据源 | 功能 |
+|-----|--------|------|
+| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布 |
+| AI 调用日志 | `ai_usage_logs` | 查看每次调用详情，包含 routingReason、latency、status |
+| Token 统计 | `token_stats` | input/output/cached tokens、压缩触发记录 |
+
+**验证 AI 功能的方式**:
+- 智能路由: 查看 `metadata.routingReason` 字段
+- 上下文压缩: 查看 `cached_tokens` 和 input_tokens 变化
+- Prompt 缓存: 查看 `cached_tokens > 0` 的记录
 
 ---
 
