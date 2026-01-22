@@ -308,11 +308,27 @@ export const diagnosticsRouter = router({
         checks.aiModels = { ok: false, message: String(e) };
       }
 
-      // 检查 API Key
-      const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+      // 检查 API Key (同时检查环境变量和数据库配置)
+      const hasEnvApiKey = !!process.env.ANTHROPIC_API_KEY;
+      let hasDbApiKey = false;
+      try {
+        const { data: modelsWithKey } = await ctx.supabase
+          .from('ai_models')
+          .select('api_key')
+          .eq('is_active', 'true')
+          .not('api_key', 'is', null);
+        hasDbApiKey = (modelsWithKey?.length ?? 0) > 0 &&
+          modelsWithKey!.some(m => m.api_key && m.api_key.length > 0);
+      } catch {
+        // 忽略数据库查询错误
+      }
+
+      const hasApiKey = hasEnvApiKey || hasDbApiKey;
       checks.apiKey = {
         ok: hasApiKey,
-        message: hasApiKey ? 'OK' : 'ANTHROPIC_API_KEY 未配置',
+        message: hasApiKey
+          ? `OK (${hasEnvApiKey ? '环境变量' : ''}${hasEnvApiKey && hasDbApiKey ? '+' : ''}${hasDbApiKey ? '数据库' : ''})`
+          : 'API 密钥未配置 (环境变量 ANTHROPIC_API_KEY 或数据库 ai_models.api_key)',
       };
 
       // 计算总体健康状态

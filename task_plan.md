@@ -51,6 +51,20 @@
 - 计费功能 (3项): 预扣计费、幂等性检查、余额对账
 - 安全功能 (3项): 速率限制、消费熔断、RLS数据隔离
 
+**问题修复**:
+- SQL 迁移失败: profiles 表 email 无唯一约束 → 移除 ON CONFLICT 子句
+- 页面中文乱码: Unicode 转义问题 → 重新写入正确字符
+- 运行测试无反应: onError 未显示错误 → 添加错误状态和 UI 显示
+- 运行测试仍无反应: mutation 成功但结果不显示 → 直接使用 mutation 返回结果显示，不依赖数据库
+- UUID 类型不匹配: batch_id 数据库为 uuid 类型，generateBatchId() 生成 `diag_xxx` 格式 → 改用标准 UUID v4 格式
+
+**已修复问题**:
+- ✅ React Hydration 错误: 移除 `<Collapsible>` 组件，改用原生 React 状态控制展开/折叠
+- ✅ 数据库写入诊断: 添加 saveStatus 返回值和 UI 警告，便于排查 RLS 问题
+- ✅ UUID 类型不匹配: 改用标准 UUID v4 格式生成 batch_id
+
+**测试结果**: ✅ 通过率 100% (11/11)，数据库持久化正常
+
 ---
 
 ### 🚨 阶段 1: 基础监控体系 (必做 | 预计 2-3 天)
@@ -62,7 +76,22 @@
 |---|------|--------|---------|------|
 | 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 1h | 🔜 下一步 |
 | 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | 2h | ⏳ 待执行 |
-| 1.3 | 创建 AI 成本追踪仪表板 | /admin/costs 页面 | 3h | ⏳ 待执行 |
+| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | 4h | ⏳ 待执行 |
+
+**任务 1.3 详细设计**:
+
+`/admin/costs` 页面包含 3 个 Tab：
+
+| Tab | 数据源 | 功能 |
+|-----|--------|------|
+| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布 |
+| AI 调用日志 | `ai_usage_logs` | 查看每次调用详情，包含 routingReason、latency、status |
+| Token 统计 | `token_stats` | input/output/cached tokens、压缩触发记录 |
+
+**验证 AI 功能的方式**:
+- 智能路由: 查看 `metadata.routingReason` 字段
+- 上下文压缩: 查看 `cached_tokens` 和 input_tokens 变化
+- Prompt 缓存: 查看 `cached_tokens > 0` 的记录
 
 ---
 

@@ -40,7 +40,7 @@
 | 阶段 | 内容 | 紧急程度 | 状态 |
 |------|------|---------|------|
 | **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
-| **阶段 1** | 基础监控 | 🔴 必做 | 🔜 下一步 |
+| **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | 🔜 下一步 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ⏳ 待执行 |
@@ -89,6 +89,71 @@
 3. 也可按类别单独运行 (AI/计费/安全)
 4. Vercel Cron 每小时自动运行一次
 5. 查看历史记录追踪系统健康趋势
+
+### 问题修复记录
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| SQL 迁移失败 | profiles 表 email 无唯一约束，ON CONFLICT 失败 | 移除 ON CONFLICT 子句 |
+| 页面中文乱码 | Write 工具将中文转义为 Unicode 序列 | 重新写入正确的中文字符 |
+| 运行测试无反应 | onError 未显示错误信息，可能是权限问题 | 添加错误状态和 UI 显示 |
+| 运行测试仍无反应 | mutation 返回结果但 onSuccess 仅调用 refetchLatest()，数据库表不存在时返回空 | 直接使用 mutation 返回结果显示，添加 localResults state |
+| UUID 类型不匹配 | batch_id 数据库类型为 uuid，但 generateBatchId() 生成自定义字符串 `diag_xxx` | 改用标准 UUID v4 格式生成 |
+
+### 已修复问题
+
+| 问题 | 修复方案 | 状态 |
+|------|---------|------|
+| React Hydration 错误 (4个) | 移除 `<Collapsible>`，改用原生 React 状态 + Fragment | ✅ 已修复 |
+| 诊断结果排版错位 | 同上 | ✅ 已修复 |
+| 数据库写入不可见 | 添加 saveStatus 返回值和 UI 警告提示 | ✅ 已修复 |
+| UUID 类型不匹配 | 改用标准 UUID v4 格式生成 batch_id | ✅ 已修复 |
+
+### 测试结果
+
+**通过率: 100% (11/11)** ✅ 全部功能正常
+
+| 类别 | 通过 | 状态 |
+|------|------|------|
+| AI 功能 | 5/5 | ✅ |
+| 计费功能 | 3/3 | ✅ |
+| 安全功能 | 3/3 | ✅ |
+
+---
+
+## 阶段 1 基础监控体系 (待执行)
+
+> **进入条件**: 阶段 0 完成 ✅
+> **完成条件**: Sentry + 日志 + AI监控仪表板全部可用
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 🔜 下一步 |
+| 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | ⏳ 待执行 |
+| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | ⏳ 待执行 |
+
+### 任务 1.3 详细设计: AI 监控仪表板
+
+**页面路径**: `/admin/costs`
+
+**Tab 结构**:
+
+| Tab | 数据源 | 功能描述 |
+|-----|--------|---------|
+| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布饼图 |
+| AI 调用日志 | `ai_usage_logs` | 每次调用详情表格，包含 routingReason、latency、status、model_id |
+| Token 统计 | `token_stats` | input/output/cached tokens 统计，上下文压缩触发记录 |
+
+**验证 AI 功能的方式**:
+
+| 功能 | 验证方式 | 数据字段 |
+|------|---------|---------|
+| 智能路由 | 查看路由决策 | `ai_usage_logs.metadata.routingReason` |
+| 上下文压缩 | 查看 Token 变化 | `token_stats.input_tokens` 趋势 |
+| Prompt 缓存 | 查看缓存命中 | `token_stats.cached_tokens > 0` |
+| 计费准确性 | 对比估算与实际 | `billing_history.amount` vs `token_stats.total_credits` |
 
 ---
 
