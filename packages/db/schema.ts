@@ -13,6 +13,8 @@ export const profiles = pgTable('profiles', {
   credits: integer('credits').default(100).notNull(),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   lastIp: text('last_ip'),
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -21,6 +23,12 @@ export const conversations = pgTable('conversations', {
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   title: text('title').notNull(),
   modelId: uuid('model_id').references(() => aiModels.id),
+  summary: text('summary'), // Conversation summary for context compression
+  summaryTokens: integer('summary_tokens'), // Token count of summary
+  summaryUpdatedAt: timestamp('summary_updated_at', { withTimezone: true }),
+  summaryMetadata: jsonb('summary_metadata'), // Recursive summary layers metadata
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -29,6 +37,8 @@ export const messages = pgTable('messages', {
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
   role: text('role', { enum: ['user', 'assistant'] }).notNull(),
   content: text('content').notNull(),
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -81,6 +91,8 @@ export const tickets = pgTable('tickets', {
   priority: text('priority', { enum: ['low', 'medium', 'high', 'urgent'] }).default('medium').notNull(), // 优先级
   attachments: jsonb('attachments').default([]), // 附件URL列表
   status: text('status', { enum: ['open', 'closed', 'in_progress'] }).default('open').notNull(),
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -92,6 +104,8 @@ export const ticketReplies = pgTable('ticket_replies', {
   content: text('content').notNull(),
   isAdmin: text('is_admin').default('false').notNull(), // 是否管理员回复
   attachments: jsonb('attachments').default([]), // 回复附件
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -140,6 +154,8 @@ export const announcements = pgTable('announcements', {
   tagColor: text('tag_color').default('blue'),
   priority: integer('priority').default(0).notNull(),
   active: text('active').default('true').notNull(),
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   startDate: timestamp('start_date', { withTimezone: true }).defaultNow(),
   endDate: timestamp('end_date', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
@@ -165,6 +181,8 @@ export const prompts = pgTable('prompts', {
   isSystem: text('is_system').default('false').notNull(),
   active: text('active').default('true').notNull(),
   sortOrder: integer('sort_order').default(0).notNull(),
+  isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
