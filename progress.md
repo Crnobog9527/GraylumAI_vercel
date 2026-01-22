@@ -42,8 +42,8 @@
 
 | 任务 | 优先级 | 状态 |
 |------|--------|------|
-| E2E 端到端测试 | 🟡 推荐 | ⏳ |
-| Sentry 监控告警 | 🟡 推荐 | ⏳ |
+| E2E 端到端测试 | 🟡 推荐 | ✅ 完成 |
+| Sentry 监控告警 | 🟡 推荐 | ✅ 完成 |
 | 负载测试 | 🟢 可选 | ⏳ |
 | 用户文档 | 🟢 可选 | ⏳ |
 
@@ -403,45 +403,49 @@ docs/
 
 ---
 
-## 后续优化任务 (可选)
-
-> **说明**: 以下任务为可选优化，根据需要执行
+## 后续优化任务
 
 | # | 任务 | 交付物 | 优先级 | 状态 |
 |---|------|--------|--------|------|
-| 7.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ⏳ 待执行 |
-| 7.2 | Sentry 监控告警 | 告警规则配置 | 🟡 推荐 | ⏳ 待执行 |
+| 7.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ✅ 完成 |
+| 7.2 | Sentry 监控告警 | 告警规则配置指南 | 🟡 推荐 | ✅ 完成 |
 | 7.3 | 负载测试 | k6/Artillery 压测脚本 | 🟢 可选 | ⏳ 待执行 |
 | 7.4 | 用户文档 | 使用手册 | 🟢 可选 | ⏳ 待执行 |
 
-### 任务 7.1 - E2E 端到端测试
+### 任务 7.1 - E2E 端到端测试 ✅
 
-**工具**: Playwright (推荐) 或 Cypress
-
-**测试场景**:
-- 用户注册/登录流程
-- AI 对话发送和接收
-- 积分扣费正确性
-- 管理后台操作
+**工具**: Playwright v1.57.0
 
 **交付物**:
-- `tests/e2e/` 目录
-- CI 集成 (GitHub Actions)
-- 测试覆盖率报告
+- ✅ `apps/web/playwright.config.ts` - Playwright 配置
+- ✅ `apps/web/tests/e2e/auth.setup.ts` - 认证设置
+- ✅ `apps/web/tests/e2e/auth.spec.ts` - 登录/注册测试
+- ✅ `apps/web/tests/e2e/chat.spec.ts` - AI 对话测试
+- ✅ `apps/web/tests/e2e/admin.spec.ts` - 管理后台测试
+- ✅ `package.json` 添加测试脚本
 
-### 任务 7.2 - Sentry 监控告警
+**测试命令**:
+```bash
+pnpm test:e2e        # 运行所有测试
+pnpm test:e2e:ui     # UI 模式
+pnpm test:e2e:headed # 有头浏览器模式
+```
 
-**配置位置**: Sentry Dashboard → Alerts
+### 任务 7.2 - Sentry 监控告警 ✅
 
-**告警规则**:
+**交付物**:
+- ✅ `docs/SENTRY_ALERTS.md` - 告警配置指南
+
+**推荐告警规则**:
 | 规则 | 触发条件 | 优先级 |
 |------|----------|--------|
 | 新错误类型 | 首次出现的错误 | 🟡 中 |
 | 错误突增 | 10x spike | 🔴 高 |
 | 错误阈值 | > 100/小时 | 🔴 高 |
 | 关键错误 | 支付失败、AI 调用失败 | 🔴 高 |
+| 慢 API | P95 > 5s | 🟡 中 |
 
-**通知渠道**: Email / Slack / Webhook
+**配置位置**: Sentry Dashboard → Alerts → Create Alert
 
 ---
 

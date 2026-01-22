@@ -8,3 +8,9 @@ node_modules/
 .env.sentry-build-plugin
 .sentryclirc
 .sentry-cli/
+
+# Playwright
+playwright-report/
+playwright/.cache/
+test-results/
+tests/.auth/user.json
