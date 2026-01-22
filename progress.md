@@ -23,95 +23,103 @@
 
 ## Current Status
 
-- **Phase:** Phase 11 安全审计问题修复 ✅ 完成 (12/12 P0+P1 + 4/4 P2)
-- **Previous:** Phase 10 安全与合规审计 ✅ 完成
-- **Started:** 2026-01-21
-- **Completed:** 2026-01-22
-- **审计评分:** 3.1/5 → 4.8+/5 (预计)
+- **Phase:** 新工作规划完成，准备执行阶段 0
+- **Previous:** Phase 11 安全审计问题修复 ✅ 完成
+- **Next:** 阶段 0.1 创建系统诊断页面
+- **Started:** 2026-01-22
+- **参考文档:** `movetonew/开发规范清单-终极版.md`
 
 ---
 
-## Phase 10 审计结果 (2026-01-21)
+## 新工作规划 (2026-01-22)
 
-### 检查清单 (18项)
+### 决策: 采用 7 阶段开发流程
 
-| # | 类别 | 检查项 | 结果 |
-|---|------|--------|------|
-| 1 | 计费安全 | 后端计算流程 | ✅ 通过 |
-| 2 | 计费安全 | 配置对齐 | 🔴 硬编码费率 |
-| 3 | 计费安全 | settle() 校验 | ⚠️ 缺成本验证 |
-| 4 | 代码规范 | 代码一致性 | ✅ 通过 |
-| 5 | 数据层 | 数据共享 | ✅ 通过 |
-| 6 | 前端功能 | Header 积分显示 | 🔴 useState(100) |
-| 7 | 前端功能 | Sidebar 对话切换 | ✅ 通过 |
-| 8 | 前端功能 | Next.js 路由 | ⚠️ 2处 window.location |
-| 9 | API 安全 | 权限/速率限制 | ✅ 通过 |
-| 10 | 计费反作弊 | 熔断/隔离 | ✅ 通过 |
-| 11 | 内容合规 | 审查/注入防御 | ✅ 通过 |
-| 12 | 数据隐私 | RLS 多租户 | 🔴 仅 3/18 表有 RLS |
-| 13 | 环境安全 | CORS/.env | ✅ 通过 |
-| 14 | 事务安全 | 行级锁/预扣 | 🔴 非原子性 |
-| 15 | AI 优化 | 智能路由 | ⚠️ 缺实时关键词 |
-| 16 | AI 优化 | 上下文压缩 | ⚠️ 阈值53%非60% |
-| 17 | 可观测性 | 幂等性/对账 | 🔴 缺 idempotencyKey |
-| 18 | 前端交互 | 流式中断结算 | 🔴 中断未触发 settle() |
+根据 `开发规范清单-终极版.md`，项目后续维护工作按以下 7 阶段执行：
 
-### 问题分布
+| 阶段 | 内容 | 紧急程度 | 状态 |
+|------|------|---------|------|
+| **阶段 0** | 系统诊断 | 🔴 必做 | 🔜 下一步 |
+| **阶段 1** | 基础监控 | 🔴 必做 | ⏳ 待执行 |
+| **阶段 2** | 安全加固 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 4** | 性能优化 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
-| 优先级 | 数量 | 问题列表 |
-|--------|------|----------|
-| **P0 紧急** | 6 | Header积分、RLS缺失、幂等性、费率硬编码、流式中断、事务原子性 |
-| **P1 重要** | 7 | settle校验、window.location、请求签名、日志信息、上下文配置、智能路由关键词 |
-| **通过** | 11 | 后端计费、权限控制、内容审核、智能路由、Prompt Caching 等 |
+### 下一步: 阶段 0.1 创建系统诊断页面
+
+**目标**: 一键测试所有"看不见"的关键功能
+
+**交付物**:
+- `packages/api/src/services/diagnostics.ts` - 诊断服务
+- `packages/api/src/routers/diagnostics.ts` - tRPC Router
+- `packages/db/migrations/0005_diagnostics.sql` - 数据库迁移
+- `apps/web/src/app/admin/diagnostics/page.tsx` - 前端页面
+- `apps/web/src/app/api/cron/diagnostics/route.ts` - Vercel Cron
+
+**11 项测试功能**:
+1. 智能路由测试
+2. Token 计算精度测试
+3. Prompt Caching 测试
+4. 上下文压缩测试
+5. 流式响应测试
+6. 三段式计费测试
+7. 幂等性检查测试
+8. 余额对账测试
+9. 速率限制测试
+10. 消费熔断测试
+11. RLS 数据隔离测试
 
 ---
 
-## Phase 11 修复计划
+## 已完成阶段 (Phase 1-11)
+
+| 阶段 | 内容 | 完成时间 | 状态 |
+|------|------|----------|------|
+| Phase 1-3 | 业务逻辑迁移 | 2026-01-14 | ✅ |
+| Phase 4-5 | UI 还原 (73组件) + 数据层 | 2026-01-20 | ✅ |
+| Phase 6 | 安全加固 (RLS + Admin权限) | 2026-01-20 | ✅ |
+| Phase 7 | 管理后台功能还原 | 2026-01-20 | ✅ |
+| Phase 8 | AI 重构执行计划 | 2026-01-21 | ✅ |
+| Phase 9 | AI 对话系统重构 | 2026-01-21 | ✅ |
+| Phase 10 | 安全与合规审计 | 2026-01-21 | ✅ |
+| Phase 11 | 安全审计修复 (16/16 任务) | 2026-01-22 | ✅ |
+
+---
+
+## Phase 11 修复总结 (2026-01-22 完成)
 
 ### P0 紧急修复 (6/6 完成) ✅
 
 | # | 任务 | 位置 | 状态 |
 |---|------|------|------|
-| 1 | Header 积分显示 | `AppHeader.tsx` | ✅ useCreditsBalance hook |
-| 2 | 关键表 RLS 策略 | `migrations/0002` | ✅ 18表 RLS 策略 |
-| 3 | 请求幂等性 | `ai.ts`, `billing.ts` | ✅ checkIdempotency + requestId |
-| 4 | 费率动态读取 | `billing.ts` | ✅ getModelPricing + 5分钟缓存 |
-| 5 | 流式中断结算 | `useAIChat.ts`, `ai.ts`, `billing.ts` | ✅ settleAbort + abortRequest |
-| 6 | 计费事务原子化 | `billing.ts`, `migrations/0003` | ✅ 原子化 RPC 函数 |
+| 1 | Header 积分显示 | `AppHeader.tsx` | ✅ |
+| 2 | 关键表 RLS 策略 | `migrations/0002` | ✅ |
+| 3 | 请求幂等性 | `ai.ts`, `billing.ts` | ✅ |
+| 4 | 费率动态读取 | `billing.ts` | ✅ |
+| 5 | 流式中断结算 | `useAIChat.ts`, `ai.ts`, `billing.ts` | ✅ |
+| 6 | 计费事务原子化 | `billing.ts`, `migrations/0003` | ✅ |
 
 ### P1 重要改进 (6/6 完成) ✅
 
 | # | 任务 | 位置 | 状态 |
 |---|------|------|------|
-| 7 | 请求签名/时间戳 | `securityChecks.ts` | ✅ HMAC-SHA256 + 30秒校验 |
-| 8 | settle() 成本校验 | `billing.ts` | ✅ verifyCost() 方法 |
-| 9 | 补全日志信息 | `ai.ts` | ✅ request_id, IP, User-Agent |
-| 10 | window.location 改 router | `login/page.tsx`, `SixStepsGuide.tsx` | ✅ router.push() |
-| 11 | 统一上下文配置 | `contextManager.ts` | ✅ 阈值90000(60%)，稳定3轮 |
-| 12 | 智能路由关键词 | `modelRouter.ts` | ✅ REALTIME_DATA_KEYWORDS |
+| 7 | 请求签名/时间戳 | `securityChecks.ts` | ✅ |
+| 8 | settle() 成本校验 | `billing.ts` | ✅ |
+| 9 | 补全日志信息 | `ai.ts` | ✅ |
+| 10 | window.location 改 router | `login/page.tsx`, `SixStepsGuide.tsx` | ✅ |
+| 11 | 统一上下文配置 | `contextManager.ts` | ✅ |
+| 12 | 智能路由关键词 | `modelRouter.ts` | ✅ |
 
 ### P2 持续优化 (4/4 完成) ✅
 
 | # | 任务 | 位置 | 状态 |
 |---|------|------|------|
-| 13 | 递归摘要算法 | `contextManager.ts` | ✅ 多层摘要链式压缩 |
-| 14 | 软删除机制 | `migrations/0004`, `schema.ts` | ✅ is_deleted + RLS + 清理函数 |
-| 15 | Redis 速率限制 | `rateLimiter.ts`, `securityChecks.ts` | ✅ ioredis + 内存降级 |
-| 16 | .env.example | `.env.example` | ✅ 完整环境变量文档 |
-
----
-
-## 已完成阶段 (Phase 1-10)
-
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| Phase 1-3 | 业务逻辑迁移 | ✅ |
-| Phase 4-5 | UI 还原 (73组件) + 数据层 | ✅ |
-| Phase 6 | 安全加固 (RLS + Admin权限) | ✅ |
-| Phase 7 | 管理后台功能还原 | ✅ |
-| Phase 8 | AI 重构执行计划 | ✅ |
-| Phase 9 | AI 对话系统重构 | ✅ |
-| Phase 10 | 安全与合规审计 | ✅ |
+| 13 | 递归摘要算法 | `contextManager.ts` | ✅ |
+| 14 | 软删除机制 | `migrations/0004`, `schema.ts` | ✅ |
+| 15 | 速率限制 | `rateLimiter.ts` | ✅ (内存实现) |
+| 16 | .env.example | `.env.example` | ✅ |
 
 ---
 
@@ -131,14 +139,23 @@
 | `apps/web/src/components/home/SixStepsGuide.tsx` | router.push() | ✅ |
 | `packages/api/src/services/contextManager.ts` | 阈值 90000 (60%) + 递归摘要 | ✅ |
 | `packages/api/src/services/modelRouter.ts` | REALTIME_DATA_KEYWORDS | ✅ |
-| `packages/api/src/middleware/securityChecks.ts` | HMAC-SHA256 + Redis 集成 | ✅ |
-| `packages/api/src/services/rateLimiter.ts` | Redis 速率限制器 (新增) | ✅ |
-| `packages/db/migrations/0004_recursive_summary_and_soft_delete.sql` | 递归摘要 + 软删除 (新增) | ✅ |
+| `packages/api/src/middleware/securityChecks.ts` | HMAC-SHA256 签名验证 | ✅ |
+| `packages/api/src/services/rateLimiter.ts` | 内存速率限制器 | ✅ |
+| `packages/db/migrations/0004_recursive_summary_and_soft_delete.sql` | 递归摘要 + 软删除 | ✅ |
 | `packages/db/schema.ts` | 软删除字段 + summary 元数据 | ✅ |
-| `packages/api/package.json` | ioredis 依赖 | ✅ |
-| `.env.example` | 环境变量文档 (新增) | ✅ |
+| `.env.example` | 环境变量文档 | ✅ |
 
 ### 迁移文件目录
 
 - `packages/db/migrations/` - Drizzle 迁移
 - `supabase/migrations/` - Supabase SQL 迁移
+
+---
+
+## 参考文档
+
+- **开发规范清单**: `movetonew/开发规范清单-终极版.md`
+- **任务计划**: `task_plan.md`
+- **审计发现**: `findings.md`
+- **UI 复刻规则**: `movetonew/UIfix_rule.md`
+- **AI 重构计划**: `movetonew/GraylumAI_分阶段重构执行计划.md`
