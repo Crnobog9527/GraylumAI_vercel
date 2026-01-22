@@ -1,0 +1,74 @@
+# Dependabot 配置
+# 自动检查依赖安全漏洞和更新
+# 文档: https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # npm/pnpm 依赖更新
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    # 限制同时打开的 PR 数量
+    open-pull-requests-limit: 10
+    # 分组次要更新
+    groups:
+      # React 生态系统
+      react:
+        patterns:
+          - "react*"
+          - "@types/react*"
+      # tRPC 生态系统
+      trpc:
+        patterns:
+          - "@trpc/*"
+      # Radix UI 组件
+      radix:
+        patterns:
+          - "@radix-ui/*"
+      # Supabase
+      supabase:
+        patterns:
+          - "@supabase/*"
+      # 开发工具
+      dev-tools:
+        patterns:
+          - "typescript"
+          - "eslint*"
+          - "@typescript-eslint/*"
+          - "prettier"
+        update-types:
+          - "minor"
+          - "patch"
+    # 忽略主版本更新 (需要手动升级)
+    ignore:
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+    # 提交消息格式
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # 标签
+    labels:
+      - "dependencies"
+      - "automated"
+    # 审阅者
+    # reviewers:
+    #   - "your-github-username"
+
+  # GitHub Actions 更新
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "ci"

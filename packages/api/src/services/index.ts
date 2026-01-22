@@ -8,6 +8,10 @@
 export { logger } from '../lib/logger';
 export type { LogLevel, LogCategory, LogContext, AppLogger } from '../lib/logger';
 
+// 环境变量验证
+export { validateEnv, validateEnvOnStartup, getSafeEnvSummary } from '../lib/envValidator';
+export type { ValidationResult } from '../lib/envValidator';
+
 // 计费服务
 export * from './billing';
 
