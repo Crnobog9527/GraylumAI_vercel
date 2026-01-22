@@ -10,6 +10,7 @@ import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
 import { aiRouter } from './routers/ai';
 import { diagnosticsRouter } from './routers/diagnostics';
+import { costsRouter } from './routers/costs';
 
 /**
  * 主路由器
@@ -28,6 +29,7 @@ export const appRouter = router({
   modules: modulesRouter,
   ai: aiRouter,
   diagnostics: diagnosticsRouter,
+  costs: costsRouter,
 });
 
 /**

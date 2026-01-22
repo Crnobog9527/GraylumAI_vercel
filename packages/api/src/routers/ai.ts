@@ -23,7 +23,8 @@ import {
   calculateTokenCostWithPricing,
   estimateRequestCost,
   getModelPricing,
-} from '../services/billing';
+  logger,
+} from '../services';
 import { selectModel, getAvailableModels } from '../services/modelRouter';
 import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
 
@@ -323,6 +324,15 @@ export const aiRouter = router({
       // 7. 预扣积分 (带幂等性 Key)
       const preDeductResult = await billingService.preDeduct(estimatedCost, { requestId });
 
+      // 记录 AI 调用开始日志
+      logger.ai.callStart(
+        modelConfig.modelId,
+        estimatedInputTokens,
+        conversation.id,
+        requestId,
+        { userId: ctx.profileId }
+      );
+
       try {
         // 8. 构建消息
         const messages = [
@@ -385,6 +395,17 @@ export const aiRouter = router({
 
         // 15. 记录使用日志 (P1-9: 补全日志信息)
         const latencyMs = Date.now() - startTime;
+
+        // 记录 AI 调用完成日志
+        logger.ai.callComplete(
+          modelConfig.modelId,
+          aiResponse.usage.inputTokens,
+          aiResponse.usage.outputTokens,
+          latencyMs,
+          actualCredits,
+          requestId,
+          { userId: ctx.profileId, conversationId: conversation.id }
+        );
         // 从请求头获取 IP 和 User-Agent
         const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
           ?? ctx.headers?.get?.('x-real-ip')
@@ -419,6 +440,16 @@ export const aiRouter = router({
           createdAt: new Date().toISOString(),
         };
       } catch (error) {
+        // 记录 AI 调用失败日志
+        const failLatencyMs = Date.now() - startTime;
+        logger.ai.callFailed(
+          modelConfig.modelId,
+          error instanceof Error ? error.message : 'Unknown error',
+          0,
+          requestId,
+          { userId: ctx.profileId, conversationId: conversation.id }
+        );
+
         // 失败退费
         await billingService.refund(
           preDeductResult.preDeductId,
@@ -426,7 +457,6 @@ export const aiRouter = router({
         );
 
         // 记录失败日志 (P1-9: 补全日志信息)
-        const failLatencyMs = Date.now() - startTime;
         const failIpAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
           ?? ctx.headers?.get?.('x-real-ip')
           ?? 'unknown';

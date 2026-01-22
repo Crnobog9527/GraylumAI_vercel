@@ -23,9 +23,9 @@
 
 ## Current Status
 
-- **Phase:** 阶段 0 系统诊断 ✅ 完成
-- **Previous:** Phase 11 安全审计问题修复 ✅ 完成
-- **Next:** 阶段 1 基础监控体系
+- **Phase:** 阶段 3 CI/CD 自动化 ✅ 完成
+- **Previous:** 阶段 2 安全加固 ✅ 完成
+- **Next:** 阶段 4 性能优化
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
@@ -40,10 +40,10 @@
 | 阶段 | 内容 | 紧急程度 | 状态 |
 |------|------|---------|------|
 | **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
-| **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | 🔜 下一步 |
-| **阶段 2** | 安全加固 | 🟡 应该做 | ⏳ 待执行 |
-| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏳ 待执行 |
-| **阶段 4** | 性能优化 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
+| **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
+| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 4** | 性能优化 | 🟡 应该做 | 🔜 下一步 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
@@ -121,20 +121,42 @@
 
 ---
 
-## 阶段 1 基础监控体系 (待执行)
+## 阶段 1 基础监控体系 (2026-01-22 完成) ✅
 
 > **进入条件**: 阶段 0 完成 ✅
-> **完成条件**: Sentry + 日志 + AI监控仪表板全部可用
+> **完成条件**: Sentry + 日志 + AI监控仪表板全部可用 ✅
 
 ### 任务清单
 
 | # | 任务 | 交付物 | 状态 |
 |---|------|--------|------|
-| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 🔜 下一步 |
-| 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | ⏳ 待执行 |
-| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | ⏳ 待执行 |
+| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | ✅ 完成 |
+| 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | ✅ 完成 |
+| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | ✅ 完成 |
 
-### 任务 1.3 详细设计: AI 监控仪表板
+### 交付物清单
+
+**任务 1.1 - Sentry 错误监控**:
+- ✅ `apps/web/sentry.client.config.ts` - 前端错误捕获
+- ✅ `apps/web/sentry.server.config.ts` - 后端错误捕获
+- ✅ `apps/web/sentry.edge.config.ts` - Edge 函数错误捕获
+- ✅ `apps/web/instrumentation.ts` - Next.js 集成
+- ✅ `apps/web/next.config.ts` - Sentry 插件配置
+- ✅ `apps/web/src/app/api/sentry-test/route.ts` - 测试端点
+- ✅ `.env.example` - 添加 Sentry 环境变量
+
+**任务 1.2 - 结构化日志系统**:
+- ✅ `packages/api/src/lib/logger.ts` - 日志服务 (pino)
+- ✅ `packages/db/migrations/0006_application_logs.sql` - 日志表 + RLS + 清理函数
+- ✅ `packages/api/src/services/billing.ts` - 添加计费日志
+- ✅ `packages/api/src/routers/ai.ts` - 添加 AI 调用日志
+
+**任务 1.3 - AI 监控仪表板**:
+- ✅ `packages/api/src/routers/costs.ts` - 成本监控 tRPC 路由
+- ✅ `apps/web/src/app/admin/costs/page.tsx` - AI 成本监控页面
+- ✅ `apps/web/src/components/admin/AdminSidebar.tsx` - 添加导航入口
+
+### AI 监控仪表板功能
 
 **页面路径**: `/admin/costs`
 
@@ -142,18 +164,92 @@
 
 | Tab | 数据源 | 功能描述 |
 |-----|--------|---------|
-| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布饼图 |
+| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布饼图、缓存效率 |
 | AI 调用日志 | `ai_usage_logs` | 每次调用详情表格，包含 routingReason、latency、status、model_id |
-| Token 统计 | `token_stats` | input/output/cached tokens 统计，上下文压缩触发记录 |
+| Token 统计 | `token_stats` | input/output/cached tokens 统计
 
-**验证 AI 功能的方式**:
+---
 
-| 功能 | 验证方式 | 数据字段 |
-|------|---------|---------|
-| 智能路由 | 查看路由决策 | `ai_usage_logs.metadata.routingReason` |
-| 上下文压缩 | 查看 Token 变化 | `token_stats.input_tokens` 趋势 |
-| Prompt 缓存 | 查看缓存命中 | `token_stats.cached_tokens > 0` |
-| 计费准确性 | 对比估算与实际 | `billing_history.amount` vs `token_stats.total_credits` |
+## 阶段 2 安全加固 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 1 完成 ✅
+> **完成条件**: RLS + 环境变量 + 依赖扫描全部配置 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 2.1 | RLS 策略全面检查 | RLS 审计报告 | ✅ 完成 |
+| 2.2 | 环境变量安全检查 | envValidator.ts | ✅ 完成 |
+| 2.3 | 依赖安全扫描 | Dependabot + GitHub Action | ✅ 完成 |
+
+### 交付物清单
+
+**任务 2.1 - RLS 审计**:
+- ✅ `docs/RLS_AUDIT_REPORT.md` - 21 个表 RLS 全覆盖审计报告
+- ✅ 所有用户数据表已启用 RLS
+- ✅ 管理员权限策略已配置
+
+**任务 2.2 - 环境变量安全**:
+- ✅ `packages/api/src/lib/envValidator.ts` - 环境变量验证器
+- ✅ `.gitignore` 已正确配置排除 .env 文件
+- ✅ 代码中无硬编码密钥 (已扫描确认)
+
+**任务 2.3 - 依赖安全扫描**:
+- ✅ `.github/dependabot.yml` - Dependabot 自动更新配置
+- ✅ `.github/workflows/security.yml` - 安全扫描 GitHub Action
+- ✅ `pnpm audit` 结果: 0 高危漏洞，1 中等漏洞 (开发依赖)
+
+### 安全扫描结果
+
+| 严重程度 | 数量 | 说明 |
+|----------|------|------|
+| Critical | 0 | ✅ |
+| High | 0 | ✅ |
+| Moderate | 1 | esbuild (开发依赖，不影响生产) |
+| Low | 0 | ✅ |
+
+---
+
+## 阶段 3 CI/CD 自动化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 2 完成 ✅
+> **完成条件**: CI/CD 流水线 + 部署文档 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ✅ 完成 |
+| 3.2 | 部署配置和文档 | DEPLOYMENT.md | ✅ 完成 |
+
+### 交付物清单
+
+**CI/CD 工作流**:
+- ✅ `.github/workflows/ci.yml` - 完整 CI/CD 流水线
+  - lint-and-type: ESLint + TypeScript 检查
+  - test: 单元测试
+  - build: 构建验证
+  - deploy-preview: PR 预览部署
+  - deploy-staging: develop → staging
+  - deploy-production: main → production
+
+**部署文档**:
+- ✅ `docs/DEPLOYMENT.md` - 完整部署指南
+  - 环境概览 (Production/Staging/Preview)
+  - GitHub Secrets 配置指南
+  - 部署检查清单
+  - 回滚流程
+
+### CI/CD 流程图
+
+```
+PR 创建 → lint → test → build → deploy-preview
+                                    ↓
+develop 推送 → lint → test → build → deploy-staging
+                                    ↓
+main 推送 → lint → test → build → deploy-production
+```
 
 ---
 
