@@ -23,11 +23,20 @@
 
 ## Current Status
 
-- **Phase:** 阶段 6 高级优化 ✅ 完成
-- **Previous:** 阶段 5 文档体系 ✅ 完成
-- **Next:** 全部阶段完成 🎉
+- **Phase:** 全部 7 阶段完成 🎉
+- **Previous:** 阶段 6 高级优化 ✅ 完成
+- **Next:** 创建 PR 合并到主分支
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
+
+### 部署检查清单
+
+| 项目 | 状态 |
+|------|------|
+| 数据库迁移 (0001-0007) | ✅ 全部完成 |
+| Vercel 环境变量 (SENTRY_DSN) | ✅ 已配置 |
+| Sentry 错误监控 | ✅ 已启用 |
+| 创建 Pull Request | ⏳ 待执行 |
 
 ---
 
@@ -155,6 +164,7 @@ npx @sentry/wizard@latest -i nextjs --saas --org grayscale-luminary-llc --projec
 - Tracing (性能监控): Yes
 - Session Replay (会话回放): Yes
 - MCP 配置: No
+- ✅ `NEXT_PUBLIC_SENTRY_DSN` 已在 Vercel 环境变量配置
 
 **任务 1.2 - 结构化日志系统**:
 - ✅ `packages/api/src/lib/logger.ts` - 日志服务 (pino)

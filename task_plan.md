@@ -93,6 +93,7 @@
 - 启用 Tracing (性能监控)
 - 启用 Session Replay (会话回放)
 - `.env.sentry-build-plugin` 已添加到 .gitignore
+- ✅ `NEXT_PUBLIC_SENTRY_DSN` 已在 Vercel 环境变量配置
 
 **AI 监控仪表板 (`/admin/costs`) 功能**:
 
