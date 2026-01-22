@@ -86,11 +86,15 @@ class MemoryStore {
 
   cleanup(): void {
     const now = Date.now();
-    for (const [key, record] of this.store.entries()) {
+    const keysToDelete: string[] = [];
+
+    this.store.forEach((record, key) => {
       if (now > record.resetTime) {
-        this.store.delete(key);
+        keysToDelete.push(key);
       }
-    }
+    });
+
+    keysToDelete.forEach((key) => this.store.delete(key));
   }
 
   close(): void {
