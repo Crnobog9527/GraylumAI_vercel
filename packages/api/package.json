@@ -20,7 +20,7 @@
     "./src/services/modelRouter": "./src/services/modelRouter.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.90.1",
+    "@supabase/supabase-js": "^2.91.0",
     "@trpc/server": "^11.8.1",
     "pino": "^10.2.1",
     "pino-pretty": "^13.1.3",
