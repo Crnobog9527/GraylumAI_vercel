@@ -23,9 +23,9 @@
 
 ## Current Status
 
-- **Phase:** 阶段 2 安全加固 ✅ 完成
-- **Previous:** 阶段 1 基础监控体系 ✅ 完成
-- **Next:** 阶段 3 CI/CD 自动化
+- **Phase:** 阶段 3 CI/CD 自动化 ✅ 完成
+- **Previous:** 阶段 2 安全加固 ✅ 完成
+- **Next:** 阶段 4 性能优化
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
@@ -42,8 +42,8 @@
 | **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
 | **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
-| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | 🔜 下一步 |
-| **阶段 4** | 性能优化 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 4** | 性能优化 | 🟡 应该做 | 🔜 下一步 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
@@ -208,6 +208,48 @@
 | High | 0 | ✅ |
 | Moderate | 1 | esbuild (开发依赖，不影响生产) |
 | Low | 0 | ✅ |
+
+---
+
+## 阶段 3 CI/CD 自动化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 2 完成 ✅
+> **完成条件**: CI/CD 流水线 + 部署文档 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ✅ 完成 |
+| 3.2 | 部署配置和文档 | DEPLOYMENT.md | ✅ 完成 |
+
+### 交付物清单
+
+**CI/CD 工作流**:
+- ✅ `.github/workflows/ci.yml` - 完整 CI/CD 流水线
+  - lint-and-type: ESLint + TypeScript 检查
+  - test: 单元测试
+  - build: 构建验证
+  - deploy-preview: PR 预览部署
+  - deploy-staging: develop → staging
+  - deploy-production: main → production
+
+**部署文档**:
+- ✅ `docs/DEPLOYMENT.md` - 完整部署指南
+  - 环境概览 (Production/Staging/Preview)
+  - GitHub Secrets 配置指南
+  - 部署检查清单
+  - 回滚流程
+
+### CI/CD 流程图
+
+```
+PR 创建 → lint → test → build → deploy-preview
+                                    ↓
+develop 推送 → lint → test → build → deploy-staging
+                                    ↓
+main 推送 → lint → test → build → deploy-production
+```
 
 ---
 
