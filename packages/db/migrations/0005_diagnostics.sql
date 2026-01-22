@@ -104,8 +104,7 @@ BEGIN
       'active',
       10000,  -- Test credits
       'free'
-    )
-    ON CONFLICT (email) DO NOTHING;
+    );
   END IF;
 END $$;
 
