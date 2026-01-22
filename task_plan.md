@@ -28,37 +28,39 @@
 
 > **执行规范**: 按照 `开发规范清单-终极版.md` 的步骤和提示词执行
 
-### 🚨 阶段 0: 系统诊断 (必做 | 预计 1 天)
+### ✅ 阶段 0: 系统诊断 (已完成 | 2026-01-22)
 
 > **进入条件**: 无
 > **完成条件**: 诊断页面可用，至少 80% 测试通过
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 0.1 | 创建系统诊断页面 | diagnostics.ts + /admin/diagnostics | 4-6h | 🔜 下一步 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 0.1 | 创建系统诊断页面 | diagnostics.ts + /admin/diagnostics | ✅ 完成 |
 
-**步骤 0.1 详情**:
-- 创建诊断服务: `packages/api/src/services/diagnostics.ts`
-- 11 项测试功能:
-  - AI 功能 (5项): 智能路由、Token计算、Prompt缓存、上下文压缩、流式响应
-  - 计费功能 (3项): 三段式计费、幂等性检查、余额对账
-  - 安全功能 (3项): 速率限制、消费熔断、RLS数据隔离
-- 创建 tRPC Router: `packages/api/src/routers/diagnostics.ts`
-- 数据库迁移: `packages/db/migrations/0005_diagnostics.sql`
-- 前端页面: `apps/web/src/app/admin/diagnostics/page.tsx`
-- Vercel Cron: `apps/web/src/app/api/cron/diagnostics/route.ts`
-- 测试账号: system-test@graylum.internal
+**交付物清单**:
+- ✅ `packages/db/migrations/0005_diagnostics.sql` - 诊断结果表 + RLS + 统计函数
+- ✅ `packages/api/src/services/diagnostics.ts` - 诊断服务 (11 项测试)
+- ✅ `packages/api/src/routers/diagnostics.ts` - tRPC 路由
+- ✅ `apps/web/src/app/admin/diagnostics/page.tsx` - 前端诊断页面
+- ✅ `apps/web/src/app/api/cron/diagnostics/route.ts` - Vercel Cron (每小时)
+- ✅ `vercel.json` - Cron 配置
+- ✅ 管理后台侧边栏导航入口
+
+**11 项测试功能**:
+- AI 功能 (5项): 智能路由、Token计算、Prompt缓存、上下文压缩、实时关键词
+- 计费功能 (3项): 预扣计费、幂等性检查、余额对账
+- 安全功能 (3项): 速率限制、消费熔断、RLS数据隔离
 
 ---
 
 ### 🚨 阶段 1: 基础监控体系 (必做 | 预计 2-3 天)
 
-> **进入条件**: 阶段 0 完成
+> **进入条件**: 阶段 0 完成 ✅
 > **完成条件**: Sentry + 日志 + 成本仪表板全部可用
 
 | # | 任务 | 交付物 | 预计时间 | 状态 |
 |---|------|--------|---------|------|
-| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 1h | ⏳ 待执行 |
+| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 1h | 🔜 下一步 |
 | 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | 2h | ⏳ 待执行 |
 | 1.3 | 创建 AI 成本追踪仪表板 | /admin/costs 页面 | 3h | ⏳ 待执行 |
 

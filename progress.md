@@ -23,10 +23,10 @@
 
 ## Current Status
 
-- **Phase:** 新工作规划完成，准备执行阶段 0
+- **Phase:** 阶段 0 系统诊断 ✅ 完成
 - **Previous:** Phase 11 安全审计问题修复 ✅ 完成
-- **Next:** 阶段 0.1 创建系统诊断页面
-- **Started:** 2026-01-22
+- **Next:** 阶段 1 基础监控体系
+- **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
 ---
@@ -39,37 +39,56 @@
 
 | 阶段 | 内容 | 紧急程度 | 状态 |
 |------|------|---------|------|
-| **阶段 0** | 系统诊断 | 🔴 必做 | 🔜 下一步 |
-| **阶段 1** | 基础监控 | 🔴 必做 | ⏳ 待执行 |
+| **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
+| **阶段 1** | 基础监控 | 🔴 必做 | 🔜 下一步 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
-### 下一步: 阶段 0.1 创建系统诊断页面
+---
 
-**目标**: 一键测试所有"看不见"的关键功能
+## 阶段 0 系统诊断 (2026-01-22 完成)
 
-**交付物**:
-- `packages/api/src/services/diagnostics.ts` - 诊断服务
-- `packages/api/src/routers/diagnostics.ts` - tRPC Router
-- `packages/db/migrations/0005_diagnostics.sql` - 数据库迁移
-- `apps/web/src/app/admin/diagnostics/page.tsx` - 前端页面
-- `apps/web/src/app/api/cron/diagnostics/route.ts` - Vercel Cron
+### 交付物
 
-**11 项测试功能**:
-1. 智能路由测试
-2. Token 计算精度测试
-3. Prompt Caching 测试
-4. 上下文压缩测试
-5. 流式响应测试
-6. 三段式计费测试
-7. 幂等性检查测试
-8. 余额对账测试
-9. 速率限制测试
-10. 消费熔断测试
-11. RLS 数据隔离测试
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/db/migrations/0005_diagnostics.sql` | 诊断结果表 + RLS + 统计函数 | ✅ |
+| `packages/api/src/services/diagnostics.ts` | 诊断服务 (11 项测试) | ✅ |
+| `packages/api/src/routers/diagnostics.ts` | tRPC 路由 | ✅ |
+| `apps/web/src/app/admin/diagnostics/page.tsx` | 前端诊断页面 | ✅ |
+| `apps/web/src/app/api/cron/diagnostics/route.ts` | Vercel Cron 定时任务 | ✅ |
+| `vercel.json` | Cron 配置 (每小时运行) | ✅ |
+| `apps/web/src/components/admin/AdminSidebar.tsx` | 添加导航入口 | ✅ |
+
+### 11 项诊断测试
+
+**AI 功能 (5项)**:
+1. ✅ 智能路由测试 - 验证 simple/complex 分类
+2. ✅ Token 计算精度测试 - 中文/英文/混合文本估算
+3. ✅ Prompt 缓存测试 - 检查缓存配置状态
+4. ✅ 上下文压缩测试 - 验证阈值配置 (60%)
+5. ✅ 实时数据关键词测试 - 验证 Web Search 触发
+
+**计费功能 (3项)**:
+6. ✅ 预扣计费测试 - 成本估算函数验证
+7. ✅ 幂等性检查测试 - RPC 函数可用性
+8. ✅ 余额对账测试 - 测试账户 + billing_history
+
+**安全功能 (3项)**:
+9. ✅ 速率限制测试 - 内存限制器配置
+10. ✅ 消费熔断测试 - 系统设置检查
+11. ✅ RLS 数据隔离测试 - 关键表访问检查
+
+### 使用方式
+
+1. 访问 `/admin/diagnostics` 进入诊断页面
+2. 点击"运行所有测试"执行 11 项诊断
+3. 也可按类别单独运行 (AI/计费/安全)
+4. Vercel Cron 每小时自动运行一次
+5. 查看历史记录追踪系统健康趋势
 
 ---
 
