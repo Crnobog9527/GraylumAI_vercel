@@ -23,9 +23,9 @@
 
 ## Current Status
 
-- **Phase:** 阶段 5 文档体系 ✅ 完成
-- **Previous:** 阶段 4 性能优化 ✅ 完成
-- **Next:** 阶段 6 高级优化 (可选)
+- **Phase:** 阶段 6 高级优化 ✅ 完成
+- **Previous:** 阶段 5 文档体系 ✅ 完成
+- **Next:** 全部阶段完成 🎉
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
@@ -45,7 +45,7 @@
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ✅ 完成 |
-| **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
+| **阶段 6** | 高级优化 | 🟢 可选 | ✅ 完成 |
 
 ---
 
@@ -346,6 +346,41 @@ docs/
     ├── MONITORING.md            # 监控告警
     └── API_DEVELOPMENT.md       # API 开发
 ```
+
+---
+
+## 阶段 6 高级优化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 1-5 完成 ✅
+> **完成条件**: 流式输出 + Prompt Caching 优化 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 6.1 | 优化 AI 流式输出 | SSE API + useStreamingChat | ✅ 完成 |
+| 6.2 | 优化 Prompt Caching | promptCache.ts | ✅ 完成 |
+
+### 交付物清单
+
+**任务 6.1 - AI 流式输出**:
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - SSE 流式响应 API
+- ✅ `apps/web/src/hooks/useStreamingChat.ts` - 流式聊天 Hook
+
+**流式功能特性**:
+- Server-Sent Events (SSE) 实现
+- 实时打字机效果
+- 中断保存 (保留已生成内容)
+- 中断时按实际消耗计费
+
+**任务 6.2 - Prompt Caching 优化**:
+- ✅ `packages/api/src/services/promptCache.ts` - 缓存优化服务
+
+**缓存优化特性**:
+- 智能缓存策略 (系统提示词 + 历史消息)
+- 最小缓存阈值: 1024 tokens
+- 缓存成本减少: 90%
+- 效率监控: 命中率、节省 tokens、成本节省
 
 ---
 

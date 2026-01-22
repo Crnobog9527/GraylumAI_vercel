@@ -166,15 +166,32 @@
 
 ---
 
-### 💡 阶段 6: 高级优化 (可选 | 按需)
+### ✅ 阶段 6: 高级优化 (已完成 | 2026-01-22)
 
-> **进入条件**: 阶段 1-5 完成，系统稳定运行 1 周以上
-> **完成条件**: 按需选择
+> **进入条件**: 阶段 1-5 完成 ✅
+> **完成条件**: 流式输出 + Prompt Caching 优化 ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 6.1 | 优化 AI 流式输出 | 打字机效果 + 中断保存 | 4h | ⏳ 待执行 |
-| 6.2 | 优化 Prompt Caching | 缓存监控 + 效率优化 | 3h | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 6.1 | 优化 AI 流式输出 | SSE 流式 API + useStreamingChat Hook | ✅ 完成 |
+| 6.2 | 优化 Prompt Caching | promptCache.ts 缓存优化服务 | ✅ 完成 |
+
+**交付物清单**:
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - SSE 流式响应 API
+- ✅ `apps/web/src/hooks/useStreamingChat.ts` - 流式聊天 Hook (打字机效果)
+- ✅ `packages/api/src/services/promptCache.ts` - Prompt Caching 优化服务
+
+**流式输出功能**:
+- Server-Sent Events (SSE) 实现真正的流式响应
+- 实时打字机效果，逐字显示
+- 中断保存功能，用户中断时保留已生成内容
+- 自动计费结算，中断时按实际消耗计费
+
+**Prompt Caching 优化**:
+- 智能缓存策略：系统提示词缓存 + 历史消息缓存
+- 缓存效率监控：命中率、节省 tokens、成本节省
+- 最小缓存阈值：1024 tokens
+- 缓存成本减少：90% (Anthropic 定价)
 
 ---
 
