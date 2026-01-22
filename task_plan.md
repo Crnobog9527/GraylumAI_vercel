@@ -67,31 +67,33 @@
 
 ---
 
-### 🚨 阶段 1: 基础监控体系 (必做 | 预计 2-3 天)
+### ✅ 阶段 1: 基础监控体系 (已完成 | 2026-01-22)
 
 > **进入条件**: 阶段 0 完成 ✅
-> **完成条件**: Sentry + 日志 + 成本仪表板全部可用
+> **完成条件**: Sentry + 日志 + 成本仪表板全部可用 ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | 1h | 🔜 下一步 |
-| 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | 2h | ⏳ 待执行 |
-| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | 4h | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 1.1 | 安装 Sentry 错误监控 | sentry.*.config.ts + 测试端点 | ✅ 完成 |
+| 1.2 | 建立结构化日志系统 | logger.ts + application_logs 表 | ✅ 完成 |
+| 1.3 | 创建 AI 监控仪表板 | /admin/costs 页面 (3个Tab) | ✅ 完成 |
 
-**任务 1.3 详细设计**:
+**交付物清单**:
+- ✅ `apps/web/sentry.*.config.ts` - Sentry 配置文件 (client/server/edge)
+- ✅ `apps/web/instrumentation.ts` - Next.js Sentry 集成
+- ✅ `apps/web/src/app/api/sentry-test/route.ts` - Sentry 测试端点
+- ✅ `packages/api/src/lib/logger.ts` - 结构化日志服务 (pino)
+- ✅ `packages/db/migrations/0006_application_logs.sql` - 日志表
+- ✅ `packages/api/src/routers/costs.ts` - 成本监控 API
+- ✅ `apps/web/src/app/admin/costs/page.tsx` - AI 成本监控仪表板
 
-`/admin/costs` 页面包含 3 个 Tab：
+**AI 监控仪表板 (`/admin/costs`) 功能**:
 
 | Tab | 数据源 | 功能 |
 |-----|--------|------|
-| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布 |
+| 成本概览 | `token_stats`, `billing_history` | 成本趋势图、用户消费排行、模型使用分布、缓存效率 |
 | AI 调用日志 | `ai_usage_logs` | 查看每次调用详情，包含 routingReason、latency、status |
-| Token 统计 | `token_stats` | input/output/cached tokens、压缩触发记录 |
-
-**验证 AI 功能的方式**:
-- 智能路由: 查看 `metadata.routingReason` 字段
-- 上下文压缩: 查看 `cached_tokens` 和 input_tokens 变化
-- Prompt 缓存: 查看 `cached_tokens > 0` 的记录
+| Token 统计 | `token_stats` | input/output/cached tokens 统计
 
 ---
 

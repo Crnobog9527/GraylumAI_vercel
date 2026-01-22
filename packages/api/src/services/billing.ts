@@ -15,6 +15,7 @@ import {
   InvalidBillingOperationError,
 } from '../types/billing';
 import { type TokenUsage, type CostBreakdown } from '../types/ai';
+import { logger } from '../lib/logger';
 
 // ============================================
 // 类型定义
@@ -424,6 +425,7 @@ export class BillingService {
 
     // 2. 余额检查
     if (currentCredits < estimatedCredits) {
+      logger.billing.insufficient(this.userId, estimatedCredits, currentCredits);
       throw new InsufficientCreditsError(this.userId, estimatedCredits, currentCredits);
     }
 
@@ -468,6 +470,14 @@ export class BillingService {
       console.error('Failed to record pre-deduct:', billingError);
       throw new Error('计费记录失败');
     }
+
+    // 记录日志
+    logger.billing.preDeduct(
+      this.userId,
+      estimatedCredits,
+      requestId ?? billingRecord.id,
+      { balanceBefore: currentCredits, balanceAfter: newCredits }
+    );
 
     return {
       preDeductId: billingRecord.id,
@@ -607,6 +617,16 @@ export class BillingService {
       .eq('id', this.userId)
       .single();
 
+    // 记录日志
+    logger.billing.settle(
+      this.userId,
+      preDeductedAmount,
+      actualCredits,
+      difference > 0 ? difference : 0,
+      preDeductId,
+      { balanceAfter: finalProfile?.credits ?? 0 }
+    );
+
     return {
       actualCredits,
       difference,
@@ -717,6 +737,15 @@ export class BillingService {
     if (refundError) {
       console.error('Failed to record refund:', refundError);
     }
+
+    // 记录日志
+    logger.billing.refund(
+      this.userId,
+      refundAmount,
+      preDeductId,
+      reason,
+      { balanceAfter: newCredits }
+    );
 
     return {
       refundAmount,
