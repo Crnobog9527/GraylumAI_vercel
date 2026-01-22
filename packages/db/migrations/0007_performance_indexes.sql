@@ -1,6 +1,7 @@
 -- Migration: 0007_performance_indexes.sql
 -- Description: Add performance indexes for common query patterns
 -- Created: 2026-01-22
+-- Note: Safe to run regardless of soft-delete migration status
 
 -- =====================================================
 -- CONVERSATIONS TABLE INDEXES
@@ -10,14 +11,17 @@
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id
 ON conversations(user_id);
 
--- Composite index for user's active conversations
-CREATE INDEX IF NOT EXISTS idx_conversations_user_active
-ON conversations(user_id, is_deleted)
-WHERE is_deleted = 'false';
-
 -- Index for sorting by creation date
 CREATE INDEX IF NOT EXISTS idx_conversations_created_at
 ON conversations(created_at DESC);
+
+-- Conditional: Composite index for user's active conversations (requires is_deleted column)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'is_deleted') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_conversations_user_active ON conversations(user_id, is_deleted) WHERE is_deleted = ''false''';
+  END IF;
+END $$;
 
 -- =====================================================
 -- MESSAGES TABLE INDEXES
@@ -31,10 +35,13 @@ ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
 ON messages(conversation_id, created_at ASC);
 
--- Index for soft delete filtering
-CREATE INDEX IF NOT EXISTS idx_messages_is_deleted
-ON messages(is_deleted)
-WHERE is_deleted = 'false';
+-- Conditional: Index for soft delete filtering (requires is_deleted column)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'messages' AND column_name = 'is_deleted') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_messages_is_deleted ON messages(is_deleted) WHERE is_deleted = ''false''';
+  END IF;
+END $$;
 
 -- =====================================================
 -- TOKEN_STATS TABLE INDEXES
@@ -121,14 +128,17 @@ ON tickets(user_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status
 ON tickets(status);
 
--- Composite index for active tickets by user
-CREATE INDEX IF NOT EXISTS idx_tickets_user_status
-ON tickets(user_id, status)
-WHERE is_deleted = 'false';
-
 -- Index for priority filtering
 CREATE INDEX IF NOT EXISTS idx_tickets_priority
 ON tickets(priority);
+
+-- Conditional: Composite index for active tickets by user (requires is_deleted column)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'is_deleted') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_tickets_user_status ON tickets(user_id, status) WHERE is_deleted = ''false''';
+  END IF;
+END $$;
 
 -- =====================================================
 -- USER_ACTIVITY_LOGS TABLE INDEXES
@@ -163,23 +173,29 @@ ON profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_membership_level
 ON profiles(membership_level);
 
--- Index for active users (excluding soft deleted)
-CREATE INDEX IF NOT EXISTS idx_profiles_active
-ON profiles(status)
-WHERE is_deleted = 'false';
+-- Conditional: Index for active users (requires is_deleted column)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'is_deleted') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_profiles_active ON profiles(status) WHERE is_deleted = ''false''';
+  END IF;
+END $$;
 
 -- =====================================================
 -- ANNOUNCEMENTS TABLE INDEXES
 -- =====================================================
 
--- Index for active announcements
-CREATE INDEX IF NOT EXISTS idx_announcements_active
-ON announcements(active, priority DESC)
-WHERE is_deleted = 'false';
-
 -- Index for announcement type
 CREATE INDEX IF NOT EXISTS idx_announcements_type
 ON announcements(announcement_type);
+
+-- Conditional: Index for active announcements (requires is_deleted column)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'announcements' AND column_name = 'is_deleted') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(active, priority DESC) WHERE is_deleted = ''false''';
+  END IF;
+END $$;
 
 -- =====================================================
 -- INVITATIONS TABLE INDEXES
@@ -206,10 +222,9 @@ CREATE INDEX IF NOT EXISTS idx_invitation_records_status
 ON invitation_records(status);
 
 -- =====================================================
--- APPLICATION_LOGS TABLE INDEXES (if exists)
+-- APPLICATION_LOGS TABLE INDEXES (if table exists)
 -- =====================================================
 
--- Conditional index creation for application_logs
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'application_logs') THEN
@@ -220,7 +235,7 @@ BEGIN
 END $$;
 
 -- =====================================================
--- DIAGNOSTICS_RESULTS TABLE INDEXES (if exists)
+-- DIAGNOSTICS_RESULTS TABLE INDEXES (if table exists)
 -- =====================================================
 
 DO $$
@@ -234,17 +249,21 @@ END $$;
 
 -- =====================================================
 -- ANALYZE TABLES (update statistics for query planner)
+-- Only analyze tables that exist
 -- =====================================================
 
-ANALYZE conversations;
-ANALYZE messages;
-ANALYZE token_stats;
-ANALYZE billing_history;
-ANALYZE ai_usage_logs;
-ANALYZE credit_transactions;
-ANALYZE tickets;
-ANALYZE user_activity_logs;
-ANALYZE profiles;
-ANALYZE announcements;
-ANALYZE invitations;
-ANALYZE invitation_records;
+DO $$
+DECLARE
+  tbl text;
+  tables text[] := ARRAY['conversations', 'messages', 'token_stats', 'billing_history',
+                         'ai_usage_logs', 'credit_transactions', 'tickets',
+                         'user_activity_logs', 'profiles', 'announcements',
+                         'invitations', 'invitation_records'];
+BEGIN
+  FOREACH tbl IN ARRAY tables
+  LOOP
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = tbl) THEN
+      EXECUTE 'ANALYZE ' || tbl;
+    END IF;
+  END LOOP;
+END $$;
