@@ -98,6 +98,7 @@
 | 页面中文乱码 | Write 工具将中文转义为 Unicode 序列 | 重新写入正确的中文字符 |
 | 运行测试无反应 | onError 未显示错误信息，可能是权限问题 | 添加错误状态和 UI 显示 |
 | 运行测试仍无反应 | mutation 返回结果但 onSuccess 仅调用 refetchLatest()，数据库表不存在时返回空 | 直接使用 mutation 返回结果显示，添加 localResults state |
+| UUID 类型不匹配 | batch_id 数据库类型为 uuid，但 generateBatchId() 生成自定义字符串 `diag_xxx` | 改用标准 UUID v4 格式生成 |
 
 ### 已修复问题
 

@@ -56,6 +56,7 @@
 - 页面中文乱码: Unicode 转义问题 → 重新写入正确字符
 - 运行测试无反应: onError 未显示错误 → 添加错误状态和 UI 显示
 - 运行测试仍无反应: mutation 成功但结果不显示 → 直接使用 mutation 返回结果显示，不依赖数据库
+- UUID 类型不匹配: batch_id 数据库为 uuid 类型，generateBatchId() 生成 `diag_xxx` 格式 → 改用标准 UUID v4 格式
 
 **已修复问题**:
 - ✅ React Hydration 错误: 移除 `<Collapsible>` 组件，改用原生 React 状态控制展开/折叠
