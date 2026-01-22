@@ -129,15 +129,20 @@
 
 ---
 
-### ⚠️ 阶段 4: 性能优化 (应该做 | 预计 1 天)
+### ✅ 阶段 4: 性能优化 (已完成 | 2026-01-22)
 
-> **进入条件**: 阶段 3 完成
-> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s
+> **进入条件**: 阶段 3 完成 ✅
+> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights 集成 | 30m | ⏳ 待执行 |
-| 4.2 | 数据库性能优化 | 索引优化 SQL + 查询缓存 | 2h | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights 集成 | ✅ 完成 |
+| 4.2 | 数据库性能优化 | 索引优化 SQL (0007_performance_indexes.sql) | ✅ 完成 |
+
+**交付物清单**:
+- ✅ `apps/web/src/app/layout.tsx` - 添加 Analytics + SpeedInsights 组件
+- ✅ `@vercel/analytics` + `@vercel/speed-insights` 依赖
+- ✅ `packages/db/migrations/0007_performance_indexes.sql` - 40+ 性能索引
 
 ---
 

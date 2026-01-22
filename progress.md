@@ -23,9 +23,9 @@
 
 ## Current Status
 
-- **Phase:** 阶段 3 CI/CD 自动化 ✅ 完成
-- **Previous:** 阶段 2 安全加固 ✅ 完成
-- **Next:** 阶段 4 性能优化
+- **Phase:** 阶段 4 性能优化 ✅ 完成
+- **Previous:** 阶段 3 CI/CD 自动化 ✅ 完成
+- **Next:** 阶段 5 文档体系
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
@@ -43,8 +43,8 @@
 | **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
-| **阶段 4** | 性能优化 | 🟡 应该做 | 🔜 下一步 |
-| **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
+| **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 5** | 文档体系 | 🟡 应该做 | 🔜 下一步 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
 ---
@@ -261,6 +261,49 @@ develop 推送 → lint → test → build → deploy-staging
                                     ↓
 main 推送 → lint → test → build → deploy-production
 ```
+
+---
+
+## 阶段 4 性能优化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 3 完成 ✅
+> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights | ✅ 完成 |
+| 4.2 | 数据库性能优化 | 40+ 性能索引 | ✅ 完成 |
+
+### 交付物清单
+
+**任务 4.1 - Vercel Analytics**:
+- ✅ `apps/web/src/app/layout.tsx` - 添加 Analytics + SpeedInsights 组件
+- ✅ `@vercel/analytics` v1.6.1
+- ✅ `@vercel/speed-insights` v1.3.1
+
+**任务 4.2 - 数据库性能索引**:
+- ✅ `packages/db/migrations/0007_performance_indexes.sql` - 40+ 索引
+
+### 索引覆盖表
+
+| 表名 | 索引数量 | 主要用途 |
+|------|----------|----------|
+| conversations | 3 | 用户对话列表、软删除过滤 |
+| messages | 3 | 对话消息查询、时间排序 |
+| token_stats | 4 | 成本报表、模型使用统计 |
+| billing_history | 3 | 用户计费记录查询 |
+| ai_usage_logs | 4 | AI 调用日志、调试追踪 |
+| credit_transactions | 3 | 积分交易记录 |
+| tickets | 4 | 工单管理、状态过滤 |
+| user_activity_logs | 4 | 用户活动审计 |
+| profiles | 3 | 角色/会员级别查询 |
+| announcements | 2 | 公告展示 |
+| invitations | 2 | 邀请码查询 |
+| invitation_records | 2 | 邀请记录统计 |
+| application_logs | 3 | 应用日志查询 |
+| diagnostics_results | 3 | 诊断结果查询 |
 
 ---
 
