@@ -48,6 +48,10 @@ export interface DiagnosticRunResult {
     passRate: number;
     avgLatencyMs: number;
   };
+  saveStatus?: {
+    saved: boolean;
+    error?: string;
+  };
 }
 
 export interface DiagnosticContext {
@@ -777,7 +781,7 @@ export class DiagnosticsService {
     const summary = this.calculateSummary(results);
 
     // 保存结果到数据库
-    await this.saveResults(batchId, results);
+    const saveStatus = await this.saveResults(batchId, results);
 
     return {
       batchId,
@@ -785,6 +789,7 @@ export class DiagnosticsService {
       runType: this.runType,
       results,
       summary,
+      saveStatus,
     };
   }
 
@@ -823,7 +828,7 @@ export class DiagnosticsService {
     }
 
     const summary = this.calculateSummary(results);
-    await this.saveResults(batchId, results);
+    const saveStatus = await this.saveResults(batchId, results);
 
     return {
       batchId,
@@ -831,6 +836,7 @@ export class DiagnosticsService {
       runType: this.runType,
       results,
       summary,
+      saveStatus,
     };
   }
 
@@ -966,7 +972,7 @@ export class DiagnosticsService {
     };
   }
 
-  private async saveResults(batchId: string, results: DiagnosticTestResult[]) {
+  private async saveResults(batchId: string, results: DiagnosticTestResult[]): Promise<{ saved: boolean; error?: string }> {
     const records = results.map((r) => ({
       test_id: r.testId,
       test_name: r.testName,
@@ -980,11 +986,17 @@ export class DiagnosticsService {
       batch_id: batchId,
     }));
 
+    console.log('[Diagnostics] Saving results to database, records:', records.length, 'userId:', this.userId);
+
     const { error } = await this.supabase.from('diagnostic_results').insert(records);
 
     if (error) {
-      console.error('Failed to save diagnostic results:', error);
+      console.error('[Diagnostics] Failed to save diagnostic results:', error.message, error.code, error.details);
+      return { saved: false, error: `${error.message} (${error.code})` };
     }
+
+    console.log('[Diagnostics] Results saved successfully');
+    return { saved: true };
   }
 
   private async saveSingleResult(result: DiagnosticTestResult) {

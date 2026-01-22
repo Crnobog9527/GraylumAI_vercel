@@ -25,11 +25,12 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+// 移除 Collapsible 以避免在表格中产生 Hydration 错误
+// import {
+//   Collapsible,
+//   CollapsibleContent,
+//   CollapsibleTrigger,
+// } from "@/components/ui/collapsible";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
@@ -90,18 +91,21 @@ function TestResultRow({ result, onRerun }: { result: TestResult; onRerun: (test
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <>
       <TableRow className="hover:bg-[var(--bg-tertiary)]">
         <TableCell>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="p-0 h-auto">
-              {isOpen ? (
-                <ChevronDown className="h-4 w-4 text-[var(--text-tertiary)]" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-[var(--text-tertiary)]" />
-              )}
-            </Button>
-          </CollapsibleTrigger>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-0 h-auto"
+            onClick={() => setIsOpen(!isOpen)}
+          >
+            {isOpen ? (
+              <ChevronDown className="h-4 w-4 text-[var(--text-tertiary)]" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-[var(--text-tertiary)]" />
+            )}
+          </Button>
         </TableCell>
         <TableCell>
           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
@@ -138,7 +142,7 @@ function TestResultRow({ result, onRerun }: { result: TestResult; onRerun: (test
           </Button>
         </TableCell>
       </TableRow>
-      <CollapsibleContent asChild>
+      {isOpen && (
         <TableRow>
           <TableCell colSpan={7} className="p-0">
             <div className="p-4 bg-[var(--bg-tertiary)] border-t border-[var(--border-primary)]">
@@ -163,8 +167,8 @@ function TestResultRow({ result, onRerun }: { result: TestResult; onRerun: (test
             </div>
           </TableCell>
         </TableRow>
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+    </>
   );
 }
 
@@ -183,12 +187,17 @@ interface RunResult {
     passRate: number;
     avgLatencyMs: number;
   };
+  saveStatus?: {
+    saved: boolean;
+    error?: string;
+  };
 }
 
 export default function AdminDiagnosticsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<DiagnosticCategory | 'all'>('all');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [localResults, setLocalResults] = useState<TestResult[]>([]);
 
   // Queries
@@ -211,6 +220,12 @@ export default function AdminDiagnosticsPage() {
       if (data && data.results) {
         setLocalResults(data.results);
       }
+      // 检查保存状态
+      if (data?.saveStatus && !data.saveStatus.saved) {
+        setSaveWarning(`数据库保存失败: ${data.saveStatus.error || '未知错误'}`);
+      } else {
+        setSaveWarning(null);
+      }
       refetchLatest();
       refetchSummary();
       refetchHealth();
@@ -229,6 +244,12 @@ export default function AdminDiagnosticsPage() {
       console.log('runCategoryTests success, data:', data);
       if (data && data.results) {
         setLocalResults(data.results);
+      }
+      // 检查保存状态
+      if (data?.saveStatus && !data.saveStatus.saved) {
+        setSaveWarning(`数据库保存失败: ${data.saveStatus.error || '未知错误'}`);
+      } else {
+        setSaveWarning(null);
       }
       refetchLatest();
       refetchSummary();
@@ -405,6 +426,28 @@ export default function AdminDiagnosticsPage() {
               size="sm"
               onClick={() => setErrorMessage(null)}
               className="text-red-400 hover:text-red-300"
+            >
+              关闭
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Save Warning */}
+      {saveWarning && (
+        <div className="mb-6 p-4 rounded-lg bg-amber-500/20 border border-amber-500/30">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium text-amber-400">测试结果未持久化</p>
+              <p className="text-sm text-amber-300 mt-1">{saveWarning}</p>
+              <p className="text-xs text-amber-300/70 mt-1">测试已执行成功，但结果未保存到数据库。刷新页面后数据将丢失。</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSaveWarning(null)}
+              className="text-amber-400 hover:text-amber-300"
             >
               关闭
             </Button>
