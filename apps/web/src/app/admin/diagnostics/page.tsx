@@ -171,6 +171,7 @@ function TestResultRow({ result, onRerun }: { result: TestResult; onRerun: (test
 export default function AdminDiagnosticsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<DiagnosticCategory | 'all'>('all');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Queries
   const { data: latestResults, refetch: refetchLatest } = trpc.diagnostics.getLatestResults.useQuery();
@@ -186,9 +187,12 @@ export default function AdminDiagnosticsPage() {
       refetchSummary();
       refetchHealth();
       setIsRunning(false);
+      setErrorMessage(null);
     },
-    onError: () => {
+    onError: (error) => {
       setIsRunning(false);
+      setErrorMessage(error.message || '运行测试失败');
+      console.error('runAllTests error:', error);
     },
   });
 
@@ -197,9 +201,12 @@ export default function AdminDiagnosticsPage() {
       refetchLatest();
       refetchSummary();
       setIsRunning(false);
+      setErrorMessage(null);
     },
-    onError: () => {
+    onError: (error) => {
       setIsRunning(false);
+      setErrorMessage(error.message || '运行测试失败');
+      console.error('runCategoryTests error:', error);
     },
   });
 
@@ -207,6 +214,11 @@ export default function AdminDiagnosticsPage() {
     onSuccess: () => {
       refetchLatest();
       refetchSummary();
+      setErrorMessage(null);
+    },
+    onError: (error) => {
+      setErrorMessage(error.message || '运行测试失败');
+      console.error('runSingleTest error:', error);
     },
   });
 
@@ -310,6 +322,27 @@ export default function AdminDiagnosticsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="mb-6 p-4 rounded-lg bg-red-500/20 border border-red-500/30">
+          <div className="flex items-center gap-3">
+            <XCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium text-red-400">测试运行失败</p>
+              <p className="text-sm text-red-300 mt-1">{errorMessage}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setErrorMessage(null)}
+              className="text-red-400 hover:text-red-300"
+            >
+              关闭
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
