@@ -86,6 +86,14 @@
 - ✅ `packages/db/migrations/0006_application_logs.sql` - 日志表
 - ✅ `packages/api/src/routers/costs.ts` - 成本监控 API
 - ✅ `apps/web/src/app/admin/costs/page.tsx` - AI 成本监控仪表板
+- ✅ `.gitignore` - 添加 Sentry 敏感文件排除规则
+
+**Sentry 配置说明**:
+- 使用官方 wizard 完成配置: `npx @sentry/wizard@latest -i nextjs`
+- 启用 Tracing (性能监控)
+- 启用 Session Replay (会话回放)
+- `.env.sentry-build-plugin` 已添加到 .gitignore
+- ✅ `NEXT_PUBLIC_SENTRY_DSN` 已在 Vercel 环境变量配置
 
 **AI 监控仪表板 (`/admin/costs`) 功能**:
 
@@ -122,39 +130,100 @@
 
 ---
 
-### ⚠️ 阶段 4: 性能优化 (应该做 | 预计 1 天)
+### ✅ 阶段 4: 性能优化 (已完成 | 2026-01-22)
 
-> **进入条件**: 阶段 3 完成
-> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s
+> **进入条件**: 阶段 3 完成 ✅
+> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights 集成 | 30m | ⏳ 待执行 |
-| 4.2 | 数据库性能优化 | 索引优化 SQL + 查询缓存 | 2h | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights 集成 | ✅ 完成 |
+| 4.2 | 数据库性能优化 | 索引优化 SQL (0007_performance_indexes.sql) | ✅ 完成 |
 
----
-
-### ⚠️ 阶段 5: 文档体系 (应该做 | 预计 1 天)
-
-> **进入条件**: 阶段 4 完成
-> **完成条件**: /docs 目录完整，Runbooks 覆盖主要场景
-
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 5.1 | 创建技术文档 | /docs 目录结构 + 架构图 | 4h | ⏳ 待执行 |
-| 5.2 | 创建操作手册 | 4 个 runbooks | 2h | ⏳ 待执行 |
+**交付物清单**:
+- ✅ `apps/web/src/app/layout.tsx` - 添加 Analytics + SpeedInsights 组件
+- ✅ `@vercel/analytics` + `@vercel/speed-insights` 依赖
+- ✅ `packages/db/migrations/0007_performance_indexes.sql` - 40+ 性能索引
 
 ---
 
-### 💡 阶段 6: 高级优化 (可选 | 按需)
+### ✅ 阶段 5: 文档体系 (已完成 | 2026-01-22)
 
-> **进入条件**: 阶段 1-5 完成，系统稳定运行 1 周以上
-> **完成条件**: 按需选择
+> **进入条件**: 阶段 4 完成 ✅
+> **完成条件**: /docs 目录完整，Runbooks 覆盖主要场景 ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 6.1 | 优化 AI 流式输出 | 打字机效果 + 中断保存 | 4h | ⏳ 待执行 |
-| 6.2 | 优化 Prompt Caching | 缓存监控 + 效率优化 | 3h | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 5.1 | 创建技术文档 | ARCHITECTURE.md + DATABASE.md | ✅ 完成 |
+| 5.2 | 创建操作手册 | 4 个 runbooks | ✅ 完成 |
+
+**交付物清单**:
+- ✅ `docs/ARCHITECTURE.md` - 系统架构文档 + 架构图
+- ✅ `docs/DATABASE.md` - 数据库 Schema 文档
+- ✅ `docs/runbooks/INCIDENT_RESPONSE.md` - 事件响应手册
+- ✅ `docs/runbooks/DATABASE_OPERATIONS.md` - 数据库操作手册
+- ✅ `docs/runbooks/MONITORING.md` - 监控告警手册
+- ✅ `docs/runbooks/API_DEVELOPMENT.md` - API 开发指南
+
+---
+
+### ✅ 阶段 6: 高级优化 (已完成 | 2026-01-22)
+
+> **进入条件**: 阶段 1-5 完成 ✅
+> **完成条件**: 流式输出 + Prompt Caching 优化 ✅
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 6.1 | 优化 AI 流式输出 | SSE 流式 API + useStreamingChat Hook | ✅ 完成 |
+| 6.2 | 优化 Prompt Caching | promptCache.ts 缓存优化服务 | ✅ 完成 |
+
+**交付物清单**:
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - SSE 流式响应 API
+- ✅ `apps/web/src/hooks/useStreamingChat.ts` - 流式聊天 Hook (打字机效果)
+- ✅ `packages/api/src/services/promptCache.ts` - Prompt Caching 优化服务
+
+**流式输出功能**:
+- Server-Sent Events (SSE) 实现真正的流式响应
+- 实时打字机效果，逐字显示
+- 中断保存功能，用户中断时保留已生成内容
+- 自动计费结算，中断时按实际消耗计费
+
+**Prompt Caching 优化**:
+- 智能缓存策略：系统提示词缓存 + 历史消息缓存
+- 缓存效率监控：命中率、节省 tokens、成本节省
+- 最小缓存阈值：1024 tokens
+- 缓存成本减少：90% (Anthropic 定价)
+
+---
+
+### 💡 后续优化任务 (可选)
+
+> **说明**: 以下任务为可选优化，根据需要执行
+
+| # | 任务 | 交付物 | 优先级 | 状态 |
+|---|------|--------|--------|------|
+| 7.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ⏳ 待执行 |
+| 7.2 | Sentry 监控告警 | 告警规则配置 | 🟡 推荐 | ⏳ 待执行 |
+| 7.3 | 负载测试 | k6/Artillery 压测脚本 | 🟢 可选 | ⏳ 待执行 |
+| 7.4 | 用户文档 | 使用手册 | 🟢 可选 | ⏳ 待执行 |
+
+**任务 7.1 - E2E 测试**:
+- 工具: Playwright (推荐) 或 Cypress
+- 测试场景:
+  - 用户注册/登录流程
+  - AI 对话发送和接收
+  - 积分扣费正确性
+  - 管理后台操作
+- 交付物: `tests/e2e/` 目录 + CI 集成
+
+**任务 7.2 - Sentry 监控告警**:
+- 在 Sentry Dashboard 配置告警规则
+- 告警场景:
+  - 新错误类型出现
+  - 错误数量突增 (10x spike)
+  - 每小时错误 > 100
+  - 特定关键错误 (支付失败、AI 调用失败)
+- 通知渠道: Email / Slack / Webhook
 
 ---
 

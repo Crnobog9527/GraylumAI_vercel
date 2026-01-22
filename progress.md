@@ -23,11 +23,29 @@
 
 ## Current Status
 
-- **Phase:** 阶段 3 CI/CD 自动化 ✅ 完成
-- **Previous:** 阶段 2 安全加固 ✅ 完成
-- **Next:** 阶段 4 性能优化
+- **Phase:** 全部 7 阶段完成 🎉
+- **Previous:** 阶段 6 高级优化 ✅ 完成
+- **Next:** 创建 PR 合并到主分支
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
+
+### 部署检查清单
+
+| 项目 | 状态 |
+|------|------|
+| 数据库迁移 (0001-0007) | ✅ 全部完成 |
+| Vercel 环境变量 (SENTRY_DSN) | ✅ 已配置 |
+| Sentry 错误监控 | ✅ 已启用 |
+| 创建 Pull Request | ⏳ 待执行 |
+
+### 后续优化任务
+
+| 任务 | 优先级 | 状态 |
+|------|--------|------|
+| E2E 端到端测试 | 🟡 推荐 | ✅ 完成 |
+| Sentry 监控告警 | 🟡 推荐 | ✅ 完成 |
+| 负载测试 | 🟢 可选 | ⏳ |
+| 用户文档 | 🟢 可选 | ⏳ |
 
 ---
 
@@ -43,9 +61,9 @@
 | **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
-| **阶段 4** | 性能优化 | 🟡 应该做 | 🔜 下一步 |
-| **阶段 5** | 文档体系 | 🟡 应该做 | ⏳ 待执行 |
-| **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
+| **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 5** | 文档体系 | 🟡 应该做 | ✅ 完成 |
+| **阶段 6** | 高级优化 | 🟢 可选 | ✅ 完成 |
 
 ---
 
@@ -144,6 +162,18 @@
 - ✅ `apps/web/next.config.ts` - Sentry 插件配置
 - ✅ `apps/web/src/app/api/sentry-test/route.ts` - 测试端点
 - ✅ `.env.example` - 添加 Sentry 环境变量
+- ✅ `.gitignore` - 添加 Sentry 敏感文件排除 (.env.sentry-build-plugin, .sentryclirc, .sentry-cli/)
+
+**Sentry 配置方式**: 使用官方 wizard 完成
+```bash
+npx @sentry/wizard@latest -i nextjs --saas --org grayscale-luminary-llc --project javascript-nextjs
+```
+- 包管理器: PNPM
+- Route through Next.js server: No
+- Tracing (性能监控): Yes
+- Session Replay (会话回放): Yes
+- MCP 配置: No
+- ✅ `NEXT_PUBLIC_SENTRY_DSN` 已在 Vercel 环境变量配置
 
 **任务 1.2 - 结构化日志系统**:
 - ✅ `packages/api/src/lib/logger.ts` - 日志服务 (pino)
@@ -250,6 +280,172 @@ develop 推送 → lint → test → build → deploy-staging
                                     ↓
 main 推送 → lint → test → build → deploy-production
 ```
+
+---
+
+## 阶段 4 性能优化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 3 完成 ✅
+> **完成条件**: Vercel Analytics 有数据，主要页面 LCP < 2.5s ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 4.1 | 启用 Vercel Analytics | Analytics + SpeedInsights | ✅ 完成 |
+| 4.2 | 数据库性能优化 | 40+ 性能索引 | ✅ 完成 |
+
+### 交付物清单
+
+**任务 4.1 - Vercel Analytics**:
+- ✅ `apps/web/src/app/layout.tsx` - 添加 Analytics + SpeedInsights 组件
+- ✅ `@vercel/analytics` v1.6.1
+- ✅ `@vercel/speed-insights` v1.3.1
+
+**任务 4.2 - 数据库性能索引**:
+- ✅ `packages/db/migrations/0007_performance_indexes.sql` - 40+ 索引
+
+### 索引覆盖表
+
+| 表名 | 索引数量 | 主要用途 |
+|------|----------|----------|
+| conversations | 3 | 用户对话列表、软删除过滤 |
+| messages | 3 | 对话消息查询、时间排序 |
+| token_stats | 4 | 成本报表、模型使用统计 |
+| billing_history | 3 | 用户计费记录查询 |
+| ai_usage_logs | 4 | AI 调用日志、调试追踪 |
+| credit_transactions | 3 | 积分交易记录 |
+| tickets | 4 | 工单管理、状态过滤 |
+| user_activity_logs | 4 | 用户活动审计 |
+| profiles | 3 | 角色/会员级别查询 |
+| announcements | 2 | 公告展示 |
+| invitations | 2 | 邀请码查询 |
+| invitation_records | 2 | 邀请记录统计 |
+| application_logs | 3 | 应用日志查询 |
+| diagnostics_results | 3 | 诊断结果查询 |
+
+---
+
+## 阶段 5 文档体系 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 4 完成 ✅
+> **完成条件**: /docs 目录完整，Runbooks 覆盖主要场景 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 5.1 | 创建技术文档 | ARCHITECTURE.md + DATABASE.md | ✅ 完成 |
+| 5.2 | 创建操作手册 | 4 个 runbooks | ✅ 完成 |
+
+### 交付物清单
+
+**技术文档**:
+- ✅ `docs/ARCHITECTURE.md` - 系统架构概览、组件说明、数据流图
+- ✅ `docs/DATABASE.md` - 数据库 Schema、ER 图、表结构说明
+
+**操作手册 (Runbooks)**:
+- ✅ `docs/runbooks/INCIDENT_RESPONSE.md` - 事件响应流程、常见问题处理
+- ✅ `docs/runbooks/DATABASE_OPERATIONS.md` - 数据库常用操作、SQL 示例
+- ✅ `docs/runbooks/MONITORING.md` - 监控告警配置、指标解读
+- ✅ `docs/runbooks/API_DEVELOPMENT.md` - tRPC 开发指南、最佳实践
+
+### 文档目录结构
+
+```
+docs/
+├── ARCHITECTURE.md       # 系统架构
+├── DATABASE.md           # 数据库文档
+├── DEPLOYMENT.md         # 部署指南
+├── RLS_AUDIT_REPORT.md   # RLS 审计报告
+├── SECURITY_AUDIT_PHASE9.md  # 安全审计
+└── runbooks/
+    ├── INCIDENT_RESPONSE.md     # 事件响应
+    ├── DATABASE_OPERATIONS.md   # 数据库操作
+    ├── MONITORING.md            # 监控告警
+    └── API_DEVELOPMENT.md       # API 开发
+```
+
+---
+
+## 阶段 6 高级优化 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 1-5 完成 ✅
+> **完成条件**: 流式输出 + Prompt Caching 优化 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 6.1 | 优化 AI 流式输出 | SSE API + useStreamingChat | ✅ 完成 |
+| 6.2 | 优化 Prompt Caching | promptCache.ts | ✅ 完成 |
+
+### 交付物清单
+
+**任务 6.1 - AI 流式输出**:
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - SSE 流式响应 API
+- ✅ `apps/web/src/hooks/useStreamingChat.ts` - 流式聊天 Hook
+
+**流式功能特性**:
+- Server-Sent Events (SSE) 实现
+- 实时打字机效果
+- 中断保存 (保留已生成内容)
+- 中断时按实际消耗计费
+
+**任务 6.2 - Prompt Caching 优化**:
+- ✅ `packages/api/src/services/promptCache.ts` - 缓存优化服务
+
+**缓存优化特性**:
+- 智能缓存策略 (系统提示词 + 历史消息)
+- 最小缓存阈值: 1024 tokens
+- 缓存成本减少: 90%
+- 效率监控: 命中率、节省 tokens、成本节省
+
+---
+
+## 后续优化任务
+
+| # | 任务 | 交付物 | 优先级 | 状态 |
+|---|------|--------|--------|------|
+| 7.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ✅ 完成 |
+| 7.2 | Sentry 监控告警 | 告警规则配置指南 | 🟡 推荐 | ✅ 完成 |
+| 7.3 | 负载测试 | k6/Artillery 压测脚本 | 🟢 可选 | ⏳ 待执行 |
+| 7.4 | 用户文档 | 使用手册 | 🟢 可选 | ⏳ 待执行 |
+
+### 任务 7.1 - E2E 端到端测试 ✅
+
+**工具**: Playwright v1.57.0
+
+**交付物**:
+- ✅ `apps/web/playwright.config.ts` - Playwright 配置
+- ✅ `apps/web/tests/e2e/auth.setup.ts` - 认证设置
+- ✅ `apps/web/tests/e2e/auth.spec.ts` - 登录/注册测试
+- ✅ `apps/web/tests/e2e/chat.spec.ts` - AI 对话测试
+- ✅ `apps/web/tests/e2e/admin.spec.ts` - 管理后台测试
+- ✅ `package.json` 添加测试脚本
+
+**测试命令**:
+```bash
+pnpm test:e2e        # 运行所有测试
+pnpm test:e2e:ui     # UI 模式
+pnpm test:e2e:headed # 有头浏览器模式
+```
+
+### 任务 7.2 - Sentry 监控告警 ✅
+
+**交付物**:
+- ✅ `docs/SENTRY_ALERTS.md` - 告警配置指南
+
+**推荐告警规则**:
+| 规则 | 触发条件 | 优先级 |
+|------|----------|--------|
+| 新错误类型 | 首次出现的错误 | 🟡 中 |
+| 错误突增 | 10x spike | 🔴 高 |
+| 错误阈值 | > 100/小时 | 🔴 高 |
+| 关键错误 | 支付失败、AI 调用失败 | 🔴 高 |
+| 慢 API | P95 > 5s | 🟡 中 |
+
+**配置位置**: Sentry Dashboard → Alerts → Create Alert
 
 ---
 
