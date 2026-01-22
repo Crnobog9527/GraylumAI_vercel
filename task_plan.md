@@ -86,6 +86,13 @@
 - ✅ `packages/db/migrations/0006_application_logs.sql` - 日志表
 - ✅ `packages/api/src/routers/costs.ts` - 成本监控 API
 - ✅ `apps/web/src/app/admin/costs/page.tsx` - AI 成本监控仪表板
+- ✅ `.gitignore` - 添加 Sentry 敏感文件排除规则
+
+**Sentry 配置说明**:
+- 使用官方 wizard 完成配置: `npx @sentry/wizard@latest -i nextjs`
+- 启用 Tracing (性能监控)
+- 启用 Session Replay (会话回放)
+- `.env.sentry-build-plugin` 已添加到 .gitignore
 
 **AI 监控仪表板 (`/admin/costs`) 功能**:
 

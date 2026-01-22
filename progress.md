@@ -144,6 +144,17 @@
 - ✅ `apps/web/next.config.ts` - Sentry 插件配置
 - ✅ `apps/web/src/app/api/sentry-test/route.ts` - 测试端点
 - ✅ `.env.example` - 添加 Sentry 环境变量
+- ✅ `.gitignore` - 添加 Sentry 敏感文件排除 (.env.sentry-build-plugin, .sentryclirc, .sentry-cli/)
+
+**Sentry 配置方式**: 使用官方 wizard 完成
+```bash
+npx @sentry/wizard@latest -i nextjs --saas --org grayscale-luminary-llc --project javascript-nextjs
+```
+- 包管理器: PNPM
+- Route through Next.js server: No
+- Tracing (性能监控): Yes
+- Session Replay (会话回放): Yes
+- MCP 配置: No
 
 **任务 1.2 - 结构化日志系统**:
 - ✅ `packages/api/src/lib/logger.ts` - 日志服务 (pino)
