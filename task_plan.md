@@ -54,6 +54,7 @@
 **问题修复**:
 - SQL 迁移失败: profiles 表 email 无唯一约束 → 移除 ON CONFLICT 子句
 - 页面中文乱码: Unicode 转义问题 → 重新写入正确字符
+- 运行测试无反应: onError 未显示错误 → 添加错误状态和 UI 显示
 
 ---
 

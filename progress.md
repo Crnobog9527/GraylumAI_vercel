@@ -96,6 +96,7 @@
 |------|------|------|
 | SQL 迁移失败 | profiles 表 email 无唯一约束，ON CONFLICT 失败 | 移除 ON CONFLICT 子句 |
 | 页面中文乱码 | Write 工具将中文转义为 Unicode 序列 | 重新写入正确的中文字符 |
+| 运行测试无反应 | onError 未显示错误信息，可能是权限问题 | 添加错误状态和 UI 显示 |
 
 ---
 
