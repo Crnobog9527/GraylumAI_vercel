@@ -168,10 +168,28 @@ function TestResultRow({ result, onRerun }: { result: TestResult; onRerun: (test
   );
 }
 
+interface RunResult {
+  batchId: string;
+  runAt: Date;
+  runType: 'manual' | 'cron' | 'ci';
+  results: TestResult[];
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    warning: number;
+    skipped: number;
+    error: number;
+    passRate: number;
+    avgLatencyMs: number;
+  };
+}
+
 export default function AdminDiagnosticsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<DiagnosticCategory | 'all'>('all');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [localResults, setLocalResults] = useState<TestResult[]>([]);
 
   // Queries
   const { data: latestResults, refetch: refetchLatest, error: latestError } = trpc.diagnostics.getLatestResults.useQuery();
@@ -187,7 +205,12 @@ export default function AdminDiagnosticsPage() {
 
   // Mutations
   const runAllMutation = trpc.diagnostics.runAllTests.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('runAllTests success, data:', data);
+      // 直接使用返回的结果，不依赖数据库
+      if (data && data.results) {
+        setLocalResults(data.results);
+      }
       refetchLatest();
       refetchSummary();
       refetchHealth();
@@ -202,7 +225,11 @@ export default function AdminDiagnosticsPage() {
   });
 
   const runCategoryMutation = trpc.diagnostics.runCategoryTests.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('runCategoryTests success, data:', data);
+      if (data && data.results) {
+        setLocalResults(data.results);
+      }
       refetchLatest();
       refetchSummary();
       setIsRunning(false);
@@ -216,7 +243,20 @@ export default function AdminDiagnosticsPage() {
   });
 
   const runSingleMutation = trpc.diagnostics.runSingleTest.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log('runSingleTest success, data:', data);
+      if (data) {
+        // 更新本地结果中的对应测试
+        setLocalResults(prev => {
+          const existing = prev.findIndex(r => r.testId === data.testId);
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = data;
+            return updated;
+          }
+          return [...prev, data];
+        });
+      }
       refetchLatest();
       refetchSummary();
       setErrorMessage(null);
@@ -259,19 +299,22 @@ export default function AdminDiagnosticsPage() {
     }
   };
 
+  // 优先使用本地结果（mutation 返回的），否则使用数据库查询结果
+  const displayResults = localResults.length > 0 ? localResults : (latestResults ?? []);
+
   // Filter results by category
   const filteredResults = selectedCategory === 'all'
-    ? (latestResults ?? [])
-    : (latestResults ?? []).filter(r => r.category === selectedCategory);
+    ? displayResults
+    : displayResults.filter(r => r.category === selectedCategory);
 
-  // Calculate category stats
+  // Calculate category stats - 使用 displayResults
   const categoryStats = {
     ai: { total: 0, passed: 0 },
     billing: { total: 0, passed: 0 },
     security: { total: 0, passed: 0 },
   };
 
-  (latestResults ?? []).forEach(r => {
+  displayResults.forEach(r => {
     if (r.category in categoryStats) {
       categoryStats[r.category as keyof typeof categoryStats].total++;
       if (r.status === 'passed') {
@@ -279,6 +322,20 @@ export default function AdminDiagnosticsPage() {
       }
     }
   });
+
+  // 计算本地摘要统计
+  const localSummary = localResults.length > 0 ? {
+    total_tests: localResults.length,
+    passed_tests: localResults.filter(r => r.status === 'passed').length,
+    failed_tests: localResults.filter(r => r.status === 'failed').length,
+    warning_tests: localResults.filter(r => r.status === 'warning').length,
+    pass_rate: Math.round((localResults.filter(r => r.status === 'passed').length / localResults.length) * 100),
+    avg_latency_ms: Math.round(localResults.reduce((sum, r) => sum + r.latencyMs, 0) / localResults.length),
+    last_run: new Date().toISOString(),
+  } : null;
+
+  // 优先使用本地摘要
+  const displaySummary = localSummary || summaryStats;
 
   // Health status
   const healthStatus = healthCheck?.status ?? 'healthy';
@@ -363,14 +420,14 @@ export default function AdminDiagnosticsPage() {
               <div>
                 <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>通过率</p>
                 <p className="text-3xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>
-                  {summaryStats?.pass_rate ?? 0}%
+                  {displaySummary?.pass_rate ?? 0}%
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                  {summaryStats?.passed_tests ?? 0}/{summaryStats?.total_tests ?? 0} 通过
+                  {displaySummary?.passed_tests ?? 0}/{displaySummary?.total_tests ?? 0} 通过
                 </p>
               </div>
-              <div className={`p-3 rounded-xl ${(summaryStats?.pass_rate ?? 0) >= 80 ? 'bg-emerald-500/20' : 'bg-amber-500/20'}`}>
-                <Gauge className={`h-6 w-6 ${(summaryStats?.pass_rate ?? 0) >= 80 ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <div className={`p-3 rounded-xl ${(displaySummary?.pass_rate ?? 0) >= 80 ? 'bg-emerald-500/20' : 'bg-amber-500/20'}`}>
+                <Gauge className={`h-6 w-6 ${(displaySummary?.pass_rate ?? 0) >= 80 ? 'text-emerald-400' : 'text-amber-400'}`} />
               </div>
             </div>
           </CardContent>

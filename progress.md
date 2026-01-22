@@ -97,7 +97,7 @@
 | SQL 迁移失败 | profiles 表 email 无唯一约束，ON CONFLICT 失败 | 移除 ON CONFLICT 子句 |
 | 页面中文乱码 | Write 工具将中文转义为 Unicode 序列 | 重新写入正确的中文字符 |
 | 运行测试无反应 | onError 未显示错误信息，可能是权限问题 | 添加错误状态和 UI 显示 |
-| 运行测试仍无反应 | 待排查：可能是 query 错误或 CSP 问题 | 添加 console.log 调试 |
+| 运行测试仍无反应 | mutation 返回结果但 onSuccess 仅调用 refetchLatest()，数据库表不存在时返回空 | 直接使用 mutation 返回结果显示，添加 localResults state |
 
 ---
 
