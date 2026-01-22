@@ -57,10 +57,16 @@
 - 运行测试无反应: onError 未显示错误 → 添加错误状态和 UI 显示
 - 运行测试仍无反应: mutation 成功但结果不显示 → 直接使用 mutation 返回结果显示，不依赖数据库
 
-**已知问题 (P2)**:
-- React Hydration 警告: `<Collapsible>` 在表格中嵌套导致 `<div> cannot contain <tr>` → 待优化，不影响功能
+**已知问题 (P1)**:
+- React Hydration 错误 (4个): `<Collapsible>` 在表格中嵌套导致非法 HTML 结构
+  - `<div> cannot contain a nested <tr>`
+  - `<tr> cannot be a child of <div>`
+  - `<div> cannot be a child of <tbody>`
+  - `<tbody> cannot contain a nested <div>`
+  - 影响: 诊断结果排版错位，需要重构 TestResultRow 组件
+- 数据库未写入: 诊断结果未保存到 diagnostic_results 表，可能是 RLS 策略问题
 
-**测试结果**: ✅ 通过率 100% (11/11)
+**测试结果**: ✅ 通过率 100% (11/11)，但有 UI/数据持久化问题
 
 ---
 

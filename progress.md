@@ -98,11 +98,24 @@
 | 页面中文乱码 | Write 工具将中文转义为 Unicode 序列 | 重新写入正确的中文字符 |
 | 运行测试无反应 | onError 未显示错误信息，可能是权限问题 | 添加错误状态和 UI 显示 |
 | 运行测试仍无反应 | mutation 返回结果但 onSuccess 仅调用 refetchLatest()，数据库表不存在时返回空 | 直接使用 mutation 返回结果显示，添加 localResults state |
-| React Hydration 警告 (P2) | `<Collapsible>` 在 `<tbody>` 中生成 `<div>` 导致非法 HTML 嵌套 | 待优化，不影响功能 |
+
+### 待修复问题 (P1)
+
+| 问题 | 原因 | 状态 |
+|------|------|------|
+| React Hydration 错误 (4个) | `<Collapsible>` 在 `<tbody>` 中渲染 `<div>` 导致非法 HTML 嵌套 | 🔴 待修复 |
+| 诊断结果排版错位 | 由 Hydration 错误导致 | 🔴 待修复 |
+| 数据库未写入 | diagnostic_results 表无数据，可能是 RLS 策略问题 | 🔴 待修复 |
+
+**Hydration 错误详情**:
+- `<div> cannot contain a nested <tr>`
+- `<tr> cannot be a child of <div>`
+- `<div> cannot be a child of <tbody>`
+- `<tbody> cannot contain a nested <div>`
 
 ### 测试结果
 
-**通过率: 100% (11/11)** ✅
+**通过率: 100% (11/11)** ✅ (功能正常，UI/持久化有问题)
 
 | 类别 | 通过 | 状态 |
 |------|------|------|
