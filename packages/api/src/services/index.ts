@@ -27,3 +27,6 @@ export * from './contentModerator';
 
 // 成本计算器
 export * from './costCalculator';
+
+// 诊断服务
+export * from './diagnostics';
