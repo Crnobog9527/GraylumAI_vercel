@@ -23,9 +23,9 @@
 
 ## Current Status
 
-- **Phase:** 阶段 4 性能优化 ✅ 完成
-- **Previous:** 阶段 3 CI/CD 自动化 ✅ 完成
-- **Next:** 阶段 5 文档体系
+- **Phase:** 阶段 5 文档体系 ✅ 完成
+- **Previous:** 阶段 4 性能优化 ✅ 完成
+- **Next:** 阶段 6 高级优化 (可选)
 - **Completed:** 2026-01-22
 - **参考文档:** `movetonew/开发规范清单-终极版.md`
 
@@ -44,7 +44,7 @@
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
 | **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
-| **阶段 5** | 文档体系 | 🟡 应该做 | 🔜 下一步 |
+| **阶段 5** | 文档体系 | 🟡 应该做 | ✅ 完成 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ⏳ 待执行 |
 
 ---
@@ -304,6 +304,48 @@ main 推送 → lint → test → build → deploy-production
 | invitation_records | 2 | 邀请记录统计 |
 | application_logs | 3 | 应用日志查询 |
 | diagnostics_results | 3 | 诊断结果查询 |
+
+---
+
+## 阶段 5 文档体系 (2026-01-22 完成) ✅
+
+> **进入条件**: 阶段 4 完成 ✅
+> **完成条件**: /docs 目录完整，Runbooks 覆盖主要场景 ✅
+
+### 任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 5.1 | 创建技术文档 | ARCHITECTURE.md + DATABASE.md | ✅ 完成 |
+| 5.2 | 创建操作手册 | 4 个 runbooks | ✅ 完成 |
+
+### 交付物清单
+
+**技术文档**:
+- ✅ `docs/ARCHITECTURE.md` - 系统架构概览、组件说明、数据流图
+- ✅ `docs/DATABASE.md` - 数据库 Schema、ER 图、表结构说明
+
+**操作手册 (Runbooks)**:
+- ✅ `docs/runbooks/INCIDENT_RESPONSE.md` - 事件响应流程、常见问题处理
+- ✅ `docs/runbooks/DATABASE_OPERATIONS.md` - 数据库常用操作、SQL 示例
+- ✅ `docs/runbooks/MONITORING.md` - 监控告警配置、指标解读
+- ✅ `docs/runbooks/API_DEVELOPMENT.md` - tRPC 开发指南、最佳实践
+
+### 文档目录结构
+
+```
+docs/
+├── ARCHITECTURE.md       # 系统架构
+├── DATABASE.md           # 数据库文档
+├── DEPLOYMENT.md         # 部署指南
+├── RLS_AUDIT_REPORT.md   # RLS 审计报告
+├── SECURITY_AUDIT_PHASE9.md  # 安全审计
+└── runbooks/
+    ├── INCIDENT_RESPONSE.md     # 事件响应
+    ├── DATABASE_OPERATIONS.md   # 数据库操作
+    ├── MONITORING.md            # 监控告警
+    └── API_DEVELOPMENT.md       # API 开发
+```
 
 ---
 
