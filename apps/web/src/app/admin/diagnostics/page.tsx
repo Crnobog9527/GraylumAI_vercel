@@ -174,11 +174,16 @@ export default function AdminDiagnosticsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Queries
-  const { data: latestResults, refetch: refetchLatest } = trpc.diagnostics.getLatestResults.useQuery();
-  const { data: summaryStats, refetch: refetchSummary } = trpc.diagnostics.getSummaryStats.useQuery();
-  const { data: healthCheck, refetch: refetchHealth } = trpc.diagnostics.healthCheck.useQuery();
+  const { data: latestResults, refetch: refetchLatest, error: latestError } = trpc.diagnostics.getLatestResults.useQuery();
+  const { data: summaryStats, refetch: refetchSummary, error: summaryError } = trpc.diagnostics.getSummaryStats.useQuery();
+  const { data: healthCheck, refetch: refetchHealth, error: healthError } = trpc.diagnostics.healthCheck.useQuery();
   const { data: recentRuns } = trpc.diagnostics.getRecentRuns.useQuery();
   const { data: testDefinitions } = trpc.diagnostics.getTestDefinitions.useQuery();
+
+  // Log any query errors
+  if (latestError) console.error('latestResults error:', latestError);
+  if (summaryError) console.error('summaryStats error:', summaryError);
+  if (healthError) console.error('healthCheck error:', healthError);
 
   // Mutations
   const runAllMutation = trpc.diagnostics.runAllTests.useMutation({
@@ -229,8 +234,14 @@ export default function AdminDiagnosticsPage() {
   });
 
   const handleRunAll = () => {
+    console.log('handleRunAll called');
+    console.log('mutation state:', { isPending: runAllMutation.isPending, isError: runAllMutation.isError });
     setIsRunning(true);
-    runAllMutation.mutate({});
+    runAllMutation.mutate({}, {
+      onSettled: () => {
+        console.log('mutation settled');
+      }
+    });
   };
 
   const handleRunCategory = (category: DiagnosticCategory) => {
