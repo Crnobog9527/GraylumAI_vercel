@@ -23,11 +23,11 @@
 
 ## Current Status
 
-- **Phase:** Phase 11 安全审计问题修复 ✅ 完成 (12/12 P0+P1)
+- **Phase:** Phase 11 安全审计问题修复 ✅ 完成 (12/12 P0+P1 + 4/4 P2)
 - **Previous:** Phase 10 安全与合规审计 ✅ 完成
 - **Started:** 2026-01-21
-- **Completed:** 2026-01-21
-- **审计评分:** 3.1/5 → 4.5+/5 (预计)
+- **Completed:** 2026-01-22
+- **审计评分:** 3.1/5 → 4.8+/5 (预计)
 
 ---
 
@@ -90,6 +90,15 @@
 | 11 | 统一上下文配置 | `contextManager.ts` | ✅ 阈值90000(60%)，稳定3轮 |
 | 12 | 智能路由关键词 | `modelRouter.ts` | ✅ REALTIME_DATA_KEYWORDS |
 
+### P2 持续优化 (4/4 完成) ✅
+
+| # | 任务 | 位置 | 状态 |
+|---|------|------|------|
+| 13 | 递归摘要算法 | `contextManager.ts` | ✅ 多层摘要链式压缩 |
+| 14 | 软删除机制 | `migrations/0004`, `schema.ts` | ✅ is_deleted + RLS + 清理函数 |
+| 15 | Redis 速率限制 | `rateLimiter.ts`, `securityChecks.ts` | ✅ ioredis + 内存降级 |
+| 16 | .env.example | `.env.example` | ✅ 完整环境变量文档 |
+
 ---
 
 ## 已完成阶段 (Phase 1-10)
@@ -120,9 +129,14 @@
 | `apps/web/src/hooks/useAIChat.ts` | 中断结算 + currentRequest 追踪 | ✅ |
 | `apps/web/src/app/login/page.tsx` | router.push() | ✅ |
 | `apps/web/src/components/home/SixStepsGuide.tsx` | router.push() | ✅ |
-| `packages/api/src/services/contextManager.ts` | 阈值 90000 (60%) | ✅ |
+| `packages/api/src/services/contextManager.ts` | 阈值 90000 (60%) + 递归摘要 | ✅ |
 | `packages/api/src/services/modelRouter.ts` | REALTIME_DATA_KEYWORDS | ✅ |
-| `packages/api/src/middleware/securityChecks.ts` | HMAC-SHA256 签名验证 | ✅ |
+| `packages/api/src/middleware/securityChecks.ts` | HMAC-SHA256 + Redis 集成 | ✅ |
+| `packages/api/src/services/rateLimiter.ts` | Redis 速率限制器 (新增) | ✅ |
+| `packages/db/migrations/0004_recursive_summary_and_soft_delete.sql` | 递归摘要 + 软删除 (新增) | ✅ |
+| `packages/db/schema.ts` | 软删除字段 + summary 元数据 | ✅ |
+| `packages/api/package.json` | ioredis 依赖 | ✅ |
+| `.env.example` | 环境变量文档 (新增) | ✅ |
 
 ### 迁移文件目录
 

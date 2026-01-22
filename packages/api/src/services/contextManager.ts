@@ -29,6 +29,17 @@ const CONTEXT_CONFIG = {
   DYNAMIC_REGION_TURNS: 10,
   // 摘要最大 Token 数
   SUMMARY_MAX_TOKENS: 2000,
+  // 递归摘要配置
+  RECURSIVE_SUMMARY: {
+    // 单层摘要最大 Token 数
+    MAX_TOKENS_PER_LAYER: 2000,
+    // 最大摘要层数
+    MAX_LAYERS: 5,
+    // 触发递归摘要的阈值 (Token 数)
+    TRIGGER_THRESHOLD: 4000,
+    // 每层压缩比率 (目标)
+    COMPRESSION_RATIO: 0.3,
+  },
 };
 
 // ============================================
@@ -43,11 +54,20 @@ export interface ContextMessage {
   tokenCount?: number;
 }
 
+export interface SummaryLayer {
+  level: number;
+  content: string;
+  tokenCount: number;
+  messageCount: number;
+  createdAt: string;
+}
+
 export interface ConversationContext {
   conversationId: string;
   summary?: string;
   summaryTokens?: number;
   summaryUpdatedAt?: string;
+  summaryLayers?: SummaryLayer[];
   stableRegion: ContextMessage[];
   dynamicRegion: ContextMessage[];
   totalTokens: number;
@@ -276,7 +296,192 @@ ${messageText}
   }
 
   /**
-   * 保存摘要
+   * 递归摘要算法 - 多层摘要链式压缩
+   *
+   * 当摘要本身过长时，生成更高层级的摘要
+   * 层级结构: L0 (原始消息) -> L1 (一级摘要) -> L2 (二级摘要) -> ...
+   */
+  async generateRecursiveSummary(
+    context: ConversationContext,
+    generateSummaryFn: (prompt: string) => Promise<string>
+  ): Promise<{
+    finalSummary: string;
+    layers: SummaryLayer[];
+    totalTokens: number;
+  }> {
+    const { RECURSIVE_SUMMARY } = CONTEXT_CONFIG;
+    const layers: SummaryLayer[] = [];
+
+    // 第一层: 从原始消息生成摘要
+    const allMessages = [...context.stableRegion, ...context.dynamicRegion];
+
+    // 按批次处理消息，每批生成一个子摘要
+    const batchSize = 20; // 每批处理 20 条消息
+    const batches: ContextMessage[][] = [];
+
+    for (let i = 0; i < allMessages.length; i += batchSize) {
+      batches.push(allMessages.slice(i, i + batchSize));
+    }
+
+    // 如果消息数量不多，直接生成单层摘要
+    if (batches.length <= 1) {
+      const prompt = this.generateSummaryPrompt(context);
+      const summary = await generateSummaryFn(prompt);
+      const tokenCount = estimateTokensFromString(summary);
+
+      layers.push({
+        level: 1,
+        content: summary,
+        tokenCount,
+        messageCount: allMessages.length,
+        createdAt: new Date().toISOString(),
+      });
+
+      return {
+        finalSummary: summary,
+        layers,
+        totalTokens: tokenCount,
+      };
+    }
+
+    // 生成每批的子摘要 (L1 层)
+    const l1Summaries: string[] = [];
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const batchText = batch
+        .map((m) => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`)
+        .join('\n\n');
+
+      const prompt = `请对以下对话片段进行简洁摘要，保留关键信息：
+
+对话片段 ${i + 1}/${batches.length}:
+${batchText}
+
+请生成摘要 (不超过 300 字):`;
+
+      const batchSummary = await generateSummaryFn(prompt);
+      l1Summaries.push(batchSummary);
+    }
+
+    // 合并 L1 摘要
+    let currentSummary = l1Summaries.join('\n\n---\n\n');
+    let currentTokens = estimateTokensFromString(currentSummary);
+    let currentLevel = 1;
+
+    layers.push({
+      level: 1,
+      content: currentSummary,
+      tokenCount: currentTokens,
+      messageCount: allMessages.length,
+      createdAt: new Date().toISOString(),
+    });
+
+    // 递归压缩: 如果当前摘要过长，继续生成更高层级的摘要
+    while (
+      currentTokens > RECURSIVE_SUMMARY.TRIGGER_THRESHOLD &&
+      currentLevel < RECURSIVE_SUMMARY.MAX_LAYERS
+    ) {
+      currentLevel++;
+
+      const compressionPrompt = `以下是一段对话的摘要，请进一步提炼和压缩，保留最核心的信息：
+
+摘要内容:
+${currentSummary}
+
+请生成更精简的摘要 (不超过 ${Math.floor(RECURSIVE_SUMMARY.MAX_TOKENS_PER_LAYER * RECURSIVE_SUMMARY.COMPRESSION_RATIO)} 字):`;
+
+      const compressedSummary = await generateSummaryFn(compressionPrompt);
+      currentSummary = compressedSummary;
+      currentTokens = estimateTokensFromString(compressedSummary);
+
+      layers.push({
+        level: currentLevel,
+        content: compressedSummary,
+        tokenCount: currentTokens,
+        messageCount: allMessages.length,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    return {
+      finalSummary: currentSummary,
+      layers,
+      totalTokens: currentTokens,
+    };
+  }
+
+  /**
+   * 生成递归摘要提示词 (用于指定层级)
+   */
+  generateRecursiveSummaryPrompt(
+    content: string,
+    targetTokens: number,
+    isFirstLayer: boolean = false
+  ): string {
+    if (isFirstLayer) {
+      return `请对以下对话内容进行摘要，保留关键信息和上下文：
+
+对话内容:
+${content}
+
+要求:
+1. 保留关键信息、决策和结论
+2. 保持时间顺序
+3. 摘要长度控制在 ${targetTokens} 字以内
+
+请生成摘要:`;
+    }
+
+    return `以下是对话的摘要内容，请进一步压缩，只保留最核心的信息：
+
+摘要内容:
+${content}
+
+要求:
+1. 只保留最关键的信息
+2. 删除冗余和次要细节
+3. 压缩后长度控制在 ${targetTokens} 字以内
+
+请生成压缩后的摘要:`;
+  }
+
+  /**
+   * 保存递归摘要的所有层级
+   */
+  async saveSummaryLayers(
+    conversationId: string,
+    layers: SummaryLayer[]
+  ): Promise<void> {
+    if (layers.length === 0) return;
+
+    // 最终摘要是最高层级的摘要
+    const finalLayer = layers[layers.length - 1];
+
+    await this.supabase
+      .from('conversations')
+      .update({
+        summary: finalLayer.content,
+        summary_tokens: finalLayer.tokenCount,
+        summary_updated_at: new Date().toISOString(),
+        // 存储所有层级的摘要元数据
+        summary_metadata: {
+          layers: layers.map(l => ({
+            level: l.level,
+            tokenCount: l.tokenCount,
+            messageCount: l.messageCount,
+            createdAt: l.createdAt,
+          })),
+          totalLayers: layers.length,
+          algorithm: 'recursive_compression',
+          version: '1.0',
+        },
+      })
+      .eq('id', conversationId);
+  }
+
+  /**
+   * 保存摘要 (单层)
    */
   async saveSummary(conversationId: string, summary: string): Promise<void> {
     const summaryTokens = estimateTokensFromString(summary);
@@ -287,6 +492,16 @@ ${messageText}
         summary,
         summary_tokens: summaryTokens,
         summary_updated_at: new Date().toISOString(),
+        summary_metadata: {
+          layers: [{
+            level: 1,
+            tokenCount: summaryTokens,
+            createdAt: new Date().toISOString(),
+          }],
+          totalLayers: 1,
+          algorithm: 'single_layer',
+          version: '1.0',
+        },
       })
       .eq('id', conversationId);
   }

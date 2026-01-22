@@ -82,18 +82,41 @@ export const SIGNATURE_CONFIG = {
 };
 
 // ============================================
-// 内存速率限制器 (生产环境建议使用 Redis)
+// 速率限制器 (支持内存和 Redis)
 // ============================================
 
+import { getRateLimiter, checkRateLimitWithRedis } from '../services/rateLimiter';
+
+// 内存速率限制存储 (降级方案)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 
 /**
  * 检查速率限制
+ *
+ * 优先使用 Redis (如果配置了)，否则降级到内存存储
  */
 export async function checkRateLimit(
   userId: string,
   type: keyof typeof RATE_LIMIT_CONFIG = 'ai'
 ): Promise<void> {
+  // 如果配置了 Redis，使用 Redis 速率限制器
+  const useRedis = process.env.REDIS_URL || process.env.REDIS_HOST;
+
+  if (useRedis) {
+    try {
+      await checkRateLimitWithRedis(userId, type);
+      return;
+    } catch (error) {
+      // 如果是速率限制错误，直接抛出
+      if (error instanceof TRPCError && error.code === 'TOO_MANY_REQUESTS') {
+        throw error;
+      }
+      // 其他错误，降级到内存存储
+      console.warn('[RateLimit] Redis error, falling back to memory store:', error);
+    }
+  }
+
+  // 内存存储方案
   const config = RATE_LIMIT_CONFIG[type];
   const key = `${type}:${userId}`;
   const now = Date.now();
@@ -119,6 +142,11 @@ export async function checkRateLimit(
 
   record.count += 1;
 }
+
+/**
+ * 导出 Redis 速率限制器实例获取函数
+ */
+export { getRateLimiter } from '../services/rateLimiter';
 
 /**
  * 检查消费熔断

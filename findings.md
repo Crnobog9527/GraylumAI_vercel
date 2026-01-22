@@ -99,10 +99,10 @@
   - contextManager 稳定区域 5 轮，promptCacheBuilder 稳定区域 3 轮
 - **建议**: 统一配置为 90000 (60%) 和 3 轮
 
-#### 9. 递归摘要算法未实现
-- **位置**: `packages/api/src/services/contextManager.ts:263-281`
+#### 9. 递归摘要算法未实现 ✅ 已修复
+- **位置**: `packages/api/src/services/contextManager.ts`
 - **问题**: 仅实现单层摘要，无递归压缩机制
-- **建议**: 实现多层摘要链式压缩
+- **修复**: 实现 `generateRecursiveSummary()` 方法，支持多层摘要链式压缩，最多 5 层，每层压缩比 30%
 
 #### 10. 智能路由关键词不完整
 - **位置**: `packages/api/src/services/modelRouter.ts:48-67`
