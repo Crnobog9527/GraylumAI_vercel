@@ -22,6 +22,7 @@ export async function middleware(request: NextRequest) {
   const isAppDomain = hostname.startsWith('app.') || hostname.includes('app.graylum.com');
   const isWwwDomain = hostname.startsWith('www.') || hostname.includes('www.graylum.com');
   const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1');
+  const isDevEnvironment = isLocalhost || hostname.includes('.github.dev') || hostname.includes('.gitpod.io');
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -82,9 +83,9 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // 本地开发: 根据查询参数或路径判断
-  if (isLocalhost) {
-    // 本地开发时使用查询参数 ?domain=www 模拟 www 域名
+  // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
+  if (isDevEnvironment) {
+    // 开发环境使用查询参数 ?domain=www 模拟 www 域名
     const domainParam = request.nextUrl.searchParams.get('domain');
 
     if (domainParam === 'www') {
