@@ -102,7 +102,8 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
       {/* 简化的条形图 */}
       <div className="h-[200px] w-full flex items-end justify-between gap-1">
         {chartData.map((day, index) => {
-          const heightPercent = (day.usage / stats.maxUsage) * 100;
+          // 防止除以0导致NaN
+          const heightPercent = stats.maxUsage > 0 ? (day.usage / stats.maxUsage) * 100 : 0;
           return (
             <div key={index} className="flex-1 flex flex-col items-center gap-1">
               <div
@@ -111,7 +112,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
                   height: `${heightPercent}%`,
                   minHeight: '4px',
                   background: 'linear-gradient(to top, var(--color-primary), var(--color-secondary))',
-                  opacity: 0.7 + (heightPercent / 100) * 0.3
+                  opacity: stats.maxUsage > 0 ? 0.7 + (heightPercent / 100) * 0.3 : 0.7
                 }}
                 title={`${day.fullDate}: ${day.usage} 积分`}
               />
