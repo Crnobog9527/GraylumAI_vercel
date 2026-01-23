@@ -40,7 +40,18 @@ const ProfileSidebar = memo(function ProfileSidebar({
       if (onLogout) {
         onLogout();
       }
-      router.push('/login');
+
+      // 根据环境跳转到不同的着陆页
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+      const isProduction = hostname.includes('graylum.com');
+
+      if (isProduction) {
+        // 生产环境: 跳转到 www 域名的着陆页
+        window.location.href = 'https://www.graylum.com';
+      } else {
+        // 开发环境: 跳转到带 domain 参数的着陆页
+        router.push('/landing?domain=www');
+      }
     } catch (error) {
       console.error('Logout failed:', error);
     } finally {

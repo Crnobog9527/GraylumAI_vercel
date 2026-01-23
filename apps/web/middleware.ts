@@ -97,16 +97,26 @@ export async function middleware(request: NextRequest) {
 
     if (domainParam === 'www') {
       // 根路径重写到着陆页
-      if (pathname === '/') {
-        const url = request.nextUrl.clone();
-        url.pathname = '/landing';
-        return NextResponse.rewrite(url);
+      if (pathname === '/' || pathname === '') {
+        // 使用 redirect 而非 rewrite 确保页面正确加载
+        const landingUrl = new URL('/landing', request.url);
+        landingUrl.searchParams.set('domain', 'www');
+        return NextResponse.redirect(landingUrl);
+      }
+      // /landing 路径直接访问，允许公开访问
+      if (pathname === '/landing') {
+        return supabaseResponse;
       }
       // 模拟 www 域名，公开访问
       return supabaseResponse;
     }
 
     // 默认行为: 模拟 app 域名逻辑
+    // /landing 路径在开发环境始终允许访问
+    if (pathname === '/landing') {
+      return supabaseResponse;
+    }
+
     if (!isPublicPath(pathname) && !user) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
