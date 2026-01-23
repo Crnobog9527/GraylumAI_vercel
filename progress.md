@@ -183,6 +183,50 @@ if (error || !userProfile) {
 }
 ```
 
+---
+
+### ✅ 阶段 8 第七轮修复 (2026-01-23)
+
+**问题**: 根据用户提供的数据库截图，发现代码查询的列与实际数据库结构不匹配
+
+**实际 profiles 表结构** (用户提供截图确认):
+| 列名 | 存在 |
+|------|------|
+| id | ✅ |
+| credits | ✅ (110) |
+| created_at | ✅ |
+| role | ✅ |
+| status | ✅ |
+| membership_level | ✅ |
+| is_deleted | ✅ |
+| nickname | ✅ |
+| avatar_url | ✅ |
+| email | ✅ |
+| last_login_at | ✅ |
+| last_ip | ✅ |
+| deleted_at | ✅ |
+| full_name | ❌ 不存在 |
+| updated_at | ❌ 不存在 |
+
+**修复**:
+| 文件 | 修改 |
+|------|------|
+| `packages/api/src/routers/user.ts` | 移除不存在的列 `updated_at` |
+| `packages/api/src/routers/user.ts` | 添加实际存在的列 `avatar_url`, `membership_level`, `status` |
+| `packages/api/src/routers/user.ts` | 使用 `nickname` 作为 `full_name` 的替代值 |
+
+**关键修复**:
+```typescript
+// 只查询数据库中实际存在的列
+// profiles 表结构: id, credits, created_at, role, status, membership_level,
+//                  is_deleted, nickname, avatar_url, email, last_login_at, last_ip, deleted_at
+const { data: userProfile, error } = await ctx.supabase
+  .from('profiles')
+  .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at')
+  .eq('id', ctx.profileId)
+  .single();
+```
+
 **功能广场说明**:
 - 模块数据来自 `modules` 数据表，通过 `trpc.modules.getModules` 查询
 - 目前没有管理后台模块管理页面 (`/admin/modules`)
