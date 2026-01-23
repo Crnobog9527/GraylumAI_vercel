@@ -50,6 +50,65 @@
 
 ---
 
+### ✅ 阶段 8 第三轮修复 (2026-01-23)
+
+**新发现的问题**:
+
+| # | 问题 | 原因 | 状态 |
+|---|------|------|------|
+| 1 | 积分显示 0 | API 404/500 错误，无 auth 检查 | ✅ 已修复 |
+| 2 | 横幅位置错误 | GlobalBanner 在 AppHeader 之前渲染 | ✅ 已修复 |
+| 3 | 横幅颜色错误 | `announcement` 样式是蓝色而非黄色 | ✅ 已修复 |
+| 4 | 横幅仅首页显示 | 其他页面未添加 GlobalBanner | ✅ 已修复 |
+| 5 | 功能广场模块硬编码? | 已验证: 模块从 tRPC 获取，非硬编码 | ✅ 已验证 |
+| 6 | 个人中心 500 错误 | 缺少 auth 检查，查询失败未处理 | ✅ 已修复 |
+
+**修复内容**:
+
+| 文件 | 修改 |
+|------|------|
+| `page.tsx` (首页) | GlobalBanner 移到 AppHeader 之后 |
+| `GlobalBanner.tsx` | `announcement` 样式改为黄色 (公告黄) |
+| `use-banner.tsx` | 新建 hook，复用横幅获取逻辑 |
+| `chat/page.tsx` | 添加 GlobalBanner 和 useBanner |
+| `marketplace/page.tsx` | 添加 GlobalBanner 和 useBanner |
+| `profile/page.tsx` | 添加 GlobalBanner、useBanner、auth 检查 |
+
+**关键修复 - 个人中心**:
+```typescript
+// 添加认证检查
+useEffect(() => {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    router.replace('/login');
+    return;
+  }
+  setIsAuthenticated(true);
+}, []);
+
+// tRPC 查询仅在认证后执行
+const { data: userProfile } = trpc.user.getUserProfile.useQuery(
+  undefined,
+  { enabled: isAuthenticated }
+);
+
+// 积分回退: creditsBalance?.credits ?? userProfile?.credits ?? 0
+```
+
+**GlobalBanner 颜色修复**:
+```typescript
+announcement: {
+  // 公告黄 - 与管理后台一致
+  gradient: 'linear-gradient(135deg, rgba(255, 215, 0, 0.12) 0%, rgba(255, 165, 0, 0.08) 100%)',
+  border: 'rgba(255, 215, 0, 0.4)',
+  iconBg: 'rgba(255, 215, 0, 0.2)',
+  iconColor: 'var(--color-primary)',
+}
+```
+
+---
+
 ### ✅ 阶段 8 第一轮修复 (2026-01-23 完成)
 
 **问题概述**: 用户登录后，首页关键数据全部使用硬编码，未与后端 API 集成。

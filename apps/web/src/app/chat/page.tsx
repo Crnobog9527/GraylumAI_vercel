@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
 import { MessageSquare, Paperclip, Send, Loader2 } from 'lucide-react';
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
+import { useBanner } from '@/hooks/use-banner';
 
 export default function ChatPage() {
   const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
@@ -17,6 +19,7 @@ export default function ChatPage() {
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { banners } = useBanner();
 
   const utils = trpc.useUtils();
 
@@ -102,6 +105,9 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg-primary)' }}>
       {/* 顶部导航 */}
       <AppHeader />
+
+      {/* 全站横幅公告 */}
+      <GlobalBanner banners={banners} />
 
       {/* 主体区域 */}
       <div className="flex flex-1 overflow-hidden">

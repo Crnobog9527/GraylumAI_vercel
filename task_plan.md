@@ -297,6 +297,29 @@
 
 ---
 
+### ✅ 阶段 8 第三轮修复 (2026-01-23)
+
+> **问题**: 横幅位置/颜色错误，积分显示0，个人中心500错误
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 积分显示 0 | 缺少 auth 检查，API 失败 | 添加认证检查和回退逻辑 |
+| 2 | 横幅位置错误 | GlobalBanner 在 AppHeader 之前 | 移到 AppHeader 之后 |
+| 3 | 横幅颜色错误 | `announcement` 样式是蓝色 | 改为黄色 (公告黄) |
+| 4 | 横幅仅首页 | 其他页面未添加 | 添加到 chat/marketplace/profile |
+| 5 | 功能广场硬编码 | 已验证非硬编码 | 使用 tRPC getModules |
+| 6 | 个人中心 500 | 缺少 auth 检查 | 添加认证和错误处理 |
+
+**交付物**:
+- `apps/web/src/hooks/use-banner.tsx`: 新建横幅获取 hook
+- `apps/web/src/components/layout/GlobalBanner.tsx`: 修复 announcement 样式颜色
+- `apps/web/src/app/page.tsx`: GlobalBanner 移到导航栏下方
+- `apps/web/src/app/chat/page.tsx`: 添加全站横幅
+- `apps/web/src/app/marketplace/page.tsx`: 添加全站横幅
+- `apps/web/src/app/profile/page.tsx`: 添加认证检查、错误处理、横幅
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

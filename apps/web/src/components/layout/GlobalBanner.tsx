@@ -66,11 +66,12 @@ const bannerStyles: Record<string, BannerStyle> = {
     icon: Gift,
   },
   announcement: {
-    gradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(99, 102, 241, 0.12) 100%)',
-    border: 'rgba(59, 130, 246, 0.3)',
-    iconBg: 'rgba(59, 130, 246, 0.2)',
-    iconColor: '#60A5FA',
-    glowColor: 'rgba(59, 130, 246, 0.25)',
+    // 公告黄 - 与管理后台一致
+    gradient: 'linear-gradient(135deg, rgba(255, 215, 0, 0.12) 0%, rgba(255, 165, 0, 0.08) 100%)',
+    border: 'rgba(255, 215, 0, 0.4)',
+    iconBg: 'rgba(255, 215, 0, 0.2)',
+    iconColor: 'var(--color-primary)',
+    glowColor: 'rgba(255, 215, 0, 0.3)',
     textColor: 'var(--text-primary)',
     icon: Megaphone,
   },
