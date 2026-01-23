@@ -17,7 +17,8 @@
     "./src/types/billing": "./src/types/billing.ts",
     "./src/services/billing": "./src/services/billing.ts",
     "./src/services/tokenCounter": "./src/services/tokenCounter.ts",
-    "./src/services/modelRouter": "./src/services/modelRouter.ts"
+    "./src/services/modelRouter": "./src/services/modelRouter.ts",
+    "./src/services/diagnostics": "./src/services/diagnostics.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",

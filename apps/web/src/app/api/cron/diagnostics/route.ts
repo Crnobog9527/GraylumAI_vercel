@@ -17,7 +17,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { DiagnosticsService } from '@graylum/api/services';
+import { DiagnosticsService } from '@repo/api/src/services/diagnostics';
 
 // Vercel Cron 验证密钥
 const CRON_SECRET = process.env.CRON_SECRET;

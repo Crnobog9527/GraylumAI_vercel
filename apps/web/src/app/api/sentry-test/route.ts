@@ -5,12 +5,21 @@ import * as Sentry from "@sentry/nextjs";
  * Sentry 测试端点
  * GET /api/sentry-test - 触发测试错误，验证 Sentry 配置是否正常
  *
+ * 注意: 此端点在生产环境中被禁用，仅供开发/预览环境测试使用
+ *
  * 使用方式:
  * 1. 访问 /api/sentry-test 触发错误
  * 2. 30 秒内检查 Sentry 后台是否收到错误报告
  * 3. 错误报告应包含用户信息和请求详情
  */
 export async function GET(request: Request) {
+  // 生产环境禁用此测试端点
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Not Found" },
+      { status: 404 }
+    );
+  }
   // Add test context for better error tracking
   Sentry.setContext("sentry_test", {
     purpose: "验证 Sentry 配置",

@@ -1,5 +1,118 @@
 # Findings & Decisions
 
+## 着陆页与访问控制实施决策 (2026-01-23)
+
+### 任务概述
+
+实现标准 SaaS 网站的访问逻辑：
+- **www.graylum.com** - 公开营销着陆页
+- **app.graylum.com** - 应用后台（需登录）
+- **graylum.com** - 重定向到 www
+
+### 技术架构决策
+
+#### 1. 路由组结构
+
+**决策**: 使用 Next.js 16 路由组分离着陆页和应用
+
+```
+apps/web/src/app/
+├── (landing)/              # 公开页面 (www 域名)
+│   ├── layout.tsx          # 着陆页独立布局
+│   └── page.tsx            # 着陆页首页
+├── (app)/                  # 应用页面 (app 域名)
+│   ├── layout.tsx          # 应用布局 (带 tRPC Provider)
+│   ├── page.tsx            # 应用首页 (Dashboard)
+│   ├── admin/              # 管理后台
+│   ├── chat/               # AI 对话
+│   ├── marketplace/        # 应用市场
+│   ├── profile/            # 个人设置
+│   └── login/              # 登录页面
+├── layout.tsx              # 根布局 (共享)
+└── globals.css             # 全局样式
+```
+
+**理由**:
+- 路由组 `()` 不影响 URL 结构
+- 允许独立的布局和样式
+- 便于维护和扩展
+
+#### 2. 中间件访问控制策略
+
+**决策**: 修改 `middleware.ts` 实现域名路由和认证拦截
+
+```typescript
+// 访问控制逻辑
+const hostname = request.headers.get('host') || ''
+const isAppDomain = hostname.startsWith('app.')
+const isWwwDomain = hostname.startsWith('www.') || !hostname.includes('.')
+
+// app 域名: 检查登录状态
+if (isAppDomain) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user && !isPublicPath) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+}
+// www 域名: 允许所有访问
+```
+
+**公开路径**: `/login`, `/api/*`, `/_next/*`, `/favicon.ico`
+
+#### 3. 着陆页组件架构
+
+**决策**: 创建独立的着陆页组件目录
+
+```
+apps/web/src/components/landing/
+├── LandingHeader.tsx       # 导航栏 (滚动效果)
+├── HeroSection.tsx         # Hero 区域
+├── FeaturesSection.tsx     # 6 步增长策略展示
+├── PricingSection.tsx      # 定价方案
+├── CTASection.tsx          # 行动号召
+└── LandingFooter.tsx       # 页脚
+```
+
+#### 4. 设计规范
+
+**决策**: 遵循 `VISUAL_DESIGN_SYSTEM.md` 设计系统
+
+| 元素 | 值 | 用途 |
+|------|----|----|
+| 主色 | `#FFD700` | CTA 按钮、强调文字 |
+| 背景 | `#0A0A0A` | 页面背景 |
+| 次级背景 | `#1A1A1A` | 卡片、容器 |
+| 文字主色 | `#FFFFFF` | 标题、重要内容 |
+| 文字次色 | `#B0B0B0` | 描述文字 |
+
+#### 5. CTA 链接策略
+
+**决策**: 所有行动按钮链接到 `app.graylum.com`
+
+- "免费开始" → `https://app.graylum.com/login?action=signup`
+- "登录" → `https://app.graylum.com/login`
+- "查看定价" → `https://app.graylum.com/login?redirect=/pricing`
+
+### 实施步骤
+
+| 步骤 | 任务 | 预计交付 |
+|------|------|---------|
+| 1 | 修改中间件添加域名路由 | middleware.ts |
+| 2 | 创建 `(landing)` 路由组 | layout.tsx, page.tsx |
+| 3 | 移动现有页面到 `(app)` 组 | 文件重组织 |
+| 4 | 开发着陆页组件 | 6 个组件 |
+| 5 | 测试验证 | 本地 + 生产 |
+
+### 潜在风险与解决方案
+
+| 风险 | 解决方案 |
+|------|---------|
+| 本地开发无多域名 | 使用环境变量 `NEXT_PUBLIC_APP_ENV` 控制行为 |
+| 样式冲突 | 路由组独立布局，不共享 Provider |
+| SEO 影响 | 着陆页添加适当的 meta 标签和 sitemap |
+
+---
+
 ## 开发规范决策 (2026-01-22)
 
 ### 采用新的 7 阶段开发流程
