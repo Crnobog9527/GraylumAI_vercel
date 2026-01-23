@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
   '/login',
+  '/landing',
   '/api',
   '/_next',
   '/favicon.ico',
@@ -22,6 +23,7 @@ export async function middleware(request: NextRequest) {
   const isAppDomain = hostname.startsWith('app.') || hostname.includes('app.graylum.com');
   const isWwwDomain = hostname.startsWith('www.') || hostname.includes('www.graylum.com');
   const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1');
+  const isDevEnvironment = isLocalhost || hostname.includes('.github.dev') || hostname.includes('.gitpod.io');
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -57,6 +59,12 @@ export async function middleware(request: NextRequest) {
 
   // www 域名: 展示着陆页 (公开访问)
   if (isWwwDomain) {
+    // 根路径重写到着陆页
+    if (pathname === '/') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/landing';
+      return NextResponse.rewrite(url);
+    }
     // www 域名允许所有访问，不需要认证
     return supabaseResponse;
   }
@@ -82,17 +90,33 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // 本地开发: 根据查询参数或路径判断
-  if (isLocalhost) {
-    // 本地开发时使用查询参数 ?domain=www 模拟 www 域名
+  // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
+  if (isDevEnvironment) {
+    // 开发环境使用查询参数 ?domain=www 模拟 www 域名
     const domainParam = request.nextUrl.searchParams.get('domain');
 
     if (domainParam === 'www') {
+      // 根路径重写到着陆页
+      if (pathname === '/' || pathname === '') {
+        // 使用 redirect 而非 rewrite 确保页面正确加载
+        const landingUrl = new URL('/landing', request.url);
+        landingUrl.searchParams.set('domain', 'www');
+        return NextResponse.redirect(landingUrl);
+      }
+      // /landing 路径直接访问，允许公开访问
+      if (pathname === '/landing') {
+        return supabaseResponse;
+      }
       // 模拟 www 域名，公开访问
       return supabaseResponse;
     }
 
     // 默认行为: 模拟 app 域名逻辑
+    // /landing 路径在开发环境始终允许访问
+    if (pathname === '/landing') {
+      return supabaseResponse;
+    }
+
     if (!isPublicPath(pathname) && !user) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
