@@ -380,6 +380,22 @@
 
 ---
 
+### ✅ 阶段 8 第十轮修复 (2026-01-23)
+
+> **问题**: 工单记录模块不显示数据
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 创建工单后不显示记录 | `TicketsPanel.tsx:720` | 使用硬编码空数组 `tickets: Ticket[] = []` | ✅ 已修复 |
+| 2 | 已关闭工单不显示 | `TicketsPanel.tsx:720` | 未调用 `trpc.ticket.getTickets` API | ✅ 已修复 |
+| 3 | 创建工单只有 console.log | `TicketsPanel.tsx:524-529` | `handleSubmit` 未调用 mutation | ✅ 已修复 |
+
+**交付物**:
+- `TicketsPanel.tsx`: 集成 tRPC API 调用 `getTickets`、`createTicket`、`replyToTicket`、`closeTicket`
+- `ticket.ts`: 增强 API 支持 description/category 字段，添加状态/分类映射，新增 `closeTicket` mutation
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

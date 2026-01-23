@@ -234,6 +234,44 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### ✅ 阶段 8 第十轮修复 (2026-01-23)
+
+**问题**: 工单记录模块不显示数据
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 创建工单后不显示记录 | `TicketsPanel.tsx:720` | 使用硬编码空数组 `tickets: Ticket[] = []` | ✅ 已修复 |
+| 2 | 已关闭工单不显示 | `TicketsPanel.tsx:720` | 未调用 `trpc.ticket.getTickets` API | ✅ 已修复 |
+| 3 | 创建工单只有 console.log | `TicketsPanel.tsx:524-529` | `handleSubmit` 未调用 `trpc.ticket.createTicket` | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `TicketsPanel.tsx` | 添加 trpc 导入，使用 `trpc.ticket.getTickets.useQuery()` 获取工单列表 |
+| `TicketsPanel.tsx` | `CreateTicketForm` 使用 `trpc.ticket.createTicket.useMutation()` |
+| `TicketsPanel.tsx` | `TicketDetailView` 使用 `replyToTicket` 和 `closeTicket` mutations |
+| `ticket.ts` | 增强 API: 支持 description/category 字段，添加状态映射，生成工单号 |
+| `ticket.ts` | 新增 `closeTicket` mutation API |
+
+---
+
+### ✅ 阶段 8 第九轮修复 (2026-01-23)
+
+**问题**: NaN 错误和订阅页积分数据硬编码
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | NaN opacity 错误 | `CreditRecordsCard.tsx:108` | `maxUsage` 为 0 时除法产生 NaN | ✅ 已修复 |
+| 2 | 本月消耗显示 256 | `SubscriptionCard.tsx:333` | `CreditStatsCard` 硬编码 `monthlyUsed = 256` | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `CreditRecordsCard.tsx` | 添加 `maxUsage > 0` 检查防止 NaN |
+| `SubscriptionCard.tsx` | 添加 trpc 导入，使用 `getCreditsSummary` API |
+
+---
+
 ### ✅ 阶段 8 第八轮修复 (2026-01-23)
 
 **问题**: 个人中心数据全部硬编码，与数据库实际数据不同步
