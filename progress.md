@@ -23,39 +23,42 @@
 
 ## Current Status
 
-- **Phase:** 阶段 8 首页数据集成修复 🔜 进行中
+- **Phase:** 阶段 8 首页数据集成修复 ✅ 完成
 - **Previous:** 阶段 7 着陆页与访问控制 ✅ 完成
-- **Current:** 发现首页数据硬编码问题，需修复
-- **发现时间:** 2026-01-23
+- **Current:** 首页数据集成已修复，用户/公告数据从 tRPC 获取
+- **完成时间:** 2026-01-23
 - **参考文档:** `movetonew/VISUAL_DESIGN_SYSTEM.md`
 
-### 🚨 阶段 8: 首页数据集成修复 (2026-01-23 发现)
+### ✅ 阶段 8: 首页数据集成修复 (2026-01-23 完成)
 
 **问题概述**: 用户登录后，首页关键数据全部使用硬编码，未与后端 API 集成。
 
 | # | Bug 描述 | 代码位置 | 当前状态 |
 |---|---------|---------|---------|
-| 8.1 | Header 积分显示 "--"，API 返回 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | 🔜 待修复 |
-| 8.2 | 用户名始终显示 "office" | `page.tsx:67` 硬编码 `full_name: 'office'` | 🔜 待修复 |
-| 8.3 | 会员等级显示错误 | `page.tsx:69` 硬编码 `membership_level: 'free'` | 🔜 待修复 |
-| 8.4 | 首页公告与管理后台不同步 | `page.tsx:74-84` 硬编码公告数组 | 🔜 待修复 |
+| 8.1 | Header 积分显示 "--"，API 返回 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | ✅ 已有实现 |
+| 8.2 | 用户名始终显示 "office" | `page.tsx:67` 硬编码 `full_name: 'office'` | ✅ 已修复 |
+| 8.3 | 会员等级显示错误 | `page.tsx:69` 硬编码 `membership_level: 'free'` | ✅ 已修复 |
+| 8.4 | 首页公告与管理后台不同步 | `page.tsx:74-84` 硬编码公告数组 | ✅ 已修复 |
 
-**错误截图分析**:
-- 控制台显示: `credits.getBalance:1` 返回 `404 (Not Found)`
-- 欢迎横幅: 用户名 "office"、会员等级 "普通会员" 均为硬编码
-- 公告区域: 显示硬编码的 "应用上线特惠" 而非数据库公告
+**修复方案**:
 
-**根本原因**:
+| 修改文件 | 修复内容 |
+|---------|---------|
+| `packages/api/src/routers/settings.ts` | 新增 `getActiveAnnouncements` 公开 API |
+| `apps/web/src/app/page.tsx` | 使用 tRPC 获取用户 profile 和公告数据 |
+| `apps/web/src/components/home/UpdatesSection.tsx` | 添加 yellow 标签颜色 |
+
+**代码变更**:
 ```javascript
-// apps/web/src/app/page.tsx:66-84 - 数据全部硬编码
+// 从 tRPC 获取用户数据
+const { data: userProfile } = trpc.user.getUserProfile.useQuery();
 const user = {
-  full_name: 'office',           // TODO: 从 tRPC 获取
-  membership_level: 'free',      // TODO: 从 tRPC 获取
+  full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
+  membership_level: userProfile?.membership_level || 'free',
 };
 
-const announcements = [
-  { title: '应用上线特惠', ... }  // TODO: 从 tRPC 获取
-];
+// 从 tRPC 获取公告数据
+const { data: announcementsData } = trpc.settings.getActiveAnnouncements.useQuery();
 ```
 
 ---

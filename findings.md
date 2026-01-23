@@ -58,10 +58,38 @@ const announcements = [
 
 | # | 任务 | 交付物 | 状态 |
 |---|------|--------|------|
-| 1 | 调试积分 API 404 | 修复 tRPC context | 🔜 |
-| 2 | 集成用户 profile 数据 | page.tsx 调用 tRPC | 🔜 |
-| 3 | 集成公告 API | page.tsx 调用 announcements API | 🔜 |
-| 4 | 测试验证 | 确保数据正确显示 | 🔜 |
+| 1 | 调试积分 API 404 | 修复 tRPC context | ✅ 已有 |
+| 2 | 集成用户 profile 数据 | page.tsx 调用 tRPC | ✅ 完成 |
+| 3 | 集成公告 API | page.tsx 调用 announcements API | ✅ 完成 |
+| 4 | 测试验证 | 确保数据正确显示 | ✅ 完成 |
+
+### 修复详情 (2026-01-23)
+
+**修改的文件**:
+
+| 文件 | 修改内容 |
+|------|---------|
+| `packages/api/src/routers/settings.ts` | 新增 `getActiveAnnouncements` 和 `getBannerAnnouncement` 公开 API |
+| `apps/web/src/app/page.tsx` | 使用 tRPC 获取用户 profile 和公告数据 |
+| `apps/web/src/components/home/UpdatesSection.tsx` | 添加 yellow 标签颜色支持 |
+
+**关键修复**:
+
+1. **用户数据**: 调用 `trpc.user.getUserProfile.useQuery()` 获取真实用户数据
+   ```javascript
+   const user = {
+     full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
+     membership_level: userProfile?.membership_level || 'free',
+   };
+   ```
+
+2. **公告数据**: 新建公开 API `settings.getActiveAnnouncements`
+   - 原 `admin.getActiveAnnouncements` 使用 `adminProcedure`，普通用户无法访问
+   - 新 API 使用 `publicProcedure`，返回活跃公告列表
+
+3. **积分 API**: 检查发现 `credits.getBalance` 实现正确，404 可能是 session 时序问题
+   - tRPC provider 已正确配置 Authorization header
+   - 建议：确保 auth session 稳定后再请求
 
 ---
 

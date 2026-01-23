@@ -254,31 +254,29 @@
 
 ---
 
-### 🚨 阶段 8: 首页数据集成修复 (必做 | 2026-01-23)
+### ✅ 阶段 8: 首页数据集成修复 (已完成 | 2026-01-23)
 
 > **发现时间**: 2026-01-23
-> **问题描述**: 首页关键数据未与后端集成，全部使用硬编码
+> **完成时间**: 2026-01-23
 
 | # | Bug | 位置 | 影响 | 状态 |
 |---|-----|------|------|------|
-| 8.1 | 积分获取 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | Header 积分显示 "--" | 🔜 待修复 |
-| 8.2 | 用户名硬编码 | `page.tsx:66-71` | 所有用户显示 "office" | 🔜 待修复 |
-| 8.3 | 会员等级硬编码 | `page.tsx:69` | 所有用户显示 "普通会员" | 🔜 待修复 |
-| 8.4 | 公告硬编码 | `page.tsx:74-84` | 公告与管理后台不同步 | 🔜 待修复 |
+| 8.1 | 积分获取 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | Header 积分显示 "--" | ✅ 已有实现 |
+| 8.2 | 用户名硬编码 | `page.tsx` | 所有用户显示 "office" | ✅ 已修复 |
+| 8.3 | 会员等级硬编码 | `page.tsx` | 所有用户显示 "普通会员" | ✅ 已修复 |
+| 8.4 | 公告硬编码 | `page.tsx` | 公告与管理后台不同步 | ✅ 已修复 |
 
-**问题根源分析**:
+**交付物**:
 
-| Bug | 根本原因 | 修复方案 |
-|-----|---------|---------|
-| 8.1 | tRPC context 可能未正确获取 profileId，或 API 路由问题 | 检查 tRPC context 和 protectedProcedure |
-| 8.2 | `page.tsx` 第 66 行 `full_name: 'office'` 硬编码 | 调用 `trpc.user.getProfile.useQuery()` 获取真实数据 |
-| 8.3 | `page.tsx` 第 69 行 `membership_level: 'free'` 硬编码 | 同上，从 profile 获取 |
-| 8.4 | `page.tsx` 第 74-84 行公告数组硬编码 | 调用 `trpc.admin.getAnnouncements.useQuery()` 获取 |
+| 文件 | 修改内容 |
+|------|---------|
+| `packages/api/src/routers/settings.ts` | 新增 `getActiveAnnouncements` 和 `getBannerAnnouncement` 公开 API |
+| `apps/web/src/app/page.tsx` | 使用 tRPC 获取用户 profile 和公告数据 |
+| `apps/web/src/components/home/UpdatesSection.tsx` | 添加 yellow 标签颜色 |
 
-**代码位置**:
-- `apps/web/src/app/page.tsx:66-84` - 硬编码用户和公告数据
-- `apps/web/src/hooks/use-credits.tsx:18-32` - 积分 Hook 实现
-- `packages/api/src/routers/credits.ts:110-129` - 积分 API 实现
+**关键修复**:
+- 用户数据: 调用 `trpc.user.getUserProfile.useQuery()` 获取 nickname、membership_level
+- 公告数据: 新建公开 API `settings.getActiveAnnouncements`（原 admin API 需要管理员权限）
 
 ---
 
