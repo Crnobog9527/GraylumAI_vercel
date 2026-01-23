@@ -196,16 +196,54 @@
 
 ---
 
+### 🚨 阶段 7: 着陆页与访问控制 (2026-01-23 执行中)
+
+> **进入条件**: Vercel 域名配置完成 ✅
+> **完成条件**: 着陆页可访问，访问控制正常工作
+
+| # | 任务 | 交付物 | 预计时间 | 状态 |
+|---|------|--------|---------|------|
+| 7.1 | 实现访问控制中间件 | middleware.ts 更新 | 30m | 🔜 下一步 |
+| 7.2 | 创建路由组结构 | (landing)/ + (app)/ | 1h | ⏳ 待执行 |
+| 7.3 | 开发着陆页组件 | 6 个组件 | 2-3h | ⏳ 待执行 |
+| 7.4 | 组装着陆页 | page.tsx | 30m | ⏳ 待执行 |
+| 7.5 | 测试验证 | 本地 + 生产 | 30m | ⏳ 待执行 |
+
+**交付物清单**:
+
+| 文件 | 描述 |
+|------|------|
+| `apps/web/middleware.ts` | 域名路由 + 认证拦截 |
+| `apps/web/src/app/(landing)/layout.tsx` | 着陆页布局 |
+| `apps/web/src/app/(landing)/page.tsx` | 着陆页首页 |
+| `apps/web/src/app/(app)/layout.tsx` | 应用布局 |
+| `apps/web/src/app/(app)/page.tsx` | 应用首页 (Dashboard) |
+| `apps/web/src/components/landing/LandingHeader.tsx` | 导航栏 |
+| `apps/web/src/components/landing/HeroSection.tsx` | Hero 区域 |
+| `apps/web/src/components/landing/FeaturesSection.tsx` | 功能展示 |
+| `apps/web/src/components/landing/PricingSection.tsx` | 定价方案 |
+| `apps/web/src/components/landing/CTASection.tsx` | 行动号召 |
+| `apps/web/src/components/landing/LandingFooter.tsx` | 页脚 |
+
+**着陆页设计规范**:
+- 主色: `#FFD700` (金色)
+- 背景: `#0A0A0A` (深黑)
+- 遵循 `movetonew/VISUAL_DESIGN_SYSTEM.md`
+- 响应式设计，支持移动端
+- CTA 按钮链接到 `app.graylum.com`
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行
 
 | # | 任务 | 交付物 | 优先级 | 状态 |
 |---|------|--------|--------|------|
-| 7.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ⏳ 待执行 |
-| 7.2 | Sentry 监控告警 | 告警规则配置 | 🟡 推荐 | ⏳ 待执行 |
-| 7.3 | 负载测试 | k6/Artillery 压测脚本 | 🟢 可选 | ⏳ 待执行 |
-| 7.4 | 用户文档 | 使用手册 | 🟢 可选 | ⏳ 待执行 |
+| 8.1 | E2E 端到端测试 | Playwright 测试用例 | 🟡 推荐 | ✅ 完成 |
+| 8.2 | Sentry 监控告警 | 告警规则配置 | 🟡 推荐 | ✅ 完成 |
+| 8.3 | 负载测试 | k6/Artillery 压测脚本 | 🟢 可选 | ⏳ 待执行 |
+| 8.4 | 用户文档 | 使用手册 | 🟢 可选 | ⏳ 待执行 |
 
 **任务 7.1 - E2E 测试**:
 - 工具: Playwright (推荐) 或 Cypress
