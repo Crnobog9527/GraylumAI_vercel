@@ -23,11 +23,42 @@
 
 ## Current Status
 
-- **Phase:** 阶段 7 着陆页与访问控制 ✅ 完成
-- **Previous:** 阶段 6 高级优化 ✅ 完成
-- **Current:** 着陆页已完成，域名路由已实现
-- **Completed:** 2026-01-23
+- **Phase:** 阶段 8 首页数据集成修复 🔜 进行中
+- **Previous:** 阶段 7 着陆页与访问控制 ✅ 完成
+- **Current:** 发现首页数据硬编码问题，需修复
+- **发现时间:** 2026-01-23
 - **参考文档:** `movetonew/VISUAL_DESIGN_SYSTEM.md`
+
+### 🚨 阶段 8: 首页数据集成修复 (2026-01-23 发现)
+
+**问题概述**: 用户登录后，首页关键数据全部使用硬编码，未与后端 API 集成。
+
+| # | Bug 描述 | 代码位置 | 当前状态 |
+|---|---------|---------|---------|
+| 8.1 | Header 积分显示 "--"，API 返回 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | 🔜 待修复 |
+| 8.2 | 用户名始终显示 "office" | `page.tsx:67` 硬编码 `full_name: 'office'` | 🔜 待修复 |
+| 8.3 | 会员等级显示错误 | `page.tsx:69` 硬编码 `membership_level: 'free'` | 🔜 待修复 |
+| 8.4 | 首页公告与管理后台不同步 | `page.tsx:74-84` 硬编码公告数组 | 🔜 待修复 |
+
+**错误截图分析**:
+- 控制台显示: `credits.getBalance:1` 返回 `404 (Not Found)`
+- 欢迎横幅: 用户名 "office"、会员等级 "普通会员" 均为硬编码
+- 公告区域: 显示硬编码的 "应用上线特惠" 而非数据库公告
+
+**根本原因**:
+```javascript
+// apps/web/src/app/page.tsx:66-84 - 数据全部硬编码
+const user = {
+  full_name: 'office',           // TODO: 从 tRPC 获取
+  membership_level: 'free',      // TODO: 从 tRPC 获取
+};
+
+const announcements = [
+  { title: '应用上线特惠', ... }  // TODO: 从 tRPC 获取
+];
+```
+
+---
 
 ### 阶段 7 任务清单
 

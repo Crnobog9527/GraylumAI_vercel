@@ -1,5 +1,70 @@
 # Findings & Decisions
 
+## 🚨 首页数据集成 Bug (2026-01-23)
+
+### 问题发现
+
+用户登录后，首页存在 4 个严重的数据集成问题：
+
+| # | 问题 | 影响 | 严重程度 |
+|---|------|------|---------|
+| 1 | 积分 API 404 | Header 积分显示 "--" | 🔴 P0 |
+| 2 | 用户名硬编码 | 所有用户显示 "office" | 🔴 P0 |
+| 3 | 会员等级硬编码 | 所有用户显示 "普通会员" | 🔴 P0 |
+| 4 | 公告硬编码 | 管理后台公告无法显示 | 🟡 P1 |
+
+### 根本原因分析
+
+**1. 积分 API 404 (`credits.getBalance`)**
+
+- **位置**: `apps/web/src/hooks/use-credits.tsx:19`
+- **调用**: `trpc.credits.getBalance.useQuery()`
+- **可能原因**:
+  - tRPC context 中 `profileId` 未正确设置
+  - Supabase 认证 token 未正确传递到 API
+  - 路由配置问题
+
+**2. 用户数据硬编码**
+
+- **位置**: `apps/web/src/app/page.tsx:66-71`
+- **当前代码**:
+```javascript
+const user = {
+  full_name: 'office',                    // ❌ 硬编码
+  email: 'office@example.com',            // ❌ 硬编码
+  membership_level: 'free',               // ❌ 硬编码
+  membership_expiry_date: undefined
+};
+```
+- **修复方案**: 调用 `trpc.user.getProfile.useQuery()` 获取真实数据
+
+**3. 公告数据硬编码**
+
+- **位置**: `apps/web/src/app/page.tsx:74-84`
+- **当前代码**:
+```javascript
+const announcements = [
+  {
+    id: '1',
+    title: '应用上线特惠',               // ❌ 硬编码
+    description: '黄金会员年卡 5 折...',  // ❌ 硬编码
+    ...
+  }
+];
+```
+- **修复方案**: 调用 `trpc.admin.getActiveAnnouncements.useQuery()` 获取
+
+### 修复任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 1 | 调试积分 API 404 | 修复 tRPC context | 🔜 |
+| 2 | 集成用户 profile 数据 | page.tsx 调用 tRPC | 🔜 |
+| 3 | 集成公告 API | page.tsx 调用 announcements API | 🔜 |
+| 4 | 测试验证 | 确保数据正确显示 | 🔜 |
+
+---
+
 ## 着陆页与访问控制实施决策 (2026-01-23)
 
 ### 任务概述
