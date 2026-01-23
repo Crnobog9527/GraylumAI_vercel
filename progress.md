@@ -234,6 +234,23 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### ✅ 阶段 8 第十二轮修复 (2026-01-23)
+
+**问题**: 管理员后台查看工单时附件图片无法显示
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 附件图片显示为占位图标 | `admin/tickets/page.tsx:541-544` | 代码只显示 Lucide Image 图标，未渲染实际 `<img>` 标签 | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `admin/tickets/page.tsx` | `isImageFile()` 函数增加查询参数处理 |
+| `admin/tickets/page.tsx` | 附件显示改为 `<img>` 标签渲染实际图片 |
+| `admin/tickets/page.tsx` | 添加 `onError` 回退机制，图片加载失败时显示图标 |
+
+---
+
 ### ✅ 阶段 8 第十一轮修复 (2026-01-23)
 
 **问题**: 工单附件不显示 + 对话功能失效
