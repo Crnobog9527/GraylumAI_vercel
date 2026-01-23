@@ -12,14 +12,22 @@ export const userRouter = router({
       .eq('id', ctx.profileId)
       .single();
 
+    // 辅助函数: 从 email 提取显示名称
+    const getDisplayName = (email: string | null | undefined): string => {
+      if (!email) return '用户';
+      return email.split('@')[0] || '用户';
+    };
+
     // 对于任何错误都返回默认值，确保页面能正常加载
     if (error || !userProfile) {
       console.error('getUserProfile error:', error?.message, error?.code, 'profileId:', ctx.profileId);
+      const email = ctx.user?.email ?? '';
+      const displayName = getDisplayName(email);
       return {
         id: ctx.profileId,
-        email: ctx.user?.email ?? '',
-        nickname: '用户',
-        full_name: null,
+        email,
+        nickname: displayName,
+        full_name: displayName,
         avatar_url: null,
         role: 'user',
         credits: 0,
@@ -29,10 +37,12 @@ export const userRouter = router({
       };
     }
 
-    // 返回实际数据
+    // 返回实际数据，nickname 为空时使用 email 前缀作为显示名称
+    const displayName = userProfile.nickname || getDisplayName(userProfile.email);
     return {
       ...userProfile,
-      full_name: userProfile.nickname ?? null, // full_name 不存在，用 nickname 代替
+      nickname: displayName,
+      full_name: displayName,
     };
   }),
 
