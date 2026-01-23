@@ -79,6 +79,9 @@
 |------|------|---------|------|
 | `?domain=www` 无法显示着陆页 | Next.js 路由组 `(landing)/page.tsx` 与根目录 `page.tsx` 冲突 | 着陆页移至 `/landing`，middleware 使用 `rewrite` | ✅ |
 | 开发环境参数不生效 | middleware 只检测 localhost | 添加 `isDevEnvironment` 支持 `*.github.dev` | ✅ |
+| 未登录访问根路径显示后台 | 根页面 `page.tsx` 是客户端组件，无认证检查 | 在 `page.tsx` 添加 `useEffect` 认证检查，未登录重定向到 `/login` | ✅ |
+| `?domain=www` 仍显示后台页面 | 中间件 rewrite 被客户端渲染覆盖 | 在 `page.tsx` 检测 URL 参数，有 `?domain=www` 时重定向到 `/landing?domain=www` | ✅ |
+| 退出登录跳转到 login | `AppHeader.tsx` 硬编码跳转到 `/login` | 修改为根据环境跳转到 landing 页面 | ✅ |
 
 ### 后续优化任务
 

@@ -231,10 +231,13 @@
 
 **Bug 修复记录** (2026-01-23):
 
-| 问题 | 原因 | 修复方案 |
-|------|------|---------|
-| `?domain=www` 无法显示着陆页 | Next.js 路由组 `(landing)/page.tsx` 与根目录 `page.tsx` 冲突，根目录优先 | 着陆页移至 `/landing` 路径，middleware 使用 `rewrite` |
-| 开发环境 `?domain=www` 不生效 | middleware 只检测 localhost，未支持 GitHub Codespaces | 添加 `isDevEnvironment` 检测 `*.github.dev` 和 `*.gitpod.io` |
+| 问题 | 原因 | 修复方案 | 状态 |
+|------|------|---------|------|
+| `?domain=www` 无法显示着陆页 | Next.js 路由组 `(landing)/page.tsx` 与根目录 `page.tsx` 冲突，根目录优先 | 着陆页移至 `/landing` 路径，middleware 使用 `rewrite` | ✅ |
+| 开发环境 `?domain=www` 不生效 | middleware 只检测 localhost，未支持 GitHub Codespaces | 添加 `isDevEnvironment` 检测 `*.github.dev` 和 `*.gitpod.io` | ✅ |
+| 未登录访问根路径显示后台 | 根页面 `page.tsx` 是客户端组件，无认证检查，直接渲染后台 UI | 在 `page.tsx` 添加客户端认证检查，未登录重定向到 `/login` | ✅ |
+| `?domain=www` 仍显示后台页面 | 中间件 rewrite 被客户端渲染覆盖，根页面无参数检查 | 在 `page.tsx` 检测 `?domain=www` 参数，重定向到 `/landing?domain=www` | ✅ |
+| 退出登录跳转到 login 而非 landing | `AppHeader.tsx` 和 `ProfileSidebar.tsx` 硬编码跳转到 `/login` | 修改为根据环境跳转: 生产→`www.graylum.com`, 开发→`/landing?domain=www` | ✅ |
 
 **着陆页设计规范**:
 - 主色: `#FFD700` (金色)
