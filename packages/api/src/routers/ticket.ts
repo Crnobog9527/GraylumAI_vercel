@@ -43,6 +43,7 @@ export const ticketRouter = router({
       title: z.string().min(1),
       description: z.string().min(1),
       category: z.string().optional().default('other'),
+      attachments: z.array(z.string()).optional().default([]),
     }))
     .mutation(async ({ ctx, input }) => {
       // 映射前端分类到数据库分类
@@ -56,6 +57,7 @@ export const ticketRouter = router({
           description: input.description,
           category: dbCategory,
           status: 'open',
+          attachments: input.attachments,
         })
         .select()
         .single();
@@ -90,6 +92,7 @@ export const ticketRouter = router({
       category: dbToCategoryMap[ticket.category] || 'other',
       status: dbToStatusMap[ticket.status] || 'pending',
       priority: ticket.priority || 'medium',
+      attachments: ticket.attachments || [],
       created_at: ticket.created_at,
       updated_at: ticket.updated_at,
       replies: (ticket.ticket_replies || []).map((reply: any) => ({
@@ -124,6 +127,7 @@ export const ticketRouter = router({
         category: dbToCategoryMap[ticket.category] || 'other',
         status: dbToStatusMap[ticket.status] || 'pending',
         priority: ticket.priority || 'medium',
+        attachments: ticket.attachments || [],
         created_at: ticket.created_at,
         updated_at: ticket.updated_at,
         replies: (ticket.ticket_replies || []).map((reply: any) => ({

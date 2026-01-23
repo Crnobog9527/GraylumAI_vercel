@@ -240,7 +240,7 @@ const { data: userProfile, error } = await ctx.supabase
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
-| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，需要 Supabase Storage 集成 | ⏳ 需后续实现 |
+| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，未实际上传到存储 | ✅ 已修复 |
 | 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ✅ 已修复 |
 
 **修复内容**:
@@ -249,13 +249,16 @@ const { data: userProfile, error } = await ctx.supabase
 | `chat/page.tsx` | 添加 `trpc.chat.getMessages.useQuery()` 获取消息 |
 | `chat/page.tsx` | 添加消息列表渲染组件，显示用户和助手消息 |
 | `chat/page.tsx` | 添加自动滚动到底部功能 |
-| `chat/page.tsx` | 条件渲染：有消息显示消息列表，无消息显示空状态 |
+| `api/upload/route.ts` | 新建文件上传 API，支持上传到 Supabase Storage |
+| `ticket.ts` | `createTicket` 添加 attachments 参数支持 |
+| `ticket.ts` | `getTickets`/`getTicketById` 返回 attachments 字段 |
+| `TicketsPanel.tsx` | `CreateTicketForm` 实现真实文件上传 |
+| `TicketsPanel.tsx` | `TicketDetailView` 添加附件图片展示区域 |
 
-**待实现 - 工单附件功能**:
-- 需要配置 Supabase Storage bucket
-- 创建文件上传 API
-- 更新 `createTicket` API 支持 attachments 参数
-- 数据库已支持 attachments 字段 (jsonb)
+**Supabase Storage 配置**:
+- Bucket 名称: `ticket-attachments`
+- 首次上传时自动创建 bucket
+- 支持 JPEG/PNG/GIF/WebP，最大 5MB
 
 ---
 

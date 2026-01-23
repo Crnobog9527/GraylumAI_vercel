@@ -386,14 +386,14 @@
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
-| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件需要 Supabase Storage 集成 | ⏳ 需后续实现 |
+| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码 | ✅ 已修复 |
 | 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ✅ 已修复 |
 
 **交付物**:
 - `chat/page.tsx`: 添加消息获取和显示功能
-
-**待实现**:
-- 工单附件功能需要 Supabase Storage 配置
+- `api/upload/route.ts`: 新建文件上传 API
+- `ticket.ts`: 支持 attachments 参数
+- `TicketsPanel.tsx`: 真实文件上传 + 附件展示
 
 ---
 

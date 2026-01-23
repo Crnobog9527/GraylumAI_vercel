@@ -13,9 +13,10 @@ import {
 } from '@/components/ui/select';
 import {
   Plus, AlertCircle, Inbox, Archive, ArrowLeft, Loader2,
-  CheckCircle, Clock, Send, Upload, X
+  CheckCircle, Clock, Send, Upload, X, Image as ImageIcon
 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { createClient } from '@/lib/supabase';
 
 interface MockUser {
   email?: string;
@@ -29,6 +30,7 @@ interface Ticket {
   category: string;
   status: 'pending' | 'in_progress' | 'resolved' | 'closed';
   created_date: string;
+  attachments?: string[];
   replies?: TicketReply[];
 }
 
@@ -351,6 +353,35 @@ const TicketDetailView = memo(function TicketDetailView({
             {ticket.description}
           </p>
         </div>
+
+        {/* 附件显示 */}
+        {ticket.attachments && ticket.attachments.length > 0 && (
+          <div className="pt-4 mt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
+            <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+              <ImageIcon className="h-4 w-4" />
+              附件截图 ({ticket.attachments.length})
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {ticket.attachments.map((url, index) => (
+                <a
+                  key={index}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-lg overflow-hidden border transition-all hover:border-yellow-500/50"
+                  style={{ borderColor: 'var(--border-primary)' }}
+                >
+                  <img
+                    src={url}
+                    alt={`附件 ${index + 1}`}
+                    className="w-full h-32 object-cover"
+                    loading="lazy"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Replies */}
@@ -508,6 +539,14 @@ const CreateTicketForm = memo(function CreateTicketForm({
 
     setUploading(true);
     try {
+      // 获取 auth token
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.error('Not authenticated');
+        return;
+      }
+
       for (const file of files) {
         if (!file.type.startsWith('image/')) {
           continue;
@@ -515,9 +554,25 @@ const CreateTicketForm = memo(function CreateTicketForm({
         if (file.size > 5 * 1024 * 1024) {
           continue;
         }
-        // TODO: Upload file via tRPC
-        // Mock upload
-        setAttachments(prev => [...prev, { name: file.name, url: URL.createObjectURL(file) }]);
+
+        // 上传文件到服务器
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setAttachments(prev => [...prev, { name: file.name, url: data.url }]);
+        } else {
+          console.error('Upload failed:', await response.text());
+        }
       }
     } finally {
       setUploading(false);
@@ -537,6 +592,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
       title: formData.title.trim(),
       description: formData.description.trim(),
       category: formData.category,
+      attachments: attachments.map(a => a.url),
     });
   };
 
@@ -737,6 +793,7 @@ export default function TicketsPanel({
       category: t.category,
       status: t.status as Ticket['status'],
       created_date: t.created_at,
+      attachments: t.attachments || [],
       replies: t.replies?.map((r: any) => ({
         id: r.id,
         message: r.message,
