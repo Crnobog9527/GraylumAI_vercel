@@ -83,6 +83,10 @@
 | `?domain=www` 仍显示后台页面 | 中间件 rewrite 被客户端渲染覆盖 | 在 `page.tsx` 检测 URL 参数，有 `?domain=www` 时重定向到 `/landing?domain=www` | ✅ |
 | 退出登录跳转到 login | `AppHeader.tsx` 硬编码跳转到 `/login` | 修改为根据环境跳转到 landing 页面 | ✅ |
 
+**验证结果** (2026-01-23):
+- ✅ 重启服务器后访问根路径 → 正确跳转到 `/login`
+- ✅ 退出登录后 → 正确跳转到 `/landing?domain=www` (开发环境)
+
 ### 后续优化任务
 
 | 任务 | 优先级 | 状态 |

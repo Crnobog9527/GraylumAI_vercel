@@ -239,6 +239,10 @@
 | `?domain=www` 仍显示后台页面 | 中间件 rewrite 被客户端渲染覆盖，根页面无参数检查 | 在 `page.tsx` 检测 `?domain=www` 参数，重定向到 `/landing?domain=www` | ✅ |
 | 退出登录跳转到 login 而非 landing | `AppHeader.tsx` 和 `ProfileSidebar.tsx` 硬编码跳转到 `/login` | 修改为根据环境跳转: 生产→`www.graylum.com`, 开发→`/landing?domain=www` | ✅ |
 
+**验证结果** (2026-01-23):
+- ✅ 重启服务器后访问根路径 → 正确跳转到 `/login`
+- ✅ 退出登录后 → 正确跳转到 `/landing?domain=www` (开发环境)
+
 **着陆页设计规范**:
 - 主色: `#FFD700` (金色)
 - 背景: `#0A0A0A` (深黑)
