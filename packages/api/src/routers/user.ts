@@ -3,17 +3,18 @@ import { z } from 'zod';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
-    // 查询基础列 - 只查询最可能存在的列
+    // 只查询数据库中实际存在的列
+    // profiles 表结构: id, credits, created_at, role, status, membership_level,
+    //                  is_deleted, nickname, avatar_url, email, last_login_at, last_ip, deleted_at
     const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
-      .select('id, email, nickname, role, credits, created_at, updated_at')
+      .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at')
       .eq('id', ctx.profileId)
       .single();
 
     // 对于任何错误都返回默认值，确保页面能正常加载
     if (error || !userProfile) {
       console.error('getUserProfile error:', error?.message, error?.code, 'profileId:', ctx.profileId);
-      // 返回基于用户信息的默认值
       return {
         id: ctx.profileId,
         email: ctx.user?.email ?? '',
@@ -23,17 +24,15 @@ export const userRouter = router({
         role: 'user',
         credits: 0,
         membership_level: 'free',
+        status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       };
     }
 
-    // 返回实际数据，补充可能缺失的字段
+    // 返回实际数据
     return {
       ...userProfile,
-      full_name: (userProfile as any).full_name ?? userProfile.nickname ?? null,
-      avatar_url: (userProfile as any).avatar_url ?? null,
-      membership_level: (userProfile as any).membership_level ?? 'free',
+      full_name: userProfile.nickname ?? null, // full_name 不存在，用 nickname 代替
     };
   }),
 
