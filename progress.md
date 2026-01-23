@@ -234,26 +234,29 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
-### 🔧 阶段 8 第八轮修复 (2026-01-23)
+### ✅ 阶段 8 第八轮修复 (2026-01-23)
 
 **问题**: 个人中心数据全部硬编码，与数据库实际数据不同步
 
-| # | 问题 | 位置 | 原因 |
-|---|------|------|------|
-| 1 | 昵称修改不写入数据库 | `PersonalInfoCard.tsx` | `handleSaveNickname` 只有 TODO |
-| 2 | 使用统计数据硬编码 | `PersonalInfoCard.tsx` | `UsageStatsCard` 使用 mock 数据 |
-| 3 | 积分概览数据硬编码 | `CreditRecordsCard.tsx` | `monthlyUsed = 256` 硬编码 |
-| 4 | 积分记录数据硬编码 | `CreditRecordsCard.tsx` | transactions 使用 mock 数据 |
-| 5 | 使用历史不显示数据 | `UsageHistoryCard.tsx` | 使用空数组 |
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 昵称修改不写入数据库 | `PersonalInfoCard.tsx` | `handleSaveNickname` 只有 TODO | ✅ 已修复 |
+| 2 | 使用统计数据硬编码 | `PersonalInfoCard.tsx` | `UsageStatsCard` 使用 mock 数据 | ✅ 已修复 |
+| 3 | 积分概览数据硬编码 | `CreditRecordsCard.tsx` | `monthlyUsed = 256` 硬编码 | ✅ 已修复 |
+| 4 | 积分记录数据硬编码 | `CreditRecordsCard.tsx` | transactions 使用 mock 数据 | ✅ 已修复 |
+| 5 | 使用历史不显示数据 | `UsageHistoryCard.tsx` | 使用空数组 | ✅ 已修复 |
 
-**修复计划**:
+**修复内容**:
 | 文件 | 修改 |
 |------|------|
-| `PersonalInfoCard.tsx` | 调用 `trpc.user.updateUserProfile` mutation |
-| `PersonalInfoCard.tsx` | 新建 API 获取使用统计 |
-| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditsSummary` |
-| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditTransactions` |
-| `UsageHistoryCard.tsx` | 使用 `trpc.chat.getConversations` |
+| `PersonalInfoCard.tsx` | 调用 `trpc.user.updateUserProfile` mutation 保存昵称 |
+| `PersonalInfoCard.tsx` | 使用 `trpc.user.getUserUsageStats` 获取真实使用统计 |
+| `PersonalInfoCard.tsx` | 使用 `trpc.credits.getCreditsSummary` 获取本月消耗 |
+| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditsSummary` 获取积分概览 |
+| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditTransactions` 获取交易记录 |
+| `UsageHistoryCard.tsx` | 使用 `trpc.chat.getConversations` 获取对话历史 |
+| `packages/api/src/routers/user.ts` | 新增 `getUserUsageStats` 接口 |
+| `packages/api/src/routers/chat.ts` | `getConversations` 增加消息数和积分消耗统计 |
 
 ---
 
