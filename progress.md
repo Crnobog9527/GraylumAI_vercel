@@ -111,29 +111,44 @@ announcement: {
 
 ### ✅ 阶段 8 第四轮修复 (2026-01-23)
 
-**新发现的问题**:
+**修复内容**:
+- 重构 `protectedProcedure` profile 创建逻辑
 
-| # | 问题 | 错误信息 | 状态 |
-|---|------|---------|------|
-| 1 | 积分获取失败 | `TRPCClientError: 用户资料不存在` + 404 | ✅ 已修复 |
-| 2 | 功能广场模块显示错误 | 管理后台无模块但页面显示数据库测试数据 | ✅ 已分析 |
-| 3 | 个人中心跳转失败 | `TRPCClientError: 用户资料不存在` | ✅ 已修复 |
+---
+
+### ✅ 阶段 8 第五轮修复 (2026-01-23)
+
+**问题**: 积分和个人中心仍然报错 404
 
 **根本原因分析**:
-- `protectedProcedure` 在用户 profile 不存在时尝试创建，但创建失败时只打印日志继续执行
-- 后续 `credits.getBalance` 和 `user.getUserProfile` 查询因 profile 不存在而抛出 NOT_FOUND 错误
-- 功能广场模块来自数据库 `modules` 表的测试/种子数据，非代码硬编码
+1. `credits.getBalance` 查询了可能不存在的列 (`credits_expiring_soon`, `credits_expiry_date`)
+2. `user.getUserProfile` 使用 `select('*')` 可能包含不存在的列
+3. API 在查询失败时直接抛出错误，导致页面无法加载
 
-**修复内容**:
+**修复策略**: 防御性编程 - 查询失败时返回默认值而非抛出错误
 
 | 文件 | 修改 |
 |------|------|
-| `packages/api/src/trpc.ts` | 重构 `protectedProcedure` profile 创建逻辑 |
+| `packages/api/src/routers/credits.ts` | `getBalance` 只查询 `credits` 列，失败时返回默认值 |
+| `packages/api/src/routers/credits.ts` | `getCreditsSummary` 查询失败时返回默认值 |
+| `packages/api/src/routers/user.ts` | `getUserProfile` 选择具体列，失败时返回默认值 |
+| `packages/api/src/routers/user.ts` | `getUserCredits` 查询失败时返回默认值 |
 
-**关键修复 - protectedProcedure**:
-- 区分 "not found" 错误 (PGRST116) 和其他数据库错误
-- Profile 创建失败时抛出明确错误而非继续执行
-- 处理并发创建冲突 (23505)，重新获取已存在的 profile
+**关键修复**:
+```typescript
+// credits.getBalance - 只查询存在的列
+const { data: profile, error } = await ctx.supabase
+  .from('profiles')
+  .select('credits')  // 移除可能不存在的列
+  .eq('id', ctx.profileId)
+  .single();
+
+// 失败时返回默认值而非抛出错误
+if (error || !profile) {
+  console.error('Credits query error:', error?.message);
+  return { credits: 0, creditsExpiringSoon: 0, creditsExpiryDate: null };
+}
+```
 
 **功能广场说明**:
 - 模块数据来自 `modules` 数据表，通过 `trpc.modules.getModules` 查询

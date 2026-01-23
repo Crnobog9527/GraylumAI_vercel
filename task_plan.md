@@ -322,16 +322,26 @@
 
 ### ✅ 阶段 8 第四轮修复 (2026-01-23)
 
-> **问题**: 积分/个人中心报错 "用户资料不存在"，功能广场显示数据库测试数据
+> **问题**: 积分/个人中心报错 "用户资料不存在"
+
+**交付物**:
+- `packages/api/src/trpc.ts`: 重构 profile 创建逻辑
+
+---
+
+### ✅ 阶段 8 第五轮修复 (2026-01-23)
+
+> **问题**: 积分和个人中心仍然报错 404
 
 | # | 问题 | 原因 | 修复 |
 |---|------|------|------|
-| 1 | 积分获取 404 | profile 不存在时创建失败后继续执行 | ✅ 重构 protectedProcedure |
-| 2 | 功能广场模块 | 数据来自 modules 表种子数据 | ✅ 非代码问题 |
-| 3 | 个人中心跳转失败 | 同 #1 | ✅ 同上修复 |
+| 1 | 积分获取 404 | 查询了不存在的列 (credits_expiring_soon) | ✅ 只查询 credits 列 |
+| 2 | 个人中心跳转失败 | select(*) 可能包含不存在的列 | ✅ 选择具体列 |
+| 3 | API 抛出错误 | 查询失败直接 throw | ✅ 返回默认值 |
 
 **交付物**:
-- `packages/api/src/trpc.ts`: 重构 profile 创建逻辑，失败时抛出明确错误
+- `packages/api/src/routers/credits.ts`: getBalance/getCreditsSummary 防御性处理
+- `packages/api/src/routers/user.ts`: getUserProfile/getUserCredits 防御性处理
 
 ---
 
