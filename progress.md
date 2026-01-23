@@ -23,13 +23,34 @@
 
 ## Current Status
 
-- **Phase:** 阶段 8 首页数据集成修复 ✅ 完成
+- **Phase:** 阶段 8 首页数据集成修复 (第二轮) ✅ 完成
 - **Previous:** 阶段 7 着陆页与访问控制 ✅ 完成
-- **Current:** 首页数据集成已修复，用户/公告数据从 tRPC 获取
+- **Current:** 首页数据集成已完成，包含用户/公告/横幅
 - **完成时间:** 2026-01-23
 - **参考文档:** `movetonew/VISUAL_DESIGN_SYSTEM.md`
 
-### ✅ 阶段 8: 首页数据集成修复 (2026-01-23 完成)
+### ✅ 阶段 8 第二轮修复 (2026-01-23)
+
+**新发现的问题**:
+
+| # | 问题 | 原因 | 状态 |
+|---|------|------|------|
+| 1 | 公告不显示 | `active` 是字符串 `'true'` 而非布尔值 | ✅ 已修复 |
+| 2 | 公告不显示 | 缺少 `announcement_type='homepage'` 过滤 | ✅ 已修复 |
+| 3 | 横幅不显示 | GlobalBanner 组件未添加到首页 | ✅ 已修复 |
+| 4 | 字段名错误 | `content` vs `description`, `banner_link` vs `link_url` | ✅ 已修复 |
+
+**修复内容**:
+
+| 文件 | 修改 |
+|------|------|
+| `settings.ts` | 修正 API 查询: `active='true'`, `announcement_type` 过滤 |
+| `settings.ts` | 字段映射: `content->description`, `banner_link->link_url` |
+| `page.tsx` | 添加 GlobalBanner，调用 `getBannerAnnouncement` API |
+
+---
+
+### ✅ 阶段 8 第一轮修复 (2026-01-23 完成)
 
 **问题概述**: 用户登录后，首页关键数据全部使用硬编码，未与后端 API 集成。
 

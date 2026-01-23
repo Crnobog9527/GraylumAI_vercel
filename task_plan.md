@@ -280,6 +280,23 @@
 
 ---
 
+### ✅ 阶段 8 第二轮修复 (2026-01-23)
+
+> **问题**: 公告和横幅仍然不显示
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 公告不显示 | `active` 是字符串 `'true'` | 改为 `.eq('active', 'true')` |
+| 2 | 公告不显示 | 缺少类型过滤 | 添加 `.eq('announcement_type', 'homepage')` |
+| 3 | 横幅不显示 | 组件未使用 | 添加 GlobalBanner 到 page.tsx |
+| 4 | 字段名错误 | content vs description | 添加字段映射 |
+
+**交付物**:
+- `settings.ts`: 修正 API 查询条件和字段映射
+- `page.tsx`: 添加 GlobalBanner 组件和 getBannerAnnouncement 调用
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

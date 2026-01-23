@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
 import WelcomeBanner from '@/components/home/WelcomeBanner';
 import SixStepsGuide from '@/components/home/SixStepsGuide';
 import UpdatesSection from '@/components/home/UpdatesSection';
@@ -57,6 +58,12 @@ export default function HomePage() {
     { enabled: isAuthenticated }
   );
 
+  // 从 tRPC 获取横幅公告
+  const { data: bannerData } = trpc.settings.getBannerAnnouncement.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
   // 加载中或未认证时显示加载状态
   if (isLoading || !isAuthenticated) {
     return (
@@ -95,6 +102,16 @@ export default function HomePage() {
     link_url: announcement.link_url,
     link_text: announcement.link_text,
   }));
+
+  // 横幅公告数据 (从 tRPC 获取)
+  const banners = bannerData ? [{
+    id: bannerData.id,
+    title: bannerData.title,
+    description: bannerData.description || '',
+    tag: bannerData.tag || '限量优惠',
+    banner_style: bannerData.banner_style || 'promo',
+    banner_link: bannerData.link_url,
+  }] : [];
 
   return (
     <div
@@ -179,6 +196,11 @@ export default function HomePage() {
           border-color: var(--color-primary) !important;
         }
       `}</style>
+
+      {/* ============================================
+          全站横幅公告
+          ============================================ */}
+      <GlobalBanner banners={banners} />
 
       {/* ============================================
           顶部导航
