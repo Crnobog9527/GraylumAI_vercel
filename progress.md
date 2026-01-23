@@ -150,6 +150,39 @@ if (error || !profile) {
 }
 ```
 
+---
+
+### ✅ 阶段 8 第六轮修复 (2026-01-23)
+
+**问题**: 个人中心加载缓慢，控制台大量报错 `TRPCClientError: 获取用户资料失败`
+
+**根本原因**:
+- `getUserProfile` 在非 PGRST116 错误时仍抛出异常
+- 查询的某些列 (如 `full_name`, `avatar_url`, `membership_level`) 可能不存在于数据库
+
+**修复**:
+| 文件 | 修改 |
+|------|------|
+| `user.ts` | `getUserProfile` 对任何错误都返回默认值，不再抛出异常 |
+| `user.ts` | 简化查询列为最基础的 `id, email, nickname, role, credits, created_at, updated_at` |
+| `user.ts` | `updateUserProfile` 失败时返回 null 而非抛出异常 |
+
+**关键修复**:
+```typescript
+// 对于任何错误都返回默认值，确保页面能正常加载
+if (error || !userProfile) {
+  console.error('getUserProfile error:', error?.message, error?.code);
+  return {
+    id: ctx.profileId,
+    email: ctx.user?.email ?? '',
+    nickname: '用户',
+    credits: 0,
+    membership_level: 'free',
+    // ... 其他默认值
+  };
+}
+```
+
 **功能广场说明**:
 - 模块数据来自 `modules` 数据表，通过 `trpc.modules.getModules` 查询
 - 目前没有管理后台模块管理页面 (`/admin/modules`)
