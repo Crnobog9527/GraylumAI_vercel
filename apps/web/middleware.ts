@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
   '/login',
+  '/landing',
   '/api',
   '/_next',
   '/favicon.ico',
@@ -58,6 +59,12 @@ export async function middleware(request: NextRequest) {
 
   // www 域名: 展示着陆页 (公开访问)
   if (isWwwDomain) {
+    // 根路径重写到着陆页
+    if (pathname === '/') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/landing';
+      return NextResponse.rewrite(url);
+    }
     // www 域名允许所有访问，不需要认证
     return supabaseResponse;
   }
@@ -89,6 +96,12 @@ export async function middleware(request: NextRequest) {
     const domainParam = request.nextUrl.searchParams.get('domain');
 
     if (domainParam === 'www') {
+      // 根路径重写到着陆页
+      if (pathname === '/') {
+        const url = request.nextUrl.clone();
+        url.pathname = '/landing';
+        return NextResponse.rewrite(url);
+      }
       // 模拟 www 域名，公开访问
       return supabaseResponse;
     }

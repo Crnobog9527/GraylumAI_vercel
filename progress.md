@@ -43,9 +43,9 @@
 
 | 文件 | 描述 | 状态 |
 |------|------|------|
-| `apps/web/middleware.ts` | 域名路由 + 认证拦截 | ✅ |
-| `apps/web/src/app/(landing)/layout.tsx` | 着陆页布局 | ✅ |
-| `apps/web/src/app/(landing)/page.tsx` | 着陆页首页 | ✅ |
+| `apps/web/middleware.ts` | 域名路由 + 认证拦截 + rewrite | ✅ |
+| `apps/web/src/app/landing/layout.tsx` | 着陆页布局 | ✅ |
+| `apps/web/src/app/landing/page.tsx` | 着陆页首页 | ✅ |
 | `apps/web/src/components/landing/LandingHeader.tsx` | 导航栏 (滚动效果) | ✅ |
 | `apps/web/src/components/landing/HeroSection.tsx` | Hero 区域 (动画统计) | ✅ |
 | `apps/web/src/components/landing/FeaturesSection.tsx` | 6 步增长策略 | ✅ |
@@ -72,6 +72,13 @@
 | Vercel 域名配置 | ✅ 已完成 |
 | 着陆页开发 | ✅ 已完成 |
 | 访问控制中间件 | ✅ 已完成 |
+
+### Bug 修复记录 (2026-01-23)
+
+| 问题 | 原因 | 修复方案 | 状态 |
+|------|------|---------|------|
+| `?domain=www` 无法显示着陆页 | Next.js 路由组 `(landing)/page.tsx` 与根目录 `page.tsx` 冲突 | 着陆页移至 `/landing`，middleware 使用 `rewrite` | ✅ |
+| 开发环境参数不生效 | middleware 只检测 localhost | 添加 `isDevEnvironment` 支持 `*.github.dev` | ✅ |
 
 ### 后续优化任务
 

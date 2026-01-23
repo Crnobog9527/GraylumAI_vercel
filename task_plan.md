@@ -213,9 +213,9 @@
 
 | 文件 | 描述 | 状态 |
 |------|------|------|
-| `apps/web/middleware.ts` | 域名路由 + 认证拦截 | ✅ |
-| `apps/web/src/app/(landing)/layout.tsx` | 着陆页布局 | ✅ |
-| `apps/web/src/app/(landing)/page.tsx` | 着陆页首页 | ✅ |
+| `apps/web/middleware.ts` | 域名路由 + 认证拦截 + rewrite | ✅ |
+| `apps/web/src/app/landing/layout.tsx` | 着陆页布局 | ✅ |
+| `apps/web/src/app/landing/page.tsx` | 着陆页首页 | ✅ |
 | `apps/web/src/components/landing/LandingHeader.tsx` | 导航栏 (滚动效果) | ✅ |
 | `apps/web/src/components/landing/HeroSection.tsx` | Hero 区域 (动画统计) | ✅ |
 | `apps/web/src/components/landing/FeaturesSection.tsx` | 6 步增长策略 | ✅ |
@@ -225,9 +225,16 @@
 | `apps/web/src/components/landing/index.ts` | 组件导出 | ✅ |
 
 **访问控制逻辑**:
-- `www.graylum.com` → 公开访问着陆页
+- `www.graylum.com` → 公开访问着陆页 (rewrite 到 `/landing`)
 - `app.graylum.com` → 需要登录，未登录重定向到 `/login`
-- `localhost` → 支持 `?domain=www` 参数模拟 www 域名
+- `localhost` / `*.github.dev` / `*.gitpod.io` → 支持 `?domain=www` 参数模拟 www 域名
+
+**Bug 修复记录** (2026-01-23):
+
+| 问题 | 原因 | 修复方案 |
+|------|------|---------|
+| `?domain=www` 无法显示着陆页 | Next.js 路由组 `(landing)/page.tsx` 与根目录 `page.tsx` 冲突，根目录优先 | 着陆页移至 `/landing` 路径，middleware 使用 `rewrite` |
+| 开发环境 `?domain=www` 不生效 | middleware 只检测 localhost，未支持 GitHub Codespaces | 添加 `isDevEnvironment` 检测 `*.github.dev` 和 `*.gitpod.io` |
 
 **着陆页设计规范**:
 - 主色: `#FFD700` (金色)
