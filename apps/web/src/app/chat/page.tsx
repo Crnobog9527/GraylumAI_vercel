@@ -5,12 +5,19 @@ import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
-import { MessageSquare, Paperclip, Send, Loader2 } from 'lucide-react';
+import { MessageSquare, Paperclip, Send, Loader2, User, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
+
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
 
 export default function ChatPage() {
   const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
@@ -31,6 +38,19 @@ export default function ChatPage() {
   const currentConversation = activeConversationId
     ? conversations.find((c) => c.id === activeConversationId)
     : null;
+
+  // Fetch messages for active conversation
+  const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
+    { conversationId: activeConversationId! },
+    { enabled: !!activeConversationId }
+  );
+  const messages: Message[] = messagesData?.data || [];
+
+  // Auto-scroll to bottom when messages change
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Mutations
   const createConversation = trpc.chat.createConversation.useMutation({
@@ -157,24 +177,76 @@ export default function ChatPage() {
 
           {/* 消息区域 - 空状态或消息列表 */}
           <div className="flex-1 flex flex-col overflow-y-auto relative z-10">
-            {/* 空状态 - 开始新对话 */}
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                style={{
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-primary)',
-                }}
-              >
-                <MessageSquare className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
+            {!activeConversationId || messages.length === 0 ? (
+              /* 空状态 - 开始新对话 */
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <div
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                  style={{
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-primary)',
+                  }}
+                >
+                  <MessageSquare className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
+                </div>
+                <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                  开始新对话
+                </h2>
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  请输入您的问题，AI将为您解答
+                </p>
               </div>
-              <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                开始新对话
-              </h2>
-              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                请输入您的问题，AI将为您解答
-              </p>
-            </div>
+            ) : (
+              /* 消息列表 */
+              <div className="flex-1 p-4 space-y-4 max-w-4xl mx-auto w-full">
+                {messagesLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
+                  </div>
+                ) : (
+                  messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {message.role === 'assistant' && (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                          style={{
+                            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                          }}
+                        >
+                          <Bot className="h-4 w-4" style={{ color: 'var(--bg-primary)' }} />
+                        </div>
+                      )}
+                      <div
+                        className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                          message.role === 'user' ? 'rounded-br-sm' : 'rounded-bl-sm'
+                        }`}
+                        style={{
+                          background: message.role === 'user'
+                            ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
+                            : 'var(--bg-secondary)',
+                          color: message.role === 'user' ? 'var(--bg-primary)' : 'var(--text-primary)',
+                          border: message.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
+                        }}
+                      >
+                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                      </div>
+                      {message.role === 'user' && (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                          style={{ background: 'var(--bg-tertiary)' }}
+                        >
+                          <User className="h-4 w-4" style={{ color: 'var(--text-secondary)' }} />
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
           </div>
 
           {/* 输入区域 */}

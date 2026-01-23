@@ -234,6 +234,31 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### ✅ 阶段 8 第十一轮修复 (2026-01-23)
+
+**问题**: 工单附件不显示 + 对话功能失效
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，需要 Supabase Storage 集成 | ⏳ 需后续实现 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `chat/page.tsx` | 添加 `trpc.chat.getMessages.useQuery()` 获取消息 |
+| `chat/page.tsx` | 添加消息列表渲染组件，显示用户和助手消息 |
+| `chat/page.tsx` | 添加自动滚动到底部功能 |
+| `chat/page.tsx` | 条件渲染：有消息显示消息列表，无消息显示空状态 |
+
+**待实现 - 工单附件功能**:
+- 需要配置 Supabase Storage bucket
+- 创建文件上传 API
+- 更新 `createTicket` API 支持 attachments 参数
+- 数据库已支持 attachments 字段 (jsonb)
+
+---
+
 ### ✅ 阶段 8 第十轮修复 (2026-01-23)
 
 **问题**: 工单记录模块不显示数据
