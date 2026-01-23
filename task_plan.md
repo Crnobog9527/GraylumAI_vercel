@@ -196,34 +196,38 @@
 
 ---
 
-### 🚨 阶段 7: 着陆页与访问控制 (2026-01-23 执行中)
+### ✅ 阶段 7: 着陆页与访问控制 (已完成 | 2026-01-23)
 
 > **进入条件**: Vercel 域名配置完成 ✅
-> **完成条件**: 着陆页可访问，访问控制正常工作
+> **完成条件**: 着陆页可访问，访问控制正常工作 ✅
 
-| # | 任务 | 交付物 | 预计时间 | 状态 |
-|---|------|--------|---------|------|
-| 7.1 | 实现访问控制中间件 | middleware.ts 更新 | 30m | 🔜 下一步 |
-| 7.2 | 创建路由组结构 | (landing)/ + (app)/ | 1h | ⏳ 待执行 |
-| 7.3 | 开发着陆页组件 | 6 个组件 | 2-3h | ⏳ 待执行 |
-| 7.4 | 组装着陆页 | page.tsx | 30m | ⏳ 待执行 |
-| 7.5 | 测试验证 | 本地 + 生产 | 30m | ⏳ 待执行 |
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 7.1 | 实现访问控制中间件 | middleware.ts 更新 | ✅ 完成 |
+| 7.2 | 创建路由组结构 | (landing)/ 路由组 | ✅ 完成 |
+| 7.3 | 开发着陆页组件 | 6 个组件 | ✅ 完成 |
+| 7.4 | 组装着陆页 | page.tsx | ✅ 完成 |
+| 7.5 | 测试验证 | 本地验证通过 | ✅ 完成 |
 
 **交付物清单**:
 
-| 文件 | 描述 |
-|------|------|
-| `apps/web/middleware.ts` | 域名路由 + 认证拦截 |
-| `apps/web/src/app/(landing)/layout.tsx` | 着陆页布局 |
-| `apps/web/src/app/(landing)/page.tsx` | 着陆页首页 |
-| `apps/web/src/app/(app)/layout.tsx` | 应用布局 |
-| `apps/web/src/app/(app)/page.tsx` | 应用首页 (Dashboard) |
-| `apps/web/src/components/landing/LandingHeader.tsx` | 导航栏 |
-| `apps/web/src/components/landing/HeroSection.tsx` | Hero 区域 |
-| `apps/web/src/components/landing/FeaturesSection.tsx` | 功能展示 |
-| `apps/web/src/components/landing/PricingSection.tsx` | 定价方案 |
-| `apps/web/src/components/landing/CTASection.tsx` | 行动号召 |
-| `apps/web/src/components/landing/LandingFooter.tsx` | 页脚 |
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `apps/web/middleware.ts` | 域名路由 + 认证拦截 | ✅ |
+| `apps/web/src/app/(landing)/layout.tsx` | 着陆页布局 | ✅ |
+| `apps/web/src/app/(landing)/page.tsx` | 着陆页首页 | ✅ |
+| `apps/web/src/components/landing/LandingHeader.tsx` | 导航栏 (滚动效果) | ✅ |
+| `apps/web/src/components/landing/HeroSection.tsx` | Hero 区域 (动画统计) | ✅ |
+| `apps/web/src/components/landing/FeaturesSection.tsx` | 6 步增长策略 | ✅ |
+| `apps/web/src/components/landing/PricingSection.tsx` | 定价方案 | ✅ |
+| `apps/web/src/components/landing/CTASection.tsx` | 行动号召 (粒子动画) | ✅ |
+| `apps/web/src/components/landing/LandingFooter.tsx` | 页脚 | ✅ |
+| `apps/web/src/components/landing/index.ts` | 组件导出 | ✅ |
+
+**访问控制逻辑**:
+- `www.graylum.com` → 公开访问着陆页
+- `app.graylum.com` → 需要登录，未登录重定向到 `/login`
+- `localhost` → 支持 `?domain=www` 参数模拟 www 域名
 
 **着陆页设计规范**:
 - 主色: `#FFD700` (金色)
@@ -231,6 +235,8 @@
 - 遵循 `movetonew/VISUAL_DESIGN_SYSTEM.md`
 - 响应式设计，支持移动端
 - CTA 按钮链接到 `app.graylum.com`
+
+**提交记录**: `40238d9 feat: implement landing page and domain-based access control`
 
 ---
 
