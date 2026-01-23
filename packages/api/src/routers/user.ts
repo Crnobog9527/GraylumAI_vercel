@@ -76,4 +76,78 @@ export const userRouter = router({
 
     return userProfile?.credits ?? 0;
   }),
+
+  /**
+   * 获取用户使用统计
+   * - 累计对话次数
+   * - 累计消息数
+   * - 本月消耗积分
+   * - 使用天数
+   * - 最常使用功能 Top 3
+   */
+  getUserUsageStats: protectedProcedure.query(async ({ ctx }) => {
+    // 计算本月开始时间
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    // 1. 获取对话统计
+    const { data: conversations, error: convError } = await ctx.supabase
+      .from('conversations')
+      .select('id, created_at')
+      .eq('user_id', ctx.profileId);
+
+    // 2. 获取消息统计
+    const { count: messageCount, error: msgError } = await ctx.supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .in('conversation_id', (conversations || []).map(c => c.id));
+
+    // 3. 获取本月积分消耗
+    const { data: monthlyTransactions, error: txError } = await ctx.supabase
+      .from('credit_transactions')
+      .select('amount')
+      .eq('user_id', ctx.profileId)
+      .lt('amount', 0) // 只统计消耗
+      .gte('created_at', monthStart);
+
+    // 4. 计算使用天数（有对话的天数）
+    const uniqueDays = new Set(
+      (conversations || []).map(c => new Date(c.created_at).toDateString())
+    );
+
+    // 5. 获取模块使用统计 (从 ai_usage_logs 或 token_stats 获取)
+    const { data: usageLogs, error: logsError } = await ctx.supabase
+      .from('ai_usage_logs')
+      .select('module_name')
+      .eq('user_id', ctx.profileId);
+
+    // 统计模块使用次数
+    const moduleUsage: Record<string, number> = {};
+    (usageLogs || []).forEach((log: any) => {
+      const moduleName = log.module_name || 'AI 智能对话';
+      moduleUsage[moduleName] = (moduleUsage[moduleName] || 0) + 1;
+    });
+
+    // 排序获取 Top 3
+    const topModules = Object.entries(moduleUsage)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({ name, count }));
+
+    // 计算本月消耗积分总和
+    const monthlyCreditsUsed = (monthlyTransactions || []).reduce(
+      (sum, tx) => sum + Math.abs(tx.amount),
+      0
+    );
+
+    return {
+      totalConversations: conversations?.length ?? 0,
+      totalMessages: messageCount ?? 0,
+      monthlyCreditsUsed,
+      usageDays: uniqueDays.size,
+      topModules: topModules.length > 0 ? topModules : [
+        { name: 'AI 智能对话', count: 0 },
+      ],
+    };
+  }),
 });

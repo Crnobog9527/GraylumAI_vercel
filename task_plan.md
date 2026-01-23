@@ -359,6 +359,27 @@
 
 ---
 
+### 🔧 阶段 8 第八轮修复 (2026-01-23)
+
+> **问题**: 个人中心数据全部硬编码，与数据库实际数据不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 昵称修改不写入数据库 | `PersonalInfoCard.tsx:59-70` | `handleSaveNickname` 只有 TODO，未调用 API | ⏳ |
+| 2 | 使用统计数据硬编码 | `PersonalInfoCard.tsx:299-311` | `UsageStatsCard` 使用 mock 数据 | ⏳ |
+| 3 | 积分概览数据硬编码 | `CreditRecordsCard.tsx:120-121` | `monthlyUsed = 256` 硬编码 | ⏳ |
+| 4 | 积分记录数据硬编码 | `CreditRecordsCard.tsx:124-129` | transactions 数组使用 mock 数据 | ⏳ |
+| 5 | 使用历史不显示数据 | `UsageHistoryCard.tsx:23` | 使用空数组，未获取真实对话记录 | ⏳ |
+
+**修复计划**:
+1. 昵称修改：调用 `trpc.user.updateUserProfile` mutation
+2. 使用统计：新建 API 获取对话/消息/积分统计
+3. 积分概览：使用 `trpc.credits.getCreditsSummary` API
+4. 积分记录：使用 `trpc.credits.getCreditTransactions` API
+5. 使用历史：使用 `trpc.chat.getConversations` API，添加 credits_used 字段
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

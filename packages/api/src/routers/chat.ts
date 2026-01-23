@@ -4,11 +4,44 @@ import { TRPCError } from '@trpc/server';
 
 export const chatRouter = router({
   getConversations: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.supabase
+    // 获取对话列表
+    const { data: conversations, error } = await ctx.supabase
       .from('conversations')
       .select('*')
       .eq('user_id', ctx.profileId)
       .order('created_at', { ascending: false });
+
+    if (error || !conversations) {
+      return { data: [], error };
+    }
+
+    // 为每个对话获取消息数量
+    const conversationsWithStats = await Promise.all(
+      conversations.map(async (conv) => {
+        // 获取消息数量
+        const { count: messageCount } = await ctx.supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('conversation_id', conv.id);
+
+        // 获取该对话消耗的积分（从 token_stats 或 billing_history）
+        const { data: usageLogs } = await ctx.supabase
+          .from('billing_history')
+          .select('amount')
+          .eq('user_id', ctx.profileId)
+          .eq('reference_id', conv.id);
+
+        const creditsUsed = (usageLogs || []).reduce((sum: number, log: any) => sum + Math.abs(log.amount || 0), 0);
+
+        return {
+          ...conv,
+          message_count: messageCount ?? 0,
+          credits_used: creditsUsed,
+        };
+      })
+    );
+
+    return { data: conversationsWithStats, error: null };
   }),
 
   createConversation: protectedProcedure

@@ -234,6 +234,29 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### 🔧 阶段 8 第八轮修复 (2026-01-23)
+
+**问题**: 个人中心数据全部硬编码，与数据库实际数据不同步
+
+| # | 问题 | 位置 | 原因 |
+|---|------|------|------|
+| 1 | 昵称修改不写入数据库 | `PersonalInfoCard.tsx` | `handleSaveNickname` 只有 TODO |
+| 2 | 使用统计数据硬编码 | `PersonalInfoCard.tsx` | `UsageStatsCard` 使用 mock 数据 |
+| 3 | 积分概览数据硬编码 | `CreditRecordsCard.tsx` | `monthlyUsed = 256` 硬编码 |
+| 4 | 积分记录数据硬编码 | `CreditRecordsCard.tsx` | transactions 使用 mock 数据 |
+| 5 | 使用历史不显示数据 | `UsageHistoryCard.tsx` | 使用空数组 |
+
+**修复计划**:
+| 文件 | 修改 |
+|------|------|
+| `PersonalInfoCard.tsx` | 调用 `trpc.user.updateUserProfile` mutation |
+| `PersonalInfoCard.tsx` | 新建 API 获取使用统计 |
+| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditsSummary` |
+| `CreditRecordsCard.tsx` | 使用 `trpc.credits.getCreditTransactions` |
+| `UsageHistoryCard.tsx` | 使用 `trpc.chat.getConversations` |
+
+---
+
 ### ✅ 阶段 8 第一轮修复 (2026-01-23 完成)
 
 **问题概述**: 用户登录后，首页关键数据全部使用硬编码，未与后端 API 集成。
