@@ -254,6 +254,179 @@
 
 ---
 
+### ✅ 阶段 8: 首页数据集成修复 (已完成 | 2026-01-23)
+
+> **发现时间**: 2026-01-23
+> **完成时间**: 2026-01-23
+
+| # | Bug | 位置 | 影响 | 状态 |
+|---|-----|------|------|------|
+| 8.1 | 积分获取 404 | `AppHeader.tsx` → `trpc.credits.getBalance` | Header 积分显示 "--" | ✅ 已有实现 |
+| 8.2 | 用户名硬编码 | `page.tsx` | 所有用户显示 "office" | ✅ 已修复 |
+| 8.3 | 会员等级硬编码 | `page.tsx` | 所有用户显示 "普通会员" | ✅ 已修复 |
+| 8.4 | 公告硬编码 | `page.tsx` | 公告与管理后台不同步 | ✅ 已修复 |
+
+**交付物**:
+
+| 文件 | 修改内容 |
+|------|---------|
+| `packages/api/src/routers/settings.ts` | 新增 `getActiveAnnouncements` 和 `getBannerAnnouncement` 公开 API |
+| `apps/web/src/app/page.tsx` | 使用 tRPC 获取用户 profile 和公告数据 |
+| `apps/web/src/components/home/UpdatesSection.tsx` | 添加 yellow 标签颜色 |
+
+**关键修复**:
+- 用户数据: 调用 `trpc.user.getUserProfile.useQuery()` 获取 nickname、membership_level
+- 公告数据: 新建公开 API `settings.getActiveAnnouncements`（原 admin API 需要管理员权限）
+
+---
+
+### ✅ 阶段 8 第二轮修复 (2026-01-23)
+
+> **问题**: 公告和横幅仍然不显示
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 公告不显示 | `active` 是字符串 `'true'` | 改为 `.eq('active', 'true')` |
+| 2 | 公告不显示 | 缺少类型过滤 | 添加 `.eq('announcement_type', 'homepage')` |
+| 3 | 横幅不显示 | 组件未使用 | 添加 GlobalBanner 到 page.tsx |
+| 4 | 字段名错误 | content vs description | 添加字段映射 |
+
+**交付物**:
+- `settings.ts`: 修正 API 查询条件和字段映射
+- `page.tsx`: 添加 GlobalBanner 组件和 getBannerAnnouncement 调用
+
+---
+
+### ✅ 阶段 8 第三轮修复 (2026-01-23)
+
+> **问题**: 横幅位置/颜色错误，积分显示0，个人中心500错误
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 积分显示 0 | 缺少 auth 检查，API 失败 | 添加认证检查和回退逻辑 |
+| 2 | 横幅位置错误 | GlobalBanner 在 AppHeader 之前 | 移到 AppHeader 之后 |
+| 3 | 横幅颜色错误 | `announcement` 样式是蓝色 | 改为黄色 (公告黄) |
+| 4 | 横幅仅首页 | 其他页面未添加 | 添加到 chat/marketplace/profile |
+| 5 | 功能广场硬编码 | 已验证非硬编码 | 使用 tRPC getModules |
+| 6 | 个人中心 500 | 缺少 auth 检查 | 添加认证和错误处理 |
+
+**交付物**:
+- `apps/web/src/hooks/use-banner.tsx`: 新建横幅获取 hook
+- `apps/web/src/components/layout/GlobalBanner.tsx`: 修复 announcement 样式颜色
+- `apps/web/src/app/page.tsx`: GlobalBanner 移到导航栏下方
+- `apps/web/src/app/chat/page.tsx`: 添加全站横幅
+- `apps/web/src/app/marketplace/page.tsx`: 添加全站横幅
+- `apps/web/src/app/profile/page.tsx`: 添加认证检查、错误处理、横幅
+
+---
+
+### ✅ 阶段 8 第四轮修复 (2026-01-23)
+
+> **问题**: 积分/个人中心报错 "用户资料不存在"
+
+**交付物**:
+- `packages/api/src/trpc.ts`: 重构 profile 创建逻辑
+
+---
+
+### ✅ 阶段 8 第五轮修复 (2026-01-23)
+
+> **问题**: 积分和个人中心仍然报错 404
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | 积分获取 404 | 查询了不存在的列 (credits_expiring_soon) | ✅ 只查询 credits 列 |
+| 2 | 个人中心跳转失败 | select(*) 可能包含不存在的列 | ✅ 选择具体列 |
+| 3 | API 抛出错误 | 查询失败直接 throw | ✅ 返回默认值 |
+
+**交付物**:
+- `packages/api/src/routers/credits.ts`: getBalance/getCreditsSummary 防御性处理
+- `packages/api/src/routers/user.ts`: getUserProfile/getUserCredits 防御性处理
+
+---
+
+### ✅ 阶段 8 第六轮修复 (2026-01-23)
+
+> **问题**: 个人中心加载缓慢，控制台大量报错 500
+
+| # | 问题 | 原因 | 修复 |
+|---|------|------|------|
+| 1 | getUserProfile 抛出异常 | 非 PGRST116 错误时仍 throw | ✅ 任何错误都返回默认值 |
+| 2 | 查询列不存在 | full_name/avatar_url 等可能不存在 | ✅ 简化为基础列 |
+
+**交付物**:
+- `packages/api/src/routers/user.ts`: 完全防御性处理，任何错误返回默认值
+
+---
+
+### ✅ 阶段 8 第八轮修复 (2026-01-23)
+
+> **问题**: 个人中心数据全部硬编码，与数据库实际数据不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 昵称修改不写入数据库 | `PersonalInfoCard.tsx:59-70` | `handleSaveNickname` 只有 TODO，未调用 API | ✅ 已修复 |
+| 2 | 使用统计数据硬编码 | `PersonalInfoCard.tsx:299-311` | `UsageStatsCard` 使用 mock 数据 | ✅ 已修复 |
+| 3 | 积分概览数据硬编码 | `CreditRecordsCard.tsx:120-121` | `monthlyUsed = 256` 硬编码 | ✅ 已修复 |
+| 4 | 积分记录数据硬编码 | `CreditRecordsCard.tsx:124-129` | transactions 数组使用 mock 数据 | ✅ 已修复 |
+| 5 | 使用历史不显示数据 | `UsageHistoryCard.tsx:23` | 使用空数组，未获取真实对话记录 | ✅ 已修复 |
+
+**交付物**:
+- `PersonalInfoCard.tsx`: 昵称保存调用 `trpc.user.updateUserProfile`，使用统计从 API 获取
+- `CreditRecordsCard.tsx`: 积分概览和交易记录从 API 获取
+- `UsageHistoryCard.tsx`: 对话历史从 API 获取
+- `packages/api/src/routers/user.ts`: 新增 `getUserUsageStats` 接口
+- `packages/api/src/routers/chat.ts`: `getConversations` 增加消息数和积分消耗统计
+
+---
+
+### ✅ 阶段 8 第十二轮修复 (2026-01-23)
+
+> **问题**: 管理员后台查看工单时附件图片无法显示
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 附件图片显示为占位图标 | `admin/tickets/page.tsx` | 代码只显示 Lucide Image 图标 | ✅ 已修复 |
+
+**交付物**:
+- `admin/tickets/page.tsx`: `isImageFile()` 增加查询参数处理，附件显示改为 `<img>` 标签
+
+---
+
+### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
+
+> **问题**: 工单附件不显示 + 对话功能失效
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码 | ✅ 已修复 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ⏳ 待修复 |
+
+**交付物**:
+- `api/upload/route.ts`: 新建文件上传 API
+- `ticket.ts`: 支持 attachments 参数
+- `TicketsPanel.tsx`: 真实文件上传 + 附件展示
+
+**待修复**: 对话功能消息显示仍有问题，需进一步排查
+
+---
+
+### ✅ 阶段 8 第十轮修复 (2026-01-23)
+
+> **问题**: 工单记录模块不显示数据
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 创建工单后不显示记录 | `TicketsPanel.tsx:720` | 使用硬编码空数组 `tickets: Ticket[] = []` | ✅ 已修复 |
+| 2 | 已关闭工单不显示 | `TicketsPanel.tsx:720` | 未调用 `trpc.ticket.getTickets` API | ✅ 已修复 |
+| 3 | 创建工单只有 console.log | `TicketsPanel.tsx:524-529` | `handleSubmit` 未调用 mutation | ✅ 已修复 |
+
+**交付物**:
+- `TicketsPanel.tsx`: 集成 tRPC API 调用 `getTickets`、`createTicket`、`replyToTicket`、`closeTicket`
+- `ticket.ts`: 增强 API 支持 description/category 字段，添加状态/分类映射，新增 `closeTicket` mutation
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

@@ -3,6 +3,7 @@
 import { memo, useState } from 'react';
 import { Crown, Zap, CheckCircle2, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { trpc } from '@/trpc/client';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -330,8 +331,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 // 积分概览卡片（订阅管理页面用）
 export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: MockUser }) {
   const credits = user?.credits || 0;
-  const monthlyUsed = 256; // Mock data
-  const totalUsed = user?.total_credits_used || 0;
+
+  // 从 API 获取积分统计数据
+  const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  const { data: allTimeSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'year' });
+  const monthlyUsed = creditsSummary?.totalSpent ?? 0;
+  const totalUsed = allTimeSummary?.totalSpent ?? user?.total_credits_used ?? 0;
 
   return (
     <>

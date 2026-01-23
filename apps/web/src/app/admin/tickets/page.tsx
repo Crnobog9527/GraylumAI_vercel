@@ -192,7 +192,9 @@ export default function AdminTicketsPage() {
   };
 
   const isImageFile = (url: string) => {
-    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(url);
+    // Remove query parameters before checking extension
+    const urlWithoutParams = url.split('?')[0];
+    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(urlWithoutParams);
   };
 
   // Loading state
@@ -539,9 +541,20 @@ export default function AdminTicketsPage() {
                               className="group relative rounded-lg overflow-hidden border border-[var(--border-primary)] hover:border-[var(--color-primary)] transition-colors"
                             >
                               {isImageFile(url) ? (
-                                <div className="aspect-square bg-[var(--bg-tertiary)] flex items-center justify-center">
-                                  <Image className="h-8 w-8 text-[var(--text-tertiary)]" />
-                                </div>
+                                <img
+                                  src={url}
+                                  alt={`附件 ${index + 1}`}
+                                  className="w-full h-full object-cover aspect-square"
+                                  onError={(e) => {
+                                    // Fallback to icon if image fails to load
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                    target.parentElement?.classList.add('flex', 'items-center', 'justify-center', 'bg-[var(--bg-tertiary)]');
+                                    const icon = document.createElement('div');
+                                    icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--text-tertiary)]"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+                                    target.parentElement?.appendChild(icon);
+                                  }}
+                                />
                               ) : (
                                 <div className="aspect-square bg-[var(--bg-tertiary)] flex flex-col items-center justify-center p-2">
                                   <FileText className="h-8 w-8 text-[var(--text-tertiary)]" />

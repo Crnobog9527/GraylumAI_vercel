@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, Suspense, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useState, Suspense, useMemo, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Menu, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,6 +10,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
 import ProfileSidebar, { ProfileTab } from '@/components/profile/ProfileSidebar';
 import {
   UserProfileHeader,
@@ -24,9 +25,33 @@ import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
+import { useBanner } from '@/hooks/use-banner';
+import { createClient } from '@/lib/supabase';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const { banners } = useBanner();
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // 检查用户登录状态
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace('/login');
+        return;
+      }
+
+      setIsAuthenticated(true);
+      setIsAuthChecking(false);
+    };
+
+    checkAuth();
+  }, [router]);
 
   // 从 URL 参数读取初始 tab
   const getInitialTab = (): ProfileTab => {
@@ -40,24 +65,44 @@ function ProfilePageContent() {
   const [activeTab, setActiveTab] = useState<ProfileTab>(getInitialTab);
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
 
-  // tRPC queries for real data
-  const { data: userProfile, isLoading: isProfileLoading } = trpc.user.getUserProfile.useQuery();
-  const { data: creditsBalance, isLoading: isBalanceLoading } = trpc.credits.getBalance.useQuery();
-  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  // tRPC queries for real data (only enabled after auth check)
+  const { data: userProfile, isLoading: isProfileLoading, error: profileError } = trpc.user.getUserProfile.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+  const { data: creditsBalance, isLoading: isBalanceLoading, error: creditsError } = trpc.credits.getBalance.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery(
+    { period: 'month' },
+    { enabled: isAuthenticated }
+  );
 
-  const isLoading = isProfileLoading || isBalanceLoading || isSummaryLoading;
+  const isLoading = isAuthChecking || !isAuthenticated || isProfileLoading || isBalanceLoading || isSummaryLoading;
+
+  // Log errors for debugging
+  useEffect(() => {
+    if (profileError) {
+      console.error('Profile query error:', profileError);
+    }
+    if (creditsError) {
+      console.error('Credits query error:', creditsError);
+    }
+  }, [profileError, creditsError]);
 
   // Map tRPC data to MockUser interface for component compatibility
+  // Use credits from userProfile as fallback if creditsBalance fails
   const userData: MockUser = useMemo(() => ({
     id: userProfile?.id ?? '',
     email: userProfile?.email ?? '',
     nickname: userProfile?.nickname ?? '用户',
     full_name: userProfile?.full_name ?? userProfile?.nickname ?? '用户',
     avatar_url: userProfile?.avatar_url ?? '',
-    credits: creditsBalance?.credits ?? 0,
+    credits: creditsBalance?.credits ?? (userProfile as any)?.credits ?? 0,
     total_credits_used: creditsSummary?.totalSpent ?? 0,
     total_credits_purchased: creditsSummary?.totalEarned ?? 0,
-    subscription_tier: (userProfile as any)?.subscription_tier ?? 'free',
+    subscription_tier: (userProfile as any)?.membership_level ?? 'free',
     email_verified: (userProfile as any)?.email_verified ?? false,
     created_date: userProfile?.created_at ?? new Date().toISOString(),
   }), [userProfile, creditsBalance, creditsSummary]);
@@ -133,6 +178,9 @@ function ProfilePageContent() {
 
       {/* 顶部导航 */}
       <AppHeader />
+
+      {/* 全站横幅公告 */}
+      <GlobalBanner banners={banners} />
 
       <div className="container mx-auto px-4 py-8 max-w-7xl relative" style={{ zIndex: 1 }}>
         <div className="flex flex-col md:flex-row gap-8">

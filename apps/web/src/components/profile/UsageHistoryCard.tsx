@@ -1,9 +1,10 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import Link from 'next/link';
-import { History } from 'lucide-react';
+import { History, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { trpc } from '@/trpc/client';
 
 interface MockUser {
   email?: string;
@@ -19,15 +20,38 @@ interface Conversation {
 
 // 使用历史卡片
 export const UsageHistoryCard = memo(function UsageHistoryCard({ user }: { user: MockUser }) {
-  // 使用空数组展示空状态（根据截图要求）
-  const conversations: Conversation[] = [];
+  // 从 API 获取对话历史
+  const { data: conversationsData, isLoading } = trpc.chat.getConversations.useQuery();
 
-  // 如果需要模拟数据进行测试，可以取消下面的注释
-  // const conversations: Conversation[] = [
-  //   { id: '1', title: 'AI 智能对话 - 代码优化', messages_count: 12, credits_used: 45, created_date: new Date().toISOString() },
-  //   { id: '2', title: '文案生成 - 产品介绍', messages_count: 8, credits_used: 28, created_date: new Date(Date.now() - 3600000).toISOString() },
-  //   { id: '3', title: 'AI 助手 - 数据分析', messages_count: 15, credits_used: 52, created_date: new Date(Date.now() - 86400000).toISOString() },
-  // ];
+  // 转换为组件所需格式
+  const conversations: Conversation[] = useMemo(() => {
+    if (!conversationsData?.data) return [];
+    return conversationsData.data.slice(0, 10).map((conv: any) => ({
+      id: conv.id,
+      title: conv.title || '新对话',
+      messages_count: conv.message_count ?? 0,
+      credits_used: conv.credits_used ?? 0,
+      created_date: conv.created_at,
+    }));
+  }, [conversationsData]);
+
+  if (isLoading) {
+    return (
+      <div
+        className="rounded-2xl p-6"
+        style={{
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border-primary)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+        }}
+      >
+        <h3 className="text-lg font-bold mb-6" style={{ color: 'var(--text-primary)' }}>使用历史</h3>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+        </div>
+      </div>
+    );
+  }
 
   if (conversations.length === 0) {
     return (

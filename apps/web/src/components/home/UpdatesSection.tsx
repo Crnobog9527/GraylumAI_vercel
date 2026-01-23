@@ -27,6 +27,7 @@ const tagColorMap: Record<string, { bg: string; color: string; border: string }>
   green: { bg: 'var(--success-bg)', color: 'var(--success)', border: 'var(--success)' },
   red: { bg: 'var(--error-bg)', color: 'var(--error)', border: 'var(--error)' },
   purple: { bg: 'rgba(139, 92, 246, 0.1)', color: '#A78BFA', border: '#A78BFA' },
+  yellow: { bg: 'var(--color-primary-10)', color: 'var(--color-primary)', border: 'var(--color-primary)' },
 };
 
 interface Announcement {

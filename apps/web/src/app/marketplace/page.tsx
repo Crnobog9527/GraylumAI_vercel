@@ -10,9 +10,11 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import ModuleCard from '@/components/modules/ModuleCard';
 import { trpc } from '@/trpc/client';
+import { useBanner } from '@/hooks/use-banner';
 
 const categories = [
   { id: 'all', label: '全部功能' },
@@ -29,6 +31,7 @@ export default function MarketplacePage() {
   const [sortOrder, setSortOrder] = useState<'newest' | 'popular'>('newest');
   const [page, setPage] = useState(1);
   const itemsPerPage = 12;
+  const { banners } = useBanner();
 
   // Fetch modules from tRPC
   const { data: modulesData, isLoading: isModulesLoading } = trpc.modules.getModules.useQuery({
@@ -161,6 +164,9 @@ export default function MarketplacePage() {
 
       {/* 顶部导航 */}
       <AppHeader />
+
+      {/* 全站横幅公告 */}
+      <GlobalBanner banners={banners} />
 
       <div className="container mx-auto px-4 py-8 max-w-7xl relative" style={{ zIndex: 1 }}>
         {/* 页面标题 */}

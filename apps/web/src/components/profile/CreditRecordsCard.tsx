@@ -1,7 +1,8 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings } from 'lucide-react';
+import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
+import { trpc } from '@/trpc/client';
 
 interface MockUser {
   email?: string;
@@ -11,7 +12,7 @@ interface MockUser {
 
 interface Transaction {
   id: string;
-  type: 'usage' | 'purchase' | 'bonus' | 'refund' | 'admin_adjustment' | 'membership' | 'checkin';
+  type: string;
   amount: number;
   balance_after: number;
   description?: string;
@@ -24,25 +25,36 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
 }: {
   transactions: Transaction[];
 }) {
-  // 生成模拟的14天数据
+  // 根据真实交易数据生成14天消耗趋势
   const chartData = useMemo(() => {
     const now = new Date();
     const days: { date: string; fullDate: string; usage: number }[] = [];
+
+    // 按日期分组统计消耗
+    const usageByDate: Record<string, number> = {};
+    transactions.forEach(tx => {
+      if (tx.amount < 0) { // 只统计消耗
+        const txDate = new Date(tx.created_date);
+        const dateKey = `${txDate.getFullYear()}-${txDate.getMonth() + 1}-${txDate.getDate()}`;
+        usageByDate[dateKey] = (usageByDate[dateKey] || 0) + Math.abs(tx.amount);
+      }
+    });
 
     for (let i = 13; i >= 0; i--) {
       const day = new Date(now);
       day.setDate(day.getDate() - i);
       const dateStr = `${(day.getMonth() + 1).toString().padStart(2, '0')}/${day.getDate().toString().padStart(2, '0')}`;
       const fullDate = `${day.getMonth() + 1}月${day.getDate()}日`;
+      const dateKey = `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`;
 
-      // 生成随机使用量进行演示
-      const usage = Math.floor(Math.random() * 100) + 10;
+      // 使用真实数据，如果没有则为0
+      const usage = usageByDate[dateKey] || 0;
 
       days.push({ date: dateStr, fullDate, usage });
     }
 
     return days;
-  }, []);
+  }, [transactions]);
 
   // 计算统计数据
   const stats = useMemo(() => {
@@ -90,7 +102,8 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
       {/* 简化的条形图 */}
       <div className="h-[200px] w-full flex items-end justify-between gap-1">
         {chartData.map((day, index) => {
-          const heightPercent = (day.usage / stats.maxUsage) * 100;
+          // 防止除以0导致NaN
+          const heightPercent = stats.maxUsage > 0 ? (day.usage / stats.maxUsage) * 100 : 0;
           return (
             <div key={index} className="flex-1 flex flex-col items-center gap-1">
               <div
@@ -99,7 +112,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
                   height: `${heightPercent}%`,
                   minHeight: '4px',
                   background: 'linear-gradient(to top, var(--color-primary), var(--color-secondary))',
-                  opacity: 0.7 + (heightPercent / 100) * 0.3
+                  opacity: stats.maxUsage > 0 ? 0.7 + (heightPercent / 100) * 0.3 : 0.7
                 }}
                 title={`${day.fullDate}: ${day.usage} 积分`}
               />
@@ -117,35 +130,57 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
 // 积分记录页面主组件
 export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { user: MockUser }) {
   const credits = user?.credits || 0;
-  const monthlyUsed = 256; // Mock
-  const totalUsed = user?.total_credits_used || 0;
 
-  // Mock transactions
-  const transactions: Transaction[] = [
-    { id: '1', type: 'usage', amount: -15, balance_after: 769, description: 'AI 智能对话', created_date: new Date().toISOString() },
-    { id: '2', type: 'usage', amount: -8, balance_after: 784, description: '文案生成', created_date: new Date(Date.now() - 3600000).toISOString() },
-    { id: '3', type: 'purchase', amount: 500, balance_after: 792, description: '购买积分包', created_date: new Date(Date.now() - 86400000).toISOString() },
-    { id: '4', type: 'bonus', amount: 50, balance_after: 292, description: '邀请好友奖励', created_date: new Date(Date.now() - 172800000).toISOString() },
-  ];
+  // 从 API 获取积分统计数据
+  const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  const { data: allTimeSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'year' });
+  const monthlyUsed = creditsSummary?.totalSpent ?? 0;
+  const totalUsed = allTimeSummary?.totalSpent ?? user?.total_credits_used ?? 0;
+
+  // 从 API 获取交易记录
+  const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50 });
+
+  // 转换 API 数据为组件所需格式
+  const transactions: Transaction[] = useMemo(() => {
+    if (!transactionsData?.items) return [];
+    return transactionsData.items.map((tx: any) => ({
+      id: tx.id,
+      type: tx.type,
+      amount: tx.amount,
+      balance_after: tx.balance_after ?? 0,
+      description: tx.reason ?? tx.description ?? '',
+      created_date: tx.created_at,
+    }));
+  }, [transactionsData]);
 
   const typeLabels: Record<string, string> = {
     purchase: '购买积分',
     usage: '积分消耗',
+    consumption: '积分消耗',
     bonus: '积分奖励',
     refund: '积分退款',
     admin_adjustment: '管理员调整',
+    adjustment: '系统调整',
     membership: '会员权益',
-    checkin: '签到奖励'
+    checkin: '签到奖励',
+    transfer_in: '积分转入',
+    transfer_out: '积分转出',
+    expiration: '积分过期',
   };
 
   const typeIcons: Record<string, { icon: typeof Package; color: string }> = {
     purchase: { icon: Package, color: 'var(--success)' },
     usage: { icon: Zap, color: 'var(--color-primary)' },
+    consumption: { icon: Zap, color: 'var(--color-primary)' },
     bonus: { icon: Crown, color: 'var(--color-secondary)' },
     refund: { icon: RefreshCw, color: 'rgba(139, 92, 246, 1)' },
     admin_adjustment: { icon: Settings, color: 'var(--text-tertiary)' },
+    adjustment: { icon: Settings, color: 'var(--text-tertiary)' },
     membership: { icon: Crown, color: 'var(--color-primary)' },
-    checkin: { icon: CheckCircle2, color: 'var(--success)' }
+    checkin: { icon: CheckCircle2, color: 'var(--success)' },
+    transfer_in: { icon: Package, color: 'var(--success)' },
+    transfer_out: { icon: Package, color: 'var(--error)' },
+    expiration: { icon: Zap, color: 'var(--text-disabled)' },
   };
 
   return (
@@ -209,9 +244,18 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>交易记录</h3>
         </div>
 
+        {isLoadingTx ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
+            暂无交易记录
+          </div>
+        ) : (
         <div className="space-y-4">
           {transactions.map((tx) => {
-            const typeConfig = typeIcons[tx.type] || typeIcons.usage;
+            const typeConfig = typeIcons[tx.type] || typeIcons.consumption;
             const Icon = typeConfig.icon;
             const txDate = new Date(tx.created_date);
 
@@ -273,6 +317,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
             );
           })}
         </div>
+        )}
 
         <div className="flex items-center justify-between mt-8 pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
           <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>共 {transactions.length} 条记录</span>

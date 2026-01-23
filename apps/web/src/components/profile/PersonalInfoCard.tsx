@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { trpc } from '@/trpc/client';
 
 // Mock user type
 export interface MockUser {
@@ -37,6 +38,9 @@ export const UserProfileHeader = memo(function UserProfileHeader({
   const [savingNickname, setSavingNickname] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // tRPC mutation for updating profile
+  const updateProfileMutation = trpc.user.updateUserProfile.useMutation();
+
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
@@ -60,10 +64,12 @@ export const UserProfileHeader = memo(function UserProfileHeader({
     if (!nickname.trim()) return;
     setSavingNickname(true);
     try {
-      // TODO: Save nickname via tRPC
-      console.log('Save nickname:', nickname);
+      // 调用 tRPC mutation 保存昵称到数据库
+      await updateProfileMutation.mutateAsync({ nickname: nickname.trim() });
       onUserUpdate?.({ ...user, nickname: nickname.trim() });
       setEditingNickname(false);
+    } catch (error) {
+      console.error('Failed to save nickname:', error);
     } finally {
       setSavingNickname(false);
     }
@@ -198,7 +204,10 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
   onNavigateToSubscription?: () => void;
 }) {
   const credits = user?.credits || 0;
-  const monthlyUsed = 256; // TODO: Calculate from real data
+
+  // 从 API 获取本月消耗数据
+  const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
+  const monthlyUsed = creditsSummary?.totalSpent ?? 0;
 
   const tierLabels: Record<string, string> = {
     free: '免费用户',
@@ -296,18 +305,19 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
 
 // 使用统计卡片
 export const UsageStatsCard = memo(function UsageStatsCard({ user }: { user: MockUser }) {
-  // Mock data
+  // 从 API 获取使用统计数据
+  const { data: usageStats, isLoading } = trpc.user.getUserUsageStats.useQuery();
+
+  // 使用 API 数据或默认值
   const stats = [
-    { label: '累计对话次数', value: '128' },
-    { label: '累计消息数', value: '1,024' },
-    { label: '本月消耗积分', value: '256' },
-    { label: '使用天数', value: '32' },
+    { label: '累计对话次数', value: usageStats?.totalConversations?.toLocaleString() ?? '0' },
+    { label: '累计消息数', value: usageStats?.totalMessages?.toLocaleString() ?? '0' },
+    { label: '本月消耗积分', value: usageStats?.monthlyCreditsUsed?.toLocaleString() ?? '0' },
+    { label: '使用天数', value: usageStats?.usageDays?.toLocaleString() ?? '0' },
   ];
 
-  const topModules = [
-    { name: 'AI 智能对话', count: 56 },
-    { name: '文案生成', count: 34 },
-    { name: '代码助手', count: 28 },
+  const topModules = usageStats?.topModules ?? [
+    { name: 'AI 智能对话', count: 0 },
   ];
 
   return (

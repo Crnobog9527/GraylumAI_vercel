@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,8 +13,10 @@ import {
 } from '@/components/ui/select';
 import {
   Plus, AlertCircle, Inbox, Archive, ArrowLeft, Loader2,
-  CheckCircle, Clock, Send, Upload, X
+  CheckCircle, Clock, Send, Upload, X, Image as ImageIcon
 } from 'lucide-react';
+import { trpc } from '@/trpc/client';
+import { createClient } from '@/lib/supabase';
 
 interface MockUser {
   email?: string;
@@ -28,6 +30,8 @@ interface Ticket {
   category: string;
   status: 'pending' | 'in_progress' | 'resolved' | 'closed';
   created_date: string;
+  attachments?: string[];
+  replies?: TicketReply[];
 }
 
 interface TicketReply {
@@ -215,7 +219,7 @@ const TicketListView = memo(function TicketListView({
                       {ticket.title}
                     </h4>
                     <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      <span>{categoryMap[ticket.category]}</span>
+                      <span>{categoryMap[ticket.category] || ticket.category}</span>
                       <span>•</span>
                       <span>{dateStr}</span>
                     </div>
@@ -243,11 +247,23 @@ const TicketDetailView = memo(function TicketDetailView({
   onTicketUpdate: () => void;
 }) {
   const [replyMessage, setReplyMessage] = useState('');
-  const [repliesLoading] = useState(false);
-  const [sendingReply, setSendingReply] = useState(false);
 
-  // Mock replies
-  const replies: TicketReply[] = [];
+  // tRPC mutations
+  const replyMutation = trpc.ticket.replyToTicket.useMutation({
+    onSuccess: () => {
+      setReplyMessage('');
+      onTicketUpdate();
+    },
+  });
+
+  const closeMutation = trpc.ticket.closeTicket.useMutation({
+    onSuccess: () => {
+      onTicketUpdate();
+      onBack();
+    },
+  });
+
+  const replies = ticket.replies || [];
 
   const ticketDate = new Date(ticket.created_date);
   const dateStr = `${ticketDate.getFullYear()}-${String(ticketDate.getMonth() + 1).padStart(2, '0')}-${String(ticketDate.getDate()).padStart(2, '0')} ${String(ticketDate.getHours()).padStart(2, '0')}:${String(ticketDate.getMinutes()).padStart(2, '0')}`;
@@ -255,17 +271,11 @@ const TicketDetailView = memo(function TicketDetailView({
   const handleReplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyMessage.trim()) return;
-    setSendingReply(true);
-    try {
-      // TODO: Call tRPC to add reply
-      console.log('Sending reply:', replyMessage);
-      setTimeout(() => {
-        setReplyMessage('');
-        setSendingReply(false);
-      }, 1000);
-    } catch (error) {
-      setSendingReply(false);
-    }
+    replyMutation.mutate({ ticketId: ticket.id, content: replyMessage.trim() });
+  };
+
+  const handleCloseTicket = () => {
+    closeMutation.mutate({ ticketId: ticket.id });
   };
 
   const statusStyle = statusColors[ticket.status] || statusColors.pending;
@@ -312,26 +322,27 @@ const TicketDetailView = memo(function TicketDetailView({
               {ticket.title}
             </h2>
             <div className="flex items-center gap-3 text-sm flex-wrap" style={{ color: 'var(--text-tertiary)' }}>
-              <span>{categoryMap[ticket.category]}</span>
+              <span>{categoryMap[ticket.category] || ticket.category}</span>
               <span>•</span>
               <span>创建于 {dateStr}</span>
             </div>
           </div>
-          {ticket.status === 'resolved' && (
+          {ticket.status !== 'closed' && (
             <Button
-              onClick={() => {
-                // TODO: Close ticket
-                console.log('Closing ticket');
-                onTicketUpdate();
-              }}
+              onClick={handleCloseTicket}
+              disabled={closeMutation.isPending}
               size="sm"
               style={{
                 background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
                 color: 'white'
               }}
             >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              确认解决
+              {closeMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              关闭工单
             </Button>
           )}
         </div>
@@ -342,6 +353,35 @@ const TicketDetailView = memo(function TicketDetailView({
             {ticket.description}
           </p>
         </div>
+
+        {/* 附件显示 */}
+        {ticket.attachments && ticket.attachments.length > 0 && (
+          <div className="pt-4 mt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
+            <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+              <ImageIcon className="h-4 w-4" />
+              附件截图 ({ticket.attachments.length})
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {ticket.attachments.map((url, index) => (
+                <a
+                  key={index}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block rounded-lg overflow-hidden border transition-all hover:border-yellow-500/50"
+                  style={{ borderColor: 'var(--border-primary)' }}
+                >
+                  <img
+                    src={url}
+                    alt={`附件 ${index + 1}`}
+                    className="w-full h-32 object-cover"
+                    loading="lazy"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Replies */}
@@ -371,11 +411,7 @@ const TicketDetailView = memo(function TicketDetailView({
           </div>
         )}
 
-        {repliesLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
-          </div>
-        ) : replies.length === 0 ? (
+        {replies.length === 0 ? (
           <div className="text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
             暂无回复
           </div>
@@ -434,14 +470,14 @@ const TicketDetailView = memo(function TicketDetailView({
             <div className="flex justify-end">
               <Button
                 type="submit"
-                disabled={sendingReply || !replyMessage.trim()}
+                disabled={replyMutation.isPending || !replyMessage.trim()}
                 className="gap-2"
                 style={{
                   background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
                   color: 'var(--bg-primary)'
                 }}
               >
-                {sendingReply ? (
+                {replyMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="h-4 w-4" />
@@ -486,7 +522,16 @@ const CreateTicketForm = memo(function CreateTicketForm({
   });
   const [attachments, setAttachments] = useState<{ name: string; url: string }[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [creating, setCreating] = useState(false);
+
+  // tRPC mutation for creating ticket
+  const createMutation = trpc.ticket.createTicket.useMutation({
+    onSuccess: () => {
+      onSuccess();
+    },
+    onError: (error) => {
+      console.error('Failed to create ticket:', error);
+    },
+  });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -494,6 +539,14 @@ const CreateTicketForm = memo(function CreateTicketForm({
 
     setUploading(true);
     try {
+      // 获取 auth token
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.error('Not authenticated');
+        return;
+      }
+
       for (const file of files) {
         if (!file.type.startsWith('image/')) {
           continue;
@@ -501,9 +554,25 @@ const CreateTicketForm = memo(function CreateTicketForm({
         if (file.size > 5 * 1024 * 1024) {
           continue;
         }
-        // TODO: Upload file via tRPC
-        // Mock upload
-        setAttachments(prev => [...prev, { name: file.name, url: URL.createObjectURL(file) }]);
+
+        // 上传文件到服务器
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setAttachments(prev => [...prev, { name: file.name, url: data.url }]);
+        } else {
+          console.error('Upload failed:', await response.text());
+        }
       }
     } finally {
       setUploading(false);
@@ -519,17 +588,12 @@ const CreateTicketForm = memo(function CreateTicketForm({
     if (!formData.title.trim() || !formData.description.trim()) {
       return;
     }
-    setCreating(true);
-    try {
-      // TODO: Create ticket via tRPC
-      console.log('Creating ticket:', formData);
-      setTimeout(() => {
-        onSuccess();
-        setCreating(false);
-      }, 1000);
-    } catch (error) {
-      setCreating(false);
-    }
+    createMutation.mutate({
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      category: formData.category,
+      attachments: attachments.map(a => a.url),
+    });
   };
 
   return (
@@ -682,14 +746,14 @@ const CreateTicketForm = memo(function CreateTicketForm({
           </Button>
           <Button
             type="submit"
-            disabled={creating}
+            disabled={createMutation.isPending}
             className="gap-2"
             style={{
               background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
               color: 'var(--bg-primary)'
             }}
           >
-            {creating ? (
+            {createMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Plus className="h-4 w-4" />
@@ -714,10 +778,30 @@ export default function TicketsPanel({
 }) {
   const [view, setView] = useState<'list' | 'detail' | 'create'>(initialView);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-  const [isLoading] = useState(false);
 
-  // 使用空数组展示空状态（根据截图要求）
-  const tickets: Ticket[] = [];
+  // 从 API 获取工单列表
+  const { data: ticketsData, isLoading, refetch } = trpc.ticket.getTickets.useQuery();
+
+  // 转换 API 数据为组件所需格式
+  const tickets: Ticket[] = useMemo(() => {
+    if (!ticketsData) return [];
+    return ticketsData.map((t: any) => ({
+      id: t.id,
+      ticket_number: t.ticket_number,
+      title: t.title,
+      description: t.description || '',
+      category: t.category,
+      status: t.status as Ticket['status'],
+      created_date: t.created_at,
+      attachments: t.attachments || [],
+      replies: t.replies?.map((r: any) => ({
+        id: r.id,
+        message: r.message,
+        is_admin_reply: r.is_admin_reply,
+        created_date: r.created_at,
+      })) || [],
+    }));
+  }, [ticketsData]);
 
   const changeView = (newView: 'list' | 'detail' | 'create') => {
     setView(newView);
@@ -739,7 +823,12 @@ export default function TicketsPanel({
   };
 
   const handleCreateSuccess = () => {
+    refetch();
     changeView('list');
+  };
+
+  const handleTicketUpdate = () => {
+    refetch();
   };
 
   if (view === 'create') {
@@ -747,14 +836,14 @@ export default function TicketsPanel({
   }
 
   if (view === 'detail' && selectedTicket) {
+    // Find the latest ticket data from the list
+    const latestTicket = tickets.find(t => t.id === selectedTicket.id) || selectedTicket;
     return (
       <TicketDetailView
-        ticket={selectedTicket}
+        ticket={latestTicket}
         user={user}
         onBack={handleBack}
-        onTicketUpdate={() => {
-          handleBack();
-        }}
+        onTicketUpdate={handleTicketUpdate}
       />
     );
   }

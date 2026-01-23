@@ -48,28 +48,65 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
   const { data: profile, error: profileError } = await ctx.supabase
     .from('profiles')
-    .select('id, role')
+    .select('id, role, credits')
     .eq('id', ctx.user.id)
     .single();
 
   if (!profile || profileError) {
     // Profile doesn't exist, create one with id and email
-    const { data: newProfile, error: createError } = await ctx.supabase
-      .from('profiles')
-      .insert({
-        id: ctx.user.id,
-        email: ctx.user.email,
-        role: 'user', // Default role for new users
-      })
-      .select('id, role')
-      .single();
+    // First check if it's a "not found" error vs other errors
+    const isNotFound = profileError?.code === 'PGRST116';
 
-    if (createError) {
-      // Log error but don't fail - use user.id as fallback
-      console.error('Failed to create profile:', createError.message);
-    } else if (newProfile) {
-      profileId = newProfile.id;
-      userRole = newProfile.role || 'user';
+    if (isNotFound) {
+      // Profile doesn't exist, try to create one
+      const { data: newProfile, error: createError } = await ctx.supabase
+        .from('profiles')
+        .insert({
+          id: ctx.user.id,
+          email: ctx.user.email,
+          role: 'user',
+          credits: 0, // Default credits for new users
+        })
+        .select('id, role, credits')
+        .single();
+
+      if (createError) {
+        console.error('Failed to create profile:', createError.message, createError.code);
+
+        // If insert failed due to conflict (profile already exists), try to fetch again
+        if (createError.code === '23505') {
+          const { data: existingProfile } = await ctx.supabase
+            .from('profiles')
+            .select('id, role, credits')
+            .eq('id', ctx.user.id)
+            .single();
+
+          if (existingProfile) {
+            profileId = existingProfile.id;
+            userRole = existingProfile.role || 'user';
+          } else {
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: '无法获取用户资料，请稍后重试',
+            });
+          }
+        } else {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '创建用户资料失败，请联系客服',
+          });
+        }
+      } else if (newProfile) {
+        profileId = newProfile.id;
+        userRole = newProfile.role || 'user';
+      }
+    } else {
+      // Other database error
+      console.error('Profile query error:', profileError?.message, profileError?.code);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: '获取用户资料失败，请稍后重试',
+      });
     }
   } else {
     profileId = profile.id;

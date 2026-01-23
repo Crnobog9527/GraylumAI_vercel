@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
 import WelcomeBanner from '@/components/home/WelcomeBanner';
 import SixStepsGuide from '@/components/home/SixStepsGuide';
 import UpdatesSection from '@/components/home/UpdatesSection';
 import { createClient } from '@/lib/supabase';
+import { trpc } from '@/trpc/client';
 
 /**
  * 首页组件
@@ -44,6 +46,24 @@ export default function HomePage() {
     checkAuth();
   }, [router, searchParams]);
 
+  // 从 tRPC 获取用户数据
+  const { data: userProfile, isLoading: isProfileLoading } = trpc.user.getUserProfile.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  // 从 tRPC 获取公告数据
+  const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
+  // 从 tRPC 获取横幅公告
+  const { data: bannerData } = trpc.settings.getBannerAnnouncement.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
+
   // 加载中或未认证时显示加载状态
   if (isLoading || !isAuthenticated) {
     return (
@@ -62,26 +82,36 @@ export default function HomePage() {
     );
   }
 
-  // TODO: 从 tRPC 获取用户数据
+  // 用户数据 (从 tRPC 获取)
   const user = {
-    full_name: 'office',
-    email: 'office@example.com',
-    membership_level: 'free',
-    membership_expiry_date: undefined
+    full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
+    email: userProfile?.email || '',
+    membership_level: userProfile?.membership_level || 'free',
+    membership_expiry_date: userProfile?.membership_expiry_date
   };
 
-  // TODO: 从 tRPC 获取公告数据
-  const announcements = [
-    {
-      id: '1',
-      title: '应用上线特惠',
-      description: '黄金会员年卡 5 折，限量 100 名。',
-      icon: 'Megaphone',
-      tag: '限量优惠',
-      tag_color: 'red',
-      publish_date: '2026-01-06',
-    }
-  ];
+  // 公告数据 (从 tRPC 获取)
+  const announcements = (announcementsData ?? []).map(announcement => ({
+    id: announcement.id,
+    title: announcement.title,
+    description: announcement.description || '',
+    icon: announcement.icon || 'Megaphone',
+    tag: announcement.tag || '',
+    tag_color: announcement.tag_color || 'yellow',
+    publish_date: announcement.created_at?.split('T')[0] || '',
+    link_url: announcement.link_url,
+    link_text: announcement.link_text,
+  }));
+
+  // 横幅公告数据 (从 tRPC 获取)
+  const banners = bannerData ? [{
+    id: bannerData.id,
+    title: bannerData.title,
+    description: bannerData.description || '',
+    tag: bannerData.tag || '限量优惠',
+    banner_style: bannerData.banner_style || 'promo',
+    banner_link: bannerData.link_url,
+  }] : [];
 
   return (
     <div
@@ -173,6 +203,11 @@ export default function HomePage() {
       <AppHeader />
 
       {/* ============================================
+          全站横幅公告 (导航栏下方)
+          ============================================ */}
+      <GlobalBanner banners={banners} />
+
+      {/* ============================================
           内容层
           ============================================ */}
       <div
@@ -184,7 +219,7 @@ export default function HomePage() {
       >
         <WelcomeBanner user={user} />
         <SixStepsGuide />
-        <UpdatesSection announcements={announcements} />
+        <UpdatesSection announcements={announcements} isLoading={isAnnouncementsLoading} />
       </div>
     </div>
   );

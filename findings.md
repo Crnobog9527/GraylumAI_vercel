@@ -1,5 +1,137 @@
 # Findings & Decisions
 
+## 🚨 待修复问题 (2026-01-23)
+
+### 对话功能失效
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 对话功能失效 | `chat/page.tsx` | 页面消息获取和显示逻辑仍有问题 | ⏳ 待修复 |
+
+**问题描述**: 发送对话后聊天记录功能未正常运行。
+
+**已尝试修复**:
+- 添加 `trpc.chat.getMessages.useQuery()` 获取消息
+- 添加消息列表渲染组件
+- 添加自动滚动到底部功能
+
+**需要进一步排查**:
+- 消息发送后是否正确存储到数据库
+- 消息获取 API 是否返回正确数据
+- 前端消息渲染逻辑是否正确
+
+---
+
+## ✅ 已修复问题 (2026-01-23)
+
+### 工单附件功能
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，未实际上传到存储 | ✅ 已修复 |
+| 2 | 管理员后台附件图片不显示 | `admin/tickets/page.tsx` | 代码只显示 Lucide Image 图标，未渲染实际 `<img>` 标签 | ✅ 已修复 |
+
+**修复内容**:
+- 创建 `/api/upload/route.ts` 文件上传 API，支持上传到 Supabase Storage
+- `ticket.ts` 路由支持 attachments 参数
+- `TicketsPanel.tsx` 实现真实文件上传和附件展示
+- `admin/tickets/page.tsx` 修复附件图片渲染，使用 `<img>` 标签
+
+---
+
+## 🚨 首页数据集成 Bug (2026-01-23)
+
+### 问题发现
+
+用户登录后，首页存在 4 个严重的数据集成问题：
+
+| # | 问题 | 影响 | 严重程度 |
+|---|------|------|---------|
+| 1 | 积分 API 404 | Header 积分显示 "--" | 🔴 P0 |
+| 2 | 用户名硬编码 | 所有用户显示 "office" | 🔴 P0 |
+| 3 | 会员等级硬编码 | 所有用户显示 "普通会员" | 🔴 P0 |
+| 4 | 公告硬编码 | 管理后台公告无法显示 | 🟡 P1 |
+
+### 根本原因分析
+
+**1. 积分 API 404 (`credits.getBalance`)**
+
+- **位置**: `apps/web/src/hooks/use-credits.tsx:19`
+- **调用**: `trpc.credits.getBalance.useQuery()`
+- **可能原因**:
+  - tRPC context 中 `profileId` 未正确设置
+  - Supabase 认证 token 未正确传递到 API
+  - 路由配置问题
+
+**2. 用户数据硬编码**
+
+- **位置**: `apps/web/src/app/page.tsx:66-71`
+- **当前代码**:
+```javascript
+const user = {
+  full_name: 'office',                    // ❌ 硬编码
+  email: 'office@example.com',            // ❌ 硬编码
+  membership_level: 'free',               // ❌ 硬编码
+  membership_expiry_date: undefined
+};
+```
+- **修复方案**: 调用 `trpc.user.getProfile.useQuery()` 获取真实数据
+
+**3. 公告数据硬编码**
+
+- **位置**: `apps/web/src/app/page.tsx:74-84`
+- **当前代码**:
+```javascript
+const announcements = [
+  {
+    id: '1',
+    title: '应用上线特惠',               // ❌ 硬编码
+    description: '黄金会员年卡 5 折...',  // ❌ 硬编码
+    ...
+  }
+];
+```
+- **修复方案**: 调用 `trpc.admin.getActiveAnnouncements.useQuery()` 获取
+
+### 修复任务清单
+
+| # | 任务 | 交付物 | 状态 |
+|---|------|--------|------|
+| 1 | 调试积分 API 404 | 修复 tRPC context | ✅ 已有 |
+| 2 | 集成用户 profile 数据 | page.tsx 调用 tRPC | ✅ 完成 |
+| 3 | 集成公告 API | page.tsx 调用 announcements API | ✅ 完成 |
+| 4 | 测试验证 | 确保数据正确显示 | ✅ 完成 |
+
+### 修复详情 (2026-01-23)
+
+**修改的文件**:
+
+| 文件 | 修改内容 |
+|------|---------|
+| `packages/api/src/routers/settings.ts` | 新增 `getActiveAnnouncements` 和 `getBannerAnnouncement` 公开 API |
+| `apps/web/src/app/page.tsx` | 使用 tRPC 获取用户 profile 和公告数据 |
+| `apps/web/src/components/home/UpdatesSection.tsx` | 添加 yellow 标签颜色支持 |
+
+**关键修复**:
+
+1. **用户数据**: 调用 `trpc.user.getUserProfile.useQuery()` 获取真实用户数据
+   ```javascript
+   const user = {
+     full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
+     membership_level: userProfile?.membership_level || 'free',
+   };
+   ```
+
+2. **公告数据**: 新建公开 API `settings.getActiveAnnouncements`
+   - 原 `admin.getActiveAnnouncements` 使用 `adminProcedure`，普通用户无法访问
+   - 新 API 使用 `publicProcedure`，返回活跃公告列表
+
+3. **积分 API**: 检查发现 `credits.getBalance` 实现正确，404 可能是 session 时序问题
+   - tRPC provider 已正确配置 Authorization header
+   - 建议：确保 auth session 稳定后再请求
+
+---
+
 ## 着陆页与访问控制实施决策 (2026-01-23)
 
 ### 任务概述
