@@ -1,10 +1,11 @@
-# Dependabot 配置
-# 自动检查依赖安全漏洞和更新
-# 文档: https://docs.github.com/en/code-security/dependabot
+# Dependabot 配置文件
+# 文档: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
 updates:
-  # npm/pnpm 依赖更新
+  # =====================================================
+  # NPM 依赖更新 (根目录 - monorepo)
+  # =====================================================
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -12,63 +13,82 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Shanghai"
-    # 限制同时打开的 PR 数量
+    # 每周最多创建 10 个 PR
     open-pull-requests-limit: 10
-    # 分组次要更新
-    groups:
-      # React 生态系统
-      react:
-        patterns:
-          - "react*"
-          - "@types/react*"
-      # tRPC 生态系统
-      trpc:
-        patterns:
-          - "@trpc/*"
-      # Radix UI 组件
-      radix:
-        patterns:
-          - "@radix-ui/*"
-      # Supabase
-      supabase:
-        patterns:
-          - "@supabase/*"
-      # 开发工具
-      dev-tools:
-        patterns:
-          - "typescript"
-          - "eslint*"
-          - "@typescript-eslint/*"
-          - "prettier"
-        update-types:
-          - "minor"
-          - "patch"
-    # 忽略主版本更新 (需要手动升级)
-    ignore:
-      - dependency-name: "next"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-    # 提交消息格式
-    commit-message:
-      prefix: "deps"
-      include: "scope"
+    # 版本更新策略
+    versioning-strategy: increase
     # 标签
     labels:
       - "dependencies"
-      - "automated"
-    # 审阅者
-    # reviewers:
-    #   - "your-github-username"
+      - "security"
+    # 提交信息前缀
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    # 分组更新 (减少 PR 数量)
+    groups:
+      # 开发工具依赖分组
+      dev-tools:
+        patterns:
+          - "@types/*"
+          - "typescript"
+          - "eslint*"
+          - "prettier*"
+          - "@typescript-eslint/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # React 生态依赖分组
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "next"
+          - "@next/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # UI 组件依赖分组
+      ui-components:
+        patterns:
+          - "@radix-ui/*"
+          - "lucide-react"
+          - "tailwindcss"
+          - "class-variance-authority"
+          - "clsx"
+        update-types:
+          - "minor"
+          - "patch"
+      # 数据库和 API 依赖分组
+      database:
+        patterns:
+          - "@supabase/*"
+          - "drizzle-*"
+          - "@trpc/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # 监控和日志依赖分组
+      monitoring:
+        patterns:
+          - "@sentry/*"
+          - "pino*"
+        update-types:
+          - "minor"
+          - "patch"
 
+  # =====================================================
   # GitHub Actions 更新
+  # =====================================================
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "ci"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
     labels:
       - "dependencies"
       - "ci"
+    commit-message:
+      prefix: "ci(deps)"

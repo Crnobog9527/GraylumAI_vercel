@@ -23,11 +23,11 @@
 
 ## Current Status
 
-- **Phase:** 阶段 9 AI 对话功能修复 + P2 功能完善
-- **Previous:** Phase 6 (P3) UI 优化 ✅ 完成
-- **Current:** P2-12/P2-13/P2-14 对话导出功能 ✅ 完成
+- **Phase:** 阶段 2 安全加固 ✅ 已完成
+- **Previous:** P2 功能完善 ✅ 完成
+- **Current:** 安全审计 + Dependabot 配置 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (P2-12~P2-14 对话导出完成)
+- **更新时间:** 2026-01-24 (阶段 2 安全加固完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -286,6 +286,30 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | gold | 50 | 25轮对话 |
 
 **P2 全部完成**:
+
+---
+
+### ✅ 阶段 2: 安全加固 (已完成 2026-01-24)
+
+#### 2.1 RLS 策略审计
+- ✅ 21/21 表已启用 RLS
+- ✅ 所有表都有完整的策略 (SELECT/INSERT/UPDATE/DELETE)
+- ✅ 管理员权限通过 `is_admin()` 函数验证
+
+#### 2.2 环境变量安全检查
+- ✅ 无硬编码密钥
+- ✅ `.gitignore` 正确排除 `.env*` 文件
+- ✅ `.env.example` 仅含占位符
+- ✅ `envValidator.ts` 启动时验证必需变量
+
+#### 2.3 依赖安全扫描
+- ✅ 配置 `.github/dependabot.yml`
+- ✅ 每周一自动扫描 (Asia/Shanghai 09:00)
+- ✅ 依赖分组更新 (减少 PR 数量)
+
+**交付物**:
+- `docs/SECURITY_AUDIT_REPORT.md` - 完整安全审计报告
+- `.github/dependabot.yml` - Dependabot 配置
 
 ---
 
