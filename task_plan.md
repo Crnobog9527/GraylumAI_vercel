@@ -479,15 +479,15 @@
 
 ### 🟡 P2 中等问题 - 功能不完整 (按需修复)
 
-#### P2-A: 性能监控数据 (后端)
+#### P2-A: 性能监控数据 (后端) ✅ 已修复
 
-| 序号 | 问题 | 位置 | 分类 |
-|------|------|------|------|
-| P2-1 | 响应时间是随机值 | `admin.ts:getPerformanceStats` | 后端 |
-| P2-2 | 错误率是随机值 | `admin.ts:getPerformanceStats` | 后端 |
-| P2-3 | 缓存命中率是估算值 | `admin.ts:getPerformanceStats` | 后端 |
-| P2-4 | Token 估算不准确 | `admin.ts:getPerformanceStats` | 后端 |
-| P2-5 | 使用量统计未连接到实际 API 调用 | `ai.ts:420-445` | 后端 |
+| 序号 | 问题 | 位置 | 分类 | 状态 |
+|------|------|------|------|------|
+| P2-1 | 响应时间是随机值 | `admin.ts:getPerformanceStats` | 后端 | ✅ 已修复 - 从 ai_usage_logs.latency_ms 获取 |
+| P2-2 | 错误率是随机值 | `admin.ts:getPerformanceStats` | 后端 | ✅ 已修复 - 从 ai_usage_logs.status 计算 |
+| P2-3 | 缓存命中率是估算值 | `admin.ts:getPerformanceStats` | 后端 | ✅ 已修复 - 从 token_stats.cached_tokens 计算 |
+| P2-4 | Token 估算不准确 | `admin.ts:getPerformanceStats` | 后端 | ✅ 已修复 - 从 token_stats 获取真实数据 |
+| P2-5 | 使用量统计未连接到实际 API 调用 | `ai.ts:420-445` | 后端 | ✅ 已验证 - 数据已正确记录到 token_stats |
 
 #### P2-B: 功能广场模块 (前端+后端+数据库)
 
@@ -497,13 +497,13 @@
 | P2-7 | modules 字段与后台不对应 | `admin/prompts` + DB | 后端+数据库 |
 | P2-8 | credits_cost 无效字段 | `modules` 表 | 数据库 |
 
-#### P2-C: 系统设置生效性 (后端)
+#### P2-C: 系统设置生效性 (后端) ✅ 已验证
 
-| 序号 | 问题 | 位置 | 分类 |
-|------|------|------|------|
-| P2-9 | 启用智能路由设置待验证 | `modelRouter.ts` | 后端 |
-| P2-10 | 显示模型选择器功能无效 | `chat/page.tsx` | 前端 |
-| P2-11 | 首页引导设置功能不明 | 首页 | 前端 |
+| 序号 | 问题 | 位置 | 分类 | 状态 |
+|------|------|------|------|------|
+| P2-9 | 启用智能路由设置待验证 | `modelRouter.ts` | 后端 | ✅ 已验证 - 从 system_settings 读取 |
+| P2-10 | 显示模型选择器功能无效 | `chat/page.tsx` | 前端 | ⚠️ 设置存在但 UI 未实现 |
+| P2-11 | 首页引导设置功能不明 | 首页 | 前端 | ⚠️ UI 存在但保存为占位符 |
 
 #### P2-D: 会员权限功能 (前端+后端)
 

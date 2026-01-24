@@ -1930,19 +1930,18 @@ export const adminRouter = router({
       const totalRequests = messages?.filter(m => m.role === 'assistant').length ?? 0;
       const rangeRequests = rangeMessages.filter(m => m.role === 'assistant').length;
 
-      // Token estimation (avg ~150 tokens per message, ~500 per assistant response)
-      const estimateTokens = (content: string | null) => {
-        if (!content) return 0;
-        return Math.ceil(content.length / 4); // ~4 chars per token
-      };
+      // === Real Token Usage from token_stats table ===
+      // Get actual token statistics for the time range
+      const { data: rangeTokenStats } = await ctx.supabase
+        .from('token_stats')
+        .select('input_tokens, output_tokens, cached_tokens, cache_creation_tokens')
+        .gte('created_at', rangeStart.toISOString());
 
-      const userMessages = rangeMessages.filter(m => m.role === 'user');
-      const assistantMessages = rangeMessages.filter(m => m.role === 'assistant');
-
-      const inputTokens = userMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-      const outputTokens = assistantMessages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-      const cacheReadTokens = Math.floor(inputTokens * 0.15); // Estimate 15% cache hit
-      const cacheCreationTokens = Math.floor(inputTokens * 0.1); // Estimate 10% cache creation
+      const tokenStatsInRange = rangeTokenStats ?? [];
+      const inputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
+      const outputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.output_tokens ?? 0), 0);
+      const cacheReadTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cached_tokens ?? 0), 0);
+      const cacheCreationTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cache_creation_tokens ?? 0), 0);
 
       // Cost estimation (using first active model's pricing as average)
       const activeModels = models?.filter(m => m.is_active === 'true') ?? [];
@@ -1958,11 +1957,50 @@ export const adminRouter = router({
       const avgCostPerRequest = rangeRequests > 0 ? totalCost / rangeRequests : 0;
       const cacheSavings = ((cacheReadTokens * avgInputCost * 0.9) / 1000000); // 90% savings on cached reads
 
-      // Simulated performance metrics
-      const errorRate = Math.random() * 0.5; // 0-0.5% simulated
-      const cacheHitRate = 15 + Math.random() * 10; // 15-25% simulated
-      const avgResponseTime = 800 + Math.random() * 400; // 800-1200ms simulated
-      const p95ResponseTime = avgResponseTime * 1.5 + Math.random() * 200;
+      // === Real Performance Metrics from ai_usage_logs ===
+      // Get actual AI usage logs for the time range
+      const { data: usageLogs } = await ctx.supabase
+        .from('ai_usage_logs')
+        .select('status, latency_ms, created_at')
+        .gte('created_at', rangeStart.toISOString());
+
+      const logsInRange = usageLogs ?? [];
+      const successLogs = logsInRange.filter(log => log.status === 'success');
+      const failedLogs = logsInRange.filter(log => log.status !== 'success');
+
+      // Calculate real error rate
+      const totalLogs = logsInRange.length;
+      const errorRate = totalLogs > 0 ? (failedLogs.length / totalLogs) * 100 : 0;
+
+      // Calculate real response times from successful requests
+      const latencies = successLogs
+        .map(log => log.latency_ms)
+        .filter((l): l is number => l !== null && l !== undefined)
+        .sort((a, b) => a - b);
+
+      const avgResponseTime = latencies.length > 0
+        ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
+        : 0;
+
+      // P95 response time
+      const p95Index = Math.floor(latencies.length * 0.95);
+      const p95ResponseTime = latencies.length > 0
+        ? latencies[p95Index] ?? latencies[latencies.length - 1]
+        : 0;
+
+      // === Real Cache Hit Rate from token_stats ===
+      const { data: tokenStatsData } = await ctx.supabase
+        .from('token_stats')
+        .select('input_tokens, cached_tokens')
+        .gte('created_at', rangeStart.toISOString());
+
+      const statsInRange = tokenStatsData ?? [];
+      const totalInputTokensFromStats = statsInRange.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
+      const totalCachedTokens = statsInRange.reduce((sum, s) => sum + (s.cached_tokens ?? 0), 0);
+
+      const cacheHitRate = totalInputTokensFromStats > 0
+        ? (totalCachedTokens / totalInputTokensFromStats) * 100
+        : 0;
 
       // Health status based on metrics
       let healthStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
