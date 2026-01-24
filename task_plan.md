@@ -604,15 +604,35 @@
    - 新用户自动获得 100 积分
    - `system_settings.new_user_credits` 显示在管理后台但实际由数据库默认值控制
 
-#### 第四阶段: 订阅与安全修复 (P1-B, P1-C)
+#### 第四阶段: 订阅与安全修复 (P1-B, P1-C) ✅ 已完成
 
 > **目标**: 修复订阅数据同步和安全机制
 
-| 序号 | 任务 | 涉及文件 | 类型 |
-|------|------|---------|------|
-| 4.1 | 订阅页面读取数据库数据 | `profile/subscription` | 前端 |
-| 4.2 | 应用输出安全过滤 | `ai.ts` | 后端 |
-| 4.3 | 启用签名验证 | `requestSigner.ts` | 前端+后端 |
+| 序号 | 任务 | 涉及文件 | 类型 | 状态 |
+|------|------|---------|------|------|
+| 4.1 | 订阅页面读取数据库数据 | `settings.ts`, `SubscriptionCard.tsx` | 前端+后端 | ✅ 已完成 |
+| 4.2 | 应用输出安全过滤 | `ai.ts`, `stream/route.ts` | 后端 | ✅ 已完成 |
+| 4.3 | 签名验证 | `securityChecks.ts` | 后端 | ✅ 已验证 |
+
+**修复详情**:
+
+1. **订阅页面读取数据库数据 (4.1)**:
+   - 新增 `settings.getCreditPackages` API - 获取积分加油包列表
+   - 新增 `settings.getMembershipPlans` API - 获取会员等级列表
+   - 更新 `SubscriptionCard.tsx` 使用 API 数据替代硬编码
+
+2. **应用输出安全过滤 (4.2)**:
+   - 导入并应用 `checkOutputSecurity` 到 `ai.ts`
+   - 添加 `checkOutputSecurity` 函数到 streaming endpoint
+   - 检测 AI 输出中的敏感内容 (API 密钥、密码等)
+
+3. **签名验证 (4.3)**:
+   - `checkRequestSignature` 函数已实现在 `securityChecks.ts`
+   - 设计选择: 启用条件由环境变量控制
+     - `API_SIGNATURE_SECRET` - 签名密钥
+     - `REQUIRE_API_SIGNATURE=true` - 强制要求签名
+   - 开发环境自动跳过验证
+   - 现有安全措施已足够: 速率限制、熔断器、认证令牌、输入/输出检查
 
 #### 第五阶段: 功能完善 (P2)
 

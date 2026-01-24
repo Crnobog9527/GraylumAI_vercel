@@ -17,6 +17,7 @@ import {
 import {
   preAICallSecurityChecks,
   checkInputSecurity,
+  checkOutputSecurity,
 } from '../middleware/securityChecks';
 import {
   BillingService,
@@ -346,6 +347,14 @@ export const aiRouter = router({
           messages,
           maxTokens: modelConfig.maxTokens,
         });
+
+        // 9.5. 输出安全检查 (P1-4: 应用输出安全过滤)
+        const isOutputSafe = checkOutputSecurity(aiResponse.content);
+        if (!isOutputSafe) {
+          // 记录警告日志，但不阻止响应 (避免影响正常使用)
+          console.warn(`[Security] Potential sensitive content detected in AI response for request ${requestId}`);
+          // 可选: 在这里可以添加更多处理逻辑，如通知管理员
+        }
 
         // 10. 保存消息
         const savedMessages = await saveMessages(

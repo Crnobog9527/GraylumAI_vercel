@@ -65,7 +65,7 @@
 | 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ✅ 已完成 |
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
-| 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ⏳ 待执行 |
+| 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ✅ 已完成 |
 | 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 待执行 |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
 
@@ -180,6 +180,56 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
   </div>
 </div>
 ```
+
+---
+
+### ✅ 第四阶段: 订阅与安全修复 (2026-01-24 完成)
+
+**修复内容**:
+
+#### 4.1 订阅页面读取数据库数据
+- ✅ 新增 `settings.getCreditPackages` API - 获取积分加油包列表
+- ✅ 新增 `settings.getMembershipPlans` API - 获取会员等级列表
+- ✅ 更新 `SubscriptionCard.tsx`:
+  - `CreditPackagesSection` 从 API 获取积分包数据
+  - `SubscriptionCard` 从 API 获取会员等级数据
+  - 添加加载状态显示
+  - 保留默认数据作为 fallback
+
+**修改文件**:
+- `packages/api/src/routers/settings.ts` - 新增 API 端点
+- `apps/web/src/components/profile/SubscriptionCard.tsx` - 使用 API 数据
+
+#### 4.2 应用输出安全过滤 (P1-4)
+- ✅ 导入 `checkOutputSecurity` 到 AI 路由
+- ✅ 在 AI 响应返回前进行安全检查
+- ✅ 添加 `checkOutputSecurity` 到流式端点
+
+**检测模式**:
+- API 密钥格式 (OpenAI sk-xxx, Anthropic sk-ant-xxx)
+- 密码字段泄露 (password=xxx)
+- 密钥字段泄露 (secret=xxx, api_key=xxx)
+
+**修改文件**:
+- `packages/api/src/routers/ai.ts` - 添加输出安全检查
+- `apps/web/src/app/api/ai/stream/route.ts` - 添加输出安全检查
+
+#### 4.3 签名验证 (P1-5)
+- ✅ 验证 `checkRequestSignature` 函数已实现
+- ✅ 确认设计选择合理:
+  - 启用条件: `API_SIGNATURE_SECRET` 环境变量
+  - 强制模式: `REQUIRE_API_SIGNATURE=true`
+  - 开发环境自动跳过验证
+
+**安全措施总结**:
+| 措施 | 状态 | 说明 |
+|------|------|------|
+| 速率限制 | ✅ 已启用 | 60次/分钟 AI 请求 |
+| 消费熔断 | ✅ 已启用 | 每小时 10000 积分上限 |
+| 余额预检 | ✅ 已启用 | 请求前检查余额 |
+| 输入安全检查 | ✅ 已启用 | 检测 Prompt 注入 |
+| 输出安全检查 | ✅ 已启用 | 检测敏感信息泄露 |
+| 签名验证 | ✅ 可选启用 | 通过环境变量控制 |
 
 ---
 

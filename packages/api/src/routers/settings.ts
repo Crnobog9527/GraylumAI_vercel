@@ -104,4 +104,73 @@ export const settingsRouter = router({
       }
       return data;
     }),
+
+  /**
+   * 获取积分加油包列表 (公开接口)
+   * 返回活跃的积分加油包供用户购买
+   */
+  getCreditPackages: publicProcedure.query(async ({ ctx }) => {
+    const { data, error } = await ctx.supabase
+      .from('credit_packages')
+      .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order')
+      .eq('active', 'true')
+      .order('sort_order', { ascending: true })
+      .order('price', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch credit packages:', error);
+      return [];
+    }
+
+    // 映射字段名以兼容前端
+    return (data ?? []).map(pkg => ({
+      id: pkg.id,
+      name: pkg.name,
+      credits: pkg.credits_amount,
+      bonus_credits: pkg.bonus_credits ?? 0,
+      price: (pkg.price ?? 0) / 100, // 从分转换为美元
+      is_popular: pkg.is_popular === 'true',
+    }));
+  }),
+
+  /**
+   * 获取会员等级列表 (公开接口)
+   * 返回所有会员等级供用户查看和订阅
+   */
+  getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
+    const { data, error } = await ctx.supabase
+      .from('membership_plans')
+      .select('*')
+      .eq('is_active', 'true')
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch membership plans:', error);
+      return [];
+    }
+
+    // 映射字段名以兼容前端
+    return (data ?? []).map(plan => ({
+      id: plan.id,
+      name: plan.name,
+      level: plan.level,
+      price: {
+        monthly: (plan.monthly_price ?? 0) / 100, // 从分转换为美元
+        yearly: (plan.yearly_price ?? 0) / 100,
+      },
+      credits: {
+        monthly: plan.monthly_credits ?? 0,
+        monthlyBonus: plan.monthly_bonus_credits ?? 0,
+        yearly: plan.yearly_credits ?? 0,
+        yearlyBonus: plan.yearly_bonus_credits ?? 0,
+      },
+      // package_discount: 100 = no discount, 95 = 5% off
+      discount: plan.package_discount ? (100 - plan.package_discount) / 100 : 0,
+      historyRetentionDays: plan.history_retention_days ?? 7,
+      features: Array.isArray(plan.features) ? plan.features : [],
+      // 使用 level 判断推荐：gold 为推荐/高亮
+      recommended: plan.level === 'gold',
+      highlight: plan.level === 'gold',
+    }));
+  }),
 });

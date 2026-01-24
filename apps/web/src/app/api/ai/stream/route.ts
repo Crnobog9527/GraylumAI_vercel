@@ -31,6 +31,30 @@ function estimateTokens(text: string): number {
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
 }
 
+/**
+ * 输出安全检查 (P1-4: 应用输出安全过滤)
+ * 检测 AI 输出中的敏感内容
+ */
+function checkOutputSecurity(content: string): boolean {
+  // 检测敏感信息泄露模式
+  const sensitivePatterns = [
+    /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
+    /password\s*[:=]\s*["']?[^\s"']{8,}/i,
+    /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
+    /sk-[a-zA-Z0-9]{48}/i, // OpenAI API key pattern
+    /sk-ant-[a-zA-Z0-9-_]{95}/i, // Anthropic API key pattern
+  ];
+
+  for (const pattern of sensitivePatterns) {
+    if (pattern.test(content)) {
+      console.warn('[Security] Detected potential sensitive content in AI output');
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function getModelConfig(supabase: any, modelId?: string) {
   // Default to claude-sonnet-4 if no model specified
   const defaultModel = 'claude-sonnet-4-20250514';
@@ -328,6 +352,14 @@ export async function POST(request: NextRequest) {
                 }
               }
             }
+          }
+
+          // 10. 输出安全检查 (P1-4: 应用输出安全过滤)
+          const isOutputSafe = checkOutputSecurity(fullContent);
+          if (!isOutputSafe) {
+            // 记录警告日志，但不阻止响应 (避免影响正常使用)
+            console.warn('[Security] Potential sensitive content detected in streaming AI response');
+            // 可选: 在这里可以添加更多处理逻辑，如通知管理员
           }
 
           // Save messages
