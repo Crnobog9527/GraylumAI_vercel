@@ -23,11 +23,24 @@
 
 ## Current Status
 
-- **Phase:** 阶段 8 第十三轮修复 (AI 模型管理) ⏳ 进行中
+- **Phase:** 阶段 8 第十三轮修复 ⏳ 进行中
 - **Previous:** 阶段 8 首页数据集成修复 (第二轮) ✅ 完成
-- **Current:** AI 模型管理功能修复
+- **Current:** 仪表板数据准确性 + 系统设置生效性检查
 - **开始时间:** 2026-01-24
+- **更新时间:** 2026-01-24 (新增问题 F-J)
 - **参考文档:** `movetonew/VISUAL_DESIGN_SYSTEM.md`
+
+### 🔴 新发现的严重问题 (2026-01-24)
+
+| 问题类别 | 问题数量 | 严重程度 | 概述 |
+|---------|---------|---------|------|
+| **F: 性能监控** | 5 | 🟡 中 | 数据是模拟/随机值，非真实统计 |
+| **G: 健康检查** | 3 | 🟡 中 | 不验证 API 有效性，只检查字段存在 |
+| **H: 积分计费** | 5 | 🔴 严重 | system_settings 规则完全未被使用 |
+| **I: 功能设置** | 9 | 🟡 中 | 需验证聊天页面是否读取配置 |
+| **J: 会员权限** | 5 | 🟡 中 | 导出功能配置存在但未实现 |
+
+**总计新发现问题**: 27 个 (问题 #20-#46)
 
 ### ⏳ 阶段 8 第十三轮修复 (2026-01-24)
 
@@ -146,6 +159,138 @@
 - [ ] 检查聊天页面模型选择器逻辑
 - [ ] 检查首页引导设置存储和读取逻辑
 - [ ] 验证 system_settings 表数据是否正确保存
+
+---
+
+**问题 F**: 性能监控模块 - 数据虚假/模拟问题 (2026-01-24 新发现)
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 20 | 性能监控数据与实际不符 | `admin/performance` | 对话功能未修复时不应有数据 | ⏳ 待修复 |
+| 21 | 响应时间是随机值 | `admin.ts:getPerformanceStats` | `800 + Math.random() * 400` | ⏳ 待修复 |
+| 22 | 错误率是随机值 | `admin.ts:getPerformanceStats` | `Math.random() * 0.5` | ⏳ 待修复 |
+| 23 | 缓存命中率是估算值 | `admin.ts:getPerformanceStats` | 假设固定 15-25%，非真实统计 | ⏳ 待修复 |
+| 24 | Token 估算不准确 | `admin.ts:getPerformanceStats` | 使用 `字符数/4` 简单算法 | ⏳ 待修复 |
+
+**代码分析**:
+```typescript
+// admin.ts 中的模拟数据
+errorRate = Math.random() * 0.5;           // 0-0.5% 随机值
+cacheHitRate = 15 + Math.random() * 10;   // 15-25% 随机值
+avgResponseTime = 800 + Math.random() * 400;  // 800-1200ms 随机值
+p95ResponseTime = avgResponseTime * 1.5 + random;
+
+// Token 估算
+const estimateTokens = (content: string) => Math.ceil(content.length / 4);
+```
+
+**影响**: 管理员看到的性能指标完全不反映真实情况
+
+---
+
+**问题 G**: 系统诊断健康检查 - 状态检测不准确 (2026-01-24 新发现)
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 25 | AI 模型配置状态不准确 | `diagnostics.ts:healthCheck` | 只检查 is_active='true'，不验证 API 是否可用 | ⏳ 待修复 |
+| 26 | API 密钥状态不准确 | `diagnostics.ts:healthCheck` | 只检查字段非空，不验证密钥有效性 | ⏳ 待修复 |
+| 27 | 未指出具体问题模型 | `diagnostics.ts:healthCheck` | 只显示"OK"，不指出哪个模型有问题 | ⏳ 待修复 |
+
+**代码分析**:
+```typescript
+// 当前 AI 模型检查 (diagnostics.ts)
+const { data } = await ctx.supabase
+  .from('ai_models')
+  .select('id')
+  .eq('is_active', 'true')  // 只检查启用标志
+  .limit(1);
+checks.aiModels = { ok: data?.length > 0 };  // 有启用的就 OK
+
+// API 密钥检查
+const hasDbApiKey = modelsWithKey?.some(m => m.api_key?.length > 0);  // 只检查非空
+```
+
+**实际情况**:
+- 数据库有 2 个模型，1 个缺少 API 密钥
+- 健康检查显示"正常"，因为只检查是否存在启用的模型
+- 不检测 API 密钥是否真正有效（能否调用 Claude API）
+
+---
+
+**问题 H**: 系统设置-积分计费规则完全未生效 (2026-01-24 新发现) 🔴 严重
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 28 | 输入Token积分单价未使用 | `billing.ts` | 实际计费读取 ai_models 表，不读取 system_settings | ⏳ 待修复 |
+| 29 | 输出Token积分单价未使用 | `billing.ts` | 同上 | ⏳ 待修复 |
+| 30 | 联网搜索积分未使用 | `billing.ts` | 使用 ai_models.web_search_cost | ⏳ 待修复 |
+| 31 | 新用户赠送积分 | 注册流程 | 待验证 | ⏳ 待验证 |
+| 32 | 首充赠送百分比 | 支付流程 | 待验证 | ⏳ 待验证 |
+
+**严重问题分析**:
+
+管理员在系统设置中配置:
+```
+input_credits_per_1k: 1   (每1000输入Token消耗1积分)
+output_credits_per_1k: 5  (每1000输出Token消耗5积分)
+web_search_credits: 5     (联网搜索额外5积分)
+```
+
+但实际计费逻辑 (`billing.ts`):
+```typescript
+// 从 ai_models 表读取成本，不读取 system_settings
+const { data: model } = await supabase
+  .from('ai_models')
+  .select('input_token_cost, output_token_cost, web_search_cost')
+  .eq('model_id', modelId);
+
+// 计算成本
+const totalCostUsd = (inputTokens / 1_000_000) * pricing.inputPer1M;
+const totalCredits = totalCostUsd * CREDITS_PER_USD * 1.5;
+```
+
+**结论**: system_settings 中的积分计费规则**完全被忽略**！
+
+---
+
+**问题 I**: 系统设置-功能设置待验证 (2026-01-24 新发现)
+
+| # | 设置项 | 存储位置 | 是否使用 | 状态 |
+|---|-------|---------|---------|------|
+| 33 | 启用智能路由 | system_settings | 部分使用 (modelRouter.ts) | ⏳ 待验证 |
+| 34 | 启用智能搜索判断 | system_settings | 待验证 | ⏳ 待验证 |
+| 35 | 启用免费体验 | system_settings | 待验证 | ⏳ 待验证 |
+| 36 | 免费消息数/天 | system_settings | 待验证 | ⏳ 待验证 |
+| 37 | 单对话最大消息数 | system_settings | 待验证 | ⏳ 待验证 |
+| 38 | 输入框字符上限 | system_settings | 待验证 | ⏳ 待验证 |
+| 39 | 启用长文本预警 | system_settings | 待验证 | ⏳ 待验证 |
+| 40 | 显示Token使用统计 | system_settings | 待验证 | ⏳ 待验证 |
+| 41 | 显示模型选择器 | system_settings | 待验证 | ⏳ 待验证 |
+
+**待验证**: 检查聊天页面 (chat/page.tsx) 是否读取这些配置
+
+---
+
+**问题 J**: 会员等级权限配置 - 导出功能未实现 (2026-01-24 新发现)
+
+| # | 功能 | 配置状态 | 实现状态 | 备注 |
+|---|------|---------|---------|------|
+| 42 | 对话历史自动清理 | ✅ 已配置 | ✅ 已实现 | Vercel Cron 每天 10:00 UTC |
+| 43 | 对话历史保存天数 | ✅ 已配置 | ✅ 已实现 | free:7天, pro:30天, gold:90天 |
+| 44 | 允许导出对话 | ✅ 已配置 | ❌ 未实现 | 配置字段存在，无导出 API |
+| 45 | 允许批量导出 | ✅ 已配置 | ❌ 未实现 | 配置字段存在，无批量导出 |
+| 46 | 导出权限检查 | - | ❌ 未实现 | 无 membershipProcedure 中间件 |
+
+**已实现功能**:
+- 对话历史清理: 支持手动清理 + Cron 定时清理
+- 按会员等级配置保存天数
+- 清理统计显示
+
+**未实现功能**:
+- 导出 API 端点 (exportConversation)
+- 聊天页面导出按钮
+- 会员权限检查中间件
+- 批量导出功能
 
 ---
 

@@ -452,6 +452,127 @@
 | 18 | 显示模型选择器功能无效 | `admin/announcements` | 开关保存后聊天页面无变化 | ⏳ 待修复 |
 | 19 | 首页引导设置功能不明 | `admin/announcements` | 新手引导功能未见生效 | ⏳ 待修复 |
 
+> **问题 F**: 性能监控模块 - 数据来源与实际不符 (2026-01-24)
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 20 | 性能监控数据与实际不符 | `admin/performance` | 对话功能未修复，不应有数据 | ⏳ 待修复 |
+| 21 | 响应时间是模拟数据 | `admin.ts:getPerformanceStats` | 使用随机值 `800 + Math.random() * 400` | ⏳ 待修复 |
+| 22 | 错误率是模拟数据 | `admin.ts:getPerformanceStats` | 使用随机值 `Math.random() * 0.5` | ⏳ 待修复 |
+| 23 | 缓存命中率是估算值 | `admin.ts:getPerformanceStats` | 假设固定 15-25%，非实际统计 | ⏳ 待修复 |
+| 24 | Token 估算不准确 | `admin.ts:getPerformanceStats` | 使用 `字符数/4` 简单算法 | ⏳ 待修复 |
+
+**分析**:
+- 性能监控页面从 `conversations`、`messages`、`ai_models` 表获取数据
+- 关键指标（响应时间、错误率、缓存命中率）使用随机值或估算值，非真实数据
+- 如果对话功能未修复，这些表应为空，页面不应显示有意义的数据
+- 需要：(1) 真实记录 API 响应时间到数据库 (2) 统计真实错误率 (3) 实现真实缓存命中统计
+
+> **问题 G**: 系统诊断健康检查 - 状态显示与实际不符 (2026-01-24)
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 25 | AI 模型配置状态不准确 | `diagnostics.ts:healthCheck` | 只检查 is_active='true'，不验证 API 连接 | ⏳ 待修复 |
+| 26 | API 密钥状态不准确 | `diagnostics.ts:healthCheck` | 只检查字段非空，不验证密钥是否有效 | ⏳ 待修复 |
+| 27 | 未指出具体问题模型 | `diagnostics.ts:healthCheck` | 只显示"OK"，不指出哪个模型有问题 | ⏳ 待修复 |
+
+**分析**:
+```typescript
+// 当前检查逻辑 (diagnostics.ts)
+const { data } = await ctx.supabase
+  .from('ai_models')
+  .select('id')
+  .eq('is_active', 'true')  // 只检查启用状态
+  .limit(1);
+checks.aiModels = { ok: data?.length > 0 };  // 有启用模型就 OK
+
+// API 密钥检查
+const hasDbApiKey = modelsWithKey?.some(m => m.api_key?.length > 0);  // 只检查非空
+```
+
+**需要修复**:
+1. AI 模型检查应验证每个启用模型的 API 密钥是否有效（可调用）
+2. 如果某模型缺少 API 密钥，应明确指出是哪个模型
+3. 如果 API 连接失败，应显示连接失败而非"已启用"
+4. 健康检查应返回每个模型的详细状态
+
+> **问题 H**: 系统设置-积分计费规则完全未生效 (2026-01-24) 🔴 严重
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 28 | 输入Token积分单价未使用 | `billing.ts` | 计费使用 ai_models 表，不读取 system_settings | ⏳ 待修复 |
+| 29 | 输出Token积分单价未使用 | `billing.ts` | 计费使用 ai_models 表，不读取 system_settings | ⏳ 待修复 |
+| 30 | 联网搜索积分未使用 | `billing.ts` | 计费使用 ai_models.web_search_cost | ⏳ 待修复 |
+| 31 | 新用户赠送积分未使用 | 注册流程 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 32 | 首充赠送百分比未使用 | 支付流程 | 需验证是否读取 system_settings | ⏳ 待验证 |
+
+**严重问题分析**:
+```typescript
+// 系统设置页面定义的积分计费规则 (admin/settings)
+{
+  input_credits_per_1k: '1',     // 每1000输入Token消耗1积分
+  output_credits_per_1k: '5',    // 每1000输出Token消耗5积分
+  web_search_credits: '5',       // 联网搜索额外5积分
+}
+
+// 但实际计费逻辑 (billing.ts) 使用的是：
+const { data: model } = await supabase
+  .from('ai_models')
+  .select('input_token_cost, output_token_cost, web_search_cost')  // ← 从 ai_models 表读取
+  .eq('model_id', modelId);
+
+// 然后计算成本：
+const totalCostUsd = (inputTokens / 1_000_000) * pricing.inputPer1M + ...;
+const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
+```
+
+**结论**: 管理员在"系统设置-积分计费"中修改的规则**完全不会生效**！实际计费完全依赖 `ai_models` 表的成本字段。
+
+**修复方案**:
+1. 方案 A: 修改 billing.ts 读取 system_settings 表的积分规则
+2. 方案 B: 移除 system_settings 中的积分规则配置，统一使用 ai_models 表
+3. 方案 C: 在管理页面说明积分规则来源，让管理员去 AI 模型页面配置
+
+> **问题 I**: 系统设置-功能设置可能未生效 (2026-01-24)
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 33 | 启用智能路由设置 | `modelRouter.ts` | 读取 system_settings，但需验证 | ⏳ 待验证 |
+| 34 | 启用智能搜索判断 | 搜索触发逻辑 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 35 | 启用免费体验 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 36 | 免费消息数/天 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 37 | 单对话最大消息数 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 38 | 输入框字符上限 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 39 | 启用长文本预警 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 40 | 显示Token使用统计 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+| 41 | 显示模型选择器 | 对话页面 | 需验证是否读取 system_settings | ⏳ 待验证 |
+
+**待验证**: 需要检查聊天页面是否读取这些 system_settings 配置
+
+> **问题 J**: 会员等级权限配置 - 部分功能未实现 (2026-01-24)
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 42 | 对话历史自动清理 | `admin.ts` | ✅ 已实现，支持 Cron 定时清理 | ✅ 已实现 |
+| 43 | 对话历史保存天数 | `membership_plans` 表 | ✅ 已实现，按会员等级配置 | ✅ 已实现 |
+| 44 | 允许导出对话-配置存在 | `membership_plans` 表 | ✅ 配置字段存在 | ✅ 已实现 |
+| 45 | 允许导出对话-功能未实现 | 聊天/对话页面 | ❌ 无导出 API 和导出按钮 | ⏳ 待实现 |
+| 46 | 允许批量导出-配置存在 | `membership_plans` 表 | ✅ 配置字段存在 | ✅ 已实现 |
+| 47 | 允许批量导出-功能未实现 | 聊天/对话页面 | ❌ 无批量导出功能 | ⏳ 待实现 |
+| 48 | 导出权限检查未实现 | API 路由 | 无 membershipProcedure 中间件 | ⏳ 待实现 |
+
+**分析**:
+- 对话历史清理功能**已完整实现** ✅
+  - 支持手动清理（管理员页面）
+  - 支持 Vercel Cron 定时清理（每天 10:00 UTC）
+  - 按会员等级读取保存天数（free:7天, pro:30天, gold:90天）
+- 导出功能**配置框架存在，但实际功能未实现** ⚠️
+  - `allow_export` 和 `allow_batch_export` 字段存在
+  - 管理员可以在设置页面配置
+  - 但没有实际的导出 API 端点
+  - 聊天页面没有导出按钮
+  - 没有会员权限检查中间件
+
 ---
 
 ### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
