@@ -1455,3 +1455,26 @@ pnpm test:e2e:headed # 有头浏览器模式
 - **审计发现**: `findings.md`
 - **UI 复刻规则**: `movetonew/UIfix_rule.md`
 - **AI 重构计划**: `movetonew/GraylumAI_分阶段重构执行计划.md`
+
+---
+
+### ✅ 阶段 9 第六阶段: UI 优化 (P3) (2026-01-24)
+
+**完成状态**: 全部完成
+
+| # | 问题 | 位置 | 修复内容 | 状态 |
+|---|------|------|---------|------|
+| P3-4 | 用户菜单绿色高亮 | `dropdown-menu.tsx` | focus 颜色从 accent(绿) 改为 primary/10(金) | ✅ 已修复 |
+| P3-5 | 缺少管理后台入口 | `AppHeader.tsx` | 为管理员添加管理后台导航入口 | ✅ 已修复 |
+| P3-1 | 用户管理状态栏图标错位 | `admin/users/page.tsx` | Badge 添加 flex items-center gap-1 对齐修复 | ✅ 已修复 |
+| P3-2 | 财务统计金额单位不统一 | `admin/finance/page.tsx` | 全部 ¥ 改为 $ (USD) | ✅ 已修复 |
+| P3-3 | AI成本监控页面排版拥挤 | `admin/costs/page.tsx` | 使用设计系统配色，增大间距 | ✅ 已修复 |
+
+**修复文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `dropdown-menu.tsx` | DropdownMenuItem/SubTrigger/CheckboxItem/RadioItem 的 focus 颜色改为 `focus:bg-primary/10 focus:text-primary` |
+| `AppHeader.tsx` | 添加 Shield 图标和 trpc.user.getUserProfile 查询，管理员显示"管理后台"入口 |
+| `admin/users/page.tsx` | 状态和会员等级 Badge 添加 `flex items-center gap-1` 和 `flex-shrink-0`，详情面板也同步修复 |
+| `admin/finance/page.tsx` | 预估收入、预估盈利、套餐价格、单价从 ¥ 改为 $，表头"元/千积分"改为"$/千积分" |
+| `admin/costs/page.tsx` | StatCard 改用设计系统配色，主容器添加 p-8，卡片间距从 gap-4 改为 gap-6，用户列表改用 var(--color-primary) |
