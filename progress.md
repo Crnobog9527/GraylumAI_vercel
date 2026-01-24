@@ -25,9 +25,9 @@
 
 - **Phase:** 阶段 9 AI 对话功能修复 + P2 功能完善
 - **Previous:** Phase 6 (P3) UI 优化 ✅ 完成
-- **Current:** P2-7/P2-8 modules 表结构修复 ✅ 完成
+- **Current:** P2-10/P2-11 系统设置功能 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (P2-7, P2-8 完成)
+- **更新时间:** 2026-01-24 (P2-10, P2-11 完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -66,7 +66,7 @@
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ✅ 已完成 |
-| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (10/15 已完成) |
+| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (12/15 已完成) |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
 
 ---
@@ -1530,3 +1530,33 @@ pnpm test:e2e:headed # 有头浏览器模式
 | `packages/db/schema.ts` | 新增 modules 表完整定义 |
 | `packages/db/migrations/0008_modules_schema_update.sql` | 数据库迁移: 添加新字段、删除 credits_cost |
 | `apps/web/src/components/chat/TemplateCard.tsx` | 移除 credits_cost 接口字段和 Badge 显示 |
+
+---
+
+### ✅ P2-10 + P2-11 系统设置功能 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-10 | 显示模型选择器功能无效 | 聊天页面读取设置并显示模型选择器 | ✅ 已修复 |
+| P2-11 | 首页引导设置功能不明 | 实现聊天页面设置和首页引导设置的保存功能 | ✅ 已修复 |
+
+**P2-10 修复内容 - 模型选择器**:
+- 聊天页面读取 `system_settings.chat_show_model_selector` 设置
+- 条件渲染 `ModelSelector` 组件
+- 获取活跃模型列表 `trpc.model.getActiveModels`
+- 选中的模型 ID 传递给流式 API
+
+**P2-11 修复内容 - 设置保存功能**:
+- 管理后台公告页面"页面设置"Tab:
+  - 聊天页面设置: 保存到 `chat_show_model_selector`, `chat_prompt_text`, `chat_welcome_message`
+  - 首页引导设置: 保存到 `home_show_onboarding`, `home_show_featured_modules`
+- 从 `system_settings` 初始化设置值
+- 使用 `trpc.settings.updateSystemSettings` 保存
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `apps/web/src/app/chat/page.tsx` | 添加模型选择器组件、获取系统设置、传递 modelId |
+| `apps/web/src/app/admin/announcements/page.tsx` | 实现聊天/首页设置的读取和保存功能 |

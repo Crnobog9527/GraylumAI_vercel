@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Megaphone, Plus, Pencil, Trash2, Check, X,
@@ -122,6 +122,60 @@ export default function AdminAnnouncementsPage() {
     chatPromptText: '请选择一个模型开始对话',
     welcomeMessage: '你好！有什么可以帮助你的吗？',
   });
+
+  // Homepage guide settings state
+  const [homeGuideSettings, setHomeGuideSettings] = useState({
+    showOnboarding: true,
+    showFeaturedModules: true,
+  });
+
+  // Fetch system settings to initialize values
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+
+  // Update system settings mutation
+  const updateSetting = trpc.settings.updateSystemSettings.useMutation();
+
+  // Initialize settings from database
+  useEffect(() => {
+    if (systemSettings) {
+      setChatSettings({
+        showModelSelector: systemSettings.chat_show_model_selector === true || systemSettings.chat_show_model_selector === 'true',
+        chatPromptText: (systemSettings.chat_prompt_text as string) || '请选择一个模型开始对话',
+        welcomeMessage: (systemSettings.chat_welcome_message as string) || '你好！有什么可以帮助你的吗？',
+      });
+      setHomeGuideSettings({
+        showOnboarding: systemSettings.home_show_onboarding === true || systemSettings.home_show_onboarding === 'true',
+        showFeaturedModules: systemSettings.home_show_featured_modules === true || systemSettings.home_show_featured_modules === 'true',
+      });
+    }
+  }, [systemSettings]);
+
+  // Save chat page settings
+  const handleSaveChatSettings = async () => {
+    try {
+      await Promise.all([
+        updateSetting.mutateAsync({ key: 'chat_show_model_selector', value: chatSettings.showModelSelector }),
+        updateSetting.mutateAsync({ key: 'chat_prompt_text', value: chatSettings.chatPromptText }),
+        updateSetting.mutateAsync({ key: 'chat_welcome_message', value: chatSettings.welcomeMessage }),
+      ]);
+      alert('聊天页面设置保存成功！');
+    } catch {
+      alert('保存失败，请重试');
+    }
+  };
+
+  // Save homepage guide settings
+  const handleSaveHomeGuideSettings = async () => {
+    try {
+      await Promise.all([
+        updateSetting.mutateAsync({ key: 'home_show_onboarding', value: homeGuideSettings.showOnboarding }),
+        updateSetting.mutateAsync({ key: 'home_show_featured_modules', value: homeGuideSettings.showFeaturedModules }),
+      ]);
+      alert('首页引导设置保存成功！');
+    } catch {
+      alert('保存失败，请重试');
+    }
+  };
 
   const { data, isLoading, error, refetch } = trpc.admin.getAllAnnouncements.useQuery({
     limit: 100,
@@ -579,9 +633,10 @@ export default function AdminAnnouncementsPage() {
 
                 <Button
                   className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
-                  onClick={() => alert('保存成功！（注：实际保存需要对接 system_settings 表）')}
+                  onClick={handleSaveChatSettings}
+                  disabled={updateSetting.isPending}
                 >
-                  保存聊天页面设置
+                  {updateSetting.isPending ? '保存中...' : '保存聊天页面设置'}
                 </Button>
               </CardContent>
             </Card>
@@ -612,7 +667,10 @@ export default function AdminAnnouncementsPage() {
                     <p className="font-medium" style={{ color: 'var(--text-primary)' }}>显示新手引导</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>新用户首次访问时显示</p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={homeGuideSettings.showOnboarding}
+                    onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showOnboarding: checked })}
+                  />
                 </div>
 
                 <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
@@ -620,14 +678,18 @@ export default function AdminAnnouncementsPage() {
                     <p className="font-medium" style={{ color: 'var(--text-primary)' }}>显示精选模块</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>在首页展示推荐功能模块</p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch
+                    checked={homeGuideSettings.showFeaturedModules}
+                    onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showFeaturedModules: checked })}
+                  />
                 </div>
 
                 <Button
                   className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
-                  onClick={() => alert('保存成功！（注：实际保存需要对接 system_settings 表）')}
+                  onClick={handleSaveHomeGuideSettings}
+                  disabled={updateSetting.isPending}
                 >
-                  保存首页引导设置
+                  {updateSetting.isPending ? '保存中...' : '保存首页引导设置'}
                 </Button>
               </CardContent>
             </Card>

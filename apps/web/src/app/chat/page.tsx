@@ -5,6 +5,7 @@ import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
+import ModelSelector from '@/components/chat/ModelSelector';
 import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,11 +27,34 @@ export default function ChatPage() {
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { banners } = useBanner();
 
   const utils = trpc.useUtils();
+
+  // Fetch system settings for chat page configuration
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
+
+  // Fetch active AI models for model selector
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
+  const activeModels = (modelsData ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    description: m.description ?? undefined,
+    credits_per_message: 0, // 按实际 token 计费，不显示固定积分
+    is_active: true,
+  }));
+
+  // Set default model when models are loaded
+  useEffect(() => {
+    if (activeModels.length > 0 && !selectedModelId) {
+      setSelectedModelId(activeModels[0].id);
+    }
+  }, [activeModels, selectedModelId]);
 
   // Fetch conversations
   const { data: conversationsData } = trpc.chat.getConversations.useQuery();
@@ -125,8 +149,11 @@ export default function ChatPage() {
 
     // 使用流式 API 发送消息
     // conversationId 为 null 时会自动创建新对话
-    await sendStreamingMessage(messageToSend);
-  }, [inputMessage, isProcessing, sendStreamingMessage]);
+    // 传递选中的模型 ID（如果启用了模型选择器）
+    await sendStreamingMessage(messageToSend, {
+      modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
+    });
+  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -308,6 +335,18 @@ export default function ChatPage() {
             style={{ borderTop: '1px solid var(--border-primary)', background: 'var(--bg-secondary)', zIndex: 1 }}
           >
             <div className="max-w-3xl mx-auto">
+              {/* 模型选择器 */}
+              {showModelSelector && activeModels.length > 0 && (
+                <div className="mb-3">
+                  <ModelSelector
+                    models={activeModels}
+                    selectedModel={selectedModelId}
+                    onSelect={setSelectedModelId}
+                    disabled={isProcessing}
+                  />
+                </div>
+              )}
+
               {/* 输入框 */}
               <div
                 className="relative rounded-2xl chat-input-box"
