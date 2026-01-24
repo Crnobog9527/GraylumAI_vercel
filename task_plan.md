@@ -118,15 +118,21 @@
 
 ---
 
-### ⚠️ 阶段 3: CI/CD 自动化 (应该做 | 预计 1 天)
+### ✅ 阶段 3: CI/CD 自动化 (已完成 | Vercel 内置)
 
 > **进入条件**: 阶段 2 完成
 > **完成条件**: CI/CD 流水线正常运行，Staging/Production 分离
 
 | # | 任务 | 交付物 | 预计时间 | 状态 |
 |---|------|--------|---------|------|
-| 3.1 | GitHub Actions CI/CD | .github/workflows/ci.yml | 2h | ⏳ 待执行 |
-| 3.2 | 配置 Staging 环境 | 环境配置 + 部署检查清单 | 2h | ⏳ 待执行 |
+| 3.1 | GitHub Actions CI/CD | .github/workflows/ci.yml | 2h | ⏭️ 跳过 - Vercel 自带 CI/CD |
+| 3.2 | 配置 Staging 环境 | 环境配置 + 部署检查清单 | 2h | ⏭️ 跳过 - Vercel Preview 环境 |
+
+**说明**: Vercel 平台已内置 CI/CD 功能：
+- 自动构建和部署（push 触发）
+- Preview 环境（PR 自动部署）
+- Production 环境（主分支部署）
+- 构建日志和错误监控
 
 ---
 

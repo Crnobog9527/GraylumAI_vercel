@@ -980,7 +980,7 @@ const { data: announcementsData } = trpc.settings.getActiveAnnouncements.useQuer
 | **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
 | **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
-| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏭️ 跳过 (Vercel 内置) |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ✅ 完成 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ✅ 完成 |
@@ -1161,45 +1161,28 @@ npx @sentry/wizard@latest -i nextjs --saas --org grayscale-luminary-llc --projec
 
 ---
 
-## 阶段 3 CI/CD 自动化 (2026-01-22 完成) ✅
+## 阶段 3 CI/CD 自动化 (跳过 - Vercel 内置)
 
 > **进入条件**: 阶段 2 完成 ✅
-> **完成条件**: CI/CD 流水线 + 部署文档 ✅
+> **完成条件**: CI/CD 流水线正常运行 ✅ (Vercel 内置)
 
 ### 任务清单
 
 | # | 任务 | 交付物 | 状态 |
 |---|------|--------|------|
-| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ✅ 完成 |
-| 3.2 | 部署配置和文档 | DEPLOYMENT.md | ✅ 完成 |
+| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ⏭️ 跳过 - Vercel 自带 |
+| 3.2 | 配置 Staging 环境 | 环境配置 | ⏭️ 跳过 - Vercel Preview |
 
-### 交付物清单
+### 说明
 
-**CI/CD 工作流**:
-- ✅ `.github/workflows/ci.yml` - 完整 CI/CD 流水线
-  - lint-and-type: ESLint + TypeScript 检查
-  - test: 单元测试
-  - build: 构建验证
-  - deploy-preview: PR 预览部署
-  - deploy-staging: develop → staging
-  - deploy-production: main → production
+**Vercel 内置 CI/CD 功能已满足需求**:
+- ✅ 自动构建和部署（Git push 触发）
+- ✅ Preview 环境（每个 PR 自动部署预览）
+- ✅ Production 环境（主分支自动部署）
+- ✅ 构建日志和错误监控
+- ✅ 环境变量管理
 
-**部署文档**:
-- ✅ `docs/DEPLOYMENT.md` - 完整部署指南
-  - 环境概览 (Production/Staging/Preview)
-  - GitHub Secrets 配置指南
-  - 部署检查清单
-  - 回滚流程
-
-### CI/CD 流程图
-
-```
-PR 创建 → lint → test → build → deploy-preview
-                                    ↓
-develop 推送 → lint → test → build → deploy-staging
-                                    ↓
-main 推送 → lint → test → build → deploy-production
-```
+无需额外配置 GitHub Actions，Vercel 平台已提供完整的 CI/CD 解决方案
 
 ---
 
