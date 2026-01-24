@@ -222,6 +222,7 @@ export const membershipPlans = pgTable('membership_plans', {
   packageDiscount: integer('package_discount').default(100).notNull(), // 100 = no discount
   features: jsonb('features').default([]).notNull(), // Array of feature strings
   historyRetentionDays: integer('history_retention_days').default(30).notNull(), // 对话历史保存天数
+  maxContextMessages: integer('max_context_messages').default(20).notNull(), // 最大上下文消息数
   allowExport: text('allow_export').default('false').notNull(), // 允许导出对话
   allowBatchExport: text('allow_batch_export').default('false').notNull(), // 允许批量导出
   isActive: text('is_active').default('true').notNull(),

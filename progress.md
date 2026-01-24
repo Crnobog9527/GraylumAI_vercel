@@ -260,7 +260,7 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 - ✅ P2-12: 对话导出功能 - 支持 JSON/Markdown/TXT 格式
 - ✅ P2-13: 批量导出功能 - 支持导出全部对话
 - ✅ P2-14: 导出权限检查 - 基于会员等级 (allow_export, allow_batch_export)
-- ⏳ P2-15: 上下文长度限制 - 待实现
+- ✅ P2-15: 上下文长度限制 - 基于会员等级 (max_context_messages)
 
 **P2-D 交付物**:
 - `packages/api/src/routers/chat.ts` - 新增 3 个导出 API:
@@ -269,6 +269,8 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
   - `exportAllConversations` - 批量导出所有对话
 - `apps/web/src/components/chat/ExportDialog.tsx` - 导出对话框组件
 - `apps/web/src/app/chat/page.tsx` - 集成导出功能
+- `packages/db/migrations/0009_context_length_limit.sql` - 上下文限制迁移
+- `apps/web/src/app/api/ai/stream/route.ts` - 基于会员的上下文限制
 
 **导出功能说明**:
 | 功能 | 权限字段 | 说明 |
@@ -276,7 +278,14 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | 单个导出 | `allow_export` | 支持 JSON/Markdown/TXT 格式 |
 | 批量导出 | `allow_batch_export` | 支持 JSON/Markdown 格式 |
 
-**待实现功能**:
+**上下文限制说明**:
+| 会员等级 | 最大消息数 | 说明 |
+|---------|-----------|------|
+| free | 10 | 5轮对话 |
+| pro | 30 | 15轮对话 |
+| gold | 50 | 25轮对话 |
+
+**P2 全部完成**:
 
 ---
 
@@ -292,7 +301,7 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | **性能监控** | 5 | 🟡 P2 | 数据是模拟/随机值 |
 | **功能广场** | 3 | 🟡 P2 | 字段不匹配 |
 | **系统设置** | 3 | 🟡 P2 | 设置生效性待验证 |
-| **会员权限** | 4 | 🟡 P2 | ✅ 导出功能已实现 (3/4) |
+| **会员权限** | 4 | 🟡 P2 | ✅ 全部完成 (4/4) |
 | **管理后台 UI** | 5 | 🟢 P3 | 排版/样式问题 |
 | **代码质量** | 1 | 🟢 P3 | 类型定义重复 |
 
