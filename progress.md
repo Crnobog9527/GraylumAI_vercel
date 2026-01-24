@@ -23,11 +23,11 @@
 
 ## Current Status
 
-- **Phase:** 阶段 9 AI 对话功能修复 ⏳ 规划完成
-- **Previous:** AI 对话功能诊断 ✅ 完成
-- **Current:** 等待用户确认修复计划后开始执行
+- **Phase:** 阶段 9 AI 对话功能修复 + P2 功能完善
+- **Previous:** Phase 6 (P3) UI 优化 ✅ 完成
+- **Current:** P2-6 功能广场模块详情弹窗 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (诊断完成 + 工作计划规划)
+- **更新时间:** 2026-01-24 (P2-6 完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -1478,3 +1478,37 @@ pnpm test:e2e:headed # 有头浏览器模式
 | `admin/users/page.tsx` | 状态和会员等级 Badge 添加 `flex items-center gap-1` 和 `flex-shrink-0`，详情面板也同步修复 |
 | `admin/finance/page.tsx` | 预估收入、预估盈利、套餐价格、单价从 ¥ 改为 $，表头"元/千积分"改为"$/千积分" |
 | `admin/costs/page.tsx` | StatCard 改用设计系统配色，主容器添加 p-8，卡片间距从 gap-4 改为 gap-6，用户列表改用 var(--color-primary) |
+
+---
+
+### ✅ P2-6 功能广场模块详情弹窗 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-6 | 缺少模块详情弹窗 | 集成 ModuleDetailDialog 组件到功能广场页面 | ✅ 已修复 |
+
+**修复内容**:
+- ✅ 增强 `ModuleDetailDialog.tsx` 组件:
+  - 添加 `useRouter` 导航到聊天页面
+  - 添加 `trpc.modules.incrementUsage` 使用量统计
+  - 点击"立即使用"后跳转到 `/chat?module={moduleId}`
+- ✅ 更新 `marketplace/page.tsx`:
+  - 添加 `ModuleDetailDialog` 组件导入
+  - 添加 `selectedModule` 和 `dialogOpen` 状态
+  - 更新 `ModuleCard.onShowDetail` 回调，设置选中模块并打开弹窗
+
+**弹窗功能**:
+- 显示模块标题、图标、分类、平台标签
+- 显示使用次数统计
+- 显示功能介绍 (description)
+- 显示功能特点列表 (默认值或从 features 字段读取)
+- 显示使用前准备问题 (默认值或从 preparation_questions 字段读取)
+- "立即使用"按钮导航到聊天页面
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `ModuleDetailDialog.tsx` | 添加 useRouter 和 trpc.modules.incrementUsage，实现导航功能 |
+| `marketplace/page.tsx` | 添加 ModuleDetailDialog 集成，状态管理和 onShowDetail 回调 |
