@@ -13,7 +13,8 @@ import {
   LogOut,
   Settings,
   CreditCard,
-  Loader2
+  Loader2,
+  Shield
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase';
 import { useCreditsBalance } from '@/hooks/use-credits';
+import { trpc } from '@/lib/trpc';
 
 // Navigation items configuration
 const navItems = [
@@ -39,6 +41,13 @@ export function AppHeader() {
   const router = useRouter();
   const { credits, isLoading: isCreditsLoading } = useCreditsBalance();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // Get user profile to check for admin role
+  const { data: userProfile } = trpc.user.getUserProfile.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const isAdmin = userProfile?.role === 'admin';
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -208,6 +217,20 @@ export function AppHeader() {
                   <span>设置</span>
                 </DropdownMenuItem>
               </Link>
+              {isAdmin && (
+                <>
+                  <DropdownMenuSeparator style={{ background: 'var(--border-primary)' }} />
+                  <Link href="/admin">
+                    <DropdownMenuItem
+                      className="gap-2 rounded-lg cursor-pointer"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <Shield className="h-4 w-4" />
+                      <span>管理后台</span>
+                    </DropdownMenuItem>
+                  </Link>
+                </>
+              )}
               <DropdownMenuSeparator style={{ background: 'var(--border-primary)' }} />
               <DropdownMenuItem
                 className="gap-2 rounded-lg cursor-pointer"
