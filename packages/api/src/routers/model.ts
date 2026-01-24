@@ -165,4 +165,157 @@ export const modelRouter = router({
       }
       return data;
     }),
+
+  // Admin only: Test API connection for a model
+  testConnection: adminProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      // Get model details
+      const { data: model, error: fetchError } = await ctx.supabase
+        .from('ai_models')
+        .select('id, name, model_id, provider, api_key, api_endpoint')
+        .eq('id', input.id)
+        .single();
+
+      if (fetchError || !model) {
+        return {
+          success: false,
+          error: '模型不存在',
+          status: 'not_found' as const,
+        };
+      }
+
+      // Check if API key is configured
+      const apiKey = model.api_key || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        return {
+          success: false,
+          error: 'API 密钥未配置',
+          status: 'no_key' as const,
+        };
+      }
+
+      // Test the API connection based on provider
+      try {
+        if (model.provider === 'anthropic' || !model.provider) {
+          // Test Anthropic API
+          const endpoint = model.api_endpoint || 'https://api.anthropic.com/v1/messages';
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+              model: model.model_id,
+              max_tokens: 1,
+              messages: [{ role: 'user', content: 'Hi' }],
+            }),
+          });
+
+          if (response.ok) {
+            // Update last tested time in config
+            await ctx.supabase
+              .from('ai_models')
+              .update({
+                config: {
+                  ...(model as any).config,
+                  last_tested: new Date().toISOString(),
+                  connection_status: 'connected',
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', input.id);
+
+            return {
+              success: true,
+              status: 'connected' as const,
+              message: 'API 连接正常',
+            };
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = (errorData as any).error?.message || `HTTP ${response.status}`;
+
+            // Update config with error status
+            await ctx.supabase
+              .from('ai_models')
+              .update({
+                config: {
+                  ...(model as any).config,
+                  last_tested: new Date().toISOString(),
+                  connection_status: 'error',
+                  last_error: errorMessage,
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', input.id);
+
+            return {
+              success: false,
+              error: errorMessage,
+              status: 'error' as const,
+            };
+          }
+        } else {
+          // For other providers, just check if API key exists
+          return {
+            success: true,
+            status: 'configured' as const,
+            message: 'API 密钥已配置（未测试连接）',
+          };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '连接失败';
+
+        // Update config with error status
+        await ctx.supabase
+          .from('ai_models')
+          .update({
+            config: {
+              ...(model as any).config,
+              last_tested: new Date().toISOString(),
+              connection_status: 'error',
+              last_error: errorMessage,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', input.id);
+
+        return {
+          success: false,
+          error: errorMessage,
+          status: 'error' as const,
+        };
+      }
+    }),
+
+  // Admin only: Get connection status for all models
+  getConnectionStatus: adminProcedure.query(async ({ ctx }) => {
+    const { data, error } = await ctx.supabase
+      .from('ai_models')
+      .select('id, name, api_key, config, is_active')
+      .order('name');
+
+    if (error) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+    }
+
+    return (data || []).map(model => {
+      const config = (model.config as any) || {};
+      const hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY);
+
+      return {
+        id: model.id,
+        name: model.name,
+        isActive: model.is_active === 'true',
+        hasApiKey,
+        connectionStatus: config.connection_status || (hasApiKey ? 'untested' : 'no_key'),
+        lastTested: config.last_tested || null,
+        lastError: config.last_error || null,
+      };
+    });
+  }),
 });

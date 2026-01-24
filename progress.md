@@ -63,7 +63,7 @@
 | 阶段 | 目标 | 问题范围 | 状态 |
 |------|------|---------|------|
 | 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ✅ 已完成 |
-| 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ⏳ 待执行 |
+| 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ⏳ 待执行 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ⏳ 待执行 |
 | 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 待执行 |
@@ -99,6 +99,28 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 ```
 
 **待用户验证**: 需要用户测试 AI 对话功能是否正常工作
+
+---
+
+### ✅ 第二阶段: AI 模型管理修复 (2026-01-24 完成)
+
+**修复内容**:
+- ✅ 新增 `model.testConnection` mutation - 测试 Anthropic API 连接
+- ✅ 新增 `model.getConnectionStatus` query - 获取所有模型连接状态
+- ✅ 模型表格新增 "API 状态" 列
+- ✅ 添加测试连接按钮（刷新图标）
+
+**修改文件**:
+- `packages/api/src/routers/model.ts` - 添加 testConnection 和 getConnectionStatus
+- `apps/web/src/app/admin/models/page.tsx` - 显示连接状态和测试按钮
+
+**API 状态显示**:
+| 状态 | 颜色 | 说明 |
+|------|------|------|
+| 已连接 | 绿色 | API 测试成功 |
+| 连接失败 | 红色 | API 测试失败 |
+| 待测试 | 黄色 | 有 API 密钥但未测试 |
+| 未配置密钥 | 红色 | 没有 API 密钥 |
 
 ---
 
