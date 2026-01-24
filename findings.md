@@ -1,24 +1,142 @@
 # Findings & Decisions
 
+## 🔴 AI 对话功能诊断报告 (2026-01-24)
+
+> **诊断文档**: `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`
+
+### 根本原因
+
+**AI 对话功能完全无法工作的核心原因**：前端调用了占位符 API (`chat.sendMessage`)，而完整的 AI 实现从未被集成。
+
+存在三套独立实现但未正确连接：
+1. `chat.sendMessage` - **占位符**（当前被调用，只回显输入）
+2. `ai.sendMessage` - **完整实现**（从未被调用）
+3. 流式处理链路 - **完整实现**（从未被调用）
+
+### 问题汇总
+
+| 优先级 | 问题数量 | 影响范围 |
+|--------|----------|----------|
+| P0 (致命) | 4 | 功能完全不可用 |
+| P1 (严重) | 3 | 功能缺陷或安全风险 |
+| P2 (中等) | 3 | 功能不完整 |
+| P3 (轻微) | 2 | 代码质量问题 |
+
+### P0 致命问题
+
+| ID | 问题 | 位置 | 原因 |
+|----|------|------|------|
+| P0-1 | chat.sendMessage 是占位符 | `packages/api/src/routers/chat.ts:121` | 只回显用户输入，未调用 AI |
+| P0-2 | 前端调用错误的 API | `apps/web/src/app/chat/page.tsx` | 调用 chat.sendMessage 而非 ai.sendMessage |
+| P0-3 | 流式处理未集成 | `streamHandler.ts`, `useStreamingChat.ts` | 完整实现存在但从未被调用 |
+| P0-4 | ai.sendMessage 前端未调用 | `packages/api/src/routers/ai.ts:251-479` | 完整实现存在但前端从未调用 |
+
+### P1 严重问题
+
+| ID | 问题 | 位置 | 原因 |
+|----|------|------|------|
+| P1-1 | 输出安全过滤未应用 | `packages/api/src/routers/ai.ts:383-397` | 代码标记为 TODO |
+| P1-2 | 签名验证未使用 | `packages/api/src/services/requestSigner.ts` | 前端从未签名，后端验证可选 |
+| P1-3 | 计费价格来源与 UI 不一致 | `packages/api/src/services/billing.ts` | 从 ai_models 表读取，非 system_settings |
+
+### P2 中等问题
+
+| ID | 问题 | 位置 | 原因 |
+|----|------|------|------|
+| P2-1 | 前端缺少错误处理 | `apps/web/src/app/chat/page.tsx` | 无 onError 回调 |
+| P2-2 | 使用量统计未连接 | `packages/api/src/routers/ai.ts:420-445` | ai.sendMessage 从未被调用 |
+| P2-3 | 上下文长度限制未实现 | `packages/api/src/routers/ai.ts:300-320` | 代码标记为 TODO |
+
+### P3 轻微问题
+
+| ID | 问题 | 位置 | 原因 |
+|----|------|------|------|
+| P3-1 | 重复的类型定义 | `packages/api/src/types/ai.ts` + 内联类型 | 维护困难 |
+| P3-2 | 环境变量验证不完整 | `apps/web/src/app/api/ai/stream/route.ts` | 缺少详细日志 |
+
+---
+
+## ✅ 修复方案: 集成流式处理（方案 A）
+
+> **推荐方案**：集成流式处理（方案 A）
+
+### 方案概述
+
+| 属性 | 值 |
+|------|------|
+| 优先级 | P0 |
+| 工作量 | 中等 |
+| 风险 | 低 |
+
+### 架构修正
+
+```
+当前状态 (错误):
+┌─────────────────┐     调用      ┌───────────────────┐
+│  Chat Page      │ ────────────→ │ chat.sendMessage  │ (占位符!)
+│  (前端)         │               │ 只回显输入        │
+└─────────────────┘               └───────────────────┘
+
+目标状态 (正确):
+┌─────────────────┐     调用      ┌───────────────────┐
+│  Chat Page      │ ────────────→ │ /api/ai/stream    │
+│  (前端)         │  SSE 连接     │ + StreamHandler   │
+│  + useStreaming │               │ + 计费集成        │
+│    Chat Hook    │               │ + 智能路由        │
+└─────────────────┘               └───────────────────┘
+```
+
+### 修复步骤
+
+| 步骤 | 任务 | 涉及文件 | 工作量 |
+|------|------|---------|--------|
+| 1 | 修改前端调用流式 API | `apps/web/src/app/chat/page.tsx` | 中 |
+| 2 | 集成 useStreamingChat Hook | `apps/web/src/hooks/useStreamingChat.ts` | 小 |
+| 3 | 添加错误处理和加载状态 | `apps/web/src/app/chat/page.tsx` | 小 |
+| 4 | 验证环境变量配置 | `.env`, Vercel 环境变量 | 小 |
+| 5 | 测试计费和智能路由 | 端到端测试 | 中 |
+
+### 关键代码修改
+
+**1. 前端 chat/page.tsx 修改**:
+```typescript
+// 移除
+const sendMessage = trpc.chat.sendMessage.useMutation({...});
+
+// 替换为
+import { useStreamingChat } from '@/hooks/useStreamingChat';
+const { sendMessage, isStreaming, error } = useStreamingChat({
+  conversationId,
+  onMessage: (content) => { /* 更新消息列表 */ },
+  onComplete: () => { /* 刷新消息列表 */ },
+  onError: (error) => { /* 显示错误提示 */ },
+});
+```
+
+**2. 验证环境变量**:
+```bash
+ANTHROPIC_API_KEY=sk-ant-xxx  # 必须配置
+DATABASE_URL=xxx              # 必须配置
+```
+
+---
+
 ## 🚨 待修复问题 (2026-01-23)
 
 ### 对话功能失效
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
-| 1 | 对话功能失效 | `chat/page.tsx` | 页面消息获取和显示逻辑仍有问题 | ⏳ 待修复 |
+| 1 | 对话功能失效 | `chat/page.tsx` | 前端调用了占位符 API | ⏳ 待修复 |
 
-**问题描述**: 发送对话后聊天记录功能未正常运行。
+**问题描述**: 发送对话后只收到 "Echo: [原消息]" 回复，AI 功能完全不可用。
 
-**已尝试修复**:
-- 添加 `trpc.chat.getMessages.useQuery()` 获取消息
-- 添加消息列表渲染组件
-- 添加自动滚动到底部功能
+**根本原因** (2026-01-24 诊断确认):
+- 前端调用 `trpc.chat.sendMessage`（占位符）
+- 完整的 AI 实现在 `trpc.ai.sendMessage` 和流式处理链路中
+- 三套实现从未正确集成
 
-**需要进一步排查**:
-- 消息发送后是否正确存储到数据库
-- 消息获取 API 是否返回正确数据
-- 前端消息渲染逻辑是否正确
+**修复方案**: 方案 A - 集成流式处理（见上文）
 
 ---
 

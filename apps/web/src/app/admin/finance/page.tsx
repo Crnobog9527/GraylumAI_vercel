@@ -124,7 +124,7 @@ export default function AdminFinancePage() {
                   <div>
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估收入</p>
                     <p className="text-2xl font-bold text-emerald-400">
-                      ¥{(financeOverview.estimatedRevenue / 100).toFixed(2)}
+                      ${(financeOverview.estimatedRevenue / 100).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -172,7 +172,7 @@ export default function AdminFinancePage() {
                   <div>
                     <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估盈利</p>
                     <p className={`text-2xl font-bold ${estimatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      ¥{(estimatedProfit / 100).toFixed(2)}
+                      ${(estimatedProfit / 100).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -334,7 +334,7 @@ export default function AdminFinancePage() {
                     <TableHead>套餐名称</TableHead>
                     <TableHead>价格</TableHead>
                     <TableHead>积分数量</TableHead>
-                    <TableHead>单价(元/千积分)</TableHead>
+                    <TableHead>单价($/千积分)</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -356,7 +356,7 @@ export default function AdminFinancePage() {
                       </TableCell>
                       <TableCell>
                         <span style={{ color: 'var(--text-primary)' }}>
-                          ¥{(pkg.price / 100).toFixed(2)}
+                          ${(pkg.price / 100).toFixed(2)}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -369,7 +369,7 @@ export default function AdminFinancePage() {
                       </TableCell>
                       <TableCell>
                         <span style={{ color: 'var(--text-secondary)' }}>
-                          ¥{((pkg.price / pkg.creditsAmount) * 10).toFixed(3)}
+                          ${((pkg.price / pkg.creditsAmount) * 10).toFixed(3)}
                         </span>
                       </TableCell>
                       <TableCell>

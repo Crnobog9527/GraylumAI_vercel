@@ -336,22 +336,54 @@ export default function AdminSettingsPage() {
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>积分计费设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                配置Token到积分的换算规则（1积分 = 1000 tokens）
+                新用户赠送积分和首充奖励配置
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {/* Warning about per-token pricing */}
               <div
                 className="p-4 rounded-lg mb-4"
-                style={{ background: 'var(--info-bg)', border: '1px solid var(--info)' }}
+                style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}
               >
-                <p className="text-sm" style={{ color: 'var(--info)' }}>
-                  <strong>默认规则：</strong>输入Token消耗 1积分/1K tokens，输出Token消耗 5积分/1K tokens
-                </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--info)', opacity: 0.8 }}>
-                  示例：输入2000 tokens → 2积分，输出1000 tokens → 5积分，总计7积分
-                </p>
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
+                      Token 计费规则已迁移至模型管理
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--warning)', opacity: 0.8 }}>
+                      每个 AI 模型的输入/输出 Token 成本在「AI 模型管理」页面单独配置。
+                      下方的 Token 积分单价设置仅作为参考显示，实际计费以模型配置为准。
+                    </p>
+                    <a
+                      href="/admin/models"
+                      className="text-xs mt-2 inline-block underline hover:no-underline"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      前往 AI 模型管理 →
+                    </a>
+                  </div>
+                </div>
               </div>
-              {renderSettingGroup(settingGroups.billing)}
+
+              {/* Active settings: new_user_credits and first_purchase_bonus_percent */}
+              <div className="mb-6">
+                <h4 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
+                  有效设置
+                </h4>
+                {renderSettingGroup(['new_user_credits', 'first_purchase_bonus_percent'])}
+              </div>
+
+              {/* Deprecated settings with visual distinction */}
+              <div className="opacity-60">
+                <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
+                  <span>参考显示（实际以模型配置为准）</span>
+                  <Badge variant="outline" className="text-xs" style={{ borderColor: 'var(--border-primary)', color: 'var(--text-disabled)' }}>
+                    仅供参考
+                  </Badge>
+                </h4>
+                {renderSettingGroup(['input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits'])}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

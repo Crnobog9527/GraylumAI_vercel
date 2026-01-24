@@ -26,8 +26,11 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
 }: {
   onBuyClick?: () => void;
 }) {
-  // Mock packages data
-  const packages = [
+  // 从 API 获取积分加油包数据
+  const { data: packages = [], isLoading } = trpc.settings.getCreditPackages.useQuery();
+
+  // 如果 API 没有数据，使用默认数据
+  const displayPackages = packages.length > 0 ? packages : [
     { id: '1', credits: 500, bonus_credits: 0, price: 4.9, is_popular: false },
     { id: '2', credits: 1200, bonus_credits: 100, price: 9.9, is_popular: true },
     { id: '3', credits: 3000, bonus_credits: 300, price: 19.9, is_popular: false },
@@ -54,7 +57,11 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {packages.map((pkg) => (
+        {isLoading ? (
+          <div className="col-span-4 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
+            加载中...
+          </div>
+        ) : displayPackages.map((pkg) => (
           <div
             key={pkg.id}
             className="relative p-4 rounded-xl text-center transition-all duration-300"
@@ -117,9 +124,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 
   const subscriptionTier = user?.subscription_tier || 'free';
 
-  // 会员等级配置
-  const planConfigs: Record<string, PlanConfig> = {
-    free: {
+  // 从 API 获取会员等级数据
+  const { data: apiPlans = [], isLoading: plansLoading } = trpc.settings.getMembershipPlans.useQuery();
+
+  // 默认会员等级配置 (API 无数据时使用)
+  const defaultPlanConfigs: PlanConfig[] = [
+    {
       name: '免费会员',
       level: 'free',
       price: { monthly: 0, yearly: 0 },
@@ -127,7 +137,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
       recommended: false,
       highlight: false
     },
-    pro: {
+    {
       name: '进阶会员',
       level: 'pro',
       price: { monthly: 9.9, yearly: 95 },
@@ -135,7 +145,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
       recommended: false,
       highlight: false
     },
-    gold: {
+    {
       name: '黄金会员',
       level: 'gold',
       price: { monthly: 29.9, yearly: 287 },
@@ -143,9 +153,37 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
       recommended: true,
       highlight: true
     }
-  };
+  ];
 
-  const displayPlans = Object.values(planConfigs);
+  // 将 API 数据转换为 PlanConfig 格式
+  const displayPlans: PlanConfig[] = apiPlans.length > 0
+    ? apiPlans.map(plan => ({
+        name: plan.name,
+        level: plan.level,
+        price: plan.price,
+        features: plan.features?.length > 0 ? plan.features : generateDefaultFeatures(plan),
+        recommended: plan.recommended,
+        highlight: plan.highlight,
+      }))
+    : defaultPlanConfigs;
+
+  // 根据计划配置生成默认特性列表
+  function generateDefaultFeatures(plan: typeof apiPlans[0]): string[] {
+    const features: string[] = [];
+    if (plan.level === 'free') {
+      features.push('注册赠送100积分（一次性）');
+    } else {
+      if (plan.credits?.monthly) {
+        features.push(`月度积分${plan.credits.monthly}积分`);
+      }
+      if (plan.discount && plan.discount > 0) {
+        const discountPercent = Math.round((1 - plan.discount) * 100);
+        features.push(`购买加油包享受${discountPercent}折`);
+      }
+    }
+    features.push(`对话历史保存${plan.historyRetentionDays ?? 7}天`);
+    return features;
+  }
 
   const handleSelectPlan = (plan: PlanConfig) => {
     // TODO: Navigate to payment or show payment dialog
@@ -202,7 +240,11 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 
       {/* Plans Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {displayPlans.map((plan) => {
+        {plansLoading ? (
+          <div className="col-span-3 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
+            加载中...
+          </div>
+        ) : displayPlans.map((plan) => {
           const isCurrentPlan = plan.level === subscriptionTier || (plan.level === 'free' && subscriptionTier === 'free');
           const isHighlight = plan.recommended || plan.highlight;
           const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;

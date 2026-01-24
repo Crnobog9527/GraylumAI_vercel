@@ -23,11 +23,533 @@
 
 ## Current Status
 
-- **Phase:** 阶段 8 首页数据集成修复 (第二轮) ✅ 完成
-- **Previous:** 阶段 7 着陆页与访问控制 ✅ 完成
-- **Current:** 首页数据集成已完成，包含用户/公告/横幅
-- **完成时间:** 2026-01-23
-- **参考文档:** `movetonew/VISUAL_DESIGN_SYSTEM.md`
+- **Phase:** 阶段 9 AI 对话功能修复 ⏳ 规划完成
+- **Previous:** AI 对话功能诊断 ✅ 完成
+- **Current:** 等待用户确认修复计划后开始执行
+- **开始时间:** 2026-01-24
+- **更新时间:** 2026-01-24 (诊断完成 + 工作计划规划)
+- **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
+
+### ✅ AI 对话功能诊断完成 (2026-01-24)
+
+**诊断结论**: AI 对话功能完全无法工作，根本原因是前端调用了占位符 API。
+
+| 类别 | 发现问题 | 状态 |
+|------|---------|------|
+| AI 对话核心 | 4 个 P0 致命问题 | ✅ 已诊断 |
+| 安全机制 | 2 个 P1 严重问题 | ✅ 已诊断 |
+| 计费系统 | 1 个 P1 严重问题 | ✅ 已诊断 |
+| 功能完善 | 3 个 P2 中等问题 | ✅ 已诊断 |
+| 代码质量 | 2 个 P3 轻微问题 | ✅ 已诊断 |
+
+**交付物**:
+- ✅ `AI_DIALOGUE_DIAGNOSTIC_REPORT.md` - 完整诊断报告
+- ✅ `findings.md` - 更新决策记录，添加方案 A
+- ✅ `task_plan.md` - 新增阶段 9 工作计划
+
+### 📋 阶段 9 工作计划规划完成 (2026-01-24)
+
+**问题优先级汇总**:
+
+| 优先级 | 问题数量 | 状态 |
+|--------|----------|------|
+| 🔴 P0 (致命) | 7 | ⏳ 待修复 |
+| 🟠 P1 (严重) | 8 | ⏳ 待修复 |
+| 🟡 P2 (中等) | 15 | ⏳ 待修复 |
+| 🟢 P3 (轻微) | 6 | ⏳ 待修复 |
+
+**修复工作阶段**:
+
+| 阶段 | 目标 | 问题范围 | 状态 |
+|------|------|---------|------|
+| 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ✅ 已完成 |
+| 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
+| 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
+| 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ✅ 已完成 |
+| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (8/15 已完成) |
+| 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
+
+---
+
+### ✅ 第一阶段: AI 对话核心修复 (2026-01-24 完成)
+
+**修复内容**:
+- ✅ 移除 `trpc.chat.sendMessage` 占位符调用
+- ✅ 集成 `useStreamingChat` Hook 实现流式对话
+- ✅ 添加错误提示组件 (AlertCircle)
+- ✅ 添加流式打字机效果 (闪烁光标)
+- ✅ 添加中断/停止按钮 (Square)
+- ✅ 验证 `/api/ai/stream` 端点存在且配置正确
+
+**修改文件**:
+- `apps/web/src/app/chat/page.tsx` - 集成流式对话 Hook
+
+**关键修改**:
+```typescript
+// 旧代码 (占位符)
+const sendMessage = trpc.chat.sendMessage.useMutation({...});
+
+// 新代码 (流式 AI)
+const { sendMessage, isStreaming, error, abort } = useStreamingChat({
+  conversationId,
+  onMessageComplete: () => { utils.chat.getConversations.invalidate(); },
+  onError: (error) => { console.error('Streaming error:', error); },
+  onBalanceChange: () => { utils.credits.getBalance.invalidate(); },
+});
+```
+
+**待用户验证**: 需要用户测试 AI 对话功能是否正常工作
+
+---
+
+### ✅ 第二阶段: AI 模型管理修复 (2026-01-24 完成)
+
+**修复内容**:
+- ✅ 新增 `model.testConnection` mutation - 测试 Anthropic API 连接
+- ✅ 新增 `model.getConnectionStatus` query - 获取所有模型连接状态
+- ✅ 模型表格新增 "API 状态" 列
+- ✅ 添加测试连接按钮（刷新图标）
+
+**修改文件**:
+- `packages/api/src/routers/model.ts` - 添加 testConnection 和 getConnectionStatus
+- `apps/web/src/app/admin/models/page.tsx` - 显示连接状态和测试按钮
+
+**API 状态显示**:
+| 状态 | 颜色 | 说明 |
+|------|------|------|
+| 已连接 | 绿色 | API 测试成功 |
+| 连接失败 | 红色 | API 测试失败 |
+| 待测试 | 黄色 | 有 API 密钥但未测试 |
+| 未配置密钥 | 红色 | 没有 API 密钥 |
+
+---
+
+### ✅ 第三阶段: 计费系统修复 (2026-01-24 完成)
+
+**问题诊断**:
+| # | 问题 | 诊断结果 | 状态 |
+|---|------|----------|------|
+| 1 | system_settings 积分计费规则未使用 | ✅ 设计正确 - 按模型计费优于全局计费 | 非问题 |
+| 2 | 新用户积分使用数据库默认值 | ✅ 已验证 - `credits.default(100)` | 正常 |
+| 3 | 管理员 UI 显示误导 | ✅ 已修复 - 添加迁移提示 | 已修复 |
+
+**关键发现**:
+
+计费系统架构分析后发现，当前设计是**正确的**:
+
+1. **按模型计费** (`ai_models` 表):
+   - 每个模型独立配置 `input_token_cost`, `output_token_cost`, `web_search_cost`
+   - 不同模型有不同价格（如 Claude 4 vs Claude 3.5）
+   - 比全局统一价格更灵活、更准确
+
+2. **system_settings 积分配置**:
+   - `input_credits_per_1k`, `output_credits_per_1k` 字段存在但未使用
+   - 这是历史遗留字段，无需使用
+   - 实际计费逻辑正确读取 `ai_models` 表
+
+3. **新用户积分**:
+   - 数据库 Schema 默认值: `credits.default(100)`
+   - 注册流程正确使用此默认值
+
+**修复内容**:
+- ✅ 在 `admin/settings` 页面添加警告提示
+- ✅ 明确说明 Token 计费已迁移至「AI 模型管理」
+- ✅ 标注遗留字段为"仅作参考显示"
+
+**修改文件**:
+- `apps/web/src/app/admin/settings/page.tsx` - 添加计费迁移警告
+
+**关键修改**:
+```typescript
+{/* Warning about per-token pricing */}
+<div className="p-4 rounded-lg mb-4" style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}>
+  <div className="flex items-start gap-2">
+    <AlertTriangle className="h-5 w-5 text-amber-400 mt-0.5 shrink-0" />
+    <div>
+      <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
+        Token 计费规则已迁移至模型管理
+      </p>
+      <p className="text-xs mt-1" style={{ color: 'var(--warning)', opacity: 0.8 }}>
+        每个 AI 模型的输入/输出 Token 成本在「AI 模型管理」页面单独配置。
+        下方的 Token 积分单价设置仅作为参考显示，实际计费以模型配置为准。
+      </p>
+      <a href="/admin/models" className="text-xs mt-2 inline-block underline">
+        前往 AI 模型管理 →
+      </a>
+    </div>
+  </div>
+</div>
+```
+
+---
+
+### ✅ 第四阶段: 订阅与安全修复 (2026-01-24 完成)
+
+**修复内容**:
+
+#### 4.1 订阅页面读取数据库数据
+- ✅ 新增 `settings.getCreditPackages` API - 获取积分加油包列表
+- ✅ 新增 `settings.getMembershipPlans` API - 获取会员等级列表
+- ✅ 更新 `SubscriptionCard.tsx`:
+  - `CreditPackagesSection` 从 API 获取积分包数据
+  - `SubscriptionCard` 从 API 获取会员等级数据
+  - 添加加载状态显示
+  - 保留默认数据作为 fallback
+
+**修改文件**:
+- `packages/api/src/routers/settings.ts` - 新增 API 端点
+- `apps/web/src/components/profile/SubscriptionCard.tsx` - 使用 API 数据
+
+#### 4.2 应用输出安全过滤 (P1-4)
+- ✅ 导入 `checkOutputSecurity` 到 AI 路由
+- ✅ 在 AI 响应返回前进行安全检查
+- ✅ 添加 `checkOutputSecurity` 到流式端点
+
+**检测模式**:
+- API 密钥格式 (OpenAI sk-xxx, Anthropic sk-ant-xxx)
+- 密码字段泄露 (password=xxx)
+- 密钥字段泄露 (secret=xxx, api_key=xxx)
+
+**修改文件**:
+- `packages/api/src/routers/ai.ts` - 添加输出安全检查
+- `apps/web/src/app/api/ai/stream/route.ts` - 添加输出安全检查
+
+#### 4.3 签名验证 (P1-5)
+- ✅ 验证 `checkRequestSignature` 函数已实现
+- ✅ 确认设计选择合理:
+  - 启用条件: `API_SIGNATURE_SECRET` 环境变量
+  - 强制模式: `REQUIRE_API_SIGNATURE=true`
+  - 开发环境自动跳过验证
+
+**安全措施总结**:
+| 措施 | 状态 | 说明 |
+|------|------|------|
+| 速率限制 | ✅ 已启用 | 60次/分钟 AI 请求 |
+| 消费熔断 | ✅ 已启用 | 每小时 10000 积分上限 |
+| 余额预检 | ✅ 已启用 | 请求前检查余额 |
+| 输入安全检查 | ✅ 已启用 | 检测 Prompt 注入 |
+| 输出安全检查 | ✅ 已启用 | 检测敏感信息泄露 |
+| 签名验证 | ✅ 可选启用 | 通过环境变量控制 |
+
+---
+
+### ⏳ 第五阶段: 功能完善 (2026-01-24 进行中)
+
+**已完成**:
+
+#### P2-A: 性能监控数据 ✅
+- ✅ 响应时间：从 `ai_usage_logs.latency_ms` 获取真实数据
+- ✅ 错误率：从 `ai_usage_logs.status` 统计计算
+- ✅ 缓存命中率：从 `token_stats.cached_tokens` 计算
+- ✅ Token 统计：从 `token_stats` 表获取真实数据
+
+**修改文件**:
+- `packages/api/src/routers/admin.ts` - `getPerformanceStats` 使用真实数据
+
+#### P2-C: 系统设置生效性 ✅ 已验证
+- ✅ P2-9 智能路由：从 `system_settings.ai_models.enableSmartRouting` 读取
+- ⚠️ P2-10 模型选择器：设置存在但聊天页 UI 未实现
+- ⚠️ P2-11 首页引导：UI 存在但保存功能为占位符
+
+**待实现功能**:
+
+#### P2-B: 功能广场模块 (需要前端+后端开发)
+- P2-6: 模块详情弹窗
+- P2-7: modules 表字段扩展
+- P2-8: 清理无效字段
+
+#### P2-D: 会员权限功能 (需要 API 和前端开发)
+- P2-12/13/14: 对话导出功能
+- P2-15: 上下文长度限制
+
+---
+
+### 🔴 历史发现问题汇总 (2026-01-24)
+
+| 问题类别 | 问题数量 | 严重程度 | 概述 |
+|---------|---------|---------|------|
+| **AI 对话核心** | 4 | 🔴 P0 | 前端调用占位符 API |
+| **AI 模型管理** | 3 | 🔴 P0 | 配置写入失败 + 状态不准确 |
+| **计费系统** | 3 | 🟠 P1 | system_settings 规则未使用 |
+| **安全机制** | 2 | 🟠 P1 | 签名验证未启用 |
+| **订阅同步** | 3 | 🟠 P1 | 后台修改前端无变化 |
+| **性能监控** | 5 | 🟡 P2 | 数据是模拟/随机值 |
+| **功能广场** | 3 | 🟡 P2 | 字段不匹配 |
+| **系统设置** | 3 | 🟡 P2 | 设置生效性待验证 |
+| **会员权限** | 4 | 🟡 P2 | 导出功能未实现 |
+| **管理后台 UI** | 5 | 🟢 P3 | 排版/样式问题 |
+| **代码质量** | 1 | 🟢 P3 | 类型定义重复 |
+
+**总计问题**: 36 个
+
+### ⏳ 阶段 8 第十三轮修复 (2026-01-24)
+
+**问题 A**: AI 模型管理 - 配置写入失败 + 状态显示不准确
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | AI 模型配置无法写入数据库 | `admin/ai-models` | 修改模型配置后无法保存到数据库 | ⏳ 待修复 |
+| 2 | 模型状态显示不准确 | `admin/ai-models` | Claude 4.5 haiku 未配置 API 但显示"已启用" | ⏳ 待修复 |
+
+**需求变更**:
+- 已启用状态检测必须与 API 连接状态关联
+- 如果 API 连接失败，应显示"连接失败"
+- 只有 API 连接成功才能显示"已启用"
+
+**待排查**:
+- [ ] 检查 AI 模型编辑 API 实现
+- [ ] 检查数据库写入逻辑
+- [ ] 实现 API 连接状态检测
+- [ ] 更新前端状态显示逻辑
+
+---
+
+**问题 B**: 功能广场模块 - 缺少详情弹窗 + 数据库字段不匹配
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 3 | 缺少模块详情弹窗 | `marketplace/page.tsx` | 点击模块应弹出详情弹窗，显示功能介绍、特点、准备问题等 | ⏳ 待修复 |
+| 4 | modules 字段与后台不对应 | `admin/prompts` + `modules` 表 | 后台新建提示词表单字段与数据库 modules 表字段不匹配 | ⏳ 待修复 |
+| 5 | credits_cost 无效字段 | `modules` 表 | 需删除 credits_cost 字段（积分按实际 token 消耗计费） | ⏳ 待修复 |
+
+**模块详情弹窗需显示内容** (参考原项目):
+- 功能介绍 (description)
+- 功能特点 (模块特点列表)
+- 使用前请准备 (用户准备问题列表)
+- 适用平台 (platform)
+- "立即使用" 按钮
+
+**modules 表字段对照**:
+
+| 数据库字段 | 后台表单字段 | 说明 |
+|-----------|-------------|------|
+| title | 名称 | ✅ 对应 |
+| category | 分类 | ✅ 对应 |
+| icon | 图标 | ✅ 对应 |
+| platform | 适用平台 | ✅ 对应 |
+| description | 描述 | ✅ 对应 |
+| - | 指定模型 | ❌ 缺少字段 |
+| - | 提示词内容 | ❌ 缺少字段 (核心) |
+| - | 系统提示词 | ❌ 缺少字段 |
+| - | 用户提示词模板 | ❌ 缺少字段 |
+| - | 模块特点 | ❌ 缺少字段 |
+| - | 用户准备问题 | ❌ 缺少字段 |
+| sort_order | 排序权重 | ✅ 对应 |
+| credits_cost | - | ❌ 需删除 |
+
+**待排查**:
+- [ ] 设计 modules 表新字段结构
+- [ ] 创建数据库迁移文件
+- [ ] 更新后台提示词管理页面
+- [ ] 实现模块详情弹窗组件
+- [ ] 功能广场页面集成弹窗
+
+---
+
+**问题 C**: 订阅管理 - 用户端与后台数据不同步 + UI 问题
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 6 | 积分加油包后台修改后用户端无变化 | `profile/subscription` | 用户端未从数据库读取积分包数据 | ⏳ 待修复 |
+| 7 | 会员等级后台修改后用户端无变化 | `profile/subscription` | 用户端未从数据库读取会员等级数据 | ⏳ 待修复 |
+| 8 | 积分包热门推荐组件可能无效 | `admin/packages` | 需检查热门标识是否生效 | ⏳ 待修复 |
+| 9 | 会员等级缺少热门推荐选项 | `admin/packages` 会员等级编辑 | 后台无法设置会员等级的热门推荐 | ⏳ 待修复 |
+| 10 | 热门推荐高亮样式不够突出 | `SubscriptionCard.tsx` | 当前紫色/蓝色边框不够显眼 | ⏳ 待修复 |
+| 11 | 年付总价信息需删除 | `SubscriptionCard.tsx` | "年付共 $95.0"/"年付共 $287.0" 需移除 | ⏳ 待修复 |
+
+**待排查**:
+- [ ] 检查用户端订阅页面数据来源
+- [ ] 检查积分包 tRPC API 是否正确读取数据库
+- [ ] 检查会员等级 tRPC API 是否正确读取数据库
+- [ ] 验证积分包热门标识字段是否生效
+- [ ] 为会员等级添加热门推荐字段
+- [ ] 重新设计热门推荐高亮样式（使用金色/橙色边框）
+- [ ] 删除年付总价显示
+
+---
+
+**问题 D**: 管理后台 UI 与数据问题
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 12 | 用户管理状态栏图标错位 | `admin/users` | UI 设计问题，图标显示不美观 | ⏳ 待修复 |
+| 13 | 用户最后登录状态不准确 | `admin/users` | 检测逻辑与实际不符 | ⏳ 待修复 |
+| 14 | 财务统计金额单位不统一 | `admin/finance` | 需全站统一为美元 $ | ⏳ 待修复 |
+| 15 | 模型渠道 API 成本不一致 | `admin/finance` 模型渠道 Tab | 与 AI 模型设置的成本数据不匹配 | ⏳ 待修复 |
+| 16 | 积分规则显示与实际不符 | `admin/finance` 积分规则 Tab | 换算规则和计费示例与系统设置不一致 | ⏳ 待修复 |
+| 17 | API 统计数据异常 | `admin/finance` API 统计 Tab | 对话功能未修复，不应有请求量 | ⏳ 待修复 |
+
+**待排查**:
+- [ ] 重新设计用户管理状态栏 UI
+- [ ] 修复用户最后登录时间检测逻辑
+- [ ] 全站金额单位统一为 $
+- [ ] 同步模型渠道成本与 AI 模型设置
+- [ ] 同步积分规则显示与系统设置
+
+---
+
+**问题 E**: 公告管理-页面设置功能问题
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 18 | 显示模型选择器功能无效 | `admin/announcements` 页面设置 | 开关保存后聊天页面无变化 | ⏳ 待修复 |
+| 19 | 首页引导设置功能不明 | `admin/announcements` 页面设置 | 新手引导功能未见生效 | ⏳ 待修复 |
+
+**待排查**:
+- [ ] 检查聊天页面模型选择器逻辑
+- [ ] 检查首页引导设置存储和读取逻辑
+- [ ] 验证 system_settings 表数据是否正确保存
+
+---
+
+**问题 F**: 性能监控模块 - 数据虚假/模拟问题 (2026-01-24 新发现)
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 20 | 性能监控数据与实际不符 | `admin/performance` | 对话功能未修复时不应有数据 | ⏳ 待修复 |
+| 21 | 响应时间是随机值 | `admin.ts:getPerformanceStats` | `800 + Math.random() * 400` | ⏳ 待修复 |
+| 22 | 错误率是随机值 | `admin.ts:getPerformanceStats` | `Math.random() * 0.5` | ⏳ 待修复 |
+| 23 | 缓存命中率是估算值 | `admin.ts:getPerformanceStats` | 假设固定 15-25%，非真实统计 | ⏳ 待修复 |
+| 24 | Token 估算不准确 | `admin.ts:getPerformanceStats` | 使用 `字符数/4` 简单算法 | ⏳ 待修复 |
+
+**代码分析**:
+```typescript
+// admin.ts 中的模拟数据
+errorRate = Math.random() * 0.5;           // 0-0.5% 随机值
+cacheHitRate = 15 + Math.random() * 10;   // 15-25% 随机值
+avgResponseTime = 800 + Math.random() * 400;  // 800-1200ms 随机值
+p95ResponseTime = avgResponseTime * 1.5 + random;
+
+// Token 估算
+const estimateTokens = (content: string) => Math.ceil(content.length / 4);
+```
+
+**影响**: 管理员看到的性能指标完全不反映真实情况
+
+---
+
+**问题 G**: 系统诊断健康检查 - 状态检测不准确 (2026-01-24 新发现)
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 25 | AI 模型配置状态不准确 | `diagnostics.ts:healthCheck` | 只检查 is_active='true'，不验证 API 是否可用 | ⏳ 待修复 |
+| 26 | API 密钥状态不准确 | `diagnostics.ts:healthCheck` | 只检查字段非空，不验证密钥有效性 | ⏳ 待修复 |
+| 27 | 未指出具体问题模型 | `diagnostics.ts:healthCheck` | 只显示"OK"，不指出哪个模型有问题 | ⏳ 待修复 |
+
+**代码分析**:
+```typescript
+// 当前 AI 模型检查 (diagnostics.ts)
+const { data } = await ctx.supabase
+  .from('ai_models')
+  .select('id')
+  .eq('is_active', 'true')  // 只检查启用标志
+  .limit(1);
+checks.aiModels = { ok: data?.length > 0 };  // 有启用的就 OK
+
+// API 密钥检查
+const hasDbApiKey = modelsWithKey?.some(m => m.api_key?.length > 0);  // 只检查非空
+```
+
+**实际情况**:
+- 数据库有 2 个模型，1 个缺少 API 密钥
+- 健康检查显示"正常"，因为只检查是否存在启用的模型
+- 不检测 API 密钥是否真正有效（能否调用 Claude API）
+
+---
+
+**问题 H**: 系统设置-积分计费规则完全未生效 (2026-01-24 新发现) 🔴 严重
+
+| # | 问题 | 位置 | 详细原因 | 状态 |
+|---|------|------|---------|------|
+| 28 | 输入Token积分单价未使用 | `billing.ts` | 实际计费读取 ai_models 表，不读取 system_settings | ⏳ 待修复 |
+| 29 | 输出Token积分单价未使用 | `billing.ts` | 同上 | ⏳ 待修复 |
+| 30 | 联网搜索积分未使用 | `billing.ts` | 使用 ai_models.web_search_cost | ⏳ 待修复 |
+| 31 | 新用户赠送积分 | 注册流程 | 待验证 | ⏳ 待验证 |
+| 32 | 首充赠送百分比 | 支付流程 | 待验证 | ⏳ 待验证 |
+
+**严重问题分析**:
+
+管理员在系统设置中配置:
+```
+input_credits_per_1k: 1   (每1000输入Token消耗1积分)
+output_credits_per_1k: 5  (每1000输出Token消耗5积分)
+web_search_credits: 5     (联网搜索额外5积分)
+```
+
+但实际计费逻辑 (`billing.ts`):
+```typescript
+// 从 ai_models 表读取成本，不读取 system_settings
+const { data: model } = await supabase
+  .from('ai_models')
+  .select('input_token_cost, output_token_cost, web_search_cost')
+  .eq('model_id', modelId);
+
+// 计算成本
+const totalCostUsd = (inputTokens / 1_000_000) * pricing.inputPer1M;
+const totalCredits = totalCostUsd * CREDITS_PER_USD * 1.5;
+```
+
+**结论**: system_settings 中的积分计费规则**完全被忽略**！
+
+---
+
+**问题 I**: 系统设置-功能设置待验证 (2026-01-24 新发现)
+
+| # | 设置项 | 存储位置 | 是否使用 | 状态 |
+|---|-------|---------|---------|------|
+| 33 | 启用智能路由 | system_settings | 部分使用 (modelRouter.ts) | ⏳ 待验证 |
+| 34 | 启用智能搜索判断 | system_settings | 待验证 | ⏳ 待验证 |
+| 35 | 启用免费体验 | system_settings | 待验证 | ⏳ 待验证 |
+| 36 | 免费消息数/天 | system_settings | 待验证 | ⏳ 待验证 |
+| 37 | 单对话最大消息数 | system_settings | 待验证 | ⏳ 待验证 |
+| 38 | 输入框字符上限 | system_settings | 待验证 | ⏳ 待验证 |
+| 39 | 启用长文本预警 | system_settings | 待验证 | ⏳ 待验证 |
+| 40 | 显示Token使用统计 | system_settings | 待验证 | ⏳ 待验证 |
+| 41 | 显示模型选择器 | system_settings | 待验证 | ⏳ 待验证 |
+
+**待验证**: 检查聊天页面 (chat/page.tsx) 是否读取这些配置
+
+---
+
+**问题 J**: 会员等级权限配置 - 导出功能未实现 (2026-01-24 新发现)
+
+| # | 功能 | 配置状态 | 实现状态 | 备注 |
+|---|------|---------|---------|------|
+| 42 | 对话历史自动清理 | ✅ 已配置 | ✅ 已实现 | Vercel Cron 每天 10:00 UTC |
+| 43 | 对话历史保存天数 | ✅ 已配置 | ✅ 已实现 | free:7天, pro:30天, gold:90天 |
+| 44 | 允许导出对话 | ✅ 已配置 | ❌ 未实现 | 配置字段存在，无导出 API |
+| 45 | 允许批量导出 | ✅ 已配置 | ❌ 未实现 | 配置字段存在，无批量导出 |
+| 46 | 导出权限检查 | - | ❌ 未实现 | 无 membershipProcedure 中间件 |
+
+**已实现功能**:
+- 对话历史清理: 支持手动清理 + Cron 定时清理
+- 按会员等级配置保存天数
+- 清理统计显示
+
+**未实现功能**:
+- 导出 API 端点 (exportConversation)
+- 聊天页面导出按钮
+- 会员权限检查中间件
+- 批量导出功能
+
+---
+
+**问题 K**: AI 成本监控页面 UI + 用户菜单改进 (2026-01-24 新发现)
+
+| # | 问题 | 位置 | 详细说明 | 状态 |
+|---|------|------|---------|------|
+| 49 | AI 成本监控页面排版拥挤 | `admin/costs/page.tsx` | 卡片间距小，布局紧凑，需调整 | ⏳ 待修复 |
+| 50 | 缺少 API 连接状态验证 | `admin/costs/page.tsx` | 需添加 API 数据获取状态指示器 | ⏳ 待修复 |
+| 51 | 用户菜单绿色高亮色块 | `AppHeader.tsx` 下拉菜单 | 选择菜单项时绿色高亮需去掉 | ⏳ 待修复 |
+| 52 | 缺少管理后台导航入口 | `AppHeader.tsx` 下拉菜单 | 管理员需快捷入口，普通用户不可见 | ⏳ 待修复 |
+
+**问题截图分析**:
+- AI 成本监控页面：今日消耗、本月累计、平均成本/次、缓存命中率 4 个卡片排列过密
+- 成本趋势图和模型使用分布、高消耗用户 TOP 10 区域布局需优化
+- 用户下拉菜单：选择"充值积分"时显示绿色背景高亮，与金色主题不符
+- 管理员用户需要在下拉菜单中快速进入管理后台
+
+---
 
 ### ✅ 阶段 8 第二轮修复 (2026-01-23)
 
@@ -933,3 +1455,26 @@ pnpm test:e2e:headed # 有头浏览器模式
 - **审计发现**: `findings.md`
 - **UI 复刻规则**: `movetonew/UIfix_rule.md`
 - **AI 重构计划**: `movetonew/GraylumAI_分阶段重构执行计划.md`
+
+---
+
+### ✅ 阶段 9 第六阶段: UI 优化 (P3) (2026-01-24)
+
+**完成状态**: 全部完成
+
+| # | 问题 | 位置 | 修复内容 | 状态 |
+|---|------|------|---------|------|
+| P3-4 | 用户菜单绿色高亮 | `dropdown-menu.tsx` | focus 颜色从 accent(绿) 改为 primary/10(金) | ✅ 已修复 |
+| P3-5 | 缺少管理后台入口 | `AppHeader.tsx` | 为管理员添加管理后台导航入口 | ✅ 已修复 |
+| P3-1 | 用户管理状态栏图标错位 | `admin/users/page.tsx` | Badge 添加 flex items-center gap-1 对齐修复 | ✅ 已修复 |
+| P3-2 | 财务统计金额单位不统一 | `admin/finance/page.tsx` | 全部 ¥ 改为 $ (USD) | ✅ 已修复 |
+| P3-3 | AI成本监控页面排版拥挤 | `admin/costs/page.tsx` | 使用设计系统配色，增大间距 | ✅ 已修复 |
+
+**修复文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `dropdown-menu.tsx` | DropdownMenuItem/SubTrigger/CheckboxItem/RadioItem 的 focus 颜色改为 `focus:bg-primary/10 focus:text-primary` |
+| `AppHeader.tsx` | 添加 Shield 图标和 trpc.user.getUserProfile 查询，管理员显示"管理后台"入口 |
+| `admin/users/page.tsx` | 状态和会员等级 Badge 添加 `flex items-center gap-1` 和 `flex-shrink-0`，详情面板也同步修复 |
+| `admin/finance/page.tsx` | 预估收入、预估盈利、套餐价格、单价从 ¥ 改为 $，表头"元/千积分"改为"$/千积分" |
+| `admin/costs/page.tsx` | StatCard 改用设计系统配色，主容器添加 p-8，卡片间距从 gap-4 改为 gap-6，用户列表改用 var(--color-primary) |

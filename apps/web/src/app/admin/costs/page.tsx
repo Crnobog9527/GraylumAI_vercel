@@ -84,25 +84,25 @@ function StatCard({
   trend?: 'up' | 'down' | 'neutral';
 }) {
   return (
-    <Card className="bg-zinc-800/50 border-zinc-700">
-      <CardContent className="p-4">
+    <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <CardContent className="p-6">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-zinc-400">{title}</p>
-            <p className="text-2xl font-bold text-white mt-1">{value}</p>
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{title}</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-primary)' }}>{value}</p>
             {subValue && (
-              <p className="text-xs text-zinc-500 mt-1">{subValue}</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-disabled)' }}>{subValue}</p>
             )}
           </div>
-          <div className={`p-3 rounded-lg ${
+          <div className={`p-3 rounded-xl ${
             trend === 'up' ? 'bg-emerald-500/20' :
             trend === 'down' ? 'bg-red-500/20' :
-            'bg-purple-500/20'
+            'bg-[var(--color-primary-20)]'
           }`}>
-            <Icon className={`h-5 w-5 ${
+            <Icon className={`h-6 w-6 ${
               trend === 'up' ? 'text-emerald-400' :
               trend === 'down' ? 'text-red-400' :
-              'text-purple-400'
+              'text-[var(--color-primary)]'
             }`} />
           </div>
         </div>
@@ -125,9 +125,9 @@ function CostOverviewTab() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* 统计卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="今日消耗"
           value={formatCredits(overview?.todayCost ?? 0)}
@@ -156,12 +156,15 @@ function CostOverviewTab() {
 
       {/* 时间范围选择 */}
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium text-white">成本趋势</h3>
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>成本趋势</h3>
         <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
-          <SelectTrigger className="w-32 bg-zinc-800 border-zinc-700">
+          <SelectTrigger
+            className="w-32"
+            style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
+          >
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
             <SelectItem value="7">近 7 天</SelectItem>
             <SelectItem value="14">近 14 天</SelectItem>
             <SelectItem value="30">近 30 天</SelectItem>
@@ -170,8 +173,8 @@ function CostOverviewTab() {
       </div>
 
       {/* 成本趋势图 */}
-      <Card className="bg-zinc-800/50 border-zinc-700">
-        <CardContent className="p-4">
+      <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <CardContent className="p-6">
           {trendLoading ? (
             <div className="h-64 flex items-center justify-center">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
@@ -218,10 +221,10 @@ function CostOverviewTab() {
       {/* 模型分布和高消耗用户 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 模型分布饼图 */}
-        <Card className="bg-zinc-800/50 border-zinc-700">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <PieChart className="h-5 w-5 text-purple-400" />
+        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+              <PieChart className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
               模型使用分布
             </CardTitle>
           </CardHeader>
@@ -267,9 +270,9 @@ function CostOverviewTab() {
         </Card>
 
         {/* 高消耗用户 */}
-        <Card className="bg-zinc-800/50 border-zinc-700">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
+        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <Users className="h-5 w-5 text-cyan-400" />
               高消耗用户 TOP 10
             </CardTitle>
@@ -277,17 +280,18 @@ function CostOverviewTab() {
           <CardContent>
             {usersLoading ? (
               <div className="h-48 flex items-center justify-center">
-                <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
+                <RefreshCw className="h-6 w-6 animate-spin" style={{ color: 'var(--text-tertiary)' }} />
               </div>
             ) : (
-              <div className="space-y-2 max-h-[220px] overflow-y-auto">
+              <div className="space-y-3 max-h-[240px] overflow-y-auto">
                 {(topUsers ?? []).map((user, index) => (
                   <div
                     key={user.userId}
-                    className="flex items-center justify-between p-2 rounded-lg bg-zinc-700/30"
+                    className="flex items-center justify-between p-3 rounded-lg"
+                    style={{ background: 'var(--bg-tertiary)' }}
                   >
                     <div className="flex items-center gap-3">
-                      <span className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold ${
+                      <span className={`w-7 h-7 flex items-center justify-center rounded-full text-xs font-bold ${
                         index === 0 ? 'bg-amber-500 text-black' :
                         index === 1 ? 'bg-zinc-400 text-black' :
                         index === 2 ? 'bg-amber-700 text-white' :
@@ -296,11 +300,11 @@ function CostOverviewTab() {
                         {index + 1}
                       </span>
                       <div>
-                        <p className="text-sm text-white">{user.nickname || user.email}</p>
-                        <p className="text-xs text-zinc-500">{user.totalCalls} 次调用</p>
+                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{user.nickname || user.email}</p>
+                        <p className="text-xs" style={{ color: 'var(--text-disabled)' }}>{user.totalCalls} 次调用</p>
                       </div>
                     </div>
-                    <span className="text-sm font-medium text-purple-400">
+                    <span className="text-sm font-medium" style={{ color: 'var(--color-primary)' }}>
                       {formatCredits(user.totalCost)}
                     </span>
                   </div>
@@ -546,32 +550,44 @@ function TokenStatsTab() {
 
 export default function AICostsPage() {
   return (
-    <div className="space-y-6">
+    <div className="p-8 space-y-8 overflow-auto">
       {/* 页面标题 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <BarChart3 className="h-7 w-7 text-purple-400" />
+          <h1 className="text-3xl font-bold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
+            <BarChart3 className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
             AI 成本监控
           </h1>
-          <p className="text-zinc-400 mt-1">
+          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>
             追踪 AI 调用成本、Token 使用和模型分布
           </p>
         </div>
       </div>
 
       {/* 选项卡 */}
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="bg-zinc-800 border border-zinc-700">
-          <TabsTrigger value="overview" className="data-[state=active]:bg-purple-600">
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList
+          className="mb-2"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+        >
+          <TabsTrigger
+            value="overview"
+            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+          >
             <TrendingUp className="h-4 w-4 mr-2" />
             成本概览
           </TabsTrigger>
-          <TabsTrigger value="logs" className="data-[state=active]:bg-purple-600">
+          <TabsTrigger
+            value="logs"
+            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+          >
             <Activity className="h-4 w-4 mr-2" />
             AI 调用日志
           </TabsTrigger>
-          <TabsTrigger value="tokens" className="data-[state=active]:bg-purple-600">
+          <TabsTrigger
+            value="tokens"
+            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+          >
             <Database className="h-4 w-4 mr-2" />
             Token 统计
           </TabsTrigger>

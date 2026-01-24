@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Bot, Plus, Pencil, Trash2, Sparkles, Brain, Zap,
-  Check, X, Loader2, Globe
+  Check, X, Loader2, Globe, RefreshCw, AlertTriangle, HelpCircle
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -127,11 +127,15 @@ export default function AdminModelsPage() {
   const [selectedModel, setSelectedModel] = useState<AIModel | null>(null);
   const [formData, setFormData] = useState(initialFormData);
 
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
+
   const { data: models, isLoading, error, refetch } = trpc.model.getAvailableModels.useQuery();
+  const { data: connectionStatus, refetch: refetchStatus } = trpc.model.getConnectionStatus.useQuery();
 
   const createModel = trpc.model.createModel.useMutation({
     onSuccess: () => {
       refetch();
+      refetchStatus();
       closeDialog();
     },
   });
@@ -139,6 +143,7 @@ export default function AdminModelsPage() {
   const updateModel = trpc.model.updateModel.useMutation({
     onSuccess: () => {
       refetch();
+      refetchStatus();
       closeDialog();
     },
   });
@@ -146,10 +151,46 @@ export default function AdminModelsPage() {
   const deleteModel = trpc.model.deleteModel.useMutation({
     onSuccess: () => {
       refetch();
+      refetchStatus();
       setDeleteDialogOpen(false);
       setSelectedModel(null);
     },
   });
+
+  const testConnection = trpc.model.testConnection.useMutation({
+    onSuccess: () => {
+      refetchStatus();
+      setTestingModelId(null);
+    },
+    onError: () => {
+      setTestingModelId(null);
+    },
+  });
+
+  const handleTestConnection = (modelId: string) => {
+    setTestingModelId(modelId);
+    testConnection.mutate({ id: modelId });
+  };
+
+  const getConnectionStatusInfo = (modelId: string) => {
+    const status = connectionStatus?.find(s => s.id === modelId);
+    if (!status) return { label: '未知', color: 'bg-gray-500/20 text-gray-400', icon: HelpCircle };
+
+    if (!status.hasApiKey) {
+      return { label: '未配置密钥', color: 'bg-rose-500/20 text-rose-400', icon: X };
+    }
+
+    switch (status.connectionStatus) {
+      case 'connected':
+        return { label: '已连接', color: 'bg-emerald-500/20 text-emerald-400', icon: Check };
+      case 'error':
+        return { label: '连接失败', color: 'bg-rose-500/20 text-rose-400', icon: AlertTriangle };
+      case 'untested':
+        return { label: '待测试', color: 'bg-amber-500/20 text-amber-400', icon: HelpCircle };
+      default:
+        return { label: '未知', color: 'bg-gray-500/20 text-gray-400', icon: HelpCircle };
+    }
+  };
 
   const resetForm = () => {
     setFormData(initialFormData);
@@ -312,8 +353,9 @@ export default function AdminModelsPage() {
                   <TableHead>模型 ID</TableHead>
                   <TableHead>Token 限制</TableHead>
                   <TableHead>联网搜索</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead className="w-[120px]">操作</TableHead>
+                  <TableHead>API 状态</TableHead>
+                  <TableHead>启用状态</TableHead>
+                  <TableHead className="w-[150px]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -369,6 +411,18 @@ export default function AdminModelsPage() {
                         )}
                       </TableCell>
                       <TableCell>
+                        {(() => {
+                          const statusInfo = getConnectionStatusInfo(model.id);
+                          const StatusIcon = statusInfo.icon;
+                          return (
+                            <Badge className={statusInfo.color}>
+                              <StatusIcon className="h-3 w-3 mr-1" />
+                              {statusInfo.label}
+                            </Badge>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell>
                         <Badge
                           className={model.is_active === 'true'
                             ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
@@ -390,7 +444,21 @@ export default function AdminModelsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleTestConnection(model.id)}
+                            disabled={testingModelId === model.id}
+                            className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                            title="测试 API 连接"
+                          >
+                            {testingModelId === model.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -414,7 +482,7 @@ export default function AdminModelsPage() {
                 })}
                 {modelList.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                    <TableCell colSpan={8} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                       暂无 AI 模型，点击上方按钮添加
                     </TableCell>
                   </TableRow>

@@ -1,22 +1,24 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
-import { MessageSquare, Paperclip, Send, Loader2, User, Bot } from 'lucide-react';
+import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
+import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+  isStreaming?: boolean;
 }
 
 export default function ChatPage() {
@@ -39,12 +41,56 @@ export default function ChatPage() {
     ? conversations.find((c) => c.id === activeConversationId)
     : null;
 
-  // Fetch messages for active conversation
+  // Streaming chat hook - 使用流式 AI 对话
+  const {
+    messages: streamingMessages,
+    isLoading: streamingLoading,
+    isStreaming,
+    error: streamingError,
+    sendMessage: sendStreamingMessage,
+    abort: abortStreaming,
+    loadHistory,
+    clearChat,
+  } = useStreamingChat({
+    conversationId: activeConversationId ?? undefined,
+    onMessageComplete: () => {
+      // 消息完成后刷新对话列表（可能创建了新对话）
+      utils.chat.getConversations.invalidate();
+      refreshConversationList();
+    },
+    onError: (error) => {
+      console.error('Streaming error:', error);
+    },
+    onBalanceChange: () => {
+      // 积分变化时刷新积分显示
+      utils.credits.getBalance.invalidate();
+    },
+  });
+
+  // Fetch messages for active conversation (用于切换对话时加载历史)
   const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
     { conversationId: activeConversationId! },
-    { enabled: !!activeConversationId }
+    { enabled: !!activeConversationId && streamingMessages.length === 0 }
   );
-  const messages: Message[] = messagesData?.data || [];
+
+  // 合并历史消息和流式消息
+  const historyMessages: Message[] = messagesData?.data || [];
+  const messages: Message[] = streamingMessages.length > 0
+    ? streamingMessages.map((m: StreamMessage) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.createdAt,
+        isStreaming: m.isStreaming,
+      }))
+    : historyMessages;
+
+  // 当切换对话时，加载历史记录
+  useEffect(() => {
+    if (activeConversationId && streamingMessages.length === 0) {
+      loadHistory(activeConversationId);
+    }
+  }, [activeConversationId, loadHistory, streamingMessages.length]);
 
   // Auto-scroll to bottom when messages change
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -52,22 +98,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Mutations
-  const createConversation = trpc.chat.createConversation.useMutation({
-    onSuccess: (data) => {
-      utils.chat.getConversations.invalidate();
-      setActiveConversation(data.id);
-      refreshConversationList();
-    },
-  });
-
-  const sendMessage = trpc.chat.sendMessage.useMutation({
-    onSuccess: () => {
-      utils.chat.getMessages.invalidate({ conversationId: activeConversationId! });
-      setInputMessage('');
-    },
-  });
-
+  // Mutations for conversation management
   const updateTitle = trpc.chat.updateConversationTitle.useMutation({
     onSuccess: () => {
       utils.chat.getConversations.invalidate();
@@ -75,36 +106,38 @@ export default function ChatPage() {
     },
   });
 
-  const isStreaming = createConversation.isPending || sendMessage.isPending;
+  const isProcessing = streamingLoading || isStreaming;
 
   const maxInputCharacters = 2500;
   const chatBillingHint = '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     setActiveConversation(null);
     setInputMessage('');
-  };
+    clearChat();
+  }, [setActiveConversation, clearChat]);
 
-  const handleSend = async () => {
-    if (!inputMessage.trim() || isStreaming) return;
+  const handleSend = useCallback(async () => {
+    if (!inputMessage.trim() || isProcessing) return;
 
-    if (!activeConversationId) {
-      // Create new conversation first
-      const newConv = await createConversation.mutateAsync({ title: inputMessage.slice(0, 50) });
-      // Then send message
-      sendMessage.mutate({ conversationId: newConv.id, content: inputMessage });
-    } else {
-      // Send to existing conversation
-      sendMessage.mutate({ conversationId: activeConversationId, content: inputMessage });
-    }
-  };
+    const messageToSend = inputMessage;
+    setInputMessage(''); // 立即清空输入框
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 使用流式 API 发送消息
+    // conversationId 为 null 时会自动创建新对话
+    await sendStreamingMessage(messageToSend);
+  }, [inputMessage, isProcessing, sendStreamingMessage]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
+  }, [handleSend]);
+
+  const handleAbort = useCallback(() => {
+    abortStreaming();
+  }, [abortStreaming]);
 
   const handleSaveTitle = () => {
     if (!activeConversationId || !editingTitleValue.trim()) {
@@ -175,9 +208,24 @@ export default function ChatPage() {
             onSaveTitle={handleSaveTitle}
           />
 
+          {/* 错误提示 */}
+          {streamingError && (
+            <div
+              className="mx-4 mt-2 px-4 py-3 rounded-lg flex items-center gap-2"
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+              }}
+            >
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <span className="text-sm">{streamingError}</span>
+            </div>
+          )}
+
           {/* 消息区域 - 空状态或消息列表 */}
           <div className="flex-1 flex flex-col overflow-y-auto relative z-10">
-            {!activeConversationId || messages.length === 0 ? (
+            {!activeConversationId && messages.length === 0 ? (
               /* 空状态 - 开始新对话 */
               <div className="flex-1 flex flex-col items-center justify-center">
                 <div
@@ -231,7 +279,12 @@ export default function ChatPage() {
                           border: message.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
                         }}
                       >
-                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        <p className="whitespace-pre-wrap break-words">
+                          {message.content}
+                          {message.isStreaming && (
+                            <span className="inline-block w-2 h-4 ml-1 animate-pulse" style={{ background: 'var(--color-primary)' }} />
+                          )}
+                        </p>
                       </div>
                       {message.role === 'user' && (
                         <div
@@ -286,7 +339,7 @@ export default function ChatPage() {
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="请输入您的问题..."
-                    disabled={isStreaming}
+                    disabled={isProcessing}
                     className="flex-1 min-h-[44px] max-h-[120px] resize-none border-0 focus-visible:ring-0 py-2 px-2 text-base bg-transparent"
                     style={{ color: 'var(--text-primary)' }}
                     rows={1}
@@ -295,24 +348,38 @@ export default function ChatPage() {
                     <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
                       {inputMessage.length}/{maxInputCharacters}
                     </span>
-                    <Button
-                      onClick={handleSend}
-                      disabled={!inputMessage.trim() || isStreaming}
-                      className="h-9 px-5 gap-2 rounded-xl font-medium"
-                      style={{
-                        background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                        color: 'var(--bg-primary)',
-                      }}
-                    >
-                      {isStreaming ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <>
-                          发送
-                          <Send className="h-4 w-4" />
-                        </>
-                      )}
-                    </Button>
+                    {isStreaming ? (
+                      <Button
+                        onClick={handleAbort}
+                        className="h-9 px-5 gap-2 rounded-xl font-medium"
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.8)',
+                          color: '#ffffff',
+                        }}
+                      >
+                        <Square className="h-4 w-4" />
+                        停止
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={handleSend}
+                        disabled={!inputMessage.trim() || isProcessing}
+                        className="h-9 px-5 gap-2 rounded-xl font-medium"
+                        style={{
+                          background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                          color: 'var(--bg-primary)',
+                        }}
+                      >
+                        {streamingLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            发送
+                            <Send className="h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>

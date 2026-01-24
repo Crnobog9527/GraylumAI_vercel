@@ -387,10 +387,10 @@ export default function AdminUsersPage() {
                         value={user.status || 'active'}
                         onValueChange={(v) => handleStatusChange(user.id, v as UserStatus)}
                       >
-                        <SelectTrigger className="w-[100px] h-8">
-                          <Badge className={statusCfg.color}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {statusCfg.label}
+                        <SelectTrigger className="w-[110px] h-8">
+                          <Badge className={`${statusCfg.color} flex items-center gap-1`}>
+                            <StatusIcon className="h-3 w-3 flex-shrink-0" />
+                            <span>{statusCfg.label}</span>
                           </Badge>
                         </SelectTrigger>
                         <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
@@ -420,10 +420,10 @@ export default function AdminUsersPage() {
                         value={user.membership_level || 'free'}
                         onValueChange={(v) => handleMembershipChange(user.id, v as MembershipLevel)}
                       >
-                        <SelectTrigger className="w-[130px] h-8">
-                          <Badge className={membershipCfg.color}>
-                            <MemberIcon className="h-3 w-3 mr-1" />
-                            {membershipCfg.label}
+                        <SelectTrigger className="w-[140px] h-8">
+                          <Badge className={`${membershipCfg.color} flex items-center gap-1`}>
+                            <MemberIcon className="h-3 w-3 flex-shrink-0" />
+                            <span>{membershipCfg.label}</span>
                           </Badge>
                         </SelectTrigger>
                         <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
@@ -699,13 +699,21 @@ export default function AdminUsersPage() {
                           {userDetails.profile.email}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <RoleBadge role={userDetails.profile.role} />
-                        <Badge className={statusConfig[userDetails.profile.status as UserStatus || 'active'].color}>
-                          {statusConfig[userDetails.profile.status as UserStatus || 'active'].label}
+                        <Badge className={`${statusConfig[userDetails.profile.status as UserStatus || 'active'].color} flex items-center gap-1`}>
+                          {(() => {
+                            const StatusIcon = statusConfig[userDetails.profile.status as UserStatus || 'active'].icon;
+                            return <StatusIcon className="h-3 w-3 flex-shrink-0" />;
+                          })()}
+                          <span>{statusConfig[userDetails.profile.status as UserStatus || 'active'].label}</span>
                         </Badge>
-                        <Badge className={membershipConfig[userDetails.profile.membership_level as MembershipLevel || 'free'].color}>
-                          {membershipConfig[userDetails.profile.membership_level as MembershipLevel || 'free'].label}
+                        <Badge className={`${membershipConfig[userDetails.profile.membership_level as MembershipLevel || 'free'].color} flex items-center gap-1`}>
+                          {(() => {
+                            const MemberIcon = membershipConfig[userDetails.profile.membership_level as MembershipLevel || 'free'].icon;
+                            return <MemberIcon className="h-3 w-3 flex-shrink-0" />;
+                          })()}
+                          <span>{membershipConfig[userDetails.profile.membership_level as MembershipLevel || 'free'].label}</span>
                         </Badge>
                       </div>
                     </div>
