@@ -25,9 +25,9 @@
 
 - **Phase:** 阶段 9 AI 对话功能修复 + P2 功能完善
 - **Previous:** Phase 6 (P3) UI 优化 ✅ 完成
-- **Current:** P2-6 功能广场模块详情弹窗 ✅ 完成
+- **Current:** P2-7/P2-8 modules 表结构修复 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (P2-6 完成)
+- **更新时间:** 2026-01-24 (P2-7, P2-8 完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -66,7 +66,7 @@
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ✅ 已完成 |
-| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (8/15 已完成) |
+| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (10/15 已完成) |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
 
 ---
@@ -1512,3 +1512,38 @@ pnpm test:e2e:headed # 有头浏览器模式
 |------|---------|
 | `ModuleDetailDialog.tsx` | 添加 useRouter 和 trpc.modules.incrementUsage，实现导航功能 |
 | `marketplace/page.tsx` | 添加 ModuleDetailDialog 集成，状态管理和 onShowDetail 回调 |
+
+---
+
+### ✅ P2-7 + P2-8 modules 表结构修复 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-7 | modules 字段与后台不对应 | 添加 modules 表 Drizzle schema 定义 + 数据库迁移 | ✅ 已修复 |
+| P2-8 | credits_cost 无效字段 | 删除 credits_cost 字段 (改为按实际 token 计费) | ✅ 已修复 |
+
+**P2-7 修复内容 - modules 表新增字段**:
+| 字段名 | 类型 | 描述 |
+|--------|------|------|
+| `model_id` | uuid | 指定使用的 AI 模型 (外键关联 ai_models) |
+| `prompt_content` | text | 提示词内容 (核心字段) |
+| `system_prompt` | text | 系统提示词 |
+| `user_prompt_template` | text | 用户提示词模板 |
+| `features` | text | 模块特点列表 (JSON 字符串数组) |
+| `examples` | text | 使用示例列表 (JSON 字符串数组) |
+| `preparation_questions` | text | 用户准备问题列表 (JSON 字符串数组) |
+| `created_by` | uuid | 创建者 (外键关联 profiles) |
+| `updated_at` | timestamptz | 更新时间 |
+
+**P2-8 修复内容 - 删除 credits_cost**:
+- 积分计费改为按实际 token 消耗计算，不再使用固定积分成本
+- 移除 `TemplateCard.tsx` 中 credits_cost 相关代码
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `packages/db/schema.ts` | 新增 modules 表完整定义 |
+| `packages/db/migrations/0008_modules_schema_update.sql` | 数据库迁移: 添加新字段、删除 credits_cost |
+| `apps/web/src/components/chat/TemplateCard.tsx` | 移除 credits_cost 接口字段和 Badge 显示 |

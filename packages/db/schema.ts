@@ -286,3 +286,44 @@ export const aiUsageLogs = pgTable('ai_usage_logs', {
   metadata: jsonb('metadata'), // 其他调试信息
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// --- 功能模块表 ---
+
+/**
+ * 功能模块表 - 在功能广场中展示的 AI 功能模块
+ * 每个模块包含预设的提示词，用户选择后可直接使用
+ */
+export const modules = pgTable('modules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: text('title').notNull(), // 模块标题
+  description: text('description'), // 简短描述
+  fullDescription: text('full_description'), // 详细介绍
+  icon: text('icon').default('Sparkles'), // Lucide 图标名称
+  category: text('category', {
+    enum: ['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']
+  }).default('other').notNull(), // 分类
+  platform: text('platform').default('all'), // 适用平台
+
+  // 核心提示词字段 (与 prompts 表对应)
+  modelId: uuid('model_id').references(() => aiModels.id, { onDelete: 'set null' }), // 指定模型
+  promptContent: text('prompt_content'), // 提示词内容
+  systemPrompt: text('system_prompt'), // 系统提示词
+  userPromptTemplate: text('user_prompt_template'), // 用户提示词模板
+
+  // 模块特性字段
+  features: text('features'), // 模块特点列表 (JSON string array)
+  examples: text('examples'), // 使用示例列表 (JSON string array)
+  preparationQuestions: text('preparation_questions'), // 用户准备问题列表 (JSON string array)
+
+  // 统计与状态
+  usageCount: integer('usage_count').default(0).notNull(), // 使用次数
+  creditsMultiplier: decimal('credits_multiplier', { precision: 4, scale: 2 }).default('1.00'), // 积分倍率
+  sortOrder: integer('sort_order').default(0).notNull(), // 排序权重
+  isFeatured: text('is_featured').default('false').notNull(), // 是否精选
+  active: text('active').default('true').notNull(), // 是否启用
+
+  // 元数据
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
