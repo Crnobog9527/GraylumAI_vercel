@@ -64,7 +64,7 @@
 |------|------|---------|------|
 | 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ✅ 已完成 |
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
-| 第三阶段 | 计费系统修复 | P1-A (3个问题) | ⏳ 待执行 |
+| 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ⏳ 待执行 |
 | 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 待执行 |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
@@ -121,6 +121,65 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | 连接失败 | 红色 | API 测试失败 |
 | 待测试 | 黄色 | 有 API 密钥但未测试 |
 | 未配置密钥 | 红色 | 没有 API 密钥 |
+
+---
+
+### ✅ 第三阶段: 计费系统修复 (2026-01-24 完成)
+
+**问题诊断**:
+| # | 问题 | 诊断结果 | 状态 |
+|---|------|----------|------|
+| 1 | system_settings 积分计费规则未使用 | ✅ 设计正确 - 按模型计费优于全局计费 | 非问题 |
+| 2 | 新用户积分使用数据库默认值 | ✅ 已验证 - `credits.default(100)` | 正常 |
+| 3 | 管理员 UI 显示误导 | ✅ 已修复 - 添加迁移提示 | 已修复 |
+
+**关键发现**:
+
+计费系统架构分析后发现，当前设计是**正确的**:
+
+1. **按模型计费** (`ai_models` 表):
+   - 每个模型独立配置 `input_token_cost`, `output_token_cost`, `web_search_cost`
+   - 不同模型有不同价格（如 Claude 4 vs Claude 3.5）
+   - 比全局统一价格更灵活、更准确
+
+2. **system_settings 积分配置**:
+   - `input_credits_per_1k`, `output_credits_per_1k` 字段存在但未使用
+   - 这是历史遗留字段，无需使用
+   - 实际计费逻辑正确读取 `ai_models` 表
+
+3. **新用户积分**:
+   - 数据库 Schema 默认值: `credits.default(100)`
+   - 注册流程正确使用此默认值
+
+**修复内容**:
+- ✅ 在 `admin/settings` 页面添加警告提示
+- ✅ 明确说明 Token 计费已迁移至「AI 模型管理」
+- ✅ 标注遗留字段为"仅作参考显示"
+
+**修改文件**:
+- `apps/web/src/app/admin/settings/page.tsx` - 添加计费迁移警告
+
+**关键修改**:
+```typescript
+{/* Warning about per-token pricing */}
+<div className="p-4 rounded-lg mb-4" style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}>
+  <div className="flex items-start gap-2">
+    <AlertTriangle className="h-5 w-5 text-amber-400 mt-0.5 shrink-0" />
+    <div>
+      <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
+        Token 计费规则已迁移至模型管理
+      </p>
+      <p className="text-xs mt-1" style={{ color: 'var(--warning)', opacity: 0.8 }}>
+        每个 AI 模型的输入/输出 Token 成本在「AI 模型管理」页面单独配置。
+        下方的 Token 积分单价设置仅作为参考显示，实际计费以模型配置为准。
+      </p>
+      <a href="/admin/models" className="text-xs mt-2 inline-block underline">
+        前往 AI 模型管理 →
+      </a>
+    </div>
+  </div>
+</div>
+```
 
 ---
 

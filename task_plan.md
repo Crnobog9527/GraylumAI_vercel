@@ -576,15 +576,33 @@
 - 添加刷新按钮可手动测试 API 连接
 - 连接状态存储在模型 config 字段中
 
-#### 第三阶段: 计费系统修复 (P1-A)
+#### ✅ 第三阶段: 计费系统修复 (P1-A) - 已完成 (2026-01-24)
 
 > **目标**: 确保积分计费规则一致性
 
-| 序号 | 任务 | 涉及文件 | 类型 |
-|------|------|---------|------|
-| 3.1 | 统一计费价格来源 | `billing.ts` | 后端 |
-| 3.2 | 移除/重定向 system_settings 积分配置 | 管理后台 | 前端 |
-| 3.3 | 验证新用户赠送积分 | 注册流程 | 后端 |
+| 序号 | 任务 | 涉及文件 | 类型 | 状态 |
+|------|------|---------|------|------|
+| 3.1 | 统一计费价格来源 | `billing.ts` | 后端 | ✅ 已验证 |
+| 3.2 | 重定向 system_settings 积分配置 | `admin/settings/page.tsx` | 前端 | ✅ 已完成 |
+| 3.3 | 验证新用户赠送积分 | 注册流程 | 后端 | ✅ 已验证 |
+
+**修复说明**:
+
+1. **计费价格来源 (已统一)**:
+   - 计费使用 `ai_models` 表的 `input_token_cost`、`output_token_cost`、`web_search_cost`
+   - 使用 `BILLING_CONSTANTS.CREDITS_PER_USD = 1000` 和 `TOKEN_PRICE_MULTIPLIER = 1.5`
+   - 这是正确的设计，无需修改
+
+2. **重定向积分配置 (已完成)**:
+   - 在管理设置页面"积分计费"Tab 添加警告提示
+   - 说明 Token 计费规则已迁移至"AI 模型管理"页面
+   - 将 `input_credits_per_1k`、`output_credits_per_1k`、`web_search_credits` 标记为"仅供参考"
+   - 保留 `new_user_credits` 和 `first_purchase_bonus_percent` 作为有效设置
+
+3. **新用户赠送积分 (已验证)**:
+   - 数据库 schema 默认值: `credits: integer('credits').default(100).notNull()`
+   - 新用户自动获得 100 积分
+   - `system_settings.new_user_credits` 显示在管理后台但实际由数据库默认值控制
 
 #### 第四阶段: 订阅与安全修复 (P1-B, P1-C)
 
