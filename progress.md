@@ -25,9 +25,9 @@
 
 - **Phase:** 阶段 9 AI 对话功能修复 + P2 功能完善
 - **Previous:** Phase 6 (P3) UI 优化 ✅ 完成
-- **Current:** P2-10/P2-11 系统设置功能 ✅ 完成
+- **Current:** P2-12/P2-13/P2-14 对话导出功能 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (P2-10, P2-11 完成)
+- **更新时间:** 2026-01-24 (P2-12~P2-14 对话导出完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -246,21 +246,37 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 **修改文件**:
 - `packages/api/src/routers/admin.ts` - `getPerformanceStats` 使用真实数据
 
-#### P2-C: 系统设置生效性 ✅ 已验证
+#### P2-C: 系统设置生效性 ✅ 已完成
 - ✅ P2-9 智能路由：从 `system_settings.ai_models.enableSmartRouting` 读取
-- ⚠️ P2-10 模型选择器：设置存在但聊天页 UI 未实现
-- ⚠️ P2-11 首页引导：UI 存在但保存功能为占位符
+- ✅ P2-10 模型选择器：聊天页面已实现模型选择器
+- ✅ P2-11 首页引导：设置保存功能已实现
+
+#### P2-B: 功能广场模块 ✅ 已完成
+- ✅ P2-6: 模块详情弹窗 - 已实现
+- ✅ P2-7: modules 表字段扩展 - 已添加 migration
+- ✅ P2-8: 清理无效字段 - 已删除 credits_cost
+
+#### P2-D: 会员权限功能 ✅ 已完成 (2026-01-24)
+- ✅ P2-12: 对话导出功能 - 支持 JSON/Markdown/TXT 格式
+- ✅ P2-13: 批量导出功能 - 支持导出全部对话
+- ✅ P2-14: 导出权限检查 - 基于会员等级 (allow_export, allow_batch_export)
+- ⏳ P2-15: 上下文长度限制 - 待实现
+
+**P2-D 交付物**:
+- `packages/api/src/routers/chat.ts` - 新增 3 个导出 API:
+  - `getExportPermissions` - 获取用户导出权限
+  - `exportConversation` - 导出单个对话
+  - `exportAllConversations` - 批量导出所有对话
+- `apps/web/src/components/chat/ExportDialog.tsx` - 导出对话框组件
+- `apps/web/src/app/chat/page.tsx` - 集成导出功能
+
+**导出功能说明**:
+| 功能 | 权限字段 | 说明 |
+|------|---------|------|
+| 单个导出 | `allow_export` | 支持 JSON/Markdown/TXT 格式 |
+| 批量导出 | `allow_batch_export` | 支持 JSON/Markdown 格式 |
 
 **待实现功能**:
-
-#### P2-B: 功能广场模块 (需要前端+后端开发)
-- P2-6: 模块详情弹窗
-- P2-7: modules 表字段扩展
-- P2-8: 清理无效字段
-
-#### P2-D: 会员权限功能 (需要 API 和前端开发)
-- P2-12/13/14: 对话导出功能
-- P2-15: 上下文长度限制
 
 ---
 
@@ -276,7 +292,7 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | **性能监控** | 5 | 🟡 P2 | 数据是模拟/随机值 |
 | **功能广场** | 3 | 🟡 P2 | 字段不匹配 |
 | **系统设置** | 3 | 🟡 P2 | 设置生效性待验证 |
-| **会员权限** | 4 | 🟡 P2 | 导出功能未实现 |
+| **会员权限** | 4 | 🟡 P2 | ✅ 导出功能已实现 (3/4) |
 | **管理后台 UI** | 5 | 🟢 P3 | 排版/样式问题 |
 | **代码质量** | 1 | 🟢 P3 | 类型定义重复 |
 

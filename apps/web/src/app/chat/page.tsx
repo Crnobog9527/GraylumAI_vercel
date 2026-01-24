@@ -6,6 +6,7 @@ import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
 import ModelSelector from '@/components/chat/ModelSelector';
+import ExportDialog from '@/components/chat/ExportDialog';
 import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,6 +29,7 @@ export default function ChatPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { banners } = useBanner();
@@ -37,6 +39,11 @@ export default function ChatPage() {
   // Fetch system settings for chat page configuration
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
+
+  // Fetch export permissions (based on membership level)
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
+  const canExport = exportPermissions?.allowExport ?? false;
+  const canBatchExport = exportPermissions?.allowBatchExport ?? false;
 
   // Fetch active AI models for model selector
   const { data: modelsData } = trpc.model.getActiveModels.useQuery();
@@ -174,6 +181,13 @@ export default function ChatPage() {
     updateTitle.mutate({ conversationId: activeConversationId, title: editingTitleValue.trim() });
   };
 
+  // Export handler - opens export dialog
+  const handleExport = useCallback(() => {
+    if (canExport && activeConversationId) {
+      setExportDialogOpen(true);
+    }
+  }, [canExport, activeConversationId]);
+
   // Set editing title value when editing starts
   useEffect(() => {
     if (isEditingTitle && currentConversation) {
@@ -233,6 +247,8 @@ export default function ChatPage() {
             editingTitleValue={editingTitleValue}
             setEditingTitleValue={setEditingTitleValue}
             onSaveTitle={handleSaveTitle}
+            canExport={canExport}
+            onExport={handleExport}
           />
 
           {/* 错误提示 */}
@@ -434,6 +450,17 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* 导出对话对话框 */}
+      {activeConversationId && (
+        <ExportDialog
+          open={exportDialogOpen}
+          onOpenChange={setExportDialogOpen}
+          conversationId={activeConversationId}
+          conversationTitle={currentConversation?.title || '对话'}
+          canBatchExport={canBatchExport}
+        />
+      )}
     </div>
   );
 }
