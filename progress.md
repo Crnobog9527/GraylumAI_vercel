@@ -62,12 +62,43 @@
 
 | 阶段 | 目标 | 问题范围 | 状态 |
 |------|------|---------|------|
-| 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ⏳ 待执行 |
+| 第一阶段 | AI 对话核心修复 | P0-A (4个问题) | ✅ 已完成 |
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ⏳ 待执行 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ⏳ 待执行 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ⏳ 待执行 |
 | 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 待执行 |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
+
+---
+
+### ✅ 第一阶段: AI 对话核心修复 (2026-01-24 完成)
+
+**修复内容**:
+- ✅ 移除 `trpc.chat.sendMessage` 占位符调用
+- ✅ 集成 `useStreamingChat` Hook 实现流式对话
+- ✅ 添加错误提示组件 (AlertCircle)
+- ✅ 添加流式打字机效果 (闪烁光标)
+- ✅ 添加中断/停止按钮 (Square)
+- ✅ 验证 `/api/ai/stream` 端点存在且配置正确
+
+**修改文件**:
+- `apps/web/src/app/chat/page.tsx` - 集成流式对话 Hook
+
+**关键修改**:
+```typescript
+// 旧代码 (占位符)
+const sendMessage = trpc.chat.sendMessage.useMutation({...});
+
+// 新代码 (流式 AI)
+const { sendMessage, isStreaming, error, abort } = useStreamingChat({
+  conversationId,
+  onMessageComplete: () => { utils.chat.getConversations.invalidate(); },
+  onError: (error) => { console.error('Streaming error:', error); },
+  onBalanceChange: () => { utils.credits.getBalance.invalidate(); },
+});
+```
+
+**待用户验证**: 需要用户测试 AI 对话功能是否正常工作
 
 ---
 
