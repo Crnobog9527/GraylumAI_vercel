@@ -936,6 +936,98 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 ---
 
+### 🚨 阶段 9: 安全功能增强 (2026-01-25 规划)
+
+> **来源**: `docs/SECURITY_AUDIT_PHASE9.md` 建议补充功能
+> **决策**: 日志脱敏暂缓（经检查无实际风险），优先实现其他 3 项
+
+| # | 功能 | 优先级 | 预计工作量 | 状态 |
+|---|------|--------|----------|------|
+| 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ⏳ 待执行 |
+| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ⏳ 待执行 |
+| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
+| 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
+
+---
+
+#### 9.1 速率限制 (Rate Limiting)
+
+**方案**: Upstash Redis (边缘低延迟、与 Vercel 集成好)
+
+**限流策略**:
+| 端点类型 | 限制 | 窗口 | 键 |
+|---------|------|------|-----|
+| 未认证 API | 20次 | 1分钟 | IP |
+| 已认证 API | 100次 | 1分钟 | userId |
+| AI 对话 | 30次 | 1分钟 | userId |
+| AI 流式 | 20次 | 1分钟 | userId |
+| 登录/注册 | 5次 | 5分钟 | IP |
+
+**交付物**:
+- `packages/api/src/services/redisRateLimiter.ts` - Redis 限流服务
+- `apps/web/middleware.ts` - Edge 限流集成
+- 环境变量: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+
+---
+
+#### 9.2 低余额预警
+
+**预警策略**:
+| 阈值 | 触发时机 | 提醒方式 |
+|------|---------|---------|
+| < 100 积分 | 刷新余额时 | Header 黄色警告 |
+| < 50 积分 | 刷新余额时 | Header 橙色 + Toast |
+| < 10 积分 | 刷新余额时 | Header 红色 + 弹窗 |
+| 0 积分 | 发送消息前 | 阻止发送 + 引导充值 |
+
+**交付物**:
+- `apps/web/src/hooks/use-credits.tsx` - 添加阈值判断
+- `apps/web/src/providers/CreditsWarningProvider.tsx` - 新建
+- `apps/web/src/components/layout/AppHeader.tsx` - 警告样式
+- `apps/web/src/app/chat/page.tsx` - 发送前检查
+
+---
+
+#### 9.3 完整安全测试套件
+
+**测试分层**:
+```
+E2E 安全测试 (Playwright) ← 用户视角
+  - 登录安全、会话管理、权限检查
+集成测试 (Vitest) ← API 视角
+  - 速率限制、内容审核、计费安全
+单元测试 (Vitest) ← 函数视角
+  - ContentModerator 各规则测试
+```
+
+**测试用例**:
+| 类别 | 测试文件 | 测试场景 |
+|------|---------|---------|
+| Prompt Injection | `contentModerator.security.test.ts` | 50+ 注入模式检测 |
+| 越狱尝试 | `contentModerator.security.test.ts` | DAN mode、developer mode |
+| 速率限制 | `rateLimiter.test.ts` | 超限返回 429、窗口重置 |
+| 计费安全 | `billing.security.test.ts` | 并发扣款、负数攻击 |
+| 权限检查 | `security.spec.ts` (E2E) | 未授权访问 admin |
+
+**交付物**:
+- `packages/api/src/services/__tests__/contentModerator.security.test.ts`
+- `packages/api/src/services/__tests__/rateLimiter.test.ts`
+- `packages/api/src/services/__tests__/billing.security.test.ts`
+- `apps/web/tests/e2e/security.spec.ts`
+- `.github/workflows/security-tests.yml`
+
+---
+
+#### 9.4 日志脱敏处理 (暂缓)
+
+**暂缓原因** (2026-01-25 检查结论):
+- ✅ 用户对话内容未记录到日志
+- ✅ `logger.auth.failed(email)` 已定义但未调用
+- ✅ IP 地址有 30 天清理策略
+- ⚠️ 无实际 PII 泄露风险，可后续统一处理
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行
