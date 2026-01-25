@@ -945,7 +945,7 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 |---|------|--------|----------|------|
 | 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ✅ 已完成 |
 | 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
-| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
+| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ✅ 已完成 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
 ---
@@ -1024,33 +1024,48 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 ---
 
-#### 9.3 完整安全测试套件
+#### 9.3 完整安全测试套件 ✅ 已完成 (2026-01-25)
 
 **测试分层**:
 ```
 E2E 安全测试 (Playwright) ← 用户视角
-  - 登录安全、会话管理、权限检查
-集成测试 (Vitest) ← API 视角
-  - 速率限制、内容审核、计费安全
+  - XSS 防护、登录安全、权限检查、安全响应头
 单元测试 (Vitest) ← 函数视角
-  - ContentModerator 各规则测试
+  - 速率限制、内容审核、计费安全、签名验证
 ```
 
-**测试用例**:
-| 类别 | 测试文件 | 测试场景 |
-|------|---------|---------|
-| Prompt Injection | `contentModerator.security.test.ts` | 50+ 注入模式检测 |
-| 越狱尝试 | `contentModerator.security.test.ts` | DAN mode、developer mode |
-| 速率限制 | `rateLimiter.test.ts` | 超限返回 429、窗口重置 |
-| 计费安全 | `billing.security.test.ts` | 并发扣款、负数攻击 |
-| 权限检查 | `security.spec.ts` (E2E) | 未授权访问 admin |
+**测试用例统计**:
+| 类别 | 测试文件 | 测试数量 | 状态 |
+|------|---------|---------|------|
+| 输入安全 | `securityChecks.test.ts` | 82 tests | ✅ |
+| 速率限制 | `rateLimiter.test.ts` | 26 tests | ✅ |
+| 计费安全 | `billing.security.test.ts` | 30+ tests | ✅ |
+| E2E 安全 | `security.spec.ts` | 20+ tests | ✅ |
+
+**测试覆盖范围**:
+
+| 测试类别 | 测试场景 |
+|---------|---------|
+| Prompt Injection | ignore instructions、system prompt、jailbreak (DAN/developer mode)、消息长度限制 |
+| 输出安全 | API Key 检测 (OpenAI/Anthropic)、密码泄露、Secret 检测 |
+| 签名验证 | HMAC-SHA256 生成、时间戳验证、重放攻击防护 |
+| 速率限制 | 超限返回、窗口重置、并发请求、Edge Case |
+| 计费安全 | 负数攻击、成本验证、双重消费防护、幂等性 |
+| XSS 防护 | 脚本注入、HTML 实体、事件处理器 |
+| 认证授权 | 未认证访问、Admin 路由保护、Session 安全 |
+| 安全响应头 | X-Frame-Options、X-Content-Type-Options、CSP |
 
 **交付物**:
-- `packages/api/src/services/__tests__/contentModerator.security.test.ts`
-- `packages/api/src/services/__tests__/rateLimiter.test.ts`
-- `packages/api/src/services/__tests__/billing.security.test.ts`
-- `apps/web/tests/e2e/security.spec.ts`
-- `.github/workflows/security-tests.yml`
+- ✅ `packages/api/src/services/__tests__/securityChecks.test.ts` - 输入/输出安全 + 签名验证测试
+- ✅ `packages/api/src/services/__tests__/rateLimiter.test.ts` - 速率限制测试
+- ✅ `packages/api/src/services/__tests__/billing.security.test.ts` - 计费安全测试
+- ✅ `apps/web/tests/e2e/security.spec.ts` - E2E 安全测试 (Playwright)
+- ✅ `.github/workflows/security.yml` - 更新添加安全测试 CI Job
+
+**CI/CD 集成**:
+- 安全单元测试 Job (`security-unit-tests`)
+- E2E 安全测试 Job (`security-e2e-tests`)
+- Playwright 测试报告自动上传 (Artifact)
 
 ---
 

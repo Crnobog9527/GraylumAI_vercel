@@ -25,9 +25,9 @@
 
 - **Phase:** 阶段 9 安全功能增强 ⏳ 进行中
 - **Previous:** 阶段 8 第十三轮修复 ✅ 完成 (对话功能)
-- **Current:** 9.1 + 9.2 已完成，待实施安全测试套件
+- **Current:** 9.1 + 9.2 + 9.3 已完成 (仅 9.4 日志脱敏暂缓)
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-25 (低余额预警实现完成)
+- **更新时间:** 2026-01-25 (安全测试套件实现完成)
 - **参考文档:** `docs/SECURITY_AUDIT_PHASE9.md`, `task_plan.md`
 
 ---
@@ -42,7 +42,7 @@
 |---|------|--------|--------|------|
 | 9.1 | 速率限制 (Upstash Redis) | 🚨 必做 | 6-8h | ✅ 已完成 |
 | 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
-| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
+| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ✅ 已完成 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
 ---
@@ -123,6 +123,55 @@
 | `apps/web/src/components/credits/LowBalanceDialog.tsx` | 充值引导弹窗组件 | ✅ |
 | `apps/web/src/components/layout/AppHeader.tsx` | 警告样式、点击充值 | ✅ |
 | `apps/web/src/app/chat/page.tsx` | 发送前检查、弹窗集成 | ✅ |
+
+---
+
+### ✅ 9.3 安全测试套件实现 (2026-01-25 完成)
+
+**测试分层架构**:
+```
+E2E 安全测试 (Playwright) ← 用户视角
+  - XSS 防护、登录安全、权限检查、安全响应头
+单元测试 (Vitest) ← 函数视角
+  - 输入/输出安全、速率限制、计费安全、签名验证
+```
+
+**测试统计**:
+
+| 测试文件 | 测试数量 | 覆盖范围 |
+|---------|---------|---------|
+| `securityChecks.test.ts` | 82 tests | Prompt injection、输出安全、签名验证 |
+| `rateLimiter.test.ts` | 26 tests | 限流逻辑、窗口重置、并发处理 |
+| `billing.security.test.ts` | 30+ tests | 负数攻击、成本验证、双重消费 |
+| `security.spec.ts` (E2E) | 20+ tests | XSS、认证、授权、安全头 |
+
+**测试覆盖场景**:
+
+| 类别 | 测试场景 |
+|------|---------|
+| Prompt Injection | ignore/disregard/forget patterns, system prompt, [INST], <<SYS>> |
+| Jailbreak 检测 | DAN mode, developer mode, roleplay bypass |
+| 输出安全 | API Key 泄露 (OpenAI/Anthropic), 密码/Secret 检测 |
+| 签名验证 | HMAC-SHA256 生成、时间戳验证、重放攻击防护 |
+| 计费安全 | 负数金额攻击、成本验证、幂等性、竞态条件 |
+| XSS 防护 | Script 标签、事件处理器、HTML 实体 |
+| 认证授权 | 未认证路由保护、Admin 权限检查 |
+| 安全响应头 | X-Frame-Options、X-Content-Type-Options |
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/services/__tests__/securityChecks.test.ts` | 输入/输出安全 + 签名验证测试 | ✅ |
+| `packages/api/src/services/__tests__/rateLimiter.test.ts` | 速率限制单元测试 | ✅ |
+| `packages/api/src/services/__tests__/billing.security.test.ts` | 计费安全测试 | ✅ |
+| `apps/web/tests/e2e/security.spec.ts` | E2E 安全测试 (Playwright) | ✅ |
+| `.github/workflows/security.yml` | 添加 security-unit-tests + security-e2e-tests Jobs | ✅ |
+
+**CI/CD 集成**:
+- `security-unit-tests` Job: 运行 API 包安全单元测试
+- `security-e2e-tests` Job: 运行 Playwright E2E 安全测试
+- 测试报告自动上传为 Artifact (7天保留)
 
 ---
 
