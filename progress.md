@@ -23,11 +23,11 @@
 
 ## Current Status
 
-- **Phase:** 阶段 2 安全加固 ✅ 已完成
-- **Previous:** P2 功能完善 ✅ 完成
-- **Current:** 安全审计 + Dependabot 配置 ✅ 完成
+- **Phase:** 阶段 8 第十三轮修复 ✅ 已完成
+- **Previous:** 阶段 2 安全加固 ✅ 完成
+- **Current:** 对话功能修复 ✅ 完成
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (阶段 2 安全加固完成)
+- **更新时间:** 2026-01-25 (对话功能修复完成)
 - **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
@@ -805,6 +805,35 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### ✅ 阶段 8 第十三轮修复 (2026-01-25)
+
+**问题**: 对话功能失效 - 消息不显示、新对话不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 对话列表显示已删除对话 | `chat.ts:getConversations` | 缺少 `is_deleted='false'` 过滤条件 | ✅ 已修复 |
+| 2 | 消息列表显示已删除消息 | `chat.ts:getMessages` | 缺少 `is_deleted='false'` 过滤条件 | ✅ 已修复 |
+| 3 | 消息计数包含已删除消息 | `chat.ts:getConversations` | 消息统计查询未排除已删除记录 | ✅ 已修复 |
+| 4 | 新对话不同步到侧边栏 | `useStreamingChat.ts` | 创建对话后未通知父组件更新 store | ✅ 已修复 |
+| 5 | AppHeader 导入路径错误 | `AppHeader.tsx:29` | `@/lib/trpc` 应为 `@/trpc/client` | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `packages/api/src/routers/chat.ts` | `getConversations` 添加 `.eq('is_deleted', 'false')` 过滤 |
+| `packages/api/src/routers/chat.ts` | `getMessages` 添加 `.eq('is_deleted', 'false')` 过滤 |
+| `packages/api/src/routers/chat.ts` | 消息计数查询添加 `.eq('is_deleted', 'false')` |
+| `apps/web/src/hooks/useStreamingChat.ts` | 添加 `onConversationCreated` 回调接口 |
+| `apps/web/src/app/chat/page.tsx` | 处理 `onConversationCreated` 同步新对话到 store |
+| `apps/web/src/components/layout/AppHeader.tsx` | 修复 trpc 导入路径 |
+
+**问题分析**:
+- 对话和消息使用软删除 (`is_deleted` 字段)，但查询未排除已删除记录
+- 流式对话创建新会话后，`activeConversationId` 未同步，导致侧边栏状态错误
+- 解决方案: 添加过滤条件 + 新增回调机制同步状态
+
+---
+
 ### ✅ 阶段 8 第十二轮修复 (2026-01-23)
 
 **问题**: 管理员后台查看工单时附件图片无法显示
@@ -822,14 +851,14 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
-### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
+### ✅ 阶段 8 第十一轮修复 (2026-01-23)
 
 **问题**: 工单附件不显示 + 对话功能失效
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
 | 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，未实际上传到存储 | ✅ 已修复 |
-| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ⏳ 待修复 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ✅ 已修复 (第十三轮) |
 
 **已完成的修复内容**:
 | 文件 | 修改 |
@@ -840,9 +869,7 @@ const { data: userProfile, error } = await ctx.supabase
 | `TicketsPanel.tsx` | `CreateTicketForm` 实现真实文件上传 |
 | `TicketsPanel.tsx` | `TicketDetailView` 添加附件图片展示区域 |
 
-**待修复 - 对话功能**:
-- 已尝试添加消息获取和显示逻辑，但功能仍未正常运行
-- 需进一步排查消息存储、获取和渲染流程
+**对话功能已在第十三轮修复**: 详见上方第十三轮修复记录
 
 **Supabase Storage 配置**:
 - Bucket 名称: `ticket-attachments`

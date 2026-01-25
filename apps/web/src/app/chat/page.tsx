@@ -89,6 +89,10 @@ export default function ChatPage() {
       utils.chat.getConversations.invalidate();
       refreshConversationList();
     },
+    onConversationCreated: (newConversationId) => {
+      // 新对话创建后同步到 store，使侧边栏正确高亮
+      setActiveConversation(newConversationId);
+    },
     onError: (error) => {
       console.error('Streaming error:', error);
     },

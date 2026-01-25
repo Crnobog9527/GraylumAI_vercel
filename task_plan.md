@@ -884,21 +884,39 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 ---
 
-### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
+### ✅ 阶段 8 第十三轮修复 (2026-01-25)
+
+> **问题**: 对话功能失效 - 消息不显示、新对话不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 对话列表显示已删除对话 | `chat.ts:getConversations` | 缺少 `is_deleted='false'` 过滤 | ✅ 已修复 |
+| 2 | 消息列表显示已删除消息 | `chat.ts:getMessages` | 缺少 `is_deleted='false'` 过滤 | ✅ 已修复 |
+| 3 | 消息计数包含已删除消息 | `chat.ts:getConversations` | 消息统计未排除已删除 | ✅ 已修复 |
+| 4 | 新对话不同步到侧边栏 | `useStreamingChat.ts` | 创建对话后未通知父组件 | ✅ 已修复 |
+| 5 | AppHeader 导入路径错误 | `AppHeader.tsx:29` | `@/lib/trpc` 应为 `@/trpc/client` | ✅ 已修复 |
+
+**交付物**:
+- `packages/api/src/routers/chat.ts`: 添加 `is_deleted='false'` 过滤条件
+- `apps/web/src/hooks/useStreamingChat.ts`: 添加 `onConversationCreated` 回调
+- `apps/web/src/app/chat/page.tsx`: 处理新对话创建事件，同步到 store
+- `apps/web/src/components/layout/AppHeader.tsx`: 修复 trpc 导入路径
+
+---
+
+### ✅ 阶段 8 第十一轮修复 (2026-01-23)
 
 > **问题**: 工单附件不显示 + 对话功能失效
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
 | 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码 | ✅ 已修复 |
-| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ⏳ 待修复 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ✅ 已修复 (第十三轮) |
 
 **交付物**:
 - `api/upload/route.ts`: 新建文件上传 API
 - `ticket.ts`: 支持 attachments 参数
 - `TicketsPanel.tsx`: 真实文件上传 + 附件展示
-
-**待修复**: 对话功能消息显示仍有问题，需进一步排查
 
 ---
 

@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase';
 import { useCreditsBalance } from '@/hooks/use-credits';
-import { trpc } from '@/lib/trpc';
+import { trpc } from '@/trpc/client';
 
 // Navigation items configuration
 const navItems = [

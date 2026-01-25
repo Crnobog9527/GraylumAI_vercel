@@ -4,11 +4,12 @@ import { TRPCError } from '@trpc/server';
 
 export const chatRouter = router({
   getConversations: protectedProcedure.query(async ({ ctx }) => {
-    // 获取对话列表
+    // 获取对话列表（排除已删除的）
     const { data: conversations, error } = await ctx.supabase
       .from('conversations')
       .select('*')
       .eq('user_id', ctx.profileId)
+      .eq('is_deleted', 'false')
       .order('created_at', { ascending: false });
 
     if (error || !conversations) {
@@ -18,11 +19,12 @@ export const chatRouter = router({
     // 为每个对话获取消息数量
     const conversationsWithStats = await Promise.all(
       conversations.map(async (conv) => {
-        // 获取消息数量
+        // 获取消息数量（排除已删除的）
         const { count: messageCount } = await ctx.supabase
           .from('messages')
           .select('*', { count: 'exact', head: true })
-          .eq('conversation_id', conv.id);
+          .eq('conversation_id', conv.id)
+          .eq('is_deleted', 'false');
 
         // 获取该对话消耗的积分（从 token_stats 或 billing_history）
         const { data: usageLogs } = await ctx.supabase
@@ -112,6 +114,7 @@ export const chatRouter = router({
         .from('messages')
         .select('*')
         .eq('conversation_id', input.conversationId)
+        .eq('is_deleted', 'false')
         .order('created_at', { ascending: true });
     }),
 
