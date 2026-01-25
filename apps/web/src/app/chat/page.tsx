@@ -14,6 +14,8 @@ import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
+import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
+import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
 
 interface Message {
   id: string;
@@ -30,11 +32,20 @@ export default function ChatPage() {
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [lowBalanceDialogOpen, setLowBalanceDialogOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { banners } = useBanner();
 
   const utils = trpc.useUtils();
+
+  // Credits balance for pre-send check
+  const {
+    credits,
+    warningLevel,
+    canSendMessage,
+    isLowBalance,
+  } = useCreditsBalance();
 
   // Fetch system settings for chat page configuration
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
@@ -155,6 +166,19 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     if (!inputMessage.trim() || isProcessing) return;
 
+    // 发送前检查积分余额
+    if (!canSendMessage) {
+      // 积分为 0，阻止发送并显示充值弹窗
+      setLowBalanceDialogOpen(true);
+      return;
+    }
+
+    // 积分不足但仍可发送，显示警告（critical 级别）
+    if (warningLevel === 'critical') {
+      setLowBalanceDialogOpen(true);
+      // 继续发送，用户可以在弹窗中选择"稍后再说"
+    }
+
     const messageToSend = inputMessage;
     setInputMessage(''); // 立即清空输入框
 
@@ -164,7 +188,7 @@ export default function ChatPage() {
     await sendStreamingMessage(messageToSend, {
       modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
     });
-  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId]);
+  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId, canSendMessage, warningLevel]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -465,6 +489,14 @@ export default function ChatPage() {
           canBatchExport={canBatchExport}
         />
       )}
+
+      {/* Low balance warning dialog */}
+      <LowBalanceDialog
+        open={lowBalanceDialogOpen}
+        onOpenChange={setLowBalanceDialogOpen}
+        credits={credits}
+        warningLevel={warningLevel}
+      />
     </div>
   );
 }

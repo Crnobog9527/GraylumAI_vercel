@@ -25,9 +25,9 @@
 
 - **Phase:** 阶段 9 安全功能增强 ⏳ 进行中
 - **Previous:** 阶段 8 第十三轮修复 ✅ 完成 (对话功能)
-- **Current:** 9.1 速率限制已完成，待实施低余额预警
+- **Current:** 9.1 + 9.2 已完成，待实施安全测试套件
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-25 (速率限制实现完成)
+- **更新时间:** 2026-01-25 (低余额预警实现完成)
 - **参考文档:** `docs/SECURITY_AUDIT_PHASE9.md`, `task_plan.md`
 
 ---
@@ -41,7 +41,7 @@
 | # | 功能 | 优先级 | 工作量 | 状态 |
 |---|------|--------|--------|------|
 | 9.1 | 速率限制 (Upstash Redis) | 🚨 必做 | 6-8h | ✅ 已完成 |
-| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ⏳ 待执行 |
+| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
 | 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
@@ -87,6 +87,42 @@
 **环境变量** (需在 Vercel 配置):
 - `UPSTASH_REDIS_REST_URL` - Upstash Redis REST URL
 - `UPSTASH_REDIS_REST_TOKEN` - Upstash Redis REST Token
+
+---
+
+### ✅ 9.2 低余额预警实现 (2026-01-25 完成)
+
+**实现功能**:
+
+1. **阈值配置** (`use-credits.tsx`):
+   - `< 100 积分`: `low` 级别 - 黄色警告
+   - `< 50 积分`: `very_low` 级别 - 橙色警告
+   - `< 10 积分`: `critical` 级别 - 红色警告 + 弹窗
+   - `= 0 积分`: `empty` 级别 - 阻止发送 + 强制充值
+
+2. **Header 积分显示** (`AppHeader.tsx`):
+   - 动态颜色变化 (金 → 黄 → 橙 → 红)
+   - 低余额时显示 AlertTriangle 图标
+   - 显示状态标签 ("请充值" / "即将用完" / "已用完")
+   - 点击可直接跳转充值页面
+
+3. **发送前检查** (`chat/page.tsx`):
+   - `empty`: 阻止发送，显示强制充值弹窗
+   - `critical`: 显示警告弹窗，但允许继续发送
+
+4. **充值引导弹窗** (`LowBalanceDialog.tsx`):
+   - 显示当前积分余额和警告级别
+   - "立即充值" 按钮跳转充值页面
+   - critical 级别可选"稍后再说"
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `apps/web/src/hooks/use-credits.tsx` | 阈值判断、警告级别、颜色函数 | ✅ |
+| `apps/web/src/components/credits/LowBalanceDialog.tsx` | 充值引导弹窗组件 | ✅ |
+| `apps/web/src/components/layout/AppHeader.tsx` | 警告样式、点击充值 | ✅ |
+| `apps/web/src/app/chat/page.tsx` | 发送前检查、弹窗集成 | ✅ |
 
 ---
 

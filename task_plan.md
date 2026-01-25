@@ -944,7 +944,7 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 | # | 功能 | 优先级 | 预计工作量 | 状态 |
 |---|------|--------|----------|------|
 | 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ✅ 已完成 |
-| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ⏳ 待执行 |
+| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
 | 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
@@ -991,21 +991,36 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 ---
 
-#### 9.2 低余额预警
+#### 9.2 低余额预警 ✅ 已完成 (2026-01-25)
 
 **预警策略**:
-| 阈值 | 触发时机 | 提醒方式 |
+| 阈值 | 警告级别 | 提醒方式 |
 |------|---------|---------|
-| < 100 积分 | 刷新余额时 | Header 黄色警告 |
-| < 50 积分 | 刷新余额时 | Header 橙色 + Toast |
-| < 10 积分 | 刷新余额时 | Header 红色 + 弹窗 |
-| 0 积分 | 发送消息前 | 阻止发送 + 引导充值 |
+| < 100 积分 | `low` | Header 黄色警告图标 |
+| < 50 积分 | `very_low` | Header 橙色 + "请充值" 标签 |
+| < 10 积分 | `critical` | Header 红色 + "即将用完" 标签 + 发送时弹窗 |
+| = 0 积分 | `empty` | Header 红色 + "已用完" 标签 + 阻止发送 + 充值弹窗 |
+
+**实现功能**:
+1. **Header 积分显示**:
+   - 根据余额动态变色 (金 → 黄 → 橙 → 红)
+   - 低余额时显示警告图标 (AlertTriangle)
+   - 点击可直接跳转充值页面
+
+2. **发送前检查**:
+   - `empty`: 阻止发送，强制显示充值弹窗
+   - `critical`: 显示警告弹窗，但允许继续发送
+
+3. **充值引导弹窗**:
+   - 显示当前积分余额
+   - 提供"立即充值"按钮
+   - critical 级别可选"稍后再说"
 
 **交付物**:
-- `apps/web/src/hooks/use-credits.tsx` - 添加阈值判断
-- `apps/web/src/providers/CreditsWarningProvider.tsx` - 新建
-- `apps/web/src/components/layout/AppHeader.tsx` - 警告样式
-- `apps/web/src/app/chat/page.tsx` - 发送前检查
+- ✅ `apps/web/src/hooks/use-credits.tsx` - 添加阈值判断、警告级别、颜色函数
+- ✅ `apps/web/src/components/credits/LowBalanceDialog.tsx` - 充值引导弹窗
+- ✅ `apps/web/src/components/layout/AppHeader.tsx` - 警告样式、点击充值
+- ✅ `apps/web/src/app/chat/page.tsx` - 发送前检查、弹窗集成
 
 ---
 
