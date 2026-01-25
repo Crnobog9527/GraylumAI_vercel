@@ -23,35 +23,74 @@
 
 ## Current Status
 
-- **Phase:** 阶段 9 安全功能增强 ⏳ 规划中
+- **Phase:** 阶段 9 安全功能增强 ⏳ 进行中
 - **Previous:** 阶段 8 第十三轮修复 ✅ 完成 (对话功能)
-- **Current:** 安全功能规划完成，待实施
+- **Current:** 9.1 速率限制已完成，待实施低余额预警
 - **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-25 (安全功能规划完成)
+- **更新时间:** 2026-01-25 (速率限制实现完成)
 - **参考文档:** `docs/SECURITY_AUDIT_PHASE9.md`, `task_plan.md`
 
 ---
 
-### 📋 阶段 9 安全功能增强规划 (2026-01-25)
+### 📋 阶段 9 安全功能增强 (2026-01-25 进行中)
 
 > **来源**: `docs/SECURITY_AUDIT_PHASE9.md` 安全审计建议补充功能
-
-**决策过程**:
-1. 审阅安全审计报告，列出 7 项建议功能
-2. 评估必要性和优先级
-3. 日志脱敏检查：确认无实际 PII 泄露风险，决定暂缓
-4. 最终确定 3 项待实施功能
 
 **功能清单**:
 
 | # | 功能 | 优先级 | 工作量 | 状态 |
 |---|------|--------|--------|------|
-| 9.1 | 速率限制 (Upstash Redis) | 🚨 必做 | 6-8h | ⏳ 待执行 |
+| 9.1 | 速率限制 (Upstash Redis) | 🚨 必做 | 6-8h | ✅ 已完成 |
 | 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ⏳ 待执行 |
 | 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
-**日志脱敏暂缓原因** (代码检查结论):
+---
+
+### ✅ 9.1 速率限制实现 (2026-01-25 完成)
+
+**实现方案**: Upstash Redis + @upstash/ratelimit (滑动窗口算法)
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/services/redisRateLimiter.ts` | Redis 限流服务 (支持 5 种类型) | ✅ |
+| `apps/web/middleware.ts` | Edge 限流 (IP 级别) | ✅ |
+| `apps/web/src/lib/rateLimit.ts` | Web 端限流工具 | ✅ |
+| `apps/web/src/app/api/ai/stream/route.ts` | AI 流式用户级限流 | ✅ |
+| `packages/api/src/middleware/securityChecks.ts` | tRPC 异步限流支持 | ✅ |
+
+**限流策略**:
+
+| 类型 | 限制 | 窗口 | 用途 |
+|------|------|------|------|
+| `ai` | 30次 | 1分钟 | AI 对话 (非流式) |
+| `ai_stream` | 20次 | 1分钟 | AI 流式对话 |
+| `api` | 100次 | 1分钟 | 通用 API |
+| `auth` | 5次 | 5分钟 | 登录/注册 |
+| `anonymous` | 20次 | 1分钟 | 未认证请求 |
+
+**架构设计**:
+```
+请求流程:
+1. Edge Middleware → IP 级别全局限流 (60次/分钟)
+2. API Route → 用户级别限流 (20次/分钟 for ai_stream)
+3. tRPC Security → 用户级别限流 (30次/分钟 for ai)
+```
+
+**故障安全**:
+- Fail-open 策略: Redis 连接失败时允许请求通过
+- 内存回退: Redis 未配置时使用内存限流器
+- 429 响应: 包含 `Retry-After`, `X-RateLimit-*` 头
+
+**环境变量** (需在 Vercel 配置):
+- `UPSTASH_REDIS_REST_URL` - Upstash Redis REST URL
+- `UPSTASH_REDIS_REST_TOKEN` - Upstash Redis REST Token
+
+---
+
+### 📋 日志脱敏暂缓原因 (代码检查结论):
 
 | 检查项 | 结果 |
 |-------|------|

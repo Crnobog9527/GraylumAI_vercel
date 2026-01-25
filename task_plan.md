@@ -943,30 +943,51 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 | # | 功能 | 优先级 | 预计工作量 | 状态 |
 |---|------|--------|----------|------|
-| 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ⏳ 待执行 |
+| 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ✅ 已完成 |
 | 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ⏳ 待执行 |
 | 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ⏳ 待执行 |
 | 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
 
 ---
 
-#### 9.1 速率限制 (Rate Limiting)
+#### 9.1 速率限制 (Rate Limiting) ✅ 已完成 (2026-01-25)
 
 **方案**: Upstash Redis (边缘低延迟、与 Vercel 集成好)
 
 **限流策略**:
 | 端点类型 | 限制 | 窗口 | 键 |
 |---------|------|------|-----|
-| 未认证 API | 20次 | 1分钟 | IP |
+| 未认证 API (Edge) | 60次 | 1分钟 | IP |
 | 已认证 API | 100次 | 1分钟 | userId |
 | AI 对话 | 30次 | 1分钟 | userId |
 | AI 流式 | 20次 | 1分钟 | userId |
 | 登录/注册 | 5次 | 5分钟 | IP |
 
+**实现架构**:
+```
+请求 → Edge Middleware (IP限流) → API Route (用户限流) → tRPC (安全检查)
+          ↓                         ↓                      ↓
+     Upstash Redis            Upstash Redis         Redis/内存回退
+```
+
 **交付物**:
-- `packages/api/src/services/redisRateLimiter.ts` - Redis 限流服务
-- `apps/web/middleware.ts` - Edge 限流集成
+- ✅ `packages/api/src/services/redisRateLimiter.ts` - Redis 限流服务
+- ✅ `apps/web/middleware.ts` - Edge 限流集成 (IP 级别)
+- ✅ `apps/web/src/lib/rateLimit.ts` - Web 端限流工具
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - 用户级别限流
+- ✅ `packages/api/src/middleware/securityChecks.ts` - 异步 Redis 限流支持
 - 环境变量: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+
+**限流类型**:
+| 类型 | 用途 | 限制 |
+|------|------|------|
+| `ai` | AI 对话 (非流式) | 30次/分钟 |
+| `ai_stream` | AI 流式对话 | 20次/分钟 |
+| `api` | 通用 API | 100次/分钟 |
+| `auth` | 登录/注册 | 5次/5分钟 |
+| `anonymous` | 未认证请求 | 20次/分钟 |
+
+**故障安全**: Fail-open 策略 (Redis 连接失败时允许请求通过，回退到内存限流器)
 
 ---
 

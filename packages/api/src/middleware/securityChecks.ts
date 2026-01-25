@@ -86,12 +86,44 @@ export const SIGNATURE_CONFIG = {
 // ============================================
 
 import { getRateLimiter } from '../services/rateLimiter';
+import {
+  checkRateLimit as checkRedisRateLimit,
+  checkRateLimitOrThrow as checkRedisRateLimitOrThrow,
+  type RateLimitType,
+} from '../services/redisRateLimiter';
 
 /**
- * 检查速率限制
+ * 检查速率限制 (异步版本)
  *
- * 使用内存存储的速率限制器
- * 生产环境分布式部署建议使用 Vercel KV 或 Upstash
+ * 优先使用 Redis (Upstash)，未配置时回退到内存限制器
+ */
+export async function checkRateLimitAsync(
+  userId: string,
+  type: RateLimitType = 'ai'
+): Promise<void> {
+  // 尝试使用 Redis 速率限制
+  const result = await checkRedisRateLimit(userId, type);
+
+  // 如果 Redis 返回 limit=0 说明未配置，回退到内存限制器
+  if (result.limit === 0) {
+    const limiter = getRateLimiter();
+    limiter.checkOrThrow(userId, type);
+    return;
+  }
+
+  // Redis 结果检查
+  if (!result.success) {
+    throw new TRPCError({
+      code: 'TOO_MANY_REQUESTS',
+      message: `请求过于频繁，请在 ${result.retryAfter} 秒后重试`,
+    });
+  }
+}
+
+/**
+ * 检查速率限制 (同步版本 - 仅内存)
+ *
+ * @deprecated 建议使用 checkRateLimitAsync
  */
 export function checkRateLimit(
   userId: string,
@@ -105,6 +137,7 @@ export function checkRateLimit(
  * 导出速率限制器实例获取函数
  */
 export { getRateLimiter } from '../services/rateLimiter';
+export { checkRedisRateLimit, checkRedisRateLimitOrThrow };
 
 /**
  * 检查消费熔断
@@ -239,9 +272,9 @@ export async function preAICallSecurityChecks(
   // 1. 用户状态检查
   await checkUserStatus(ctx);
 
-  // 2. 速率限制检查
+  // 2. 速率限制检查 (使用 Redis 优先，内存回退)
   if (!options.skipRateLimit) {
-    await checkRateLimit(ctx.userId, options.rateLimitType ?? 'ai');
+    await checkRateLimitAsync(ctx.userId, options.rateLimitType as RateLimitType ?? 'ai');
   }
 
   // 3. 消费熔断检查

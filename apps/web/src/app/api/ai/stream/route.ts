@@ -7,6 +7,7 @@
 
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 // Types
 interface StreamRequest {
@@ -221,6 +222,28 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = user.id;
+
+    // Check user-level rate limit for AI streaming
+    const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
+    if (!rateLimitResult.success) {
+      return new Response(
+        JSON.stringify({
+          error: '请求过于频繁',
+          message: `请在 ${rateLimitResult.retryAfter} 秒后重试`,
+          retryAfter: rateLimitResult.retryAfter,
+        }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+            'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+            'X-RateLimit-Reset': rateLimitResult.reset.toString(),
+            'Retry-After': rateLimitResult.retryAfter?.toString() ?? '60',
+          },
+        }
+      );
+    }
 
     // Get model config
     const modelConfig = await getModelConfig(supabase, modelId);
