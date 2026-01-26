@@ -1566,6 +1566,7 @@ export const adminRouter = router({
       monthlyBonusCredits: z.number().int().min(0).default(0),
       packageDiscount: z.number().int().min(0).max(100).default(100),
       features: z.array(z.string()).default([]),
+      maxContextMessages: z.number().int().min(5).max(100).default(20), // 上下文消息数限制
       sortOrder: z.number().int().min(0).default(0),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -1581,6 +1582,7 @@ export const adminRouter = router({
           monthly_bonus_credits: input.monthlyBonusCredits,
           package_discount: input.packageDiscount,
           features: input.features,
+          max_context_messages: input.maxContextMessages,
           is_active: 'true',
           sort_order: input.sortOrder,
         })
@@ -1610,6 +1612,7 @@ export const adminRouter = router({
       packageDiscount: z.number().int().min(0).max(100).optional(),
       features: z.array(z.string()).optional(),
       historyRetentionDays: z.number().int().min(1).max(365).optional(),
+      maxContextMessages: z.number().int().min(5).max(100).optional(), // 上下文消息数限制
       allowExport: z.enum(['true', 'false']).optional(),
       allowBatchExport: z.enum(['true', 'false']).optional(),
       isActive: z.enum(['true', 'false']).optional(),
@@ -1629,6 +1632,7 @@ export const adminRouter = router({
       if (input.packageDiscount !== undefined) updateData.package_discount = input.packageDiscount;
       if (input.features !== undefined) updateData.features = input.features;
       if (input.historyRetentionDays !== undefined) updateData.history_retention_days = input.historyRetentionDays;
+      if (input.maxContextMessages !== undefined) updateData.max_context_messages = input.maxContextMessages;
       if (input.allowExport !== undefined) updateData.allow_export = input.allowExport;
       if (input.allowBatchExport !== undefined) updateData.allow_batch_export = input.allowBatchExport;
       if (input.isActive !== undefined) updateData.is_active = input.isActive;

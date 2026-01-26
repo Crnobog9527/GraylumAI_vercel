@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { toast } from '@/components/ui/sonner';
 
 interface AIModel {
   id: string;
@@ -134,35 +135,53 @@ export default function AdminModelsPage() {
 
   const createModel = trpc.model.createModel.useMutation({
     onSuccess: () => {
+      toast.success('模型创建成功');
       refetch();
       refetchStatus();
       closeDialog();
+    },
+    onError: (error) => {
+      toast.error(`创建失败: ${error.message}`);
     },
   });
 
   const updateModel = trpc.model.updateModel.useMutation({
     onSuccess: () => {
+      toast.success('模型更新成功');
       refetch();
       refetchStatus();
       closeDialog();
+    },
+    onError: (error) => {
+      toast.error(`更新失败: ${error.message}`);
     },
   });
 
   const deleteModel = trpc.model.deleteModel.useMutation({
     onSuccess: () => {
+      toast.success('模型已删除');
       refetch();
       refetchStatus();
       setDeleteDialogOpen(false);
       setSelectedModel(null);
     },
+    onError: (error) => {
+      toast.error(`删除失败: ${error.message}`);
+    },
   });
 
   const testConnection = trpc.model.testConnection.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result.success) {
+        toast.success(result.message || 'API 连接成功');
+      } else {
+        toast.error(result.error || 'API 连接失败');
+      }
       refetchStatus();
       setTestingModelId(null);
     },
-    onError: () => {
+    onError: (error) => {
+      toast.error(`测试失败: ${error.message}`);
       setTestingModelId(null);
     },
   });
@@ -240,9 +259,17 @@ export default function AdminModelsPage() {
   };
 
   const handleToggleActive = (model: AIModel) => {
+    const isEnabling = model.is_active !== 'true';
+    const status = connectionStatus?.find(s => s.id === model.id);
+
+    // 如果要启用，但没有 API Key，显示警告
+    if (isEnabling && status && !status.hasApiKey) {
+      toast.warning('该模型未配置 API Key，启用后用户将无法使用');
+    }
+
     updateModel.mutate({
       id: model.id,
-      isActive: model.is_active !== 'true',
+      isActive: isEnabling,
     });
   };
 

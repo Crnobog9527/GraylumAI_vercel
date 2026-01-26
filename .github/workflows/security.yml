@@ -129,3 +129,93 @@ jobs:
 
       - name: Run TypeScript check
         run: pnpm turbo typecheck || true
+
+  # 安全单元测试
+  security-unit-tests:
+    name: Security Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run security tests (API package)
+        run: |
+          echo "## 安全单元测试报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          cd packages/api
+          pnpm test -- --run --reporter=verbose 2>&1 | tee test-output.txt || true
+
+          # Extract test summary
+          if grep -q "Tests:" test-output.txt; then
+            SUMMARY=$(grep "Tests:" test-output.txt | tail -1)
+            echo "### 测试结果" >> $GITHUB_STEP_SUMMARY
+            echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check for failures in security-related tests
+          if grep -q "FAIL.*security" test-output.txt; then
+            echo "❌ 安全测试失败" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "✅ 安全单元测试通过" >> $GITHUB_STEP_SUMMARY
+
+  # E2E 安全测试
+  security-e2e-tests:
+    name: Security E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: cd apps/web && npx playwright install --with-deps chromium
+
+      - name: Build application
+        run: pnpm turbo build
+        env:
+          # Provide minimal env vars for build
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
+
+      - name: Run E2E security tests
+        run: |
+          cd apps/web
+          npx playwright test security.spec.ts --project=chromium --reporter=html,list
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-security-report
+          path: apps/web/playwright-report/
+          retention-days: 7

@@ -105,28 +105,44 @@
 
 ---
 
-### ⚠️ 阶段 2: 安全加固 (应该做 | 预计 1-2 天)
+### ✅ 阶段 2: 安全加固 (已完成 | 2026-01-24)
 
-> **进入条件**: 阶段 1 完成
-> **完成条件**: RLS 100%、无硬编码密钥、依赖无高危漏洞
+> **进入条件**: 阶段 1 完成 ✅
+> **完成条件**: RLS 100%、无硬编码密钥、依赖无高危漏洞 ✅
 
 | # | 任务 | 交付物 | 预计时间 | 状态 |
 |---|------|--------|---------|------|
-| 2.1 | RLS 策略全面检查 | 审计报告 + 修复 SQL | 2h | ⏳ 待执行 |
-| 2.2 | 环境变量安全检查 | 审计报告 + 验证脚本 | 1h | ⏳ 待执行 |
-| 2.3 | 依赖安全扫描 | dependabot.yml + GitHub Action | 30m | ⏳ 待执行 |
+| 2.1 | RLS 策略全面检查 | 审计报告 (21/21 表覆盖) | 2h | ✅ 已完成 |
+| 2.2 | 环境变量安全检查 | 审计报告 (无泄露风险) | 1h | ✅ 已完成 |
+| 2.3 | 依赖安全扫描 | dependabot.yml | 30m | ✅ 已完成 |
+
+**交付物**:
+- `docs/SECURITY_AUDIT_REPORT.md` - 完整安全审计报告
+- `.github/dependabot.yml` - 依赖自动扫描配置
+
+**审计结果**:
+- RLS 覆盖率: 100% (21/21 表)
+- 环境变量: 无硬编码密钥
+- .gitignore: 正确排除敏感文件
+- Dependabot: 已配置每周扫描
 
 ---
 
-### ⚠️ 阶段 3: CI/CD 自动化 (应该做 | 预计 1 天)
+### ✅ 阶段 3: CI/CD 自动化 (已完成 | Vercel 内置)
 
 > **进入条件**: 阶段 2 完成
 > **完成条件**: CI/CD 流水线正常运行，Staging/Production 分离
 
 | # | 任务 | 交付物 | 预计时间 | 状态 |
 |---|------|--------|---------|------|
-| 3.1 | GitHub Actions CI/CD | .github/workflows/ci.yml | 2h | ⏳ 待执行 |
-| 3.2 | 配置 Staging 环境 | 环境配置 + 部署检查清单 | 2h | ⏳ 待执行 |
+| 3.1 | GitHub Actions CI/CD | .github/workflows/ci.yml | 2h | ⏭️ 跳过 - Vercel 自带 CI/CD |
+| 3.2 | 配置 Staging 环境 | 环境配置 + 部署检查清单 | 2h | ⏭️ 跳过 - Vercel Preview 环境 |
+
+**说明**: Vercel 平台已内置 CI/CD 功能：
+- 自动构建和部署（push 触发）
+- Preview 环境（PR 自动部署）
+- Production 环境（主分支部署）
+- 构建日志和错误监控
 
 ---
 
@@ -491,28 +507,28 @@
 
 #### P2-B: 功能广场模块 (前端+后端+数据库)
 
-| 序号 | 问题 | 位置 | 分类 |
-|------|------|------|------|
-| P2-6 | 缺少模块详情弹窗 | `marketplace/page.tsx` | 前端 |
-| P2-7 | modules 字段与后台不对应 | `admin/prompts` + DB | 后端+数据库 |
-| P2-8 | credits_cost 无效字段 | `modules` 表 | 数据库 |
+| 序号 | 问题 | 位置 | 分类 | 状态 |
+|------|------|------|------|------|
+| P2-6 | 缺少模块详情弹窗 | `marketplace/page.tsx` | 前端 | ✅ 已修复 |
+| P2-7 | modules 字段与后台不对应 | `admin/prompts` + DB | 后端+数据库 | ✅ 已修复 |
+| P2-8 | credits_cost 无效字段 | `modules` 表 | 数据库 | ✅ 已修复 |
 
 #### P2-C: 系统设置生效性 (后端) ✅ 已验证
 
 | 序号 | 问题 | 位置 | 分类 | 状态 |
 |------|------|------|------|------|
 | P2-9 | 启用智能路由设置待验证 | `modelRouter.ts` | 后端 | ✅ 已验证 - 从 system_settings 读取 |
-| P2-10 | 显示模型选择器功能无效 | `chat/page.tsx` | 前端 | ⚠️ 设置存在但 UI 未实现 |
-| P2-11 | 首页引导设置功能不明 | 首页 | 前端 | ⚠️ UI 存在但保存为占位符 |
+| P2-10 | 显示模型选择器功能无效 | `chat/page.tsx` | 前端 | ✅ 已修复 - 读取设置并显示选择器 |
+| P2-11 | 首页引导设置功能不明 | 首页 | 前端 | ✅ 已修复 - 实现设置保存功能 |
 
 #### P2-D: 会员权限功能 (前端+后端)
 
-| 序号 | 问题 | 位置 | 分类 |
-|------|------|------|------|
-| P2-12 | 允许导出对话-功能未实现 | 聊天页面 | 前端+后端 |
-| P2-13 | 允许批量导出-功能未实现 | 聊天页面 | 前端+后端 |
-| P2-14 | 导出权限检查未实现 | API 路由 | 后端 |
-| P2-15 | 上下文长度限制未实现 | `ai.ts:300-320` | 后端 |
+| 序号 | 问题 | 位置 | 分类 | 状态 |
+|------|------|------|------|------|
+| P2-12 | 允许导出对话-功能未实现 | 聊天页面 | 前端+后端 | ✅ 已修复 |
+| P2-13 | 允许批量导出-功能未实现 | 聊天页面 | 前端+后端 | ✅ 已修复 |
+| P2-14 | 导出权限检查未实现 | API 路由 | 后端 | ✅ 已修复 |
+| P2-15 | 上下文长度限制未实现 | `ai.ts:300-320` | 后端 | ✅ 已修复 |
 
 ---
 
@@ -817,10 +833,10 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 | 42 | 对话历史自动清理 | `admin.ts` | ✅ 已实现，支持 Cron 定时清理 | ✅ 已实现 |
 | 43 | 对话历史保存天数 | `membership_plans` 表 | ✅ 已实现，按会员等级配置 | ✅ 已实现 |
 | 44 | 允许导出对话-配置存在 | `membership_plans` 表 | ✅ 配置字段存在 | ✅ 已实现 |
-| 45 | 允许导出对话-功能未实现 | 聊天/对话页面 | ❌ 无导出 API 和导出按钮 | ⏳ 待实现 |
+| 45 | 允许导出对话-功能未实现 | 聊天/对话页面 | ✅ 导出 API + 导出按钮 | ✅ 已实现 |
 | 46 | 允许批量导出-配置存在 | `membership_plans` 表 | ✅ 配置字段存在 | ✅ 已实现 |
-| 47 | 允许批量导出-功能未实现 | 聊天/对话页面 | ❌ 无批量导出功能 | ⏳ 待实现 |
-| 48 | 导出权限检查未实现 | API 路由 | 无 membershipProcedure 中间件 | ⏳ 待实现 |
+| 47 | 允许批量导出-功能未实现 | 聊天/对话页面 | ✅ 批量导出功能 | ✅ 已实现 |
+| 48 | 导出权限检查未实现 | API 路由 | ✅ 会员权限检查 | ✅ 已实现 |
 
 **分析**:
 - 对话历史清理功能**已完整实现** ✅
@@ -868,21 +884,39 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 
 ---
 
-### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
+### ✅ 阶段 8 第十三轮修复 (2026-01-25)
+
+> **问题**: 对话功能失效 - 消息不显示、新对话不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 对话列表显示已删除对话 | `chat.ts:getConversations` | 缺少 `is_deleted='false'` 过滤 | ✅ 已修复 |
+| 2 | 消息列表显示已删除消息 | `chat.ts:getMessages` | 缺少 `is_deleted='false'` 过滤 | ✅ 已修复 |
+| 3 | 消息计数包含已删除消息 | `chat.ts:getConversations` | 消息统计未排除已删除 | ✅ 已修复 |
+| 4 | 新对话不同步到侧边栏 | `useStreamingChat.ts` | 创建对话后未通知父组件 | ✅ 已修复 |
+| 5 | AppHeader 导入路径错误 | `AppHeader.tsx:29` | `@/lib/trpc` 应为 `@/trpc/client` | ✅ 已修复 |
+
+**交付物**:
+- `packages/api/src/routers/chat.ts`: 添加 `is_deleted='false'` 过滤条件
+- `apps/web/src/hooks/useStreamingChat.ts`: 添加 `onConversationCreated` 回调
+- `apps/web/src/app/chat/page.tsx`: 处理新对话创建事件，同步到 store
+- `apps/web/src/components/layout/AppHeader.tsx`: 修复 trpc 导入路径
+
+---
+
+### ✅ 阶段 8 第十一轮修复 (2026-01-23)
 
 > **问题**: 工单附件不显示 + 对话功能失效
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
 | 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码 | ✅ 已修复 |
-| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ⏳ 待修复 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息 | ✅ 已修复 (第十三轮) |
 
 **交付物**:
 - `api/upload/route.ts`: 新建文件上传 API
 - `ticket.ts`: 支持 attachments 参数
 - `TicketsPanel.tsx`: 真实文件上传 + 附件展示
-
-**待修复**: 对话功能消息显示仍有问题，需进一步排查
 
 ---
 
@@ -899,6 +933,401 @@ const totalCredits = totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * 1.5;
 **交付物**:
 - `TicketsPanel.tsx`: 集成 tRPC API 调用 `getTickets`、`createTicket`、`replyToTicket`、`closeTicket`
 - `ticket.ts`: 增强 API 支持 description/category 字段，添加状态/分类映射，新增 `closeTicket` mutation
+
+---
+
+### 🚨 阶段 9: 安全功能增强 (2026-01-25 规划)
+
+> **来源**: `docs/SECURITY_AUDIT_PHASE9.md` 建议补充功能
+> **决策**: 日志脱敏暂缓（经检查无实际风险），优先实现其他 3 项
+
+| # | 功能 | 优先级 | 预计工作量 | 状态 |
+|---|------|--------|----------|------|
+| 9.1 | 速率限制 (Rate Limiting) | 🚨 必做 | 6-8h | ✅ 已完成 |
+| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
+| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ✅ 已完成 |
+| 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
+
+---
+
+#### 9.1 速率限制 (Rate Limiting) ✅ 已完成 (2026-01-25)
+
+**方案**: Upstash Redis (边缘低延迟、与 Vercel 集成好)
+
+**限流策略**:
+| 端点类型 | 限制 | 窗口 | 键 |
+|---------|------|------|-----|
+| 未认证 API (Edge) | 60次 | 1分钟 | IP |
+| 已认证 API | 100次 | 1分钟 | userId |
+| AI 对话 | 30次 | 1分钟 | userId |
+| AI 流式 | 20次 | 1分钟 | userId |
+| 登录/注册 | 5次 | 5分钟 | IP |
+
+**实现架构**:
+```
+请求 → Edge Middleware (IP限流) → API Route (用户限流) → tRPC (安全检查)
+          ↓                         ↓                      ↓
+     Upstash Redis            Upstash Redis         Redis/内存回退
+```
+
+**交付物**:
+- ✅ `packages/api/src/services/redisRateLimiter.ts` - Redis 限流服务
+- ✅ `apps/web/middleware.ts` - Edge 限流集成 (IP 级别)
+- ✅ `apps/web/src/lib/rateLimit.ts` - Web 端限流工具
+- ✅ `apps/web/src/app/api/ai/stream/route.ts` - 用户级别限流
+- ✅ `packages/api/src/middleware/securityChecks.ts` - 异步 Redis 限流支持
+- 环境变量: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+
+**限流类型**:
+| 类型 | 用途 | 限制 |
+|------|------|------|
+| `ai` | AI 对话 (非流式) | 30次/分钟 |
+| `ai_stream` | AI 流式对话 | 20次/分钟 |
+| `api` | 通用 API | 100次/分钟 |
+| `auth` | 登录/注册 | 5次/5分钟 |
+| `anonymous` | 未认证请求 | 20次/分钟 |
+
+**故障安全**: Fail-open 策略 (Redis 连接失败时允许请求通过，回退到内存限流器)
+
+---
+
+#### 9.2 低余额预警 ✅ 已完成 (2026-01-25)
+
+**预警策略**:
+| 阈值 | 警告级别 | 提醒方式 |
+|------|---------|---------|
+| < 100 积分 | `low` | Header 黄色警告图标 |
+| < 50 积分 | `very_low` | Header 橙色 + "请充值" 标签 |
+| < 10 积分 | `critical` | Header 红色 + "即将用完" 标签 + 发送时弹窗 |
+| = 0 积分 | `empty` | Header 红色 + "已用完" 标签 + 阻止发送 + 充值弹窗 |
+
+**实现功能**:
+1. **Header 积分显示**:
+   - 根据余额动态变色 (金 → 黄 → 橙 → 红)
+   - 低余额时显示警告图标 (AlertTriangle)
+   - 点击可直接跳转充值页面
+
+2. **发送前检查**:
+   - `empty`: 阻止发送，强制显示充值弹窗
+   - `critical`: 显示警告弹窗，但允许继续发送
+
+3. **充值引导弹窗**:
+   - 显示当前积分余额
+   - 提供"立即充值"按钮
+   - critical 级别可选"稍后再说"
+
+**交付物**:
+- ✅ `apps/web/src/hooks/use-credits.tsx` - 添加阈值判断、警告级别、颜色函数
+- ✅ `apps/web/src/components/credits/LowBalanceDialog.tsx` - 充值引导弹窗
+- ✅ `apps/web/src/components/layout/AppHeader.tsx` - 警告样式、点击充值
+- ✅ `apps/web/src/app/chat/page.tsx` - 发送前检查、弹窗集成
+
+---
+
+#### 9.3 完整安全测试套件 ✅ 已完成 (2026-01-25)
+
+**测试分层**:
+```
+E2E 安全测试 (Playwright) ← 用户视角
+  - XSS 防护、登录安全、权限检查、安全响应头
+单元测试 (Vitest) ← 函数视角
+  - 速率限制、内容审核、计费安全、签名验证
+```
+
+**测试用例统计**:
+| 类别 | 测试文件 | 测试数量 | 状态 |
+|------|---------|---------|------|
+| 输入安全 | `securityChecks.test.ts` | 82 tests | ✅ |
+| 速率限制 | `rateLimiter.test.ts` | 26 tests | ✅ |
+| 计费安全 | `billing.security.test.ts` | 30+ tests | ✅ |
+| E2E 安全 | `security.spec.ts` | 20+ tests | ✅ |
+
+**测试覆盖范围**:
+
+| 测试类别 | 测试场景 |
+|---------|---------|
+| Prompt Injection | ignore instructions、system prompt、jailbreak (DAN/developer mode)、消息长度限制 |
+| 输出安全 | API Key 检测 (OpenAI/Anthropic)、密码泄露、Secret 检测 |
+| 签名验证 | HMAC-SHA256 生成、时间戳验证、重放攻击防护 |
+| 速率限制 | 超限返回、窗口重置、并发请求、Edge Case |
+| 计费安全 | 负数攻击、成本验证、双重消费防护、幂等性 |
+| XSS 防护 | 脚本注入、HTML 实体、事件处理器 |
+| 认证授权 | 未认证访问、Admin 路由保护、Session 安全 |
+| 安全响应头 | X-Frame-Options、X-Content-Type-Options、CSP |
+
+**交付物**:
+- ✅ `packages/api/src/services/__tests__/securityChecks.test.ts` - 输入/输出安全 + 签名验证测试
+- ✅ `packages/api/src/services/__tests__/rateLimiter.test.ts` - 速率限制测试
+- ✅ `packages/api/src/services/__tests__/billing.security.test.ts` - 计费安全测试
+- ✅ `apps/web/tests/e2e/security.spec.ts` - E2E 安全测试 (Playwright)
+- ✅ `.github/workflows/security.yml` - 更新添加安全测试 CI Job
+
+**CI/CD 集成**:
+- 安全单元测试 Job (`security-unit-tests`)
+- E2E 安全测试 Job (`security-e2e-tests`)
+- Playwright 测试报告自动上传 (Artifact)
+
+---
+
+#### 9.4 日志脱敏处理 (暂缓)
+
+**暂缓原因** (2026-01-25 检查结论):
+- ✅ 用户对话内容未记录到日志
+- ✅ `logger.auth.failed(email)` 已定义但未调用
+- ✅ IP 地址有 30 天清理策略
+- ⚠️ 无实际 PII 泄露风险，可后续统一处理
+
+---
+
+### ✅ 阶段 10: AI 模型管理修复 (2026-01-26 已完成)
+
+> **来源**: 遗留问题诊断 (阶段 8 第十三轮)
+> **方案**: 方案 A - 每个模型独立 API Key
+> **提交**: `55741d0` - `fix: 修复 AI 模型管理问题 (阶段 10)`
+
+#### 问题概述
+
+| # | 问题 | 位置 | 影响 | 优先级 | 状态 |
+|---|------|------|------|--------|------|
+| 1 | AI 模型配置无法写入数据库 | `admin/models` | 管理员无法保存模型配置 | 🔴 高 | ✅ |
+| 2 | 模型状态显示不准确 | `admin/models` | "已启用"与"未配置密钥"矛盾 | 🟡 中 | ✅ |
+
+#### 根因分析
+
+**问题 1: 配置写入失败**
+- 前端缺少 `onError` 错误处理，用户看不到失败原因
+- tRPC context 使用 Service Role Key 绕过 RLS，写入应该成功
+- 如果失败，用户无法得知原因
+
+**问题 2: 状态显示不准确**
+- "启用状态"和"API 状态"是独立的两列
+- 环境变量回退逻辑导致误判：`hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY)`
+- `/api/ai/stream` 直接使用环境变量，不读取模型的 api_key
+
+---
+
+#### 10.1 问题 1 修复方案
+
+| # | 修复项 | 位置 | 类型 | 优先级 |
+|---|--------|------|------|--------|
+| 1.1 | 添加 `onError` 错误处理 | `admin/models/page.tsx:135-148` | 前端 | 🔴 高 |
+| 1.2 | 添加 toast 提示保存成功/失败 | `admin/models/page.tsx` | 前端 | 🔴 高 |
+| 1.3 | 添加错误状态 UI 显示 | `admin/models/page.tsx` | 前端 | 🔴 高 |
+
+**1.1 添加 onError 错误处理**
+
+```typescript
+// 修改前
+const createModel = trpc.model.createModel.useMutation({
+  onSuccess: () => { refetch(); closeDialog(); },
+});
+
+// 修改后
+const createModel = trpc.model.createModel.useMutation({
+  onSuccess: () => {
+    toast.success('模型创建成功');
+    refetch();
+    closeDialog();
+  },
+  onError: (error) => {
+    toast.error(`创建失败: ${error.message}`);
+  },
+});
+```
+
+**1.2 引入 toast 组件**
+
+```typescript
+import { toast } from 'sonner'; // 或使用项目现有的 toast
+```
+
+---
+
+#### 10.2 问题 2 修复方案 (方案 A: 每个模型独立 API Key)
+
+| # | 修复项 | 位置 | 类型 | 优先级 |
+|---|--------|------|------|--------|
+| 2.1 | `getModelConfig` 增加查询 `api_key` | `stream/route.ts:73-76` | 后端 | 🔴 高 |
+| 2.2 | API 调用使用模型的 api_key | `stream/route.ts:340` | 后端 | 🔴 高 |
+| 2.3 | 移除状态检测的环境变量回退 | `model.ts:308` | 后端 | 🟡 中 |
+| 2.4 | 启用时检查 API 连接状态 | `admin/models/page.tsx` | 前端 | 🟡 中 |
+| 2.5 | 合并显示：未连接时显示"不可用" | `admin/models/page.tsx` | 前端 | 🟢 低 |
+
+**2.1 getModelConfig 增加 api_key 字段**
+
+```typescript
+// stream/route.ts:73-76
+// 修改前
+const { data } = await supabase
+  .from('ai_models')
+  .select('model_id, name, max_tokens, input_token_cost, output_token_cost')
+  .eq('id', modelId)
+  .single();
+
+// 修改后
+const { data } = await supabase
+  .from('ai_models')
+  .select('model_id, name, max_tokens, input_token_cost, output_token_cost, api_key')
+  .eq('id', modelId)
+  .single();
+
+// 返回值增加 apiKey
+return {
+  modelId: data.model_id,
+  name: data.name,
+  maxTokens: data.max_tokens,
+  inputTokenCost: data.input_token_cost,
+  outputTokenCost: data.output_token_cost,
+  apiKey: data.api_key,  // 新增
+};
+```
+
+**2.2 API 调用优先使用模型的 api_key**
+
+```typescript
+// stream/route.ts:340
+// 修改前
+'x-api-key': process.env.ANTHROPIC_API_KEY!,
+
+// 修改后
+'x-api-key': modelConfig.apiKey || process.env.ANTHROPIC_API_KEY!,
+```
+
+**2.3 移除状态检测的环境变量回退**
+
+```typescript
+// model.ts:308
+// 修改前
+const hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY);
+
+// 修改后
+const hasApiKey = !!model.api_key;
+```
+
+**2.4 启用时检查 API 连接状态**
+
+```typescript
+// admin/models/page.tsx - handleToggleActive 函数
+const handleToggleActive = (model: AIModel) => {
+  const status = connectionStatus?.find(s => s.id === model.id);
+
+  // 如果要启用，但 API 未连接，显示警告
+  if (model.is_active !== 'true' && status && !status.hasApiKey) {
+    toast.warning('该模型未配置 API Key，启用后用户将无法使用');
+  }
+
+  updateModel.mutate({
+    id: model.id,
+    isActive: model.is_active !== 'true',
+  });
+};
+```
+
+---
+
+#### 修复交付物清单
+
+| 文件 | 修改内容 | 状态 |
+|------|---------|------|
+| `apps/web/src/app/admin/models/page.tsx` | 添加错误处理、toast 提示、启用警告 | ✅ 已完成 |
+| `apps/web/src/app/api/ai/stream/route.ts` | getModelConfig 增加 api_key、API 调用使用模型 key | ✅ 已完成 |
+| `packages/api/src/routers/model.ts` | 移除状态检测的环境变量回退 | ✅ 已完成 |
+
+---
+
+#### 验证清单
+
+| # | 验证项 | 预期结果 | 状态 |
+|---|--------|----------|------|
+| 1 | 创建模型失败时 | 显示错误 toast | ⏳ 待验证 |
+| 2 | 更新模型成功时 | 显示成功 toast | ⏳ 待验证 |
+| 3 | 模型无 api_key 时 | 状态显示"未配置密钥" | ⏳ 待验证 |
+| 4 | 模型有 api_key 且测试成功 | 状态显示"已连接" | ⏳ 待验证 |
+| 5 | 启用无 api_key 的模型 | 显示警告提示 | ⏳ 待验证 |
+| 6 | 删除环境变量后 | 有 api_key 的模型仍可用 | ⏳ 待验证 |
+
+---
+
+### ✅ 阶段 11: 移除会员上下文限制功能 (2026-01-26 已完成)
+
+> **来源**: 用户体验优化需求
+> **评估报告**: `docs/diagnostics/context-limits-removal/evaluation-report.md`
+> **方案**: 方案 A - 使用固定值替代会员等级限制
+
+#### 背景说明
+
+当前不同会员等级有不同的上下文消息数限制，这会降低用户体验：
+- free: 10 条 (仅 5 轮对话)
+- pro: 30 条 (15 轮对话)
+- gold: 50 条 (25 轮对话)
+
+**目标**: 移除此限制，所有用户统一使用 100 条上下文消息。
+
+#### 影响评估
+
+| 类型 | 结果 |
+|------|------|
+| ✅ 不受影响 | AI 对话核心、积分计费、会员其他权限、速率限制 |
+| ⚠️ 需要修改 | stream/route.ts、admin/packages/page.tsx (可选) |
+| ❌ 会破坏的 | 无 |
+
+---
+
+#### 11.1 执行步骤
+
+| 步骤 | 任务 | 文件 | 状态 |
+|------|------|------|------|
+| 1 | 删除 `getMaxContextMessages` 函数 | `stream/route.ts` | ✅ 已完成 |
+| 2 | 添加常量 `MAX_CONTEXT_MESSAGES = 100` | `stream/route.ts` | ✅ 已完成 |
+| 3 | 修改历史查询使用固定值 | `stream/route.ts` | ✅ 已完成 |
+| 4 | (可选) 隐藏后台表单字段 | `admin/packages/page.tsx` | 🔜 后续 |
+
+---
+
+#### 11.2 代码修改详情
+
+**修改前** (`stream/route.ts`):
+```typescript
+// 行 105-131: getMaxContextMessages 函数 (删除整个函数)
+async function getMaxContextMessages(supabase: any, userId: string): Promise<number> {
+  // ... 查询会员等级和限制值
+}
+
+// 行 255: 调用函数
+const maxContextMessages = await getMaxContextMessages(supabase, userId);
+
+// 行 266: 使用变量
+const history = await getConversationHistory(supabase, conversation.id, maxContextMessages);
+```
+
+**修改后**:
+```typescript
+// 删除 getMaxContextMessages 函数
+
+// 使用固定值
+const MAX_CONTEXT_MESSAGES = 100; // 统一的最大上下文消息数，所有用户相同
+const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
+```
+
+---
+
+#### 11.3 数据库处理
+
+| 处理项 | 决策 | 原因 |
+|--------|------|------|
+| `membership_plans.max_context_messages` 字段 | 保留不删除 | 避免迁移风险，保留历史数据 |
+| 迁移脚本 | 不需要 | 字段保留 |
+
+---
+
+#### 11.4 验证清单
+
+| # | 验证项 | 预期结果 | 状态 |
+|---|--------|----------|------|
+| 1 | AI 对话功能 | 正常工作 | ⏳ |
+| 2 | 长对话 (超过 50 条) | 能正常发送和接收 | ⏳ |
+| 3 | 免费用户对话 | 与付费用户体验一致 | ⏳ |
+| 4 | 积分计费 | 正常扣费 | ⏳ |
 
 ---
 

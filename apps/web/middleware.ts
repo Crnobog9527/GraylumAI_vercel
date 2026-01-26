@@ -1,5 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
@@ -10,14 +12,105 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
 ];
 
+// 需要速率限制的 API 路径
+const RATE_LIMITED_PATHS = [
+  '/api/ai/stream',
+  '/api/trpc',
+];
+
 // 判断是否为公开路径
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(path => pathname.startsWith(path));
 }
 
+// 判断是否需要速率限制
+function needsRateLimit(pathname: string): boolean {
+  return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
+}
+
+// 获取客户端 IP
+function getClientIP(request: NextRequest): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  const realIP = request.headers.get('x-real-ip');
+  if (realIP) {
+    return realIP;
+  }
+  return 'unknown';
+}
+
+// 创建 Redis 速率限制器 (懒加载)
+let rateLimiter: Ratelimit | null = null;
+
+function getRateLimiter(): Ratelimit | null {
+  if (rateLimiter) return rateLimiter;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (!url || !token) {
+    // 未配置 Redis，跳过速率限制
+    return null;
+  }
+
+  try {
+    const redis = new Redis({ url, token });
+    rateLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(60, '1 m'), // 60 requests per minute
+      prefix: 'graylum:middleware:',
+      analytics: true,
+    });
+    return rateLimiter;
+  } catch {
+    return null;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.headers.get('host') || '';
+
+  // ========================================
+  // 速率限制检查 (API 路径)
+  // ========================================
+  if (needsRateLimit(pathname)) {
+    const limiter = getRateLimiter();
+    if (limiter) {
+      const ip = getClientIP(request);
+      const identifier = ip;
+
+      try {
+        const result = await limiter.limit(identifier);
+
+        if (!result.success) {
+          const retryAfter = Math.ceil((result.reset - Date.now()) / 1000);
+          return new NextResponse(
+            JSON.stringify({
+              error: 'Too Many Requests',
+              message: `请求过于频繁，请在 ${retryAfter} 秒后重试`,
+              retryAfter,
+            }),
+            {
+              status: 429,
+              headers: {
+                'Content-Type': 'application/json',
+                'X-RateLimit-Limit': result.limit.toString(),
+                'X-RateLimit-Remaining': result.remaining.toString(),
+                'X-RateLimit-Reset': result.reset.toString(),
+                'Retry-After': retryAfter.toString(),
+              },
+            }
+          );
+        }
+      } catch (error) {
+        // Redis 错误时允许请求通过 (fail-open)
+        console.error('[Middleware] Rate limit check failed:', error);
+      }
+    }
+  }
 
   // 判断域名类型
   const isAppDomain = hostname.startsWith('app.') || hostname.includes('app.graylum.com');
@@ -54,7 +147,7 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   // ========================================
-  // 域名路由逻辑
+  // 认证与路由逻辑
   // ========================================
 
   // www 域名: 展示着陆页 (公开访问)

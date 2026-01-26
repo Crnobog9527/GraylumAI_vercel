@@ -60,6 +60,7 @@ interface MembershipPlan {
   monthly_bonus_credits: number;
   package_discount: number;
   features: string[];
+  max_context_messages: number;
   is_active: string;
   sort_order: number;
   created_at: string;
@@ -99,6 +100,7 @@ export default function AdminPackagesPage() {
     yearlyCredits: '',
     monthlyBonusCredits: '',
     packageDiscount: '100',
+    maxContextMessages: '20',
     features: '',
     sortOrder: '0',
   });
@@ -247,6 +249,7 @@ export default function AdminPackagesPage() {
       yearlyCredits: '',
       monthlyBonusCredits: '0',
       packageDiscount: '100',
+      maxContextMessages: '20',
       features: '',
       sortOrder: '0',
     });
@@ -264,6 +267,7 @@ export default function AdminPackagesPage() {
       yearlyCredits: plan.yearly_credits.toString(),
       monthlyBonusCredits: plan.monthly_bonus_credits.toString(),
       packageDiscount: plan.package_discount.toString(),
+      maxContextMessages: (plan.max_context_messages || 20).toString(),
       features: (plan.features || []).join('\n'),
       sortOrder: plan.sort_order.toString(),
     });
@@ -285,6 +289,7 @@ export default function AdminPackagesPage() {
       yearlyCredits: parseInt(planFormData.yearlyCredits || '0'),
       monthlyBonusCredits: parseInt(planFormData.monthlyBonusCredits || '0'),
       packageDiscount: parseInt(planFormData.packageDiscount || '100'),
+      maxContextMessages: parseInt(planFormData.maxContextMessages || '20'),
       features: planFormData.features.split('\n').filter(f => f.trim()),
       sortOrder: parseInt(planFormData.sortOrder || '0'),
     };
@@ -1030,15 +1035,33 @@ export default function AdminPackagesPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>排序顺序</Label>
-                <Input
-                  type="number"
-                  value={planFormData.sortOrder}
-                  onChange={(e) => setPlanFormData({ ...planFormData, sortOrder: e.target.value })}
-                  placeholder="如：0"
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>上下文消息数</Label>
+                  <Input
+                    type="number"
+                    min="5"
+                    max="100"
+                    value={planFormData.maxContextMessages}
+                    onChange={(e) => setPlanFormData({ ...planFormData, maxContextMessages: e.target.value })}
+                    placeholder="如：20"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    AI 对话时携带的历史消息数量限制
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>排序顺序</Label>
+                  <Input
+                    type="number"
+                    value={planFormData.sortOrder}
+                    onChange={(e) => setPlanFormData({ ...planFormData, sortOrder: e.target.value })}
+                    placeholder="如：0"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">

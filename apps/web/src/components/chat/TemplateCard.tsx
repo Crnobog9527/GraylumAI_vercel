@@ -23,7 +23,6 @@ interface Template {
   icon?: string;
   color?: string;
   category?: string;
-  credits_cost?: number;
 }
 
 interface TemplateCardProps {
@@ -122,18 +121,6 @@ export default function TemplateCard({
           >
             <Icon className="h-5 w-5" />
           </div>
-          {template.credits_cost && template.credits_cost > 0 && (
-            <Badge
-              variant="secondary"
-              className="font-medium"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              +{template.credits_cost} 积分
-            </Badge>
-          )}
         </div>
 
         <h3

@@ -305,7 +305,8 @@ export const modelRouter = router({
 
     return (data || []).map(model => {
       const config = (model.config as any) || {};
-      const hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY);
+      // 只检查模型自身的 api_key，不再回退到环境变量
+      const hasApiKey = !!model.api_key;
 
       return {
         id: model.id,

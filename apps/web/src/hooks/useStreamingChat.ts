@@ -58,6 +58,7 @@ interface UseStreamingChatOptions {
   conversationId?: string;
   onMessageStart?: () => void;
   onMessageComplete?: (message: StreamMessage) => void;
+  onConversationCreated?: (conversationId: string) => void;
   onError?: (error: string) => void;
   onBalanceChange?: () => void;
 }
@@ -194,6 +195,10 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
                       conversationId: event.conversationId ?? prev.conversationId,
                       modelUsed: event.modelUsed ?? prev.modelUsed,
                     }));
+                    // Notify parent about new conversation
+                    if (event.conversationId && !state.conversationId) {
+                      options.onConversationCreated?.(event.conversationId);
+                    }
                     break;
 
                   case 'delta':
