@@ -1,5 +1,6 @@
 # Dependabot 配置文件
 # 文档: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+# 最后扫描触发: 2026-01-26
 
 version: 2
 updates:
