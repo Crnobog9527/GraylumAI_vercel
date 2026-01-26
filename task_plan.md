@@ -1248,6 +1248,89 @@ const handleToggleActive = (model: AIModel) => {
 
 ---
 
+### ✅ 阶段 11: 移除会员上下文限制功能 (2026-01-26 已完成)
+
+> **来源**: 用户体验优化需求
+> **评估报告**: `docs/diagnostics/context-limits-removal/evaluation-report.md`
+> **方案**: 方案 A - 使用固定值替代会员等级限制
+
+#### 背景说明
+
+当前不同会员等级有不同的上下文消息数限制，这会降低用户体验：
+- free: 10 条 (仅 5 轮对话)
+- pro: 30 条 (15 轮对话)
+- gold: 50 条 (25 轮对话)
+
+**目标**: 移除此限制，所有用户统一使用 100 条上下文消息。
+
+#### 影响评估
+
+| 类型 | 结果 |
+|------|------|
+| ✅ 不受影响 | AI 对话核心、积分计费、会员其他权限、速率限制 |
+| ⚠️ 需要修改 | stream/route.ts、admin/packages/page.tsx (可选) |
+| ❌ 会破坏的 | 无 |
+
+---
+
+#### 11.1 执行步骤
+
+| 步骤 | 任务 | 文件 | 状态 |
+|------|------|------|------|
+| 1 | 删除 `getMaxContextMessages` 函数 | `stream/route.ts` | ✅ 已完成 |
+| 2 | 添加常量 `MAX_CONTEXT_MESSAGES = 100` | `stream/route.ts` | ✅ 已完成 |
+| 3 | 修改历史查询使用固定值 | `stream/route.ts` | ✅ 已完成 |
+| 4 | (可选) 隐藏后台表单字段 | `admin/packages/page.tsx` | 🔜 后续 |
+
+---
+
+#### 11.2 代码修改详情
+
+**修改前** (`stream/route.ts`):
+```typescript
+// 行 105-131: getMaxContextMessages 函数 (删除整个函数)
+async function getMaxContextMessages(supabase: any, userId: string): Promise<number> {
+  // ... 查询会员等级和限制值
+}
+
+// 行 255: 调用函数
+const maxContextMessages = await getMaxContextMessages(supabase, userId);
+
+// 行 266: 使用变量
+const history = await getConversationHistory(supabase, conversation.id, maxContextMessages);
+```
+
+**修改后**:
+```typescript
+// 删除 getMaxContextMessages 函数
+
+// 使用固定值
+const MAX_CONTEXT_MESSAGES = 100; // 统一的最大上下文消息数，所有用户相同
+const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
+```
+
+---
+
+#### 11.3 数据库处理
+
+| 处理项 | 决策 | 原因 |
+|--------|------|------|
+| `membership_plans.max_context_messages` 字段 | 保留不删除 | 避免迁移风险，保留历史数据 |
+| 迁移脚本 | 不需要 | 字段保留 |
+
+---
+
+#### 11.4 验证清单
+
+| # | 验证项 | 预期结果 | 状态 |
+|---|--------|----------|------|
+| 1 | AI 对话功能 | 正常工作 | ⏳ |
+| 2 | 长对话 (超过 50 条) | 能正常发送和接收 | ⏳ |
+| 3 | 免费用户对话 | 与付费用户体验一致 | ⏳ |
+| 4 | 积分计费 | 正常扣费 | ⏳ |
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行

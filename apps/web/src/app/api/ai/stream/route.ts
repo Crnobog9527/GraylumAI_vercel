@@ -98,38 +98,9 @@ async function getModelConfig(supabase: any, modelId?: string) {
   };
 }
 
-/**
- * 获取用户会员等级的上下文消息限制 (P2-15: 上下文长度限制)
- * free: 10条, pro: 30条, gold: 50条
- */
-async function getMaxContextMessages(supabase: any, userId: string): Promise<number> {
-  const DEFAULT_LIMIT = 20;
-
-  try {
-    // 获取用户会员等级
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('membership_level')
-      .eq('id', userId)
-      .single();
-
-    if (!profile?.membership_level) {
-      return DEFAULT_LIMIT;
-    }
-
-    // 获取对应会员等级的上下文限制
-    const { data: plan } = await supabase
-      .from('membership_plans')
-      .select('max_context_messages')
-      .eq('level', profile.membership_level)
-      .eq('is_active', 'true')
-      .single();
-
-    return plan?.max_context_messages ?? DEFAULT_LIMIT;
-  } catch {
-    return DEFAULT_LIMIT;
-  }
-}
+// 统一的最大上下文消息数（所有用户相同，不再按会员等级区分）
+// 移除了 P2-15 会员等级限制功能，提升用户体验
+const MAX_CONTEXT_MESSAGES = 100;
 
 async function getConversationHistory(
   supabase: any,
@@ -251,9 +222,6 @@ export async function POST(request: NextRequest) {
     // Get model config
     const modelConfig = await getModelConfig(supabase, modelId);
 
-    // Get user's context message limit based on membership (P2-15)
-    const maxContextMessages = await getMaxContextMessages(supabase, userId);
-
     // Get or create conversation
     const conversation = await getOrCreateConversation(
       supabase,
@@ -262,8 +230,8 @@ export async function POST(request: NextRequest) {
       message.substring(0, 50)
     );
 
-    // Get history with membership-based limit
-    const history = await getConversationHistory(supabase, conversation.id, maxContextMessages);
+    // Get conversation history (统一使用 MAX_CONTEXT_MESSAGES，所有用户相同)
+    const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
 
     // Build messages
     const messages = [
