@@ -1079,6 +1079,174 @@ E2E 安全测试 (Playwright) ← 用户视角
 
 ---
 
+### 🚀 阶段 10: AI 模型管理修复 (2026-01-26 规划)
+
+> **来源**: 遗留问题诊断 (阶段 8 第十三轮)
+> **方案**: 方案 A - 每个模型独立 API Key
+
+#### 问题概述
+
+| # | 问题 | 位置 | 影响 | 优先级 |
+|---|------|------|------|--------|
+| 1 | AI 模型配置无法写入数据库 | `admin/models` | 管理员无法保存模型配置 | 🔴 高 |
+| 2 | 模型状态显示不准确 | `admin/models` | "已启用"与"未配置密钥"矛盾 | 🟡 中 |
+
+#### 根因分析
+
+**问题 1: 配置写入失败**
+- 前端缺少 `onError` 错误处理，用户看不到失败原因
+- tRPC context 使用 Service Role Key 绕过 RLS，写入应该成功
+- 如果失败，用户无法得知原因
+
+**问题 2: 状态显示不准确**
+- "启用状态"和"API 状态"是独立的两列
+- 环境变量回退逻辑导致误判：`hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY)`
+- `/api/ai/stream` 直接使用环境变量，不读取模型的 api_key
+
+---
+
+#### 10.1 问题 1 修复方案
+
+| # | 修复项 | 位置 | 类型 | 优先级 |
+|---|--------|------|------|--------|
+| 1.1 | 添加 `onError` 错误处理 | `admin/models/page.tsx:135-148` | 前端 | 🔴 高 |
+| 1.2 | 添加 toast 提示保存成功/失败 | `admin/models/page.tsx` | 前端 | 🔴 高 |
+| 1.3 | 添加错误状态 UI 显示 | `admin/models/page.tsx` | 前端 | 🔴 高 |
+
+**1.1 添加 onError 错误处理**
+
+```typescript
+// 修改前
+const createModel = trpc.model.createModel.useMutation({
+  onSuccess: () => { refetch(); closeDialog(); },
+});
+
+// 修改后
+const createModel = trpc.model.createModel.useMutation({
+  onSuccess: () => {
+    toast.success('模型创建成功');
+    refetch();
+    closeDialog();
+  },
+  onError: (error) => {
+    toast.error(`创建失败: ${error.message}`);
+  },
+});
+```
+
+**1.2 引入 toast 组件**
+
+```typescript
+import { toast } from 'sonner'; // 或使用项目现有的 toast
+```
+
+---
+
+#### 10.2 问题 2 修复方案 (方案 A: 每个模型独立 API Key)
+
+| # | 修复项 | 位置 | 类型 | 优先级 |
+|---|--------|------|------|--------|
+| 2.1 | `getModelConfig` 增加查询 `api_key` | `stream/route.ts:73-76` | 后端 | 🔴 高 |
+| 2.2 | API 调用使用模型的 api_key | `stream/route.ts:340` | 后端 | 🔴 高 |
+| 2.3 | 移除状态检测的环境变量回退 | `model.ts:308` | 后端 | 🟡 中 |
+| 2.4 | 启用时检查 API 连接状态 | `admin/models/page.tsx` | 前端 | 🟡 中 |
+| 2.5 | 合并显示：未连接时显示"不可用" | `admin/models/page.tsx` | 前端 | 🟢 低 |
+
+**2.1 getModelConfig 增加 api_key 字段**
+
+```typescript
+// stream/route.ts:73-76
+// 修改前
+const { data } = await supabase
+  .from('ai_models')
+  .select('model_id, name, max_tokens, input_token_cost, output_token_cost')
+  .eq('id', modelId)
+  .single();
+
+// 修改后
+const { data } = await supabase
+  .from('ai_models')
+  .select('model_id, name, max_tokens, input_token_cost, output_token_cost, api_key')
+  .eq('id', modelId)
+  .single();
+
+// 返回值增加 apiKey
+return {
+  modelId: data.model_id,
+  name: data.name,
+  maxTokens: data.max_tokens,
+  inputTokenCost: data.input_token_cost,
+  outputTokenCost: data.output_token_cost,
+  apiKey: data.api_key,  // 新增
+};
+```
+
+**2.2 API 调用优先使用模型的 api_key**
+
+```typescript
+// stream/route.ts:340
+// 修改前
+'x-api-key': process.env.ANTHROPIC_API_KEY!,
+
+// 修改后
+'x-api-key': modelConfig.apiKey || process.env.ANTHROPIC_API_KEY!,
+```
+
+**2.3 移除状态检测的环境变量回退**
+
+```typescript
+// model.ts:308
+// 修改前
+const hasApiKey = !!(model.api_key || process.env.ANTHROPIC_API_KEY);
+
+// 修改后
+const hasApiKey = !!model.api_key;
+```
+
+**2.4 启用时检查 API 连接状态**
+
+```typescript
+// admin/models/page.tsx - handleToggleActive 函数
+const handleToggleActive = (model: AIModel) => {
+  const status = connectionStatus?.find(s => s.id === model.id);
+
+  // 如果要启用，但 API 未连接，显示警告
+  if (model.is_active !== 'true' && status && !status.hasApiKey) {
+    toast.warning('该模型未配置 API Key，启用后用户将无法使用');
+  }
+
+  updateModel.mutate({
+    id: model.id,
+    isActive: model.is_active !== 'true',
+  });
+};
+```
+
+---
+
+#### 修复交付物清单
+
+| 文件 | 修改内容 | 状态 |
+|------|---------|------|
+| `apps/web/src/app/admin/models/page.tsx` | 添加错误处理、toast 提示、启用警告 | ⏳ 待修复 |
+| `apps/web/src/app/api/ai/stream/route.ts` | getModelConfig 增加 api_key、API 调用使用模型 key | ⏳ 待修复 |
+| `packages/api/src/routers/model.ts` | 移除状态检测的环境变量回退 | ⏳ 待修复 |
+
+---
+
+#### 验证清单
+
+| # | 验证项 | 预期结果 |
+|---|--------|----------|
+| 1 | 创建模型失败时 | 显示错误 toast |
+| 2 | 更新模型成功时 | 显示成功 toast |
+| 3 | 模型无 api_key 时 | 状态显示"未配置密钥" |
+| 4 | 模型有 api_key 且测试成功 | 状态显示"已连接" |
+| 5 | 启用无 api_key 的模型 | 显示警告提示 |
+| 6 | 删除环境变量后 | 有 api_key 的模型仍可用 |
+
+---
+
 ### 💡 后续优化任务 (可选)
 
 > **说明**: 以下任务为可选优化，根据需要执行
