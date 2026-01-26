@@ -21,7 +21,7 @@
     "./src/services/diagnostics": "./src/services/diagnostics.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.90.1",
+    "@supabase/supabase-js": "^2.91.1",
     "@trpc/server": "^11.8.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.1",
