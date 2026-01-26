@@ -67,12 +67,13 @@ async function getModelConfig(supabase: any, modelId?: string) {
       maxTokens: 8192,
       inputTokenCost: 3000, // per 1M tokens in micro-dollars
       outputTokenCost: 15000,
+      apiKey: null, // 使用环境变量
     };
   }
 
   const { data } = await supabase
     .from('ai_models')
-    .select('model_id, name, max_tokens, input_token_cost, output_token_cost')
+    .select('model_id, name, max_tokens, input_token_cost, output_token_cost, api_key')
     .eq('id', modelId)
     .single();
 
@@ -83,6 +84,7 @@ async function getModelConfig(supabase: any, modelId?: string) {
       maxTokens: data.max_tokens,
       inputTokenCost: data.input_token_cost,
       outputTokenCost: data.output_token_cost,
+      apiKey: data.api_key || null, // 模型自己的 API Key
     };
   }
 
@@ -92,6 +94,7 @@ async function getModelConfig(supabase: any, modelId?: string) {
     maxTokens: 8192,
     inputTokenCost: 3000,
     outputTokenCost: 15000,
+    apiKey: null,
   };
 }
 
@@ -333,11 +336,17 @@ export async function POST(request: NextRequest) {
           );
 
           // Call Anthropic streaming API
+          // 优先使用模型配置的 API Key，否则回退到环境变量
+          const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY;
+          if (!apiKey) {
+            throw new Error('未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量');
+          }
+
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-api-key': process.env.ANTHROPIC_API_KEY!,
+              'x-api-key': apiKey,
               'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
