@@ -12,6 +12,81 @@ import { v4 as uuidv4 } from 'uuid';
 // 自定义 Hooks
 // ============================================================================
 
+// ============================================================================
+// 余额预警阈值配置
+// ============================================================================
+
+export const CREDIT_THRESHOLDS = {
+  LOW: 100,      // < 100 积分: 黄色警告
+  VERY_LOW: 50,  // < 50 积分: 橙色警告 + Toast
+  CRITICAL: 10,  // < 10 积分: 红色警告 + 弹窗
+  EMPTY: 0,      // 0 积分: 阻止发送
+} as const;
+
+export type WarningLevel = 'none' | 'low' | 'very_low' | 'critical' | 'empty';
+
+/**
+ * 根据积分余额判断警告级别
+ */
+export function getWarningLevel(credits: number): WarningLevel {
+  if (credits <= CREDIT_THRESHOLDS.EMPTY) return 'empty';
+  if (credits < CREDIT_THRESHOLDS.CRITICAL) return 'critical';
+  if (credits < CREDIT_THRESHOLDS.VERY_LOW) return 'very_low';
+  if (credits < CREDIT_THRESHOLDS.LOW) return 'low';
+  return 'none';
+}
+
+/**
+ * 获取警告级别对应的颜色
+ */
+export function getWarningColor(level: WarningLevel): string {
+  switch (level) {
+    case 'empty':
+    case 'critical':
+      return 'var(--error)'; // 红色
+    case 'very_low':
+      return '#f97316'; // 橙色
+    case 'low':
+      return '#eab308'; // 黄色
+    default:
+      return 'var(--color-primary)'; // 金色 (正常)
+  }
+}
+
+/**
+ * 获取警告级别对应的背景色
+ */
+export function getWarningBgColor(level: WarningLevel): string {
+  switch (level) {
+    case 'empty':
+    case 'critical':
+      return 'rgba(239, 68, 68, 0.1)'; // 红色背景
+    case 'very_low':
+      return 'rgba(249, 115, 22, 0.1)'; // 橙色背景
+    case 'low':
+      return 'rgba(234, 179, 8, 0.1)'; // 黄色背景
+    default:
+      return 'var(--color-primary-10)'; // 金色背景 (正常)
+  }
+}
+
+/**
+ * 获取警告级别对应的边框色
+ */
+export function getWarningBorderColor(level: WarningLevel): string {
+  switch (level) {
+    case 'empty':
+    case 'critical':
+      return 'rgba(239, 68, 68, 0.2)';
+    case 'very_low':
+      return 'rgba(249, 115, 22, 0.2)';
+    case 'low':
+      return 'rgba(234, 179, 8, 0.2)';
+    default:
+      return 'var(--color-primary-20)';
+  }
+}
+
 /**
  * 获取积分余额
  */
@@ -21,13 +96,23 @@ export function useCreditsBalance() {
     refetchOnWindowFocus: true, // 窗口聚焦时刷新
   });
 
+  const credits = query.data?.credits ?? 0;
+  const warningLevel = getWarningLevel(credits);
+
   return {
-    credits: query.data?.credits ?? 0,
+    credits,
     creditsExpiringSoon: query.data?.creditsExpiringSoon ?? 0,
     creditsExpiryDate: query.data?.creditsExpiryDate,
     isLoading: query.isLoading,
     error: query.error,
     refetch: query.refetch,
+    // 预警相关
+    warningLevel,
+    warningColor: getWarningColor(warningLevel),
+    warningBgColor: getWarningBgColor(warningLevel),
+    warningBorderColor: getWarningBorderColor(warningLevel),
+    isLowBalance: warningLevel !== 'none',
+    canSendMessage: credits > CREDIT_THRESHOLDS.EMPTY,
   };
 }
 

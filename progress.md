@@ -23,12 +23,238 @@
 
 ## Current Status
 
-- **Phase:** 阶段 9 AI 对话功能修复 ⏳ 规划完成
-- **Previous:** AI 对话功能诊断 ✅ 完成
-- **Current:** 等待用户确认修复计划后开始执行
-- **开始时间:** 2026-01-24
-- **更新时间:** 2026-01-24 (诊断完成 + 工作计划规划)
-- **参考文档:** `AI_DIALOGUE_DIAGNOSTIC_REPORT.md`, `findings.md`
+- **Phase:** 阶段 11 移除会员上下文限制 ✅ 已完成
+- **Previous:** 阶段 10 AI 模型管理修复 ✅ 已完成
+- **Current:** 方案 A 已执行完成
+- **开始时间:** 2026-01-26
+- **更新时间:** 2026-01-26 (方案 A 执行完成)
+- **参考文档:** `task_plan.md` - 阶段 11, `docs/diagnostics/context-limits-removal/evaluation-report.md`
+
+---
+
+### ✅ 阶段 11: 移除会员上下文限制 (2026-01-26 已完成)
+
+> **来源**: 用户体验优化需求
+> **方案**: 方案 A - 使用固定值 100 替代会员等级限制
+
+#### 背景
+
+当前不同会员等级有不同的上下文消息限制 (free:10, pro:30, gold:50)，影响用户体验。
+
+#### 执行结果
+
+| 步骤 | 任务 | 文件 | 状态 |
+|------|------|------|------|
+| 1 | 删除 `getMaxContextMessages` 函数 | `stream/route.ts` | ✅ |
+| 2 | 添加常量 `MAX_CONTEXT_MESSAGES = 100` | `stream/route.ts` | ✅ |
+| 3 | 修改历史查询使用固定值 | `stream/route.ts` | ✅ |
+
+#### 效果
+
+- ✅ 所有用户统一 100 条上下文消息
+- ✅ 无需数据库迁移
+- ✅ 不影响其他功能
+- ✅ 删除了约 30 行代码，简化了逻辑
+
+---
+
+### ✅ 阶段 10: AI 模型管理修复 (2026-01-26 已完成)
+
+> **来源**: 遗留问题诊断 (阶段 8 第十三轮)
+> **方案**: 方案 A - 每个模型独立 API Key
+
+#### 问题概述
+
+| # | 问题 | 影响 | 优先级 | 状态 |
+|---|------|------|--------|------|
+| 1 | AI 模型配置无法写入数据库 | 管理员无法保存模型配置 | 🔴 高 | ✅ 已修复 |
+| 2 | 模型状态显示不准确 | "已启用"与"未配置密钥"矛盾 | 🟡 中 | ✅ 已修复 |
+
+#### 问题 1 修复内容
+
+| # | 修复项 | 位置 | 状态 |
+|---|--------|------|------|
+| 1.1 | 添加 `onError` 错误处理 | `admin/models/page.tsx` | ✅ |
+| 1.2 | 添加 toast 提示 (成功/失败) | `admin/models/page.tsx` | ✅ |
+| 1.3 | 添加错误状态 UI 显示 | `admin/models/page.tsx` | ✅ |
+
+#### 问题 2 修复内容 (方案 A)
+
+| # | 修复项 | 位置 | 状态 |
+|---|--------|------|------|
+| 2.1 | `getModelConfig` 增加查询 `api_key` | `stream/route.ts` | ✅ |
+| 2.2 | API 调用使用模型的 api_key | `stream/route.ts:340` | ✅ |
+| 2.3 | 移除状态检测的环境变量回退 | `model.ts:308` | ✅ |
+| 2.4 | 启用时检查 API 连接状态 | `admin/models/page.tsx` | ✅ |
+| 2.5 | 合并显示：未连接时显示"不可用" | `admin/models/page.tsx` | 🔜 下次迭代 |
+
+#### 修改文件清单
+
+| 文件 | 修改内容 | 状态 |
+|------|---------|------|
+| `apps/web/src/app/admin/models/page.tsx` | 错误处理、toast、启用警告 | ✅ |
+| `apps/web/src/app/api/ai/stream/route.ts` | api_key 查询和使用 | ✅ |
+| `packages/api/src/routers/model.ts` | 移除环境变量回退 | ✅ |
+
+**提交记录**: `55741d0` - `fix: 修复 AI 模型管理问题 (阶段 10)`
+
+---
+
+### ✅ 阶段 9 安全功能增强 (2026-01-25 已完成)
+
+> **来源**: `docs/SECURITY_AUDIT_PHASE9.md` 安全审计建议补充功能
+
+**功能清单**:
+
+| # | 功能 | 优先级 | 工作量 | 状态 |
+|---|------|--------|--------|------|
+| 9.1 | 速率限制 (Upstash Redis) | 🚨 必做 | 6-8h | ✅ 已完成 |
+| 9.2 | 低余额预警 | ⚠️ 应做 | 3-4h | ✅ 已完成 |
+| 9.3 | 完整安全测试套件 | ⚠️ 应做 | 8-12h | ✅ 已完成 |
+| 9.4 | 日志脱敏处理 | 💡 可选 | 4-6h | 🔜 暂缓 |
+
+---
+
+### ✅ 9.1 速率限制实现 (2026-01-25 完成)
+
+**实现方案**: Upstash Redis + @upstash/ratelimit (滑动窗口算法)
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/services/redisRateLimiter.ts` | Redis 限流服务 (支持 5 种类型) | ✅ |
+| `apps/web/middleware.ts` | Edge 限流 (IP 级别) | ✅ |
+| `apps/web/src/lib/rateLimit.ts` | Web 端限流工具 | ✅ |
+| `apps/web/src/app/api/ai/stream/route.ts` | AI 流式用户级限流 | ✅ |
+| `packages/api/src/middleware/securityChecks.ts` | tRPC 异步限流支持 | ✅ |
+
+**限流策略**:
+
+| 类型 | 限制 | 窗口 | 用途 |
+|------|------|------|------|
+| `ai` | 30次 | 1分钟 | AI 对话 (非流式) |
+| `ai_stream` | 20次 | 1分钟 | AI 流式对话 |
+| `api` | 100次 | 1分钟 | 通用 API |
+| `auth` | 5次 | 5分钟 | 登录/注册 |
+| `anonymous` | 20次 | 1分钟 | 未认证请求 |
+
+**架构设计**:
+```
+请求流程:
+1. Edge Middleware → IP 级别全局限流 (60次/分钟)
+2. API Route → 用户级别限流 (20次/分钟 for ai_stream)
+3. tRPC Security → 用户级别限流 (30次/分钟 for ai)
+```
+
+**故障安全**:
+- Fail-open 策略: Redis 连接失败时允许请求通过
+- 内存回退: Redis 未配置时使用内存限流器
+- 429 响应: 包含 `Retry-After`, `X-RateLimit-*` 头
+
+**环境变量** (需在 Vercel 配置):
+- `UPSTASH_REDIS_REST_URL` - Upstash Redis REST URL
+- `UPSTASH_REDIS_REST_TOKEN` - Upstash Redis REST Token
+
+---
+
+### ✅ 9.2 低余额预警实现 (2026-01-25 完成)
+
+**实现功能**:
+
+1. **阈值配置** (`use-credits.tsx`):
+   - `< 100 积分`: `low` 级别 - 黄色警告
+   - `< 50 积分`: `very_low` 级别 - 橙色警告
+   - `< 10 积分`: `critical` 级别 - 红色警告 + 弹窗
+   - `= 0 积分`: `empty` 级别 - 阻止发送 + 强制充值
+
+2. **Header 积分显示** (`AppHeader.tsx`):
+   - 动态颜色变化 (金 → 黄 → 橙 → 红)
+   - 低余额时显示 AlertTriangle 图标
+   - 显示状态标签 ("请充值" / "即将用完" / "已用完")
+   - 点击可直接跳转充值页面
+
+3. **发送前检查** (`chat/page.tsx`):
+   - `empty`: 阻止发送，显示强制充值弹窗
+   - `critical`: 显示警告弹窗，但允许继续发送
+
+4. **充值引导弹窗** (`LowBalanceDialog.tsx`):
+   - 显示当前积分余额和警告级别
+   - "立即充值" 按钮跳转充值页面
+   - critical 级别可选"稍后再说"
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `apps/web/src/hooks/use-credits.tsx` | 阈值判断、警告级别、颜色函数 | ✅ |
+| `apps/web/src/components/credits/LowBalanceDialog.tsx` | 充值引导弹窗组件 | ✅ |
+| `apps/web/src/components/layout/AppHeader.tsx` | 警告样式、点击充值 | ✅ |
+| `apps/web/src/app/chat/page.tsx` | 发送前检查、弹窗集成 | ✅ |
+
+---
+
+### ✅ 9.3 安全测试套件实现 (2026-01-25 完成)
+
+**测试分层架构**:
+```
+E2E 安全测试 (Playwright) ← 用户视角
+  - XSS 防护、登录安全、权限检查、安全响应头
+单元测试 (Vitest) ← 函数视角
+  - 输入/输出安全、速率限制、计费安全、签名验证
+```
+
+**测试统计**:
+
+| 测试文件 | 测试数量 | 覆盖范围 |
+|---------|---------|---------|
+| `securityChecks.test.ts` | 82 tests | Prompt injection、输出安全、签名验证 |
+| `rateLimiter.test.ts` | 26 tests | 限流逻辑、窗口重置、并发处理 |
+| `billing.security.test.ts` | 30+ tests | 负数攻击、成本验证、双重消费 |
+| `security.spec.ts` (E2E) | 20+ tests | XSS、认证、授权、安全头 |
+
+**测试覆盖场景**:
+
+| 类别 | 测试场景 |
+|------|---------|
+| Prompt Injection | ignore/disregard/forget patterns, system prompt, [INST], <<SYS>> |
+| Jailbreak 检测 | DAN mode, developer mode, roleplay bypass |
+| 输出安全 | API Key 泄露 (OpenAI/Anthropic), 密码/Secret 检测 |
+| 签名验证 | HMAC-SHA256 生成、时间戳验证、重放攻击防护 |
+| 计费安全 | 负数金额攻击、成本验证、幂等性、竞态条件 |
+| XSS 防护 | Script 标签、事件处理器、HTML 实体 |
+| 认证授权 | 未认证路由保护、Admin 权限检查 |
+| 安全响应头 | X-Frame-Options、X-Content-Type-Options |
+
+**交付物**:
+
+| 文件 | 描述 | 状态 |
+|------|------|------|
+| `packages/api/src/services/__tests__/securityChecks.test.ts` | 输入/输出安全 + 签名验证测试 | ✅ |
+| `packages/api/src/services/__tests__/rateLimiter.test.ts` | 速率限制单元测试 | ✅ |
+| `packages/api/src/services/__tests__/billing.security.test.ts` | 计费安全测试 | ✅ |
+| `apps/web/tests/e2e/security.spec.ts` | E2E 安全测试 (Playwright) | ✅ |
+| `.github/workflows/security.yml` | 添加 security-unit-tests + security-e2e-tests Jobs | ✅ |
+
+**CI/CD 集成**:
+- `security-unit-tests` Job: 运行 API 包安全单元测试
+- `security-e2e-tests` Job: 运行 Playwright E2E 安全测试
+- 测试报告自动上传为 Artifact (7天保留)
+
+---
+
+### 📋 日志脱敏暂缓原因 (代码检查结论):
+
+| 检查项 | 结果 |
+|-------|------|
+| 用户对话内容是否记录 | ✅ 未记录 |
+| `logger.auth.failed(email)` 调用 | ✅ 已定义但未调用 (0 次) |
+| IP 地址记录 | ⚠️ 有记录，但有 30 天清理 |
+| 其他 PII (密码/API Key 等) | ✅ 未记录 |
+
+**结论**: 无实际合规风险，日志脱敏可延后至下一迭代
+
+---
 
 ### ✅ AI 对话功能诊断完成 (2026-01-24)
 
@@ -66,7 +292,7 @@
 | 第二阶段 | AI 模型管理修复 | P0-B (3个问题) | ✅ 已完成 |
 | 第三阶段 | 计费系统修复 | P1-A (3个问题) | ✅ 已完成 |
 | 第四阶段 | 订阅与安全修复 | P1-B, P1-C (5个问题) | ✅ 已完成 |
-| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (8/15 已完成) |
+| 第五阶段 | 功能完善 | P2 (15个问题) | ⏳ 进行中 (12/15 已完成) |
 | 第六阶段 | UI 优化 | P3 (6个问题) | ⏳ 待执行 |
 
 ---
@@ -246,21 +472,70 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 **修改文件**:
 - `packages/api/src/routers/admin.ts` - `getPerformanceStats` 使用真实数据
 
-#### P2-C: 系统设置生效性 ✅ 已验证
+#### P2-C: 系统设置生效性 ✅ 已完成
 - ✅ P2-9 智能路由：从 `system_settings.ai_models.enableSmartRouting` 读取
-- ⚠️ P2-10 模型选择器：设置存在但聊天页 UI 未实现
-- ⚠️ P2-11 首页引导：UI 存在但保存功能为占位符
+- ✅ P2-10 模型选择器：聊天页面已实现模型选择器
+- ✅ P2-11 首页引导：设置保存功能已实现
 
-**待实现功能**:
+#### P2-B: 功能广场模块 ✅ 已完成
+- ✅ P2-6: 模块详情弹窗 - 已实现
+- ✅ P2-7: modules 表字段扩展 - 已添加 migration
+- ✅ P2-8: 清理无效字段 - 已删除 credits_cost
 
-#### P2-B: 功能广场模块 (需要前端+后端开发)
-- P2-6: 模块详情弹窗
-- P2-7: modules 表字段扩展
-- P2-8: 清理无效字段
+#### P2-D: 会员权限功能 ✅ 已完成 (2026-01-24)
+- ✅ P2-12: 对话导出功能 - 支持 JSON/Markdown/TXT 格式
+- ✅ P2-13: 批量导出功能 - 支持导出全部对话
+- ✅ P2-14: 导出权限检查 - 基于会员等级 (allow_export, allow_batch_export)
+- ✅ P2-15: 上下文长度限制 - 基于会员等级 (max_context_messages)
 
-#### P2-D: 会员权限功能 (需要 API 和前端开发)
-- P2-12/13/14: 对话导出功能
-- P2-15: 上下文长度限制
+**P2-D 交付物**:
+- `packages/api/src/routers/chat.ts` - 新增 3 个导出 API:
+  - `getExportPermissions` - 获取用户导出权限
+  - `exportConversation` - 导出单个对话
+  - `exportAllConversations` - 批量导出所有对话
+- `apps/web/src/components/chat/ExportDialog.tsx` - 导出对话框组件
+- `apps/web/src/app/chat/page.tsx` - 集成导出功能
+- `packages/db/migrations/0009_context_length_limit.sql` - 上下文限制迁移
+- `apps/web/src/app/api/ai/stream/route.ts` - 基于会员的上下文限制
+
+**导出功能说明**:
+| 功能 | 权限字段 | 说明 |
+|------|---------|------|
+| 单个导出 | `allow_export` | 支持 JSON/Markdown/TXT 格式 |
+| 批量导出 | `allow_batch_export` | 支持 JSON/Markdown 格式 |
+
+**上下文限制说明**:
+| 会员等级 | 最大消息数 | 说明 |
+|---------|-----------|------|
+| free | 10 | 5轮对话 |
+| pro | 30 | 15轮对话 |
+| gold | 50 | 25轮对话 |
+
+**P2 全部完成**:
+
+---
+
+### ✅ 阶段 2: 安全加固 (已完成 2026-01-24)
+
+#### 2.1 RLS 策略审计
+- ✅ 21/21 表已启用 RLS
+- ✅ 所有表都有完整的策略 (SELECT/INSERT/UPDATE/DELETE)
+- ✅ 管理员权限通过 `is_admin()` 函数验证
+
+#### 2.2 环境变量安全检查
+- ✅ 无硬编码密钥
+- ✅ `.gitignore` 正确排除 `.env*` 文件
+- ✅ `.env.example` 仅含占位符
+- ✅ `envValidator.ts` 启动时验证必需变量
+
+#### 2.3 依赖安全扫描
+- ✅ 配置 `.github/dependabot.yml`
+- ✅ 每周一自动扫描 (Asia/Shanghai 09:00)
+- ✅ 依赖分组更新 (减少 PR 数量)
+
+**交付物**:
+- `docs/SECURITY_AUDIT_REPORT.md` - 完整安全审计报告
+- `.github/dependabot.yml` - Dependabot 配置
 
 ---
 
@@ -276,7 +551,7 @@ const { sendMessage, isStreaming, error, abort } = useStreamingChat({
 | **性能监控** | 5 | 🟡 P2 | 数据是模拟/随机值 |
 | **功能广场** | 3 | 🟡 P2 | 字段不匹配 |
 | **系统设置** | 3 | 🟡 P2 | 设置生效性待验证 |
-| **会员权限** | 4 | 🟡 P2 | 导出功能未实现 |
+| **会员权限** | 4 | 🟡 P2 | ✅ 全部完成 (4/4) |
 | **管理后台 UI** | 5 | 🟢 P3 | 排版/样式问题 |
 | **代码质量** | 1 | 🟢 P3 | 类型定义重复 |
 
@@ -756,6 +1031,35 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
+### ✅ 阶段 8 第十三轮修复 (2026-01-25)
+
+**问题**: 对话功能失效 - 消息不显示、新对话不同步
+
+| # | 问题 | 位置 | 原因 | 状态 |
+|---|------|------|------|------|
+| 1 | 对话列表显示已删除对话 | `chat.ts:getConversations` | 缺少 `is_deleted='false'` 过滤条件 | ✅ 已修复 |
+| 2 | 消息列表显示已删除消息 | `chat.ts:getMessages` | 缺少 `is_deleted='false'` 过滤条件 | ✅ 已修复 |
+| 3 | 消息计数包含已删除消息 | `chat.ts:getConversations` | 消息统计查询未排除已删除记录 | ✅ 已修复 |
+| 4 | 新对话不同步到侧边栏 | `useStreamingChat.ts` | 创建对话后未通知父组件更新 store | ✅ 已修复 |
+| 5 | AppHeader 导入路径错误 | `AppHeader.tsx:29` | `@/lib/trpc` 应为 `@/trpc/client` | ✅ 已修复 |
+
+**修复内容**:
+| 文件 | 修改 |
+|------|------|
+| `packages/api/src/routers/chat.ts` | `getConversations` 添加 `.eq('is_deleted', 'false')` 过滤 |
+| `packages/api/src/routers/chat.ts` | `getMessages` 添加 `.eq('is_deleted', 'false')` 过滤 |
+| `packages/api/src/routers/chat.ts` | 消息计数查询添加 `.eq('is_deleted', 'false')` |
+| `apps/web/src/hooks/useStreamingChat.ts` | 添加 `onConversationCreated` 回调接口 |
+| `apps/web/src/app/chat/page.tsx` | 处理 `onConversationCreated` 同步新对话到 store |
+| `apps/web/src/components/layout/AppHeader.tsx` | 修复 trpc 导入路径 |
+
+**问题分析**:
+- 对话和消息使用软删除 (`is_deleted` 字段)，但查询未排除已删除记录
+- 流式对话创建新会话后，`activeConversationId` 未同步，导致侧边栏状态错误
+- 解决方案: 添加过滤条件 + 新增回调机制同步状态
+
+---
+
 ### ✅ 阶段 8 第十二轮修复 (2026-01-23)
 
 **问题**: 管理员后台查看工单时附件图片无法显示
@@ -773,14 +1077,14 @@ const { data: userProfile, error } = await ctx.supabase
 
 ---
 
-### ⚠️ 阶段 8 第十一轮修复 (2026-01-23)
+### ✅ 阶段 8 第十一轮修复 (2026-01-23)
 
 **问题**: 工单附件不显示 + 对话功能失效
 
 | # | 问题 | 位置 | 原因 | 状态 |
 |---|------|------|------|------|
 | 1 | 工单上传图片不显示 | `TicketsPanel.tsx` | 附件上传是 mock 代码，未实际上传到存储 | ✅ 已修复 |
-| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ⏳ 待修复 |
+| 2 | 对话功能失效 | `chat/page.tsx` | 页面从未获取或显示消息，始终显示空状态 | ✅ 已修复 (第十三轮) |
 
 **已完成的修复内容**:
 | 文件 | 修改 |
@@ -791,9 +1095,7 @@ const { data: userProfile, error } = await ctx.supabase
 | `TicketsPanel.tsx` | `CreateTicketForm` 实现真实文件上传 |
 | `TicketsPanel.tsx` | `TicketDetailView` 添加附件图片展示区域 |
 
-**待修复 - 对话功能**:
-- 已尝试添加消息获取和显示逻辑，但功能仍未正常运行
-- 需进一步排查消息存储、获取和渲染流程
+**对话功能已在第十三轮修复**: 详见上方第十三轮修复记录
 
 **Supabase Storage 配置**:
 - Bucket 名称: `ticket-attachments`
@@ -980,7 +1282,7 @@ const { data: announcementsData } = trpc.settings.getActiveAnnouncements.useQuer
 | **阶段 0** | 系统诊断 | 🔴 必做 | ✅ 完成 |
 | **阶段 1** | 基础监控 (Sentry + 日志 + AI监控仪表板) | 🔴 必做 | ✅ 完成 |
 | **阶段 2** | 安全加固 | 🟡 应该做 | ✅ 完成 |
-| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ✅ 完成 |
+| **阶段 3** | CI/CD 自动化 | 🟡 应该做 | ⏭️ 跳过 (Vercel 内置) |
 | **阶段 4** | 性能优化 | 🟡 应该做 | ✅ 完成 |
 | **阶段 5** | 文档体系 | 🟡 应该做 | ✅ 完成 |
 | **阶段 6** | 高级优化 | 🟢 可选 | ✅ 完成 |
@@ -1161,45 +1463,28 @@ npx @sentry/wizard@latest -i nextjs --saas --org grayscale-luminary-llc --projec
 
 ---
 
-## 阶段 3 CI/CD 自动化 (2026-01-22 完成) ✅
+## 阶段 3 CI/CD 自动化 (跳过 - Vercel 内置)
 
 > **进入条件**: 阶段 2 完成 ✅
-> **完成条件**: CI/CD 流水线 + 部署文档 ✅
+> **完成条件**: CI/CD 流水线正常运行 ✅ (Vercel 内置)
 
 ### 任务清单
 
 | # | 任务 | 交付物 | 状态 |
 |---|------|--------|------|
-| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ✅ 完成 |
-| 3.2 | 部署配置和文档 | DEPLOYMENT.md | ✅ 完成 |
+| 3.1 | GitHub Actions CI/CD | ci.yml 工作流 | ⏭️ 跳过 - Vercel 自带 |
+| 3.2 | 配置 Staging 环境 | 环境配置 | ⏭️ 跳过 - Vercel Preview |
 
-### 交付物清单
+### 说明
 
-**CI/CD 工作流**:
-- ✅ `.github/workflows/ci.yml` - 完整 CI/CD 流水线
-  - lint-and-type: ESLint + TypeScript 检查
-  - test: 单元测试
-  - build: 构建验证
-  - deploy-preview: PR 预览部署
-  - deploy-staging: develop → staging
-  - deploy-production: main → production
+**Vercel 内置 CI/CD 功能已满足需求**:
+- ✅ 自动构建和部署（Git push 触发）
+- ✅ Preview 环境（每个 PR 自动部署预览）
+- ✅ Production 环境（主分支自动部署）
+- ✅ 构建日志和错误监控
+- ✅ 环境变量管理
 
-**部署文档**:
-- ✅ `docs/DEPLOYMENT.md` - 完整部署指南
-  - 环境概览 (Production/Staging/Preview)
-  - GitHub Secrets 配置指南
-  - 部署检查清单
-  - 回滚流程
-
-### CI/CD 流程图
-
-```
-PR 创建 → lint → test → build → deploy-preview
-                                    ↓
-develop 推送 → lint → test → build → deploy-staging
-                                    ↓
-main 推送 → lint → test → build → deploy-production
-```
+无需额外配置 GitHub Actions，Vercel 平台已提供完整的 CI/CD 解决方案
 
 ---
 
@@ -1478,3 +1763,102 @@ pnpm test:e2e:headed # 有头浏览器模式
 | `admin/users/page.tsx` | 状态和会员等级 Badge 添加 `flex items-center gap-1` 和 `flex-shrink-0`，详情面板也同步修复 |
 | `admin/finance/page.tsx` | 预估收入、预估盈利、套餐价格、单价从 ¥ 改为 $，表头"元/千积分"改为"$/千积分" |
 | `admin/costs/page.tsx` | StatCard 改用设计系统配色，主容器添加 p-8，卡片间距从 gap-4 改为 gap-6，用户列表改用 var(--color-primary) |
+
+---
+
+### ✅ P2-6 功能广场模块详情弹窗 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-6 | 缺少模块详情弹窗 | 集成 ModuleDetailDialog 组件到功能广场页面 | ✅ 已修复 |
+
+**修复内容**:
+- ✅ 增强 `ModuleDetailDialog.tsx` 组件:
+  - 添加 `useRouter` 导航到聊天页面
+  - 添加 `trpc.modules.incrementUsage` 使用量统计
+  - 点击"立即使用"后跳转到 `/chat?module={moduleId}`
+- ✅ 更新 `marketplace/page.tsx`:
+  - 添加 `ModuleDetailDialog` 组件导入
+  - 添加 `selectedModule` 和 `dialogOpen` 状态
+  - 更新 `ModuleCard.onShowDetail` 回调，设置选中模块并打开弹窗
+
+**弹窗功能**:
+- 显示模块标题、图标、分类、平台标签
+- 显示使用次数统计
+- 显示功能介绍 (description)
+- 显示功能特点列表 (默认值或从 features 字段读取)
+- 显示使用前准备问题 (默认值或从 preparation_questions 字段读取)
+- "立即使用"按钮导航到聊天页面
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `ModuleDetailDialog.tsx` | 添加 useRouter 和 trpc.modules.incrementUsage，实现导航功能 |
+| `marketplace/page.tsx` | 添加 ModuleDetailDialog 集成，状态管理和 onShowDetail 回调 |
+
+---
+
+### ✅ P2-7 + P2-8 modules 表结构修复 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-7 | modules 字段与后台不对应 | 添加 modules 表 Drizzle schema 定义 + 数据库迁移 | ✅ 已修复 |
+| P2-8 | credits_cost 无效字段 | 删除 credits_cost 字段 (改为按实际 token 计费) | ✅ 已修复 |
+
+**P2-7 修复内容 - modules 表新增字段**:
+| 字段名 | 类型 | 描述 |
+|--------|------|------|
+| `model_id` | uuid | 指定使用的 AI 模型 (外键关联 ai_models) |
+| `prompt_content` | text | 提示词内容 (核心字段) |
+| `system_prompt` | text | 系统提示词 |
+| `user_prompt_template` | text | 用户提示词模板 |
+| `features` | text | 模块特点列表 (JSON 字符串数组) |
+| `examples` | text | 使用示例列表 (JSON 字符串数组) |
+| `preparation_questions` | text | 用户准备问题列表 (JSON 字符串数组) |
+| `created_by` | uuid | 创建者 (外键关联 profiles) |
+| `updated_at` | timestamptz | 更新时间 |
+
+**P2-8 修复内容 - 删除 credits_cost**:
+- 积分计费改为按实际 token 消耗计算，不再使用固定积分成本
+- 移除 `TemplateCard.tsx` 中 credits_cost 相关代码
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `packages/db/schema.ts` | 新增 modules 表完整定义 |
+| `packages/db/migrations/0008_modules_schema_update.sql` | 数据库迁移: 添加新字段、删除 credits_cost |
+| `apps/web/src/components/chat/TemplateCard.tsx` | 移除 credits_cost 接口字段和 Badge 显示 |
+
+---
+
+### ✅ P2-10 + P2-11 系统设置功能 (2026-01-24)
+
+**完成状态**: 已完成
+
+| # | 问题 | 修复内容 | 状态 |
+|---|------|---------|------|
+| P2-10 | 显示模型选择器功能无效 | 聊天页面读取设置并显示模型选择器 | ✅ 已修复 |
+| P2-11 | 首页引导设置功能不明 | 实现聊天页面设置和首页引导设置的保存功能 | ✅ 已修复 |
+
+**P2-10 修复内容 - 模型选择器**:
+- 聊天页面读取 `system_settings.chat_show_model_selector` 设置
+- 条件渲染 `ModelSelector` 组件
+- 获取活跃模型列表 `trpc.model.getActiveModels`
+- 选中的模型 ID 传递给流式 API
+
+**P2-11 修复内容 - 设置保存功能**:
+- 管理后台公告页面"页面设置"Tab:
+  - 聊天页面设置: 保存到 `chat_show_model_selector`, `chat_prompt_text`, `chat_welcome_message`
+  - 首页引导设置: 保存到 `home_show_onboarding`, `home_show_featured_modules`
+- 从 `system_settings` 初始化设置值
+- 使用 `trpc.settings.updateSystemSettings` 保存
+
+**修改文件列表**:
+| 文件 | 修改说明 |
+|------|---------|
+| `apps/web/src/app/chat/page.tsx` | 添加模型选择器组件、获取系统设置、传递 modelId |
+| `apps/web/src/app/admin/announcements/page.tsx` | 实现聊天/首页设置的读取和保存功能 |

@@ -13,8 +13,20 @@ import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import ModuleCard from '@/components/modules/ModuleCard';
+import ModuleDetailDialog from '@/components/modules/ModuleDetailDialog';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
+
+// Module type for detail dialog
+interface ModuleData {
+  id: string;
+  title: string;
+  description: string;
+  icon?: string;
+  category?: string;
+  platform?: string;
+  usage_count?: number;
+}
 
 const categories = [
   { id: 'all', label: '全部功能' },
@@ -30,6 +42,8 @@ export default function MarketplacePage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'popular'>('newest');
   const [page, setPage] = useState(1);
+  const [selectedModule, setSelectedModule] = useState<ModuleData | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const itemsPerPage = 12;
   const { banners } = useBanner();
 
@@ -330,7 +344,16 @@ export default function MarketplacePage() {
                     usage_count: module.usage_count ?? 0,
                   }}
                   onShowDetail={() => {
-                    console.log('Show detail:', module);
+                    setSelectedModule({
+                      id: module.id,
+                      title: module.title,
+                      description: module.description ?? '',
+                      icon: module.icon ?? 'Sparkles',
+                      category: module.category,
+                      platform: module.platform ?? '',
+                      usage_count: module.usage_count ?? 0,
+                    });
+                    setDialogOpen(true);
                   }}
                 />
               </div>
@@ -432,6 +455,13 @@ export default function MarketplacePage() {
           </div>
         )}
       </div>
+
+      {/* Module Detail Dialog */}
+      <ModuleDetailDialog
+        module={selectedModule}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
     </div>
   );
 }

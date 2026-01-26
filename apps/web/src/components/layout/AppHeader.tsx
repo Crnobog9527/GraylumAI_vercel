@@ -25,8 +25,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase';
-import { useCreditsBalance } from '@/hooks/use-credits';
-import { trpc } from '@/lib/trpc';
+import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
+import { trpc } from '@/trpc/client';
+import { AlertTriangle } from 'lucide-react';
 
 // Navigation items configuration
 const navItems = [
@@ -39,7 +40,15 @@ const navItems = [
 export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
-  const { credits, isLoading: isCreditsLoading } = useCreditsBalance();
+  const {
+    credits,
+    isLoading: isCreditsLoading,
+    warningLevel,
+    warningColor,
+    warningBgColor,
+    warningBorderColor,
+    isLowBalance,
+  } = useCreditsBalance();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Get user profile to check for admin role
@@ -142,26 +151,42 @@ export function AppHeader() {
 
         {/* Right section */}
         <div className="flex items-center gap-4">
-          {/* Credits badge */}
-          <div
-            className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl"
-            style={{
-              background: 'var(--color-primary-10)',
-              border: '1px solid var(--color-primary-20)'
-            }}
-          >
-            {isCreditsLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
-            ) : (
-              <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            )}
-            <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-              {isCreditsLoading ? '--' : credits}
-            </span>
-            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              积分
-            </span>
-          </div>
+          {/* Credits badge with warning styles */}
+          <Link href="/profile?tab=subscription">
+            <div
+              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 hover:opacity-90"
+              style={{
+                background: warningBgColor,
+                border: `1px solid ${warningBorderColor}`
+              }}
+              title={isLowBalance ? `积分不足，请充值` : undefined}
+            >
+              {isCreditsLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
+              ) : isLowBalance ? (
+                <AlertTriangle className="h-4 w-4" style={{ color: warningColor }} />
+              ) : (
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+              )}
+              <span className="font-semibold" style={{ color: warningColor }}>
+                {isCreditsLoading ? '--' : credits}
+              </span>
+              <span className="text-sm" style={{ color: isLowBalance ? warningColor : 'var(--text-tertiary)' }}>
+                积分
+              </span>
+              {isLowBalance && warningLevel !== 'low' && (
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{
+                    background: warningColor,
+                    color: 'white',
+                  }}
+                >
+                  {warningLevel === 'empty' ? '已用完' : warningLevel === 'critical' ? '即将用完' : '请充值'}
+                </span>
+              )}
+            </div>
+          </Link>
 
           {/* User avatar dropdown */}
           <DropdownMenu>

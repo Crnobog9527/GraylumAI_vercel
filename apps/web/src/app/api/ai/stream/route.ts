@@ -7,6 +7,7 @@
 
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 // Types
 interface StreamRequest {
@@ -66,12 +67,13 @@ async function getModelConfig(supabase: any, modelId?: string) {
       maxTokens: 8192,
       inputTokenCost: 3000, // per 1M tokens in micro-dollars
       outputTokenCost: 15000,
+      apiKey: null, // 使用环境变量
     };
   }
 
   const { data } = await supabase
     .from('ai_models')
-    .select('model_id, name, max_tokens, input_token_cost, output_token_cost')
+    .select('model_id, name, max_tokens, input_token_cost, output_token_cost, api_key')
     .eq('id', modelId)
     .single();
 
@@ -82,6 +84,7 @@ async function getModelConfig(supabase: any, modelId?: string) {
       maxTokens: data.max_tokens,
       inputTokenCost: data.input_token_cost,
       outputTokenCost: data.output_token_cost,
+      apiKey: data.api_key || null, // 模型自己的 API Key
     };
   }
 
@@ -91,8 +94,13 @@ async function getModelConfig(supabase: any, modelId?: string) {
     maxTokens: 8192,
     inputTokenCost: 3000,
     outputTokenCost: 15000,
+    apiKey: null,
   };
 }
+
+// 统一的最大上下文消息数（所有用户相同，不再按会员等级区分）
+// 移除了 P2-15 会员等级限制功能，提升用户体验
+const MAX_CONTEXT_MESSAGES = 100;
 
 async function getConversationHistory(
   supabase: any,
@@ -189,6 +197,28 @@ export async function POST(request: NextRequest) {
 
     const userId = user.id;
 
+    // Check user-level rate limit for AI streaming
+    const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
+    if (!rateLimitResult.success) {
+      return new Response(
+        JSON.stringify({
+          error: '请求过于频繁',
+          message: `请在 ${rateLimitResult.retryAfter} 秒后重试`,
+          retryAfter: rateLimitResult.retryAfter,
+        }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+            'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+            'X-RateLimit-Reset': rateLimitResult.reset.toString(),
+            'Retry-After': rateLimitResult.retryAfter?.toString() ?? '60',
+          },
+        }
+      );
+    }
+
     // Get model config
     const modelConfig = await getModelConfig(supabase, modelId);
 
@@ -200,8 +230,8 @@ export async function POST(request: NextRequest) {
       message.substring(0, 50)
     );
 
-    // Get history
-    const history = await getConversationHistory(supabase, conversation.id);
+    // Get conversation history (统一使用 MAX_CONTEXT_MESSAGES，所有用户相同)
+    const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
 
     // Build messages
     const messages = [
@@ -274,11 +304,17 @@ export async function POST(request: NextRequest) {
           );
 
           // Call Anthropic streaming API
+          // 优先使用模型配置的 API Key，否则回退到环境变量
+          const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY;
+          if (!apiKey) {
+            throw new Error('未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量');
+          }
+
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-api-key': process.env.ANTHROPIC_API_KEY!,
+              'x-api-key': apiKey,
               'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({

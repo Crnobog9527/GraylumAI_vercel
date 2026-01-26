@@ -5,6 +5,8 @@ import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
+import ModelSelector from '@/components/chat/ModelSelector';
+import ExportDialog from '@/components/chat/ExportDialog';
 import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,6 +14,8 @@ import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
+import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
+import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
 
 interface Message {
   id: string;
@@ -26,11 +30,49 @@ export default function ChatPage() {
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [lowBalanceDialogOpen, setLowBalanceDialogOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { banners } = useBanner();
 
   const utils = trpc.useUtils();
+
+  // Credits balance for pre-send check
+  const {
+    credits,
+    warningLevel,
+    canSendMessage,
+    isLowBalance,
+  } = useCreditsBalance();
+
+  // Fetch system settings for chat page configuration
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
+
+  // Fetch export permissions (based on membership level)
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
+  const canExport = exportPermissions?.allowExport ?? false;
+  const canBatchExport = exportPermissions?.allowBatchExport ?? false;
+
+  // Fetch active AI models for model selector
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
+  const activeModels = (modelsData ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    description: m.description ?? undefined,
+    credits_per_message: 0, // 按实际 token 计费，不显示固定积分
+    is_active: true,
+  }));
+
+  // Set default model when models are loaded
+  useEffect(() => {
+    if (activeModels.length > 0 && !selectedModelId) {
+      setSelectedModelId(activeModels[0].id);
+    }
+  }, [activeModels, selectedModelId]);
 
   // Fetch conversations
   const { data: conversationsData } = trpc.chat.getConversations.useQuery();
@@ -57,6 +99,10 @@ export default function ChatPage() {
       // 消息完成后刷新对话列表（可能创建了新对话）
       utils.chat.getConversations.invalidate();
       refreshConversationList();
+    },
+    onConversationCreated: (newConversationId) => {
+      // 新对话创建后同步到 store，使侧边栏正确高亮
+      setActiveConversation(newConversationId);
     },
     onError: (error) => {
       console.error('Streaming error:', error);
@@ -120,13 +166,29 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     if (!inputMessage.trim() || isProcessing) return;
 
+    // 发送前检查积分余额
+    if (!canSendMessage) {
+      // 积分为 0，阻止发送并显示充值弹窗
+      setLowBalanceDialogOpen(true);
+      return;
+    }
+
+    // 积分不足但仍可发送，显示警告（critical 级别）
+    if (warningLevel === 'critical') {
+      setLowBalanceDialogOpen(true);
+      // 继续发送，用户可以在弹窗中选择"稍后再说"
+    }
+
     const messageToSend = inputMessage;
     setInputMessage(''); // 立即清空输入框
 
     // 使用流式 API 发送消息
     // conversationId 为 null 时会自动创建新对话
-    await sendStreamingMessage(messageToSend);
-  }, [inputMessage, isProcessing, sendStreamingMessage]);
+    // 传递选中的模型 ID（如果启用了模型选择器）
+    await sendStreamingMessage(messageToSend, {
+      modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
+    });
+  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId, canSendMessage, warningLevel]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -146,6 +208,13 @@ export default function ChatPage() {
     }
     updateTitle.mutate({ conversationId: activeConversationId, title: editingTitleValue.trim() });
   };
+
+  // Export handler - opens export dialog
+  const handleExport = useCallback(() => {
+    if (canExport && activeConversationId) {
+      setExportDialogOpen(true);
+    }
+  }, [canExport, activeConversationId]);
 
   // Set editing title value when editing starts
   useEffect(() => {
@@ -206,6 +275,8 @@ export default function ChatPage() {
             editingTitleValue={editingTitleValue}
             setEditingTitleValue={setEditingTitleValue}
             onSaveTitle={handleSaveTitle}
+            canExport={canExport}
+            onExport={handleExport}
           />
 
           {/* 错误提示 */}
@@ -308,6 +379,18 @@ export default function ChatPage() {
             style={{ borderTop: '1px solid var(--border-primary)', background: 'var(--bg-secondary)', zIndex: 1 }}
           >
             <div className="max-w-3xl mx-auto">
+              {/* 模型选择器 */}
+              {showModelSelector && activeModels.length > 0 && (
+                <div className="mb-3">
+                  <ModelSelector
+                    models={activeModels}
+                    selectedModel={selectedModelId}
+                    onSelect={setSelectedModelId}
+                    disabled={isProcessing}
+                  />
+                </div>
+              )}
+
               {/* 输入框 */}
               <div
                 className="relative rounded-2xl chat-input-box"
@@ -395,6 +478,25 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* 导出对话对话框 */}
+      {activeConversationId && (
+        <ExportDialog
+          open={exportDialogOpen}
+          onOpenChange={setExportDialogOpen}
+          conversationId={activeConversationId}
+          conversationTitle={currentConversation?.title || '对话'}
+          canBatchExport={canBatchExport}
+        />
+      )}
+
+      {/* Low balance warning dialog */}
+      <LowBalanceDialog
+        open={lowBalanceDialogOpen}
+        onOpenChange={setLowBalanceDialogOpen}
+        credits={credits}
+        warningLevel={warningLevel}
+      />
     </div>
   );
 }

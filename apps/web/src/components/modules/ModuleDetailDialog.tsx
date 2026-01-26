@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -21,6 +21,7 @@ import {
   MessageSquare,
   Zap,
 } from 'lucide-react';
+import { trpc } from '@/trpc/client';
 
 interface Module {
   id: string;
@@ -61,15 +62,25 @@ export default function ModuleDetailDialog({
   onOpenChange,
   onUse,
 }: ModuleDetailDialogProps) {
+  const router = useRouter();
+  const incrementUsage = trpc.modules.incrementUsage.useMutation();
+
   if (!module) return null;
 
   const Icon = module.icon ? iconMap[module.icon] || Bot : Bot;
   const iconColor = module.icon ? getIconColor(module.icon) : '#FFD700';
 
   const handleUse = () => {
+    // Increment usage count
+    incrementUsage.mutate({ moduleId: module.id });
+
+    // Call custom onUse handler if provided
     if (onUse) {
       onUse(module);
     }
+
+    // Navigate to chat with module context
+    router.push(`/chat?module=${module.id}`);
     onOpenChange(false);
   };
 
