@@ -23,16 +23,16 @@
 
 ## Current Status
 
-- **Phase:** 阶段 10 AI 模型管理修复 🔜 规划中
+- **Phase:** 阶段 10 AI 模型管理修复 ✅ 已完成
 - **Previous:** 阶段 9 安全功能增强 ✅ 完成 (9.1-9.3)
-- **Current:** 制定修复方案，等待确认后执行
+- **Current:** 修复已完成并推送
 - **开始时间:** 2026-01-26
-- **更新时间:** 2026-01-26 (修复方案制定完成)
+- **更新时间:** 2026-01-26 (修复实施完成)
 - **参考文档:** `task_plan.md` - 阶段 10
 
 ---
 
-### 🚀 阶段 10: AI 模型管理修复 (2026-01-26 规划中)
+### ✅ 阶段 10: AI 模型管理修复 (2026-01-26 已完成)
 
 > **来源**: 遗留问题诊断 (阶段 8 第十三轮)
 > **方案**: 方案 A - 每个模型独立 API Key
@@ -41,34 +41,36 @@
 
 | # | 问题 | 影响 | 优先级 | 状态 |
 |---|------|------|--------|------|
-| 1 | AI 模型配置无法写入数据库 | 管理员无法保存模型配置 | 🔴 高 | ⏳ 待修复 |
-| 2 | 模型状态显示不准确 | "已启用"与"未配置密钥"矛盾 | 🟡 中 | ⏳ 待修复 |
+| 1 | AI 模型配置无法写入数据库 | 管理员无法保存模型配置 | 🔴 高 | ✅ 已修复 |
+| 2 | 模型状态显示不准确 | "已启用"与"未配置密钥"矛盾 | 🟡 中 | ✅ 已修复 |
 
-#### 问题 1 修复方案
-
-| # | 修复项 | 位置 | 状态 |
-|---|--------|------|------|
-| 1.1 | 添加 `onError` 错误处理 | `admin/models/page.tsx` | ⏳ |
-| 1.2 | 添加 toast 提示 (成功/失败) | `admin/models/page.tsx` | ⏳ |
-| 1.3 | 添加错误状态 UI 显示 | `admin/models/page.tsx` | ⏳ |
-
-#### 问题 2 修复方案 (方案 A)
+#### 问题 1 修复内容
 
 | # | 修复项 | 位置 | 状态 |
 |---|--------|------|------|
-| 2.1 | `getModelConfig` 增加查询 `api_key` | `stream/route.ts` | ⏳ |
-| 2.2 | API 调用使用模型的 api_key | `stream/route.ts:340` | ⏳ |
-| 2.3 | 移除状态检测的环境变量回退 | `model.ts:308` | ⏳ |
-| 2.4 | 启用时检查 API 连接状态 | `admin/models/page.tsx` | ⏳ |
-| 2.5 | 合并显示：未连接时显示"不可用" | `admin/models/page.tsx` | ⏳ |
+| 1.1 | 添加 `onError` 错误处理 | `admin/models/page.tsx` | ✅ |
+| 1.2 | 添加 toast 提示 (成功/失败) | `admin/models/page.tsx` | ✅ |
+| 1.3 | 添加错误状态 UI 显示 | `admin/models/page.tsx` | ✅ |
+
+#### 问题 2 修复内容 (方案 A)
+
+| # | 修复项 | 位置 | 状态 |
+|---|--------|------|------|
+| 2.1 | `getModelConfig` 增加查询 `api_key` | `stream/route.ts` | ✅ |
+| 2.2 | API 调用使用模型的 api_key | `stream/route.ts:340` | ✅ |
+| 2.3 | 移除状态检测的环境变量回退 | `model.ts:308` | ✅ |
+| 2.4 | 启用时检查 API 连接状态 | `admin/models/page.tsx` | ✅ |
+| 2.5 | 合并显示：未连接时显示"不可用" | `admin/models/page.tsx` | 🔜 下次迭代 |
 
 #### 修改文件清单
 
-| 文件 | 修改内容 |
-|------|---------|
-| `apps/web/src/app/admin/models/page.tsx` | 错误处理、toast、启用警告 |
-| `apps/web/src/app/api/ai/stream/route.ts` | api_key 查询和使用 |
-| `packages/api/src/routers/model.ts` | 移除环境变量回退 |
+| 文件 | 修改内容 | 状态 |
+|------|---------|------|
+| `apps/web/src/app/admin/models/page.tsx` | 错误处理、toast、启用警告 | ✅ |
+| `apps/web/src/app/api/ai/stream/route.ts` | api_key 查询和使用 | ✅ |
+| `packages/api/src/routers/model.ts` | 移除环境变量回退 | ✅ |
+
+**提交记录**: `55741d0` - `fix: 修复 AI 模型管理问题 (阶段 10)`
 
 ---
 
