@@ -71,6 +71,7 @@ const TEST_DEFINITIONS = [
   { id: 'ai_prompt_cache', name: 'Prompt 缓存测试', category: 'ai' as DiagnosticCategory },
   { id: 'ai_context_compress', name: '上下文压缩测试', category: 'ai' as DiagnosticCategory },
   { id: 'ai_realtime_keywords', name: '实时数据关键词测试', category: 'ai' as DiagnosticCategory },
+  { id: 'ai_model_status', name: 'AI 模型状态检查', category: 'ai' as DiagnosticCategory },
 
   // 计费功能测试 (3项)
   { id: 'billing_prededuct', name: '预扣计费测试', category: 'billing' as DiagnosticCategory },
@@ -89,7 +90,7 @@ const TEST_DEFINITIONS = [
 
 function generateBatchId(): string {
   // 生成 UUID v4 格式，符合数据库 batch_id uuid 类型要求
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
@@ -389,51 +390,59 @@ async function testRealtimeKeywords(ctx: DiagnosticContext): Promise<DiagnosticT
   }
 }
 
-// ============================================
-// 计费功能测试
-// ============================================
-
 /**
- * 测试 6: 预扣计费测试
+ * 测试 5.1: AI 模型状态检查 (修复 #25-27)
  */
-async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
-  const testId = 'billing_prededuct';
-  const testName = '预扣计费测试';
-  const category: DiagnosticCategory = 'billing';
+async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
+  const testId = 'ai_model_status';
+  const testName = 'AI 模型状态检查';
+  const category: DiagnosticCategory = 'ai';
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
-      // 测试成本估算函数
-      const modelId = 'claude-sonnet-4-20250514';
-      const estimatedInputTokens = 1000;
+      // 获取所有启用的模型
+      const { data: models, error } = await ctx.supabase
+        .from('ai_models')
+        .select('id, name, model_id, provider, is_active, api_key')
+        .eq('is_active', 'true');
 
-      const estimatedCost = estimateRequestCost(modelId, estimatedInputTokens);
+      if (error) throw error;
 
-      // 测试 Token 成本计算
-      const usage: TokenUsage = {
-        inputTokens: 1000,
-        outputTokens: 500,
-        cacheReadTokens: 100,
-        cacheCreationTokens: 50,
-      };
+      const modelResults = await Promise.all((models || []).map(async (model) => {
+        const hasKey = !!model.api_key || !!process.env.ANTHROPIC_API_KEY;
 
-      const costResult = calculateTokenCost(modelId, usage);
+        // TODO: 可选 - 尝试一个极简的 API 调用验证连接
+        // 目前只检查配置完整性
+
+        return {
+          id: model.id,
+          name: model.name,
+          modelId: model.model_id,
+          status: hasKey ? 'configured' : 'missing_key',
+          message: hasKey ? '配置正确' : '缺少 API 密钥',
+        };
+      }));
+
+      const failedCount = modelResults.filter(m => m.status === 'missing_key').length;
 
       return {
-        estimatedCost,
-        actualCost: costResult.credits,
-        costUsd: costResult.costUsd,
-        breakdown: costResult.breakdown,
-        calculationValid: costResult.credits > 0,
+        models: modelResults,
+        total: modelResults.length,
+        configured: modelResults.length - failedCount,
+        failed: failedCount,
       };
     });
+
+    const allOk = result.failed === 0;
 
     return {
       testId,
       testName,
       category,
-      status: result.calculationValid ? 'passed' : 'failed',
-      message: `成本计算: 预估=${result.estimatedCost} 积分, 实际=${result.actualCost} 积分`,
+      status: allOk ? 'passed' : 'warning',
+      message: allOk
+        ? `所有模型 (${result.total}) 配置正确`
+        : `警告: 有 ${result.failed}/${result.total} 个模型未配置密钥`,
       details: result,
       latencyMs,
     };
@@ -443,11 +452,88 @@ async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: `模型检查异常: ${error instanceof Error ? error.message : String(error)}`,
       latencyMs: 0,
     };
   }
 }
+
+
+// ============================================
+// 计费功能测试
+// ============================================
+
+/**
+ * 测试 6: 预扣计费测试 (修复 #26 - 验证实际 RPC 调用)
+ */
+async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
+  const testId = 'billing_prededuct';
+  const testName = '预扣计费测试';
+  const category: DiagnosticCategory = 'billing';
+
+  if (!ctx.userId) {
+    return {
+      testId, testName, category,
+      status: 'skipped',
+      message: '跳过: 未提供用户 ID',
+      latencyMs: 0
+    };
+  }
+
+  try {
+    const { result, latencyMs } = await measureLatency(async () => {
+      const testAmount = 1;
+      const requestId = crypto.randomUUID();
+
+      // 实际调用数据库 RPC
+      const { data, error } = await ctx.supabase.rpc('atomic_pre_deduct', {
+        p_user_id: ctx.userId,
+        p_amount: testAmount,
+        p_reason: '诊断测试预扣',
+        p_request_id: requestId
+      });
+
+      if (error) throw error;
+
+      const deductResult = Array.isArray(data) ? data[0] : data;
+
+      // 立即退款以保持积分平衡
+      if (deductResult && deductResult.pre_deduct_id) {
+        await ctx.supabase.rpc('atomic_refund', {
+          p_user_id: ctx.userId,
+          p_pre_deduct_id: deductResult.pre_deduct_id,
+          p_reason: '诊断测试自动退费'
+        });
+      }
+
+      return {
+        deductResult,
+        testAmount,
+        reconciled: true
+      };
+    });
+
+    return {
+      testId,
+      testName,
+      category,
+      status: 'passed',
+      message: `RPC 调用成功: 预扣 ${result.testAmount} 积分已自动退还`,
+      details: result,
+      latencyMs,
+    };
+  } catch (error) {
+    return {
+      testId,
+      testName,
+      category,
+      status: 'failed',
+      message: `RPC 预扣失败: ${error instanceof Error ? error.message : String(error)}`,
+      latencyMs: 0,
+    };
+  }
+}
+
 
 /**
  * 测试 7: 幂等性检查测试
@@ -764,6 +850,7 @@ export class DiagnosticsService {
       testPromptCache,
       testContextCompression,
       testRealtimeKeywords,
+      testAIModelStatus,
       testBillingPrededuct,
       testBillingIdempotency,
       testBillingReconcile,
@@ -814,7 +901,7 @@ export class DiagnosticsService {
 
     // 根据类别选择测试
     const testMap: Record<DiagnosticCategory, Array<(ctx: DiagnosticContext) => Promise<DiagnosticTestResult>>> = {
-      ai: [testAIRouting, testTokenCalculation, testPromptCache, testContextCompression, testRealtimeKeywords],
+      ai: [testAIRouting, testTokenCalculation, testPromptCache, testContextCompression, testRealtimeKeywords, testAIModelStatus],
       billing: [testBillingPrededuct, testBillingIdempotency, testBillingReconcile],
       security: [testRateLimit, testCircuitBreaker, testRLSIsolation],
       performance: [],

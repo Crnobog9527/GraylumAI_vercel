@@ -65,7 +65,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
           id: ctx.user.id,
           email: ctx.user.email,
           role: 'user',
-          credits: 0, // Default credits for new users
+          // credits property omitted to use database default of 100
         })
         .select('id, role, credits')
         .single();

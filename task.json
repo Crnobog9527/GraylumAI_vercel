@@ -156,7 +156,7 @@
             "files": [
                 "packages/api/src/services/billing.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -171,7 +171,7 @@
                 "packages/db/schema.ts",
                 "packages/api/src/trpc.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -285,7 +285,7 @@
             "files": [
                 "packages/api/src/services/diagnostics.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -299,7 +299,7 @@
             "files": [
                 "packages/api/src/services/diagnostics.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
