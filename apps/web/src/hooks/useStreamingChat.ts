@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase';
 
 // Types
 export interface StreamMessage {
@@ -64,9 +64,7 @@ interface UseStreamingChatOptions {
 }
 
 // Supabase client for auth
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient();
 
 export function useStreamingChat(options: UseStreamingChatOptions = {}) {
   const [state, setState] = useState<StreamingChatState>({
