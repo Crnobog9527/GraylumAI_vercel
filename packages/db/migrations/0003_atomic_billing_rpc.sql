@@ -74,8 +74,7 @@ BEGIN
 
   -- 4. 原子更新余额
   UPDATE profiles
-  SET credits = v_balance_after,
-      updated_at = NOW()
+  SET credits = v_balance_after
   WHERE id = p_user_id;
 
   -- 5. 插入预扣记录
@@ -163,8 +162,7 @@ BEGIN
     v_balance_after := v_current_balance + v_difference; -- 正数退还，负数补扣
 
     UPDATE profiles
-    SET credits = v_balance_after,
-        updated_at = NOW()
+    SET credits = v_balance_after
     WHERE id = p_user_id;
   ELSE
     v_balance_after := v_current_balance;
@@ -250,8 +248,7 @@ BEGIN
   v_balance_after := v_current_balance + v_refund_amount;
 
   UPDATE profiles
-  SET credits = v_balance_after,
-      updated_at = NOW()
+  SET credits = v_balance_after
   WHERE id = p_user_id;
 
   -- 4. 插入退费记录
@@ -339,8 +336,7 @@ BEGIN
     v_balance_after := v_current_balance + v_refunded;
 
     UPDATE profiles
-    SET credits = v_balance_after,
-        updated_at = NOW()
+    SET credits = v_balance_after
     WHERE id = p_user_id;
   ELSE
     v_balance_after := v_current_balance;
