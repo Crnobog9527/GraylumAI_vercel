@@ -276,19 +276,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Pre-deduct credits
-    const { error: deductError } = await supabase.rpc('atomic_pre_deduct', {
+    const { data: deductResult, error: deductError } = await supabase.rpc('atomic_pre_deduct', {
       p_user_id: userId,
       p_amount: estimatedCredits,
       p_reason: 'AI 对话预扣',
-      p_idempotency_key: requestId ?? crypto.randomUUID(),
+      p_request_id: requestId ?? crypto.randomUUID(),
     });
 
-    if (deductError) {
+    if (deductError || !deductResult || deductResult.length === 0) {
+      console.error('[DEBUG stream/route.ts] Pre-deduct error:', deductError);
       return new Response(
-        JSON.stringify({ error: '积分扣除失败' }),
+        JSON.stringify({ error: `积分预扣除失败: ${deductError?.message || 'Unknown RPC Error'}` }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
+    const preDeductId = deductResult[0].pre_deduct_id;
 
     // Create streaming response
     const stream = new ReadableStream({
@@ -439,14 +441,19 @@ export async function POST(request: NextRequest) {
             1000000
           );
 
-          // Settle billing - refund difference if needed
+          // Calculate refund for logging
           const refundAmount = Math.max(0, estimatedCredits - actualCredits);
-          if (refundAmount > 0) {
-            await supabase.rpc('atomic_settle', {
-              p_user_id: userId,
-              p_refund_amount: refundAmount,
-              p_reason: 'AI 对话结算退还',
-            });
+
+          // Settle billing
+          const { error: settleError } = await supabase.rpc('atomic_settle', {
+            p_user_id: userId,
+            p_pre_deduct_id: preDeductId,
+            p_actual_credits: actualCredits,
+            p_usage: usage,
+          });
+
+          if (settleError) {
+            console.error('[Billing] Failed to settle credits:', settleError);
           }
 
           // Record token stats
@@ -484,7 +491,7 @@ export async function POST(request: NextRequest) {
           // Refund on error
           await supabase.rpc('atomic_refund', {
             p_user_id: userId,
-            p_amount: estimatedCredits,
+            p_pre_deduct_id: preDeductId,
             p_reason: `AI 调用失败: ${error instanceof Error ? error.message : 'Unknown error'}`,
           });
 
