@@ -6,8 +6,13 @@
  */
 
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { checkRateLimit } from '@/lib/rateLimit';
+
+// ... (保持原有的类型和助手函数)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { createClient } from '@supabase/supabase-js'; // 保留以便旧代码还能用，下面会覆盖 supabase 实例
 
 // Types
 interface StreamRequest {
@@ -170,32 +175,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get auth from cookie
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get user from auth header or cookie
+    // 从前端 Header 拿到 Authorization
     const authHeader = request.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '');
 
     if (!token) {
       return new Response(
-        JSON.stringify({ error: '未授权' }),
+        JSON.stringify({ error: '未提供认证 Token' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    // 这里使用 anon key 进行 auth.getUser，跟前端保持一致环境，不依赖 SSR cookies
+    const supabaseAuth = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+
+    // 尝试验证 token 获取用户
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
 
     if (authError || !user) {
+      console.error('[DEBUG stream/route.ts] Token 验证失败:', authError?.message || 'User obj missing');
       return new Response(
-        JSON.stringify({ error: '无效的认证令牌' }),
+        JSON.stringify({ error: `身份验证失败: ${authError?.message || '会话已过期'}` }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     const userId = user.id;
+
+    // Admin client (需要调用 RPC 和绕过 RLS 计费)
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Check user-level rate limit for AI streaming
     const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
@@ -248,7 +258,7 @@ export async function POST(request: NextRequest) {
     const estimatedCredits = Math.ceil(
       (estimatedInputTokens * modelConfig.inputTokenCost +
         estimatedOutputTokens * modelConfig.outputTokenCost) /
-        1000000
+      1000000
     );
 
     // Check balance
@@ -426,7 +436,7 @@ export async function POST(request: NextRequest) {
             (usage.inputTokens * modelConfig.inputTokenCost +
               usage.outputTokens * modelConfig.outputTokenCost -
               usage.cacheReadTokens * modelConfig.inputTokenCost * 0.9) / // Cache reads are 90% cheaper
-              1000000
+            1000000
           );
 
           // Settle billing - refund difference if needed

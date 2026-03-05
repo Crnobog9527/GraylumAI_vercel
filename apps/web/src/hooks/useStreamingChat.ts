@@ -100,9 +100,10 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
 
       // Get auth token
       const { data: { session } } = await supabase.auth.getSession();
+
       if (!session?.access_token) {
-        setState((prev) => ({ ...prev, error: '请先登录' }));
-        options.onError?.('请先登录');
+        setState((prev) => ({ ...prev, error: '未能获取身份证明，请刷新页面或重新登录' }));
+        options.onError?.('未能获取身份证明，请刷新页面或重新登录');
         return;
       }
 
@@ -143,7 +144,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
+            'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             message: content.trim(),
@@ -247,15 +248,15 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
           isStreaming: false,
           usage: finalUsage
             ? {
-                inputTokens: finalUsage.inputTokens,
-                outputTokens: finalUsage.outputTokens,
-                cacheReadTokens: finalUsage.cacheReadTokens,
-              }
+              inputTokens: finalUsage.inputTokens,
+              outputTokens: finalUsage.outputTokens,
+              cacheReadTokens: finalUsage.cacheReadTokens,
+            }
             : undefined,
           cost: finalCost
             ? {
-                credits: finalCost.creditsDeducted,
-              }
+              credits: finalCost.creditsDeducted,
+            }
             : undefined,
         };
 
