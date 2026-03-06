@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getChatRuntimeSettings } from './chatRuntime';
 
 // ============================================
 // 类型定义
@@ -215,31 +216,19 @@ async function getModelConfigFromDb(
 async function getSystemDefaultModels(
   supabase: SupabaseClient
 ): Promise<{ sonnet?: ModelConfig; haiku?: ModelConfig }> {
-  // 尝试从系统设置获取
-  const { data: settings } = await supabase
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'ai_models')
-    .single();
-
-  const modelSettings = settings?.value as {
-    defaultModelId?: string;
-    sonnetModelId?: string;
-    haikuModelId?: string;
-    enableSmartRouting?: boolean;
-  } | null;
+  const runtimeSettings = await getChatRuntimeSettings(supabase);
 
   const result: { sonnet?: ModelConfig; haiku?: ModelConfig } = {};
 
   // 获取 Sonnet 模型
-  if (modelSettings?.sonnetModelId) {
-    const sonnet = await getModelConfigFromDb(supabase, modelSettings.sonnetModelId);
+  if (runtimeSettings.sonnetModelId) {
+    const sonnet = await getModelConfigFromDb(supabase, runtimeSettings.sonnetModelId);
     if (sonnet) result.sonnet = sonnet;
   }
 
   // 获取 Haiku 模型
-  if (modelSettings?.haikuModelId) {
-    const haiku = await getModelConfigFromDb(supabase, modelSettings.haikuModelId);
+  if (runtimeSettings.haikuModelId) {
+    const haiku = await getModelConfigFromDb(supabase, runtimeSettings.haikuModelId);
     if (haiku) result.haiku = haiku;
   }
 
@@ -276,14 +265,8 @@ async function getConversationModel(
  * 检查智能路由是否启用
  */
 async function isSmartRoutingEnabled(supabase: SupabaseClient): Promise<boolean> {
-  const { data: settings } = await supabase
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'ai_models')
-    .single();
-
-  const modelSettings = settings?.value as { enableSmartRouting?: boolean } | null;
-  return modelSettings?.enableSmartRouting ?? true;
+  const runtimeSettings = await getChatRuntimeSettings(supabase);
+  return runtimeSettings.enableSmartRouting;
 }
 
 // ============================================

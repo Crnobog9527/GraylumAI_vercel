@@ -1,20 +1,31 @@
 /**
  * AI Streaming API Route
  *
- * 提供真正的流式响应，实现打字机效果
- * 支持中断保存和计费
+ * This is the production chat runtime used by the web app. It shares the
+ * same runtime settings, prompt resolution, model routing, and provider
+ * detection logic as the admin tools and diagnostics surface.
  */
 
 import { NextRequest } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { BillingService } from '@repo/api/src/services/billing';
+import { buildCachedPrompt } from '@repo/api/src/services/promptCacheBuilder';
+import { needsRealtimeData, selectModel } from '@repo/api/src/services/modelRouter';
+import {
+  applyUserPromptTemplate,
+  buildRuntimeSystemPrompt,
+  getChatRuntimeSettings,
+  resolveActiveChatPrompt,
+} from '@repo/api/src/services/chatRuntime';
+import {
+  getOpenAICompatibleHeaders,
+  getProviderErrorMessage,
+  normalizeOpenAICompatibleEndpoint,
+  usesOpenAICompatibleApi,
+} from '@repo/api/src/services/providerUtils';
+import type { ClaudeMessage } from '@repo/api/src/types/ai';
 
-// ... (保持原有的类型和助手函数)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { createClient } from '@supabase/supabase-js'; // 保留以便旧代码还能用，下面会覆盖 supabase 实例
-
-// Types
 interface StreamRequest {
   message: string;
   conversationId?: string;
@@ -29,26 +40,32 @@ interface TokenUsage {
   cacheCreationTokens: number;
 }
 
-// Helpers
+interface RuntimeModelConfig {
+  id: string;
+  modelId: string;
+  name: string;
+  maxTokens: number;
+  inputTokenCost: number;
+  outputTokenCost: number;
+  apiKey: string | null;
+  provider: string;
+  apiEndpoint: string | null;
+  enableWebSearch: boolean;
+}
+
 function estimateTokens(text: string): number {
-  // Rough estimate: ~4 characters per token for English, ~2 for Chinese
   const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
   const otherChars = text.length - chineseChars;
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
 }
 
-/**
- * 输出安全检查 (P1-4: 应用输出安全过滤)
- * 检测 AI 输出中的敏感内容
- */
 function checkOutputSecurity(content: string): boolean {
-  // 检测敏感信息泄露模式
   const sensitivePatterns = [
     /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
     /password\s*[:=]\s*["']?[^\s"']{8,}/i,
     /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-    /sk-[a-zA-Z0-9]{48}/i, // OpenAI API key pattern
-    /sk-ant-[a-zA-Z0-9-_]{95}/i, // Anthropic API key pattern
+    /sk-[a-zA-Z0-9]{48}/i,
+    /sk-ant-[a-zA-Z0-9-_]{95}/i,
   ];
 
   for (const pattern of sensitivePatterns) {
@@ -59,112 +76,6 @@ function checkOutputSecurity(content: string): boolean {
   }
 
   return true;
-}
-
-async function getModelConfig(supabase: any, modelId?: string) {
-  // Default to claude-sonnet-4 if no model specified
-  const defaultModel = 'claude-sonnet-4-20250514';
-
-  if (!modelId) {
-    return {
-      modelId: defaultModel,
-      name: 'Claude Sonnet 4',
-      maxTokens: 8192,
-      inputTokenCost: 3000, // per 1M tokens in micro-dollars
-      outputTokenCost: 15000,
-      apiKey: null, // 使用环境变量
-      provider: 'anthropic',
-      apiEndpoint: null,
-    };
-  }
-
-  const { data } = await supabase
-    .from('ai_models')
-    .select('model_id, name, provider, max_tokens, input_token_cost, output_token_cost, api_key, api_endpoint')
-    .eq('id', modelId)
-    .single();
-
-  if (data) {
-    return {
-      modelId: data.model_id,
-      name: data.name,
-      maxTokens: data.max_tokens,
-      inputTokenCost: data.input_token_cost,
-      outputTokenCost: data.output_token_cost,
-      apiKey: data.api_key || null, // 模型自己的 API Key
-      provider: data.provider || 'anthropic',
-      apiEndpoint: data.api_endpoint || null,
-    };
-  }
-
-  return {
-    modelId: defaultModel,
-    name: 'Claude Sonnet 4',
-    maxTokens: 8192,
-    inputTokenCost: 3000,
-    outputTokenCost: 15000,
-    apiKey: null,
-    provider: 'anthropic',
-    apiEndpoint: null,
-  };
-}
-
-function normalizeOpenAICompatibleEndpoint(endpoint?: string | null) {
-  const trimmed = endpoint?.trim();
-  if (!trimmed) return null;
-  if (trimmed.endsWith('/chat/completions')) return trimmed;
-  if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
-  if (trimmed.endsWith('/v1/')) return `${trimmed}chat/completions`;
-  if (trimmed.endsWith('/')) return `${trimmed}chat/completions`;
-  return trimmed;
-}
-
-function looksLikeOpenRouterKey(apiKey?: string | null) {
-  return Boolean(apiKey?.startsWith('sk-or-'));
-}
-
-function usesOpenAICompatibleApi(
-  modelConfig: Awaited<ReturnType<typeof getModelConfig>>,
-  apiKey?: string | null,
-) {
-  const endpoint = modelConfig.apiEndpoint?.toLowerCase() ?? '';
-  return endpoint.includes('openrouter.ai') || endpoint.includes('/chat/completions') || looksLikeOpenRouterKey(apiKey);
-}
-
-async function getProviderErrorMessage(response: Response) {
-  const errorText = await response.text();
-
-  try {
-    const errorData = JSON.parse(errorText);
-    return (
-      errorData?.error?.message ||
-      errorData?.message ||
-      errorText ||
-      `HTTP ${response.status}`
-    );
-  } catch {
-    return errorText || `HTTP ${response.status}`;
-  }
-}
-
-// 统一的最大上下文消息数（所有用户相同，不再按会员等级区分）
-// 移除了 P2-15 会员等级限制功能，提升用户体验
-const MAX_CONTEXT_MESSAGES = 100;
-
-async function getConversationHistory(
-  supabase: any,
-  conversationId: string,
-  limit: number = 20
-): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
-  const { data } = await supabase
-    .from('messages')
-    .select('role, content')
-    .eq('conversation_id', conversationId)
-    .eq('is_deleted', 'false')
-    .order('created_at', { ascending: true })
-    .limit(limit);
-
-  return data ?? [];
 }
 
 async function getOrCreateConversation(
@@ -203,26 +114,171 @@ async function getOrCreateConversation(
   return { id: newConversation.id, isNew: true };
 }
 
-// Main handler
+async function getConversationHistory(
+  supabase: any,
+  conversationId: string,
+  limit: number
+): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+  const { data } = await supabase
+    .from('messages')
+    .select('role, content')
+    .eq('conversation_id', conversationId)
+    .eq('is_deleted', 'false')
+    .order('created_at', { ascending: true })
+    .limit(limit);
+
+  return data ?? [];
+}
+
+async function getRuntimeModelConfig(
+  supabase: any,
+  options: {
+    runtimeModelId?: string;
+    fallbackModelId: string;
+    fallbackName: string;
+    fallbackProvider: string;
+    fallbackMaxTokens: number;
+    fallbackInputTokenCost: number;
+    fallbackOutputTokenCost: number;
+    fallbackEnableWebSearch: boolean;
+  }
+): Promise<RuntimeModelConfig> {
+  if (options.runtimeModelId) {
+    const { data } = await supabase
+      .from('ai_models')
+      .select('id, model_id, name, provider, max_tokens, input_token_cost, output_token_cost, api_key, api_endpoint, enable_web_search')
+      .eq('id', options.runtimeModelId)
+      .single();
+
+    if (data) {
+      return {
+        id: data.id,
+        modelId: data.model_id,
+        name: data.name,
+        maxTokens: data.max_tokens,
+        inputTokenCost: data.input_token_cost,
+        outputTokenCost: data.output_token_cost,
+        apiKey: data.api_key || null,
+        provider: data.provider || 'anthropic',
+        apiEndpoint: data.api_endpoint || null,
+        enableWebSearch: data.enable_web_search === 'true',
+      };
+    }
+  }
+
+  return {
+    id: options.runtimeModelId ?? 'runtime-default-model',
+    modelId: options.fallbackModelId,
+    name: options.fallbackName,
+    maxTokens: options.fallbackMaxTokens,
+    inputTokenCost: options.fallbackInputTokenCost,
+    outputTokenCost: options.fallbackOutputTokenCost,
+    apiKey: null,
+    provider: options.fallbackProvider,
+    apiEndpoint: null,
+    enableWebSearch: options.fallbackEnableWebSearch,
+  };
+}
+
+async function saveMessages(
+  supabase: any,
+  conversationId: string,
+  userMessage: string,
+  assistantMessage: string
+): Promise<{ userMessageId: string | null; assistantMessageId: string | null }> {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert([
+      {
+        conversation_id: conversationId,
+        role: 'user',
+        content: userMessage,
+      },
+      {
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: assistantMessage,
+      },
+    ])
+    .select('id, role');
+
+  if (error) {
+    console.error('Failed to save chat messages:', error);
+    return { userMessageId: null, assistantMessageId: null };
+  }
+
+  return {
+    userMessageId: data?.find((item: { role: string }) => item.role === 'user')?.id ?? null,
+    assistantMessageId: data?.find((item: { role: string }) => item.role === 'assistant')?.id ?? null,
+  };
+}
+
+function buildAnthropicPayload(params: {
+  modelId: string;
+  maxTokens: number;
+  messages: ClaudeMessage[];
+  systemPrompt?: string;
+  enablePromptCache: boolean;
+}) {
+  const cachedPrompt = buildCachedPrompt({
+    systemPrompt: params.systemPrompt,
+    messages: params.messages,
+    config: { enabled: params.enablePromptCache },
+  });
+
+  return {
+    payload: {
+      model: params.modelId,
+      max_tokens: params.maxTokens,
+      stream: true,
+      messages: cachedPrompt.messages,
+      ...(cachedPrompt.system ? { system: cachedPrompt.system } : {}),
+    },
+    cachePoints: cachedPrompt.cachePoints,
+  };
+}
+
+function buildOpenAICompatibleMessages(params: {
+  systemPrompt?: string;
+  messages: ClaudeMessage[];
+}) {
+  const messages = params.messages.map((message) => ({
+    role: message.role,
+    content: typeof message.content === 'string'
+      ? message.content
+      : message.content
+        .filter((block) => block.type === 'text' && block.text)
+        .map((block) => block.text)
+        .join('\n'),
+  }));
+
+  if (params.systemPrompt) {
+    return [{ role: 'system' as const, content: params.systemPrompt }, ...messages];
+  }
+
+  return messages;
+}
+
+const MAX_CONTEXT_MESSAGES = 100;
+
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
 
   try {
-    // Parse request
     const body: StreamRequest = await request.json();
-    const { message, conversationId, modelId, requestId } = body;
+    const { conversationId, modelId } = body;
+    const message = body.message?.trim();
+    const requestId = body.requestId ?? crypto.randomUUID();
 
-    if (!message?.trim()) {
+    if (!message) {
       return new Response(
         JSON.stringify({ error: '消息内容不能为空' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // 从前端 Header 拿到 Authorization
     const authHeader = request.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '');
-
     if (!token) {
       return new Response(
         JSON.stringify({ error: '未提供认证 Token' }),
@@ -231,14 +287,16 @@ export async function POST(request: NextRequest) {
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    // 这里使用 anon key 进行 auth.getUser，跟前端保持一致环境，不依赖 SSR cookies
-    const supabaseAuth = createClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    // 尝试验证 token 获取用户
-    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAuth.auth.getUser(token);
 
     if (authError || !user) {
-      console.error('[DEBUG stream/route.ts] Token 验证失败:', authError?.message || 'User obj missing');
       return new Response(
         JSON.stringify({ error: `身份验证失败: ${authError?.message || '会话已过期'}` }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
@@ -246,14 +304,23 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = user.id;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const billingService = new BillingService({
+      supabase,
+      userId,
+    });
 
-    // Admin client (需要调用 RPC 和绕过 RLS 计费)
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Check user-level rate limit for AI streaming
     const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
     if (!rateLimitResult.success) {
+      await billingService.recordUsageLog({
+        requestId,
+        status: 'rate_limited',
+        modelId: 'unknown',
+        inputLength: message.length,
+        ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+        userAgent: request.headers.get('user-agent') ?? undefined,
+      });
+
       return new Response(
         JSON.stringify({
           error: '请求过于频繁',
@@ -273,73 +340,120 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get model config
-    const modelConfig = await getModelConfig(supabase, modelId);
-
-    // Get or create conversation
     const conversation = await getOrCreateConversation(
       supabase,
       userId,
       conversationId,
       message.substring(0, 50)
     );
-
-    // Get conversation history (统一使用 MAX_CONTEXT_MESSAGES，所有用户相同)
     const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
+    const conversationTurns = Math.floor(history.length / 2);
+    const runtimeSettings = await getChatRuntimeSettings(supabase);
 
-    // Build messages
-    const messages = [
+    const { modelConfig, routingReason } = await selectModel({
+      supabase,
+      conversationId: conversation.id,
+      message,
+      conversationTurns,
+      userPreferredModel: modelId,
+    });
+
+    const activePrompt = await resolveActiveChatPrompt(supabase, {
+      platform: 'web',
+      modelId: modelConfig.id,
+    });
+    const systemPrompt = buildRuntimeSystemPrompt(activePrompt);
+    const transformedMessage = applyUserPromptTemplate(activePrompt, message);
+    const providerMessages: ClaudeMessage[] = [
       ...history,
-      { role: 'user' as const, content: message },
+      { role: 'user', content: transformedMessage },
     ];
 
-    // Estimate cost and check balance
-    const estimatedInputTokens = messages.reduce(
-      (sum, m) => sum + estimateTokens(m.content),
-      0
-    );
-    const estimatedOutputTokens = 1000; // Conservative estimate
+    const runtimeModel = await getRuntimeModelConfig(supabase, {
+      runtimeModelId: modelConfig.id,
+      fallbackModelId: modelConfig.modelId,
+      fallbackName: modelConfig.name,
+      fallbackProvider: modelConfig.provider,
+      fallbackMaxTokens: modelConfig.maxTokens,
+      fallbackInputTokenCost: modelConfig.inputTokenCost,
+      fallbackOutputTokenCost: modelConfig.outputTokenCost,
+      fallbackEnableWebSearch: modelConfig.enableWebSearch,
+    });
+
+    const estimatedInputTokens =
+      providerMessages.reduce((sum, entry) => sum + estimateTokens(typeof entry.content === 'string'
+        ? entry.content
+        : entry.content.map((block) => block.text ?? '').join('\n')), 0) +
+      estimateTokens(systemPrompt ?? '');
+    const estimatedOutputTokens = 1000;
     const estimatedCredits = Math.ceil(
-      (estimatedInputTokens * modelConfig.inputTokenCost +
-        estimatedOutputTokens * modelConfig.outputTokenCost) /
+      (estimatedInputTokens * runtimeModel.inputTokenCost +
+        estimatedOutputTokens * runtimeModel.outputTokenCost) /
       1000000
     );
 
-    // Check balance
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('credits')
-      .eq('id', userId)
-      .single();
+    const balance = await billingService.getBalance();
+    if (balance < estimatedCredits) {
+      await billingService.recordUsageLog({
+        conversationId: conversation.id,
+        requestId,
+        modelId: runtimeModel.modelId,
+        status: 'failed',
+        errorMessage: '积分不足',
+        inputLength: message.length,
+        ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+        userAgent: request.headers.get('user-agent') ?? undefined,
+        metadata: {
+          estimatedCredits,
+          balance,
+          routingReason,
+        },
+      });
 
-    if (!profile || profile.credits < estimatedCredits) {
       return new Response(
         JSON.stringify({ error: '积分不足' }),
         { status: 402, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Pre-deduct credits
-    const { data: deductResult, error: deductError } = await supabase.rpc('atomic_pre_deduct', {
-      p_user_id: userId,
-      p_amount: estimatedCredits,
-      p_reason: 'AI 对话预扣',
-      p_request_id: requestId ?? crypto.randomUUID(),
+    const preDeduct = await billingService.preDeduct(estimatedCredits, {
+      reason: 'AI 对话预扣',
+      requestId,
     });
 
-    if (deductError || !deductResult || deductResult.length === 0) {
-      console.error('[DEBUG stream/route.ts] Pre-deduct error:', deductError);
+    await supabase
+      .from('conversations')
+      .update({ model_id: modelConfig.id })
+      .eq('id', conversation.id)
+      .eq('user_id', userId);
+
+    const webSearchRequested = runtimeSettings.enableSmartSearchDecision && needsRealtimeData(message);
+    const webSearchAvailable = webSearchRequested && runtimeModel.enableWebSearch;
+    const apiKey = runtimeModel.apiKey || process.env.ANTHROPIC_API_KEY || null;
+
+    if (!apiKey) {
+      await billingService.refund(preDeduct.preDeductId, '未配置 API Key');
+      await billingService.recordUsageLog({
+        conversationId: conversation.id,
+        requestId,
+        modelId: runtimeModel.modelId,
+        status: 'failed',
+        errorMessage: '未配置 API Key',
+        inputLength: message.length,
+        latencyMs: 0,
+      });
+
       return new Response(
-        JSON.stringify({ error: `积分预扣除失败: ${deductError?.message || 'Unknown RPC Error'}` }),
+        JSON.stringify({ error: '未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
-    const preDeductId = deductResult[0].pre_deduct_id;
 
-    // Create streaming response
     const stream = new ReadableStream({
       async start(controller) {
+        const startedAt = Date.now();
         let fullContent = '';
+        let cachePoints = 0;
         let usage: TokenUsage = {
           inputTokens: 0,
           outputTokens: 0,
@@ -348,45 +462,37 @@ export async function POST(request: NextRequest) {
         };
 
         try {
-          // Send initial metadata
-          const initEvent = {
-            type: 'init',
-            conversationId: conversation.id,
-            modelUsed: modelConfig.modelId,
-            requestId: requestId ?? crypto.randomUUID(),
-          };
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(initEvent)}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({
+              type: 'init',
+              conversationId: conversation.id,
+              modelUsed: runtimeModel.modelId,
+              requestId,
+              routingReason,
+              promptId: activePrompt?.id ?? null,
+            })}\n\n`)
           );
 
-          // Call model provider streaming API
-          // 优先使用模型配置的 API Key，否则回退到环境变量
-          const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY;
-          if (!apiKey) {
-            throw new Error('未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量');
-          }
-          const openAICompatibleEndpoint = usesOpenAICompatibleApi(modelConfig, apiKey)
-            ? (normalizeOpenAICompatibleEndpoint(modelConfig.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions')
-            : null;
+          const openAICompatible = usesOpenAICompatibleApi({
+            endpoint: runtimeModel.apiEndpoint,
+            apiKey,
+          });
 
-          if (openAICompatibleEndpoint) {
-            const response = await fetch(openAICompatibleEndpoint, {
+          if (openAICompatible) {
+            const endpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) ||
+              'https://openrouter.ai/api/v1/chat/completions';
+            const response = await fetch(endpoint, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${apiKey}`,
-                'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-                'X-Title': 'GraylumAI',
-              },
+              headers: getOpenAICompatibleHeaders(apiKey),
               body: JSON.stringify({
-                model: modelConfig.modelId,
-                max_tokens: modelConfig.maxTokens,
+                model: runtimeModel.modelId,
+                max_tokens: runtimeModel.maxTokens,
                 stream: true,
                 stream_options: { include_usage: true },
-                messages: messages.map((m) => ({
-                  role: m.role,
-                  content: m.content,
-                })),
+                messages: buildOpenAICompatibleMessages({
+                  systemPrompt,
+                  messages: providerMessages,
+                }),
               }),
             });
 
@@ -414,7 +520,7 @@ export async function POST(request: NextRequest) {
               for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
                 const data = line.slice(6);
-                if (data === '[DONE]') continue;
+                if (!data || data === '[DONE]') continue;
 
                 try {
                   const event = JSON.parse(data);
@@ -431,27 +537,28 @@ export async function POST(request: NextRequest) {
                     usage.outputTokens = event.usage.completion_tokens || usage.outputTokens;
                   }
                 } catch {
-                  // Ignore parse errors for non-JSON lines
+                  // Ignore non-JSON keepalive lines from upstream providers.
                 }
               }
             }
           } else {
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
+            const anthropicPayload = buildAnthropicPayload({
+              modelId: runtimeModel.modelId,
+              maxTokens: runtimeModel.maxTokens,
+              messages: providerMessages,
+              systemPrompt,
+              enablePromptCache: runtimeSettings.enablePromptCache,
+            });
+            cachePoints = anthropicPayload.cachePoints;
+
+            const response = await fetch(runtimeModel.apiEndpoint || 'https://api.anthropic.com/v1/messages', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'x-api-key': apiKey,
                 'anthropic-version': '2023-06-01',
               },
-              body: JSON.stringify({
-                model: modelConfig.modelId,
-                max_tokens: modelConfig.maxTokens,
-                stream: true,
-                messages: messages.map((m) => ({
-                  role: m.role,
-                  content: m.content,
-                })),
-              }),
+              body: JSON.stringify(anthropicPayload.payload),
             });
 
             if (!response.ok) {
@@ -469,7 +576,6 @@ export async function POST(request: NextRequest) {
 
             while (true) {
               const { done, value } = await reader.read();
-
               if (done) break;
 
               buffer += decoder.decode(value, { stream: true });
@@ -477,41 +583,32 @@ export async function POST(request: NextRequest) {
               buffer = lines.pop() || '';
 
               for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6);
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (!data || data === '[DONE]') continue;
 
-                  if (data === '[DONE]') continue;
+                try {
+                  const event = JSON.parse(data);
 
-                  try {
-                    const event = JSON.parse(data);
-
-                    if (event.type === 'content_block_delta') {
-                      const delta = event.delta?.text || '';
-                      fullContent += delta;
-
-                      // Send delta to client
-                      const deltaEvent = {
-                        type: 'delta',
-                        content: delta,
-                      };
-                      controller.enqueue(
-                        encoder.encode(`data: ${JSON.stringify(deltaEvent)}\n\n`)
-                      );
-                    } else if (event.type === 'message_delta') {
-                      // Final usage stats
-                      if (event.usage) {
-                        usage.outputTokens = event.usage.output_tokens || 0;
-                      }
-                    } else if (event.type === 'message_start') {
-                      if (event.message?.usage) {
-                        usage.inputTokens = event.message.usage.input_tokens || 0;
-                        usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || 0;
-                        usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || 0;
-                      }
+                  if (event.type === 'content_block_delta') {
+                    const delta = event.delta?.text || '';
+                    fullContent += delta;
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
+                    );
+                  } else if (event.type === 'message_delta') {
+                    if (event.usage) {
+                      usage.outputTokens = event.usage.output_tokens || usage.outputTokens;
                     }
-                  } catch {
-                    // Ignore parse errors for non-JSON lines
+                  } else if (event.type === 'message_start') {
+                    if (event.message?.usage) {
+                      usage.inputTokens = event.message.usage.input_tokens || usage.inputTokens;
+                      usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || usage.cacheReadTokens;
+                      usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || usage.cacheCreationTokens;
+                    }
                   }
+                } catch {
+                  // Ignore malformed provider frames.
                 }
               }
             }
@@ -524,105 +621,122 @@ export async function POST(request: NextRequest) {
             usage.outputTokens = estimateTokens(fullContent);
           }
 
-          // 10. 输出安全检查 (P1-4: 应用输出安全过滤)
-          const isOutputSafe = checkOutputSecurity(fullContent);
-          if (!isOutputSafe) {
-            // 记录警告日志，但不阻止响应 (避免影响正常使用)
-            console.warn('[Security] Potential sensitive content detected in streaming AI response');
-            // 可选: 在这里可以添加更多处理逻辑，如通知管理员
-          }
+          checkOutputSecurity(fullContent);
 
-          // Save messages
-          await supabase.from('messages').insert([
-            {
-              conversation_id: conversation.id,
-              role: 'user',
-              content: message,
-            },
-            {
-              conversation_id: conversation.id,
-              role: 'assistant',
-              content: fullContent,
-            },
-          ]);
+          const messageIds = await saveMessages(
+            supabase,
+            conversation.id,
+            message,
+            fullContent
+          );
 
-          // Update conversation title if new
           if (conversation.isNew) {
-            const title = message.length > 50 ? message.substring(0, 47) + '...' : message;
+            const title = message.length > 50 ? `${message.substring(0, 47)}...` : message;
             await supabase
               .from('conversations')
-              .update({ title })
+              .update({ title, model_id: modelConfig.id })
               .eq('id', conversation.id);
           }
 
-          // Calculate actual cost
           const actualCredits = Math.ceil(
-            (usage.inputTokens * modelConfig.inputTokenCost +
-              usage.outputTokens * modelConfig.outputTokenCost -
-              usage.cacheReadTokens * modelConfig.inputTokenCost * 0.9) / // Cache reads are 90% cheaper
+            (usage.inputTokens * runtimeModel.inputTokenCost +
+              usage.outputTokens * runtimeModel.outputTokenCost -
+              usage.cacheReadTokens * runtimeModel.inputTokenCost * 0.9) /
             1000000
           );
+          const totalCostUsd = (
+            (usage.inputTokens * runtimeModel.inputTokenCost +
+              usage.outputTokens * runtimeModel.outputTokenCost) /
+            1000000000
+          );
+          const refundAmount = Math.max(0, preDeduct.estimatedCredits - actualCredits);
 
-          // Calculate refund for logging
-          const refundAmount = Math.max(0, estimatedCredits - actualCredits);
-
-          // Settle billing
-          const { error: settleError } = await supabase.rpc('atomic_settle', {
-            p_user_id: userId,
-            p_pre_deduct_id: preDeductId,
-            p_actual_credits: actualCredits,
-            p_usage: usage,
-          });
-
-          if (settleError) {
-            console.error('[Billing] Failed to settle credits:', settleError);
-          }
-
-          // Record token stats
-          await supabase.from('token_stats').insert({
-            conversation_id: conversation.id,
-            user_id: userId,
-            model_used: modelConfig.modelId,
-            input_tokens: usage.inputTokens,
-            output_tokens: usage.outputTokens,
-            cached_tokens: usage.cacheReadTokens,
-            cache_creation_tokens: usage.cacheCreationTokens,
-            total_cost_usd: (
-              (usage.inputTokens * modelConfig.inputTokenCost +
-                usage.outputTokens * modelConfig.outputTokenCost) /
-              1000000000
-            ).toFixed(6),
-            total_credits: actualCredits,
-          });
-
-          // Send completion event
-          const completeEvent = {
-            type: 'complete',
+          await billingService.settle(
+            preDeduct.preDeductId,
+            actualCredits,
             usage,
-            cost: {
-              creditsDeducted: actualCredits,
-              estimatedCredits,
-              refunded: refundAmount,
-            },
+            messageIds.assistantMessageId
+              ? {
+                messageId: messageIds.assistantMessageId,
+                conversationId: conversation.id,
+                content: fullContent,
+              }
+              : undefined
+          );
+
+          await billingService.recordTokenStats({
             conversationId: conversation.id,
-          };
+            messageId: messageIds.assistantMessageId ?? undefined,
+            modelUsed: runtimeModel.modelId,
+            usage,
+            costUsd: totalCostUsd,
+            credits: actualCredits,
+          });
+
+          await billingService.recordUsageLog({
+            conversationId: conversation.id,
+            requestId,
+            modelId: runtimeModel.modelId,
+            status: 'success',
+            inputLength: message.length,
+            latencyMs: Date.now() - startedAt,
+            ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+            userAgent: request.headers.get('user-agent') ?? undefined,
+            metadata: {
+              routingReason,
+              promptId: activePrompt?.id ?? null,
+              promptName: activePrompt?.name ?? null,
+              promptCacheEnabled: runtimeSettings.enablePromptCache,
+              promptCacheApplied: cachePoints > 0,
+              cachePoints,
+              webSearchRequested,
+              webSearchAvailable,
+              webSearchExecuted: false,
+              selectedModelRecordId: modelConfig.id,
+              selectedModelProvider: runtimeModel.provider,
+            },
+          });
+
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(completeEvent)}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({
+              type: 'complete',
+              usage,
+              cost: {
+                creditsDeducted: actualCredits,
+                estimatedCredits: preDeduct.estimatedCredits,
+                refunded: refundAmount,
+              },
+              conversationId: conversation.id,
+            })}\n\n`)
           );
         } catch (error) {
-          // Refund on error
-          await supabase.rpc('atomic_refund', {
-            p_user_id: userId,
-            p_pre_deduct_id: preDeductId,
-            p_reason: `AI 调用失败: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          const messageText = error instanceof Error ? error.message : 'Unknown error';
+          await billingService.refund(
+            preDeduct.preDeductId,
+            `AI 调用失败: ${messageText}`
+          );
+          await billingService.recordUsageLog({
+            conversationId: conversation.id,
+            requestId,
+            modelId: runtimeModel.modelId,
+            status: 'failed',
+            errorMessage: messageText,
+            inputLength: message.length,
+            latencyMs: Date.now() - startedAt,
+            ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+            userAgent: request.headers.get('user-agent') ?? undefined,
+            metadata: {
+              routingReason,
+              promptId: activePrompt?.id ?? null,
+              promptCacheEnabled: runtimeSettings.enablePromptCache,
+              webSearchRequested,
+              webSearchAvailable,
+              webSearchExecuted: false,
+            },
           });
 
-          const errorEvent = {
-            type: 'error',
-            error: error instanceof Error ? error.message : 'Unknown error',
-          };
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: messageText })}\n\n`)
           );
         } finally {
           controller.close();

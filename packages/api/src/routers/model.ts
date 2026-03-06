@@ -1,6 +1,12 @@
 import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import {
+  getOpenAICompatibleHeaders,
+  getProviderErrorMessage,
+  normalizeOpenAICompatibleEndpoint,
+  usesOpenAICompatibleApi as usesOpenAICompatibleProvider,
+} from '../services/providerUtils';
 
 type PersistedModel = {
   id: string;
@@ -19,48 +25,11 @@ type ConnectionCheckResult = {
   error?: string;
 };
 
-function normalizeOpenAICompatibleEndpoint(endpoint?: string | null) {
-  const trimmed = endpoint?.trim();
-  if (!trimmed) return null;
-  if (trimmed.endsWith('/chat/completions')) return trimmed;
-  if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
-  if (trimmed.endsWith('/v1/')) return `${trimmed}chat/completions`;
-  if (trimmed.endsWith('/')) return `${trimmed}chat/completions`;
-  return trimmed;
-}
-
-function looksLikeOpenRouterKey(apiKey?: string | null) {
-  return Boolean(apiKey?.startsWith('sk-or-'));
-}
-
 function usesOpenAICompatibleApi(model: PersistedModel) {
-  const endpoint = model.api_endpoint?.toLowerCase() ?? '';
-  return endpoint.includes('openrouter.ai') || endpoint.includes('/chat/completions') || looksLikeOpenRouterKey(model.api_key);
-}
-
-function getOpenAICompatibleHeaders(apiKey: string) {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
-    'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-    'X-Title': 'GraylumAI',
-  };
-}
-
-async function getProviderErrorMessage(response: Response) {
-  const errorText = await response.text();
-
-  try {
-    const errorData = JSON.parse(errorText);
-    return (
-      errorData?.error?.message ||
-      errorData?.message ||
-      errorText ||
-      `HTTP ${response.status}`
-    );
-  } catch {
-    return errorText || `HTTP ${response.status}`;
-  }
+  return usesOpenAICompatibleProvider({
+    endpoint: model.api_endpoint,
+    apiKey: model.api_key,
+  });
 }
 
 async function persistConnectionState(

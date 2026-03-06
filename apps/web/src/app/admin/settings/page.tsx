@@ -40,7 +40,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   chat_show_model_selector: { value: 'true', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框' },
   chat_billing_hint: { value: '⚡ 按实际Token消耗计费：输入 {input}积分/1K tokens，输出 {output}积分/1K tokens', type: 'string', label: '计费提示文案', description: '聊天页面底部显示的计费说明' },
   enable_smart_routing: { value: 'true', type: 'boolean', label: '启用智能路由', description: '根据用户问题自动分类任务类型并推荐最合适的AI模型' },
-  enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '通过关键词检测自动判断是否需要联网搜索' },
+  enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '通过关键词检测自动判断是否需要联网；当前仅做判断与记录，不自动发起外部联网请求' },
+  enable_prompt_cache: { value: 'true', type: 'boolean', label: '启用 API 缓存', description: '为 Anthropic 请求构造可缓存提示词，以便记录和利用 prompt caching 命中数据' },
 
   // Checkin (6项)
   checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },
@@ -69,7 +70,7 @@ const settingGroups = {
   billing: ['new_user_credits', 'input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits', 'first_purchase_bonus_percent'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
-  features: ['enable_smart_routing', 'enable_smart_search_decision', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats', 'chat_show_model_selector', 'chat_billing_hint'],
+  features: ['enable_smart_routing', 'enable_smart_search_decision', 'enable_prompt_cache', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats', 'chat_show_model_selector', 'chat_billing_hint'],
 };
 
 interface SettingData {

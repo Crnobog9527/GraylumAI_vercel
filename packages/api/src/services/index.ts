@@ -20,6 +20,8 @@ export * from './tokenCounter';
 
 // 模型路由服务
 export * from './modelRouter';
+export * from './chatRuntime';
+export * from './providerUtils';
 
 // Prompt 缓存构建器
 export * from './promptCacheBuilder';

@@ -18,6 +18,9 @@
     "./src/services/billing": "./src/services/billing.ts",
     "./src/services/tokenCounter": "./src/services/tokenCounter.ts",
     "./src/services/modelRouter": "./src/services/modelRouter.ts",
+    "./src/services/chatRuntime": "./src/services/chatRuntime.ts",
+    "./src/services/promptCacheBuilder": "./src/services/promptCacheBuilder.ts",
+    "./src/services/providerUtils": "./src/services/providerUtils.ts",
     "./src/services/diagnostics": "./src/services/diagnostics.ts"
   },
   "dependencies": {
