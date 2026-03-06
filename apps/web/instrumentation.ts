@@ -18,38 +18,19 @@ export const onRequestError = async (
   request: {
     path: string;
     method: string;
-    headers: { [key: string]: string };
+    headers: { [key: string]: string | string[] | undefined };
   },
   context: {
     routerKind: "Pages Router" | "App Router";
     routePath: string;
-    routeType: "render" | "route" | "action" | "middleware";
-    renderSource:
+    routeType: "render" | "route" | "action" | "proxy";
+    renderSource?:
       | "react-server-components"
       | "react-server-components-payload"
       | "server-rendering";
     revalidateReason: "on-demand" | "stale" | undefined;
-    renderType: "dynamic" | "dynamic-resume";
   }
 ) => {
-  // Import Sentry dynamically to avoid issues with edge runtime
   const Sentry = await import("@sentry/nextjs");
-
-  Sentry.captureException(err, {
-    mechanism: {
-      type: "instrument",
-      handled: false,
-    },
-    tags: {
-      router_kind: context.routerKind,
-      route_path: context.routePath,
-      route_type: context.routeType,
-    },
-    extra: {
-      request_path: request.path,
-      request_method: request.method,
-      render_source: context.renderSource,
-      revalidate_reason: context.revalidateReason,
-    },
-  });
+  Sentry.captureRequestError(err, request, context);
 };

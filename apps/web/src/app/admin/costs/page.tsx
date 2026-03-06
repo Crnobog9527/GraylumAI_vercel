@@ -55,6 +55,19 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString();
 }
 
+function formatTooltipCredits(
+  value: number | string | ReadonlyArray<number | string> | undefined
+): string {
+  const normalizedValue = Array.isArray(value) ? value[0] : value;
+
+  if (typeof normalizedValue === 'number') {
+    return formatCredits(normalizedValue);
+  }
+
+  const numericValue = Number(normalizedValue);
+  return Number.isFinite(numericValue) ? formatCredits(numericValue) : '0';
+}
+
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
@@ -201,7 +214,7 @@ function CostOverviewTab() {
                     borderRadius: '8px',
                   }}
                   labelStyle={{ color: '#a1a1aa' }}
-                  formatter={(value: number) => [formatCredits(value), '积分']}
+                  formatter={(value) => [formatTooltipCredits(value), '积分']}
                   labelFormatter={(label) => `日期: ${label}`}
                 />
                 <Line
@@ -245,7 +258,7 @@ function CostOverviewTab() {
                     paddingAngle={2}
                     dataKey="cost"
                     nameKey="modelName"
-                    label={({ modelName, percentage }) => `${percentage}%`}
+                    label={({ percent }) => `${Math.round((percent ?? 0) * 100)}%`}
                     labelLine={false}
                   >
                     {(distribution ?? []).map((_, index) => (
@@ -261,7 +274,7 @@ function CostOverviewTab() {
                       border: '1px solid #3f3f46',
                       borderRadius: '8px',
                     }}
-                    formatter={(value: number) => [formatCredits(value), '积分']}
+                    formatter={(value) => [formatTooltipCredits(value), '积分']}
                   />
                 </RechartsPieChart>
               </ResponsiveContainer>

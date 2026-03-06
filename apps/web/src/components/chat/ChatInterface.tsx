@@ -1,5 +1,10 @@
 'use client';
 
+/**
+ * @deprecated 旧非流式聊天组件，依赖已下线的 chat.sendMessage。
+ * 请使用 apps/web/src/app/chat/page.tsx + useStreamingChat 主链路。
+ */
+
 import { useState, useRef, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';

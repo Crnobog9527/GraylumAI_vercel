@@ -355,18 +355,27 @@ export class BillingService {
    */
   async preDeduct(
     estimatedCredits: number,
-    options: { reason?: string; requestId?: string } = {}
+    options: { reason?: string; requestId?: string } | string = {}
   ): Promise<PreDeductResult> {
-    const { reason = 'AI 对话预扣', requestId } = options;
+    const normalizedOptions = typeof options === 'string' ? { reason: options } : options;
+    const { reason = 'AI 对话预扣', requestId } = normalizedOptions;
 
     // 尝试使用原子化 RPC 函数
-    const { data: rpcResult, error: rpcError } = await this.supabase
-      .rpc('atomic_pre_deduct', {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    let rpcResult: any[] | null = null;
+    let rpcError: { message: string } | null = null;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_pre_deduct', {
         p_user_id: this.userId,
         p_amount: estimatedCredits,
         p_reason: reason,
         p_request_id: requestId ?? null,
       });
+      rpcResult = rpcResponse.data;
+      rpcError = rpcResponse.error;
+    } else {
+      rpcError = { message: 'RPC function missing on supabase client' };
+    }
 
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {
@@ -505,14 +514,22 @@ export class BillingService {
     this.verifyCost(actualCredits, usage);
 
     // 尝试使用原子化 RPC 函数
-    const { data: rpcResult, error: rpcError } = await this.supabase
-      .rpc('atomic_settle', {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    let rpcResult: any[] | null = null;
+    let rpcError: { message: string } | null = null;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_settle', {
         p_user_id: this.userId,
         p_pre_deduct_id: preDeductId,
         p_actual_credits: actualCredits,
         p_usage: usage,
         p_response: response ?? null,
       });
+      rpcResult = rpcResponse.data;
+      rpcError = rpcResponse.error;
+    } else {
+      rpcError = { message: 'RPC function missing on supabase client' };
+    }
 
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {
@@ -642,12 +659,20 @@ export class BillingService {
    */
   async refund(preDeductId: string, reason: string): Promise<RefundResult> {
     // 尝试使用原子化 RPC 函数
-    const { data: rpcResult, error: rpcError } = await this.supabase
-      .rpc('atomic_refund', {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    let rpcResult: any[] | null = null;
+    let rpcError: { message: string } | null = null;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_refund', {
         p_user_id: this.userId,
         p_pre_deduct_id: preDeductId,
         p_reason: reason,
       });
+      rpcResult = rpcResponse.data;
+      rpcError = rpcResponse.error;
+    } else {
+      rpcError = { message: 'RPC function missing on supabase client' };
+    }
 
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {
@@ -777,8 +802,11 @@ export class BillingService {
     const { credits: consumedCredits } = calculateTokenCost(modelId, consumedUsage);
 
     // 尝试使用原子化 RPC 函数
-    const { data: rpcResult, error: rpcError } = await this.supabase
-      .rpc('atomic_abort_settle', {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    let rpcResult: any[] | null = null;
+    let rpcError: { message: string } | null = null;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_abort_settle', {
         p_user_id: this.userId,
         p_pre_deduct_id: preDeductId,
         p_consumed_credits: consumedCredits,
@@ -786,6 +814,11 @@ export class BillingService {
         p_model_id: modelId,
         p_reason: reason,
       });
+      rpcResult = rpcResponse.data;
+      rpcError = rpcResponse.error;
+    } else {
+      rpcError = { message: 'RPC function missing on supabase client' };
+    }
 
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {

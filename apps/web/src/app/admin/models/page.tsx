@@ -133,9 +133,26 @@ export default function AdminModelsPage() {
   const { data: models, isLoading, error, refetch } = trpc.model.getAvailableModels.useQuery();
   const { data: connectionStatus, refetch: refetchStatus } = trpc.model.getConnectionStatus.useQuery();
 
+  const showSaveResultToast = (
+    action: '创建' | '更新',
+    connectionCheck?: { success: boolean; message?: string; error?: string } | null,
+  ) => {
+    if (!connectionCheck) {
+      toast.success(`模型${action}成功`);
+      return;
+    }
+
+    if (connectionCheck.success) {
+      toast.success(connectionCheck.message || `模型${action}成功，API 连接正常`);
+      return;
+    }
+
+    toast.warning(`模型已${action}，但 API 连接失败: ${connectionCheck.error || '未知错误'}`);
+  };
+
   const createModel = trpc.model.createModel.useMutation({
-    onSuccess: () => {
-      toast.success('模型创建成功');
+    onSuccess: (result) => {
+      showSaveResultToast('创建', result.connectionCheck);
       refetch();
       refetchStatus();
       closeDialog();
@@ -146,8 +163,8 @@ export default function AdminModelsPage() {
   });
 
   const updateModel = trpc.model.updateModel.useMutation({
-    onSuccess: () => {
-      toast.success('模型更新成功');
+    onSuccess: (result) => {
+      showSaveResultToast('更新', result.connectionCheck);
       refetch();
       refetchStatus();
       closeDialog();
@@ -202,6 +219,8 @@ export default function AdminModelsPage() {
     switch (status.connectionStatus) {
       case 'connected':
         return { label: '已连接', color: 'bg-emerald-500/20 text-emerald-400', icon: Check };
+      case 'configured':
+        return { label: '已配置', color: 'bg-blue-500/20 text-blue-400', icon: HelpCircle };
       case 'error':
         return { label: '连接失败', color: 'bg-rose-500/20 text-rose-400', icon: AlertTriangle };
       case 'untested':
@@ -565,7 +584,7 @@ export default function AdminModelsPage() {
                   </SelectTrigger>
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
                     <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="openai">OpenAI / OpenRouter (兼容)</SelectItem>
                     <SelectItem value="google">Google (Gemini)</SelectItem>
                     <SelectItem value="custom">Custom</SelectItem>
                     <SelectItem value="builtin">内置 (支持联网)</SelectItem>
@@ -589,9 +608,12 @@ export default function AdminModelsPage() {
                 <Input
                   value={formData.apiEndpoint}
                   onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
-                  placeholder="https://api.example.com/v1"
+                  placeholder="Anthropic: https://api.anthropic.com/v1/messages | OpenRouter: https://openrouter.ai/api/v1/chat/completions"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
+                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  使用 OpenRouter 连接 Claude 时，请填写 `https://openrouter.ai/api/v1/chat/completions`。
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

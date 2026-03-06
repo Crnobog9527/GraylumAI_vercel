@@ -1,0 +1,13 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e5]: Login
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: Email
+        - textbox "Email" [ref=e10]:
+          - /placeholder: m@example.com
+      - generic [ref=e11]:
+        - generic [ref=e12]: Password
+        - textbox "Password" [ref=e13]
+      - button "Login" [ref=e14]
+  - alert [ref=e15]

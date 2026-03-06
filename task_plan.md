@@ -1,5 +1,8 @@
 # Task Plan: GraylumAI
 
+> [!WARNING]
+> 此文件已于 2026-03-06 退役为历史归档。当前唯一计划源是 `task.json`，请改为使用 `task.json + progress.md + findings.md`。
+
 ## Goal
 按照 `开发规范清单-终极版.md` 完成 GraylumAI 项目的系统完善工作
 

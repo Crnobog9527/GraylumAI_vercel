@@ -2,6 +2,200 @@ import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 
+type PersistedModel = {
+  id: string;
+  name: string;
+  model_id: string;
+  provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin' | null;
+  api_key?: string | null;
+  api_endpoint?: string | null;
+  config?: Record<string, unknown> | null;
+};
+
+type ConnectionCheckResult = {
+  success: boolean;
+  status: 'connected' | 'configured' | 'error' | 'no_key' | 'not_found';
+  message?: string;
+  error?: string;
+};
+
+function normalizeOpenAICompatibleEndpoint(endpoint?: string | null) {
+  const trimmed = endpoint?.trim();
+  if (!trimmed) return null;
+  if (trimmed.endsWith('/chat/completions')) return trimmed;
+  if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
+  if (trimmed.endsWith('/v1/')) return `${trimmed}chat/completions`;
+  if (trimmed.endsWith('/')) return `${trimmed}chat/completions`;
+  return trimmed;
+}
+
+function looksLikeOpenRouterKey(apiKey?: string | null) {
+  return Boolean(apiKey?.startsWith('sk-or-'));
+}
+
+function usesOpenAICompatibleApi(model: PersistedModel) {
+  const endpoint = model.api_endpoint?.toLowerCase() ?? '';
+  return endpoint.includes('openrouter.ai') || endpoint.includes('/chat/completions') || looksLikeOpenRouterKey(model.api_key);
+}
+
+function getOpenAICompatibleHeaders(apiKey: string) {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+    'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+    'X-Title': 'GraylumAI',
+  };
+}
+
+async function getProviderErrorMessage(response: Response) {
+  const errorText = await response.text();
+
+  try {
+    const errorData = JSON.parse(errorText);
+    return (
+      errorData?.error?.message ||
+      errorData?.message ||
+      errorText ||
+      `HTTP ${response.status}`
+    );
+  } catch {
+    return errorText || `HTTP ${response.status}`;
+  }
+}
+
+async function persistConnectionState(
+  supabase: any,
+  model: PersistedModel,
+  result: ConnectionCheckResult,
+) {
+  const currentConfig = (model.config as Record<string, unknown> | null) ?? {};
+  const nextConfig: Record<string, unknown> = {
+    ...currentConfig,
+    last_tested: new Date().toISOString(),
+    connection_status: result.status,
+  };
+
+  if (result.success) {
+    nextConfig.last_error = null;
+  } else if (result.error) {
+    nextConfig.last_error = result.error;
+  }
+
+  await supabase
+    .from('ai_models')
+    .update({
+      config: nextConfig,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', model.id);
+}
+
+async function verifyAndPersistConnection(
+  supabase: any,
+  model: PersistedModel,
+): Promise<ConnectionCheckResult> {
+  const apiKey = model.api_key || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    const result: ConnectionCheckResult = {
+      success: false,
+      status: 'no_key',
+      error: 'API 密钥未配置',
+    };
+    await persistConnectionState(supabase, model, result);
+    return result;
+  }
+
+  try {
+    const openAICompatibleEndpoint = usesOpenAICompatibleApi(model)
+      ? (normalizeOpenAICompatibleEndpoint(model.api_endpoint) || 'https://openrouter.ai/api/v1/chat/completions')
+      : null;
+
+    if (openAICompatibleEndpoint) {
+      const response = await fetch(openAICompatibleEndpoint, {
+        method: 'POST',
+        headers: getOpenAICompatibleHeaders(apiKey),
+        body: JSON.stringify({
+          model: model.model_id,
+          max_tokens: 1,
+          stream: true,
+          messages: [{ role: 'user', content: 'Hi' }],
+        }),
+      });
+
+      if (response.ok) {
+        const result: ConnectionCheckResult = {
+          success: true,
+          status: 'connected',
+          message: 'OpenRouter / OpenAI 兼容接口连接正常',
+        };
+        await persistConnectionState(supabase, model, result);
+        return result;
+      }
+
+      const errorMessage = await getProviderErrorMessage(response);
+      const result: ConnectionCheckResult = {
+        success: false,
+        status: 'error',
+        error: errorMessage,
+      };
+      await persistConnectionState(supabase, model, result);
+      return result;
+    }
+
+    if (model.provider !== 'anthropic' && model.provider) {
+      const result: ConnectionCheckResult = {
+        success: true,
+        status: 'configured',
+        message: 'API 密钥已保存，请配置 OpenAI / OpenRouter 兼容 endpoint 后再测试连接',
+      };
+      await persistConnectionState(supabase, model, result);
+      return result;
+    }
+
+    const endpoint = model.api_endpoint || 'https://api.anthropic.com/v1/messages';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: model.model_id,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+
+    if (response.ok) {
+      const result: ConnectionCheckResult = {
+        success: true,
+        status: 'connected',
+        message: 'API 连接正常',
+      };
+      await persistConnectionState(supabase, model, result);
+      return result;
+    }
+
+    const errorMessage = await getProviderErrorMessage(response);
+    const result: ConnectionCheckResult = {
+      success: false,
+      status: 'error',
+      error: errorMessage,
+    };
+    await persistConnectionState(supabase, model, result);
+    return result;
+  } catch (error) {
+    const result: ConnectionCheckResult = {
+      success: false,
+      status: 'error',
+      error: error instanceof Error ? error.message : '连接失败',
+    };
+    await persistConnectionState(supabase, model, result);
+    return result;
+  }
+}
+
 export const modelRouter = router({
   // Public: Get active AI models for users to select
   getActiveModels: protectedProcedure.query(async ({ ctx }) => {
@@ -74,7 +268,12 @@ export const modelRouter = router({
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
-      return data;
+
+      const connectionCheck = await verifyAndPersistConnection(ctx.supabase, data as PersistedModel);
+      return {
+        ...data,
+        connectionCheck,
+      };
     }),
 
   // Admin only: Update AI model
@@ -96,7 +295,7 @@ export const modelRouter = router({
       outputTokenCostAbove200k: z.number().min(0).optional(),
       webSearchCost: z.number().min(0).optional(),
       isActive: z.boolean().optional(),
-      config: z.record(z.unknown()).optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const updateData: Record<string, unknown> = {
@@ -130,7 +329,21 @@ export const modelRouter = router({
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
-      return data;
+
+      const shouldVerifyConnection =
+        input.apiKey !== undefined ||
+        input.apiEndpoint !== undefined ||
+        input.modelId !== undefined ||
+        input.provider !== undefined;
+
+      const connectionCheck = shouldVerifyConnection
+        ? await verifyAndPersistConnection(ctx.supabase, data as PersistedModel)
+        : null;
+
+      return {
+        ...data,
+        connectionCheck,
+      };
     }),
 
   // Admin only: Delete AI model
@@ -175,7 +388,7 @@ export const modelRouter = router({
       // Get model details
       const { data: model, error: fetchError } = await ctx.supabase
         .from('ai_models')
-        .select('id, name, model_id, provider, api_key, api_endpoint')
+        .select('id, name, model_id, provider, api_key, api_endpoint, config')
         .eq('id', input.id)
         .single();
 
@@ -187,109 +400,7 @@ export const modelRouter = router({
         };
       }
 
-      // Check if API key is configured
-      const apiKey = model.api_key || process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        return {
-          success: false,
-          error: 'API 密钥未配置',
-          status: 'no_key' as const,
-        };
-      }
-
-      // Test the API connection based on provider
-      try {
-        if (model.provider === 'anthropic' || !model.provider) {
-          // Test Anthropic API
-          const endpoint = model.api_endpoint || 'https://api.anthropic.com/v1/messages';
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-              model: model.model_id,
-              max_tokens: 1,
-              messages: [{ role: 'user', content: 'Hi' }],
-            }),
-          });
-
-          if (response.ok) {
-            // Update last tested time in config
-            await ctx.supabase
-              .from('ai_models')
-              .update({
-                config: {
-                  ...(model as any).config,
-                  last_tested: new Date().toISOString(),
-                  connection_status: 'connected',
-                },
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', input.id);
-
-            return {
-              success: true,
-              status: 'connected' as const,
-              message: 'API 连接正常',
-            };
-          } else {
-            const errorData = await response.json().catch(() => ({}));
-            const errorMessage = (errorData as any).error?.message || `HTTP ${response.status}`;
-
-            // Update config with error status
-            await ctx.supabase
-              .from('ai_models')
-              .update({
-                config: {
-                  ...(model as any).config,
-                  last_tested: new Date().toISOString(),
-                  connection_status: 'error',
-                  last_error: errorMessage,
-                },
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', input.id);
-
-            return {
-              success: false,
-              error: errorMessage,
-              status: 'error' as const,
-            };
-          }
-        } else {
-          // For other providers, just check if API key exists
-          return {
-            success: true,
-            status: 'configured' as const,
-            message: 'API 密钥已配置（未测试连接）',
-          };
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '连接失败';
-
-        // Update config with error status
-        await ctx.supabase
-          .from('ai_models')
-          .update({
-            config: {
-              ...(model as any).config,
-              last_tested: new Date().toISOString(),
-              connection_status: 'error',
-              last_error: errorMessage,
-            },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', input.id);
-
-        return {
-          success: false,
-          error: errorMessage,
-          status: 'error' as const,
-        };
-      }
+      return verifyAndPersistConnection(ctx.supabase, model as PersistedModel);
     }),
 
   // Admin only: Get connection status for all models

@@ -8,6 +8,9 @@ export default defineConfig({
   // Test directory
   testDir: './tests/e2e',
 
+  // Keep structured reports and per-test evidence under a stable directory
+  outputDir: 'test-results/artifacts',
+
   // Run tests in parallel
   fullyParallel: true,
 
@@ -23,6 +26,7 @@ export default defineConfig({
   // Reporter to use
   reporter: [
     ['html', { open: 'never' }],
+    ['json', { outputFile: 'test-results/report.json' }],
     ['list'],
   ],
 
@@ -31,14 +35,14 @@ export default defineConfig({
     // Base URL for navigation
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
 
-    // Collect trace when retrying the failed test
-    trace: 'on-first-retry',
+    // Keep trace artifacts for any failing flow audit in local runs
+    trace: 'retain-on-failure',
 
     // Take screenshot on failure
     screenshot: 'only-on-failure',
 
     // Record video on failure
-    video: 'on-first-retry',
+    video: 'retain-on-failure',
   },
 
   // Configure projects for major browsers

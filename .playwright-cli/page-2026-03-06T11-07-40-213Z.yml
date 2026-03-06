@@ -1,0 +1,175 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e12]:
+      - generic [ref=e14]:
+        - img [ref=e16]
+        - generic [ref=e18]:
+          - heading "管理后台" [level=1] [ref=e19]
+          - paragraph [ref=e20]: GraylumAI 控制面板
+      - navigation [ref=e21]:
+        - link "仪表盘" [ref=e22] [cursor=pointer]:
+          - /url: /admin
+          - button "仪表盘" [ref=e23]:
+            - img
+            - text: 仪表盘
+        - link "AI 模型" [ref=e24] [cursor=pointer]:
+          - /url: /admin/models
+          - button "AI 模型" [ref=e25]:
+            - img
+            - text: AI 模型
+        - link "AI 成本监控" [ref=e26] [cursor=pointer]:
+          - /url: /admin/costs
+          - button "AI 成本监控" [ref=e27]:
+            - img
+            - text: AI 成本监控
+        - link "提示词模块" [ref=e28] [cursor=pointer]:
+          - /url: /admin/prompts
+          - button "提示词模块" [ref=e29]:
+            - img
+            - text: 提示词模块
+        - link "积分包" [ref=e30] [cursor=pointer]:
+          - /url: /admin/packages
+          - button "积分包" [ref=e31]:
+            - img
+            - text: 积分包
+        - link "用户管理" [ref=e32] [cursor=pointer]:
+          - /url: /admin/users
+          - button "用户管理" [ref=e33]:
+            - img
+            - text: 用户管理
+        - link "交易记录" [ref=e34] [cursor=pointer]:
+          - /url: /admin/transactions
+          - button "交易记录" [ref=e35]:
+            - img
+            - text: 交易记录
+        - link "财务统计" [ref=e36] [cursor=pointer]:
+          - /url: /admin/finance
+          - button "财务统计" [ref=e37]:
+            - img
+            - text: 财务统计
+        - link "公告管理" [ref=e38] [cursor=pointer]:
+          - /url: /admin/announcements
+          - button "公告管理" [ref=e39]:
+            - img
+            - text: 公告管理
+        - link "工单管理" [ref=e40] [cursor=pointer]:
+          - /url: /admin/tickets
+          - button "工单管理" [ref=e41]:
+            - img
+            - text: 工单管理
+        - link "邀请码" [ref=e42] [cursor=pointer]:
+          - /url: /admin/invitations
+          - button "邀请码" [ref=e43]:
+            - img
+            - text: 邀请码
+        - link "性能监控" [ref=e44] [cursor=pointer]:
+          - /url: /admin/performance
+          - button "性能监控" [ref=e45]:
+            - img
+            - text: 性能监控
+        - link "系统诊断" [ref=e46] [cursor=pointer]:
+          - /url: /admin/diagnostics
+          - button "系统诊断" [ref=e47]:
+            - img
+            - text: 系统诊断
+        - link "系统设置" [ref=e48] [cursor=pointer]:
+          - /url: /admin/settings
+          - button "系统设置" [ref=e49]:
+            - img
+            - text: 系统设置
+      - link "返回应用" [ref=e51] [cursor=pointer]:
+        - /url: /chat
+        - button "返回应用" [ref=e52]:
+          - img
+          - text: 返回应用
+    - generic [ref=e54]:
+      - generic [ref=e55]:
+        - generic [ref=e56]:
+          - heading "AI 模型管理" [level=1] [ref=e57]
+          - paragraph [ref=e58]: 管理可用的 AI 模型和配置
+        - button "添加模型" [ref=e59]:
+          - img
+          - text: 添加模型
+      - generic [ref=e60]:
+        - generic [ref=e63]:
+          - img [ref=e65]
+          - generic [ref=e68]:
+            - paragraph [ref=e69]: 总模型数
+            - paragraph [ref=e70]: "2"
+        - generic [ref=e73]:
+          - img [ref=e75]
+          - generic [ref=e77]:
+            - paragraph [ref=e78]: 已启用
+            - paragraph [ref=e79]: "2"
+        - generic [ref=e82]:
+          - img [ref=e84]
+          - generic [ref=e87]:
+            - paragraph [ref=e88]: 已禁用
+            - paragraph [ref=e89]: "0"
+      - table [ref=e93]:
+        - rowgroup [ref=e94]:
+          - row "模型名称 提供商 模型 ID Token 限制 联网搜索 API 状态 启用状态 操作" [ref=e95]:
+            - columnheader "模型名称" [ref=e96]
+            - columnheader "提供商" [ref=e97]
+            - columnheader "模型 ID" [ref=e98]
+            - columnheader "Token 限制" [ref=e99]
+            - columnheader "联网搜索" [ref=e100]
+            - columnheader "API 状态" [ref=e101]
+            - columnheader "启用状态" [ref=e102]
+            - columnheader "操作" [ref=e103]
+        - rowgroup [ref=e104]:
+          - row "Claude 4.5 haiku openai anthropic/claude-haiku-4.5 4,096 / 100K - 已连接 已启用" [ref=e105]:
+            - cell "Claude 4.5 haiku" [ref=e106]:
+              - generic [ref=e107]:
+                - img [ref=e109]
+                - generic [ref=e111]: Claude 4.5 haiku
+            - cell "openai" [ref=e112]:
+              - generic [ref=e113]: openai
+            - cell "anthropic/claude-haiku-4.5" [ref=e114]:
+              - code [ref=e115]: anthropic/claude-haiku-4.5
+            - cell "4,096 / 100K" [ref=e116]
+            - cell "-" [ref=e117]
+            - cell "已连接" [ref=e118]:
+              - generic [ref=e119]:
+                - img [ref=e120]
+                - text: 已连接
+            - cell "已启用" [ref=e122]:
+              - generic [ref=e123] [cursor=pointer]:
+                - img [ref=e124]
+                - text: 已启用
+            - cell [ref=e126]:
+              - generic [ref=e127]:
+                - button "测试 API 连接" [ref=e128]:
+                  - img
+                - button [ref=e129]:
+                  - img
+                - button [ref=e130]:
+                  - img
+          - row "Claude 4.6 Sonnet openai anthropic/claude-sonnet-4.6 4,096 / 180K - 已连接 已启用" [ref=e131]:
+            - cell "Claude 4.6 Sonnet" [ref=e132]:
+              - generic [ref=e133]:
+                - img [ref=e135]
+                - generic [ref=e137]: Claude 4.6 Sonnet
+            - cell "openai" [ref=e138]:
+              - generic [ref=e139]: openai
+            - cell "anthropic/claude-sonnet-4.6" [ref=e140]:
+              - code [ref=e141]: anthropic/claude-sonnet-4.6
+            - cell "4,096 / 180K" [ref=e142]
+            - cell "-" [ref=e143]
+            - cell "已连接" [ref=e144]:
+              - generic [ref=e145]:
+                - img [ref=e146]
+                - text: 已连接
+            - cell "已启用" [ref=e148]:
+              - generic [ref=e149] [cursor=pointer]:
+                - img [ref=e150]
+                - text: 已启用
+            - cell [ref=e152]:
+              - generic [ref=e153]:
+                - button "测试 API 连接" [ref=e154]:
+                  - img
+                - button [ref=e155]:
+                  - img
+                - button [ref=e156]:
+                  - img
+  - alert [ref=e11]

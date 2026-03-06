@@ -183,55 +183,57 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
               const data = line.slice(6).trim();
               if (!data) continue;
 
+              let event: StreamEvent;
               try {
-                const event: StreamEvent = JSON.parse(data);
+                event = JSON.parse(data) as StreamEvent;
+              } catch (parseError) {
+                // Ignore malformed provider lines, but do not swallow real stream error events.
+                if (parseError instanceof SyntaxError) {
+                  console.warn('Parse error:', parseError);
+                  continue;
+                }
 
-                switch (event.type) {
-                  case 'init':
-                    finalConversationId = event.conversationId;
+                throw parseError;
+              }
+
+              switch (event.type) {
+                case 'init':
+                  finalConversationId = event.conversationId;
+                  setState((prev) => ({
+                    ...prev,
+                    conversationId: event.conversationId ?? prev.conversationId,
+                    modelUsed: event.modelUsed ?? prev.modelUsed,
+                  }));
+                  // Notify parent about new conversation
+                  if (event.conversationId && !state.conversationId) {
+                    options.onConversationCreated?.(event.conversationId);
+                  }
+                  break;
+
+                case 'delta':
+                  if (event.content) {
+                    streamingMessageRef.current += event.content;
+
+                    // Update message content with typewriter effect
                     setState((prev) => ({
                       ...prev,
-                      conversationId: event.conversationId ?? prev.conversationId,
-                      modelUsed: event.modelUsed ?? prev.modelUsed,
+                      messages: prev.messages.map((m) =>
+                        m.id === assistantMessageId
+                          ? { ...m, content: streamingMessageRef.current }
+                          : m
+                      ),
                     }));
-                    // Notify parent about new conversation
-                    if (event.conversationId && !state.conversationId) {
-                      options.onConversationCreated?.(event.conversationId);
-                    }
-                    break;
+                  }
+                  break;
 
-                  case 'delta':
-                    if (event.content) {
-                      streamingMessageRef.current += event.content;
+                case 'complete':
+                  finalUsage = event.usage;
+                  finalCost = event.cost;
+                  finalConversationId = event.conversationId;
+                  break;
 
-                      // Update message content with typewriter effect
-                      setState((prev) => ({
-                        ...prev,
-                        messages: prev.messages.map((m) =>
-                          m.id === assistantMessageId
-                            ? { ...m, content: streamingMessageRef.current }
-                            : m
-                        ),
-                      }));
-                    }
-                    break;
-
-                  case 'complete':
-                    finalUsage = event.usage;
-                    finalCost = event.cost;
-                    finalConversationId = event.conversationId;
-                    break;
-
-                  case 'error':
-                    throw new Error(event.error || 'Stream error');
-                }
-              } catch (parseError) {
-                // Ignore parse errors for malformed events
-                if (parseError instanceof Error && parseError.message !== 'Stream error') {
-                  console.warn('Parse error:', parseError);
-                } else {
-                  throw parseError;
-                }
+                case 'error':
+                  throw new Error(event.error || 'Stream error');
               }
             }
           }

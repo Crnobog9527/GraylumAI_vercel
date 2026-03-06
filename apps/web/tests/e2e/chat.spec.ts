@@ -1,127 +1,204 @@
-import { test, expect } from '@playwright/test';
+/*
+ * Copyright (c) 2026 Grayscale Luminary LLC.
+ * All rights reserved.
+ * This code is proprietary and confidential.
+ */
+
+import { test, expect, type Page } from '@playwright/test';
+import { authStatePaths, hasCredentials } from './support/auth';
+import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
+
+async function dismissLowBalanceDialogIfVisible(page: Page) {
+  const dismissButton = page.getByRole('button', { name: '稍后再说' });
+  if (await dismissButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await dismissButton.click();
+    return true;
+  }
+  return false;
+}
 
 test.describe('AI Chat', () => {
-  // Use authenticated state for chat tests
-  test.use({ storageState: 'tests/.auth/user.json' });
+  test.use({ storageState: authStatePaths.user });
+  test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for chat flows');
 
-  test.describe('Chat Interface', () => {
-    test.skip('should display chat input', async ({ page }) => {
+  test('should display chat input', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Chat shell rendered';
+
+    try {
+      steps.push('Open /chat');
       await page.goto('/chat');
+      await expect(page).toHaveURL(/\/chat/);
 
-      // Should have message input
-      await expect(
-        page.locator('textarea, input[type="text"]').filter({ hasText: '' }).first()
-      ).toBeVisible();
+      steps.push('Verify input shell and CTA controls');
+      await expect(page.getByText('开始新对话')).toBeVisible();
+      await expect(page.locator('textarea[placeholder="请输入您的问题..."]')).toBeVisible();
+      await expect(page.getByRole('button', { name: '发送' })).toBeVisible();
 
-      // Should have send button
-      await expect(
-        page.locator('button[type="submit"], button:has-text("发送"), button:has-text("Send")').first()
-      ).toBeVisible();
-    });
-
-    test.skip('should display credits balance', async ({ page }) => {
-      await page.goto('/chat');
-
-      // Should show credits somewhere
-      await expect(
-        page.locator('[class*="credits"], [class*="balance"], :text-matches("\\d+ 积分")').first()
-      ).toBeVisible();
-    });
-
-    test.skip('should create new conversation', async ({ page }) => {
-      await page.goto('/chat');
-
-      // Click new chat button if exists
-      const newChatButton = page.locator('button:has-text("新对话"), button:has-text("New Chat")').first();
-      if (await newChatButton.isVisible()) {
-        await newChatButton.click();
-      }
-
-      // Should have empty chat or welcome message
-      await expect(page.locator('.messages, .chat-container, [class*="message"]').first()).toBeVisible();
-    });
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown chat shell failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-shell-smoke',
+          role: 'user',
+          route: '/chat',
+          expected: 'Chat page renders the main shell, input, and send CTA without blocking runtime issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 
-  test.describe('Send Message', () => {
-    test.skip('should send message and receive response', async ({ page }) => {
+  test('should display conversation shell', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Conversation shell rendered';
+
+    try {
+      steps.push('Open /chat and inspect sidebar');
       await page.goto('/chat');
+      await expect(page).toHaveURL(/\/chat/);
 
-      // Type a message
-      const input = page.locator('textarea, input[type="text"]').first();
-      await input.fill('你好，请简单介绍一下你自己');
+      steps.push('Verify conversation sidebar or empty state');
+      await expect(page.getByText('全部对话')).toBeVisible();
+      await expect(page.getByRole('button', { name: /新建对话/ })).toBeVisible();
 
-      // Send message
-      await page.click('button[type="submit"], button:has-text("发送"), button:has-text("Send")');
-
-      // Wait for user message to appear
-      await expect(
-        page.locator('.message-user, [class*="user-message"], [data-role="user"]').first()
-      ).toBeVisible({ timeout: 5000 });
-
-      // Wait for AI response (may take longer)
-      await expect(
-        page.locator('.message-assistant, [class*="assistant-message"], [data-role="assistant"]').first()
-      ).toBeVisible({ timeout: 60000 });
-    });
-
-    test.skip('should show loading state while waiting for response', async ({ page }) => {
-      await page.goto('/chat');
-
-      // Type and send a message
-      const input = page.locator('textarea, input[type="text"]').first();
-      await input.fill('测试消息');
-      await page.click('button[type="submit"], button:has-text("发送")');
-
-      // Should show loading indicator
-      await expect(
-        page.locator('[class*="loading"], [class*="spinner"], .animate-pulse').first()
-      ).toBeVisible({ timeout: 2000 });
-    });
-
-    test.skip('should be able to abort message', async ({ page }) => {
-      await page.goto('/chat');
-
-      // Send a message
-      const input = page.locator('textarea, input[type="text"]').first();
-      await input.fill('请写一篇长文章关于人工智能的发展历史');
-      await page.click('button[type="submit"]');
-
-      // Wait for abort button to appear
-      const abortButton = page.locator('button:has-text("停止"), button:has-text("Stop"), button:has-text("中断")');
-
-      if (await abortButton.isVisible({ timeout: 3000 })) {
-        await abortButton.click();
-
-        // Message should be marked as interrupted or stop generating
-        await expect(page.locator(':text("已中断"), :text("Stopped")')).toBeVisible({ timeout: 5000 });
-      }
-    });
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown conversation shell failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-conversation-shell',
+          role: 'user',
+          route: '/chat',
+          expected: 'Chat page exposes the conversation list container or equivalent shell without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 
-  test.describe('Conversation Management', () => {
-    test.skip('should show conversation history', async ({ page }) => {
+  test('should send message and receive stream response', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = `E2E smoke message ${Date.now()}`;
+    let actual = 'Chat send flow completed';
+
+    try {
+      steps.push('Open /chat');
       await page.goto('/chat');
 
-      // Should have sidebar or conversation list
-      await expect(
-        page.locator('[class*="sidebar"], [class*="conversation-list"], aside').first()
-      ).toBeVisible();
-    });
+      steps.push('Fill chat prompt');
+      const input = page.locator('textarea[placeholder="请输入您的问题..."]');
+      await input.fill(prompt);
 
-    test.skip('should be able to switch conversations', async ({ page }) => {
-      await page.goto('/chat');
-
-      // Find conversation items
-      const conversations = page.locator('[class*="conversation-item"], [data-testid="conversation"]');
-
-      const count = await conversations.count();
-      if (count > 1) {
-        // Click second conversation
-        await conversations.nth(1).click();
-
-        // URL should change or messages should update
-        await page.waitForTimeout(1000);
+      steps.push('Submit the prompt and wait for stream endpoint');
+      const streamResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/ai/stream') &&
+          response.request().method() === 'POST',
+        { timeout: 20000 },
+      );
+      await page.getByRole('button', { name: '发送' }).click();
+      const dismissedLowBalance = await dismissLowBalanceDialogIfVisible(page);
+      if (dismissedLowBalance) {
+        steps.push('Dismiss low-balance dialog and retry send');
+        await page.getByRole('button', { name: '发送' }).click();
       }
-    });
+
+      const streamResponse = await streamResponsePromise;
+      expect(streamResponse.status()).toBe(200);
+
+      steps.push('Verify user prompt is echoed into the conversation list');
+      await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+
+      steps.push('Wait until the UI returns to idle after streaming');
+      await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown chat send failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-send-message',
+          role: 'user',
+          route: '/chat',
+          expected: 'Authenticated users can send a prompt, hit /api/ai/stream successfully, and return to idle without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+        ['If this fails, inspect model configuration, user credits, and stream route auth before changing UI logic.'],
+      );
+    }
+  });
+
+  test('should expose stop control during long-running stream', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = '请按行输出数字 1 到 400，并在每行附带一句简短中文说明。';
+    let actual = 'Stop control interrupted the stream';
+
+    try {
+      steps.push('Open /chat and start a long-running prompt');
+      await page.goto('/chat');
+      const input = page.locator('textarea[placeholder="请输入您的问题..."]');
+      await input.fill(prompt);
+      await page.getByRole('button', { name: '发送' }).click();
+      const dismissedLowBalance = await dismissLowBalanceDialogIfVisible(page);
+      if (dismissedLowBalance) {
+        steps.push('Dismiss low-balance dialog and retry send');
+        await page.getByRole('button', { name: '发送' }).click();
+      }
+
+      steps.push('Wait for stop control and click it');
+      const stopButton = page.getByRole('button', { name: '停止' });
+      await expect(stopButton).toBeVisible({ timeout: 15000 });
+      await stopButton.click();
+
+      steps.push('Verify interrupted marker is rendered');
+      await expect(page.getByText('[已中断]')).toBeVisible({ timeout: 10000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown abort flow failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-abort-stream',
+          role: 'user',
+          route: '/chat',
+          expected: 'Long-running chat responses expose the stop control and render an interrupted marker after abort.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 });

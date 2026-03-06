@@ -346,41 +346,16 @@ export const chatRouter = router({
       };
     }),
 
+  /**
+   * @deprecated 旧非流式对话入口，已下线。
+   * 请使用 /api/ai/stream + useStreamingChat 主链路。
+   */
   sendMessage: protectedProcedure
     .input(z.object({ conversationId: z.string().uuid(), content: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      // TODO: Add logic to call AI model and stream response
-      // For now, we just save the user's message and echo a reply
-
-      // 1. Save user message
-      const { data: userMessage, error: userMessageError } = await ctx.supabase
-        .from('messages')
-        .insert({
-          conversation_id: input.conversationId,
-          role: 'user',
-          content: input.content,
-        })
-        .select()
-        .single();
-
-      if (userMessageError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: userMessageError.message });
-
-      // 2. Deduct credits (example)
-      // await ctx.supabase.rpc('deduct_credits', { user_id: ctx.profileId, amount: 1 });
-
-      // 3. Echo a reply
-      const { data: assistantMessage, error: assistantMessageError } = await ctx.supabase
-        .from('messages')
-        .insert({
-          conversation_id: input.conversationId,
-          role: 'assistant',
-          content: `You said: ${input.content}`,
-        })
-        .select()
-        .single();
-
-      if (assistantMessageError) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: assistantMessageError.message });
-
-      return { userMessage, assistantMessage };
+    .mutation(async () => {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'chat.sendMessage 已废弃，请使用 /api/ai/stream + useStreamingChat。',
+      });
     }),
 });

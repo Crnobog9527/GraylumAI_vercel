@@ -599,24 +599,17 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
-      // Get usage statistics in parallel
+      // Get usage statistics
       const [
         conversationsResult,
-        messagesResult,
         creditsSpentResult,
         ticketsResult,
       ] = await Promise.all([
-        // Total conversations
+        // Fetch conversation IDs first; message count must be based on these IDs
         ctx.supabase
           .from('conversations')
-          .select('id', { count: 'exact', head: true })
+          .select('id')
           .eq('user_id', input.userId),
-
-        // Total messages
-        ctx.supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', input.userId), // This will need adjustment based on actual schema
 
         // Credits spent (deductions)
         ctx.supabase
@@ -631,6 +624,32 @@ export const adminRouter = router({
           .select('id', { count: 'exact', head: true })
           .eq('user_id', input.userId),
       ]);
+
+      if (conversationsResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: conversationsResult.error.message });
+      }
+      if (creditsSpentResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: creditsSpentResult.error.message });
+      }
+      if (ticketsResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ticketsResult.error.message });
+      }
+
+      const conversationIds = (conversationsResult.data ?? []).map((conversation) => conversation.id);
+      let totalMessages = 0;
+
+      if (conversationIds.length > 0) {
+        const { count: messageCount, error: messageError } = await ctx.supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .in('conversation_id', conversationIds);
+
+        if (messageError) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageError.message });
+        }
+
+        totalMessages = messageCount ?? 0;
+      }
 
       // Calculate total credits spent
       const totalCreditsSpent = creditsSpentResult.data?.reduce(
@@ -648,8 +667,8 @@ export const adminRouter = router({
       return {
         profile,
         stats: {
-          totalConversations: conversationsResult.count ?? 0,
-          totalMessages: messagesResult.count ?? 0,
+          totalConversations: conversationsResult.data?.length ?? 0,
+          totalMessages,
           totalCreditsSpent,
           totalTickets: ticketsResult.count ?? 0,
         },

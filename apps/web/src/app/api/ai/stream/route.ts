@@ -73,12 +73,14 @@ async function getModelConfig(supabase: any, modelId?: string) {
       inputTokenCost: 3000, // per 1M tokens in micro-dollars
       outputTokenCost: 15000,
       apiKey: null, // 使用环境变量
+      provider: 'anthropic',
+      apiEndpoint: null,
     };
   }
 
   const { data } = await supabase
     .from('ai_models')
-    .select('model_id, name, max_tokens, input_token_cost, output_token_cost, api_key')
+    .select('model_id, name, provider, max_tokens, input_token_cost, output_token_cost, api_key, api_endpoint')
     .eq('id', modelId)
     .single();
 
@@ -90,6 +92,8 @@ async function getModelConfig(supabase: any, modelId?: string) {
       inputTokenCost: data.input_token_cost,
       outputTokenCost: data.output_token_cost,
       apiKey: data.api_key || null, // 模型自己的 API Key
+      provider: data.provider || 'anthropic',
+      apiEndpoint: data.api_endpoint || null,
     };
   }
 
@@ -100,7 +104,47 @@ async function getModelConfig(supabase: any, modelId?: string) {
     inputTokenCost: 3000,
     outputTokenCost: 15000,
     apiKey: null,
+    provider: 'anthropic',
+    apiEndpoint: null,
   };
+}
+
+function normalizeOpenAICompatibleEndpoint(endpoint?: string | null) {
+  const trimmed = endpoint?.trim();
+  if (!trimmed) return null;
+  if (trimmed.endsWith('/chat/completions')) return trimmed;
+  if (trimmed.endsWith('/v1')) return `${trimmed}/chat/completions`;
+  if (trimmed.endsWith('/v1/')) return `${trimmed}chat/completions`;
+  if (trimmed.endsWith('/')) return `${trimmed}chat/completions`;
+  return trimmed;
+}
+
+function looksLikeOpenRouterKey(apiKey?: string | null) {
+  return Boolean(apiKey?.startsWith('sk-or-'));
+}
+
+function usesOpenAICompatibleApi(
+  modelConfig: Awaited<ReturnType<typeof getModelConfig>>,
+  apiKey?: string | null,
+) {
+  const endpoint = modelConfig.apiEndpoint?.toLowerCase() ?? '';
+  return endpoint.includes('openrouter.ai') || endpoint.includes('/chat/completions') || looksLikeOpenRouterKey(apiKey);
+}
+
+async function getProviderErrorMessage(response: Response) {
+  const errorText = await response.text();
+
+  try {
+    const errorData = JSON.parse(errorText);
+    return (
+      errorData?.error?.message ||
+      errorData?.message ||
+      errorText ||
+      `HTTP ${response.status}`
+    );
+  } catch {
+    return errorText || `HTTP ${response.status}`;
+  }
 }
 
 // 统一的最大上下文消息数（所有用户相同，不再按会员等级区分）
@@ -315,91 +359,169 @@ export async function POST(request: NextRequest) {
             encoder.encode(`data: ${JSON.stringify(initEvent)}\n\n`)
           );
 
-          // Call Anthropic streaming API
+          // Call model provider streaming API
           // 优先使用模型配置的 API Key，否则回退到环境变量
           const apiKey = modelConfig.apiKey || process.env.ANTHROPIC_API_KEY;
           if (!apiKey) {
             throw new Error('未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量');
           }
+          const openAICompatibleEndpoint = usesOpenAICompatibleApi(modelConfig, apiKey)
+            ? (normalizeOpenAICompatibleEndpoint(modelConfig.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions')
+            : null;
 
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-              model: modelConfig.modelId,
-              max_tokens: modelConfig.maxTokens,
-              stream: true,
-              messages: messages.map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-            }),
-          });
+          if (openAICompatibleEndpoint) {
+            const response = await fetch(openAICompatibleEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+                'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+                'X-Title': 'GraylumAI',
+              },
+              body: JSON.stringify({
+                model: modelConfig.modelId,
+                max_tokens: modelConfig.maxTokens,
+                stream: true,
+                stream_options: { include_usage: true },
+                messages: messages.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                })),
+              }),
+            });
 
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Anthropic API error: ${response.status} - ${errorText}`);
-          }
+            if (!response.ok) {
+              const providerError = await getProviderErrorMessage(response);
+              throw new Error(`OpenAI-compatible API error: ${response.status} - ${providerError}`);
+            }
 
-          const reader = response.body?.getReader();
-          if (!reader) {
-            throw new Error('No response body');
-          }
+            const reader = response.body?.getReader();
+            if (!reader) {
+              throw new Error('No response body');
+            }
 
-          const decoder = new TextDecoder();
-          let buffer = '';
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-          while (true) {
-            const { done, value } = await reader.read();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-            if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
                 const data = line.slice(6);
-
                 if (data === '[DONE]') continue;
 
                 try {
                   const event = JSON.parse(data);
-
-                  if (event.type === 'content_block_delta') {
-                    const delta = event.delta?.text || '';
+                  const delta = event.choices?.[0]?.delta?.content || '';
+                  if (delta) {
                     fullContent += delta;
-
-                    // Send delta to client
-                    const deltaEvent = {
-                      type: 'delta',
-                      content: delta,
-                    };
                     controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify(deltaEvent)}\n\n`)
+                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
                     );
-                  } else if (event.type === 'message_delta') {
-                    // Final usage stats
-                    if (event.usage) {
-                      usage.outputTokens = event.usage.output_tokens || 0;
-                    }
-                  } else if (event.type === 'message_start') {
-                    if (event.message?.usage) {
-                      usage.inputTokens = event.message.usage.input_tokens || 0;
-                      usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || 0;
-                      usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || 0;
-                    }
                   }
-                } catch (parseError) {
+
+                  if (event.usage) {
+                    usage.inputTokens = event.usage.prompt_tokens || usage.inputTokens;
+                    usage.outputTokens = event.usage.completion_tokens || usage.outputTokens;
+                  }
+                } catch {
                   // Ignore parse errors for non-JSON lines
                 }
               }
             }
+          } else {
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+              },
+              body: JSON.stringify({
+                model: modelConfig.modelId,
+                max_tokens: modelConfig.maxTokens,
+                stream: true,
+                messages: messages.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                })),
+              }),
+            });
+
+            if (!response.ok) {
+              const providerError = await getProviderErrorMessage(response);
+              throw new Error(`Anthropic API error: ${response.status} - ${providerError}`);
+            }
+
+            const reader = response.body?.getReader();
+            if (!reader) {
+              throw new Error('No response body');
+            }
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+
+                  if (data === '[DONE]') continue;
+
+                  try {
+                    const event = JSON.parse(data);
+
+                    if (event.type === 'content_block_delta') {
+                      const delta = event.delta?.text || '';
+                      fullContent += delta;
+
+                      // Send delta to client
+                      const deltaEvent = {
+                        type: 'delta',
+                        content: delta,
+                      };
+                      controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify(deltaEvent)}\n\n`)
+                      );
+                    } else if (event.type === 'message_delta') {
+                      // Final usage stats
+                      if (event.usage) {
+                        usage.outputTokens = event.usage.output_tokens || 0;
+                      }
+                    } else if (event.type === 'message_start') {
+                      if (event.message?.usage) {
+                        usage.inputTokens = event.message.usage.input_tokens || 0;
+                        usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || 0;
+                        usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || 0;
+                      }
+                    }
+                  } catch {
+                    // Ignore parse errors for non-JSON lines
+                  }
+                }
+              }
+            }
+          }
+
+          if (!usage.inputTokens) {
+            usage.inputTokens = estimatedInputTokens;
+          }
+          if (!usage.outputTokens) {
+            usage.outputTokens = estimateTokens(fullContent);
           }
 
           // 10. 输出安全检查 (P1-4: 应用输出安全过滤)
