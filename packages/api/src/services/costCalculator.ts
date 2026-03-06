@@ -303,7 +303,12 @@ export class CostCalculator {
     tier: 'budget' | 'standard' | 'premium';
   }> {
     const models = Object.keys(EXTENDED_MODEL_PRICING);
-    const usage: TokenUsage = { inputTokens, outputTokens };
+    const usage: TokenUsage = {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    };
 
     return models.map((modelId) => {
       const result = this.calculate(modelId, usage);

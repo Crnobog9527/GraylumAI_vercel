@@ -7,6 +7,8 @@
 
 import type { ClaudeMessage, ClaudeStreamEvent, TokenUsage, StreamEvent } from '../types/ai';
 
+type MessageEndEvent = Extract<StreamEvent, { type: 'message_end' }>;
+
 // ============================================
 // 常量
 // ============================================
@@ -348,7 +350,7 @@ export function createSSEStream(
         // 发送结束事件
         const endEvent: StreamEvent = {
           type: 'message_end',
-          stopReason: result.stopReason as StreamEvent['stopReason'],
+          stopReason: result.stopReason as MessageEndEvent['stopReason'],
         };
         controller.enqueue(encoder.encode(formatSSEEvent(endEvent)));
 

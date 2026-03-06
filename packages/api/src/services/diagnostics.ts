@@ -14,6 +14,8 @@ import { classifyTask, selectModel, needsRealtimeData } from './modelRouter';
 import { countTokens, quickEstimate } from './tokenCounter';
 import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
 import { BillingService, calculateTokenCost, estimateRequestCost } from './billing';
+import { buildCachedPrompt } from './promptCacheBuilder';
+import { getChatRuntimeSettings } from './chatRuntime';
 import type { TokenUsage } from '../types/ai';
 
 // ============================================
@@ -118,6 +120,7 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
+      const runtimeSettings = await getChatRuntimeSettings(ctx.supabase);
       // 测试简单任务分类
       const simpleTask = classifyTask('你好', 0);
       const complexTask = classifyTask('请帮我写一个完整的用户管理系统，包括登录、注册、权限管理功能', 0);
@@ -131,6 +134,7 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       });
 
       return {
+        smartRoutingEnabled: runtimeSettings.enableSmartRouting,
         simpleTask,
         complexTask,
         multiTurnTask,
@@ -152,7 +156,7 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       category,
       status: isValid ? 'passed' : 'failed',
       message: isValid
-        ? `路由正确: 简单=${result.simpleTask}, 复杂=${result.complexTask}, 多轮=${result.multiTurnTask}`
+        ? `路由正常: 开关=${result.smartRoutingEnabled ? '开启' : '关闭'}, 简单=${result.simpleTask}, 复杂=${result.complexTask}`
         : '路由分类异常',
       details: result,
       latencyMs,
@@ -246,19 +250,24 @@ async function testPromptCache(ctx: DiagnosticContext): Promise<DiagnosticTestRe
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
-      // 检查系统设置中的缓存配置
-      const { data: settings } = await ctx.supabase
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'ai_models')
-        .single();
-
-      const aiSettings = settings?.value as { enablePromptCache?: boolean } | null;
-      const cacheEnabled = aiSettings?.enablePromptCache ?? true;
+      const runtimeSettings = await getChatRuntimeSettings(ctx.supabase);
+      const cachedPrompt = buildCachedPrompt({
+        systemPrompt: '你是一个提示词缓存测试助手。'.repeat(220),
+        messages: [
+          { role: 'user', content: '这是第一轮历史消息。'.repeat(180) },
+          { role: 'assistant', content: '这是第一轮回复。'.repeat(180) },
+          { role: 'user', content: '这是第二轮历史消息。'.repeat(180) },
+          { role: 'assistant', content: '这是第二轮回复。'.repeat(180) },
+          { role: 'user', content: '这是当前用户输入。' },
+        ],
+        config: { enabled: runtimeSettings.enablePromptCache },
+      });
 
       return {
-        cacheEnabled,
-        settingsFound: settings !== null,
+        cacheEnabled: runtimeSettings.enablePromptCache,
+        cachePoints: cachedPrompt.cachePoints,
+        estimatedCacheSavings: cachedPrompt.estimatedCacheSavings,
+        cacheApplied: cachedPrompt.cachePoints > 0,
       };
     });
 
@@ -266,10 +275,10 @@ async function testPromptCache(ctx: DiagnosticContext): Promise<DiagnosticTestRe
       testId,
       testName,
       category,
-      status: result.cacheEnabled ? 'passed' : 'warning',
+      status: result.cacheEnabled && result.cacheApplied ? 'passed' : 'warning',
       message: result.cacheEnabled
-        ? 'Prompt 缓存已启用'
-        : 'Prompt 缓存未启用，可能影响成本',
+        ? `Prompt 缓存已接入构造链路，缓存点 ${result.cachePoints}`
+        : 'Prompt 缓存已关闭',
       details: result,
       latencyMs,
     };
@@ -340,6 +349,7 @@ async function testRealtimeKeywords(ctx: DiagnosticContext): Promise<DiagnosticT
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
+      const runtimeSettings = await getChatRuntimeSettings(ctx.supabase);
       // 测试各种实时数据查询
       const testCases = [
         { query: '今天的新闻是什么', expected: true },
@@ -360,6 +370,7 @@ async function testRealtimeKeywords(ctx: DiagnosticContext): Promise<DiagnosticT
       const correctCount = results.filter((r) => r.correct).length;
 
       return {
+        smartSearchEnabled: runtimeSettings.enableSmartSearchDecision,
         testCases: results,
         correctCount,
         totalCount: testCases.length,
@@ -374,7 +385,7 @@ async function testRealtimeKeywords(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: allCorrect ? 'passed' : result.passRate >= 80 ? 'warning' : 'failed',
-      message: `实时关键词检测: ${result.correctCount}/${result.totalCount} 正确 (${result.passRate}%)`,
+      message: `实时关键词检测: ${result.correctCount}/${result.totalCount} 正确 (${result.passRate}%)，当前仅做判断${result.smartSearchEnabled ? '' : '，开关关闭'}`,
       details: result,
       latencyMs,
     };
@@ -403,27 +414,28 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
       // 获取所有启用的模型
       const { data: models, error } = await ctx.supabase
         .from('ai_models')
-        .select('id, name, model_id, provider, is_active, api_key')
+        .select('id, name, model_id, provider, is_active, api_key, config')
         .eq('is_active', 'true');
 
       if (error) throw error;
 
       const modelResults = await Promise.all((models || []).map(async (model) => {
+        const config = (model.config as Record<string, unknown> | null) ?? {};
+        const connectionStatus = typeof config.connection_status === 'string'
+          ? config.connection_status
+          : null;
         const hasKey = !!model.api_key || !!process.env.ANTHROPIC_API_KEY;
-
-        // TODO: 可选 - 尝试一个极简的 API 调用验证连接
-        // 目前只检查配置完整性
 
         return {
           id: model.id,
           name: model.name,
           modelId: model.model_id,
-          status: hasKey ? 'configured' : 'missing_key',
-          message: hasKey ? '配置正确' : '缺少 API 密钥',
+          status: !hasKey ? 'missing_key' : connectionStatus ?? 'untested',
+          message: !hasKey ? '缺少 API 密钥' : (connectionStatus ? `最近连接状态: ${connectionStatus}` : '尚未执行连接测试'),
         };
       }));
 
-      const failedCount = modelResults.filter(m => m.status === 'missing_key').length;
+      const failedCount = modelResults.filter(m => m.status === 'missing_key' || m.status === 'error').length;
 
       return {
         models: modelResults,

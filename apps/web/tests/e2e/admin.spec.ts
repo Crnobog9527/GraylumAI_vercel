@@ -1,115 +1,159 @@
+/*
+ * Copyright (c) 2026 Grayscale Luminary LLC.
+ * All rights reserved.
+ * This code is proprietary and confidential.
+ */
+
 import { test, expect } from '@playwright/test';
+import { authStatePaths, hasCredentials } from './support/auth';
+import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 test.describe('Admin Dashboard', () => {
-  // Use authenticated state (admin user required)
-  test.use({ storageState: 'tests/.auth/user.json' });
+  test.use({ storageState: authStatePaths.admin });
+  test.skip(!hasCredentials('admin'), 'E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD are required for admin flows');
 
-  test.describe('Admin Access', () => {
-    test.skip('should redirect non-admin users', async ({ page }) => {
-      // This test assumes the auth user is not an admin
+  test('should display admin dashboard', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin dashboard rendered';
+
+    try {
+      steps.push('Open /admin');
       await page.goto('/admin');
+      await expect(page).toHaveURL(/\/admin/);
 
-      // Should be redirected or see access denied
-      await expect(page).toHaveURL(/\/(login|403|home)?/);
-    });
+      steps.push('Verify dashboard heading and summary copy');
+      await expect(page.getByText('管理后台仪表盘')).toBeVisible();
+      await expect(page.getByText('平台运营数据概览')).toBeVisible();
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin dashboard failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-dashboard-smoke',
+          role: 'admin',
+          route: '/admin',
+          expected: 'Admin users can load the dashboard and see the primary heading without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 
-  test.describe('Diagnostics Page', () => {
-    test.skip('should display diagnostics dashboard', async ({ page }) => {
-      await page.goto('/admin/diagnostics');
+  test('should display models dashboard', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Models page rendered';
 
-      // Check for page title or heading
-      await expect(
-        page.locator('h1:has-text("诊断"), h1:has-text("Diagnostics")').first()
-      ).toBeVisible();
-    });
+    try {
+      steps.push('Open /admin/models');
+      await page.goto('/admin/models');
+      await expect(page).toHaveURL(/\/admin\/models/);
 
-    test.skip('should run diagnostics tests', async ({ page }) => {
-      await page.goto('/admin/diagnostics');
+      steps.push('Verify models page heading and table shell');
+      await expect(page.getByText('AI 模型管理')).toBeVisible();
+      await expect(page.locator('table').first()).toBeVisible();
 
-      // Find and click run tests button
-      const runButton = page.locator('button:has-text("运行"), button:has-text("Run")').first();
-      await runButton.click();
-
-      // Wait for results
-      await expect(
-        page.locator('[class*="result"], [class*="test-result"]').first()
-      ).toBeVisible({ timeout: 30000 });
-    });
-
-    test.skip('should display test results', async ({ page }) => {
-      await page.goto('/admin/diagnostics');
-
-      // Run tests first
-      await page.click('button:has-text("运行"), button:has-text("Run")');
-
-      // Wait for completion
-      await page.waitForTimeout(5000);
-
-      // Should show pass/fail indicators
-      await expect(
-        page.locator(':text("通过"), :text("Pass"), :text("✓"), :text("✅")').first()
-      ).toBeVisible();
-    });
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin models failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-models-smoke',
+          role: 'admin',
+          route: '/admin/models',
+          expected: 'Admin users can load the models page, see its heading, and render the primary data table without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 
-  test.describe('Cost Monitoring Page', () => {
-    test.skip('should display costs dashboard', async ({ page }) => {
-      await page.goto('/admin/costs');
+  test('should display diagnostics dashboard', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Diagnostics page rendered';
 
-      // Check for page title
-      await expect(
-        page.locator('h1:has-text("成本"), h1:has-text("Cost")').first()
-      ).toBeVisible();
-    });
+    try {
+      steps.push('Open /admin/diagnostics');
+      await page.goto('/admin/diagnostics');
+      await expect(page).toHaveURL(/\/admin\/diagnostics/);
 
-    test.skip('should display tabs', async ({ page }) => {
-      await page.goto('/admin/costs');
+      steps.push('Verify diagnostics heading and run button');
+      await expect(page.getByRole('heading', { name: '系统诊断' })).toBeVisible();
+      await expect(page.getByRole('button', { name: /运行|Run/ }).first()).toBeVisible();
 
-      // Check for tab navigation
-      await expect(page.locator('[role="tablist"], [class*="tabs"]')).toBeVisible();
-    });
-
-    test.skip('should switch between tabs', async ({ page }) => {
-      await page.goto('/admin/costs');
-
-      // Find tabs
-      const tabs = page.locator('[role="tab"], button[class*="tab"]');
-
-      const count = await tabs.count();
-      if (count > 1) {
-        // Click second tab
-        await tabs.nth(1).click();
-
-        // Content should change
-        await page.waitForTimeout(500);
-      }
-    });
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown diagnostics failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-diagnostics-smoke',
+          role: 'admin',
+          route: '/admin/diagnostics',
+          expected: 'Admin users can load diagnostics and see the primary test-run controls without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 
-  test.describe('User Management', () => {
-    test.skip('should display users list', async ({ page }) => {
+  test('should display users list', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Users page rendered';
+
+    try {
+      steps.push('Open /admin/users');
       await page.goto('/admin/users');
+      await expect(page).toHaveURL(/\/admin\/users/);
 
-      // Should show user table or list
-      await expect(
-        page.locator('table, [class*="user-list"], [data-testid="users-table"]').first()
-      ).toBeVisible();
-    });
+      steps.push('Verify users page heading and filter form');
+      await expect(page.getByText('用户管理')).toBeVisible();
+      await expect(page.locator('table').first()).toBeVisible();
+      await expect(page.locator('input[placeholder="邮箱或昵称..."]').first()).toBeVisible();
 
-    test.skip('should be able to search users', async ({ page }) => {
-      await page.goto('/admin/users');
-
-      // Find search input
-      const searchInput = page.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search"]');
-
-      if (await searchInput.isVisible()) {
-        await searchInput.fill('test');
-        await page.waitForTimeout(500);
-
-        // Results should update
-        await expect(page.locator('table tbody tr, [class*="user-item"]').first()).toBeVisible();
-      }
-    });
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown users page failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-users-smoke',
+          role: 'admin',
+          route: '/admin/users',
+          expected: 'Admin users can load the users page, see the table shell, and access the primary search input without blocking issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
   });
 });

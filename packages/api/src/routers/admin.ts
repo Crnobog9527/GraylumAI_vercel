@@ -599,24 +599,17 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
-      // Get usage statistics in parallel
+      // Get usage statistics
       const [
         conversationsResult,
-        messagesResult,
         creditsSpentResult,
         ticketsResult,
       ] = await Promise.all([
-        // Total conversations
+        // Fetch conversation IDs first; message count must be based on these IDs
         ctx.supabase
           .from('conversations')
-          .select('id', { count: 'exact', head: true })
+          .select('id')
           .eq('user_id', input.userId),
-
-        // Total messages
-        ctx.supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', input.userId), // This will need adjustment based on actual schema
 
         // Credits spent (deductions)
         ctx.supabase
@@ -631,6 +624,32 @@ export const adminRouter = router({
           .select('id', { count: 'exact', head: true })
           .eq('user_id', input.userId),
       ]);
+
+      if (conversationsResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: conversationsResult.error.message });
+      }
+      if (creditsSpentResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: creditsSpentResult.error.message });
+      }
+      if (ticketsResult.error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ticketsResult.error.message });
+      }
+
+      const conversationIds = (conversationsResult.data ?? []).map((conversation) => conversation.id);
+      let totalMessages = 0;
+
+      if (conversationIds.length > 0) {
+        const { count: messageCount, error: messageError } = await ctx.supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .in('conversation_id', conversationIds);
+
+        if (messageError) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageError.message });
+        }
+
+        totalMessages = messageCount ?? 0;
+      }
 
       // Calculate total credits spent
       const totalCreditsSpent = creditsSpentResult.data?.reduce(
@@ -648,8 +667,8 @@ export const adminRouter = router({
       return {
         profile,
         stats: {
-          totalConversations: conversationsResult.count ?? 0,
-          totalMessages: messagesResult.count ?? 0,
+          totalConversations: conversationsResult.data?.length ?? 0,
+          totalMessages,
           totalCreditsSpent,
           totalTickets: ticketsResult.count ?? 0,
         },
@@ -1326,39 +1345,40 @@ export const adminRouter = router({
    */
   getFinanceStats: adminProcedure
     .query(async ({ ctx }) => {
-      // Get all transactions for analysis
-      const { data: transactions } = await ctx.supabase
+      const { data: creditTransactions } = await ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at, description')
         .order('created_at', { ascending: false });
 
-      // Get credit packages for revenue calculation
       const { data: packages } = await ctx.supabase
         .from('credit_packages')
         .select('*');
 
-      // Get user statistics
       const { data: users } = await ctx.supabase
         .from('profiles')
         .select('credits, created_at');
 
-      // Get AI models for cost configuration
       const { data: models } = await ctx.supabase
         .from('ai_models')
         .select('*')
         .order('name', { ascending: true });
 
-      // Get messages for API request count estimate
-      const { data: messages } = await ctx.supabase
-        .from('messages')
-        .select('id, role, created_at, conversation_id');
-
-      // Get conversations with model info
       const { data: conversations } = await ctx.supabase
         .from('conversations')
         .select('id, model_id, created_at');
 
-      // Get system settings for credits conversion rules
+      const { data: tokenStats } = await ctx.supabase
+        .from('token_stats')
+        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
+
+      const { data: usageLogs } = await ctx.supabase
+        .from('ai_usage_logs')
+        .select('status, created_at');
+
+      const { data: billingHistory } = await ctx.supabase
+        .from('billing_history')
+        .select('operation_type, amount, created_at, metadata');
+
       const { data: settings } = await ctx.supabase
         .from('system_settings')
         .select('*')
@@ -1393,23 +1413,42 @@ export const adminRouter = router({
         dailyStats[dateKey] = { additions: 0, deductions: 0, purchases: 0 };
       }
 
-      transactions?.forEach(t => {
+      creditTransactions?.forEach(t => {
         const transDate = new Date(t.created_at);
         const dateKey = transDate.toISOString().split('T')[0];
 
-        if (t.type === 'addition') transactionStats.totalAdditions += t.amount;
-        else if (t.type === 'deduction') transactionStats.totalDeductions += Math.abs(t.amount);
-        else if (t.type === 'purchase') transactionStats.totalPurchases += t.amount;
-        else if (t.type === 'refund') transactionStats.totalRefunds += t.amount;
+        if (t.type === 'addition') {
+          transactionStats.totalAdditions += t.amount;
+          if (dailyStats[dateKey]) dailyStats[dateKey].additions += t.amount;
+        } else if (t.type === 'purchase') {
+          transactionStats.totalPurchases += t.amount;
+          if (dailyStats[dateKey]) dailyStats[dateKey].purchases += t.amount;
+        }
 
         if (transDate >= todayStart) transactionStats.todayTransactions++;
         if (transDate >= sevenDaysAgo) transactionStats.weekTransactions++;
         if (transDate >= thirtyDaysAgo) transactionStats.monthTransactions++;
+      });
 
+      tokenStats?.forEach((stat) => {
+        const createdAt = new Date(stat.created_at);
+        const dateKey = createdAt.toISOString().split('T')[0];
+        const credits = stat.total_credits ?? 0;
+
+        transactionStats.totalDeductions += credits;
         if (dailyStats[dateKey]) {
-          if (t.type === 'addition') dailyStats[dateKey].additions += t.amount;
-          else if (t.type === 'deduction') dailyStats[dateKey].deductions += Math.abs(t.amount);
-          else if (t.type === 'purchase') dailyStats[dateKey].purchases += t.amount;
+          dailyStats[dateKey].deductions += credits;
+        }
+      });
+
+      billingHistory?.forEach((entry) => {
+        const createdAt = new Date(entry.created_at);
+        if (createdAt >= todayStart) transactionStats.todayTransactions++;
+        if (createdAt >= sevenDaysAgo) transactionStats.weekTransactions++;
+        if (createdAt >= thirtyDaysAgo) transactionStats.monthTransactions++;
+
+        if (entry.operation_type === 'refund') {
+          transactionStats.totalRefunds += Math.abs(entry.amount ?? 0);
         }
       });
 
@@ -1455,18 +1494,29 @@ export const adminRouter = router({
 
       // API/Model statistics
       const apiStats = {
-        totalRequests: messages?.filter(m => m.role === 'assistant').length ?? 0,
+        totalRequests: usageLogs?.length ?? tokenStats?.length ?? 0,
         totalConversations: conversations?.length ?? 0,
-        messagesThisMonth: messages?.filter(m => new Date(m.created_at) >= thirtyDaysAgo).length ?? 0,
-        messagesThisWeek: messages?.filter(m => new Date(m.created_at) >= sevenDaysAgo).length ?? 0,
+        messagesThisMonth: usageLogs?.filter(log => new Date(log.created_at) >= thirtyDaysAgo).length ?? 0,
+        messagesThisWeek: usageLogs?.filter(log => new Date(log.created_at) >= sevenDaysAgo).length ?? 0,
       };
 
       // Model statistics with usage count
-      const modelUsageMap: Record<string, number> = {};
-      conversations?.forEach(conv => {
+      const modelUsageByConversation: Record<string, number> = {};
+      conversations?.forEach((conv) => {
         if (conv.model_id) {
-          modelUsageMap[conv.model_id] = (modelUsageMap[conv.model_id] || 0) + 1;
+          modelUsageByConversation[conv.model_id] = (modelUsageByConversation[conv.model_id] || 0) + 1;
         }
+      });
+
+      const modelUsageByToken: Record<string, { requests: number; credits: number; costUsd: number }> = {};
+      tokenStats?.forEach((stat) => {
+        const key = stat.model_used;
+        if (!key) return;
+        const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costUsd: 0 };
+        current.requests += 1;
+        current.credits += stat.total_credits ?? 0;
+        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        modelUsageByToken[key] = current;
       });
 
       const modelStats = models?.map(model => ({
@@ -1481,7 +1531,10 @@ export const adminRouter = router({
         outputTokenCostAbove200k: model.output_token_cost_above_200k,
         webSearchCost: model.web_search_cost,
         maxTokens: model.max_tokens,
-        conversationCount: modelUsageMap[model.id] || 0,
+        conversationCount: modelUsageByConversation[model.id] || 0,
+        requestCount: modelUsageByToken[model.model_id]?.requests || 0,
+        creditsConsumed: modelUsageByToken[model.model_id]?.credits || 0,
+        costUsd: parseFloat((modelUsageByToken[model.model_id]?.costUsd || 0).toFixed(6)),
       })) ?? [];
 
       // Revenue estimation from purchases (credits sold * estimated price)
@@ -1813,7 +1866,7 @@ export const adminRouter = router({
       // Get AI models with pricing
       const { data: models } = await ctx.supabase
         .from('ai_models')
-        .select('id, name, provider, input_token_cost, output_token_cost, web_search_cost, is_active');
+        .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active');
 
       // Get tickets statistics
       const { data: tickets, count: totalTickets } = await ctx.supabase
@@ -1867,20 +1920,61 @@ export const adminRouter = router({
       };
 
       // Model usage stats with cost estimation
+      const { data: allTokenStats } = await ctx.supabase
+        .from('token_stats')
+        .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
+        .gte('created_at', rangeStart.toISOString());
+
+      const modelUsageByToken = new Map<string, {
+        requestCount: number;
+        credits: number;
+        costUsd: number;
+        inputTokens: number;
+        outputTokens: number;
+        cachedTokens: number;
+      }>();
+
+      for (const stat of allTokenStats ?? []) {
+        const current = modelUsageByToken.get(stat.model_used) ?? {
+          requestCount: 0,
+          credits: 0,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedTokens: 0,
+        };
+        current.requestCount += 1;
+        current.credits += stat.total_credits ?? 0;
+        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        current.inputTokens += stat.input_tokens ?? 0;
+        current.outputTokens += stat.output_tokens ?? 0;
+        current.cachedTokens += stat.cached_tokens ?? 0;
+        modelUsageByToken.set(stat.model_used, current);
+      }
+
       const modelUsage = models?.map(model => {
         const modelConversations = conversations?.filter(c => c.model_id === model.id) ?? [];
-        const count = modelConversations.length;
-        // Estimate tokens per message (avg ~150 tokens/message)
-        const modelMessages = messages?.filter(m => {
-          const conv = modelConversations.find(c => c.id === m.id);
-          return !!conv;
-        }) ?? [];
+        const usage = modelUsageByToken.get(model.model_id) ?? {
+          requestCount: 0,
+          credits: 0,
+          costUsd: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedTokens: 0,
+        };
+
         return {
           id: model.id,
           name: model.name,
           provider: model.provider,
           isActive: model.is_active,
-          conversationCount: count,
+          conversationCount: modelConversations.length,
+          requestCount: usage.requestCount,
+          creditsConsumed: usage.credits,
+          totalCostUsd: parseFloat(usage.costUsd.toFixed(6)),
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedTokens: usage.cachedTokens,
           inputTokenCost: model.input_token_cost ?? 0,
           outputTokenCost: model.output_token_cost ?? 0,
           webSearchCost: model.web_search_cost ?? 0,
@@ -1936,30 +2030,22 @@ export const adminRouter = router({
 
       // === Real Token Usage from token_stats table ===
       // Get actual token statistics for the time range
-      const { data: rangeTokenStats } = await ctx.supabase
-        .from('token_stats')
-        .select('input_tokens, output_tokens, cached_tokens, cache_creation_tokens')
-        .gte('created_at', rangeStart.toISOString());
-
-      const tokenStatsInRange = rangeTokenStats ?? [];
+      const tokenStatsInRange = allTokenStats ?? [];
       const inputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
       const outputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.output_tokens ?? 0), 0);
       const cacheReadTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cached_tokens ?? 0), 0);
       const cacheCreationTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cache_creation_tokens ?? 0), 0);
 
-      // Cost estimation (using first active model's pricing as average)
-      const activeModels = models?.filter(m => m.is_active === 'true') ?? [];
-      const avgInputCost = activeModels.length > 0
-        ? activeModels.reduce((sum, m) => sum + (m.input_token_cost ?? 0), 0) / activeModels.length
-        : 3; // Default $3/1M tokens
-      const avgOutputCost = activeModels.length > 0
-        ? activeModels.reduce((sum, m) => sum + (m.output_token_cost ?? 0), 0) / activeModels.length
-        : 15; // Default $15/1M tokens
-
-      // Convert to actual cost (costs are in micro-dollars per 1M tokens)
-      const totalCost = ((inputTokens * avgInputCost) + (outputTokens * avgOutputCost)) / 1000000;
+      const totalCost = tokenStatsInRange.reduce(
+        (sum, stat) => sum + parseFloat(stat.total_cost_usd ?? '0'),
+        0
+      );
       const avgCostPerRequest = rangeRequests > 0 ? totalCost / rangeRequests : 0;
-      const cacheSavings = ((cacheReadTokens * avgInputCost * 0.9) / 1000000); // 90% savings on cached reads
+      const cacheSavings = tokenStatsInRange.reduce((sum, stat) => {
+        const model = models?.find((item) => item.model_id === stat.model_used);
+        if (!model) return sum;
+        return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1000000000);
+      }, 0);
 
       // === Real Performance Metrics from ai_usage_logs ===
       // Get actual AI usage logs for the time range
@@ -1993,17 +2079,9 @@ export const adminRouter = router({
         : 0;
 
       // === Real Cache Hit Rate from token_stats ===
-      const { data: tokenStatsData } = await ctx.supabase
-        .from('token_stats')
-        .select('input_tokens, cached_tokens')
-        .gte('created_at', rangeStart.toISOString());
-
-      const statsInRange = tokenStatsData ?? [];
-      const totalInputTokensFromStats = statsInRange.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
-      const totalCachedTokens = statsInRange.reduce((sum, s) => sum + (s.cached_tokens ?? 0), 0);
-
-      const cacheHitRate = totalInputTokensFromStats > 0
-        ? (totalCachedTokens / totalInputTokensFromStats) * 100
+      const totalInputWithoutCache = inputTokens + cacheReadTokens;
+      const cacheHitRate = totalInputWithoutCache > 0
+        ? (cacheReadTokens / totalInputWithoutCache) * 100
         : 0;
 
       // Health status based on metrics

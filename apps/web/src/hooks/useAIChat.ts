@@ -3,6 +3,8 @@
  *
  * AI 对话核心 Hook
  * 管理对话状态、发送消息、流式响应
+ *
+ * @deprecated 旧非流式对话链路。请使用 useStreamingChat + /api/ai/stream。
  */
 
 import { useState, useCallback, useRef } from 'react';

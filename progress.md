@@ -25,10 +25,246 @@
 
 - **Phase:** 阶段 12 遗留问题清理与系统稳定化 ⏳ 规划完成
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
-- **Current:** 阶段 12 规划文档已完成，等待执行
+- **Current:** 阶段 12 步骤 1 执行中（P0 批次已完成自动验证，部分阻塞，部分转入修复）
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-03-06 (新工作阶段规划完成)
-- **参考文档:** `task_plan.md` - 阶段 12, `findings.md` - 阶段 12 决策
+- **更新时间:** 2026-03-06 (P0 验证批次状态已对齐)
+- **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-03-06 - 工作流标准化: task.json 成为唯一计划源
+
+**完成内容**:
+- 新增仓库级 `always_on` 规则，强制使用 `task.json + progress.md + findings.md`
+- 更新 `do-next`、`new-feature`、`debug` 工作流，移除对 `task_plan.md` 的当前计划依赖
+- 升级 `init.sh`，增加三文件存在性、`task.json` 结构和下一任务提示检查
+- 重写 `manus工作流使用说明.md` 与 `Manus正确工作流程.md`
+- 新增可复用模板目录 `docs/task-json-workflow-templates/`
+- 将 `task_plan.md` 标记为历史归档
+
+**验证方式**:
+- 通过静态检查确认规则与文档已统一为 `task.json` 驱动
+- 通过 `bash -n init.sh` 验证初始化脚本语法
+- 通过全文搜索检查新的工作流文件不再把 `task_plan.md` 当成当前计划源
+
+**备注**:
+- 历史日志中出现的 `task_plan.md` 引用保留不动，避免篡改历史上下文
+- 后续新需求应直接进入 `task.json`
+
+### 2026-03-06 - P0 验证批次结果对齐
+
+**完成内容**:
+- 对齐 `12.1.1`、`12.1.2`、`12.1.3`、`12.1.4`、`12.1.6`、`12.1.8` 六项 P0 验证任务的真实状态
+- 将依赖登录态、真实模型 key 或真实外部调用的任务统一标记为 `BLOCKED`
+- 将 `12.1.3` 标记为 `PASS`
+- 将 `12.1.4` 标记为“验证已完成但结果不符合预期”，并新增后续修复任务 `12.1.11`
+
+**验证方式**:
+- `pnpm --filter @repo/api test:run`：`228 passed, 0 failed`
+- `rg "^E2E_TEST_EMAIL=|^E2E_TEST_PASSWORD=" .env.local`：无匹配，确认缺少登录态 E2E 环境变量
+- 静态代码审计：
+  - `chat/page.tsx` + `useStreamingChat.ts` + `stream/route.ts` 证明流式主链路、打字机、中断与扣费代码路径存在
+  - `admin/models/page.tsx` 证明模型管理成功/失败 toast 已接入
+  - `model.ts` + `admin/models/page.tsx` 证明 API 状态显示当前为“有 key -> 未测试”，并非“有 key -> 已连接”
+
+**备注**:
+- 本条为阶段 12 当前最新批次结论；更早的单项阻塞记录保留作为历史上下文
+- 本批次目标不是“全部通过”，而是“全部被真实归类为 PASS / BLOCKED / FAIL-转修复”
+
+| Task | Result | task.json 写入 | Evidence | Next Action |
+|------|--------|----------------|----------|-------------|
+| `12.1.1` | `BLOCKED` | `passes=false, blocked=true` | `E-01`, `E-08` | 等待真实登录态与模型 key 人工复核 |
+| `12.1.2` | `BLOCKED` | `passes=false, blocked=true` | `E-02`, `E-08` | 等待真实登录态人工复核 |
+| `12.1.3` | `PASS` | `passes=true, blocked=false` | `E-03` | 无 |
+| `12.1.4` | `FAIL` | `passes=true, blocked=false` | `E-04` | 执行 `12.1.11` 修复状态语义 |
+| `12.1.6` | `BLOCKED` | `passes=false, blocked=true` | `E-05` | 在“仅模型 key”条件下人工复核 |
+| `12.1.8` | `BLOCKED` | `passes=false, blocked=true` | `E-06`, `E-08` | 以真实会话验证积分变化与落库 |
+
+### 2026-03-06 - 本地开发环境自动登录巡检范式落地
+
+**完成内容**:
+- 为 Playwright setup 增加普通用户和管理员双账号登录态生成，并在缺少账号时保存空 storage state 后显式跳过
+- 新增浏览器巡检监控器，统一采集控制台异常、运行时异常、失败请求与 `4xx/5xx` 响应
+- 将 `auth.spec.ts`、`chat.spec.ts`、`admin.spec.ts` 从示意/跳过用例升级为关键业务流巡检用例
+- 为关键业务流输出 `issue-report.json` 与 `issue-report.md`，沉淀结构化问题证据
+- 补充 `test:e2e:critical` 脚本、Playwright JSON 报告、失败 trace/video 保留策略
+- 在 `.env.example`、`init.sh` 与 `docs/LOCAL_E2E_AUDIT_WORKFLOW.md` 中接入运行说明和环境检查
+
+**验证方式**:
+- 静态核对登录页、聊天页、个人中心和管理员页面的关键选择器与文案，确保巡检断言对应真实 UI
+- 通过 Playwright 配置确认巡检产物写入 `apps/web/test-results/report.json` 与 `apps/web/test-results/artifacts/`
+- 通过 `task.json` 对齐新增的 `12.5.1` - `12.5.5` 五项基础设施任务
+
+**备注**:
+- 这批改动只负责“自动登录 + 关键巡检 + 结构化报错采集”，不直接自动修复业务逻辑
+- 若缺少 `E2E_TEST_*` 或 `E2E_ADMIN_*` 环境变量，对应巡检会跳过而不是伪造通过
+- 流式聊天相关巡检仍依赖真实模型配置、可用积分和本地可访问的开发环境
+- 已完成一次真实 `auth.spec.ts` 巡检执行：`4 passed / 2 skipped / 1 failed`
+- 当前首个确认问题为公开 landing 页 hydration mismatch，已新增修复任务 `12.5.6`
+
+### 2026-03-06 - 修复管理后台 OpenRouter API 设置链路
+
+**完成内容**:
+- 通过 Supabase 实查确认 `ai_models` 记录里的 `api_key` 已落库，但当前两条 Claude 模型的 `api_endpoint` 为空
+- 直接测试现有活动模型的第三方连接，确认当前保存的配置走 Anthropic 官方接口会返回 `403 Request not allowed`
+- 修复模型保存 / 测试连接逻辑，使其支持 OpenRouter 的 OpenAI 兼容 `chat/completions` 接口
+- 修复流式对话路由，使其可根据 endpoint 或 key 形态自动切换到 OpenRouter 兼容协议
+- 更新后台模型设置 UI，补充 OpenRouter endpoint 提示和保存后的真实连接结果 toast
+
+**验证方式**:
+- 通过直连 Supabase 检查 `ai_models`，确认当前记录 `has_api_key=true` 但 `api_endpoint` 为空
+- 通过真实第三方连接测试确认当前两条 Claude 模型均返回 `403 Request not allowed`
+- 通过类型检查筛出本轮修改文件，确认未新增 `model.ts` / `stream/route.ts` / `admin/models/page.tsx` 相关类型错误
+
+**备注**:
+- 这次修复解决的是“后台只会按 Anthropic 官方协议处理 Claude”的代码问题
+- 当前数据库里保存的 key 不是 OpenRouter 格式，且 endpoint 为空，所以对话验证仍需先把后台模型改成真实 OpenRouter 配置
+
+### 2026-03-06 - 修复管理后台 tRPC 401 兜底
+
+**完成内容**:
+- 确认前端 tRPC provider 本来会尝试附带 `Authorization`，但后端 `/api/trpc` 只认 header，不认浏览器现有 cookie 会话
+- 为 `/api/trpc` 增加 Supabase cookie 会话解析，在 header 缺失时仍可识别已登录用户
+- 同步调整 `createTRPCContext`，支持由路由层直接注入已解析用户，避免管理后台整页 `401 Unauthorized`
+
+**验证方式**:
+- 静态检查 `packages/api/src/trpc.ts` 与 `apps/web/src/app/api/trpc/[trpc]/route.ts`
+- 通过类型检查筛出本轮修改文件，确认未新增这两处相关类型错误
+
+**备注**:
+- 这次修复目标是先消除后台黑屏和批量 `401`
+- 页面刷新后若仍提示“连接失败”，那就回到模型配置本身，而不是后台认证链路
+
+### 2026-03-06 - 可视化浏览器复现 Claude/OpenRouter 连接失败
+
+**完成内容**:
+- 使用独立的 headed Playwright 浏览器窗口，以管理员账号真实登录本地开发环境并进入 `/admin/models`
+- 在可视化窗口中分别打开 `Claude 4.5 haiku` 与 `Claude 4.6 Sonnet` 的编辑弹窗，确认两条记录都已保存为：
+  - `provider = OpenAI / OpenRouter (兼容)`
+  - `model_id = anthropic/...`
+  - `api_endpoint = https://openrouter.ai/api/v1/chat/completions`
+  - `api_key` 前缀为 `sk-or-v1`
+- 在可视化窗口中对两条模型都执行了真实“测试连接”，并同步抓取：
+  - 浏览器网络请求
+  - 开发服务器日志
+  - 数据库持久化后的 `connection_status / last_error / last_tested`
+- 通过静态代码复核确认：
+  - 管理后台 `model.testConnection` 使用的是 `ai_models.model_id`
+  - 流式聊天路由也通过 `ai_models.id -> model_id` 取真实模型，而不是依赖 `config.model`
+
+**验证方式**:
+- 可视化浏览器脚本产物：
+  - `apps/web/test-results/visible-debug/claude-openrouter-debug-report.json`
+  - `apps/web/test-results/visible-debug/01-login.png`
+  - `apps/web/test-results/visible-debug/03-admin-models.png`
+- 浏览器网络响应：
+  - 两次 `POST /api/trpc/model.testConnection?batch=1` 都返回 `200`
+  - 返回体都为 `success=false, error="This model is not available in your region."`
+- 开发服务器日志：
+  - `/api/trpc/model.testConnection` 与 `/api/trpc/model.getConnectionStatus` 全部为 `200`
+  - 未出现新的 `401` 或前端到后台未送达的异常
+- Supabase 复查：
+  - `Claude 4.5 haiku` `last_tested = 2026-03-06T08:06:08.396Z`
+  - `Claude 4.6 Sonnet` `last_tested = 2026-03-06T08:06:13.270Z`
+  - 两条记录都持久化为 `connection_status = error`
+  - 两条记录的 `last_error` 都是 `This model is not available in your region.`
+
+**备注**:
+- 本轮结论已从“应用是否把请求发出去”收敛为“供应商侧拒绝当前 Claude 模型”
+- `12.1.13` 已完成真实验证，验证结果是否定结论而非阻塞
+- 已新增 `12.1.15` 承接后续动作：需要更换可用模型、调整 OpenRouter 账号/地区，或改用非 OpenRouter 的 Claude 接入
+
+### 2026-03-06 - 对齐后台连接测试与聊天流错误表现
+
+**完成内容**:
+- 复查用户现场后确认两类问题同时存在：
+  - 管理后台模型页会短暂沿用旧的 `connected` 状态，直到再次执行测试连接
+  - 聊天页收到流式 `type=error` 事件时，被前端错误地记录成 `Parse error`，没有直接展示真实供应商错误
+- 修复 `useStreamingChat.ts` 的 SSE 解析逻辑：
+  - 只忽略真正的 JSON 解析失败
+  - 不再吞掉 `type=error` 事件
+  - 聊天页现在会直接显示 `OpenAI-compatible API error: 403 - This model is not available in your region.`
+- 调整后台 `verifyAndPersistConnection()` 的 OpenRouter 连接测试，使其尽量模拟真实聊天流：
+  - 增加与聊天流一致的 `HTTP-Referer` / `X-Title`
+  - 改为按流式模式验证 OpenAI 兼容接口
+- 后台模型状态增加 `configured -> 已配置` 的中间态映射，避免继续把未完成验证的状态误导成“已连接”
+
+**验证方式**:
+- 可视化浏览器复测 `Claude 4.6 Sonnet`：
+  - 初始状态仍显示旧的 `已连接`
+  - 再次点击“测试连接”后，接口返回 `success=false`
+  - 状态立即刷新为 `连接失败`
+- 可视化浏览器强制选择 `Claude 4.6 Sonnet` 发送消息：
+  - `/api/ai/stream` 返回 `type=error`
+  - 浏览器控制台直接输出 `Streaming error: OpenAI-compatible API error: 403 - This model is not available in your region.`
+  - 页面正文中可见同样的错误文案，不再只有 `Parse error`
+- 直接对当前数据库里的 `Claude 4.5 haiku` / `Claude 4.6 Sonnet` 做 OpenRouter 非流式与流式请求：
+  - 两条模型都返回 `403 This model is not available in your region.`
+
+**备注**:
+- 这轮修复解决的是“应用层把真实错误显示错了”的问题，不是绕过 OpenRouter 地区限制
+- 当前最可靠的事实版本是：
+  - `Claude 4.6 Sonnet` 在重测后会被后台正确打回 `连接失败`
+  - 选择 `Claude 4.6 Sonnet` 聊天时，前端现在能明确告诉用户真实错误原因
+- `12.1.11` 与 `12.1.16` 已完成；`12.1.15` 仍阻塞于供应商侧限制
+
+### 2026-03-06 - Vercel Preview 部署验证 Claude/OpenRouter 差异
+
+**完成内容**:
+- 完成当前仓库与 Vercel 项目的链接，并成功发起 Preview 部署：
+  - `https://graylum-ai-vercel-v1-dwn5ji2wp-simons-projects-bfe3e99f.vercel.app`
+- 为使 Preview 能通过构建，修复了本轮暴露出的构建阻塞：
+  - `apps/web/instrumentation.ts` 的 Sentry `captureRequestError` 调用签名
+  - `apps/web/src/app/admin/costs/page.tsx` 的 Recharts 类型问题
+  - `apps/web/src/app/page.tsx` 的 `useSearchParams()` 预渲染问题与公告字段类型问题
+  - `packages/api/src/services/costCalculator.ts` 缺失的缓存 token 字段
+  - `packages/api/src/services/streamHandler.ts` 的 `message_end.stopReason` 类型提取
+  - `packages/api/src/types/billing.ts` 的 `z.record()` 类型签名
+  - `turbo.json` 的构建环境变量透传
+- 本地执行 `pnpm --dir apps/web exec tsc --noEmit --pretty false`，确认上述构建相关类型错误已清理
+- 在独立可视化浏览器窗口中进入 Preview `/admin/models`，对 `Claude 4.6 Sonnet` 执行真实“测试连接”
+- 通过 Supabase 复查确认 Preview 上这次 `model.testConnection` 已把 `Claude 4.6 Sonnet` 写回：
+  - `connection_status = connected`
+  - `last_error = null`
+  - `last_tested = 2026-03-06T11:07:39.102Z`
+- 通过 `vercel logs` 确认 Preview 运行时确实收到了：
+  - `POST /api/trpc/model.testConnection`
+  - `GET /api/trpc/model.getConnectionStatus`
+
+**验证方式**:
+- `npx vercel link --yes --scope simons-projects-bfe3e99f`
+- `npx vercel --yes --target preview --scope simons-projects-bfe3e99f`
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+- headed Playwright Preview 浏览器复现 `/admin/models`
+- Supabase 查询 `ai_models(name, model_id, updated_at, config)`
+- `npx vercel logs graylum-ai-vercel-v1-dwn5ji2wp-simons-projects-bfe3e99f.vercel.app --scope simons-projects-bfe3e99f --no-follow --since 1h --expand`
+
+**备注**:
+- 这轮新证据说明“本地环境触发地区限制”并不等于“Vercel Preview 也一定被同样拦截”
+- 当前已确认：
+  - Preview 上后台测试连接至少对 `Claude 4.6 Sonnet` 是成功的
+  - 因此供应商判定很可能受部署出口环境影响，而不是只看用户本地 IP
+- 但 `/api/ai/stream` 的 Preview 端到端聊天验证仍未闭环：
+  - 直接请求 Preview URL 会被 Vercel Deployment Protection 拦截
+  - `vercel curl` 已能绕过部署保护，但当前 CLI 传入的 Supabase Bearer token 在 Preview 路由中被识别为 malformed JWT
+- 已新增 `12.1.17` 承接下一步：需要在已登录浏览器中继续确认 Preview 聊天链路，或提供 bypass 方案后再做 CLI 级验证
+
+### 2026-03-06 - 用户实测确认 Claude 4.6 Sonnet 已恢复真实对话
+
+**完成内容**:
+- 用户在当前聊天界面中使用 `Claude 4.6 Sonnet` 连续发送消息并收到正常回答，确认对话系统已能真实连接 API 并返回内容
+- 从用户截图可见：
+  - 聊天历史中已出现多轮正常 assistant 回复
+  - 当前底部模型选择器为 `Claude 4.6 Sonnet`
+  - 页面未再出现此前的 `OpenAI-compatible API error: 403 - This model is not available in your region.`
+- 将 `12.1.15` 从“外部阻塞”收口为已完成，因为“恢复至少一条可用 Claude 聊天模型”这一目标已经满足
+
+**验证方式**:
+- 用户在真实浏览器中的可视化操作与聊天结果截图
+- 页面中 `Claude 4.6 Sonnet` 选中状态与正常 assistant 回复内容
+
+**备注**:
+- 这条结论针对“当前对话链路已恢复可用”，不等于已经完成所有 Preview 自动化验证
+- `12.1.17` 继续保留，用于单独确认 Preview 专项验证链路与 CLI 工具链差异
+- 当前控制台剩余显著问题主要是 `/_vercel/insights/script.js` 的 `404`，它不影响聊天主链路
 
 ---
 

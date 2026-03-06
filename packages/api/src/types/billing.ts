@@ -95,7 +95,7 @@ export const BillingHistoryRecordSchema = z.object({
   operationType: z.enum(['pre_deduct', 'settle', 'refund']),
   amount: z.number(),
   reason: z.string().nullable(),
-  metadata: z.record(z.unknown()).nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string().datetime(),
 });
 

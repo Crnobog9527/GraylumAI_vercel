@@ -50,6 +50,12 @@ export default function ChatPage() {
   // Fetch system settings for chat page configuration
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
+  const maxInputCharacters = Number(systemSettings?.max_input_characters ?? 2500) || 2500;
+  const chatBillingHint = typeof systemSettings?.chat_billing_hint === 'string' && systemSettings.chat_billing_hint
+    ? systemSettings.chat_billing_hint
+      .replace('{input}', String(systemSettings?.input_credits_per_1k ?? 1))
+      .replace('{output}', String(systemSettings?.output_credits_per_1k ?? 5))
+    : '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
 
   // Fetch export permissions (based on membership level)
   const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
@@ -153,9 +159,6 @@ export default function ChatPage() {
   });
 
   const isProcessing = streamingLoading || isStreaming;
-
-  const maxInputCharacters = 2500;
-  const chatBillingHint = '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
 
   const handleNewChat = useCallback(() => {
     setActiveConversation(null);

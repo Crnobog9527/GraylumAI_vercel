@@ -1,7 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type User } from '@supabase/supabase-js';
 
-export const createTRPCContext = async (opts: { headers: Headers }) => {
+export const createTRPCContext = async (opts: { headers: Headers; user?: User | null }) => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   // Use service role key for server-side operations (bypasses RLS)
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -9,16 +9,18 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
   // Create Supabase client for database operations
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  let user = null;
+  let user = opts.user ?? null;
 
-  // Get token from Authorization header
-  const authHeader = opts.headers.get('Authorization') ?? '';
-  const token = authHeader.replace('Bearer ', '');
+  if (!user) {
+    // Get token from Authorization header
+    const authHeader = opts.headers.get('Authorization') ?? '';
+    const token = authHeader.replace('Bearer ', '');
 
-  if (token) {
-    const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
-    if (!error && authUser) {
-      user = authUser;
+    if (token) {
+      const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
+      if (!error && authUser) {
+        user = authUser;
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import WelcomeBanner from '@/components/home/WelcomeBanner';
@@ -16,14 +16,13 @@ import { trpc } from '@/trpc/client';
  */
 export default function HomePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       // 检查是否有 ?domain=www 参数，如果有则重定向到 landing 页
-      const domainParam = searchParams.get('domain');
+      const domainParam = new URLSearchParams(window.location.search).get('domain');
       if (domainParam === 'www') {
         router.replace('/landing?domain=www');
         return;
@@ -44,7 +43,7 @@ export default function HomePage() {
     };
 
     checkAuth();
-  }, [router, searchParams]);
+  }, [router]);
 
   // 从 tRPC 获取用户数据
   const { data: userProfile, isLoading: isProfileLoading } = trpc.user.getUserProfile.useQuery(
@@ -87,7 +86,7 @@ export default function HomePage() {
     full_name: userProfile?.nickname || userProfile?.email?.split('@')[0] || '用户',
     email: userProfile?.email || '',
     membership_level: userProfile?.membership_level || 'free',
-    membership_expiry_date: userProfile?.membership_expiry_date
+    membership_expiry_date: undefined,
   };
 
   // 公告数据 (从 tRPC 获取)
@@ -100,7 +99,6 @@ export default function HomePage() {
     tag_color: announcement.tag_color || 'yellow',
     publish_date: announcement.created_at?.split('T')[0] || '',
     link_url: announcement.link_url,
-    link_text: announcement.link_text,
   }));
 
   // 横幅公告数据 (从 tRPC 获取)

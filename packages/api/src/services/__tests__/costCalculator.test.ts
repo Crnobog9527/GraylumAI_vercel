@@ -12,6 +12,7 @@ import {
   defaultCalculator,
 } from '../costCalculator';
 import type { TokenUsage } from '../../types/ai';
+import { BILLING_CONSTANTS } from '../../types/billing';
 
 // ============================================
 // CostCalculator Class Tests
@@ -223,12 +224,17 @@ describe('CostCalculator', () => {
     it('should convert USD to credits correctly', () => {
       const credits = calculator.usdToCredits(1.0); // $1
 
-      // Default: 100 credits per USD * 1.1 multiplier = 110 credits
-      expect(credits).toBe(110);
+      const expectedCredits = Math.ceil(
+        BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER
+      );
+      expect(credits).toBe(expectedCredits);
     });
 
     it('should convert credits to USD correctly', () => {
-      const usd = calculator.creditsToUsd(110);
+      const creditsForOneUsd = Math.ceil(
+        BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER
+      );
+      const usd = calculator.creditsToUsd(creditsForOneUsd);
 
       expect(usd).toBeCloseTo(1.0, 4);
     });
@@ -402,7 +408,9 @@ describe('Custom Configuration', () => {
 
   it('should respect custom credits per USD', () => {
     const standardCalc = new CostCalculator();
-    const customCalc = new CostCalculator({ creditsPerUsd: 200 }); // Double
+    const customCalc = new CostCalculator({
+      creditsPerUsd: BILLING_CONSTANTS.CREDITS_PER_USD * 2,
+    }); // Double
 
     const usage: TokenUsage = {
       inputTokens: 1000,

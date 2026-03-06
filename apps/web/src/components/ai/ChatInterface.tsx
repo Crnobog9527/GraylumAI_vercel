@@ -5,6 +5,8 @@
  *
  * AI 对话界面主组件
  * 包含消息列表、输入框、发送按钮
+ *
+ * @deprecated 旧非流式对话 UI。请使用 apps/web/src/app/chat/page.tsx 主链路。
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
