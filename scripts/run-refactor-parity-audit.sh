@@ -14,6 +14,7 @@ EVIDENCE_DIR="$RUN_DIR/evidence"
 MANUAL_DIR="$RUN_DIR/manual"
 PLAYWRIGHT_DIR="$EVIDENCE_DIR/playwright"
 WITH_SECURITY=0
+ENV_FILE="$ROOT_DIR/.env.local"
 
 if [[ "${1:-}" == "--with-security" ]]; then
   WITH_SECURITY=1
@@ -34,6 +35,20 @@ copy_if_exists() {
     rm -rf "$target_path"
     cp -R "$source_path" "$target_path"
   fi
+}
+
+env_key_configured() {
+  local key="$1"
+
+  if [[ -n "${!key:-}" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return 1
+  fi
+
+  rg -q "^${key}=.+" "$ENV_FILE"
 }
 
 run_step() {
@@ -76,10 +91,10 @@ copy_if_exists "$ROOT_DIR/apps/web/playwright-report" "$PLAYWRIGHT_DIR/playwrigh
 
 USER_E2E_READY="no"
 ADMIN_E2E_READY="no"
-if [[ -n "${E2E_TEST_EMAIL:-}" && -n "${E2E_TEST_PASSWORD:-}" ]]; then
+if env_key_configured "E2E_TEST_EMAIL" && env_key_configured "E2E_TEST_PASSWORD"; then
   USER_E2E_READY="yes"
 fi
-if [[ -n "${E2E_ADMIN_EMAIL:-}" && -n "${E2E_ADMIN_PASSWORD:-}" ]]; then
+if env_key_configured "E2E_ADMIN_EMAIL" && env_key_configured "E2E_ADMIN_PASSWORD"; then
   ADMIN_E2E_READY="yes"
 fi
 

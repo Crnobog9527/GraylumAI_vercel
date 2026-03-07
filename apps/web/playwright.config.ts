@@ -1,4 +1,11 @@
+import path from 'node:path';
+
+import dotenv from 'dotenv';
 import { defineConfig, devices } from '@playwright/test';
+
+dotenv.config({
+  path: path.resolve(__dirname, '../../.env.local'),
+});
 
 /**
  * Playwright E2E Test Configuration
