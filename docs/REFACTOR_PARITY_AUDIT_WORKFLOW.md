@@ -82,6 +82,22 @@ E2E_ADMIN_PASSWORD=...
 .audit-output/refactor-parity/latest-run.txt
 ```
 
+## 推荐填写位置
+
+对非开发者更友好的做法，是把本轮人工填写内容同步到仓库内的可见目录：
+
+```text
+docs/refactor-parity/current-audit/
+```
+
+建议至少维护这 3 份文件：
+
+- `legacy-repo-baseline.draft.md`
+- `function-comparison-matrix.draft.md`
+- `issue-list.draft.md`
+
+这样你不需要在隐藏目录 `.audit-output/` 里找文件，也更方便把初稿直接发给开发者。
+
 ## 推荐执行顺序
 
 ### 1. 先跑自动化采集
