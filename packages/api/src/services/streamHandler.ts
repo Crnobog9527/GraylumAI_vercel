@@ -6,6 +6,7 @@
  */
 
 import type { ClaudeMessage, ClaudeStreamEvent, TokenUsage, StreamEvent } from '../types/ai';
+import { getConfiguredProviderApiKey } from './providerUtils';
 
 type MessageEndEvent = Extract<StreamEvent, { type: 'message_end' }>;
 
@@ -104,9 +105,9 @@ export class StreamHandler {
   private abortController: AbortController | null = null;
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey ?? process.env.ANTHROPIC_API_KEY ?? '';
+    this.apiKey = getConfiguredProviderApiKey(apiKey) ?? '';
     if (!this.apiKey) {
-      throw new Error('ANTHROPIC_API_KEY not configured');
+      throw new Error('OPENROUTER_API_KEY / ANTHROPIC_API_KEY not configured');
     }
   }
 

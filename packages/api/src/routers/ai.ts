@@ -27,6 +27,7 @@ import {
   logger,
 } from '../services';
 import { selectModel, getAvailableModels } from '../services/modelRouter';
+import { getFallbackProviderApiKey } from '../services/providerUtils';
 import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
 
 // ============================================
@@ -172,7 +173,7 @@ async function callClaudeAPI(params: {
   usage: TokenUsage;
   stopReason: string;
 }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = getFallbackProviderApiKey();
 
   if (!apiKey) {
     throw new TRPCError({

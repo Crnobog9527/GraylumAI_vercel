@@ -11,6 +11,8 @@ import { z } from 'zod';
 // 环境变量 Schema
 // ============================================
 
+const apiKeySchema = z.string().min(10);
+
 const envSchema = z.object({
   // Node 环境
   NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
@@ -42,10 +44,15 @@ const envSchema = z.object({
     )
     .optional(),
 
-  // Anthropic API (必需)
+  // AI Provider API (OpenRouter / Anthropic)
+  OPENROUTER_API_KEY: apiKeySchema
+    .regex(/^sk-or-/, 'OPENROUTER_API_KEY 必须以 sk-or- 开头')
+    .optional(),
+
   ANTHROPIC_API_KEY: z
     .string()
-    .regex(/^sk-ant-/, 'ANTHROPIC_API_KEY 必须以 sk-ant- 开头'),
+    .regex(/^sk-ant-/, 'ANTHROPIC_API_KEY 必须以 sk-ant- 开头')
+    .optional(),
 
   // Sentry (可选但推荐)
   NEXT_PUBLIC_SENTRY_DSN: z
@@ -96,11 +103,16 @@ export function validateEnv(): ValidationResult {
 
   const env = result.success ? result.data : null;
   const nodeEnv = env?.NODE_ENV ?? process.env.NODE_ENV ?? 'development';
+  const hasAnyAiKey = Boolean(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY);
+
+  if (!hasAnyAiKey) {
+    errors.push('必须配置 OPENROUTER_API_KEY 或 ANTHROPIC_API_KEY');
+  }
 
   // 2. 生产环境特殊检查
   if (nodeEnv === 'production') {
     // 检查是否使用测试密钥
-    if (process.env.ANTHROPIC_API_KEY?.includes('test')) {
+    if (process.env.OPENROUTER_API_KEY?.includes('test') || process.env.ANTHROPIC_API_KEY?.includes('test')) {
       errors.push('生产环境不能使用测试 API 密钥');
     }
 
@@ -183,6 +195,7 @@ export function getSafeEnvSummary(): Record<string, string> {
     SUPABASE_SERVICE_KEY_SET: process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓' : '✗',
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
     ANTHROPIC_KEY_SET: process.env.ANTHROPIC_API_KEY ? '✓' : '✗',
+    OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
     SENTRY_DSN_SET: process.env.NEXT_PUBLIC_SENTRY_DSN ? '✓' : '✗',
   };
 }

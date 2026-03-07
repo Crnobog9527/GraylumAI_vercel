@@ -2,6 +2,7 @@ import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import {
+  getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
   getProviderErrorMessage,
   normalizeOpenAICompatibleEndpoint,
@@ -63,7 +64,7 @@ async function verifyAndPersistConnection(
   supabase: any,
   model: PersistedModel,
 ): Promise<ConnectionCheckResult> {
-  const apiKey = model.api_key || process.env.ANTHROPIC_API_KEY;
+  const apiKey = getConfiguredProviderApiKey(model.api_key);
   if (!apiKey) {
     const result: ConnectionCheckResult = {
       success: false,

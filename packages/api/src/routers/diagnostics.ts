@@ -6,6 +6,7 @@
  */
 
 import { router, adminProcedure } from '../trpc';
+import { getConfiguredProviderApiKeySource } from '../services/providerUtils';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { DiagnosticsService, type DiagnosticCategory } from '../services/diagnostics';
@@ -309,7 +310,8 @@ export const diagnosticsRouter = router({
       }
 
       // 检查 API Key (同时检查环境变量和数据库配置)
-      const hasEnvApiKey = !!process.env.ANTHROPIC_API_KEY;
+      const configuredKeySource = getConfiguredProviderApiKeySource();
+      const hasEnvApiKey = Boolean(configuredKeySource?.startsWith('env:'));
       let hasDbApiKey = false;
       try {
         const { data: modelsWithKey } = await ctx.supabase
@@ -327,8 +329,8 @@ export const diagnosticsRouter = router({
       checks.apiKey = {
         ok: hasApiKey,
         message: hasApiKey
-          ? `OK (${hasEnvApiKey ? '环境变量' : ''}${hasEnvApiKey && hasDbApiKey ? '+' : ''}${hasDbApiKey ? '数据库' : ''})`
-          : 'API 密钥未配置 (环境变量 ANTHROPIC_API_KEY 或数据库 ai_models.api_key)',
+          ? `OK (${hasEnvApiKey ? configuredKeySource?.replace('env:', '') : ''}${hasEnvApiKey && hasDbApiKey ? '+' : ''}${hasDbApiKey ? '数据库' : ''})`
+          : 'API 密钥未配置 (环境变量 OPENROUTER_API_KEY / ANTHROPIC_API_KEY 或数据库 ai_models.api_key)',
       };
 
       // 计算总体健康状态
