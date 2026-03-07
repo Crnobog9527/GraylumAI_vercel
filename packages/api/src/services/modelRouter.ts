@@ -210,6 +210,69 @@ async function getModelConfigFromDb(
   return null;
 }
 
+async function getActiveModelConfigs(
+  supabase: SupabaseClient
+): Promise<ModelConfig[]> {
+  const { data, error } = await supabase
+    .from('ai_models')
+    .select('*')
+    .eq('is_active', 'true')
+    .order('name');
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((model) => ({
+    id: model.id,
+    name: model.name,
+    modelId: model.model_id,
+    provider: model.provider,
+    maxTokens: model.max_tokens,
+    inputLimit: model.input_limit,
+    enableWebSearch: model.enable_web_search === 'true',
+    inputTokenCost: model.input_token_cost,
+    outputTokenCost: model.output_token_cost,
+    isActive: model.is_active === 'true',
+    config: model.config,
+  }));
+}
+
+function scoreModelFamilyCandidate(
+  model: ModelConfig,
+  family: 'sonnet' | 'haiku'
+): number {
+  const haystack = `${model.name} ${model.modelId}`.toLowerCase();
+  let score = 0;
+
+  if (haystack.includes(family)) {
+    score += 12;
+  }
+
+  if (family === 'sonnet') {
+    if (model.enableWebSearch) score += 2;
+    score += Math.round(model.outputTokenCost / 1000);
+  } else {
+    score += Math.max(0, 10 - Math.round(model.outputTokenCost / 1000));
+  }
+
+  return score;
+}
+
+function pickBestModelFamilyCandidate(
+  models: ModelConfig[],
+  family: 'sonnet' | 'haiku'
+): ModelConfig | undefined {
+  if (models.length === 0) return undefined;
+
+  return [...models]
+    .sort((a, b) => {
+      const scoreDiff = scoreModelFamilyCandidate(b, family) - scoreModelFamilyCandidate(a, family);
+      if (scoreDiff !== 0) return scoreDiff;
+      return b.outputTokenCost - a.outputTokenCost;
+    })[0];
+}
+
 /**
  * 获取系统默认模型配置
  */
@@ -217,8 +280,15 @@ async function getSystemDefaultModels(
   supabase: SupabaseClient
 ): Promise<{ sonnet?: ModelConfig; haiku?: ModelConfig }> {
   const runtimeSettings = await getChatRuntimeSettings(supabase);
-
+  const activeModels = await getActiveModelConfigs(supabase);
   const result: { sonnet?: ModelConfig; haiku?: ModelConfig } = {};
+
+  let defaultModel: ModelConfig | null = null;
+  if (runtimeSettings.defaultModelId) {
+    defaultModel = await getModelConfigFromDb(supabase, runtimeSettings.defaultModelId);
+  }
+
+  const activeDefaultModel = defaultModel ?? activeModels[0] ?? null;
 
   // 获取 Sonnet 模型
   if (runtimeSettings.sonnetModelId) {
@@ -232,9 +302,14 @@ async function getSystemDefaultModels(
     if (haiku) result.haiku = haiku;
   }
 
-  // 如果没有配置，使用默认值
-  if (!result.sonnet) result.sonnet = DEFAULT_MODELS.sonnet;
-  if (!result.haiku) result.haiku = DEFAULT_MODELS.haiku;
+  // 如果后台未显式指定模型，则优先从当前启用模型中推断默认族群
+  if (!result.sonnet) {
+    result.sonnet = pickBestModelFamilyCandidate(activeModels, 'sonnet') ?? activeDefaultModel ?? DEFAULT_MODELS.sonnet;
+  }
+
+  if (!result.haiku) {
+    result.haiku = pickBestModelFamilyCandidate(activeModels, 'haiku') ?? activeDefaultModel ?? result.sonnet ?? DEFAULT_MODELS.haiku;
+  }
 
   return result;
 }
@@ -338,30 +413,14 @@ export async function selectModel(ctx: RoutingContext): Promise<RoutingResult> {
 export async function getAvailableModels(
   supabase: SupabaseClient
 ): Promise<ModelConfig[]> {
-  const { data: models, error } = await supabase
-    .from('ai_models')
-    .select('*')
-    .eq('is_active', 'true')
-    .order('name');
+  const models = await getActiveModelConfigs(supabase);
 
-  if (error || !models) {
+  if (models.length === 0) {
     // 返回默认模型
     return [DEFAULT_MODELS.sonnet, DEFAULT_MODELS.haiku];
   }
 
-  return models.map((m) => ({
-    id: m.id,
-    name: m.name,
-    modelId: m.model_id,
-    provider: m.provider,
-    maxTokens: m.max_tokens,
-    inputLimit: m.input_limit,
-    enableWebSearch: m.enable_web_search === 'true',
-    inputTokenCost: m.input_token_cost,
-    outputTokenCost: m.output_token_cost,
-    isActive: m.is_active === 'true',
-    config: m.config,
-  }));
+  return models;
 }
 
 /**
