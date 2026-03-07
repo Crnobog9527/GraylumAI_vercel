@@ -20,6 +20,12 @@
 pnpm audit:parity
 ```
 
+如果你要继续做第二轮“细颗粒度能力”验收：
+
+```bash
+pnpm audit:parity:extended
+```
+
 如果你还想把完整 Playwright 套件一起纳入证据包：
 
 ```bash
@@ -118,6 +124,19 @@ pnpm audit:parity
 - 关键 E2E 结果
 - Playwright 失败证据
 
+如果首轮主流程已通过，再跑：
+
+```bash
+pnpm audit:parity:extended
+```
+
+这会额外补第二轮能力证据，目前覆盖：
+
+- 聊天重命名
+- 聊天导出
+- 后台模型测试连接
+- 后台用户积分调整与回滚
+
 ### 2. 冻结旧仓库基线
 
 打开旧版 GitHub 仓库，按 `manual/01-old-site-baseline.md` 逐项填写：
@@ -171,6 +190,7 @@ pnpm audit:parity
 
 - API 测试：`pnpm test:api`
 - 线上关键 E2E：`PLAYWRIGHT_BASE_URL=<preview-url> pnpm --dir apps/web test:e2e:critical`
+- 线上扩展 E2E：`PLAYWRIGHT_BASE_URL=<preview-url> pnpm --dir apps/web test:e2e:parity:extended`
 - 线上完整 E2E：`PLAYWRIGHT_BASE_URL=<preview-url> pnpm --dir apps/web test:e2e`
 - 预览部署与保护绕过：由 `pnpm audit:parity` 自动完成
 

@@ -14,14 +14,22 @@ EVIDENCE_DIR="$RUN_DIR/evidence"
 MANUAL_DIR="$RUN_DIR/manual"
 PLAYWRIGHT_DIR="$EVIDENCE_DIR/playwright"
 WITH_SECURITY=0
+WITH_EXTENDED=0
 ENV_FILE="$ROOT_DIR/.env.local"
 PREVIEW_URL=""
 BYPASS_COOKIE=""
 REMOTE_E2E_READY=0
 
-if [[ "${1:-}" == "--with-security" ]]; then
-  WITH_SECURITY=1
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --with-security)
+      WITH_SECURITY=1
+      ;;
+    --with-extended)
+      WITH_EXTENDED=1
+      ;;
+  esac
+done
 
 mkdir -p "$LOG_DIR" "$PLAYWRIGHT_DIR" "$MANUAL_DIR"
 
@@ -189,8 +197,14 @@ run_step "api-tests" pnpm test:api
 if run_vercel_deploy && fetch_vercel_bypass_cookie; then
   REMOTE_E2E_READY=1
   run_playwright_step "critical-e2e" pnpm --dir apps/web test:e2e:critical
+  if [[ "$WITH_EXTENDED" -eq 1 ]]; then
+    run_playwright_step "extended-e2e" pnpm --dir apps/web test:e2e:parity:extended
+  fi
 else
   STEP_RESULTS="${STEP_RESULTS}- critical-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  if [[ "$WITH_EXTENDED" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- extended-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
 fi
 
 if [[ "$WITH_SECURITY" -eq 1 && "$REMOTE_E2E_READY" -eq 1 ]]; then
@@ -223,6 +237,7 @@ RESULTS_FILE="$RUN_DIR/00-command-results.md"
   printf '%s\n' "- preview_url: \`${PREVIEW_URL:-not-available}\`"
   printf '%s\n' "- user_e2e_credentials_ready: \`$USER_E2E_READY\`"
   printf '%s\n' "- admin_e2e_credentials_ready: \`$ADMIN_E2E_READY\`"
+  printf '%s\n' "- extended_suite_included: \`$([[ "$WITH_EXTENDED" -eq 1 ]] && printf 'yes' || printf 'no')\`"
   printf '%s\n' "- security_suite_included: \`$([[ "$WITH_SECURITY" -eq 1 ]] && printf 'yes' || printf 'no')\`"
   printf '\n%s\n\n' '## Command Results'
   printf '%b' "$STEP_RESULTS"
@@ -232,6 +247,9 @@ RESULTS_FILE="$RUN_DIR/00-command-results.md"
   printf '%s\n' '- Preview bypass log: `logs/vercel-bypass.log`'
   printf '%s\n' '- API logs: `logs/api-tests.log`'
   printf '%s\n' '- Critical E2E logs: `logs/critical-e2e.log`'
+  if [[ "$WITH_EXTENDED" -eq 1 ]]; then
+    printf '%s\n' '- Extended E2E logs: `logs/extended-e2e.log`'
+  fi
   if [[ "$WITH_SECURITY" -eq 1 ]]; then
     printf '%s\n' '- Full E2E logs: `logs/full-e2e.log`'
   fi

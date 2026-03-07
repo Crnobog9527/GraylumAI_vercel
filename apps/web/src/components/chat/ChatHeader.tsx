@@ -90,6 +90,7 @@ const ChatHeader = memo(function ChatHeader({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="编辑标题"
               className="h-8 w-8 hover:opacity-80"
               style={{ color: 'var(--text-tertiary)' }}
               onClick={() => {

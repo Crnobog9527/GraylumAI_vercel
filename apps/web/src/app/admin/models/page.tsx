@@ -494,6 +494,7 @@ export default function AdminModelsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label="测试 API 连接"
                             onClick={() => handleTestConnection(model.id)}
                             disabled={testingModelId === model.id}
                             className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"

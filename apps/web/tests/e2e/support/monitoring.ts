@@ -194,6 +194,13 @@ export function createIssueMonitor(page: Page) {
       if (!minSeverity) return [...issues];
       return issues.filter((issue) => severityRank[issue.severity] <= severityRank[minSeverity]);
     },
+    removeIssues(predicate: (issue: FlowIssue) => boolean) {
+      for (let index = issues.length - 1; index >= 0; index -= 1) {
+        if (predicate(issues[index])) {
+          issues.splice(index, 1);
+        }
+      }
+    },
     addAssertionIssue(message: string, severity: IssueSeverity = 'P1') {
       issues.push({
         severity,

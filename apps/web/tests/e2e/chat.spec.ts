@@ -181,6 +181,15 @@ test.describe('AI Chat', () => {
       steps.push('Verify interrupted marker is rendered');
       await expect(page.getByText('[已中断]')).toBeVisible({ timeout: 10000 });
 
+      // Stopping a stream intentionally aborts the underlying fetch request.
+      monitor.removeIssues(
+        (issue) =>
+          issue.source === 'requestfailed' &&
+          issue.message === 'net::ERR_ABORTED' &&
+          issue.method === 'POST' &&
+          issue.url?.includes('/api/ai/stream') === true,
+      );
+
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {

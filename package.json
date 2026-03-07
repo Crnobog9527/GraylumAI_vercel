@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "audit:parity": "bash ./scripts/run-refactor-parity-audit.sh",
+    "audit:parity:extended": "bash ./scripts/run-refactor-parity-audit.sh --with-extended",
     "audit:parity:full": "bash ./scripts/run-refactor-parity-audit.sh --with-security",
     "build": "turbo build",
     "dev": "turbo dev",

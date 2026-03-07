@@ -603,6 +603,7 @@ export default function AdminUsersPage() {
                   <Button
                     variant="outline"
                     size="icon"
+                    aria-label="减少积分"
                     onClick={() => setCreditAdjustment(prev => ({ ...prev, amount: prev.amount - 100 }))}
                     className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
                   >
@@ -618,6 +619,7 @@ export default function AdminUsersPage() {
                   <Button
                     variant="outline"
                     size="icon"
+                    aria-label="增加积分"
                     onClick={() => setCreditAdjustment(prev => ({ ...prev, amount: prev.amount + 100 }))}
                     className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
                   >

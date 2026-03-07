@@ -156,6 +156,7 @@ function ConversationItem({
           <Button
             variant="ghost"
             size="icon"
+            aria-label="打开对话操作菜单"
             className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
             style={{ color: 'var(--text-tertiary)' }}
             onClick={(e) => e.stopPropagation()}
