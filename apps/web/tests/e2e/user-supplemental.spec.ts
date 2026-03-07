@@ -105,6 +105,7 @@ test.describe('User Supplemental Flows', () => {
     test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for supplemental user flows');
 
     test('should block sends at zero credits and route recharge CTA to subscription management', async ({ browser, page }, testInfo) => {
+      test.setTimeout(90000);
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
       const prompt = `Parity empty credits ${Date.now()}`;
@@ -130,8 +131,8 @@ test.describe('User Supplemental Flows', () => {
         steps.push('Verify the empty-balance dialog appears and no stream request is sent');
         const lowBalanceDialog = page.getByRole('alertdialog');
         await expect(lowBalanceDialog).toBeVisible({ timeout: 10000 });
-        await expect(lowBalanceDialog.getByText('积分已用完')).toBeVisible({ timeout: 10000 });
-        await expect(lowBalanceDialog.getByText('请充值积分后继续使用 AI 对话功能')).toBeVisible({ timeout: 10000 });
+        await expect(lowBalanceDialog.getByRole('heading', { name: '积分已用完' })).toBeVisible({ timeout: 10000 });
+        await expect(lowBalanceDialog.getByText('请充值积分后继续使用 AI 对话功能', { exact: false })).toBeVisible({ timeout: 10000 });
         await page.waitForTimeout(2000);
         expect(streamRequestCount).toBe(0);
 

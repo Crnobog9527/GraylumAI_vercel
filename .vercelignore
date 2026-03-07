@@ -1,0 +1,8 @@
+.audit-output
+.next
+node_modules
+apps/web/.next
+apps/web/node_modules
+apps/web/playwright-report
+apps/web/test-results
+output

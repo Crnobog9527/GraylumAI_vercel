@@ -173,7 +173,7 @@ pnpm audit:parity:extended
 
 注意：
 - 2026-03-07 这条脚本在一次实际执行中遇到 Vercel 上传 `EPIPE`，导致 `.audit-output/refactor-parity/20260307-232022/` 只保留了 API 成功和部署失败记录。
-- 同一天的直接线上预览验证仍然完成了 `user-supplemental 5/6`，因此当前结论以直连预览地址的 Playwright 结果为准，而不是以这次失败的部署产物为准。
+- 同一天补充了 `.vercelignore` 后再次部署预览，直接线上验证已经完成 `user-supplemental 6/6`，因此当前结论以最新 Vercel Preview 的 Playwright 结果为准。
 - `pnpm audit:parity:round2`
   管理员配置页，当前已覆盖 `settings / announcements / packages / prompts` 的进入、修改、保存、刷新后持久化、测试数据清理
 - `pnpm audit:parity:round3`

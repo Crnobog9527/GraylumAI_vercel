@@ -14,7 +14,7 @@ import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
-import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
+import { useCreditsBalance, CREDIT_THRESHOLDS, getWarningLevel } from '@/hooks/use-credits';
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
 
 interface Message {
@@ -43,9 +43,7 @@ export default function ChatPage() {
   const {
     credits,
     warningLevel,
-    canSendMessage,
-    isLoading: creditsLoading,
-    isLowBalance,
+    refetch: refetchCreditsBalance,
   } = useCreditsBalance();
 
   // Fetch system settings for chat page configuration
@@ -170,15 +168,21 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     if (!inputMessage.trim() || isProcessing) return;
 
+    // 发送前主动刷新一次余额，避免使用过期缓存继续向后端发起流式请求。
+    const latestBalance = await refetchCreditsBalance();
+    const latestCredits = latestBalance.data?.credits ?? credits;
+    const latestWarningLevel = getWarningLevel(latestCredits);
+    const latestCanSendMessage = latestCredits > CREDIT_THRESHOLDS.EMPTY;
+
     // 发送前检查积分余额
-    if (!creditsLoading && !canSendMessage) {
+    if (!latestCanSendMessage) {
       // 积分为 0，阻止发送并显示充值弹窗
       setLowBalanceDialogOpen(true);
       return;
     }
 
     // 积分不足但仍可发送，显示警告（critical 级别）
-    if (!creditsLoading && warningLevel === 'critical') {
+    if (latestWarningLevel === 'critical') {
       setLowBalanceDialogOpen(true);
       // 继续发送，用户可以在弹窗中选择"稍后再说"
     }
@@ -192,7 +196,7 @@ export default function ChatPage() {
     await sendStreamingMessage(messageToSend, {
       modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
     });
-  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId, canSendMessage, warningLevel, creditsLoading]);
+  }, [inputMessage, isProcessing, refetchCreditsBalance, credits, sendStreamingMessage, showModelSelector, selectedModelId]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

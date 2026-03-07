@@ -5,17 +5,17 @@
 > 新站证据目录：`.audit-output/refactor-parity/20260307-212219/`
 >
 > 2026-03-07 补充定向验证：
-> `parity-extended 6/6`、`user-extended 6/6`、`admin-config 6/6`、`admin-ops 5/5`、`user-supplemental 5/6`
+> `parity-extended 6/6`、`user-extended 6/6`、`admin-config 6/6`、`admin-ops 5/5`、`user-supplemental 6/6`
 
 ## 当前状态
 
 - 当前 `pnpm audit:parity:extended` 在线上预览环境中已完整通过，首轮关键回归 `15/15`、第二轮扩展回归 `6/6` 均已通过。
 - 第三轮新增线上定向回归已通过：用户扩展 `6/6`、管理员配置 `6/6`、管理员业务 `5/5`。
-- 第三轮用户补充回归 `5/6`，新增发现 1 个真实用户端缺陷：`0` 积分时前端未在发送前拦截请求。
+- 第三轮用户补充回归已在最新线上预览环境中复测通过，结果为 `6/6`。
 - 旧的“本地地域限制导致聊天 403”结论已废弃，因为它不符合当前规定的验收方法。
 - 当前没有新的线上阻塞 bug 留在清单中；本清单保留的内容改为“仍未覆盖的细颗粒度能力”和“刻意隔离的危险操作”。
 
-## [P1] 0 积分时发送按钮仍会触发聊天请求，未弹出预期充值拦截弹窗
+## 已修复记录：0 积分发送前拦截
 
 - 影响范围：聊天发送前拦截、低余额/空余额用户体验、无效 402 请求
 - 复现步骤：
@@ -24,9 +24,10 @@
   3. 确认页头已经显示 `0 积分 / 已用完`
   4. 输入任意消息并点击 `发送`
 - 旧版本期望（来自旧仓库）：积分体系存在发送前提示/限制逻辑，空余额时应先阻止用户继续发送
-- 新站实际：当前并未弹出预期 `alertdialog` 充值拦截层，而是直接命中 `/api/ai/stream`，随后返回 `402` 和 `Streaming error: 积分不足`
-- 证据：`apps/web/test-results/artifacts/user-supplemental-User-Sup-eec1f--to-subscription-management-chromium/attachments/issue-report-md-0cae0ae356efc8a2edf46473bc0ec67f65e858cb.md`
-- 建议归属：前端 / 后端
+- 修复前实际：会直接命中 `/api/ai/stream`，随后返回 `402` 和 `Streaming error: 积分不足`
+- 修复后实际：最新预览 `https://graylum-ai-vercel-v1-4bnf8wxv9-simons-projects-bfe3e99f.vercel.app` 已验证在发送前弹出充值拦截弹窗，且 `user-supplemental` 全部通过
+- 证据：`pnpm --dir apps/web test:e2e:user-supplemental` 直连最新 Vercel Preview 结果 `6/6`
+- 建议归属：前端 / 测试
 
 ## 已确认规则
 
