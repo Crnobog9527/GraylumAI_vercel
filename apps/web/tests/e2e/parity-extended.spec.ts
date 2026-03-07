@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
@@ -16,6 +16,12 @@ async function dismissLowBalanceDialogIfVisible(page: Page) {
     return true;
   }
   return false;
+}
+
+async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20000) {
+  await expect(
+    page.locator('[data-testid="chat-message"][data-message-role="user"]').filter({ hasText: prompt }).last()
+  ).toBeVisible({ timeout });
 }
 
 async function createConversation(page: Page, prompt: string) {
@@ -39,8 +45,9 @@ async function createConversation(page: Page, prompt: string) {
 
   const streamResponse = await streamResponsePromise;
   expect(streamResponse.status()).toBe(200);
-  await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+  await expectUserMessageVisible(page, prompt);
   await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole('button', { name: '编辑标题' })).toBeEnabled({ timeout: 15000 });
 }
 
 async function readCreditsFromRow(row: Locator) {
@@ -49,10 +56,62 @@ async function readCreditsFromRow(row: Locator) {
   return Number((rawText ?? '').replace(/[^\d-]/g, ''));
 }
 
+async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number) {
+  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+    return;
+  }
+
+  const context = await browser.newContext({ storageState: authStatePaths.admin });
+  const page = await context.newPage();
+
+  try {
+    await gotoWithBypass(page, '/admin/users');
+    await expect(page).toHaveURL(/\/admin\/users/);
+
+    const targetEmail = getCredentials('user').email;
+    await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
+    const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
+    await expect(targetRow).toBeVisible({ timeout: 15000 });
+
+    const currentCredits = await readCreditsFromRow(targetRow);
+    if (currentCredits >= minimumCredits) {
+      return;
+    }
+
+    const delta = minimumCredits - currentCredits;
+    await targetRow.getByRole('button', { name: '积分' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+    await page.locator('input[type="number"]').fill(String(delta));
+    await page.locator('input[placeholder="奖励积分、退款等..."]').fill(`Parity extended top-up ${Date.now()}`);
+
+    const adjustResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/trpc/admin.adjustUserCredits') &&
+        response.request().method() === 'POST',
+      { timeout: 20000 },
+    );
+    await page.getByRole('button', { name: '确认调整' }).click();
+    const adjustResponse = await adjustResponsePromise;
+    expect(adjustResponse.status()).toBe(200);
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 })
+      .toBeGreaterThanOrEqual(minimumCredits);
+  } finally {
+    await context.close();
+  }
+}
+
 test.describe('Parity Extended', () => {
+  test.describe.configure({ mode: 'serial' });
+
   test.describe('User Flows', () => {
     test.use({ storageState: authStatePaths.user });
     test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for extended user flows');
+
+    test.beforeAll(async ({ browser }) => {
+      await ensureUserCreditsAtLeast(browser, 150);
+    });
 
     test('should rename a conversation from the chat header', async ({ page }, testInfo) => {
       const steps: string[] = [];

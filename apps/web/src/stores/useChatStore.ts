@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 interface ChatState {
   // Current active conversation ID
@@ -15,20 +16,32 @@ interface ChatState {
   setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
-  // Initial state
-  activeConversationId: null,
-  conversationListVersion: 0,
-  isSidebarCollapsed: false,
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set) => ({
+      // Initial state
+      activeConversationId: null,
+      conversationListVersion: 0,
+      isSidebarCollapsed: false,
 
-  // Actions
-  setActiveConversation: (id) => set({ activeConversationId: id }),
+      // Actions
+      setActiveConversation: (id) => set({ activeConversationId: id }),
 
-  refreshConversationList: () =>
-    set((state) => ({ conversationListVersion: state.conversationListVersion + 1 })),
+      refreshConversationList: () =>
+        set((state) => ({ conversationListVersion: state.conversationListVersion + 1 })),
 
-  toggleSidebar: () =>
-    set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
+      toggleSidebar: () =>
+        set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
 
-  setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-}));
+      setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
+    }),
+    {
+      name: 'graylum-chat-store',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        activeConversationId: state.activeConversationId,
+        isSidebarCollapsed: state.isSidebarCollapsed,
+      }),
+    }
+  )
+);

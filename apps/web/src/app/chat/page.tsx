@@ -80,7 +80,7 @@ export default function ChatPage() {
   }, [activeModels, selectedModelId]);
 
   // Fetch conversations
-  const { data: conversationsData } = trpc.chat.getConversations.useQuery();
+  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery();
   const conversations = conversationsData?.data || [];
 
   // Get current conversation
@@ -117,6 +117,35 @@ export default function ChatPage() {
       utils.credits.getBalance.invalidate();
     },
   });
+
+  useEffect(() => {
+    if (
+      !activeConversationId ||
+      !conversationsData ||
+      conversationsLoading ||
+      isStreaming ||
+      streamingLoading ||
+      streamingMessages.length > 0
+    ) {
+      return;
+    }
+
+    const activeConversationExists = conversations.some((conversation) => conversation.id === activeConversationId);
+    if (!activeConversationExists) {
+      setActiveConversation(null);
+      clearChat();
+    }
+  }, [
+    activeConversationId,
+    clearChat,
+    conversations,
+    conversationsData,
+    conversationsLoading,
+    isStreaming,
+    setActiveConversation,
+    streamingLoading,
+    streamingMessages.length,
+  ]);
 
   // Fetch messages for active conversation (用于切换对话时加载历史)
   const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
@@ -334,6 +363,8 @@ export default function ChatPage() {
                   messages.map((message) => (
                     <div
                       key={message.id}
+                      data-testid="chat-message"
+                      data-message-role={message.role}
                       className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                       {message.role === 'assistant' && (
@@ -358,7 +389,7 @@ export default function ChatPage() {
                           border: message.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
                         }}
                       >
-                        <p className="whitespace-pre-wrap break-words">
+                        <p data-testid="chat-message-content" className="whitespace-pre-wrap break-words">
                           {message.content}
                           {message.isStreaming && (
                             <span className="inline-block w-2 h-4 ml-1 animate-pulse" style={{ background: 'var(--color-primary)' }} />

@@ -18,6 +18,12 @@ async function dismissLowBalanceDialogIfVisible(page: Page) {
   return false;
 }
 
+async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20000) {
+  await expect(
+    page.locator('[data-testid="chat-message"][data-message-role="user"]').filter({ hasText: prompt }).last()
+  ).toBeVisible({ timeout });
+}
+
 async function readCreditsFromRow(row: Locator) {
   const creditsCell = row.locator('td').nth(4);
   const rawText = await creditsCell.textContent();
@@ -71,6 +77,7 @@ async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number
 }
 
 test.describe('AI Chat', () => {
+  test.describe.configure({ mode: 'serial' });
   test.use({ storageState: authStatePaths.user });
   test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for chat flows');
 
@@ -182,7 +189,7 @@ test.describe('AI Chat', () => {
       expect(streamResponse.status()).toBe(200);
 
       steps.push('Verify user prompt is echoed into the conversation list');
-      await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+      await expectUserMessageVisible(page, prompt);
 
       steps.push('Wait until the UI returns to idle after streaming');
       await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
@@ -295,7 +302,7 @@ test.describe('AI Chat', () => {
       await page.getByRole('button', { name: '发送' }).click();
 
       steps.push('Verify the user prompt remains visible and an error banner is rendered');
-      await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+      await expectUserMessageVisible(page, prompt);
       await expect(page.getByText('Injected parity failure')).toBeVisible({ timeout: 10000 });
       await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 10000 });
 

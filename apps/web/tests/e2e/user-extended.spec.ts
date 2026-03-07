@@ -23,6 +23,12 @@ async function dismissLowBalanceDialogIfVisible(page: Page) {
   return false;
 }
 
+async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20000) {
+  await expect(
+    page.locator('[data-testid="chat-message"][data-message-role="user"]').filter({ hasText: prompt }).last()
+  ).toBeVisible({ timeout });
+}
+
 async function readCreditsFromRow(row: Locator) {
   const creditsCell = row.locator('td').nth(4);
   const rawText = await creditsCell.textContent();
@@ -95,8 +101,9 @@ async function createConversation(page: Page, prompt: string) {
 
   const streamResponse = await streamResponsePromise;
   expect(streamResponse.status()).toBe(200);
-  await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+  await expectUserMessageVisible(page, prompt);
   await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole('button', { name: '编辑标题' })).toBeEnabled({ timeout: 15000 });
 }
 
 async function renameConversation(page: Page, title: string) {
@@ -203,6 +210,53 @@ test.describe('User Extended Flows', () => {
           role: 'user',
           route: '/chat',
           expected: 'Authenticated users can delete an existing conversation from the sidebar and the deleted item disappears from the list.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should restore the active conversation after refreshing the chat page', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = `Parity refresh seed ${Date.now()}`;
+    const renamedTitle = `Parity refresh ${Date.now()}`;
+    let actual = 'Conversation restored after refresh';
+
+    try {
+      steps.push('Create a fresh conversation from /chat');
+      await createConversation(page, prompt);
+
+      steps.push('Rename the conversation to a deterministic title');
+      await renameConversation(page, renamedTitle);
+      const conversationRow = page.getByTestId('conversation-item').filter({ hasText: renamedTitle }).first();
+      await expect(conversationRow).toBeVisible({ timeout: 10000 });
+
+      steps.push('Refresh /chat to verify the active conversation is restored from persisted state');
+      await page.reload({ waitUntil: 'networkidle' });
+      await expect(page).toHaveURL(/\/chat/);
+
+      steps.push('Verify the renamed conversation title and previous prompt are still loaded');
+      await expect(page.getByRole('heading', { name: renamedTitle })).toBeVisible({ timeout: 15000 });
+      await expectUserMessageVisible(page, prompt);
+      await expect(conversationRow).toBeVisible({ timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown conversation refresh recovery failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-refresh-recovery',
+          role: 'user',
+          route: '/chat',
+          expected: 'Authenticated users can refresh the chat page and continue in the previously active conversation with title and history intact.',
         },
         actual,
         steps,
