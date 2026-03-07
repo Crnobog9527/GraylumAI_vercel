@@ -8,10 +8,5 @@ export function createClient() {
     throw new Error('Missing Supabase environment variables');
   }
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      storageKey: 'sb-auth-token',
-    },
-  });
+  return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }
