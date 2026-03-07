@@ -72,6 +72,7 @@ function getRateLimiter(): Ratelimit | null {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.headers.get('host') || '';
+  const normalizedHostname = hostname.split(':')[0].toLowerCase();
 
   // ========================================
   // 速率限制检查 (API 路径)
@@ -113,10 +114,16 @@ export async function middleware(request: NextRequest) {
   }
 
   // 判断域名类型
-  const isAppDomain = hostname.startsWith('app.') || hostname.includes('app.graylum.com');
-  const isWwwDomain = hostname.startsWith('www.') || hostname.includes('www.graylum.com');
-  const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1');
-  const isDevEnvironment = isLocalhost || hostname.includes('.github.dev') || hostname.includes('.gitpod.io');
+  const isAppDomain = normalizedHostname === 'app.graylum.com' || normalizedHostname.startsWith('app.');
+  const isPublicSiteDomain =
+    normalizedHostname === 'graylum.com' ||
+    normalizedHostname === 'www.graylum.com' ||
+    normalizedHostname.startsWith('www.');
+  const isLocalhost = normalizedHostname.includes('localhost') || normalizedHostname.includes('127.0.0.1');
+  const isDevEnvironment =
+    isLocalhost ||
+    normalizedHostname.includes('.github.dev') ||
+    normalizedHostname.includes('.gitpod.io');
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -150,8 +157,8 @@ export async function middleware(request: NextRequest) {
   // 认证与路由逻辑
   // ========================================
 
-  // www 域名: 展示着陆页 (公开访问)
-  if (isWwwDomain) {
+  // 公开站点域名: 展示着陆页 (公开访问)
+  if (isPublicSiteDomain) {
     // 根路径重写到着陆页
     if (pathname === '/') {
       const url = request.nextUrl.clone();

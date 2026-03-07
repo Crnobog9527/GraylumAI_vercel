@@ -10,17 +10,12 @@
 - 旧的“本地地域限制导致聊天 403”结论已废弃，因为它不符合当前规定的验收方法。
 - 本清单保留的内容改为“需要确认的结构差异”和“仍未覆盖的细颗粒度能力”，而不是线上阻塞 bug。
 
-## [P2] 登录入口策略与旧版本不一致，需要明确是否接受偏离
+## 已确认规则
 
-- 影响范围：访客首次进入网站的路径、登录/注册入口、首页定义
-- 复现步骤：
-  1. 查看旧仓库 `src/App.jsx`、`src/Layout.jsx`、`src/lib/AuthContext.jsx`
-  2. 运行 `pnpm audit:parity:extended`
-  3. 对照新站当前公开路由 `/landing?domain=www` 和 `/login`
-- 旧版本期望（来自旧仓库）：旧版本没有站内公开首页和本地登录页；访客访问受保护页面会进入 Base44 托管登录流程
-- 新站实际：新站提供公开落地页和站内 `/login` 登录页，访客链路与旧版明显不同
-- 证据：`docs/refactor-parity/current-audit/legacy-repo-baseline.draft.md`、`apps/web/tests/e2e/auth.spec.ts`、`.audit-output/refactor-parity/20260307-212219/logs/critical-e2e.log`
-- 建议归属：前端 / 认证 / 产品决策
+- `graylum.com` 和 `www.graylum.com` 都应进入新版本公开落地页。
+- 用户登录后使用 `app.graylum.com` 进入应用后台。
+- 未登录用户如果直接访问 `app.graylum.com` 下的后台页面，应被重定向到登录/注册页。
+- 这属于已确认产品规则，不再作为“需修复差异”跟踪。
 
 ## [P2] 会话批量管理与深层边角能力仍缺少一致性证据
 
