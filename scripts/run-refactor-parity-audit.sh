@@ -16,6 +16,7 @@ PLAYWRIGHT_DIR="$EVIDENCE_DIR/playwright"
 WITH_SECURITY=0
 WITH_EXTENDED=0
 WITH_USER_EXTENDED=0
+WITH_USER_SUPPLEMENTAL=0
 WITH_ADMIN_CONFIG=0
 WITH_ADMIN_OPS=0
 WITH_ADMIN_DESTRUCTIVE=0
@@ -34,6 +35,9 @@ for arg in "$@"; do
       ;;
     --with-user-extended)
       WITH_USER_EXTENDED=1
+      ;;
+    --with-user-supplemental)
+      WITH_USER_SUPPLEMENTAL=1
       ;;
     --with-admin-config)
       WITH_ADMIN_CONFIG=1
@@ -102,27 +106,41 @@ run_vercel_deploy() {
   local log_file="$LOG_DIR/${step_name}.log"
   local output_file="$RUN_DIR/preview-url.txt"
   local status="failed"
+  local attempt=1
+  local max_attempts=3
 
   printf '## %s\n' "$step_name" > "$log_file"
-  printf 'Command: (cd repo-root && vercel deploy -y)\n\n' >> "$log_file"
+  printf 'Command: (cd repo-root && vercel deploy -y) (with retries)\n\n' >> "$log_file"
 
   local deploy_output
-  if deploy_output="$(
-    cd "$ROOT_DIR" &&
-      vercel deploy -y 2>&1
-  )"; then
-    printf '%s\n' "$deploy_output" | tee -a "$log_file" >/dev/null
-    PREVIEW_URL="$(printf '%s\n' "$deploy_output" | rg -o 'https://[[:alnum:].-]+\.vercel\.app' | tail -n 1)"
+  while [[ "$attempt" -le "$max_attempts" ]]; do
+    printf 'Attempt %s/%s\n' "$attempt" "$max_attempts" >> "$log_file"
 
-    if [[ -n "$PREVIEW_URL" ]]; then
-      printf '%s\n' "$PREVIEW_URL" > "$output_file"
-      status="passed"
-    else
+    if deploy_output="$(
+      cd "$ROOT_DIR" &&
+        vercel deploy -y 2>&1
+    )"; then
+      printf '%s\n' "$deploy_output" | tee -a "$log_file" >/dev/null
+      PREVIEW_URL="$(printf '%s\n' "$deploy_output" | rg -o 'https://[[:alnum:].-]+\.vercel\.app' | tail -n 1)"
+
+      if [[ -n "$PREVIEW_URL" ]]; then
+        printf '%s\n' "$PREVIEW_URL" > "$output_file"
+        status="passed"
+        break
+      fi
+
       printf '\nFailed to parse preview URL from deploy output.\n' | tee -a "$log_file" >/dev/null
+    else
+      printf '%s\n' "$deploy_output" | tee -a "$log_file" >/dev/null
     fi
-  else
-    printf '%s\n' "$deploy_output" | tee -a "$log_file" >/dev/null
-  fi
+
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      printf '%s\n' 'Retrying preview deploy after 5 seconds...' >> "$log_file"
+      sleep 5
+    fi
+
+    attempt=$((attempt + 1))
+  done
 
   STEP_RESULTS="${STEP_RESULTS}- ${step_name}: ${status} (log: logs/${step_name}.log)\n"
 
@@ -219,6 +237,9 @@ if run_vercel_deploy && fetch_vercel_bypass_cookie; then
   if [[ "$WITH_USER_EXTENDED" -eq 1 ]]; then
     run_playwright_step "user-extended-e2e" pnpm --dir apps/web test:e2e:user-extended
   fi
+  if [[ "$WITH_USER_SUPPLEMENTAL" -eq 1 ]]; then
+    run_playwright_step "user-supplemental-e2e" pnpm --dir apps/web test:e2e:user-supplemental
+  fi
   if [[ "$WITH_ADMIN_CONFIG" -eq 1 ]]; then
     run_playwright_step "admin-config-e2e" pnpm --dir apps/web test:e2e:admin-config
   fi
@@ -235,6 +256,9 @@ else
   fi
   if [[ "$WITH_USER_EXTENDED" -eq 1 ]]; then
     STEP_RESULTS="${STEP_RESULTS}- user-extended-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
+  if [[ "$WITH_USER_SUPPLEMENTAL" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- user-supplemental-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
   fi
   if [[ "$WITH_ADMIN_CONFIG" -eq 1 ]]; then
     STEP_RESULTS="${STEP_RESULTS}- admin-config-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"

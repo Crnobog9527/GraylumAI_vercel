@@ -47,6 +47,12 @@ pnpm audit:parity:round2
 pnpm audit:parity:round3
 ```
 
+如果你只想继续补剩余用户端能力，可以直接运行：
+
+```bash
+pnpm audit:parity:user-supplemental
+```
+
 危险操作保留为单独入口，默认不纳入日常回归：
 
 ```bash
@@ -161,7 +167,13 @@ pnpm audit:parity:extended
 如果你按第三轮计划继续推进，当前分轮覆盖是：
 
 - `pnpm audit:parity:round1`
-  用户高价值链路，当前已覆盖会话删除、批量导出可用性、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭
+  用户高价值链路，当前已覆盖会话删除、批量导出可用性、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭，以及剩余用户端的低余额拦截、账户安全、Marketplace
+- `pnpm audit:parity:user-supplemental`
+  只执行剩余用户端补充套件，当前目标是低余额拦截、受保护页面跳转、账户安全交互、Marketplace 筛选与详情流
+
+注意：
+- 2026-03-07 这条脚本在一次实际执行中遇到 Vercel 上传 `EPIPE`，导致 `.audit-output/refactor-parity/20260307-232022/` 只保留了 API 成功和部署失败记录。
+- 同一天的直接线上预览验证仍然完成了 `user-supplemental 5/6`，因此当前结论以直连预览地址的 Playwright 结果为准，而不是以这次失败的部署产物为准。
 - `pnpm audit:parity:round2`
   管理员配置页，当前已覆盖 `settings / announcements / packages / prompts` 的进入、修改、保存、刷新后持久化、测试数据清理
 - `pnpm audit:parity:round3`
