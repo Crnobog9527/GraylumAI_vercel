@@ -19,6 +19,7 @@ import {
   resolveActiveChatPrompt,
 } from '@repo/api/src/services/chatRuntime';
 import {
+  getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
   getProviderErrorMessage,
   normalizeOpenAICompatibleEndpoint,
@@ -429,7 +430,7 @@ export async function POST(request: NextRequest) {
 
     const webSearchRequested = runtimeSettings.enableSmartSearchDecision && needsRealtimeData(message);
     const webSearchAvailable = webSearchRequested && runtimeModel.enableWebSearch;
-    const apiKey = runtimeModel.apiKey || process.env.ANTHROPIC_API_KEY || null;
+    const apiKey = getConfiguredProviderApiKey(runtimeModel.apiKey);
 
     if (!apiKey) {
       await billingService.refund(preDeduct.preDeductId, '未配置 API Key');
@@ -444,7 +445,7 @@ export async function POST(request: NextRequest) {
       });
 
       return new Response(
-        JSON.stringify({ error: '未配置 API Key，请在模型管理中配置或设置 ANTHROPIC_API_KEY 环境变量' }),
+        JSON.stringify({ error: '未配置 API Key，请在模型管理中配置或设置 OPENROUTER_API_KEY / ANTHROPIC_API_KEY 环境变量' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }

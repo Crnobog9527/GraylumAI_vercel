@@ -6,6 +6,7 @@
  */
 
 import type { AIMessage } from '../types/ai';
+import { getFallbackProviderApiKey, looksLikeOpenRouterKey } from './providerUtils';
 
 // ============================================
 // 常量
@@ -62,10 +63,14 @@ export interface TokenCountResult {
  * @see https://docs.anthropic.com/en/docs/build-with-claude/token-counting
  */
 export async function countTokensOfficial(params: TokenCountParams): Promise<number> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = getFallbackProviderApiKey();
 
   if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY not configured');
+    throw new Error('OPENROUTER_API_KEY / ANTHROPIC_API_KEY not configured');
+  }
+
+  if (looksLikeOpenRouterKey(apiKey)) {
+    throw new Error('Official token counting requires ANTHROPIC_API_KEY; OpenRouter keys fall back to estimate mode');
   }
 
   const response = await fetch(COUNT_TOKENS_URL, {

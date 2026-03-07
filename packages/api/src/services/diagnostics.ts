@@ -16,6 +16,7 @@ import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
 import { BillingService, calculateTokenCost, estimateRequestCost } from './billing';
 import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
+import { getConfiguredProviderApiKeySource } from './providerUtils';
 import type { TokenUsage } from '../types/ai';
 
 // ============================================
@@ -424,7 +425,7 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
         const connectionStatus = typeof config.connection_status === 'string'
           ? config.connection_status
           : null;
-        const hasKey = !!model.api_key || !!process.env.ANTHROPIC_API_KEY;
+        const hasKey = !!model.api_key || !!getConfiguredProviderApiKeySource();
 
         return {
           id: model.id,

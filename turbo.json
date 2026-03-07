@@ -2,9 +2,12 @@
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
     "ANTHROPIC_API_KEY",
+    "CRON_SECRET",
     "DATABASE_URL",
+    "ENABLE_SENTRY_BUILD_UPLOAD",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
     "NEXT_PUBLIC_SUPABASE_URL",
+    "OPENROUTER_API_KEY",
     "POSTGRES_URL_NON_POOLING",
     "SENTRY_AUTH_TOKEN",
     "SENTRY_ORG",
