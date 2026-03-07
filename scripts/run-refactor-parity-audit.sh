@@ -104,11 +104,11 @@ RESULTS_FILE="$RUN_DIR/00-command-results.md"
     printf '%s\n' '- Full E2E logs: `logs/full-e2e.log`'
   fi
   printf '%s\n' '- Playwright evidence copy: `evidence/playwright/`'
-  printf '%s\n' '- Manual baseline template: `manual/01-old-site-baseline.md`'
+  printf '%s\n' '- Legacy repo baseline template: `manual/01-old-site-baseline.md`'
   printf '%s\n' '- Comparison matrix template: `manual/02-function-comparison-matrix.md`'
   printf '%s\n' '- Issue list template: `manual/03-issue-list.md`'
   printf '\n%s\n\n' '## Next Actions'
-  printf '%s\n' '1. Fill the old-site baseline from Base44 in `manual/01-old-site-baseline.md`.'
+  printf '%s\n' '1. Fill the legacy-repo baseline from the old Base44 GitHub repository in `manual/01-old-site-baseline.md`.'
   printf '%s\n' '2. Compare old vs new behavior in `manual/02-function-comparison-matrix.md`.'
   printf '%s\n' '3. Convert every mismatch into a repair-ready ticket in `manual/03-issue-list.md`.'
   printf '%s\n' '4. Treat skipped Playwright flows due to missing E2E credentials as a readiness gap, not as a pass.'
