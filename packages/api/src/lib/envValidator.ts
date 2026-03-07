@@ -12,6 +12,16 @@ import { z } from 'zod';
 // ============================================
 
 const apiKeySchema = z.string().min(10);
+const hasDuplicatedEnvPrefix = (value: string, key: string) =>
+  value.startsWith(`${key}=`) ||
+  value.startsWith(`"${key}=`) ||
+  value.startsWith(`'${key}=`);
+
+const rejectDuplicatedEnvPrefix = (key: string) =>
+  z.string().refine(
+    (value) => !hasDuplicatedEnvPrefix(value, key),
+    `${key} 的值包含重复的 ${key}= 前缀，请修正环境变量来源`
+  );
 
 const envSchema = z.object({
   // Node 环境
@@ -36,8 +46,7 @@ const envSchema = z.object({
     .optional(),
 
   // Database
-  DATABASE_URL: z
-    .string()
+  DATABASE_URL: rejectDuplicatedEnvPrefix('DATABASE_URL')
     .refine(
       (url) => url.startsWith('postgresql://') || url.startsWith('postgres://'),
       'DATABASE_URL 必须是有效的 PostgreSQL 连接字符串'
@@ -58,6 +67,10 @@ const envSchema = z.object({
   NEXT_PUBLIC_SENTRY_DSN: z
     .string()
     .url()
+    .optional(),
+
+  SENTRY_AUTH_TOKEN: rejectDuplicatedEnvPrefix('SENTRY_AUTH_TOKEN')
+    .regex(/^sntrys_/, 'SENTRY_AUTH_TOKEN 必须以 sntrys_ 开头')
     .optional(),
 
   // Rate Limiting (可选)
@@ -197,5 +210,6 @@ export function getSafeEnvSummary(): Record<string, string> {
     ANTHROPIC_KEY_SET: process.env.ANTHROPIC_API_KEY ? '✓' : '✗',
     OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
     SENTRY_DSN_SET: process.env.NEXT_PUBLIC_SENTRY_DSN ? '✓' : '✗',
+    SENTRY_AUTH_TOKEN_SET: process.env.SENTRY_AUTH_TOKEN ? '✓' : '✗',
   };
 }
