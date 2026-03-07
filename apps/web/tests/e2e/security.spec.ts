@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { gotoWithBypass } from './support/deploymentProtection';
 
 /**
  * Security E2E Tests
@@ -17,7 +18,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('XSS Prevention', () => {
     test('should escape script tags in user input display', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Attempt XSS via email field
       const xssPayload = '<script>alert("xss")</script>';
@@ -46,7 +47,7 @@ test.describe('Security', () => {
     });
 
     test('should sanitize HTML entities in displayed content', async ({ page }) => {
-      await page.goto('/register');
+      await gotoWithBypass(page, '/register');
 
       // Attempt XSS via various payloads
       const xssPayloads = [
@@ -83,7 +84,7 @@ test.describe('Security', () => {
       await page.context().clearCookies();
 
       // Try to access protected route
-      await page.goto('/chat');
+      await gotoWithBypass(page, '/chat');
 
       // Should redirect to login or landing
       await page.waitForURL(/\/(login|landing)/, { timeout: 5000 });
@@ -92,14 +93,14 @@ test.describe('Security', () => {
     test('should protect profile page from unauthenticated access', async ({ page }) => {
       await page.context().clearCookies();
 
-      await page.goto('/profile');
+      await gotoWithBypass(page, '/profile');
 
       // Should redirect to login or landing
       await page.waitForURL(/\/(login|landing)/, { timeout: 5000 });
     });
 
     test('should not expose session tokens in URL', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Check URL doesn't contain sensitive tokens
       const url = page.url();
@@ -109,7 +110,7 @@ test.describe('Security', () => {
     });
 
     test('should use secure password input', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Password field should be type="password"
       const passwordInput = page.locator('input[name="password"], input[type="password"]');
@@ -117,7 +118,7 @@ test.describe('Security', () => {
     });
 
     test('should not autocomplete sensitive fields', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Password field should have autocomplete="new-password" or "current-password" or "off"
       const passwordInput = page.locator('input[name="password"], input[type="password"]');
@@ -137,7 +138,7 @@ test.describe('Security', () => {
       await page.context().clearCookies();
 
       // Try to access admin route
-      await page.goto('/admin');
+      await gotoWithBypass(page, '/admin');
 
       // Should redirect to login or show access denied
       await page.waitForTimeout(2000);
@@ -166,7 +167,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('Input Validation', () => {
     test('should validate email format on login', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Enter invalid email
       await page.fill('input[type="email"], input[name="email"]', 'not-an-email');
@@ -185,7 +186,7 @@ test.describe('Security', () => {
     });
 
     test('should handle SQL injection attempts safely', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // SQL injection attempt
       const sqlPayload = "admin'--";
@@ -202,7 +203,7 @@ test.describe('Security', () => {
     });
 
     test('should limit input length in forms', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Try extremely long input
       const longInput = 'a'.repeat(10000);
@@ -221,7 +222,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('Security Headers', () => {
     test('should have X-Frame-Options header', async ({ page }) => {
-      const response = await page.goto('/');
+      const response = await gotoWithBypass(page, '/');
 
       const xFrameOptions = response?.headers()['x-frame-options'];
       // Should be set (DENY or SAMEORIGIN)
@@ -232,7 +233,7 @@ test.describe('Security', () => {
     });
 
     test('should have X-Content-Type-Options header', async ({ page }) => {
-      const response = await page.goto('/');
+      const response = await gotoWithBypass(page, '/');
 
       const xContentType = response?.headers()['x-content-type-options'];
       if (xContentType) {
@@ -241,7 +242,7 @@ test.describe('Security', () => {
     });
 
     test('should have X-XSS-Protection header or CSP', async ({ page }) => {
-      const response = await page.goto('/');
+      const response = await gotoWithBypass(page, '/');
       const headers = response?.headers() || {};
 
       // Either X-XSS-Protection or Content-Security-Policy should be present
@@ -254,7 +255,7 @@ test.describe('Security', () => {
     });
 
     test('should not expose server version in headers', async ({ page }) => {
-      const response = await page.goto('/');
+      const response = await gotoWithBypass(page, '/');
       const headers = response?.headers() || {};
 
       // Should not expose detailed version info
@@ -272,7 +273,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('Cookie Security', () => {
     test('should set secure cookies on HTTPS', async ({ page, context }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Get cookies
       const cookies = await context.cookies();
@@ -296,7 +297,7 @@ test.describe('Security', () => {
     });
 
     test('should set HttpOnly flag on session cookies', async ({ page, context }) => {
-      await page.goto('/');
+      await gotoWithBypass(page, '/');
 
       const cookies = await context.cookies();
 
@@ -322,7 +323,7 @@ test.describe('Security', () => {
   // ============================================
   test.describe('Rate Limiting', () => {
     test('should show appropriate message when rate limited', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
 
       // Rapidly submit login attempts
       for (let i = 0; i < 15; i++) {
@@ -366,7 +367,7 @@ test.describe('Authenticated Security', () => {
     // Try to access another user's profile via URL manipulation
     // This requires knowing another user's ID
 
-    await page.goto('/profile/some-other-user-id');
+    await gotoWithBypass(page, '/profile/some-other-user-id');
 
     // Should either redirect or show access denied
     const url = page.url();
@@ -374,7 +375,7 @@ test.describe('Authenticated Security', () => {
   });
 
   test.skip('should sanitize chat input before submission', async ({ page }) => {
-    await page.goto('/chat');
+    await gotoWithBypass(page, '/chat');
 
     // Wait for chat interface
     await page.waitForSelector('[data-testid="chat-input"], textarea, input[type="text"]', { timeout: 10000 });

@@ -51,6 +51,19 @@ function classifyConsoleSeverity(type: string): IssueSeverity {
   return type === 'error' ? 'P1' : 'P2';
 }
 
+function shouldIgnoreRequestFailure(url: string, method: string, message: string) {
+  if (url.includes('/.well-known/vercel/jwe') || url.includes('/.well-known/vercel-user-meta')) {
+    return true;
+  }
+
+  // Remote Vercel previews can emit aborted HEAD/OPTIONS fetches during deployment protection handshakes.
+  if (message === 'net::ERR_ABORTED' && ['HEAD', 'OPTIONS'].includes(method)) {
+    return true;
+  }
+
+  return false;
+}
+
 function renderMarkdown(report: FlowAuditReport) {
   const lines = [
     `# ${report.title}`,
@@ -145,11 +158,13 @@ export function createIssueMonitor(page: Page) {
   page.on('requestfailed', (request) => {
     const resourceType = request.resourceType();
     if (!relevantResourceTypes.has(resourceType) || !shouldTrackUrl(request.url())) return;
+    const message = request.failure()?.errorText ?? 'Request failed';
+    if (shouldIgnoreRequestFailure(request.url(), request.method(), message)) return;
 
     issues.push({
       severity: 'P1',
       source: 'requestfailed',
-      message: request.failure()?.errorText ?? 'Request failed',
+      message,
       method: request.method(),
       resourceType,
       url: request.url(),

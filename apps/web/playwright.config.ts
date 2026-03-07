@@ -7,6 +7,9 @@ dotenv.config({
   path: path.resolve(__dirname, '../../.env.local'),
 });
 
+const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+const shouldUseLocalWebServer = !process.env.CI && !remoteBaseUrl;
+
 /**
  * Playwright E2E Test Configuration
  * @see https://playwright.dev/docs/test-configuration
@@ -40,7 +43,7 @@ export default defineConfig({
   // Shared settings for all projects
   use: {
     // Base URL for navigation
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    baseURL: remoteBaseUrl || 'http://localhost:3000',
 
     // Keep trace artifacts for any failing flow audit in local runs
     trace: 'retain-on-failure',
@@ -89,14 +92,14 @@ export default defineConfig({
   ],
 
   // Run local dev server before starting the tests
-  webServer: process.env.CI
-    ? undefined
-    : {
+  webServer: shouldUseLocalWebServer
+    ? {
         command: 'pnpm dev',
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 120000,
-      },
+      }
+    : undefined,
 
   // Global timeout for each test
   timeout: 30000,

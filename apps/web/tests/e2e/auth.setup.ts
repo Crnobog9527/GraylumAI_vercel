@@ -6,6 +6,7 @@ import {
   hasCredentials,
   type E2ERole,
 } from './support/auth';
+import { gotoWithBypass } from './support/deploymentProtection';
 
 /**
  * Authentication Setup
@@ -24,7 +25,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
     return;
   }
 
-  await page.goto('/login');
+  await gotoWithBypass(page, '/login');
 
   await page.fill('#email, input[type="email"], input[name="email"]', credentials.email);
   await page.fill('#password, input[type="password"], input[name="password"]', credentials.password);
@@ -33,10 +34,10 @@ async function authenticateRole(page: Page, role: E2ERole) {
   await page.waitForFunction(() => window.location.pathname !== '/login', undefined, { timeout: 15000 });
 
   if (role === 'admin') {
-    await page.goto('/admin');
+    await gotoWithBypass(page, '/admin');
     await expect(page).toHaveURL(/\/admin/);
   } else {
-    await page.goto('/profile');
+    await gotoWithBypass(page, '/profile');
     await expect(page).toHaveURL(/\/profile/);
   }
 

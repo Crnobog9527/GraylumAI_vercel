@@ -6,6 +6,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
+import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 async function dismissLowBalanceDialogIfVisible(page: Page) {
@@ -28,7 +29,7 @@ test.describe('AI Chat', () => {
 
     try {
       steps.push('Open /chat');
-      await page.goto('/chat');
+      await gotoWithBypass(page, '/chat');
       await expect(page).toHaveURL(/\/chat/);
 
       steps.push('Verify input shell and CTA controls');
@@ -65,7 +66,7 @@ test.describe('AI Chat', () => {
 
     try {
       steps.push('Open /chat and inspect sidebar');
-      await page.goto('/chat');
+      await gotoWithBypass(page, '/chat');
       await expect(page).toHaveURL(/\/chat/);
 
       steps.push('Verify conversation sidebar or empty state');
@@ -102,7 +103,7 @@ test.describe('AI Chat', () => {
 
     try {
       steps.push('Open /chat');
-      await page.goto('/chat');
+      await gotoWithBypass(page, '/chat');
 
       steps.push('Fill chat prompt');
       const input = page.locator('textarea[placeholder="请输入您的问题..."]');
@@ -162,7 +163,7 @@ test.describe('AI Chat', () => {
 
     try {
       steps.push('Open /chat and start a long-running prompt');
-      await page.goto('/chat');
+      await gotoWithBypass(page, '/chat');
       const input = page.locator('textarea[placeholder="请输入您的问题..."]');
       await input.fill(prompt);
       await page.getByRole('button', { name: '发送' }).click();

@@ -6,6 +6,7 @@
 
 import { test, expect } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
+import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 test.describe('Admin Dashboard', () => {
@@ -19,7 +20,7 @@ test.describe('Admin Dashboard', () => {
 
     try {
       steps.push('Open /admin');
-      await page.goto('/admin');
+      await gotoWithBypass(page, '/admin');
       await expect(page).toHaveURL(/\/admin/);
 
       steps.push('Verify dashboard heading and summary copy');
@@ -55,7 +56,7 @@ test.describe('Admin Dashboard', () => {
 
     try {
       steps.push('Open /admin/models');
-      await page.goto('/admin/models');
+      await gotoWithBypass(page, '/admin/models');
       await expect(page).toHaveURL(/\/admin\/models/);
 
       steps.push('Verify models page heading and table shell');
@@ -91,7 +92,7 @@ test.describe('Admin Dashboard', () => {
 
     try {
       steps.push('Open /admin/diagnostics');
-      await page.goto('/admin/diagnostics');
+      await gotoWithBypass(page, '/admin/diagnostics');
       await expect(page).toHaveURL(/\/admin\/diagnostics/);
 
       steps.push('Verify diagnostics heading and run button');
@@ -127,7 +128,7 @@ test.describe('Admin Dashboard', () => {
 
     try {
       steps.push('Open /admin/users');
-      await page.goto('/admin/users');
+      await gotoWithBypass(page, '/admin/users');
       await expect(page).toHaveURL(/\/admin\/users/);
 
       steps.push('Verify users page heading and filter form');

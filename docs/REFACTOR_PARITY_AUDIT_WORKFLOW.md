@@ -37,11 +37,12 @@ pnpm audit:parity:full
 - 可以访问旧版 GitHub 仓库代码
 - 可以访问旧仓库中的 README、文档、截图、录屏、操作说明
 
-### 本地环境
+### 新站测试环境
 
 至少保证：
 
-- `.env.local` 已能支持本地开发运行
+- 已登录 Vercel CLI，并且当前仓库已正确关联目标项目
+- `.env.local` 中已配置 E2E 账号
 - 若要跑完整用户链路，提供以下变量：
 
 ```bash
@@ -54,6 +55,8 @@ E2E_ADMIN_PASSWORD=...
 Playwright 现在会自动从根目录 [`.env.local`](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale Luminary LLC/Graylum_AI/GraylumAI_vercel/.env.local) 读取这些变量。
 
 如果这些测试账号缺失，相关 Playwright 流程会跳过。跳过不等于通过，必须在最终验收里标记为“证据不足”。
+
+当前工作流默认不会启动本地 `pnpm dev`。它会先部署一个 Vercel Preview，再直接对该线上预览地址执行 Playwright，用来规避本地地域网络对模型供应商 API 的影响。
 
 ## 输出目录
 
@@ -111,6 +114,7 @@ pnpm audit:parity
 先让系统自动帮你把“新站事实”收集出来，包括：
 
 - API 单元测试结果
+- Vercel Preview 部署地址
 - 关键 E2E 结果
 - Playwright 失败证据
 
@@ -166,9 +170,9 @@ pnpm audit:parity
 直接复用的资产包括：
 
 - API 测试：`pnpm test:api`
-- 关键 E2E：`pnpm --dir apps/web test:e2e:critical`
-- 完整 E2E：`pnpm --dir apps/web test:e2e`
-- 本地 E2E 说明：[docs/LOCAL_E2E_AUDIT_WORKFLOW.md](./LOCAL_E2E_AUDIT_WORKFLOW.md)
+- 线上关键 E2E：`PLAYWRIGHT_BASE_URL=<preview-url> pnpm --dir apps/web test:e2e:critical`
+- 线上完整 E2E：`PLAYWRIGHT_BASE_URL=<preview-url> pnpm --dir apps/web test:e2e`
+- 预览部署与保护绕过：由 `pnpm audit:parity` 自动完成
 
 ## 交付给开发者时必须包含
 

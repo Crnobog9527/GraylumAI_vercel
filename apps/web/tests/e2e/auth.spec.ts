@@ -6,19 +6,20 @@
 
 import { test, expect } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
+import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 test.describe('Authentication', () => {
   test.describe('Login Page', () => {
     test('should display login form', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
       await expect(page.locator('#email, input[type="email"], input[name="email"]')).toBeVisible();
       await expect(page.locator('#password, input[type="password"], input[name="password"]')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Login' })).toBeVisible();
     });
 
     test('should show error for invalid credentials', async ({ page }) => {
-      await page.goto('/login');
+      await gotoWithBypass(page, '/login');
       await page.fill('#email, input[type="email"], input[name="email"]', 'invalid@example.com');
       await page.fill('#password, input[type="password"], input[name="password"]', 'wrongpassword');
       await page.getByRole('button', { name: 'Login' }).click();
@@ -34,7 +35,7 @@ test.describe('Authentication', () => {
 
     try {
       steps.push('Open /landing?domain=www');
-      await page.goto('/landing?domain=www');
+      await gotoWithBypass(page, '/landing?domain=www');
 
       steps.push('Verify public CTA copy is visible');
       await expect(page.getByText('登录').first()).toBeVisible();
@@ -73,7 +74,7 @@ test.describe('Authentication', () => {
 
       try {
         steps.push('Open authenticated home page');
-        await page.goto('/');
+        await gotoWithBypass(page, '/');
         await expect(page).toHaveURL(/\/$/);
 
         steps.push('Verify authenticated navigation is visible');
@@ -108,7 +109,7 @@ test.describe('Authentication', () => {
 
       try {
         steps.push('Open /profile');
-        await page.goto('/profile');
+        await gotoWithBypass(page, '/profile');
         await expect(page).toHaveURL(/\/profile/);
 
         steps.push('Verify profile sidebar content');
