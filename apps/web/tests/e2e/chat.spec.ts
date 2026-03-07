@@ -4,8 +4,8 @@
  * This code is proprietary and confidential.
  */
 
-import { test, expect, type Page } from '@playwright/test';
-import { authStatePaths, hasCredentials } from './support/auth';
+import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -16,6 +16,58 @@ async function dismissLowBalanceDialogIfVisible(page: Page) {
     return true;
   }
   return false;
+}
+
+async function readCreditsFromRow(row: Locator) {
+  const creditsCell = row.locator('td').nth(4);
+  const rawText = await creditsCell.textContent();
+  return Number((rawText ?? '').replace(/[^\d-]/g, ''));
+}
+
+async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number) {
+  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+    return;
+  }
+
+  const context = await browser.newContext({ storageState: authStatePaths.admin });
+  const page = await context.newPage();
+
+  try {
+    await gotoWithBypass(page, '/admin/users');
+    await expect(page).toHaveURL(/\/admin\/users/);
+
+    const targetEmail = getCredentials('user').email;
+    await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
+    const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
+    await expect(targetRow).toBeVisible({ timeout: 15000 });
+
+    const currentCredits = await readCreditsFromRow(targetRow);
+    if (currentCredits >= minimumCredits) {
+      return;
+    }
+
+    const delta = minimumCredits - currentCredits;
+    await targetRow.getByRole('button', { name: '积分' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+    await page.locator('input[type="number"]').fill(String(delta));
+    await page.locator('input[placeholder="奖励积分、退款等..."]').fill(`Ensure minimum chat credits ${Date.now()}`);
+
+    const adjustResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/trpc/admin.adjustUserCredits') &&
+        response.request().method() === 'POST',
+      { timeout: 20000 },
+    );
+    await page.getByRole('button', { name: '确认调整' }).click();
+    const adjustResponse = await adjustResponsePromise;
+    expect(adjustResponse.status()).toBe(200);
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 })
+      .toBeGreaterThanOrEqual(minimumCredits);
+  } finally {
+    await context.close();
+  }
 }
 
 test.describe('AI Chat', () => {
@@ -95,13 +147,16 @@ test.describe('AI Chat', () => {
     }
   });
 
-  test('should send message and receive stream response', async ({ page }, testInfo) => {
+  test('should send message and receive stream response', async ({ browser, page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const prompt = `E2E smoke message ${Date.now()}`;
     let actual = 'Chat send flow completed';
 
     try {
+      steps.push('Ensure the E2E user has enough credits for chat');
+      await ensureUserCreditsAtLeast(browser, 100);
+
       steps.push('Open /chat');
       await gotoWithBypass(page, '/chat');
 
@@ -155,13 +210,16 @@ test.describe('AI Chat', () => {
     }
   });
 
-  test('should expose stop control during long-running stream', async ({ page }, testInfo) => {
+  test('should expose stop control during long-running stream', async ({ browser, page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const prompt = '请按行输出数字 1 到 400，并在每行附带一句简短中文说明。';
     let actual = 'Stop control interrupted the stream';
 
     try {
+      steps.push('Ensure the E2E user has enough credits for chat');
+      await ensureUserCreditsAtLeast(browser, 100);
+
       steps.push('Open /chat and start a long-running prompt');
       await gotoWithBypass(page, '/chat');
       const input = page.locator('textarea[placeholder="请输入您的问题..."]');
@@ -208,6 +266,75 @@ test.describe('AI Chat', () => {
         actual,
         steps,
         monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should surface a visible error banner when the stream request fails', async ({ browser, page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = `Parity injected failure ${Date.now()}`;
+    let actual = 'Injected stream failure displayed a recoverable error banner';
+
+    try {
+      steps.push('Ensure the E2E user has enough credits for chat');
+      await ensureUserCreditsAtLeast(browser, 100);
+
+      steps.push('Open /chat and inject a one-shot stream failure');
+      await gotoWithBypass(page, '/chat');
+      await page.route('**/api/ai/stream', async (route) => {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Injected parity failure' }),
+        });
+      }, { times: 1 });
+
+      steps.push('Submit a prompt while the injected failure route is active');
+      await page.locator('textarea[placeholder="请输入您的问题..."]').fill(prompt);
+      await page.getByRole('button', { name: '发送' }).click();
+
+      steps.push('Verify the user prompt remains visible and an error banner is rendered');
+      await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText('Injected parity failure')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 10000 });
+
+      monitor.removeIssues(
+        (issue) =>
+          issue.source === 'response' &&
+          issue.url?.includes('/api/ai/stream') === true &&
+          issue.status === 500,
+      );
+      monitor.removeIssues(
+        (issue) =>
+          issue.source === 'console' &&
+          issue.message.includes('Streaming error: Injected parity failure'),
+      );
+      monitor.removeIssues(
+        (issue) =>
+          issue.source === 'console' &&
+          issue.message.includes('Failed to load resource: the server responded with a status of 500'),
+      );
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown injected stream failure handling';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-injected-stream-failure',
+          role: 'user',
+          route: '/chat',
+          expected: 'When the stream request fails, the chat UI keeps the user prompt, surfaces a visible error banner, and returns to idle.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+        ['This flow intentionally injects a one-shot 500 response to validate user-visible error handling without depending on provider-side failures.'],
       );
     }
   });

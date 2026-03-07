@@ -183,7 +183,8 @@ export async function middleware(request: NextRequest) {
     // 非公开路径需要登录
     if (!user) {
       const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
+      const redirectTarget = `${pathname}${request.nextUrl.search}`;
+      loginUrl.searchParams.set('redirect', redirectTarget);
       return NextResponse.redirect(loginUrl);
     }
 
@@ -219,7 +220,8 @@ export async function middleware(request: NextRequest) {
 
     if (!isPublicPath(pathname) && !user) {
       const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
+      const redirectTarget = `${pathname}${request.nextUrl.search}`;
+      loginUrl.searchParams.set('redirect', redirectTarget);
       return NextResponse.redirect(loginUrl);
     }
 

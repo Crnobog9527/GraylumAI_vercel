@@ -170,6 +170,8 @@ pnpm audit:parity:extended
   用户高价值链路，当前已覆盖会话删除、批量导出可用性、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭，以及剩余用户端的低余额拦截、账户安全、Marketplace
 - `pnpm audit:parity:user-supplemental`
   只执行剩余用户端补充套件，当前目标是低余额拦截、受保护页面跳转、账户安全交互、Marketplace 筛选与详情流
+- `pnpm --dir apps/web exec playwright test auth.spec.ts chat.spec.ts --project=chromium`
+  用于补充登录回流、注册入口目标、聊天失败态等定向验证；2026-03-08 已在最新 Vercel Preview 上完成
 
 注意：
 - 2026-03-07 这条脚本在一次实际执行中遇到 Vercel 上传 `EPIPE`，导致 `.audit-output/refactor-parity/20260307-232022/` 只保留了 API 成功和部署失败记录。

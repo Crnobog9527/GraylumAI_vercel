@@ -42,7 +42,8 @@ function ProfilePageContent() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
-        router.replace('/login');
+        const redirectTarget = `${window.location.pathname}${window.location.search}`;
+        router.replace(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
         return;
       }
 
