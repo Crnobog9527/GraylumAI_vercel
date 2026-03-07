@@ -204,6 +204,7 @@ export default function AdminSettingsPage() {
     if (data.type === 'boolean') {
       return (
         <Switch
+          data-testid={`admin-setting-${key}`}
           checked={data.value === 'true'}
           onCheckedChange={(checked) => handleSettingChange(key, checked.toString())}
         />
@@ -212,6 +213,7 @@ export default function AdminSettingsPage() {
     if (data.type === 'number') {
       return (
         <Input
+          data-testid={`admin-setting-${key}`}
           type="number"
           value={data.value}
           onChange={(e) => handleSettingChange(key, e.target.value)}
@@ -221,6 +223,7 @@ export default function AdminSettingsPage() {
     }
     return (
       <Input
+        data-testid={`admin-setting-${key}`}
         value={data.value}
         onChange={(e) => handleSettingChange(key, e.target.value)}
         className="max-w-md bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
@@ -273,6 +276,7 @@ export default function AdminSettingsPage() {
           </p>
         </div>
         <Button
+          data-testid="admin-settings-save-all"
           onClick={handleSaveAll}
           disabled={saving}
           className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 gap-2"
@@ -482,6 +486,7 @@ export default function AdminSettingsPage() {
                       return (
                         <div
                           key={plan.id}
+                          data-testid={`membership-plan-${plan.level}`}
                           className="p-4 rounded-lg"
                           style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
                         >
@@ -495,6 +500,7 @@ export default function AdminSettingsPage() {
                               </span>
                             </div>
                             <Button
+                              data-testid={`membership-plan-save-${plan.level}`}
                               size="sm"
                               onClick={() => handleSaveMembershipSetting(plan.id)}
                               disabled={updateMembershipPlan.isPending}
@@ -511,6 +517,7 @@ export default function AdminSettingsPage() {
                                 对话历史保存天数
                               </Label>
                               <Input
+                                data-testid={`membership-plan-history-${plan.level}`}
                                 type="number"
                                 min={1}
                                 max={365}
@@ -534,6 +541,7 @@ export default function AdminSettingsPage() {
                               </Label>
                               <div className="flex items-center gap-2 mt-2">
                                 <Switch
+                                  data-testid={`membership-plan-allow-export-${plan.level}`}
                                   checked={setting.allowExport}
                                   onCheckedChange={(checked) => {
                                     setMembershipSettings(prev => ({
@@ -554,6 +562,7 @@ export default function AdminSettingsPage() {
                               </Label>
                               <div className="flex items-center gap-2 mt-2">
                                 <Switch
+                                  data-testid={`membership-plan-allow-batch-export-${plan.level}`}
                                   checked={setting.allowBatchExport}
                                   onCheckedChange={(checked) => {
                                     setMembershipSettings(prev => ({

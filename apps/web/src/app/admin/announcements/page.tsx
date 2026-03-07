@@ -613,6 +613,7 @@ export default function AdminAnnouncementsPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>聊天提示文案</Label>
                   <Input
+                    data-testid="announcement-chat-prompt-input"
                     value={chatSettings.chatPromptText}
                     onChange={(e) => setChatSettings({ ...chatSettings, chatPromptText: e.target.value })}
                     placeholder="请选择一个模型开始对话"
@@ -623,6 +624,7 @@ export default function AdminAnnouncementsPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>欢迎消息</Label>
                   <Textarea
+                    data-testid="announcement-chat-welcome-input"
                     value={chatSettings.welcomeMessage}
                     onChange={(e) => setChatSettings({ ...chatSettings, welcomeMessage: e.target.value })}
                     placeholder="你好！有什么可以帮助你的吗？"
@@ -632,6 +634,7 @@ export default function AdminAnnouncementsPage() {
                 </div>
 
                 <Button
+                  data-testid="announcement-save-chat-settings"
                   className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
                   onClick={handleSaveChatSettings}
                   disabled={updateSetting.isPending}
@@ -668,6 +671,7 @@ export default function AdminAnnouncementsPage() {
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>新用户首次访问时显示</p>
                   </div>
                   <Switch
+                    data-testid="announcement-home-onboarding-switch"
                     checked={homeGuideSettings.showOnboarding}
                     onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showOnboarding: checked })}
                   />
@@ -679,12 +683,14 @@ export default function AdminAnnouncementsPage() {
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>在首页展示推荐功能模块</p>
                   </div>
                   <Switch
+                    data-testid="announcement-home-featured-switch"
                     checked={homeGuideSettings.showFeaturedModules}
                     onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showFeaturedModules: checked })}
                   />
                 </div>
 
                 <Button
+                  data-testid="announcement-save-home-settings"
                   className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
                   onClick={handleSaveHomeGuideSettings}
                   disabled={updateSetting.isPending}
@@ -713,6 +719,7 @@ export default function AdminAnnouncementsPage() {
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>标题</Label>
               <Input
+                data-testid="announcement-title-input"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 placeholder="如：系统维护通知"
@@ -723,6 +730,7 @@ export default function AdminAnnouncementsPage() {
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>内容</Label>
               <Textarea
+                data-testid="announcement-content-input"
                 value={formData.content}
                 onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                 placeholder="公告详细内容..."

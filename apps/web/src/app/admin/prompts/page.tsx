@@ -525,6 +525,7 @@ export default function AdminPromptsPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>名称 *</Label>
                   <Input
+                    data-testid="prompt-name-input"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="如：通用助手"
@@ -615,6 +616,7 @@ export default function AdminPromptsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>描述 (可选)</Label>
                 <Input
+                  data-testid="prompt-description-input"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="简短描述这个提示词的用途"
@@ -626,6 +628,7 @@ export default function AdminPromptsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>提示词内容 *</Label>
                 <Textarea
+                  data-testid="prompt-content-input"
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
                   placeholder="输入提示词内容..."
@@ -704,6 +707,7 @@ export default function AdminPromptsPage() {
                 取消
               </Button>
               <Button
+                data-testid="prompt-save"
                 onClick={handleSubmit}
                 disabled={!formData.name || !formData.content || createPrompt.isPending || updatePrompt.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"

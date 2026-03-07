@@ -769,6 +769,7 @@ export default function AdminPackagesPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>套餐名称</Label>
                 <Input
+                  data-testid="credit-package-name-input"
                   value={packageFormData.name}
                   onChange={(e) => setPackageFormData({ ...packageFormData, name: e.target.value })}
                   placeholder="如：入门套餐"
@@ -780,6 +781,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>价格 (元)</Label>
                   <Input
+                    data-testid="credit-package-price-input"
                     type="number"
                     step="0.01"
                     value={packageFormData.price}
@@ -792,6 +794,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>积分数量</Label>
                   <Input
+                    data-testid="credit-package-credits-input"
                     type="number"
                     value={packageFormData.creditsAmount}
                     onChange={(e) => setPackageFormData({ ...packageFormData, creditsAmount: e.target.value })}
@@ -810,6 +813,7 @@ export default function AdminPackagesPage() {
                     </div>
                   </Label>
                   <Input
+                    data-testid="credit-package-bonus-input"
                     type="number"
                     min="0"
                     value={packageFormData.bonusCredits}
@@ -907,6 +911,7 @@ export default function AdminPackagesPage() {
                 取消
               </Button>
               <Button
+                data-testid="credit-package-save"
                 onClick={handlePackageSubmit}
                 disabled={!packageFormData.name || !packageFormData.price || !packageFormData.creditsAmount || createPackage.isPending || updatePackage.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
@@ -934,6 +939,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>等级名称</Label>
                   <Input
+                    data-testid="membership-plan-name-input"
                     value={planFormData.name}
                     onChange={(e) => setPlanFormData({ ...planFormData, name: e.target.value })}
                     placeholder="如：专业版"
@@ -963,6 +969,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (元)</Label>
                   <Input
+                    data-testid="membership-plan-monthly-price-input"
                     type="number"
                     step="0.01"
                     value={planFormData.monthlyPrice}
@@ -975,6 +982,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (元)</Label>
                   <Input
+                    data-testid="membership-plan-yearly-price-input"
                     type="number"
                     step="0.01"
                     value={planFormData.yearlyPrice}
@@ -989,6 +997,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>月积分额度</Label>
                   <Input
+                    data-testid="membership-plan-monthly-credits-input"
                     type="number"
                     value={planFormData.monthlyCredits}
                     onChange={(e) => setPlanFormData({ ...planFormData, monthlyCredits: e.target.value })}
@@ -1000,6 +1009,7 @@ export default function AdminPackagesPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>年积分额度</Label>
                   <Input
+                    data-testid="membership-plan-yearly-credits-input"
                     type="number"
                     value={planFormData.yearlyCredits}
                     onChange={(e) => setPlanFormData({ ...planFormData, yearlyCredits: e.target.value })}
@@ -1085,6 +1095,7 @@ export default function AdminPackagesPage() {
                 取消
               </Button>
               <Button
+                data-testid="membership-plan-save"
                 onClick={handlePlanSubmit}
                 disabled={!planFormData.name || createMembershipPlan.isPending || updateMembershipPlan.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"

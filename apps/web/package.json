@@ -11,6 +11,10 @@
     "test:e2e": "playwright test",
     "test:e2e:critical": "playwright test auth.spec.ts chat.spec.ts admin.spec.ts --project=chromium",
     "test:e2e:parity:extended": "playwright test parity-extended.spec.ts --project=chromium",
+    "test:e2e:user-extended": "playwright test user-extended.spec.ts --project=chromium",
+    "test:e2e:admin-config": "playwright test admin-config.spec.ts --project=chromium",
+    "test:e2e:admin-ops": "playwright test admin-ops.spec.ts --project=chromium",
+    "test:e2e:admin-destructive": "playwright test admin-destructive.spec.ts --project=chromium",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report"

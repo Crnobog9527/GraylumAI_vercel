@@ -15,6 +15,10 @@ MANUAL_DIR="$RUN_DIR/manual"
 PLAYWRIGHT_DIR="$EVIDENCE_DIR/playwright"
 WITH_SECURITY=0
 WITH_EXTENDED=0
+WITH_USER_EXTENDED=0
+WITH_ADMIN_CONFIG=0
+WITH_ADMIN_OPS=0
+WITH_ADMIN_DESTRUCTIVE=0
 ENV_FILE="$ROOT_DIR/.env.local"
 PREVIEW_URL=""
 BYPASS_COOKIE=""
@@ -27,6 +31,18 @@ for arg in "$@"; do
       ;;
     --with-extended)
       WITH_EXTENDED=1
+      ;;
+    --with-user-extended)
+      WITH_USER_EXTENDED=1
+      ;;
+    --with-admin-config)
+      WITH_ADMIN_CONFIG=1
+      ;;
+    --with-admin-ops)
+      WITH_ADMIN_OPS=1
+      ;;
+    --with-admin-destructive)
+      WITH_ADMIN_DESTRUCTIVE=1
       ;;
   esac
 done
@@ -200,10 +216,34 @@ if run_vercel_deploy && fetch_vercel_bypass_cookie; then
   if [[ "$WITH_EXTENDED" -eq 1 ]]; then
     run_playwright_step "extended-e2e" pnpm --dir apps/web test:e2e:parity:extended
   fi
+  if [[ "$WITH_USER_EXTENDED" -eq 1 ]]; then
+    run_playwright_step "user-extended-e2e" pnpm --dir apps/web test:e2e:user-extended
+  fi
+  if [[ "$WITH_ADMIN_CONFIG" -eq 1 ]]; then
+    run_playwright_step "admin-config-e2e" pnpm --dir apps/web test:e2e:admin-config
+  fi
+  if [[ "$WITH_ADMIN_OPS" -eq 1 ]]; then
+    run_playwright_step "admin-ops-e2e" pnpm --dir apps/web test:e2e:admin-ops
+  fi
+  if [[ "$WITH_ADMIN_DESTRUCTIVE" -eq 1 ]]; then
+    run_playwright_step "admin-destructive-e2e" pnpm --dir apps/web test:e2e:admin-destructive
+  fi
 else
   STEP_RESULTS="${STEP_RESULTS}- critical-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
   if [[ "$WITH_EXTENDED" -eq 1 ]]; then
     STEP_RESULTS="${STEP_RESULTS}- extended-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
+  if [[ "$WITH_USER_EXTENDED" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- user-extended-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
+  if [[ "$WITH_ADMIN_CONFIG" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- admin-config-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
+  if [[ "$WITH_ADMIN_OPS" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- admin-ops-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
+  fi
+  if [[ "$WITH_ADMIN_DESTRUCTIVE" -eq 1 ]]; then
+    STEP_RESULTS="${STEP_RESULTS}- admin-destructive-e2e: skipped (preview deploy or bypass bootstrap failed; local fallback disabled)\n"
   fi
 fi
 
@@ -238,6 +278,10 @@ RESULTS_FILE="$RUN_DIR/00-command-results.md"
   printf '%s\n' "- user_e2e_credentials_ready: \`$USER_E2E_READY\`"
   printf '%s\n' "- admin_e2e_credentials_ready: \`$ADMIN_E2E_READY\`"
   printf '%s\n' "- extended_suite_included: \`$([[ "$WITH_EXTENDED" -eq 1 ]] && printf 'yes' || printf 'no')\`"
+  printf '%s\n' "- user_extended_suite_included: \`$([[ "$WITH_USER_EXTENDED" -eq 1 ]] && printf 'yes' || printf 'no')\`"
+  printf '%s\n' "- admin_config_suite_included: \`$([[ "$WITH_ADMIN_CONFIG" -eq 1 ]] && printf 'yes' || printf 'no')\`"
+  printf '%s\n' "- admin_ops_suite_included: \`$([[ "$WITH_ADMIN_OPS" -eq 1 ]] && printf 'yes' || printf 'no')\`"
+  printf '%s\n' "- admin_destructive_suite_included: \`$([[ "$WITH_ADMIN_DESTRUCTIVE" -eq 1 ]] && printf 'yes' || printf 'no')\`"
   printf '%s\n' "- security_suite_included: \`$([[ "$WITH_SECURITY" -eq 1 ]] && printf 'yes' || printf 'no')\`"
   printf '\n%s\n\n' '## Command Results'
   printf '%b' "$STEP_RESULTS"
@@ -249,6 +293,18 @@ RESULTS_FILE="$RUN_DIR/00-command-results.md"
   printf '%s\n' '- Critical E2E logs: `logs/critical-e2e.log`'
   if [[ "$WITH_EXTENDED" -eq 1 ]]; then
     printf '%s\n' '- Extended E2E logs: `logs/extended-e2e.log`'
+  fi
+  if [[ "$WITH_USER_EXTENDED" -eq 1 ]]; then
+    printf '%s\n' '- User Extended E2E logs: `logs/user-extended-e2e.log`'
+  fi
+  if [[ "$WITH_ADMIN_CONFIG" -eq 1 ]]; then
+    printf '%s\n' '- Admin Config E2E logs: `logs/admin-config-e2e.log`'
+  fi
+  if [[ "$WITH_ADMIN_OPS" -eq 1 ]]; then
+    printf '%s\n' '- Admin Ops E2E logs: `logs/admin-ops-e2e.log`'
+  fi
+  if [[ "$WITH_ADMIN_DESTRUCTIVE" -eq 1 ]]; then
+    printf '%s\n' '- Admin Destructive E2E logs: `logs/admin-destructive-e2e.log`'
   fi
   if [[ "$WITH_SECURITY" -eq 1 ]]; then
     printf '%s\n' '- Full E2E logs: `logs/full-e2e.log`'

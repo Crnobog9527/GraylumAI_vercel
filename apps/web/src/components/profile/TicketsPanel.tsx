@@ -101,6 +101,7 @@ const TicketListView = memo(function TicketListView({
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>我的工单</h3>
         <Button
+          data-testid="ticket-create-button"
           onClick={onCreateNew}
           size="sm"
           className="gap-2"
@@ -183,6 +184,7 @@ const TicketListView = memo(function TicketListView({
             return (
               <div
                 key={ticket.id}
+                data-testid="ticket-list-item"
                 onClick={() => onSelectTicket(ticket)}
                 className="p-4 rounded-xl cursor-pointer transition-all duration-200"
                 style={{
@@ -281,7 +283,7 @@ const TicketDetailView = memo(function TicketDetailView({
   const statusStyle = statusColors[ticket.status] || statusColors.pending;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="ticket-detail-view">
       {/* Header with Back Button */}
       <div
         className="rounded-2xl p-6"

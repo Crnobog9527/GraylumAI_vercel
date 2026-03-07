@@ -112,6 +112,7 @@ function ConversationItem({
 }) {
   return (
     <div
+      data-testid="conversation-item"
       className="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
       style={{
         background: isActive ? 'var(--color-primary-10)' : 'transparent',
@@ -154,6 +155,7 @@ function ConversationItem({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
+            data-testid="conversation-actions-trigger"
             variant="ghost"
             size="icon"
             aria-label="打开对话操作菜单"
@@ -281,6 +283,7 @@ export function ChatSidebar({
       {/* New chat button */}
       <div className="p-4">
         <Button
+          data-testid="conversation-new-chat"
           onClick={onNewChat}
           className="w-full gap-2 h-11 rounded-xl font-medium transition-all duration-200 hover:opacity-90"
           style={{

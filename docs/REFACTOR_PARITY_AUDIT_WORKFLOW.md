@@ -39,6 +39,20 @@ pnpm audit:parity:extended
 pnpm audit:parity:full
 ```
 
+如果你要按第三轮计划分阶段执行新增套件，直接用这些入口：
+
+```bash
+pnpm audit:parity:round1
+pnpm audit:parity:round2
+pnpm audit:parity:round3
+```
+
+危险操作保留为单独入口，默认不纳入日常回归：
+
+```bash
+pnpm audit:parity:destructive
+```
+
 ## 运行前提
 
 ### 旧版本资料
@@ -143,6 +157,17 @@ pnpm audit:parity:extended
 - 聊天导出
 - 后台模型测试连接
 - 后台用户积分调整与回滚
+
+如果你按第三轮计划继续推进，当前分轮覆盖是：
+
+- `pnpm audit:parity:round1`
+  用户高价值链路，当前已覆盖会话删除、批量导出可用性、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭
+- `pnpm audit:parity:round2`
+  管理员配置页，当前已覆盖 `settings / announcements / packages / prompts` 的进入、修改、保存、刷新后持久化、测试数据清理
+- `pnpm audit:parity:round3`
+  管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流
+- `pnpm audit:parity:destructive`
+  仅保留危险操作闸门校验，不默认执行真实删除/清理
 
 ### 2. 冻结旧仓库基线
 

@@ -56,8 +56,21 @@ function shouldIgnoreRequestFailure(url: string, method: string, message: string
     return true;
   }
 
+  if (url.includes('vercel.live/login/validate')) {
+    return true;
+  }
+
   // Remote Vercel previews can emit aborted HEAD/OPTIONS fetches during deployment protection handshakes.
   if (message === 'net::ERR_ABORTED' && ['HEAD', 'OPTIONS'].includes(method)) {
+    return true;
+  }
+
+  // Navigations and reloads in the App Router can abort in-flight RSC or GET tRPC fetches.
+  if (
+    message === 'net::ERR_ABORTED' &&
+    method === 'GET' &&
+    (url.includes('_rsc=') || url.includes('/api/trpc/'))
+  ) {
     return true;
   }
 
