@@ -218,6 +218,132 @@ test.describe('User Extended Flows', () => {
     }
   });
 
+  test('should delete multiple conversations from sidebar management mode', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const firstPrompt = `Parity batch delete seed A ${Date.now()}`;
+    const secondPrompt = `Parity batch delete seed B ${Date.now()}`;
+    const firstTitle = `Parity batch delete A ${Date.now()}`;
+    const secondTitle = `Parity batch delete B ${Date.now()}`;
+    let actual = 'Batch conversation deletion flow completed';
+
+    try {
+      steps.push('Create and rename the first conversation');
+      await createConversation(page, firstPrompt);
+      await renameConversation(page, firstTitle);
+
+      steps.push('Create and rename the second conversation');
+      await page.getByTestId('conversation-new-chat').click();
+      await createConversation(page, secondPrompt);
+      await renameConversation(page, secondTitle);
+
+      const firstRow = page.getByTestId('conversation-item').filter({ hasText: firstTitle }).first();
+      const secondRow = page.getByTestId('conversation-item').filter({ hasText: secondTitle }).first();
+      await expect(firstRow).toBeVisible({ timeout: 10000 });
+      await expect(secondRow).toBeVisible({ timeout: 10000 });
+
+      steps.push('Enter management mode and select both conversations');
+      await page.getByTestId('conversation-manage-toggle').click();
+      await expect(page.getByTestId('conversation-selected-count')).toContainText('已选择 0 条');
+      await firstRow.click();
+      await secondRow.click();
+      await expect(page.getByTestId('conversation-selected-count')).toContainText('已选择 2 条');
+
+      steps.push('Trigger batch deletion and confirm the selected conversations disappear');
+      const deleteRequestPromise = page.waitForRequest(
+        (request) =>
+          request.url().includes('/api/trpc/chat.deleteConversations') &&
+          request.method() === 'POST',
+        { timeout: 15000 },
+      );
+      await page.getByTestId('conversation-batch-delete').click();
+      await page.getByRole('button', { name: '删除 2 条' }).click();
+      await deleteRequestPromise;
+
+      await expect(firstRow).toHaveCount(0, { timeout: 15000 });
+      await expect(secondRow).toHaveCount(0, { timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown batch conversation deletion failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-batch-delete-conversations',
+          role: 'user',
+          route: '/chat',
+          expected: 'Authenticated users can enter chat management mode, select multiple conversations, and delete them in one action.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should expose selected conversation export in sidebar management mode', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = `Parity selected export ${Date.now()}`;
+    const title = `Parity selected export ${Date.now()}`;
+    let actual = 'Selected conversation export management flow completed';
+
+    try {
+      steps.push('Create and rename a conversation to export from management mode');
+      await createConversation(page, prompt);
+      await renameConversation(page, title);
+      const conversationRow = page.getByTestId('conversation-item').filter({ hasText: title }).first();
+      await expect(conversationRow).toBeVisible({ timeout: 10000 });
+
+      steps.push('Enter management mode and select the conversation');
+      await page.getByTestId('conversation-manage-toggle').click();
+      await conversationRow.click();
+      await expect(page.getByTestId('conversation-selected-count')).toContainText('已选择 1 条');
+
+      steps.push('Open the batch export dialog');
+      await page.getByTestId('conversation-batch-export').click();
+      await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+
+      const exportButton = page.getByTestId('export-selected-conversations');
+      const canExportSelected = await exportButton.isEnabled();
+      if (canExportSelected) {
+        steps.push('Download the selected conversation bundle when membership allows it');
+        const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
+        await exportButton.click();
+        const download = await downloadPromise;
+        expect(download.suggestedFilename()).toMatch(/\.(md|json)$/);
+        await expect(page.getByText('导出成功！')).toBeVisible({ timeout: 10000 });
+      } else {
+        steps.push('Verify the upgrade hint is shown when selected batch export is locked');
+        await expect(page.getByText('升级会员可解锁批量导出功能')).toBeVisible({ timeout: 10000 });
+      }
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown selected batch export failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-selected-batch-export',
+          role: 'user',
+          route: '/chat',
+          expected: 'Authenticated users can select conversations in management mode and either export them in batch or see the membership restriction clearly.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
   test('should restore the active conversation after refreshing the chat page', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);

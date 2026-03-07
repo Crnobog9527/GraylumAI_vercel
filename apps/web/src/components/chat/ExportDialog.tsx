@@ -16,8 +16,11 @@ import { cn } from '@/lib/utils';
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  conversationId: string;
-  conversationTitle: string;
+  mode?: 'single' | 'selected';
+  conversationId?: string;
+  conversationIds?: string[];
+  conversationTitle?: string;
+  conversationCount?: number;
   canBatchExport?: boolean;
 }
 
@@ -32,8 +35,11 @@ const formatOptions: { value: ExportFormat; label: string; icon: React.ElementTy
 export default function ExportDialog({
   open,
   onOpenChange,
+  mode = 'single',
   conversationId,
-  conversationTitle,
+  conversationIds = [],
+  conversationTitle = '对话',
+  conversationCount = 0,
   canBatchExport = false,
 }: ExportDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('markdown');
@@ -41,27 +47,36 @@ export default function ExportDialog({
   const [exportSuccess, setExportSuccess] = useState(false);
 
   const utils = trpc.useUtils();
+  const isBatchMode = mode === 'selected';
+  const availableFormats = isBatchMode
+    ? formatOptions.filter((format) => format.value !== 'txt')
+    : formatOptions;
 
-  // Export single conversation
+  const closeWithSuccess = () => {
+    setExportSuccess(true);
+    setTimeout(() => {
+      setExportSuccess(false);
+      onOpenChange(false);
+    }, 1500);
+  };
+
   const handleExport = async () => {
     setIsExporting(true);
     setExportSuccess(false);
 
     try {
-      const result = await utils.client.chat.exportConversation.query({
-        conversationId,
-        format: selectedFormat,
-      });
+      const result = isBatchMode
+        ? await utils.client.chat.exportSelectedConversations.query({
+            conversationIds,
+            format: selectedFormat === 'txt' ? 'markdown' : selectedFormat,
+          })
+        : await utils.client.chat.exportConversation.query({
+            conversationId: conversationId!,
+            format: selectedFormat,
+          });
 
-      // Download the file
       downloadFile(result.content, result.filename, result.mimeType);
-      setExportSuccess(true);
-
-      // Reset success state after 2 seconds
-      setTimeout(() => {
-        setExportSuccess(false);
-        onOpenChange(false);
-      }, 1500);
+      closeWithSuccess();
     } catch (error) {
       console.error('Export failed:', error);
       alert('导出失败，请稍后重试');
@@ -80,15 +95,8 @@ export default function ExportDialog({
         format: selectedFormat === 'txt' ? 'markdown' : selectedFormat,
       });
 
-      // Download the file
       downloadFile(result.content, result.filename, result.mimeType);
-      setExportSuccess(true);
-
-      // Reset success state after 2 seconds
-      setTimeout(() => {
-        setExportSuccess(false);
-        onOpenChange(false);
-      }, 1500);
+      closeWithSuccess();
     } catch (error) {
       console.error('Batch export failed:', error);
       alert('批量导出失败，请稍后重试');
@@ -108,21 +116,23 @@ export default function ExportDialog({
       >
         <DialogHeader>
           <DialogTitle style={{ color: 'var(--text-primary)' }}>
-            导出对话
+            {isBatchMode ? '批量导出对话' : '导出对话'}
           </DialogTitle>
           <DialogDescription style={{ color: 'var(--text-tertiary)' }}>
-            将当前对话 "{conversationTitle}" 导出为文件
+            {isBatchMode
+              ? `将已选中的 ${conversationCount} 条对话导出为文件`
+              : `将当前对话 "${conversationTitle}" 导出为文件`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Format selection */}
           <div className="space-y-2">
-            <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-              选择导出格式
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {formatOptions.map((format) => {
+              <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                选择导出格式
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+              {availableFormats.map((format) => {
                 const Icon = format.icon;
                 const isSelected = selectedFormat === format.value;
                 return (
@@ -155,7 +165,7 @@ export default function ExportDialog({
               })}
             </div>
             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {formatOptions.find((f) => f.value === selectedFormat)?.description}
+              {availableFormats.find((f) => f.value === selectedFormat)?.description}
             </p>
           </div>
 
@@ -163,7 +173,8 @@ export default function ExportDialog({
           <div className="flex flex-col gap-2">
             <Button
               onClick={handleExport}
-              disabled={isExporting}
+              disabled={isExporting || (isBatchMode && (!canBatchExport || conversationIds.length === 0))}
+              data-testid={isBatchMode ? 'export-selected-conversations' : 'export-current-conversation'}
               className="w-full gap-2"
               style={{
                 background: exportSuccess
@@ -179,10 +190,14 @@ export default function ExportDialog({
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              {exportSuccess ? '导出成功！' : '导出当前对话'}
+              {exportSuccess
+                ? '导出成功！'
+                : isBatchMode
+                  ? `导出已选 ${conversationCount} 条对话`
+                  : '导出当前对话'}
             </Button>
 
-            {canBatchExport && (
+            {!isBatchMode && canBatchExport && (
               <Button
                 onClick={handleBatchExport}
                 disabled={isExporting}

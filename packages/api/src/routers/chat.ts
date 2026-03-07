@@ -1,6 +1,185 @@
-import { router, protectedProcedure } from '../trpc';
+import { createTRPCContext, router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+
+type ExportFormat = 'json' | 'markdown' | 'txt';
+type BaseContext = Awaited<ReturnType<typeof createTRPCContext>>;
+type ProtectedContext = BaseContext & {
+  profileId: string;
+  userRole: 'user' | 'admin';
+  user: NonNullable<BaseContext['user']>;
+};
+
+interface ExportConversationRecord {
+  id: string;
+  title: string | null;
+  created_at: string;
+}
+
+interface ExportMessageRecord {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+async function assertExportPermission(ctx: ProtectedContext) {
+  const { data: profile } = await ctx.supabase
+    .from('profiles')
+    .select('membership_level')
+    .eq('id', ctx.profileId)
+    .single();
+
+  if (!profile) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: '用户不存在' });
+  }
+
+  const { data: plan } = await ctx.supabase
+    .from('membership_plans')
+    .select('allow_export, allow_batch_export')
+    .eq('level', profile.membership_level)
+    .eq('is_active', 'true')
+    .single();
+
+  return {
+    membershipLevel: profile.membership_level,
+    allowExport: plan?.allow_export === 'true',
+    allowBatchExport: plan?.allow_batch_export === 'true',
+  };
+}
+
+async function loadConversationExportData(
+  ctx: ProtectedContext,
+  conversations: ExportConversationRecord[]
+) {
+  return Promise.all(
+    conversations.map(async (conversation) => {
+      const { data: messages } = await ctx.supabase
+        .from('messages')
+        .select('role, content, created_at')
+        .eq('conversation_id', conversation.id)
+        .eq('is_deleted', 'false')
+        .order('created_at', { ascending: true });
+
+      return {
+        id: conversation.id,
+        title: conversation.title,
+        createdAt: conversation.created_at,
+        messages: (messages ?? []) as ExportMessageRecord[],
+      };
+    })
+  );
+}
+
+function buildConversationExportPayload(
+  conversations: Awaited<ReturnType<typeof loadConversationExportData>>,
+  format: ExportFormat,
+  filenameBase: string
+) {
+  if (conversations.length === 1) {
+    const [conversation] = conversations;
+    const title = conversation.title || '未命名对话';
+    const createdAt = new Date(conversation.createdAt).toLocaleString('zh-CN');
+
+    if (format === 'json') {
+      return {
+        filename: `${filenameBase}.json`,
+        content: JSON.stringify(
+          {
+            title,
+            createdAt: conversation.createdAt,
+            messages: conversation.messages,
+          },
+          null,
+          2
+        ),
+        mimeType: 'application/json',
+      };
+    }
+
+    if (format === 'txt') {
+      const lines = [`对话: ${title}`, `创建时间: ${createdAt}`, '', '---', ''];
+      conversation.messages.forEach((message) => {
+        const role = message.role === 'user' ? '用户' : 'AI';
+        lines.push(`[${role}]`);
+        lines.push(message.content);
+        lines.push('');
+      });
+
+      return {
+        filename: `${filenameBase}.txt`,
+        content: lines.join('\n'),
+        mimeType: 'text/plain',
+      };
+    }
+
+    const lines = [`# ${title}`, '', `> 创建时间: ${createdAt}`, '', '---', ''];
+    conversation.messages.forEach((message) => {
+      const role = message.role === 'user' ? '**用户**' : '**AI**';
+      lines.push(role);
+      lines.push('');
+      lines.push(message.content);
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    });
+
+    return {
+      filename: `${filenameBase}.md`,
+      content: lines.join('\n'),
+      mimeType: 'text/markdown',
+    };
+  }
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+
+  if (format === 'json') {
+    return {
+      filename: `${filenameBase}_${timestamp}.json`,
+      content: JSON.stringify(
+        {
+          exportedAt: new Date().toISOString(),
+          totalConversations: conversations.length,
+          conversations,
+        },
+        null,
+        2
+      ),
+      mimeType: 'application/json',
+    };
+  }
+
+  const lines = [
+    '# 对话记录导出',
+    '',
+    `> 导出时间: ${new Date().toLocaleString('zh-CN')}`,
+    `> 共 ${conversations.length} 个对话`,
+    '',
+    '---',
+    '',
+  ];
+
+  conversations.forEach((conversation, index) => {
+    lines.push(`## ${index + 1}. ${conversation.title || '未命名对话'}`);
+    lines.push('');
+    lines.push(`创建时间: ${new Date(conversation.createdAt).toLocaleString('zh-CN')}`);
+    lines.push('');
+    conversation.messages.forEach((message) => {
+      const role = message.role === 'user' ? '**用户**' : '**AI**';
+      lines.push(role);
+      lines.push('');
+      lines.push(message.content);
+      lines.push('');
+    });
+    lines.push('---');
+    lines.push('');
+  });
+
+  return {
+    filename: `${filenameBase}_${timestamp}.md`,
+    content: lines.join('\n'),
+    mimeType: 'text/markdown',
+  };
+}
 
 export const chatRouter = router({
   getConversations: protectedProcedure.query(async ({ ctx }) => {
@@ -80,20 +259,68 @@ export const chatRouter = router({
   deleteConversation: protectedProcedure
     .input(z.object({ conversationId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      // Delete messages first (foreign key constraint)
-      await ctx.supabase
+      const deletedAt = new Date().toISOString();
+
+      const { error: messageDeleteError } = await ctx.supabase
         .from('messages')
-        .delete()
-        .eq('conversation_id', input.conversationId);
+        .update({ is_deleted: true, deleted_at: deletedAt })
+        .eq('conversation_id', input.conversationId)
+        .eq('is_deleted', 'false');
+
+      if (messageDeleteError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageDeleteError.message });
+      }
 
       const { error } = await ctx.supabase
         .from('conversations')
-        .delete()
+        .update({ is_deleted: true, deleted_at: deletedAt })
         .eq('id', input.conversationId)
-        .eq('user_id', ctx.profileId);
+        .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false');
 
       if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       return { success: true };
+    }),
+
+  deleteConversations: protectedProcedure
+    .input(z.object({ conversationIds: z.array(z.string().uuid()).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const deletedAt = new Date().toISOString();
+      const { data: ownedConversations, error: ownedError } = await ctx.supabase
+        .from('conversations')
+        .select('id')
+        .in('id', input.conversationIds)
+        .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false');
+
+      if (ownedError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ownedError.message });
+      }
+
+      const ownedConversationIds = (ownedConversations ?? []).map((conversation) => conversation.id);
+      if (ownedConversationIds.length !== input.conversationIds.length) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: '包含无权操作的对话' });
+      }
+
+      const { error: messageDeleteError } = await ctx.supabase
+        .from('messages')
+        .update({ is_deleted: true, deleted_at: deletedAt })
+        .in('conversation_id', ownedConversationIds)
+        .eq('is_deleted', 'false');
+
+      if (messageDeleteError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageDeleteError.message });
+      }
+
+      const { error } = await ctx.supabase
+        .from('conversations')
+        .update({ is_deleted: true, deleted_at: deletedAt })
+        .in('id', ownedConversationIds)
+        .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false');
+
+      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      return { success: true, deletedCount: ownedConversationIds.length };
     }),
 
   getMessages: protectedProcedure
@@ -122,30 +349,11 @@ export const chatRouter = router({
    * 获取用户导出权限（基于会员等级）
    */
   getExportPermissions: protectedProcedure.query(async ({ ctx }) => {
-    // 获取用户 profile 和会员等级
-    const { data: profile } = await ctx.supabase
-      .from('profiles')
-      .select('membership_level')
-      .eq('id', ctx.profileId)
-      .single();
-
-    if (!profile) {
+    try {
+      return await assertExportPermission(ctx);
+    } catch {
       return { allowExport: false, allowBatchExport: false };
     }
-
-    // 获取对应会员等级的权限
-    const { data: plan } = await ctx.supabase
-      .from('membership_plans')
-      .select('allow_export, allow_batch_export')
-      .eq('level', profile.membership_level)
-      .eq('is_active', 'true')
-      .single();
-
-    return {
-      allowExport: plan?.allow_export === 'true',
-      allowBatchExport: plan?.allow_batch_export === 'true',
-      membershipLevel: profile.membership_level,
-    };
   }),
 
   /**
@@ -157,25 +365,8 @@ export const chatRouter = router({
       format: z.enum(['json', 'markdown', 'txt']).default('markdown'),
     }))
     .query(async ({ ctx, input }) => {
-      // 检查导出权限
-      const { data: profile } = await ctx.supabase
-        .from('profiles')
-        .select('membership_level')
-        .eq('id', ctx.profileId)
-        .single();
-
-      if (!profile) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: '用户不存在' });
-      }
-
-      const { data: plan } = await ctx.supabase
-        .from('membership_plans')
-        .select('allow_export')
-        .eq('level', profile.membership_level)
-        .eq('is_active', 'true')
-        .single();
-
-      if (plan?.allow_export !== 'true') {
+      const permissions = await assertExportPermission(ctx);
+      if (!permissions.allowExport) {
         throw new TRPCError({ code: 'FORBIDDEN', message: '您的会员等级不支持导出对话功能，请升级会员' });
       }
 
@@ -185,66 +376,50 @@ export const chatRouter = router({
         .select('id, title, created_at')
         .eq('id', input.conversationId)
         .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false')
         .single();
 
       if (!conversation) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '对话不存在' });
       }
 
-      // 获取对话消息
-      const { data: messages } = await ctx.supabase
-        .from('messages')
-        .select('role, content, created_at')
-        .eq('conversation_id', input.conversationId)
-        .order('created_at', { ascending: true });
+      const exportData = await loadConversationExportData(ctx, [conversation as ExportConversationRecord]);
+      return buildConversationExportPayload(exportData, input.format, conversation.title || '未命名对话');
+    }),
 
-      // 根据格式生成导出内容
-      const title = conversation.title || '未命名对话';
-      const createdAt = new Date(conversation.created_at).toLocaleString('zh-CN');
-
-      if (input.format === 'json') {
-        return {
-          filename: `${title}.json`,
-          content: JSON.stringify({
-            title,
-            createdAt: conversation.created_at,
-            messages: messages || [],
-          }, null, 2),
-          mimeType: 'application/json',
-        };
+  exportSelectedConversations: protectedProcedure
+    .input(z.object({
+      conversationIds: z.array(z.string().uuid()).min(1).max(100),
+      format: z.enum(['json', 'markdown']).default('json'),
+    }))
+    .query(async ({ ctx, input }) => {
+      const permissions = await assertExportPermission(ctx);
+      if (!permissions.allowBatchExport) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: '您的会员等级不支持批量导出功能，请升级会员' });
       }
 
-      if (input.format === 'txt') {
-        const lines = [`对话: ${title}`, `创建时间: ${createdAt}`, '', '---', ''];
-        (messages || []).forEach((msg) => {
-          const role = msg.role === 'user' ? '用户' : 'AI';
-          lines.push(`[${role}]`);
-          lines.push(msg.content);
-          lines.push('');
-        });
-        return {
-          filename: `${title}.txt`,
-          content: lines.join('\n'),
-          mimeType: 'text/plain',
-        };
+      const { data: conversations, error } = await ctx.supabase
+        .from('conversations')
+        .select('id, title, created_at')
+        .in('id', input.conversationIds)
+        .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
-      // 默认 markdown 格式
-      const lines = [`# ${title}`, '', `> 创建时间: ${createdAt}`, '', '---', ''];
-      (messages || []).forEach((msg) => {
-        const role = msg.role === 'user' ? '**用户**' : '**AI**';
-        lines.push(role);
-        lines.push('');
-        lines.push(msg.content);
-        lines.push('');
-        lines.push('---');
-        lines.push('');
-      });
-      return {
-        filename: `${title}.md`,
-        content: lines.join('\n'),
-        mimeType: 'text/markdown',
-      };
+      if (!conversations || conversations.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '没有可导出的对话' });
+      }
+
+      if (conversations.length !== input.conversationIds.length) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: '包含无权导出的对话' });
+      }
+
+      const exportData = await loadConversationExportData(ctx, conversations as ExportConversationRecord[]);
+      return buildConversationExportPayload(exportData, input.format, `selected_conversations_${conversations.length}`);
     }),
 
   /**
@@ -255,25 +430,8 @@ export const chatRouter = router({
       format: z.enum(['json', 'markdown']).default('json'),
     }))
     .query(async ({ ctx, input }) => {
-      // 检查批量导出权限
-      const { data: profile } = await ctx.supabase
-        .from('profiles')
-        .select('membership_level')
-        .eq('id', ctx.profileId)
-        .single();
-
-      if (!profile) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: '用户不存在' });
-      }
-
-      const { data: plan } = await ctx.supabase
-        .from('membership_plans')
-        .select('allow_batch_export')
-        .eq('level', profile.membership_level)
-        .eq('is_active', 'true')
-        .single();
-
-      if (plan?.allow_batch_export !== 'true') {
+      const permissions = await assertExportPermission(ctx);
+      if (!permissions.allowBatchExport) {
         throw new TRPCError({ code: 'FORBIDDEN', message: '您的会员等级不支持批量导出功能，请升级会员' });
       }
 
@@ -282,68 +440,15 @@ export const chatRouter = router({
         .from('conversations')
         .select('id, title, created_at')
         .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false')
         .order('created_at', { ascending: false });
 
       if (!conversations || conversations.length === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '没有可导出的对话' });
       }
 
-      // 获取每个对话的消息
-      const exportData = await Promise.all(
-        conversations.map(async (conv) => {
-          const { data: messages } = await ctx.supabase
-            .from('messages')
-            .select('role, content, created_at')
-            .eq('conversation_id', conv.id)
-            .order('created_at', { ascending: true });
-
-          return {
-            id: conv.id,
-            title: conv.title,
-            createdAt: conv.created_at,
-            messages: messages || [],
-          };
-        })
-      );
-
-      const timestamp = new Date().toISOString().slice(0, 10);
-
-      if (input.format === 'json') {
-        return {
-          filename: `all_conversations_${timestamp}.json`,
-          content: JSON.stringify({
-            exportedAt: new Date().toISOString(),
-            totalConversations: exportData.length,
-            conversations: exportData,
-          }, null, 2),
-          mimeType: 'application/json',
-        };
-      }
-
-      // Markdown 格式
-      const lines = ['# 对话记录导出', '', `> 导出时间: ${new Date().toLocaleString('zh-CN')}`, `> 共 ${exportData.length} 个对话`, '', '---', ''];
-
-      exportData.forEach((conv, index) => {
-        lines.push(`## ${index + 1}. ${conv.title || '未命名对话'}`);
-        lines.push('');
-        lines.push(`创建时间: ${new Date(conv.createdAt).toLocaleString('zh-CN')}`);
-        lines.push('');
-        conv.messages.forEach((msg) => {
-          const role = msg.role === 'user' ? '**用户**' : '**AI**';
-          lines.push(role);
-          lines.push('');
-          lines.push(msg.content);
-          lines.push('');
-        });
-        lines.push('---');
-        lines.push('');
-      });
-
-      return {
-        filename: `all_conversations_${timestamp}.md`,
-        content: lines.join('\n'),
-        mimeType: 'text/markdown',
-      };
+      const exportData = await loadConversationExportData(ctx, conversations as ExportConversationRecord[]);
+      return buildConversationExportPayload(exportData, input.format, 'all_conversations');
     }),
 
   /**

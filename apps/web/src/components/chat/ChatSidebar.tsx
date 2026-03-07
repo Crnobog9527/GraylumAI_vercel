@@ -10,10 +10,15 @@ import {
   Trash2,
   Pencil,
   Loader2,
-  Settings2
+  Settings2,
+  Download,
+  CheckSquare,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import ExportDialog from '@/components/chat/ExportDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,13 +105,19 @@ function TimeGroupHeader({ label }: { label: string }) {
 function ConversationItem({
   conversation,
   isActive,
+  isManaging,
+  isSelected,
   onSelect,
+  onToggleSelection,
   onDelete,
   onRename
 }: {
   conversation: { id: string; title: string | null };
   isActive: boolean;
+  isManaging: boolean;
+  isSelected: boolean;
   onSelect: () => void;
+  onToggleSelection: () => void;
   onDelete: () => void;
   onRename: () => void;
 }) {
@@ -115,89 +126,100 @@ function ConversationItem({
       data-testid="conversation-item"
       className="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
       style={{
-        background: isActive ? 'var(--color-primary-10)' : 'transparent',
-        border: isActive ? '1px solid var(--color-primary-20)' : '1px solid transparent',
+        background: isSelected || isActive ? 'var(--color-primary-10)' : 'transparent',
+        border: isSelected || isActive ? '1px solid var(--color-primary-20)' : '1px solid transparent',
       }}
-      onClick={onSelect}
+      onClick={isManaging ? onToggleSelection : onSelect}
       onMouseEnter={(e) => {
-        if (!isActive) {
+        if (!isActive && !isSelected) {
           e.currentTarget.style.background = 'var(--bg-tertiary)';
         }
       }}
       onMouseLeave={(e) => {
-        if (!isActive) {
+        if (!isActive && !isSelected) {
           e.currentTarget.style.background = 'transparent';
         }
       }}
     >
+      {isManaging && (
+        <Checkbox
+          data-testid="conversation-select-checkbox"
+          checked={isSelected}
+          onCheckedChange={() => onToggleSelection()}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`选择对话 ${conversation.title || '新对话'}`}
+        />
+      )}
+
       <div
         className="p-1.5 rounded-lg transition-colors"
         style={{
-          background: isActive ? 'var(--color-primary-20)' : 'var(--bg-tertiary)',
+          background: isSelected || isActive ? 'var(--color-primary-20)' : 'var(--bg-tertiary)',
         }}
       >
         <MessageSquare
           className="h-4 w-4"
-          style={{ color: isActive ? 'var(--color-primary)' : 'var(--text-tertiary)' }}
+          style={{ color: isSelected || isActive ? 'var(--color-primary)' : 'var(--text-tertiary)' }}
         />
       </div>
 
       <div className="flex-1 min-w-0">
         <p
           className="text-sm truncate font-medium"
-          style={{ color: isActive ? 'var(--color-primary)' : 'var(--text-primary)' }}
+          style={{ color: isSelected || isActive ? 'var(--color-primary)' : 'var(--text-primary)' }}
         >
           {conversation.title || '新对话'}
         </p>
       </div>
 
-      {/* Action menu - visible on hover */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            data-testid="conversation-actions-trigger"
-            variant="ghost"
-            size="icon"
-            aria-label="打开对话操作菜单"
-            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-            style={{ color: 'var(--text-tertiary)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="w-36 rounded-xl"
-          style={{
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border-primary)'
-          }}
-        >
-          <DropdownMenuItem
-            className="gap-2 rounded-lg cursor-pointer"
-            style={{ color: 'var(--text-secondary)' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRename();
+      {!isManaging && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              data-testid="conversation-actions-trigger"
+              variant="ghost"
+              size="icon"
+              aria-label="打开对话操作菜单"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+              style={{ color: 'var(--text-tertiary)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-36 rounded-xl"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-primary)'
             }}
           >
-            <Pencil className="h-4 w-4" />
-            <span>重命名</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="gap-2 rounded-lg cursor-pointer"
-            style={{ color: 'var(--error)' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            <span>删除</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <DropdownMenuItem
+              className="gap-2 rounded-lg cursor-pointer"
+              style={{ color: 'var(--text-secondary)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRename();
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+              <span>重命名</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2 rounded-lg cursor-pointer"
+              style={{ color: 'var(--error)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>删除</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   );
 }
@@ -210,21 +232,44 @@ export function ChatSidebar({
   const { setActiveConversation } = useChatStore();
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
+  const [batchExportDialogOpen, setBatchExportDialogOpen] = useState(false);
+  const [managementMode, setManagementMode] = useState(false);
+  const [selectedConvIds, setSelectedConvIds] = useState<string[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
   const utils = trpc.useUtils();
   const { data: conversations, isLoading } = trpc.chat.getConversations.useQuery();
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
 
   const deleteConversation = trpc.chat.deleteConversation.useMutation({
-    onSuccess: () => {
-      utils.chat.getConversations.invalidate();
+    onMutate: async ({ conversationId }) => {
+      await utils.chat.getConversations.cancel();
+      const previousConversations = utils.chat.getConversations.getData();
+
+      if (previousConversations?.error === null) {
+        utils.chat.getConversations.setData(undefined, {
+          ...previousConversations,
+          data: previousConversations.data.filter((conversation) => conversation.id !== conversationId),
+        });
+      }
+
       if (activeConversationId === selectedConvId) {
         setActiveConversation(null);
         onNewChat();
       }
       setDeleteDialogOpen(false);
       setSelectedConvId(null);
+      return { previousConversations };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousConversations) {
+        utils.chat.getConversations.setData(undefined, context.previousConversations);
+      }
+    },
+    onSettled: () => {
+      utils.chat.getConversations.invalidate();
     },
   });
 
@@ -237,7 +282,44 @@ export function ChatSidebar({
     },
   });
 
+  const deleteConversations = trpc.chat.deleteConversations.useMutation({
+    onMutate: async ({ conversationIds }) => {
+      await utils.chat.getConversations.cancel();
+      const previousConversations = utils.chat.getConversations.getData();
+      const deletedConversationIds = new Set(conversationIds);
+
+      if (previousConversations?.error === null) {
+        utils.chat.getConversations.setData(undefined, {
+          ...previousConversations,
+          data: previousConversations.data.filter((conversation) => !deletedConversationIds.has(conversation.id)),
+        });
+      }
+
+      if (activeConversationId && selectedConvIds.includes(activeConversationId)) {
+        setActiveConversation(null);
+        onNewChat();
+      }
+      setBatchDeleteDialogOpen(false);
+      setSelectedConvIds([]);
+      setManagementMode(false);
+      return { previousConversations };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousConversations) {
+        utils.chat.getConversations.setData(undefined, context.previousConversations);
+      }
+    },
+    onSettled: () => {
+      utils.chat.getConversations.invalidate();
+    },
+  });
+
   const conversationList = conversations?.data || [];
+  const canBatchExport = exportPermissions?.allowBatchExport ?? false;
+  const allConversationIds = useMemo(
+    () => conversationList.map((conversation) => conversation.id),
+    [conversationList]
+  );
   const groupedConversations = useMemo(
     () => groupConversationsByTime(conversationList),
     [conversationList]
@@ -261,10 +343,39 @@ export function ChatSidebar({
     }
   };
 
+  const confirmBatchDelete = () => {
+    if (selectedConvIds.length > 0) {
+      deleteConversations.mutate({ conversationIds: selectedConvIds });
+    }
+  };
+
   const confirmRename = () => {
     if (selectedConvId && renameValue.trim()) {
       renameConversation.mutate({ conversationId: selectedConvId, title: renameValue.trim() });
     }
+  };
+
+  const toggleManagementMode = () => {
+    setManagementMode((current) => {
+      if (current) {
+        setSelectedConvIds([]);
+      }
+      return !current;
+    });
+  };
+
+  const toggleConversationSelection = (conversationId: string) => {
+    setSelectedConvIds((current) =>
+      current.includes(conversationId)
+        ? current.filter((id) => id !== conversationId)
+        : [...current, conversationId]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedConvIds((current) =>
+      current.length === allConversationIds.length ? [] : allConversationIds
+    );
   };
 
   const handleSelectConversation = (id: string) => {
@@ -308,13 +419,68 @@ export function ChatSidebar({
         <Button
           variant="ghost"
           size="sm"
+          data-testid="conversation-manage-toggle"
           className="h-7 px-2 text-xs rounded-lg flex items-center gap-1"
           style={{ color: 'var(--text-tertiary)' }}
+          onClick={toggleManagementMode}
         >
-          <Settings2 className="h-3.5 w-3.5" />
-          管理
+          {managementMode ? <X className="h-3.5 w-3.5" /> : <Settings2 className="h-3.5 w-3.5" />}
+          {managementMode ? '完成' : '管理'}
         </Button>
       </div>
+
+      {managementMode && conversationList.length > 0 && (
+        <div
+          className="px-3 py-3 space-y-2"
+          style={{ borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-primary)' }}
+        >
+          <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            <span data-testid="conversation-selected-count">已选择 {selectedConvIds.length} 条</span>
+            <Button
+              data-testid="conversation-select-all"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              style={{ color: 'var(--color-primary)' }}
+              onClick={toggleSelectAll}
+            >
+              <CheckSquare className="h-3.5 w-3.5" />
+              {selectedConvIds.length === allConversationIds.length ? '取消全选' : '全选'}
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              data-testid="conversation-batch-export"
+              variant="outline"
+              className="h-9 gap-2"
+              disabled={selectedConvIds.length === 0}
+              style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}
+              onClick={() => setBatchExportDialogOpen(true)}
+            >
+              <Download className="h-4 w-4" />
+              批量导出
+            </Button>
+            <Button
+              data-testid="conversation-batch-delete"
+              variant="outline"
+              className="h-9 gap-2"
+              disabled={selectedConvIds.length === 0}
+              style={{ borderColor: 'rgba(239, 68, 68, 0.35)', color: 'var(--error)' }}
+              onClick={() => setBatchDeleteDialogOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              批量删除
+            </Button>
+          </div>
+
+          {!canBatchExport && (
+            <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+              当前会员不支持批量导出，但仍可批量删除对话。
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto p-2">
@@ -350,8 +516,11 @@ export function ChatSidebar({
                   <ConversationItem
                     key={conv.id}
                     conversation={conv}
-                    isActive={activeConversationId === conv.id}
+                    isActive={!managementMode && activeConversationId === conv.id}
+                    isManaging={managementMode}
+                    isSelected={selectedConvIds.includes(conv.id)}
                     onSelect={() => handleSelectConversation(conv.id)}
+                    onToggleSelection={() => toggleConversationSelection(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -367,8 +536,11 @@ export function ChatSidebar({
                   <ConversationItem
                     key={conv.id}
                     conversation={conv}
-                    isActive={activeConversationId === conv.id}
+                    isActive={!managementMode && activeConversationId === conv.id}
+                    isManaging={managementMode}
+                    isSelected={selectedConvIds.includes(conv.id)}
                     onSelect={() => handleSelectConversation(conv.id)}
+                    onToggleSelection={() => toggleConversationSelection(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -384,8 +556,11 @@ export function ChatSidebar({
                   <ConversationItem
                     key={conv.id}
                     conversation={conv}
-                    isActive={activeConversationId === conv.id}
+                    isActive={!managementMode && activeConversationId === conv.id}
+                    isManaging={managementMode}
+                    isSelected={selectedConvIds.includes(conv.id)}
                     onSelect={() => handleSelectConversation(conv.id)}
+                    onToggleSelection={() => toggleConversationSelection(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -401,8 +576,11 @@ export function ChatSidebar({
                   <ConversationItem
                     key={conv.id}
                     conversation={conv}
-                    isActive={activeConversationId === conv.id}
+                    isActive={!managementMode && activeConversationId === conv.id}
+                    isManaging={managementMode}
+                    isSelected={selectedConvIds.includes(conv.id)}
                     onSelect={() => handleSelectConversation(conv.id)}
+                    onToggleSelection={() => toggleConversationSelection(conv.id)}
                     onDelete={() => handleDelete(conv.id)}
                     onRename={() => handleRename(conv.id)}
                   />
@@ -448,6 +626,15 @@ export function ChatSidebar({
         </DialogContent>
       </Dialog>
 
+      <ExportDialog
+        open={batchExportDialogOpen}
+        onOpenChange={setBatchExportDialogOpen}
+        mode="selected"
+        conversationIds={selectedConvIds}
+        conversationCount={selectedConvIds.length}
+        canBatchExport={canBatchExport}
+      />
+
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -467,6 +654,29 @@ export function ChatSidebar({
               style={{ background: 'var(--error)', color: 'white' }}
             >
               {deleteConversation.isPending ? '删除中...' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
+        <AlertDialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>确认批量删除</AlertDialogTitle>
+            <AlertDialogDescription style={{ color: 'var(--text-tertiary)' }}>
+              将永久删除已选中的 {selectedConvIds.length} 条对话及其消息记录，且无法恢复。确定要继续吗？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-[var(--border-primary)] text-[var(--text-secondary)]">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmBatchDelete}
+              disabled={deleteConversations.isPending}
+              style={{ background: 'var(--error)', color: 'white' }}
+            >
+              {deleteConversations.isPending ? '删除中...' : `删除 ${selectedConvIds.length} 条`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
