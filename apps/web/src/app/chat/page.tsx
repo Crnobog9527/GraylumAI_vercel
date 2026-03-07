@@ -44,6 +44,7 @@ export default function ChatPage() {
     credits,
     warningLevel,
     canSendMessage,
+    isLoading: creditsLoading,
     isLowBalance,
   } = useCreditsBalance();
 
@@ -170,14 +171,14 @@ export default function ChatPage() {
     if (!inputMessage.trim() || isProcessing) return;
 
     // 发送前检查积分余额
-    if (!canSendMessage) {
+    if (!creditsLoading && !canSendMessage) {
       // 积分为 0，阻止发送并显示充值弹窗
       setLowBalanceDialogOpen(true);
       return;
     }
 
     // 积分不足但仍可发送，显示警告（critical 级别）
-    if (warningLevel === 'critical') {
+    if (!creditsLoading && warningLevel === 'critical') {
       setLowBalanceDialogOpen(true);
       // 继续发送，用户可以在弹窗中选择"稍后再说"
     }
@@ -191,7 +192,7 @@ export default function ChatPage() {
     await sendStreamingMessage(messageToSend, {
       modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
     });
-  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId, canSendMessage, warningLevel]);
+  }, [inputMessage, isProcessing, sendStreamingMessage, showModelSelector, selectedModelId, canSendMessage, warningLevel, creditsLoading]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
