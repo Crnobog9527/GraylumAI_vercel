@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "audit:parity": "bash ./scripts/run-refactor-parity-audit.sh",
+    "audit:parity:full": "bash ./scripts/run-refactor-parity-audit.sh --with-security",
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",

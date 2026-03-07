@@ -16,3 +16,4 @@ test-results/
 tests/.auth/user.json
 .vercel
 .env*.local
+.audit-output/
