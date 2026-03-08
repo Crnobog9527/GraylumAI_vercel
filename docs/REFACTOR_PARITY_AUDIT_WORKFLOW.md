@@ -181,7 +181,7 @@ pnpm audit:parity:extended
 - `pnpm audit:parity:round3`
   管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流
 - `pnpm audit:parity:destructive`
-  仅保留危险操作闸门校验，不默认执行真实删除/清理
+  默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实清理动作，当前覆盖 `admin/settings` 对话历史清理与 `admin/diagnostics` 旧记录清理
 
 ### 2. 冻结旧仓库基线
 

@@ -94,6 +94,7 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState('');
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const { data: savedSettings, isLoading, refetch } = trpc.settings.getSystemSettings.useQuery();
@@ -118,10 +119,12 @@ export default function AdminSettingsPage() {
 
   const cleanupConversations = trpc.admin.cleanupExpiredConversations.useMutation({
     onSuccess: (result) => {
+      setCleanupMessage(result.message);
       toast.success(result.message);
       refetchStats();
     },
     onError: () => {
+      setCleanupMessage('清理失败，请稍后重试');
       toast.error('清理失败');
     },
   });
@@ -655,6 +658,7 @@ export default function AdminSettingsPage() {
                 <div className="flex items-center gap-4">
                   <Button
                     variant="destructive"
+                    data-testid="admin-settings-cleanup-trigger"
                     onClick={handleCleanup}
                     disabled={cleaningUp || (cleanupStats?.totalExpired === 0)}
                     className="bg-red-600 hover:bg-red-700"
@@ -680,6 +684,9 @@ export default function AdminSettingsPage() {
                       <span className="text-sm">暂无需要清理的对话</span>
                     </div>
                   )}
+                </div>
+                <div className="mt-3 text-sm" data-testid="admin-settings-cleanup-status" style={{ color: 'var(--text-secondary)' }}>
+                  {cleanupMessage || '尚未执行清理'}
                 </div>
               </CardContent>
             </Card>

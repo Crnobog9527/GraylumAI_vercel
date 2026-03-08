@@ -1758,27 +1758,56 @@ export const adminRouter = router({
 
       let totalDeleted = 0;
       const now = new Date();
+      const deletedAt = now.toISOString();
 
-      // For each user, delete conversations older than their retention period
+      // Soft-delete expired conversations so cleanup remains auditable and consistent with chat-side deletion.
       for (const profile of profiles ?? []) {
         const membershipLevel = profile.membership_level || 'free';
         const retentionDays = retentionMap[membershipLevel] || 30;
         const cutoffDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
 
-        // Delete old conversations (messages will be cascade deleted)
-        const { data, error } = await ctx.supabase
+        const { data: expiredConversations, error: expiredError } = await ctx.supabase
           .from('conversations')
-          .delete()
+          .select('id')
           .eq('user_id', profile.id)
-          .lt('created_at', cutoffDate.toISOString())
-          .select('id');
+          .eq('is_deleted', 'false')
+          .lt('created_at', cutoffDate.toISOString());
 
-        if (error) {
-          console.error(`Failed to delete conversations for user ${profile.id}:`, error);
+        if (expiredError) {
+          console.error(`Failed to query expired conversations for user ${profile.id}:`, expiredError);
           continue;
         }
 
-        totalDeleted += data?.length ?? 0;
+        const conversationIds = (expiredConversations ?? []).map((conversation) => conversation.id);
+        if (conversationIds.length === 0) {
+          continue;
+        }
+
+        const { error: messageError } = await ctx.supabase
+          .from('messages')
+          .update({ is_deleted: true, deleted_at: deletedAt })
+          .in('conversation_id', conversationIds)
+          .eq('is_deleted', 'false');
+
+        if (messageError) {
+          console.error(`Failed to soft-delete messages for user ${profile.id}:`, messageError);
+          continue;
+        }
+
+        const { data: updatedConversations, error: conversationError } = await ctx.supabase
+          .from('conversations')
+          .update({ is_deleted: true, deleted_at: deletedAt })
+          .in('id', conversationIds)
+          .eq('user_id', profile.id)
+          .eq('is_deleted', 'false')
+          .select('id');
+
+        if (conversationError) {
+          console.error(`Failed to soft-delete conversations for user ${profile.id}:`, conversationError);
+          continue;
+        }
+
+        totalDeleted += updatedConversations?.length ?? 0;
       }
 
       return {
@@ -1816,6 +1845,7 @@ export const adminRouter = router({
           .from('conversations')
           .select('id, profiles!inner(membership_level)', { count: 'exact', head: true })
           .eq('profiles.membership_level', level)
+          .eq('is_deleted', 'false')
           .lt('created_at', cutoffDate.toISOString());
 
         stats.push({

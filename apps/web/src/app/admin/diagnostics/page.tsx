@@ -199,6 +199,7 @@ export default function AdminDiagnosticsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [localResults, setLocalResults] = useState<TestResult[]>([]);
+  const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
 
   // Queries
   const { data: latestResults, refetch: refetchLatest, error: latestError } = trpc.diagnostics.getLatestResults.useQuery();
@@ -289,8 +290,13 @@ export default function AdminDiagnosticsPage() {
   });
 
   const cleanupMutation = trpc.diagnostics.cleanupOldResults.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setCleanupStatus(`${data.message}，本次处理 ${data.deletedCount} 条记录`);
       refetchLatest();
+      refetchSummary();
+    },
+    onError: (error) => {
+      setCleanupStatus(error.message || '诊断记录清理失败');
     },
   });
 
@@ -384,6 +390,7 @@ export default function AdminDiagnosticsPage() {
         </div>
         <div className="flex items-center gap-3">
           <Button
+            data-testid="admin-diagnostics-cleanup-trigger"
             variant="outline"
             onClick={handleCleanup}
             disabled={cleanupMutation.isPending}
@@ -410,6 +417,9 @@ export default function AdminDiagnosticsPage() {
             )}
           </Button>
         </div>
+      </div>
+      <div className="mb-4 text-sm" data-testid="admin-diagnostics-cleanup-status" style={{ color: 'var(--text-secondary)' }}>
+        {cleanupStatus || '尚未执行诊断记录清理'}
       </div>
 
       {/* Error Message */}

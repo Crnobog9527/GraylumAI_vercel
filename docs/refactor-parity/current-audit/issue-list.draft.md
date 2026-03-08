@@ -49,7 +49,7 @@
 - 证据：`docs/refactor-parity/current-audit/function-comparison-matrix.draft.md`
 - 建议归属：前端 / 产品 / 测试
 
-## [P2] 危险操作套件已建好入口，但按设计保持独立闸门，不纳入日常回归
+## [P2] 危险操作套件已可在线执行，但仍按设计保持独立闸门，不纳入日常回归
 
 - 影响范围：聊天批量删除、历史清理、后台不可逆删除、批量发布/下线、清理任务
 - 复现步骤：
@@ -57,6 +57,6 @@
   2. 使用专门的测试账号和测试对象
   3. 对每个动作执行“创建/定位 -> 执行 -> 验证 -> 回滚/清理”
 - 旧版本期望（来自旧仓库）：旧版后台和聊天存在这类危险能力入口
-- 新站实际：当前已提供独立 `admin-destructive` 套件入口，但默认只做闸门校验，不自动执行真实破坏性动作
+- 新站实际：当前已提供独立 `admin-destructive` 套件入口；在显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 时，已完成 `admin/settings` 对话历史清理与 `admin/diagnostics` 旧记录清理的线上取证，但仍不会默认并入日常回归
 - 证据：`apps/web/tests/e2e/admin-destructive.spec.ts`、`docs/REFACTOR_PARITY_AUDIT_WORKFLOW.md`
 - 建议归属：测试 / 前端 / 后端 / 运营
