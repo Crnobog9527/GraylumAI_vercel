@@ -181,7 +181,7 @@ pnpm audit:parity:extended
 - `pnpm audit:parity:round3`
   管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流
 - `pnpm audit:parity:destructive`
-  默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实清理动作，当前覆盖 `admin/settings` 对话历史清理与 `admin/diagnostics` 旧记录清理
+  默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实高风险动作，当前覆盖 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理，以及“创建临时模型 -> 用户端出现 -> 停用 -> 用户端消失 -> 恢复 -> 用户端回归 -> 删除清理”的可回滚模型状态闭环
 
 ### 2. 冻结旧仓库基线
 

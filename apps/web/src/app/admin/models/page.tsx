@@ -329,6 +329,7 @@ export default function AdminModelsPage() {
             </p>
           </div>
           <Button
+            data-testid="admin-model-create-trigger"
             onClick={openCreateDialog}
             className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
           >
@@ -409,7 +410,7 @@ export default function AdminModelsPage() {
                   const Icon = providerIcons[model.provider] || Bot;
                   const providerColor = providerColors[model.provider] || providerColors.custom;
                   return (
-                    <TableRow key={model.id}>
+                    <TableRow key={model.id} data-testid={`admin-model-row-${model.id}`}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <div
@@ -470,6 +471,7 @@ export default function AdminModelsPage() {
                       </TableCell>
                       <TableCell>
                         <Badge
+                          data-testid={`admin-model-active-toggle-${model.id}`}
                           className={model.is_active === 'true'
                             ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                             : 'bg-rose-500/20 text-rose-400 cursor-pointer'
@@ -509,6 +511,7 @@ export default function AdminModelsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            data-testid={`admin-model-edit-${model.id}`}
                             onClick={() => openEditDialog(model)}
                             className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                           >
@@ -517,6 +520,7 @@ export default function AdminModelsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            data-testid={`admin-model-delete-${model.id}`}
                             onClick={() => handleDelete(model)}
                             className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
                           >
@@ -557,6 +561,7 @@ export default function AdminModelsPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>显示名称</Label>
                   <Input
+                    data-testid="admin-model-name-input"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Claude 4.5 Sonnet"
@@ -566,6 +571,7 @@ export default function AdminModelsPage() {
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>模型 ID</Label>
                   <Input
+                    data-testid="admin-model-id-input"
                     value={formData.modelId}
                     onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
                     placeholder="claude-4.5-sonnet"
@@ -580,7 +586,7 @@ export default function AdminModelsPage() {
                   value={formData.provider}
                   onValueChange={(value: typeof formData.provider) => setFormData({ ...formData, provider: value })}
                 >
-                  <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                  <SelectTrigger data-testid="admin-model-provider-trigger" className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -596,6 +602,7 @@ export default function AdminModelsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>API Key</Label>
                 <Input
+                  data-testid="admin-model-api-key-input"
                   type="password"
                   value={formData.apiKey}
                   onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
@@ -607,6 +614,7 @@ export default function AdminModelsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>API Endpoint (可选)</Label>
                 <Input
+                  data-testid="admin-model-endpoint-input"
                   value={formData.apiEndpoint}
                   onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
                   placeholder="Anthropic: https://api.anthropic.com/v1/messages | OpenRouter: https://openrouter.ai/api/v1/chat/completions"
@@ -643,6 +651,7 @@ export default function AdminModelsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>描述</Label>
                 <Textarea
+                  data-testid="admin-model-description-input"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="模型简介..."
@@ -769,6 +778,7 @@ export default function AdminModelsPage() {
                 取消
               </Button>
               <Button
+                data-testid="admin-model-save"
                 onClick={handleSubmit}
                 disabled={!formData.name || !formData.modelId || createModel.isPending || updateModel.isPending}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
@@ -802,6 +812,7 @@ export default function AdminModelsPage() {
                 取消
               </AlertDialogCancel>
               <AlertDialogAction
+                data-testid="admin-model-delete-confirm"
                 onClick={confirmDelete}
                 className="bg-rose-600 text-white hover:bg-rose-700"
               >

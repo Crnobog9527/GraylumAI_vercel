@@ -52,6 +52,7 @@ export default function ModelSelector({
   return (
     <Select value={selectedModel} onValueChange={onSelect} disabled={disabled}>
       <SelectTrigger
+        data-testid="chat-model-selector-trigger"
         className={cn(
           "w-full h-11 px-3",
           "bg-[var(--bg-secondary)]/80 backdrop-blur-sm",
@@ -98,6 +99,7 @@ export default function ModelSelector({
             <SelectItem
               key={model.id}
               value={model.id}
+              data-testid={`chat-model-option-${model.id}`}
               className={cn(
                 "cursor-pointer py-3 px-3",
                 "hover:bg-[var(--bg-tertiary)]",
