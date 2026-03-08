@@ -50,6 +50,7 @@ interface UsageLog {
   inputLength: number;
   latencyMs: number;
   routingReason: string | null;
+  promptName: string | null;
   createdAt: string;
 }
 
@@ -296,6 +297,7 @@ export const costsRouter = router({
         inputLength: record.input_length ?? 0,
         latencyMs: record.latency_ms ?? 0,
         routingReason: record.metadata?.routingReason ?? null,
+        promptName: record.metadata?.promptName ?? null,
         createdAt: record.created_at,
       }));
 

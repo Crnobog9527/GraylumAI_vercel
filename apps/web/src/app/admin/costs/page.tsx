@@ -360,7 +360,7 @@ function UsageLogsTab() {
             </SelectContent>
           </Select>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
+        <Button data-testid="admin-usage-logs-refresh" variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-2" />
           刷新
         </Button>
@@ -382,12 +382,13 @@ function UsageLogsTab() {
                   <TableHead className="text-zinc-400">模型</TableHead>
                   <TableHead className="text-zinc-400">状态</TableHead>
                   <TableHead className="text-zinc-400">延迟</TableHead>
+                  <TableHead className="text-zinc-400">提示词</TableHead>
                   <TableHead className="text-zinc-400">路由原因</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(data?.logs ?? []).map((log) => (
-                  <TableRow key={log.id} className="border-zinc-700">
+                  <TableRow key={log.id} data-testid={`admin-usage-log-row-${log.id}`} className="border-zinc-700">
                     <TableCell className="text-zinc-300 text-sm">
                       {formatDateTime(log.createdAt)}
                     </TableCell>
@@ -409,6 +410,9 @@ function UsageLogsTab() {
                     </TableCell>
                     <TableCell className="text-zinc-400 text-sm">
                       {log.latencyMs}ms
+                    </TableCell>
+                    <TableCell data-testid="admin-usage-log-prompt-name" className="text-zinc-400 text-sm max-w-[180px] truncate">
+                      {log.promptName || '-'}
                     </TableCell>
                     <TableCell className="text-zinc-500 text-sm max-w-[200px] truncate">
                       {log.routingReason || '-'}

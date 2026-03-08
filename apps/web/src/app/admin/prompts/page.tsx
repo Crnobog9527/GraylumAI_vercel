@@ -40,6 +40,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
@@ -105,6 +106,7 @@ export default function AdminPromptsPage() {
     icon: 'Wand2',
     category: 'general' as PromptCategory,
     sortOrder: '0',
+    isSystem: false,
   });
 
   // Fetch models for selector
@@ -150,6 +152,7 @@ export default function AdminPromptsPage() {
       icon: 'Wand2',
       category: 'general',
       sortOrder: '0',
+      isSystem: false,
     });
     setDialogOpen(true);
   };
@@ -178,6 +181,7 @@ export default function AdminPromptsPage() {
       icon: prompt.icon || 'Wand2',
       category: prompt.category,
       sortOrder: prompt.sort_order.toString(),
+      isSystem: prompt.is_system === 'true',
     });
     setDialogOpen(true);
   };
@@ -198,6 +202,7 @@ export default function AdminPromptsPage() {
       icon: 'Wand2',
       category: 'general',
       sortOrder: '0',
+      isSystem: false,
     });
   };
 
@@ -225,6 +230,7 @@ export default function AdminPromptsPage() {
         icon: formData.icon,
         category: formData.category,
         sortOrder,
+        isSystem: formData.isSystem ? 'true' : 'false',
       });
     } else {
       createPrompt.mutate({
@@ -240,6 +246,7 @@ export default function AdminPromptsPage() {
         icon: formData.icon,
         category: formData.category,
         sortOrder,
+        isSystem: formData.isSystem ? 'true' : 'false',
       });
     }
   };
@@ -412,7 +419,7 @@ export default function AdminPromptsPage() {
                   const config = categoryConfig[prompt.category];
                   const CategoryIcon = config.icon;
                   return (
-                    <TableRow key={prompt.id}>
+                    <TableRow key={prompt.id} data-testid={`admin-prompt-row-${prompt.id}`}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <div
@@ -423,7 +430,7 @@ export default function AdminPromptsPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                              <p data-testid="admin-prompt-name" className="font-medium" style={{ color: 'var(--text-primary)' }}>
                                 {prompt.name}
                               </p>
                               {prompt.is_system === 'true' && (
@@ -449,6 +456,7 @@ export default function AdminPromptsPage() {
                       </TableCell>
                       <TableCell>
                         <Badge
+                          data-testid={`admin-prompt-toggle-${prompt.id}`}
                           className={prompt.active === 'true'
                             ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                             : 'bg-rose-500/20 text-rose-400 cursor-pointer'
@@ -476,6 +484,7 @@ export default function AdminPromptsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            data-testid={`admin-prompt-edit-${prompt.id}`}
                             onClick={() => openEditDialog(prompt)}
                             className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                           >
@@ -484,6 +493,7 @@ export default function AdminPromptsPage() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            data-testid={`admin-prompt-delete-${prompt.id}`}
                             onClick={() => handleDelete(prompt)}
                             disabled={prompt.is_system === 'true'}
                             className="h-8 w-8 text-rose-400 hover:bg-rose-500/20 disabled:opacity-30"
@@ -687,6 +697,7 @@ export default function AdminPromptsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>排序权重 (数字越大越靠前)</Label>
                 <Input
+                  data-testid="prompt-sort-order-input"
                   type="number"
                   min="0"
                   max="1000"
@@ -694,6 +705,20 @@ export default function AdminPromptsPage() {
                   onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })}
                   placeholder="0"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)] w-32"
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
+                <div>
+                  <Label style={{ color: 'var(--text-secondary)' }}>作为系统提示词</Label>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                    系统提示词会参与聊天运行时选择，仅用于管理员可控的全局 AI 行为。
+                  </p>
+                </div>
+                <Switch
+                  data-testid="prompt-is-system-switch"
+                  checked={formData.isSystem}
+                  onCheckedChange={(checked) => setFormData({ ...formData, isSystem: checked })}
                 />
               </div>
             </div>

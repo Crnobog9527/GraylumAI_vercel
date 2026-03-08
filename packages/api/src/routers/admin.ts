@@ -1220,6 +1220,7 @@ export const adminRouter = router({
       // Original fields
       category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).default('general'),
       sortOrder: z.number().int().min(0).max(1000).default(0),
+      isSystem: z.enum(['true', 'false']).default('false'),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
@@ -1237,7 +1238,7 @@ export const adminRouter = router({
           icon: input.icon,
           category: input.category,
           sort_order: input.sortOrder,
-          is_system: 'false',
+          is_system: input.isSystem,
           active: 'true',
           created_by: ctx.profileId,
         })
@@ -1272,6 +1273,7 @@ export const adminRouter = router({
       category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).optional(),
       sortOrder: z.number().int().min(0).max(1000).optional(),
       active: z.enum(['true', 'false']).optional(),
+      isSystem: z.enum(['true', 'false']).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const updateData: Record<string, unknown> = {
@@ -1290,6 +1292,7 @@ export const adminRouter = router({
       if (input.category !== undefined) updateData.category = input.category;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
       if (input.active !== undefined) updateData.active = input.active;
+      if (input.isSystem !== undefined) updateData.is_system = input.isSystem;
 
       const { data, error } = await ctx.supabase
         .from('prompts')
