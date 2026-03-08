@@ -260,6 +260,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
           return (
             <div
               key={plan.level}
+              data-testid={`profile-membership-plan-${plan.level}`}
               className="relative rounded-xl p-5 transition-all duration-300"
               style={{
                 background: isHighlight ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%)' : 'var(--bg-primary)',
@@ -282,7 +283,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
               )}
 
               {/* Plan Name */}
-              <h4 className="text-center font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
+              <h4 data-testid="profile-membership-plan-name" className="text-center font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
                 {plan.name}
               </h4>
 

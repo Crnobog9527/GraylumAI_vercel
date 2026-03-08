@@ -555,4 +555,119 @@ test.describe('Admin Destructive Flows', () => {
       );
     }
   });
+
+  test('should disable a membership plan, verify it disappears from the user subscription view, then restore it', async ({ browser, page }, testInfo) => {
+    test.skip(
+      !destructiveGateEnabled,
+      'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
+    );
+    test.setTimeout(60000);
+
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin membership plan rollback flow completed';
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    let targetPlanId = '';
+    let targetPlanLevel = '';
+    let targetPlanName = '';
+
+    try {
+      steps.push('Open /admin/packages and locate an active non-free membership plan');
+      await gotoWithBypass(page, '/admin/packages');
+      await expect(page).toHaveURL(/\/admin\/packages/);
+      await page.getByRole('tab', { name: '会员等级' }).click();
+
+      const activePlanRow = page.locator('tbody tr').filter({ hasText: '已启用' }).filter({ hasNotText: '免费版' }).first();
+      await expect(activePlanRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await activePlanRow.getAttribute('data-testid');
+      targetPlanId = rowTestId?.replace('admin-membership-plan-row-', '') ?? '';
+      expect(targetPlanId).not.toBe('');
+      targetPlanName = ((await activePlanRow.textContent()) ?? '').replace(/\s+/g, ' ');
+      if (targetPlanName.includes('Gold')) {
+        targetPlanLevel = 'gold';
+      } else if (targetPlanName.includes('Pro')) {
+        targetPlanLevel = 'pro';
+      } else {
+        targetPlanLevel = 'free';
+      }
+      expect(targetPlanLevel).not.toBe('free');
+
+      steps.push('Open /profile?tab=subscription as the user and verify the target plan is visible');
+      await gotoWithBypass(userPage, '/profile?tab=subscription');
+      await expect(userPage).toHaveURL(/\/profile\?tab=subscription/);
+      const userPlan = userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`);
+      await expect(userPlan).toBeVisible({ timeout: 15000 });
+
+      steps.push('Disable the membership plan and verify it disappears from the user subscription view');
+      const disableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updateMembershipPlan') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`).click();
+      const disableResponse = await disableResponsePromise;
+      expect(disableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`)).toContainText('已禁用', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`)).toHaveCount(0, { timeout: 15000 });
+
+      steps.push('Re-enable the membership plan and verify it returns to the user subscription view');
+      const enableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updateMembershipPlan') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`).click();
+      const enableResponse = await enableResponsePromise;
+      expect(enableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`)).toContainText('已启用', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`)).toBeVisible({ timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      actual = `Membership plan ${targetPlanLevel} disabled and restored successfully`;
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin membership plan rollback failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (targetPlanId) {
+        await gotoWithBypass(page, '/admin/packages').catch(() => undefined);
+        await page.getByRole('tab', { name: '会员等级' }).click().catch(() => undefined);
+        const planToggle = page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`);
+        if (await planToggle.isVisible().catch(() => false)) {
+          const label = await planToggle.textContent();
+          if (label?.includes('已禁用')) {
+            const restoreResponsePromise = page.waitForResponse(
+              (response) =>
+                response.url().includes('/api/trpc/admin.updateMembershipPlan') &&
+                response.request().method() === 'POST',
+              { timeout: 30000 },
+            ).catch(() => undefined);
+            await planToggle.click().catch(() => undefined);
+            await restoreResponsePromise;
+          }
+        }
+      }
+      await userContext.close();
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-membership-plan-rollback',
+          role: 'admin',
+          route: '/admin/packages,/profile?tab=subscription',
+          expected: 'Admin users can disable a membership plan, verify it disappears from the user subscription view, then restore it safely in preview fixtures.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
 });

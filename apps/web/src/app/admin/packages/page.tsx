@@ -649,7 +649,7 @@ export default function AdminPackagesPage() {
                     {planList.map((plan: MembershipPlan) => {
                       const levelStyle = levelColors[plan.level] || levelColors.pro;
                       return (
-                        <TableRow key={plan.id}>
+                        <TableRow key={plan.id} data-testid={`admin-membership-plan-row-${plan.id}`}>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <div
@@ -701,6 +701,7 @@ export default function AdminPackagesPage() {
                           </TableCell>
                           <TableCell>
                             <Badge
+                              data-testid={`admin-membership-plan-toggle-${plan.id}`}
                               className={plan.is_active === 'true'
                                 ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                                 : 'bg-rose-500/20 text-rose-400 cursor-pointer'
@@ -725,6 +726,7 @@ export default function AdminPackagesPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                data-testid={`admin-membership-plan-edit-${plan.id}`}
                                 onClick={() => openEditPlanDialog(plan)}
                                 className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                               >
@@ -733,6 +735,7 @@ export default function AdminPackagesPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                data-testid={`admin-membership-plan-delete-${plan.id}`}
                                 onClick={() => handlePlanDelete(plan)}
                                 className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
                               >
