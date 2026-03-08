@@ -156,7 +156,8 @@ async function updateConversationTitle(
   await supabase
     .from('conversations')
     .update({ title })
-    .eq('id', conversationId);
+    .eq('id', conversationId)
+    .eq('title', '新对话');
 }
 
 /**

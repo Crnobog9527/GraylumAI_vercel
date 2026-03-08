@@ -81,7 +81,9 @@ async function ensureUserHasChatCredits(browser: Browser, minimumCredits = 300) 
 }
 
 async function createConversation(page: Page, prompt: string) {
-  await gotoWithBypass(page, '/chat');
+  if (!page.url().includes('/chat')) {
+    await gotoWithBypass(page, '/chat');
+  }
 
   const input = page.locator('textarea[placeholder="请输入您的问题..."]');
   await input.fill(prompt);
@@ -122,6 +124,7 @@ async function renameConversation(page: Page, title: string) {
   expect(renameResponse.status()).toBe(200);
 
   await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId('conversation-item').filter({ hasText: title }).first()).toBeVisible({ timeout: 10000 });
 }
 
 async function openTicketDetail(page: Page, ticketTitle: string) {
