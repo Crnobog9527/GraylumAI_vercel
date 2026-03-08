@@ -373,6 +373,7 @@ export default function AdminPackagesPage() {
             <div className="flex justify-end mb-4">
               <Button
                 onClick={openCreatePackageDialog}
+                data-testid="admin-credit-package-create-trigger"
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -449,7 +450,7 @@ export default function AdminPackagesPage() {
                   </TableHeader>
                   <TableBody>
                     {packageList.map((pkg: CreditPackage) => (
-                      <TableRow key={pkg.id}>
+                      <TableRow key={pkg.id} data-testid={`admin-credit-package-row-${pkg.id}`}>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             <div
@@ -509,6 +510,7 @@ export default function AdminPackagesPage() {
                         </TableCell>
                         <TableCell>
                           <Badge
+                            data-testid={`admin-credit-package-toggle-${pkg.id}`}
                             className={pkg.active === 'true'
                               ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                               : 'bg-rose-500/20 text-rose-400 cursor-pointer'
@@ -533,6 +535,7 @@ export default function AdminPackagesPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              data-testid={`admin-credit-package-edit-${pkg.id}`}
                               onClick={() => openEditPackageDialog(pkg)}
                               className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                             >
@@ -541,6 +544,7 @@ export default function AdminPackagesPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              data-testid={`admin-credit-package-delete-${pkg.id}`}
                               onClick={() => handlePackageDelete(pkg)}
                               className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
                             >

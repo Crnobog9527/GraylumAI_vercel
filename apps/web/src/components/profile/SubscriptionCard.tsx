@@ -64,6 +64,7 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
         ) : displayPackages.map((pkg) => (
           <div
             key={pkg.id}
+            data-testid={`profile-credit-package-${pkg.id}`}
             className="relative p-4 rounded-xl text-center transition-all duration-300"
             style={{
               background: 'var(--bg-primary)',
@@ -99,6 +100,13 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
             )}
             <div className="text-lg font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
               ${pkg.price.toFixed(1)}
+            </div>
+            <div
+              data-testid="profile-credit-package-name"
+              className="text-sm font-medium mb-3"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {'name' in pkg && typeof pkg.name === 'string' ? pkg.name : `${pkg.credits.toLocaleString()} 积分包`}
             </div>
             <Button
               onClick={onBuyClick}

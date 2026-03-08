@@ -429,4 +429,130 @@ test.describe('Admin Destructive Flows', () => {
       );
     }
   });
+
+  test('should publish a credit package, verify it appears in the user subscription view, then unpublish and restore it before cleanup', async ({ browser, page }, testInfo) => {
+    test.skip(
+      !destructiveGateEnabled,
+      'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
+    );
+    test.setTimeout(60000);
+
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin credit package publish rollback flow completed';
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    const packageName = `Parity Credit Pack ${Date.now()}`;
+    let packageId = '';
+
+    try {
+      steps.push('Open /admin/packages and create an isolated active credit package');
+      await gotoWithBypass(page, '/admin/packages');
+      await expect(page).toHaveURL(/\/admin\/packages/);
+      await page.getByTestId('admin-credit-package-create-trigger').click();
+      await page.getByTestId('credit-package-name-input').fill(packageName);
+      await page.getByTestId('credit-package-price-input').fill('12.9');
+      await page.getByTestId('credit-package-credits-input').fill('4321');
+      await page.getByTestId('credit-package-bonus-input').fill('321');
+
+      const createResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.createPackage') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId('credit-package-save').click();
+      const createResponse = await createResponsePromise;
+      expect(createResponse.status()).toBe(200);
+
+      const packageRow = page.locator('tbody tr').filter({ hasText: packageName }).first();
+      await expect(packageRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await packageRow.getAttribute('data-testid');
+      packageId = rowTestId?.replace('admin-credit-package-row-', '') ?? '';
+      expect(packageId).not.toBe('');
+
+      steps.push('Open /profile?tab=subscription as the user and verify the credit package appears');
+      await gotoWithBypass(userPage, '/profile?tab=subscription');
+      await expect(userPage).toHaveURL(/\/profile\?tab=subscription/);
+      const userPackage = userPage.getByTestId(`profile-credit-package-${packageId}`);
+      await expect(userPackage).toBeVisible({ timeout: 15000 });
+      await expect(userPackage.getByTestId('profile-credit-package-name')).toContainText(packageName, { timeout: 15000 });
+
+      steps.push('Disable the credit package and verify it disappears from the user subscription view');
+      const disableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updatePackage') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-credit-package-toggle-${packageId}`).click();
+      const disableResponse = await disableResponsePromise;
+      expect(disableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-credit-package-toggle-${packageId}`)).toContainText('已下架', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toHaveCount(0, { timeout: 15000 });
+
+      steps.push('Re-enable the credit package and verify it returns to the user subscription view');
+      const enableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updatePackage') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-credit-package-toggle-${packageId}`).click();
+      const enableResponse = await enableResponsePromise;
+      expect(enableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-credit-package-toggle-${packageId}`)).toContainText('已上架', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toBeVisible({ timeout: 15000 });
+
+      steps.push('Delete the temporary credit package and verify cleanup');
+      page.once('dialog', (dialog) => dialog.accept());
+      const deleteResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.deletePackage') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-credit-package-delete-${packageId}`).click();
+      const deleteResponse = await deleteResponsePromise;
+      expect(deleteResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-credit-package-row-${packageId}`)).toHaveCount(0, { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toHaveCount(0, { timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      actual = `Credit package ${packageName} published, unpublished, restored, and cleaned up successfully`;
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin credit package publish rollback failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (packageId) {
+        await gotoWithBypass(page, '/admin/packages').catch(() => undefined);
+        const lingeringRow = page.getByTestId(`admin-credit-package-row-${packageId}`);
+        if (await lingeringRow.count()) {
+          page.once('dialog', (dialog) => dialog.accept());
+          await page.getByTestId(`admin-credit-package-delete-${packageId}`).click().catch(() => undefined);
+        }
+      }
+      await userContext.close();
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-credit-package-publish-rollback',
+          role: 'admin',
+          route: '/admin/packages,/profile?tab=subscription',
+          expected: 'Admin users can publish a credit package, verify it appears in the user subscription view, unpublish it to hide it, then restore and clean it up safely in preview fixtures.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
 });
