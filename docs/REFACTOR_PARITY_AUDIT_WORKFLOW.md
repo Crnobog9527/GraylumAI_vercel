@@ -167,7 +167,7 @@ pnpm audit:parity:extended
 如果你按第三轮计划继续推进，当前分轮覆盖是：
 
 - `pnpm audit:parity:round1`
-  用户高价值链路，当前已覆盖会话删除、批量导出可用性、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭，以及剩余用户端的低余额拦截、账户安全、Marketplace
+  用户高价值链路，当前已覆盖会话删除、批量删除、批量导出、模型切换、订阅/积分/使用历史页签、工单创建/回复/关闭，以及剩余用户端的低余额拦截、账户安全、Marketplace
 - `pnpm audit:parity:user-supplemental`
   只执行剩余用户端补充套件，当前目标是低余额拦截、受保护页面跳转、账户安全交互、Marketplace 筛选与详情流
 - `pnpm --dir apps/web exec playwright test auth.spec.ts chat.spec.ts --project=chromium`
@@ -181,7 +181,7 @@ pnpm audit:parity:extended
 - `pnpm audit:parity:round3`
   管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流
 - `pnpm audit:parity:destructive`
-  默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实高风险动作，当前覆盖 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理，以及“创建临时模型 -> 用户端出现 -> 停用 -> 用户端消失 -> 恢复 -> 用户端回归 -> 删除清理”的可回滚模型状态闭环
+  默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实高风险动作，当前覆盖 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理、“创建临时模型 -> 用户端出现 -> 停用 -> 用户端消失 -> 恢复 -> 用户端回归 -> 删除清理”的可回滚模型状态闭环，以及“创建临时横幅公告 -> 用户端可见 -> 下线隐藏 -> 恢复显示 -> 删除清理”的公告发布回滚闭环
 
 ### 2. 冻结旧仓库基线
 

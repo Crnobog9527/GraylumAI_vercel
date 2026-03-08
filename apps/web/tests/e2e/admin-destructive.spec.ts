@@ -143,6 +143,7 @@ test.describe('Admin Destructive Flows', () => {
       !destructiveGateEnabled,
       'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
     );
+    test.setTimeout(60000);
 
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
@@ -291,6 +292,136 @@ test.describe('Admin Destructive Flows', () => {
           role: 'admin',
           route: '/admin/models,/chat',
           expected: 'Admin users can disable a model and confirm it disappears from the user model selector, then re-enable it and confirm it returns.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should publish a banner announcement, verify it appears for users, then unpublish and restore it before cleanup', async ({ browser, page }, testInfo) => {
+    test.skip(
+      !destructiveGateEnabled,
+      'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
+    );
+    test.setTimeout(60000);
+
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin announcement publish rollback flow completed';
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    const announcementTitle = `Parity Banner ${Date.now()}`;
+    let announcementId = '';
+
+    try {
+      steps.push('Open /admin/announcements and create an isolated banner announcement');
+      await gotoWithBypass(page, '/admin/announcements');
+      await expect(page).toHaveURL(/\/admin\/announcements/);
+      await page.getByRole('tab', { name: '横幅公告' }).click();
+      await page.getByTestId('admin-announcement-create-banner').click();
+      await page.getByTestId('announcement-title-input').fill(announcementTitle);
+      await page.getByTestId('announcement-content-input').fill('Parity destructive banner visibility verification');
+      await page.getByTestId('announcement-priority-input').fill('100');
+
+      const createResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.createAnnouncement') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId('admin-announcement-save').click();
+      const createResponse = await createResponsePromise;
+      expect(createResponse.status()).toBe(200);
+
+      const announcementRow = page.locator('tbody tr').filter({ hasText: announcementTitle }).first();
+      await expect(announcementRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await announcementRow.getAttribute('data-testid');
+      announcementId = rowTestId?.replace('admin-announcement-row-', '') ?? '';
+      expect(announcementId).not.toBe('');
+
+      steps.push('Open /chat as the user and verify the new banner becomes visible');
+      await gotoWithBypass(userPage, '/chat');
+      await expect(userPage).toHaveURL(/\/chat/);
+      await userPage.evaluate(() => {
+        window.localStorage.removeItem('dismissedBanners');
+      });
+      await userPage.reload({ waitUntil: 'networkidle' });
+      const userBanner = userPage.getByTestId(`global-banner-${announcementId}`);
+      await expect(userBanner).toBeVisible({ timeout: 15000 });
+      await expect(userBanner.getByTestId('global-banner-title')).toContainText(announcementTitle, { timeout: 15000 });
+
+      steps.push('Disable the banner announcement and verify it disappears for users');
+      const disableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updateAnnouncement') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-announcement-toggle-${announcementId}`).click();
+      const disableResponse = await disableResponsePromise;
+      expect(disableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-announcement-toggle-${announcementId}`)).toContainText('已禁用', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
+
+      steps.push('Re-enable the banner announcement and verify it returns for users');
+      const enableResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.updateAnnouncement') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-announcement-toggle-${announcementId}`).click();
+      const enableResponse = await enableResponsePromise;
+      expect(enableResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-announcement-toggle-${announcementId}`)).toContainText('已启用', { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toBeVisible({ timeout: 15000 });
+
+      steps.push('Delete the temporary announcement and verify cleanup');
+      page.once('dialog', (dialog) => dialog.accept());
+      const deleteResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/admin.deleteAnnouncement') &&
+          response.request().method() === 'POST',
+        { timeout: 30000 },
+      );
+      await page.getByTestId(`admin-announcement-delete-${announcementId}`).click();
+      const deleteResponse = await deleteResponsePromise;
+      expect(deleteResponse.status()).toBe(200);
+      await expect(page.getByTestId(`admin-announcement-row-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
+
+      await userPage.reload({ waitUntil: 'networkidle' });
+      await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      actual = `Announcement ${announcementTitle} published, unpublished, restored, and cleaned up successfully`;
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin announcement publish rollback failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (announcementId) {
+        await gotoWithBypass(page, '/admin/announcements').catch(() => undefined);
+        const lingeringRow = page.getByTestId(`admin-announcement-row-${announcementId}`);
+        if (await lingeringRow.count()) {
+          page.once('dialog', (dialog) => dialog.accept());
+          await page.getByTestId(`admin-announcement-delete-${announcementId}`).click().catch(() => undefined);
+        }
+      }
+      await userContext.close();
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-announcement-banner-publish-rollback',
+          role: 'admin',
+          route: '/admin/announcements,/chat',
+          expected: 'Admin users can publish a banner announcement, verify it appears for users, unpublish it to hide it, then restore and clean it up safely in preview fixtures.',
         },
         actual,
         steps,

@@ -144,6 +144,7 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
           </span>
         )}
         <span
+          data-testid="global-banner-title"
           className="font-medium truncate"
           style={{ color: style.textColor }}
         >
@@ -173,6 +174,7 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
   return (
     <>
       <div
+        data-testid={`global-banner-${banner.id}`}
         className={`w-full px-4 py-2.5 relative z-40 overflow-hidden transition-all duration-500 ${
           isVisible ? 'opacity-100 max-h-16' : 'opacity-0 max-h-0'
         }`}
@@ -227,6 +229,7 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
           )}
 
           <button
+            data-testid="global-banner-dismiss"
             onClick={() => handleDismiss(banner.id)}
             className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-300 hover:scale-110 bg-white/[0.08] text-[var(--text-tertiary)] hover:bg-white/[0.15] hover:text-[var(--text-primary)]"
             aria-label="关闭公告"

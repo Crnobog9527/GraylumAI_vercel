@@ -319,6 +319,7 @@ export default function AdminAnnouncementsPage() {
         <Button
           onClick={() => openCreateDialog(areaType)}
           size="sm"
+          data-testid={`admin-announcement-create-${areaType}`}
           className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
         >
           <Plus className="h-4 w-4 mr-1" />
@@ -343,7 +344,7 @@ export default function AdminAnnouncementsPage() {
               const config = typeConfig[announcement.type];
               const TypeIcon = config.icon;
               return (
-                <TableRow key={announcement.id}>
+                <TableRow key={announcement.id} data-testid={`admin-announcement-row-${announcement.id}`}>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div
@@ -407,6 +408,7 @@ export default function AdminAnnouncementsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge
+                      data-testid={`admin-announcement-toggle-${announcement.id}`}
                       className={announcement.active === 'true'
                         ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                         : 'bg-rose-500/20 text-rose-400 cursor-pointer'
@@ -431,6 +433,7 @@ export default function AdminAnnouncementsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        data-testid={`admin-announcement-edit-${announcement.id}`}
                         onClick={() => openEditDialog(announcement)}
                         className="h-8 w-8 text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
                       >
@@ -439,6 +442,7 @@ export default function AdminAnnouncementsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        data-testid={`admin-announcement-delete-${announcement.id}`}
                         onClick={() => handleDelete(announcement)}
                         className="h-8 w-8 text-rose-400 hover:bg-rose-500/20"
                       >
@@ -768,6 +772,7 @@ export default function AdminAnnouncementsPage() {
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>优先级 (0-100)</Label>
                 <Input
+                  data-testid="announcement-priority-input"
                   type="number"
                   min="0"
                   max="100"
@@ -936,6 +941,7 @@ export default function AdminAnnouncementsPage() {
               取消
             </Button>
             <Button
+              data-testid="admin-announcement-save"
               onClick={handleSubmit}
               disabled={!formData.title || !formData.content || createAnnouncement.isPending || updateAnnouncement.isPending}
               className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
