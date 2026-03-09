@@ -5,7 +5,7 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { authStatePaths, hasCredentials } from './support/auth';
+import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -47,6 +47,36 @@ async function readLatestPromptNameForUser(page: import('@playwright/test').Page
   }
 
   return promptName;
+}
+
+function normalizeUserRoleLabel(label: string | null | undefined): '管理员' | '普通用户' {
+  return label?.includes('管理员') ? '管理员' : '普通用户';
+}
+
+async function selectAdminUserRole(
+  page: import('@playwright/test').Page,
+  userId: string,
+  targetRoleLabel: '管理员' | '普通用户',
+) {
+  const roleTrigger = page.getByTestId(`admin-user-role-${userId}`);
+  const currentLabel = normalizeUserRoleLabel(await roleTrigger.textContent());
+  if (currentLabel === targetRoleLabel) {
+    return;
+  }
+
+  const updateResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/trpc/admin.updateUserRole') &&
+      response.request().method() === 'POST',
+    { timeout: 30000 },
+  );
+  await roleTrigger.click();
+  await page.getByRole('option', { name: targetRoleLabel }).click();
+  const updateResponse = await updateResponsePromise;
+  expect(updateResponse.status()).toBe(200);
+  await expect
+    .poll(async () => normalizeUserRoleLabel(await roleTrigger.textContent()), { timeout: 15000 })
+    .toBe(targetRoleLabel);
 }
 
 test.describe('Admin Destructive Flows', () => {
@@ -702,6 +732,90 @@ test.describe('Admin Destructive Flows', () => {
           role: 'admin',
           route: '/admin/packages,/profile?tab=subscription',
           expected: 'Admin users can disable a membership plan, verify it disappears from the user subscription view, then restore it safely in preview fixtures.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should promote the configured E2E user to admin, verify admin access, then restore the original role', async ({ browser, page }, testInfo) => {
+    test.skip(
+      !destructiveGateEnabled,
+      'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
+    );
+    test.setTimeout(90000);
+
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin user role rollback flow completed';
+    const targetEmail = getCredentials('user').email;
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    let targetUserId = '';
+    let originalRole: '管理员' | '普通用户' = '普通用户';
+
+    try {
+      steps.push('Open /admin/users and locate the configured E2E user');
+      await gotoWithBypass(page, '/admin/users');
+      await expect(page).toHaveURL(/\/admin\/users/);
+      await page.getByTestId('admin-users-search').fill(targetEmail);
+      const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
+      await expect(targetRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await targetRow.getAttribute('data-testid');
+      targetUserId = rowTestId?.replace('admin-user-row-', '') ?? '';
+      expect(targetUserId).not.toBe('');
+
+      originalRole = normalizeUserRoleLabel(
+        await page.getByTestId(`admin-user-role-${targetUserId}`).textContent(),
+      );
+
+      steps.push('Normalize the target user back to a non-admin baseline before promotion');
+      await selectAdminUserRole(page, targetUserId, '普通用户');
+
+      steps.push('Verify the normal user is denied access to /admin before promotion');
+      await gotoWithBypass(userPage, '/admin');
+      await expect(userPage).toHaveURL(/\/access-denied/, { timeout: 15000 });
+      await expect(userPage.getByText('访问被拒绝')).toBeVisible({ timeout: 15000 });
+
+      steps.push('Promote the target user to admin in /admin/users');
+      await selectAdminUserRole(page, targetUserId, '管理员');
+
+      steps.push('Verify the promoted user can open /admin successfully');
+      await gotoWithBypass(userPage, '/admin');
+      await expect(userPage).toHaveURL(/\/admin/, { timeout: 15000 });
+      await expect(userPage.getByRole('heading', { name: '管理后台仪表盘' })).toBeVisible({ timeout: 15000 });
+
+      steps.push('Restore the target user role to the original non-admin state');
+      await selectAdminUserRole(page, targetUserId, '普通用户');
+
+      steps.push('Verify the restored user loses /admin access again');
+      await gotoWithBypass(userPage, '/admin');
+      await expect(userPage).toHaveURL(/\/access-denied/, { timeout: 15000 });
+      await expect(userPage.getByText('访问被拒绝')).toBeVisible({ timeout: 15000 });
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      actual = `User ${targetEmail} promoted to admin and restored to ${originalRole} successfully`;
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin role rollback failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (targetUserId) {
+        await gotoWithBypass(page, '/admin/users').catch(() => undefined);
+        await page.getByTestId('admin-users-search').fill(targetEmail).catch(() => undefined);
+        await selectAdminUserRole(page, targetUserId, originalRole).catch(() => undefined);
+      }
+      await userContext.close();
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-user-role-rollback',
+          role: 'admin',
+          route: '/admin/users,/admin,/access-denied',
+          expected: 'Admin users can temporarily promote the configured E2E user to admin, verify the user gains /admin access, then restore the original role and confirm access is revoked again.',
         },
         actual,
         steps,

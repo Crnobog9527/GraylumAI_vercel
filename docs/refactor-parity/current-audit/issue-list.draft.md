@@ -8,7 +8,7 @@
 > `parity-extended 6/6`、`user-extended 7/7`、`admin-config 6/6`、`admin-ops 5/5`、`user-supplemental 6/6`
 >
 > 2026-03-08 危险操作补充验证：
-> `admin-destructive 10/10`
+> `admin-destructive 11/11`
 
 ## 当前状态
 
@@ -16,7 +16,7 @@
 - 第三轮新增线上定向回归已通过：用户扩展 `7/7`、管理员配置 `6/6`、管理员业务 `5/5`。
 - 第三轮用户补充回归已在最新线上预览环境中复测通过，结果为 `6/6`。
 - 2026-03-08 对最新预览 `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果为：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`。
-- 2026-03-08 对最新预览 `https://graylum-ai-vercel-v1-bg46yav30-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果为：`admin-destructive 10/10`。
+- 2026-03-08 对最新预览 `https://graylum-ai-vercel-v1-b6uxzuk1q-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果为：`admin-destructive 11/11`。
 - 旧的“本地地域限制导致聊天 403”结论已废弃，因为它不符合当前规定的验收方法。
 - 当前没有新的线上阻塞 bug 留在清单中；本清单保留的内容改为“仍未覆盖的细颗粒度能力”和“刻意隔离的危险操作”。
 
@@ -49,6 +49,6 @@
   2. 使用专门的测试账号和测试对象
   3. 对每个动作执行“创建/定位 -> 执行 -> 验证 -> 回滚/清理”
 - 旧版本期望（来自旧仓库）：旧版后台和聊天存在这类危险能力入口
-- 新站实际：当前已提供独立 `admin-destructive` 套件入口；在显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 时，已完成 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理、模型停用/恢复回滚、横幅公告发布/下线/恢复/删除回滚、积分包发布/下架/恢复/删除回滚、会员计划禁用/恢复回滚，以及系统提示词运行时联动回滚的线上取证，但仍不会默认并入日常回归
+- 新站实际：当前已提供独立 `admin-destructive` 套件入口；在显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 时，已完成 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理、模型停用/恢复回滚、横幅公告发布/下线/恢复/删除回滚、积分包发布/下架/恢复/删除回滚、会员计划禁用/恢复回滚、用户角色权限回滚，以及系统提示词运行时联动回滚的线上取证，但仍不会默认并入日常回归
 - 证据：`apps/web/tests/e2e/admin-destructive.spec.ts`、`docs/REFACTOR_PARITY_AUDIT_WORKFLOW.md`
 - 建议归属：测试 / 前端 / 后端 / 运营

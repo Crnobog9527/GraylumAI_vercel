@@ -236,6 +236,7 @@ export default function AdminUsersPage() {
             </Button>
           )}
           <Button
+            data-testid="admin-users-refresh"
             variant="outline"
             onClick={() => refetch()}
             className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
@@ -262,6 +263,7 @@ export default function AdminUsersPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
                 <Input
+                  data-testid="admin-users-search"
                   placeholder="邮箱或昵称..."
                   value={searchQuery}
                   onChange={(e) => {
@@ -365,7 +367,7 @@ export default function AdminUsersPage() {
                 const MemberIcon = membershipCfg.icon;
 
                 return (
-                  <TableRow key={user.id}>
+                  <TableRow key={user.id} data-testid={`admin-user-row-${user.id}`}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
@@ -387,7 +389,7 @@ export default function AdminUsersPage() {
                         value={user.status || 'active'}
                         onValueChange={(v) => handleStatusChange(user.id, v as UserStatus)}
                       >
-                        <SelectTrigger className="w-[110px] h-8">
+                        <SelectTrigger data-testid={`admin-user-status-${user.id}`} className="w-[110px] h-8">
                           <Badge className={`${statusCfg.color} flex items-center gap-1`}>
                             <StatusIcon className="h-3 w-3 flex-shrink-0" />
                             <span>{statusCfg.label}</span>
@@ -420,7 +422,7 @@ export default function AdminUsersPage() {
                         value={user.membership_level || 'free'}
                         onValueChange={(v) => handleMembershipChange(user.id, v as MembershipLevel)}
                       >
-                        <SelectTrigger className="w-[140px] h-8">
+                        <SelectTrigger data-testid={`admin-user-membership-${user.id}`} className="w-[140px] h-8">
                           <Badge className={`${membershipCfg.color} flex items-center gap-1`}>
                             <MemberIcon className="h-3 w-3 flex-shrink-0" />
                             <span>{membershipCfg.label}</span>
@@ -453,7 +455,7 @@ export default function AdminUsersPage() {
                         value={user.role}
                         onValueChange={(v) => handleRoleChange(user.id, v as UserRole)}
                       >
-                        <SelectTrigger className="w-[100px] h-8">
+                        <SelectTrigger data-testid={`admin-user-role-${user.id}`} className="w-[100px] h-8">
                           <RoleBadge role={user.role} />
                         </SelectTrigger>
                         <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
@@ -480,6 +482,7 @@ export default function AdminUsersPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Button
+                          data-testid={`admin-user-detail-${user.id}`}
                           variant="outline"
                           size="sm"
                           onClick={() => openUserDetail(user.id)}
@@ -489,6 +492,7 @@ export default function AdminUsersPage() {
                           详情
                         </Button>
                         <Button
+                          data-testid={`admin-user-credit-${user.id}`}
                           variant="outline"
                           size="sm"
                           onClick={() => {
