@@ -54,6 +54,22 @@ interface RuntimeModelConfig {
   enableWebSearch: boolean;
 }
 
+async function getUserAccountStatus(supabase: any, userId: string): Promise<'active' | 'disabled' | 'banned'> {
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('status')
+    .eq('id', userId)
+    .single();
+
+  if (error || !profile) {
+    throw new Error('用户资料不存在');
+  }
+
+  if (profile.status === 'disabled') return 'disabled';
+  if (profile.status === 'banned') return 'banned';
+  return 'active';
+}
+
 function estimateTokens(text: string): number {
   const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
   const otherChars = text.length - chineseChars;
@@ -310,6 +326,20 @@ export async function POST(request: NextRequest) {
       supabase,
       userId,
     });
+
+    const userStatus = await getUserAccountStatus(supabase, userId);
+    if (userStatus === 'disabled') {
+      return new Response(
+        JSON.stringify({ error: '账号已被禁用，请联系管理员' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (userStatus === 'banned') {
+      return new Response(
+        JSON.stringify({ error: '账号已被封禁' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
     if (!rateLimitResult.success) {

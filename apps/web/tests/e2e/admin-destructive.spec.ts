@@ -49,8 +49,86 @@ async function readLatestPromptNameForUser(page: import('@playwright/test').Page
   return promptName;
 }
 
+async function readCreditsFromUserRow(row: import('@playwright/test').Locator) {
+  const creditsCell = row.locator('td').nth(4);
+  const rawText = await creditsCell.textContent();
+  return Number((rawText ?? '').replace(/[^\d-]/g, ''));
+}
+
+async function adjustUserCredits(
+  page: import('@playwright/test').Page,
+  userId: string,
+  amount: number,
+  reason: string,
+) {
+  const creditButton = page.getByTestId(`admin-user-credit-${userId}`);
+  await creditButton.click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+  await page.locator('input[type="number"]').fill(String(amount));
+  await page.locator('input[placeholder="奖励积分、退款等..."]').fill(reason);
+  const adjustResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/trpc/admin.adjustUserCredits') &&
+      response.request().method() === 'POST',
+    { timeout: 20000 },
+  );
+  await page.getByRole('button', { name: '确认调整' }).click();
+  const adjustResponse = await adjustResponsePromise;
+  expect(adjustResponse.status()).toBe(200);
+  await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
+}
+
+async function ensureUserCreditsAtLeast(
+  page: import('@playwright/test').Page,
+  userId: string,
+  minimumCredits: number,
+) {
+  const targetRow = page.getByTestId(`admin-user-row-${userId}`);
+  const currentCredits = await readCreditsFromUserRow(targetRow);
+  if (currentCredits >= minimumCredits) {
+    return 0;
+  }
+
+  const delta = minimumCredits - currentCredits;
+  await adjustUserCredits(page, userId, delta, `Destructive parity top-up ${Date.now()}`);
+  await expect.poll(async () => readCreditsFromUserRow(targetRow), { timeout: 15000 }).toBeGreaterThanOrEqual(minimumCredits);
+  return delta;
+}
+
+function normalizeUserStatusLabel(label: string | null | undefined): '正常' | '禁用' | '封禁' {
+  if (label?.includes('封禁')) return '封禁';
+  if (label?.includes('禁用')) return '禁用';
+  return '正常';
+}
+
 function normalizeUserRoleLabel(label: string | null | undefined): '管理员' | '普通用户' {
   return label?.includes('管理员') ? '管理员' : '普通用户';
+}
+
+async function selectAdminUserStatus(
+  page: import('@playwright/test').Page,
+  userId: string,
+  targetStatusLabel: '正常' | '禁用' | '封禁',
+) {
+  const statusTrigger = page.getByTestId(`admin-user-status-${userId}`);
+  const currentLabel = normalizeUserStatusLabel(await statusTrigger.textContent());
+  if (currentLabel === targetStatusLabel) {
+    return;
+  }
+
+  const updateResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/trpc/admin.updateUserStatus') &&
+      response.request().method() === 'POST',
+    { timeout: 30000 },
+  );
+  await statusTrigger.click();
+  await page.getByRole('option', { name: targetStatusLabel }).click();
+  const updateResponse = await updateResponsePromise;
+  expect(updateResponse.status()).toBe(200);
+  await expect
+    .poll(async () => normalizeUserStatusLabel(await statusTrigger.textContent()), { timeout: 15000 })
+    .toBe(targetStatusLabel);
 }
 
 async function selectAdminUserRole(
@@ -77,6 +155,63 @@ async function selectAdminUserRole(
   await expect
     .poll(async () => normalizeUserRoleLabel(await roleTrigger.textContent()), { timeout: 15000 })
     .toBe(targetRoleLabel);
+}
+
+async function sendChatPromptExpectError(
+  page: import('@playwright/test').Page,
+  prompt: string,
+  expectedStatus: number,
+) {
+  const streamResult = await sendChatPromptThroughAuthenticatedSession(page, prompt);
+  expect(streamResult.status).toBe(expectedStatus);
+  return streamResult.body;
+}
+
+async function sendChatPromptThroughAuthenticatedSession(
+  page: import('@playwright/test').Page,
+  prompt: string,
+) {
+  await gotoWithBypass(page, '/landing');
+  await expect(page).toHaveURL(/\/landing/);
+
+  return page.evaluate(async (message) => {
+    const authCookieEntry = document.cookie
+      .split('; ')
+      .find((entry) => entry.includes('-auth-token='));
+
+    if (!authCookieEntry) {
+      return { status: 0, body: 'Missing auth cookie' };
+    }
+
+    const rawCookieValue = decodeURIComponent(authCookieEntry.split('=').slice(1).join('='));
+    let accessToken = '';
+
+    if (rawCookieValue.startsWith('base64-')) {
+      const parsed = JSON.parse(atob(rawCookieValue.slice(7)));
+      accessToken = parsed.access_token ?? '';
+    }
+
+    if (!accessToken) {
+      return { status: 0, body: 'Missing access token' };
+    }
+
+    const response = await fetch('/api/ai/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        message,
+        requestId: crypto.randomUUID(),
+      }),
+    });
+
+    return {
+      status: response.status,
+      body: await response.text(),
+    };
+  }, prompt);
 }
 
 test.describe('Admin Destructive Flows', () => {
@@ -816,6 +951,94 @@ test.describe('Admin Destructive Flows', () => {
           role: 'admin',
           route: '/admin/users,/admin,/access-denied',
           expected: 'Admin users can temporarily promote the configured E2E user to admin, verify the user gains /admin access, then restore the original role and confirm access is revoked again.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should disable the configured E2E user, block chat requests, then restore the account status', async ({ browser, page }, testInfo) => {
+    test.skip(
+      !destructiveGateEnabled,
+      'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
+    );
+    test.setTimeout(90000);
+
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Admin user status rollback flow completed';
+    const targetEmail = getCredentials('user').email;
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    let targetUserId = '';
+    let originalStatus: '正常' | '禁用' | '封禁' = '正常';
+    let creditedDelta = 0;
+
+    try {
+      steps.push('Open /admin/users and locate the configured E2E user');
+      await gotoWithBypass(page, '/admin/users');
+      await expect(page).toHaveURL(/\/admin\/users/);
+      await page.getByTestId('admin-users-search').fill(targetEmail);
+      const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
+      await expect(targetRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await targetRow.getAttribute('data-testid');
+      targetUserId = rowTestId?.replace('admin-user-row-', '') ?? '';
+      expect(targetUserId).not.toBe('');
+
+      originalStatus = normalizeUserStatusLabel(
+        await page.getByTestId(`admin-user-status-${targetUserId}`).textContent(),
+      );
+
+      steps.push('Normalize the target user back to an active baseline and ensure enough credits for a control request');
+      await selectAdminUserStatus(page, targetUserId, '正常');
+      creditedDelta = await ensureUserCreditsAtLeast(page, targetUserId, 120);
+
+      steps.push('Disable the target user account in /admin/users');
+      await selectAdminUserStatus(page, targetUserId, '禁用');
+
+      steps.push('Verify authenticated stream requests are rejected with a disabled-account error while the account is disabled');
+      const disabledPrompt = `Parity disabled user ${Date.now()}`;
+      const disabledError = await sendChatPromptExpectError(userPage, disabledPrompt, 403);
+      expect(disabledError).toContain('账号已被禁用，请联系管理员');
+
+      steps.push('Restore the account to active and verify authenticated stream requests succeed again');
+      await selectAdminUserStatus(page, targetUserId, '正常');
+      const restoredPrompt = `Parity restored user ${Date.now()}`;
+      const restoredResponse = await sendChatPromptThroughAuthenticatedSession(userPage, restoredPrompt);
+      expect(restoredResponse.status).toBe(200);
+      expect(restoredResponse.body).toContain('"type":"init"');
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      actual = `User ${targetEmail} disabled and restored successfully`;
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown admin user status rollback failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (targetUserId) {
+        await gotoWithBypass(page, '/admin/users').catch(() => undefined);
+        await page.getByTestId('admin-users-search').fill(targetEmail).catch(() => undefined);
+        await selectAdminUserStatus(page, targetUserId, originalStatus).catch(() => undefined);
+        if (creditedDelta > 0) {
+          await adjustUserCredits(
+            page,
+            targetUserId,
+            -creditedDelta,
+            `Destructive parity credit rollback ${Date.now()}`,
+          ).catch(() => undefined);
+        }
+      }
+      await userContext.close();
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-user-status-rollback',
+          role: 'admin',
+          route: '/admin/users,/chat',
+          expected: 'Admin users can temporarily disable the configured E2E user, verify chat requests are rejected with a disabled-account error, then restore the account status and confirm chat works again.',
         },
         actual,
         steps,

@@ -47,10 +47,11 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   // Try to get user profile (foreign keys reference profiles.id)
   let profileId = ctx.user.id;
   let userRole: 'user' | 'admin' = 'user';
+  let userStatus: 'active' | 'disabled' | 'banned' = 'active';
 
   const { data: profile, error: profileError } = await ctx.supabase
     .from('profiles')
-    .select('id, role, credits')
+    .select('id, role, credits, status')
     .eq('id', ctx.user.id)
     .single();
 
@@ -69,7 +70,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
           role: 'user',
           // credits property omitted to use database default of 100
         })
-        .select('id, role, credits')
+        .select('id, role, credits, status')
         .single();
 
       if (createError) {
@@ -79,13 +80,14 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
         if (createError.code === '23505') {
           const { data: existingProfile } = await ctx.supabase
             .from('profiles')
-            .select('id, role, credits')
+            .select('id, role, credits, status')
             .eq('id', ctx.user.id)
             .single();
 
           if (existingProfile) {
             profileId = existingProfile.id;
             userRole = existingProfile.role || 'user';
+            userStatus = existingProfile.status || 'active';
           } else {
             throw new TRPCError({
               code: 'INTERNAL_SERVER_ERROR',
@@ -101,6 +103,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       } else if (newProfile) {
         profileId = newProfile.id;
         userRole = newProfile.role || 'user';
+        userStatus = newProfile.status || 'active';
       }
     } else {
       // Other database error
@@ -113,6 +116,21 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   } else {
     profileId = profile.id;
     userRole = profile.role || 'user';
+    userStatus = profile.status || 'active';
+  }
+
+  if (userStatus === 'disabled') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '账号已被禁用，请联系管理员',
+    });
+  }
+
+  if (userStatus === 'banned') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '账号已被封禁',
+    });
   }
 
   return next({
@@ -121,6 +139,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       user: ctx.user,
       profileId,
       userRole,
+      userStatus,
     },
   });
 });
