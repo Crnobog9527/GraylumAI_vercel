@@ -10,10 +10,6 @@
     {
       "path": "/api/cron/diagnostics",
       "schedule": "0 10 * * *"
-    },
-    {
-      "path": "/api/cron/tickets/auto-close",
-      "schedule": "0 0 * * *"
     }
   ]
 }

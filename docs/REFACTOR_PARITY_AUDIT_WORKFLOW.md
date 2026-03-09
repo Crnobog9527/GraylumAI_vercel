@@ -187,8 +187,8 @@ pnpm audit:parity:extended
 
 - 旧版 Base44 仓库存在独立 `autoCloseTickets` 云函数，会在后台首次回复后开始计时，若 48 小时内用户没有再回复则自动关闭工单并写入系统消息。
 - 新仓库现已补上等价实现：`packages/api/src/services/ticketAutoClose.ts` + `apps/web/src/app/api/cron/tickets/auto-close/route.ts`。
-- 当前部署在 Vercel Hobby 计划下，因此 cron 只能按日执行；规则本身已恢复，但执行粒度仍比“精确 48 小时后关闭”更粗。
-- 如果继续采用 Supabase 作为主调度器，仓库中已准备 `packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`，可把小时级调度迁移到 `pg_cron`，再将 Vercel 的日级 fallback 下线。
+- 当前小时级调度已迁移到 Supabase `pg_cron`：`packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql` 会创建数据库函数并注册 `ticket-auto-close-hourly`。
+- Vercel route 继续保留为人工兜底入口，但 `vercel.json` 中不再为 ticket auto-close 注册定时调度。
 
 ### 2. 冻结旧仓库基线
 

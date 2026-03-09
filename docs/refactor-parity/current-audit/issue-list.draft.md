@@ -19,7 +19,7 @@
 - 2026-03-08 对最新预览 `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果为：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`。
 - 2026-03-09 对最新预览 `https://graylum-ai-vercel-v1-d7i5kvk9w-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果为：`admin-destructive 12/12`。
 - 旧的“本地地域限制导致聊天 403”结论已废弃，因为它不符合当前规定的验收方法。
-- 当前没有新的线上主路径阻塞 bug。旧版工单 `48` 小时自动关闭逻辑已经恢复基础实现，但受当前 Vercel Hobby cron 粒度限制，仍保留一个平台层面的执行精度问题。
+- 当前没有新的线上主路径阻塞 bug。旧版工单 `48` 小时自动关闭逻辑已经恢复，并已切换到 Supabase 小时级 `pg_cron` 调度。
 
 ## 已修复记录：0 积分发送前拦截
 
@@ -55,21 +55,18 @@
 - 证据：`.audit-output/legacy-repos/graylumAi-backup/functions/autoCloseTickets.ts`、`packages/api/src/services/ticketAutoClose.ts`、`packages/api/src/services/__tests__/ticketAutoClose.test.ts`、`apps/web/src/app/api/cron/tickets/auto-close/route.ts`
 - 建议归属：后端 / 平台配置
 
-## [P2] 工单自动关闭已恢复，但当前部署计划只能按日执行 cron
+## 已修复记录：工单自动关闭调度从 Vercel Hobby 迁移到 Supabase `pg_cron`
 
 - 影响范围：工单自动关闭时点、客服 SLA 精度
 - 复现步骤：
-  1. 查看 `apps/web/vercel.json`
-  2. 当前 `/api/cron/tickets/auto-close` 使用 `0 0 * * *`
-  3. 尝试改为每小时执行会被 Vercel Hobby 计划拒绝部署
-- 当前缓解方案：
-  1. 仓库已新增 `packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`
-  2. 该迁移会把调度迁到 Supabase `pg_cron`，按每小时执行数据库函数
-  3. 在目标 Supabase 项目实际应用并验证前，Vercel 日级 fallback 仍应保留
+  1. 应用 `packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`
+  2. 数据库会创建 `public.auto_close_stale_tickets(48)`
+  3. 同时注册 `cron.job.ticket-auto-close-hourly`
+  4. `apps/web/vercel.json` 中不再保留 ticket auto-close 的定时调度，只保留 Vercel route 作为人工兜底入口
 - 旧版本期望（来自旧仓库）：后台首次回复后 48 小时未收到用户回复时，系统应尽快自动关闭工单
-- 新站实际：规则逻辑已恢复，但由于 cron 只能每日触发，最坏情况下关闭动作会比 48 小时阈值晚一个 cron 周期
-- 证据：`apps/web/vercel.json`、Vercel 部署报错 `Hobby accounts are limited to daily cron jobs`、`packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`
-- 建议归属：平台配置 / 运维
+- 修复后实际：当前小时级调度已由 Supabase `pg_cron` 承担，已读验证确认函数存在且 job 处于 `active=true`
+- 证据：`packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`、`apps/web/vercel.json`
+- 建议归属：后端 / 运维
 
 ## [P2] 危险操作套件已可在线执行，但仍按设计保持独立闸门，不纳入日常回归
 
