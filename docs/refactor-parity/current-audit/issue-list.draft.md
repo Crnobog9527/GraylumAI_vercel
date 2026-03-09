@@ -62,9 +62,13 @@
   1. 查看 `apps/web/vercel.json`
   2. 当前 `/api/cron/tickets/auto-close` 使用 `0 0 * * *`
   3. 尝试改为每小时执行会被 Vercel Hobby 计划拒绝部署
+- 当前缓解方案：
+  1. 仓库已新增 `packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`
+  2. 该迁移会把调度迁到 Supabase `pg_cron`，按每小时执行数据库函数
+  3. 在目标 Supabase 项目实际应用并验证前，Vercel 日级 fallback 仍应保留
 - 旧版本期望（来自旧仓库）：后台首次回复后 48 小时未收到用户回复时，系统应尽快自动关闭工单
 - 新站实际：规则逻辑已恢复，但由于 cron 只能每日触发，最坏情况下关闭动作会比 48 小时阈值晚一个 cron 周期
-- 证据：`apps/web/vercel.json`、Vercel 部署报错 `Hobby accounts are limited to daily cron jobs`
+- 证据：`apps/web/vercel.json`、Vercel 部署报错 `Hobby accounts are limited to daily cron jobs`、`packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql`
 - 建议归属：平台配置 / 运维
 
 ## [P2] 危险操作套件已可在线执行，但仍按设计保持独立闸门，不纳入日常回归
