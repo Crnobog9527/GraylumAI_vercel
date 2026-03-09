@@ -179,9 +179,14 @@ pnpm audit:parity:extended
 - `pnpm audit:parity:round2`
   管理员配置页，当前已覆盖 `settings / announcements / packages / prompts` 的进入、修改、保存、刷新后持久化、测试数据清理
 - `pnpm audit:parity:round3`
-  管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流
+  管理员业务页，当前已覆盖 `diagnostics / users / transactions / finance / invitations / costs / performance / tickets` 的核心读写或标签筛选流；其中 `tickets` 已补齐“用户创建工单 -> 管理员改状态并回复 -> 用户侧可见管理员回复”的线上闭环
 - `pnpm audit:parity:destructive`
   默认仍独立于日常回归；显式设置 `ENABLE_PARITY_DESTRUCTIVE_E2E=true` 后，会在 Vercel Preview 上执行已隔离的真实高风险动作，当前覆盖 `admin/settings` 对话历史清理、`admin/diagnostics` 旧记录清理、“创建临时模型 -> 用户端出现 -> 停用 -> 用户端消失 -> 恢复 -> 用户端回归 -> 删除清理”的可回滚模型状态闭环、“创建临时横幅公告 -> 用户端可见 -> 下线隐藏 -> 恢复显示 -> 删除清理”的公告发布回滚闭环、“创建临时积分包 -> 用户端订阅页可见 -> 下架隐藏 -> 恢复显示 -> 删除清理”的套餐发布回滚闭环、“禁用现有会员计划 -> 用户端订阅页消失 -> 恢复启用”的会员计划回滚闭环、“将普通用户临时提升为管理员 -> 用户端获得 `/admin` 访问权限 -> 恢复普通用户 -> 再次失去 `/admin` 访问权限”的用户角色权限回滚闭环、“将普通用户临时设为禁用 -> 用户会话对 `/api/ai/stream` 返回禁用错误 -> 恢复正常状态后再次返回 200”的账号状态回滚闭环，以及“创建临时系统提示词 -> 聊天运行时命中该提示词 -> 禁用后切换到其他运行时提示词 -> 恢复后再次命中 -> 删除清理”的系统提示词运行时联动闭环
+
+额外注意：
+
+- 旧版 Base44 仓库存在独立 `autoCloseTickets` 云函数，会在后台首次回复后开始计时，若 48 小时内用户没有再回复则自动关闭工单并写入系统消息。
+- 新仓库当前未发现等价的 cron / serverless job / 后端服务实现，因此这条旧版工单生命周期规则应单独作为回归缺口跟踪，而不是继续归类为“待测试”。
 
 ### 2. 冻结旧仓库基线
 

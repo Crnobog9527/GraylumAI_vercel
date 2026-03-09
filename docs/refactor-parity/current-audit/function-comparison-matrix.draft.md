@@ -5,9 +5,9 @@
 > 新站证据来源：
 > - `pnpm audit:parity:extended` 线上预览运行结果，目录 `.audit-output/refactor-parity/20260307-212219/`
 > - 2026-03-07 Vercel Preview 定向验证：
->   `parity-extended 6/6`、`user-extended 7/7`、`admin-config 6/6`、`admin-ops 5/5`、`user-supplemental 6/6`
+>   `parity-extended 6/6`、`user-extended 7/7`、`admin-config 6/6`、`admin-ops 6/6`、`user-supplemental 6/6`
 > - 预览地址：
->   `https://graylum-ai-vercel-v1-4bnf8wxv9-simons-projects-bfe3e99f.vercel.app`
+>   `https://graylum-ai-vercel-v1-4natgwj9o-simons-projects-bfe3e99f.vercel.app`
 
 | 模块 | 功能 | 旧版本结果 | 新站结果 | 是否一致 | 严重级别 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -45,16 +45,19 @@
 | 后台 | 用户角色与后台权限联动 | 旧版后台存在用户角色管理能力 | 第四轮危险套件已验证将普通用户临时提升为管理员后可访问 `/admin`，恢复普通用户后再次跳回 `/access-denied` | 一致 | - | 已完成线上取证 |
 | 后台 | 用户状态与聊天权限联动 | 旧版后台存在账号状态管理能力 | 第四轮危险套件已验证将普通用户临时设为禁用后，其认证会话对 `/api/ai/stream` 返回 `账号已被禁用，请联系管理员`，恢复正常后再次返回 200 | 一致 | - | 已完成线上取证 |
 | 后台 | 用户详情抽屉 | 旧版支持查看用户详情 | 第三轮第 3 轮管理员业务回归已验证按 E2E 用户筛选并打开用户详情 | 一致 | - | 已完成线上取证 |
+| 后台 | 工单状态流转与管理员回复 | 旧版支持后台人员处理工单并继续在工单中回复 | 2026-03-09 已在最新 Vercel Preview 上验证：用户创建工单后，管理员可在 `/admin/tickets` 中打开详情、改为 `处理中`、发送回复，用户返回 `/profile?tab=tickets` 可见管理员回复 | 一致 | - | `admin-ops` 已从 `5/5` 扩展到 `6/6` |
 | 后台 | 运营读页交互 | 旧版存在交易、财务、邀请码、成本、性能、工单等运营页 | 第三轮第 3 轮管理员业务回归已验证这些页面的进入、主标签切换、搜索或刷新控件 | 一致 | - | 当前以读操作为主，不含危险写入 |
+| 后台 | 工单 48 小时无用户回复自动关闭 | 旧仓库存在独立 `autoCloseTickets` 云函数：从后台首次回复开始计时，48 小时无用户回复则自动关闭并写入系统消息 | 新仓库未找到等价的定时任务、Serverless Cron 或票据服务逻辑；当前仅支持手动关闭工单 | 缺失 | P1 | 这是旧版明确存在的行为，不应继续停留在“待验证” |
 
 ## 当前结论
 
 - 首轮关键回归 `15/15` 通过，第二轮扩展回归 `6/6` 通过
 - 第三轮新增定向回归已通过：`user-extended 7/7`、`admin-config 6/6`、`admin-ops 5/5`
+- 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-4natgwj9o-simons-projects-bfe3e99f.vercel.app` 的管理员工单闭环定向复测结果：`admin-ops ticket flow 1/1`
 - 第三轮用户补充回归结果为 `user-supplemental 6/6`
 - 2026-03-08 对最新 Vercel Preview `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`
 - 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-d7i5kvk9w-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果：`admin-destructive 12/12`
 - 核心结论已经改为“必须以 Vercel 预览环境作为验收基线”，本地地域限制不再作为产品缺陷证据
 - 当前未发现登录、聊天、后台三条主路径的线上阻塞性故障
 - 已确认的结构性差异有 1 项：旧版是 Base44 托管登录入口，新版改为 `graylum.com/www.graylum.com` 公开落地页 + `app.graylum.com` 应用后台
-- 当前剩余缺口已缩小到更高风险的后台不可逆写操作；聊天批量管理、清理类危险操作、模型停用/恢复回滚、公告发布/下线回滚、积分包发布/下架回滚、会员计划禁用/恢复回滚、用户角色权限回滚、用户状态权限回滚，以及系统提示词运行时联动回滚都已在线上预览环境完成首轮取证
+- 绝大多数用户端和后台端可见能力已经完成线上取证；当前新增发现的明确缺口不是 UI 流，而是旧版遗留的“工单 48 小时无用户回复自动关闭”后台定时逻辑在新仓库中缺失

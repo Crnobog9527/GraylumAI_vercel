@@ -297,7 +297,7 @@ export default function AdminTicketsPage() {
                   const CategoryIcon = categoryInfo.icon;
                   const PriorityIcon = priorityInfo.icon;
                   return (
-                    <TableRow key={ticket.id}>
+                    <TableRow key={ticket.id} data-testid={`admin-ticket-row-${ticket.id}`}>
                       {/* Ticket ID */}
                       <TableCell>
                         <Tooltip>
@@ -388,6 +388,7 @@ export default function AdminTicketsPage() {
                       {/* Actions */}
                       <TableCell>
                         <Button
+                          data-testid={`admin-ticket-open-${ticket.id}`}
                           variant="outline"
                           size="sm"
                           onClick={() => openTicketDetail(ticket)}
@@ -413,10 +414,11 @@ export default function AdminTicketsPage() {
 
         {/* Ticket Detail Sheet */}
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetContent
-            className="w-[600px] sm:max-w-[600px] overflow-y-auto"
-            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}
-          >
+        <SheetContent
+          data-testid="admin-ticket-detail-sheet"
+          className="w-[600px] sm:max-w-[600px] overflow-y-auto"
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}
+        >
             <SheetHeader>
               <SheetTitle style={{ color: 'var(--text-primary)' }}>工单详情</SheetTitle>
             </SheetHeader>
@@ -443,6 +445,7 @@ export default function AdminTicketsPage() {
                   {/* Quick Mark Resolved Button */}
                   {selectedTicket.status !== 'closed' && (
                     <Button
+                      data-testid="admin-ticket-mark-resolved"
                       size="sm"
                       onClick={handleMarkResolved}
                       disabled={updateStatus.isPending}
@@ -589,7 +592,7 @@ export default function AdminTicketsPage() {
                     value={selectedTicket.status}
                     onValueChange={(value) => handleStatusChange(selectedTicket.id, value as TicketStatus)}
                   >
-                    <SelectTrigger className="bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                    <SelectTrigger data-testid="admin-ticket-status-select" className="bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -694,12 +697,14 @@ export default function AdminTicketsPage() {
                       发送回复 (以管理员身份)
                     </h4>
                     <Textarea
+                      data-testid="admin-ticket-reply-input"
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
                       placeholder="输入回复内容..."
                       className="min-h-[100px] bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
                     />
                     <Button
+                      data-testid="admin-ticket-reply-submit"
                       onClick={handleReply}
                       disabled={!replyContent.trim() || replyMutation.isPending}
                       className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
