@@ -40,3 +40,6 @@ export * from './costCalculator';
 
 // 诊断服务
 export * from './diagnostics';
+
+// 工单自动关闭服务
+export * from './ticketAutoClose';

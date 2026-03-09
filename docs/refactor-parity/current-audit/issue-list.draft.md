@@ -19,7 +19,7 @@
 - 2026-03-08 对最新预览 `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果为：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`。
 - 2026-03-09 对最新预览 `https://graylum-ai-vercel-v1-d7i5kvk9w-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果为：`admin-destructive 12/12`。
 - 旧的“本地地域限制导致聊天 403”结论已废弃，因为它不符合当前规定的验收方法。
-- 当前没有新的线上主路径阻塞 bug，但新发现了一个旧版能力回归缺口：工单 `48` 小时自动关闭逻辑在新仓库中缺失。
+- 当前没有新的线上主路径阻塞 bug。旧版工单 `48` 小时自动关闭逻辑已经恢复基础实现，但受当前 Vercel Hobby cron 粒度限制，仍保留一个平台层面的执行精度问题。
 
 ## 已修复记录：0 积分发送前拦截
 
@@ -42,18 +42,30 @@
 - 未登录用户如果直接访问 `app.graylum.com` 下的后台页面，应被重定向到登录/注册页。
 - 这属于已确认产品规则，不再作为“需修复差异”跟踪。
 
-## [P1] 旧版工单“管理员首次回复后 48 小时无用户回复自动关闭”逻辑在新仓库中缺失
+## 已修复记录：工单“管理员首次回复后 48 小时无用户回复自动关闭”逻辑
 
 - 影响范围：工单生命周期、客服 SLA、工单列表堆积、用户超时提醒
 - 复现步骤：
   1. 查看旧仓库 `.audit-output/legacy-repos/graylumAi-backup/functions/autoCloseTickets.ts`
   2. 确认旧版会在后台首次回复后开始计时，若 48 小时内用户没有再回复，则自动关闭工单并写入系统消息
-  3. 在新仓库搜索 `packages/api`、`apps/web/src/app/api/cron`、`scripts` 中与 ticket auto-close 对应的逻辑
-  4. 结果仅找到手动 `closeTicket`、管理员 `updateTicketStatus/replyToTicket` 和诊断 cron，没有找到等价定时任务或后台服务
+  3. 新仓库现已新增 `packages/api/src/services/ticketAutoClose.ts` 与 `apps/web/src/app/api/cron/tickets/auto-close/route.ts`
+  4. 单测已覆盖核心规则，线上 Preview 已验证 cron 路由可正常执行并返回 `200`
 - 旧版本期望（来自旧仓库）：`autoCloseTickets` 定时任务会自动关闭超时工单，并追加“因超过 48 小时无用户回复已自动关闭”的系统消息
-- 新站实际：当前仅支持用户或管理员手动关闭工单，没有发现自动关闭实现，因而这条旧版规则目前无法生效
-- 证据：`.audit-output/legacy-repos/graylumAi-backup/functions/autoCloseTickets.ts`、`packages/api/src/routers/ticket.ts`、`packages/api/src/routers/admin.ts`、`apps/web/src/app/api/cron/diagnostics/route.ts`
-- 建议归属：后端 / 定时任务
+- 修复后实际：新站已恢复后台自动关闭逻辑，规则与旧版一致；但当前 Vercel Hobby 计划只允许每日 cron，因此关闭动作的执行时点可能晚于 48 小时阈值，不是精确到小时的触发
+- 证据：`.audit-output/legacy-repos/graylumAi-backup/functions/autoCloseTickets.ts`、`packages/api/src/services/ticketAutoClose.ts`、`packages/api/src/services/__tests__/ticketAutoClose.test.ts`、`apps/web/src/app/api/cron/tickets/auto-close/route.ts`
+- 建议归属：后端 / 平台配置
+
+## [P2] 工单自动关闭已恢复，但当前部署计划只能按日执行 cron
+
+- 影响范围：工单自动关闭时点、客服 SLA 精度
+- 复现步骤：
+  1. 查看 `apps/web/vercel.json`
+  2. 当前 `/api/cron/tickets/auto-close` 使用 `0 0 * * *`
+  3. 尝试改为每小时执行会被 Vercel Hobby 计划拒绝部署
+- 旧版本期望（来自旧仓库）：后台首次回复后 48 小时未收到用户回复时，系统应尽快自动关闭工单
+- 新站实际：规则逻辑已恢复，但由于 cron 只能每日触发，最坏情况下关闭动作会比 48 小时阈值晚一个 cron 周期
+- 证据：`apps/web/vercel.json`、Vercel 部署报错 `Hobby accounts are limited to daily cron jobs`
+- 建议归属：平台配置 / 运维
 
 ## [P2] 危险操作套件已可在线执行，但仍按设计保持独立闸门，不纳入日常回归
 

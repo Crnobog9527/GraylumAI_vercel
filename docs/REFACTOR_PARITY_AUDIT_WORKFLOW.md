@@ -186,7 +186,8 @@ pnpm audit:parity:extended
 额外注意：
 
 - 旧版 Base44 仓库存在独立 `autoCloseTickets` 云函数，会在后台首次回复后开始计时，若 48 小时内用户没有再回复则自动关闭工单并写入系统消息。
-- 新仓库当前未发现等价的 cron / serverless job / 后端服务实现，因此这条旧版工单生命周期规则应单独作为回归缺口跟踪，而不是继续归类为“待测试”。
+- 新仓库现已补上等价实现：`packages/api/src/services/ticketAutoClose.ts` + `apps/web/src/app/api/cron/tickets/auto-close/route.ts`。
+- 当前部署在 Vercel Hobby 计划下，因此 cron 只能按日执行；规则本身已恢复，但执行粒度仍比“精确 48 小时后关闭”更粗。
 
 ### 2. 冻结旧仓库基线
 

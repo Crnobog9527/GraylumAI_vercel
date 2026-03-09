@@ -47,17 +47,18 @@
 | 后台 | 用户详情抽屉 | 旧版支持查看用户详情 | 第三轮第 3 轮管理员业务回归已验证按 E2E 用户筛选并打开用户详情 | 一致 | - | 已完成线上取证 |
 | 后台 | 工单状态流转与管理员回复 | 旧版支持后台人员处理工单并继续在工单中回复 | 2026-03-09 已在最新 Vercel Preview 上验证：用户创建工单后，管理员可在 `/admin/tickets` 中打开详情、改为 `处理中`、发送回复，用户返回 `/profile?tab=tickets` 可见管理员回复 | 一致 | - | `admin-ops` 已从 `5/5` 扩展到 `6/6` |
 | 后台 | 运营读页交互 | 旧版存在交易、财务、邀请码、成本、性能、工单等运营页 | 第三轮第 3 轮管理员业务回归已验证这些页面的进入、主标签切换、搜索或刷新控件 | 一致 | - | 当前以读操作为主，不含危险写入 |
-| 后台 | 工单 48 小时无用户回复自动关闭 | 旧仓库存在独立 `autoCloseTickets` 云函数：从后台首次回复开始计时，48 小时无用户回复则自动关闭并写入系统消息 | 新仓库未找到等价的定时任务、Serverless Cron 或票据服务逻辑；当前仅支持手动关闭工单 | 缺失 | P1 | 这是旧版明确存在的行为，不应继续停留在“待验证” |
+| 后台 | 工单 48 小时无用户回复自动关闭 | 旧仓库存在独立 `autoCloseTickets` 云函数：从后台首次回复开始计时，48 小时无用户回复则自动关闭并写入系统消息 | 已恢复实现：新仓库新增 `TicketAutoCloseService` 和 `/api/cron/tickets/auto-close`，单测已覆盖“无管理员回复不关闭 / 超时自动关闭 / 用户回复后重置计时”，线上 Preview 路由返回 `200`；当前 Vercel Hobby 计划仅允许按日执行 cron | 部分一致 | P2 | 规则本身已恢复，但实际关闭时点粒度受部署计划限制，最坏会晚于 48 小时阈值 |
 
 ## 当前结论
 
 - 首轮关键回归 `15/15` 通过，第二轮扩展回归 `6/6` 通过
-- 第三轮新增定向回归已通过：`user-extended 7/7`、`admin-config 6/6`、`admin-ops 5/5`
+- 第三轮新增定向回归已通过：`user-extended 7/7`、`admin-config 6/6`、`admin-ops 6/6`
 - 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-4natgwj9o-simons-projects-bfe3e99f.vercel.app` 的管理员工单闭环定向复测结果：`admin-ops ticket flow 1/1`
+- 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-17cq55n1b-simons-projects-bfe3e99f.vercel.app` 的工单自动关闭 cron 路由验证结果：`/api/cron/tickets/auto-close -> 200`
 - 第三轮用户补充回归结果为 `user-supplemental 6/6`
 - 2026-03-08 对最新 Vercel Preview `https://graylum-ai-vercel-v1-cnpxb452f-simons-projects-bfe3e99f.vercel.app` 的直连复测结果：`critical 18/18`、`parity-extended 6/6`、`user-extended 7/7`
 - 2026-03-09 对最新 Vercel Preview `https://graylum-ai-vercel-v1-d7i5kvk9w-simons-projects-bfe3e99f.vercel.app` 的危险操作回归结果：`admin-destructive 12/12`
 - 核心结论已经改为“必须以 Vercel 预览环境作为验收基线”，本地地域限制不再作为产品缺陷证据
 - 当前未发现登录、聊天、后台三条主路径的线上阻塞性故障
 - 已确认的结构性差异有 1 项：旧版是 Base44 托管登录入口，新版改为 `graylum.com/www.graylum.com` 公开落地页 + `app.graylum.com` 应用后台
-- 绝大多数用户端和后台端可见能力已经完成线上取证；当前新增发现的明确缺口不是 UI 流，而是旧版遗留的“工单 48 小时无用户回复自动关闭”后台定时逻辑在新仓库中缺失
+- 绝大多数用户端和后台端可见能力已经完成线上取证；旧版遗留的“工单 48 小时无用户回复自动关闭”逻辑已恢复，但在当前 Vercel Hobby 计划下只能按日执行，仍存在执行粒度上的平台限制
