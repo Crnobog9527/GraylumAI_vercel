@@ -15,6 +15,10 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
+    "release:preflight": "bash ./scripts/run-release-preflight.sh",
+    "release:preflight:preview": "bash ./scripts/run-release-preflight.sh --with-preview",
+    "release:preflight:destructive": "bash ./scripts/run-release-preflight.sh --with-preview --with-admin-destructive",
+    "stripe:readiness": "node ./scripts/check-stripe-readiness.mjs",
     "test": "turbo test",
     "test:api": "pnpm --filter @repo/api test:run",
     "db:push": "drizzle-kit push --config=packages/db/drizzle.config.ts"

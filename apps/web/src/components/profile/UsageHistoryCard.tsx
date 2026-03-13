@@ -105,18 +105,10 @@ export const UsageHistoryCard = memo(function UsageHistoryCard({ user }: { user:
           return (
             <div
               key={conv.id}
-              className="flex items-center justify-between p-4 rounded-xl transition-all duration-200"
+              className="flex items-center justify-between p-4 rounded-xl transition-[border-color,transform,box-shadow] duration-200 motion-reduce:transition-none hover:translate-x-1 hover:border-[rgba(255,215,0,0.2)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
               style={{
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border-primary)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(255, 215, 0, 0.2)';
-                e.currentTarget.style.transform = 'translateX(4px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--border-primary)';
-                e.currentTarget.style.transform = 'translateX(0)';
               }}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">

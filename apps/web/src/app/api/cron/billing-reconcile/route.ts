@@ -1,0 +1,87 @@
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { runDailyBillingReconciliation } from '@repo/api/src/services/billingReconciliation';
+import { logger } from '@repo/api/src/services';
+
+const CRON_SECRET = process.env.CRON_SECRET;
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+function isAuthorized(request: Request) {
+  const authHeader = request.headers.get('authorization');
+  if (CRON_SECRET) {
+    return authHeader === `Bearer ${CRON_SECRET}`;
+  }
+
+  const userAgent = request.headers.get('user-agent') ?? '';
+  if (process.env.NODE_ENV === 'production') {
+    return userAgent.includes('vercel-cron');
+  }
+  return true;
+}
+
+export async function GET(request: Request) {
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const startedAt = Date.now();
+
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    logger.system.cronJob('billing-reconcile', 'started');
+    const result = await runDailyBillingReconciliation(supabase);
+
+    if (!result.success) {
+      logger.system.cronJob(
+        'billing-reconcile',
+        'failed',
+        Date.now() - startedAt,
+        result.mismatches.join(' | '),
+        { mismatches: result.mismatches, summary: result.summary },
+      );
+    } else {
+      logger.system.cronJob(
+        'billing-reconcile',
+        'completed',
+        Date.now() - startedAt,
+        undefined,
+        { summary: result.summary },
+      );
+    }
+
+    return NextResponse.json({
+      success: result.success,
+      periodStart: result.periodStart,
+      periodEnd: result.periodEnd,
+      mismatches: result.mismatches,
+      summary: result.summary,
+      timestamp: new Date().toISOString(),
+    }, { status: result.success ? 200 : 500 });
+  } catch (error) {
+    logger.system.cronJob(
+      'billing-reconcile',
+      'failed',
+      Date.now() - startedAt,
+      error instanceof Error ? error.message : 'Unknown error',
+    );
+
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  return GET(request);
+}

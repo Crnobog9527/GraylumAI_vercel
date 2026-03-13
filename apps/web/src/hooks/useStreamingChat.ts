@@ -35,11 +35,13 @@ export interface StreamingChatState {
 }
 
 interface StreamEvent {
-  type: 'init' | 'delta' | 'complete' | 'error';
+  type: 'init' | 'delta' | 'complete' | 'error' | 'search_started' | 'search_finished' | 'route_upgraded';
   conversationId?: string;
   modelUsed?: string;
+  selectedModel?: string;
   requestId?: string;
   content?: string;
+  reasonCodes?: string[];
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -230,6 +232,17 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
                   finalUsage = event.usage;
                   finalCost = event.cost;
                   finalConversationId = event.conversationId;
+                  break;
+
+                case 'route_upgraded':
+                  setState((prev) => ({
+                    ...prev,
+                    modelUsed: event.modelUsed ?? prev.modelUsed,
+                  }));
+                  break;
+
+                case 'search_started':
+                case 'search_finished':
                   break;
 
                 case 'error':

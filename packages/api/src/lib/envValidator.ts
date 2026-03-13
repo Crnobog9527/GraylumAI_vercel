@@ -40,6 +40,21 @@ const envSchema = z.object({
     .string()
     .min(100, 'NEXT_PUBLIC_SUPABASE_ANON_KEY 格式无效'),
 
+  NEXT_PUBLIC_APP_URL: z
+    .string()
+    .url('NEXT_PUBLIC_APP_URL 必须是有效的 URL')
+    .optional(),
+
+  NEXT_PUBLIC_SITE_NAME: z
+    .string()
+    .min(1, 'NEXT_PUBLIC_SITE_NAME 不能为空')
+    .optional(),
+
+  NEXT_PUBLIC_SUPPORT_EMAIL: z
+    .string()
+    .email('NEXT_PUBLIC_SUPPORT_EMAIL 必须是有效的邮箱地址')
+    .optional(),
+
   SUPABASE_SERVICE_ROLE_KEY: z
     .string()
     .min(100, 'SUPABASE_SERVICE_ROLE_KEY 格式无效')
@@ -67,6 +82,22 @@ const envSchema = z.object({
   NEXT_PUBLIC_SENTRY_DSN: z
     .string()
     .url()
+    .optional(),
+
+  // Stripe (可选，启用支付时必需)
+  STRIPE_SECRET_KEY: z
+    .string()
+    .regex(/^sk_(test|live)_/, 'STRIPE_SECRET_KEY 必须是有效的 Stripe Secret Key')
+    .optional(),
+
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z
+    .string()
+    .regex(/^pk_(test|live)_/, 'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 必须是有效的 Stripe Publishable Key')
+    .optional(),
+
+  STRIPE_WEBHOOK_SECRET: z
+    .string()
+    .regex(/^whsec_/, 'STRIPE_WEBHOOK_SECRET 必须以 whsec_ 开头')
     .optional(),
 
   SENTRY_AUTH_TOKEN: rejectDuplicatedEnvPrefix('SENTRY_AUTH_TOKEN')
@@ -134,9 +165,49 @@ export function validateEnv(): ValidationResult {
       warnings.push('生产环境建议配置 Sentry 错误监控');
     }
 
+    if (!process.env.NEXT_PUBLIC_APP_URL) {
+      errors.push('生产环境必须配置 NEXT_PUBLIC_APP_URL');
+    }
+
+    if (!process.env.NEXT_PUBLIC_SITE_NAME) {
+      warnings.push('生产环境建议配置 NEXT_PUBLIC_SITE_NAME');
+    }
+
+    if (!process.env.NEXT_PUBLIC_SUPPORT_EMAIL) {
+      warnings.push('生产环境建议配置 NEXT_PUBLIC_SUPPORT_EMAIL');
+    }
+
     // 检查 Service Role Key
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       warnings.push('生产环境建议配置 SUPABASE_SERVICE_ROLE_KEY');
+    }
+
+    if (process.env.STRIPE_SECRET_KEY?.includes('_test_')) {
+      warnings.push('生产环境检测到 Stripe 测试密钥，请确认是否仍处于 Test Mode');
+    }
+  }
+
+  const hasAnyStripeKey = Boolean(
+    process.env.STRIPE_SECRET_KEY ||
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ||
+    process.env.STRIPE_WEBHOOK_SECRET
+  );
+
+  if (hasAnyStripeKey) {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      errors.push('启用 Stripe 时必须配置 STRIPE_SECRET_KEY');
+    }
+    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+      errors.push('启用 Stripe 时必须配置 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY');
+    }
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      errors.push('启用 Stripe 时必须配置 STRIPE_WEBHOOK_SECRET');
+    }
+    if (!process.env.NEXT_PUBLIC_APP_URL) {
+      errors.push('启用 Stripe 时必须配置 NEXT_PUBLIC_APP_URL');
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      errors.push('启用 Stripe 时必须配置 SUPABASE_SERVICE_ROLE_KEY');
     }
   }
 
@@ -154,6 +225,11 @@ export function validateEnv(): ValidationResult {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
     if (supabaseUrl.includes('localhost') || supabaseUrl.includes('127.0.0.1')) {
       errors.push('生产环境不能使用 localhost Supabase URL');
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+    if (appUrl.includes('localhost') || appUrl.includes('127.0.0.1')) {
+      errors.push('生产环境不能使用 localhost NEXT_PUBLIC_APP_URL');
     }
   }
 
@@ -205,10 +281,16 @@ export function getSafeEnvSummary(): Record<string, string> {
     NODE_ENV: process.env.NODE_ENV ?? 'undefined',
     SUPABASE_URL_SET: process.env.NEXT_PUBLIC_SUPABASE_URL ? '✓' : '✗',
     SUPABASE_ANON_KEY_SET: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✓' : '✗',
+    APP_URL_SET: process.env.NEXT_PUBLIC_APP_URL ? '✓' : '✗',
+    SITE_NAME_SET: process.env.NEXT_PUBLIC_SITE_NAME ? '✓' : '✗',
+    SUPPORT_EMAIL_SET: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ? '✓' : '✗',
     SUPABASE_SERVICE_KEY_SET: process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓' : '✗',
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
     ANTHROPIC_KEY_SET: process.env.ANTHROPIC_API_KEY ? '✓' : '✗',
     OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
+    STRIPE_SECRET_KEY_SET: process.env.STRIPE_SECRET_KEY ? '✓' : '✗',
+    STRIPE_PUBLISHABLE_KEY_SET: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ? '✓' : '✗',
+    STRIPE_WEBHOOK_SECRET_SET: process.env.STRIPE_WEBHOOK_SECRET ? '✓' : '✗',
     SENTRY_DSN_SET: process.env.NEXT_PUBLIC_SENTRY_DSN ? '✓' : '✗',
     SENTRY_AUTH_TOKEN_SET: process.env.SENTRY_AUTH_TOKEN ? '✓' : '✗',
   };

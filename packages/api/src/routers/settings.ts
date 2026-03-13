@@ -1,6 +1,7 @@
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { isStripeCheckoutConfigured } from '../services/stripe';
 
 export const settingsRouter = router({
   /**
@@ -110,9 +111,10 @@ export const settingsRouter = router({
    * 返回活跃的积分加油包供用户购买
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
+    const stripeReady = isStripeCheckoutConfigured();
     const { data, error } = await ctx.supabase
       .from('credit_packages')
-      .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order')
+      .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order, stripe_price_id')
       .eq('active', 'true')
       .order('sort_order', { ascending: true })
       .order('price', { ascending: true });
@@ -130,6 +132,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
+      checkout_ready: stripeReady && Boolean(pkg.stripe_price_id),
     }));
   }),
 
@@ -138,6 +141,7 @@ export const settingsRouter = router({
    * 返回所有会员等级供用户查看和订阅
    */
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
+    const stripeReady = isStripeCheckoutConfigured();
     const { data, error } = await ctx.supabase
       .from('membership_plans')
       .select('*')
@@ -171,6 +175,10 @@ export const settingsRouter = router({
       // 使用 level 判断推荐：gold 为推荐/高亮
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
+      checkoutReady: {
+        monthly: stripeReady && Boolean(plan.stripe_monthly_price_id),
+        yearly: stripeReady && Boolean(plan.stripe_yearly_price_id),
+      },
     }));
   }),
 });

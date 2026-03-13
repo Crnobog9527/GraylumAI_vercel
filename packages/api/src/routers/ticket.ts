@@ -1,6 +1,7 @@
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
 
 // 前端分类到数据库分类的映射
 const categoryToDbMap: Record<string, string> = {
@@ -84,7 +85,7 @@ export const ticketRouter = router({
     }
 
     // 转换数据格式以匹配前端组件期望的格式
-    return (data || []).map((ticket: any) => ({
+    return Promise.all((data || []).map(async (ticket: any) => ({
       id: ticket.id,
       ticket_number: generateTicketNumber(ticket.id),
       title: ticket.title,
@@ -92,16 +93,17 @@ export const ticketRouter = router({
       category: dbToCategoryMap[ticket.category] || 'other',
       status: dbToStatusMap[ticket.status] || 'pending',
       priority: ticket.priority || 'medium',
-      attachments: ticket.attachments || [],
+      attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
       created_at: ticket.created_at,
       updated_at: ticket.updated_at,
-      replies: (ticket.ticket_replies || []).map((reply: any) => ({
+      replies: await Promise.all((ticket.ticket_replies || []).map(async (reply: any) => ({
         id: reply.id,
         message: reply.content,
         is_admin_reply: reply.is_admin === 'true',
+        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
         created_at: reply.created_at,
-      })),
-    }));
+      }))),
+    })));
   }),
 
   getTicketById: protectedProcedure
@@ -127,15 +129,16 @@ export const ticketRouter = router({
         category: dbToCategoryMap[ticket.category] || 'other',
         status: dbToStatusMap[ticket.status] || 'pending',
         priority: ticket.priority || 'medium',
-        attachments: ticket.attachments || [],
+        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
         created_at: ticket.created_at,
         updated_at: ticket.updated_at,
-        replies: (ticket.ticket_replies || []).map((reply: any) => ({
+        replies: await Promise.all((ticket.ticket_replies || []).map(async (reply: any) => ({
           id: reply.id,
           message: reply.content,
           is_admin_reply: reply.is_admin === 'true',
+          attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
           created_at: reply.created_at,
-        })),
+        }))),
       };
     }),
 
@@ -172,6 +175,7 @@ export const ticketRouter = router({
         id: newReply.id,
         message: newReply.content,
         is_admin_reply: false,
+        attachments: [],
         created_at: newReply.created_at,
       };
     }),

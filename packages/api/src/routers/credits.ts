@@ -14,6 +14,7 @@ const TransactionType = z.enum([
   'consumption',   // 消费扣除
   'refund',        // 退款
   'bonus',         // 奖励/赠送
+  'checkin',       // 每日签到
   'adjustment',    // 手动调整
   'transfer_in',   // 转入
   'transfer_out',  // 转出
@@ -70,33 +71,32 @@ const GetTransactionsInput = z.object({
 // ============================================================================
 
 /**
- * 生成交易ID
- */
-function generateTransactionId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 10);
-  return `txn_${timestamp}_${random}`;
-}
-
-/**
  * 检查幂等性（防止重复操作）
+ *
+ * 当前 credit_transactions 表不包含 idempotency_key 列，
+ * 因此这里只保留接口兼容性，不执行数据库级幂等检查。
  */
 async function checkIdempotency(
-  supabase: any,
-  userId: string,
-  idempotencyKey: string
+  _supabase: any,
+  _userId: string,
+  _idempotencyKey: string
 ): Promise<{ exists: boolean; transactionId?: string }> {
-  const { data } = await supabase
-    .from('credit_transactions')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('idempotency_key', idempotencyKey)
-    .single();
-
   return {
-    exists: !!data,
-    transactionId: data?.id,
+    exists: false,
   };
+}
+
+function normalizeTransactionType(type: TransactionType): 'addition' | 'deduction' | 'purchase' | 'refund' {
+  switch (type) {
+    case 'purchase':
+      return 'purchase';
+    case 'refund':
+      return 'refund';
+    case 'checkin':
+      return 'addition';
+    default:
+      return 'addition';
+  }
 }
 
 // ============================================================================
@@ -201,7 +201,6 @@ export const creditsRouter = router({
       }
 
       const newCredits = profile.credits - amount;
-      const transactionId = generateTransactionId();
 
       // 4. 使用乐观锁更新余额
       // 只有当 updated_at 没变时才更新（防止并发修改）
@@ -227,18 +226,10 @@ export const creditsRouter = router({
       const { data: transaction, error: txnError } = await ctx.supabase
         .from('credit_transactions')
         .insert({
-          id: transactionId,
           user_id: ctx.profileId,
-          type: 'consumption',
+          type: 'deduction',
           amount: -amount, // 负数表示扣除
-          balance_before: profile.credits,
-          balance_after: newCredits,
-          reason: reason ?? '积分消费',
-          reference_id: referenceId,
-          reference_type: referenceType,
-          idempotency_key: idempotencyKey,
-          status: 'completed',
-          created_at: new Date().toISOString(),
+          description: reason ?? '积分消费',
         })
         .select()
         .single();
@@ -251,7 +242,7 @@ export const creditsRouter = router({
 
       return {
         success: true,
-        transactionId,
+        transactionId: transaction?.id,
         previousCredits: profile.credits,
         newCredits,
         amountDeducted: amount,
@@ -305,19 +296,12 @@ export const creditsRouter = router({
       }
 
       const newCredits = profile.credits + amount;
-      const transactionId = generateTransactionId();
 
       // 3. 乐观锁更新余额
       const updateData: Record<string, any> = {
         credits: newCredits,
         updated_at: new Date().toISOString(),
       };
-
-      // 如果有过期时间，更新过期相关字段
-      if (expiresAt) {
-        updateData.credits_expiring_soon = amount;
-        updateData.credits_expiry_date = expiresAt;
-      }
 
       const { data: updateResult, error: updateError } = await ctx.supabase
         .from('profiles')
@@ -335,22 +319,15 @@ export const creditsRouter = router({
       }
 
       // 4. 记录交易
+      const normalizedType = normalizeTransactionType(type);
+
       const { data: transaction, error: txnError } = await ctx.supabase
         .from('credit_transactions')
         .insert({
-          id: transactionId,
           user_id: ctx.profileId,
-          type,
+          type: normalizedType,
           amount: amount, // 正数表示增加
-          balance_before: profile.credits,
-          balance_after: newCredits,
-          reason: reason ?? getDefaultReason(type),
-          reference_id: referenceId,
-          reference_type: referenceType,
-          idempotency_key: idempotencyKey,
-          expires_at: expiresAt,
-          status: 'completed',
-          created_at: new Date().toISOString(),
+          description: reason ?? getDefaultReason(type),
         })
         .select()
         .single();
@@ -361,7 +338,7 @@ export const creditsRouter = router({
 
       return {
         success: true,
-        transactionId,
+        transactionId: transaction?.id,
         previousCredits: profile.credits,
         newCredits,
         amountAdded: amount,
@@ -375,7 +352,7 @@ export const creditsRouter = router({
   getCreditTransactions: protectedProcedure
     .input(GetTransactionsInput)
     .query(async ({ ctx, input }) => {
-      const { limit, cursor, type, status, startDate, endDate } = input;
+      const { limit, cursor, type, status: _status, startDate, endDate } = input;
 
       // 构建查询
       let query = ctx.supabase
@@ -388,10 +365,6 @@ export const creditsRouter = router({
       // 应用筛选条件
       if (type) {
         query = query.eq('type', type);
-      }
-
-      if (status) {
-        query = query.eq('status', status);
       }
 
       if (startDate) {
@@ -437,14 +410,14 @@ export const creditsRouter = router({
    */
   getCreditsSummary: protectedProcedure
     .input(z.object({
-      period: z.enum(['day', 'week', 'month', 'year']).default('month'),
+      period: z.enum(['day', 'week', 'month', 'year', 'all']).default('month'),
     }))
     .query(async ({ ctx, input }) => {
       const { period } = input;
 
       // 计算时间范围
       const now = new Date();
-      let startDate: Date;
+      let startDate: Date | null = null;
 
       switch (period) {
         case 'day':
@@ -459,15 +432,22 @@ export const creditsRouter = router({
         case 'year':
           startDate = new Date(now.setFullYear(now.getFullYear() - 1));
           break;
+        case 'all':
+          startDate = null;
+          break;
       }
 
       // 获取交易统计
-      const { data: transactions, error } = await ctx.supabase
+      let query = ctx.supabase
         .from('credit_transactions')
         .select('type, amount')
-        .eq('user_id', ctx.profileId)
-        .eq('status', 'completed')
-        .gte('created_at', startDate.toISOString());
+        .eq('user_id', ctx.profileId);
+
+      if (startDate) {
+        query = query.gte('created_at', startDate.toISOString());
+      }
+
+      const { data: transactions, error } = await query;
 
       // 如果查询失败（可能是表不存在），返回默认值而不是抛出错误
       if (error) {
@@ -539,6 +519,7 @@ function getDefaultReason(type: TransactionType): string {
     consumption: '积分消费',
     refund: '退款返还',
     bonus: '奖励积分',
+    checkin: '签到奖励',
     adjustment: '系统调整',
     transfer_in: '积分转入',
     transfer_out: '积分转出',

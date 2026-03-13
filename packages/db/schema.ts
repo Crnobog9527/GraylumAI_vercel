@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // --- 核心表 ---
 
@@ -69,6 +69,11 @@ export const aiModels = pgTable('ai_models', {
   inputTokenCostAbove200k: integer('input_token_cost_above_200k').default(0).notNull(),
   outputTokenCostAbove200k: integer('output_token_cost_above_200k').default(0).notNull(),
   webSearchCost: integer('web_search_cost').default(0).notNull(), // Per 1K searches
+  tokenCountingSupported: text('token_counting_supported').default('false').notNull(),
+  tokenCountingMethod: text('token_counting_method', {
+    enum: ['anthropic_count_tokens', 'gemini_count_tokens', 'provider_usage', 'estimate', 'unsupported'],
+  }).default('unsupported').notNull(),
+  tokenizerFamily: text('tokenizer_family'),
   isActive: text('is_active').default('true').notNull(),
   config: jsonb('config'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -115,6 +120,7 @@ export const creditPackages = pgTable('credit_packages', {
   price: integer('price').notNull(), // In cents
   creditsAmount: integer('credits_amount').notNull(),
   bonusCredits: integer('bonus_credits').default(0).notNull(), // 赠送积分
+  stripePriceId: text('stripe_price_id'),
   sortOrder: integer('sort_order').default(0).notNull(), // 排序顺序
   isPopular: text('is_popular').default('false').notNull(), // 热门标识
   active: text('active').default('true').notNull(),
@@ -208,6 +214,22 @@ export const invitationRecords = pgTable('invitation_records', {
   rewardedAt: timestamp('rewarded_at', { withTimezone: true }),
 });
 
+export const userCheckins = pgTable(
+  'user_checkins',
+  {
+    userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+    checkinDate: text('checkin_date').notNull(), // YYYY-MM-DD (Asia/Shanghai)
+    monthKey: text('month_key').notNull(), // YYYY-MM
+    streakDay: integer('streak_day').notNull(),
+    rewardCredits: integer('reward_credits').default(0).notNull(),
+    monthlyBonusCredits: integer('monthly_bonus_credits').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.checkinDate] }),
+  })
+);
+
 // --- 会员系统 ---
 
 export const membershipPlans = pgTable('membership_plans', {
@@ -216,6 +238,8 @@ export const membershipPlans = pgTable('membership_plans', {
   level: text('level', { enum: ['free', 'pro', 'gold'] }).default('pro').notNull(),
   monthlyPrice: integer('monthly_price').default(990).notNull(), // In cents
   yearlyPrice: integer('yearly_price').default(9900).notNull(), // In cents
+  stripeMonthlyPriceId: text('stripe_monthly_price_id'),
+  stripeYearlyPriceId: text('stripe_yearly_price_id'),
   monthlyCredits: integer('monthly_credits').default(1500).notNull(),
   yearlyCredits: integer('yearly_credits').default(20000).notNull(),
   monthlyBonusCredits: integer('monthly_bonus_credits').default(0).notNull(),
@@ -232,6 +256,24 @@ export const membershipPlans = pgTable('membership_plans', {
 });
 
 // --- AI 对话计费表 ---
+
+export const conversationContextSnapshots = pgTable('conversation_context_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  snapshotType: text('snapshot_type', {
+    enum: ['rolling_summary', 'search_digest', 'compression_checkpoint'],
+  }).notNull(),
+  content: text('content').notNull(),
+  sourceMessageStartId: uuid('source_message_start_id').references(() => messages.id, { onDelete: 'set null' }),
+  sourceMessageEndId: uuid('source_message_end_id').references(() => messages.id, { onDelete: 'set null' }),
+  sourceMessageCount: integer('source_message_count').default(0).notNull(),
+  metadata: jsonb('metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  conversationSnapshotTypeUnique: uniqueIndex('idx_context_snapshots_conversation_type')
+    .on(table.conversationId, table.snapshotType),
+}));
 
 /**
  * Token 统计表 - 记录每次 AI 对话的 Token 使用情况
@@ -250,7 +292,47 @@ export const tokenStats = pgTable('token_stats', {
   webSearchCount: integer('web_search_count').default(0).notNull(), // Web 搜索次数
   totalCostUsd: decimal('total_cost_usd', { precision: 12, scale: 6 }).notNull(), // 美元成本 (精确到微美元)
   totalCredits: integer('total_credits').notNull(), // 消耗的积分
+  metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const paymentOrders = pgTable('payment_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
+  itemType: text('item_type', { enum: ['credit_package', 'membership_plan'] }).notNull(),
+  itemId: uuid('item_id').notNull(),
+  billingCycle: text('billing_cycle', { enum: ['one_time', 'monthly', 'yearly'] }).default('one_time').notNull(),
+  stripeCheckoutSessionId: text('stripe_checkout_session_id'),
+  stripeInvoiceId: text('stripe_invoice_id'),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  stripePriceId: text('stripe_price_id'),
+  amountTotal: integer('amount_total'),
+  currency: text('currency').default('usd').notNull(),
+  mode: text('mode', { enum: ['payment', 'subscription'] }).notNull(),
+  status: text('status', { enum: ['pending', 'completed', 'failed', 'cancelled'] }).default('pending').notNull(),
+  paymentStatus: text('payment_status'),
+  metadata: jsonb('metadata').default({}).notNull(),
+  fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const userSubscriptions = pgTable('user_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  membershipPlanId: uuid('membership_plan_id').references(() => membershipPlans.id, { onDelete: 'set null' }),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+  stripePriceId: text('stripe_price_id'),
+  billingCycle: text('billing_cycle', { enum: ['monthly', 'yearly'] }).default('monthly').notNull(),
+  status: text('status').notNull(),
+  cancelAtPeriodEnd: text('cancel_at_period_end').default('false').notNull(),
+  currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  metadata: jsonb('metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 /**
@@ -261,7 +343,7 @@ export const billingHistory = pgTable('billing_history', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   transactionId: uuid('transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
-  operationType: text('operation_type', { enum: ['pre_deduct', 'settle', 'refund'] }).notNull(),
+  operationType: text('operation_type', { enum: ['pre_deduct', 'settle', 'refund', 'abort_settle'] }).notNull(),
   amount: integer('amount').notNull(), // 积分变动量 (预扣为负，退费为正)
   reason: text('reason'), // 操作原因描述
   metadata: jsonb('metadata'), // 额外元数据 (如 usage 信息、preDeductId 等)

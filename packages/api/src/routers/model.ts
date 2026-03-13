@@ -26,6 +26,65 @@ type ConnectionCheckResult = {
   error?: string;
 };
 
+type TokenCountingMetadata = {
+  token_counting_supported: 'true' | 'false';
+  token_counting_method: string;
+  tokenizer_family: string | null;
+};
+
+const VERIFIED_OPENAI_TOKENIZER_PREFIXES = [
+  'gpt-4.1',
+  'gpt-4o',
+  'gpt-4.5',
+  'gpt-5',
+  'o1',
+  'o3',
+  'text-embedding-3',
+];
+
+function inferTokenCountingMetadata(params: {
+  provider: PersistedModel['provider'] | NonNullable<PersistedModel['provider']>;
+  modelId: string;
+  apiEndpoint?: string | null;
+}): TokenCountingMetadata {
+  const provider = params.provider ?? 'custom';
+  const modelId = params.modelId.toLowerCase();
+  const endpoint = params.apiEndpoint?.toLowerCase() ?? '';
+
+  if (provider === 'anthropic') {
+    return {
+      token_counting_supported: 'true',
+      token_counting_method: 'anthropic_count_tokens',
+      tokenizer_family: 'anthropic',
+    };
+  }
+
+  if (provider === 'google') {
+    return {
+      token_counting_supported: 'true',
+      token_counting_method: 'gemini_count_tokens',
+      tokenizer_family: 'gemini',
+    };
+  }
+
+  const openAITokenizerVerified = VERIFIED_OPENAI_TOKENIZER_PREFIXES.some((prefix) => modelId.startsWith(prefix));
+  const openAICompatibleProvider = provider === 'openai' || endpoint.includes('openrouter') || endpoint.includes('chat/completions');
+
+  if (openAICompatibleProvider && openAITokenizerVerified) {
+    return {
+      token_counting_supported: 'true',
+      token_counting_method: 'verified_openai_tokenizer',
+      tokenizer_family: 'openai',
+    };
+  }
+
+  return {
+    token_counting_supported: 'false',
+    token_counting_method: 'unsupported',
+    tokenizer_family: openAICompatibleProvider ? 'openai' : null,
+  };
+}
+
 function usesOpenAICompatibleApi(model: PersistedModel) {
   return usesOpenAICompatibleProvider({
     endpoint: model.api_endpoint,
@@ -213,6 +272,12 @@ export const modelRouter = router({
       webSearchCost: z.number().min(0).default(0),
     }))
     .mutation(async ({ ctx, input }) => {
+      const tokenCountingMetadata = inferTokenCountingMetadata({
+        provider: input.provider,
+        modelId: input.modelId,
+        apiEndpoint: input.apiEndpoint,
+      });
+
       const { data, error } = await ctx.supabase
         .from('ai_models')
         .insert({
@@ -230,6 +295,9 @@ export const modelRouter = router({
           input_token_cost_above_200k: Math.round(input.inputTokenCostAbove200k * 100),
           output_token_cost_above_200k: Math.round(input.outputTokenCostAbove200k * 100),
           web_search_cost: Math.round(input.webSearchCost * 100),
+          token_counting_supported: tokenCountingMetadata.token_counting_supported,
+          token_counting_method: tokenCountingMetadata.token_counting_method,
+          tokenizer_family: tokenCountingMetadata.tokenizer_family,
           is_active: 'true',
         })
         .select()
@@ -268,6 +336,12 @@ export const modelRouter = router({
       config: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const currentModel = await ctx.supabase
+        .from('ai_models')
+        .select('provider, model_id, api_endpoint')
+        .eq('id', input.id)
+        .single();
+
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
       };
@@ -288,6 +362,21 @@ export const modelRouter = router({
       if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * 100);
       if (input.isActive !== undefined) updateData.is_active = input.isActive ? 'true' : 'false';
       if (input.config !== undefined) updateData.config = input.config;
+
+      const nextProvider = input.provider ?? currentModel.data?.provider ?? 'custom';
+      const nextModelId = input.modelId ?? currentModel.data?.model_id;
+      const nextEndpoint = input.apiEndpoint ?? currentModel.data?.api_endpoint ?? null;
+
+      if (nextModelId) {
+        const tokenCountingMetadata = inferTokenCountingMetadata({
+          provider: nextProvider,
+          modelId: nextModelId,
+          apiEndpoint: nextEndpoint,
+        });
+        updateData.token_counting_supported = tokenCountingMetadata.token_counting_supported;
+        updateData.token_counting_method = tokenCountingMetadata.token_counting_method;
+        updateData.tokenizer_family = tokenCountingMetadata.tokenizer_family;
+      }
 
       const { data, error } = await ctx.supabase
         .from('ai_models')

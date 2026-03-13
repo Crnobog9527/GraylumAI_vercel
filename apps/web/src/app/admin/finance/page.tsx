@@ -20,21 +20,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { formatUsd, formatUsdFromCents } from '@/lib/currency';
 
 export default function AdminFinancePage() {
   const { data, isLoading, error, refetch } = trpc.admin.getFinanceStats.useQuery();
 
-  // Loading state
-  if (isLoading) {
-    return <AdminLoadingState />;
-  }
-
   // Error state
-  if (error) {
+  if (error && !data) {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
+
+  const isInitialLoading = isLoading && !data;
 
   const transactions = data?.transactions ?? {
     totalAdditions: 0, totalDeductions: 0, totalPurchases: 0, totalRefunds: 0,
@@ -55,56 +52,57 @@ export default function AdminFinancePage() {
   const estimatedProfit = financeOverview.estimatedRevenue - (financeOverview.creditsConsumed * 0.01); // Rough cost estimation
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8" data-testid="admin-finance-page">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="admin-finance-header">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
             财务统计
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            平台收入、成本与 API 使用统计
+            平台收入、成本与 API 使用统计（USD）
           </p>
         </div>
         <Button
           variant="outline"
           onClick={() => refetch()}
-          className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+          className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
         >
+          {isInitialLoading && <span className="mr-2 text-xs">加载中</span>}
           <RefreshCw className="h-4 w-4 mr-2" />
           刷新数据
         </Button>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs data-testid="admin-finance-tabs" defaultValue="overview" className="w-full">
         <TabsList
-          className="mb-6"
+          className="mb-2 flex h-auto justify-start gap-1 overflow-x-auto p-1"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
         >
           <TabsTrigger
             value="overview"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <CircleDollarSign className="h-4 w-4 mr-2" />
             收入概览
           </TabsTrigger>
           <TabsTrigger
             value="api"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <Activity className="h-4 w-4 mr-2" />
             API 统计
           </TabsTrigger>
           <TabsTrigger
             value="models"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <Cpu className="h-4 w-4 mr-2" />
             模型渠道
           </TabsTrigger>
           <TabsTrigger
             value="rules"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <Settings className="h-4 w-4 mr-2" />
             积分规则
@@ -112,26 +110,26 @@ export default function AdminFinancePage() {
         </TabsList>
 
         {/* Overview Tab */}
-        <TabsContent value="overview">
+        <TabsContent value="overview" className="space-y-6">
           {/* Finance Overview Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <div data-testid="admin-finance-api-summary" className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <Card data-testid="admin-finance-overview-revenue" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
                   <div className="p-3 rounded-xl bg-emerald-500/20">
                     <PiggyBank className="h-6 w-6 text-emerald-400" />
                   </div>
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估收入</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估收入 (USD)</p>
                     <p className="text-2xl font-bold text-emerald-400">
-                      ${(financeOverview.estimatedRevenue / 100).toFixed(2)}
+                      {formatUsdFromCents(financeOverview.estimatedRevenue)}
                     </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-finance-overview-consumed" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
                   <div className="p-3 rounded-xl bg-rose-500/20">
@@ -147,7 +145,7 @@ export default function AdminFinancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-finance-overview-purchased" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
                   <div className="p-3 rounded-xl bg-blue-500/20">
@@ -163,16 +161,16 @@ export default function AdminFinancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-finance-overview-profit" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center gap-4">
                   <div className={`p-3 rounded-xl ${estimatedProfit >= 0 ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
                     <DollarSign className={`h-6 w-6 ${estimatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} />
                   </div>
                   <div>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估盈利</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>预估盈利 (USD)</p>
                     <p className={`text-2xl font-bold ${estimatedProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      ${(estimatedProfit / 100).toFixed(2)}
+                      {formatUsd(estimatedProfit / 100)}
                     </p>
                   </div>
                 </div>
@@ -265,7 +263,7 @@ export default function AdminFinancePage() {
           </div>
 
           {/* Daily Chart */}
-          <Card className="mb-8" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-finance-daily-chart" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <Calendar className="h-5 w-5" />
@@ -320,7 +318,7 @@ export default function AdminFinancePage() {
           </Card>
 
           {/* Credit Packages Table */}
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-finance-packages-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <Package className="h-5 w-5" />
@@ -328,7 +326,8 @@ export default function AdminFinancePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
+              <div className="overflow-x-auto">
+              <Table className="min-w-[720px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>套餐名称</TableHead>
@@ -356,7 +355,7 @@ export default function AdminFinancePage() {
                       </TableCell>
                       <TableCell>
                         <span style={{ color: 'var(--text-primary)' }}>
-                          ${(pkg.price / 100).toFixed(2)}
+                          {formatUsdFromCents(pkg.price)}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -393,12 +392,13 @@ export default function AdminFinancePage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* API Statistics Tab */}
-        <TabsContent value="api">
+        <TabsContent value="api" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
@@ -465,7 +465,7 @@ export default function AdminFinancePage() {
             </Card>
           </div>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-finance-api-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <Activity className="h-5 w-5" />
@@ -475,12 +475,12 @@ export default function AdminFinancePage() {
             <CardContent>
               <div className="p-4 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                 <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  API 统计基于消息记录估算。详细的 Token 使用量和成本追踪需要在消息保存时记录具体的 Token 消耗数据。
+                  API 统计与运行时记账已接通同一套 Token/成本链路。这里的请求与消息面板仅用于运营概览，不再作为独立结算口径；精确 Token、积分消耗和路由结果请结合成本页与 Token 统计页查看。
                 </p>
                 <ul className="mt-3 space-y-2 text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   <li>• 总请求数 = AI 回复消息数量</li>
                   <li>• 总对话数 = 创建的对话数量</li>
-                  <li>• 实际 Token 使用需要集成 API 响应中的 usage 数据</li>
+                  <li>• 精确 Token 使用与积分消耗以运行时写入的 usage/token stats 为准</li>
                 </ul>
               </div>
             </CardContent>
@@ -488,8 +488,8 @@ export default function AdminFinancePage() {
         </TabsContent>
 
         {/* Model Channel Statistics Tab */}
-        <TabsContent value="models">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <TabsContent value="models" className="space-y-6">
+          <Card data-testid="admin-finance-models-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <Cpu className="h-5 w-5" />
@@ -497,7 +497,8 @@ export default function AdminFinancePage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
+              <div className="overflow-x-auto">
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>模型名称</TableHead>
@@ -511,7 +512,7 @@ export default function AdminFinancePage() {
                 </TableHeader>
                 <TableBody>
                   {modelStats.map((model) => (
-                    <TableRow key={model.id}>
+                    <TableRow key={model.id} data-testid={`admin-finance-model-row-${model.id}`}>
                       <TableCell>
                         <div className="flex flex-col">
                           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
@@ -585,18 +586,32 @@ export default function AdminFinancePage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* Credits Rules Tab */}
-        <TabsContent value="rules">
+        <TabsContent value="rules" className="space-y-6">
+          <div
+            data-testid="admin-finance-rules-note"
+            className="rounded-lg border p-4"
+            style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
+          >
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              下列积分换算卡片用于运营参考和历史兼容展示。实际运行时成本以
+              <a href="/admin/models" className="mx-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
+                AI 模型管理
+              </a>
+              中的单模型定价与实时 token 记账为准；不要把本标签页当作实时 authoritative 计费控制台。
+            </p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-finance-rules-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                   <Coins className="h-5 w-5" />
-                  积分换算规则
+                  参考积分规则
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -649,7 +664,7 @@ export default function AdminFinancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-finance-benefits-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                   <Users className="h-5 w-5" />
@@ -675,7 +690,7 @@ export default function AdminFinancePage() {
                 </div>
 
                 <div className="mt-6 p-4 rounded-lg border" style={{ borderColor: 'var(--border-primary)', background: 'var(--bg-primary)' }}>
-                  <h4 className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>计算示例</h4>
+                  <h4 className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>参考计算示例</h4>
                   <div className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
                     <p>• 发送 1000 Token 输入 = {typeof creditsRules.inputCreditsPerK === 'number' ? creditsRules.inputCreditsPerK : 1} 积分</p>
                     <p>• 接收 1000 Token 输出 = {typeof creditsRules.outputCreditsPerK === 'number' ? creditsRules.outputCreditsPerK : 3} 积分</p>

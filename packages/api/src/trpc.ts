@@ -1,33 +1,62 @@
 import { initTRPC, TRPCError } from '@trpc/server';
-import { createClient, type User } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { getAuthProvider, isEmailVerified } from './lib/auth';
+import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 
-export const createTRPCContext = async (opts: { headers: Headers; user?: User | null }) => {
+type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
+
+export const createTRPCContext = async (opts: {
+  headers: Headers;
+  user?: User | null;
+  supabaseAuth?: ApiSupabaseClient | null;
+}) => {
+  ensureWorkspaceServerEnv();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  // Use service role key for server-side operations (bypasses RLS)
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  // Create Supabase client for database operations
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const hasSupabaseAdminPrivileges = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
   let user = opts.user ?? null;
+  let supabaseAuth = opts.supabaseAuth ?? null;
 
-  if (!user) {
+  if (!supabaseAuth && !user) {
     // Get token from Authorization header
     const authHeader = opts.headers.get('Authorization') ?? '';
     const token = authHeader.replace('Bearer ', '');
 
     if (token) {
-      const { data: { user: authUser }, error } = await supabase.auth.getUser(token);
+      supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      });
+
+      const { data: { user: authUser }, error } = await supabaseAuth.auth.getUser(token);
       if (!error && authUser) {
         user = authUser;
       }
     }
   }
 
+  if (!user && supabaseAuth) {
+    const { data: { user: authUser }, error } = await supabaseAuth.auth.getUser();
+    if (!error && authUser) {
+      user = authUser;
+    }
+  }
+
   return {
     ...opts,
-    supabase,
+    supabase: supabaseAdmin,
+    supabaseAdmin,
+    supabaseAuth,
+    hasSupabaseAdminPrivileges,
     user,
+    authProvider: getAuthProvider(user),
+    isEmailVerified: isEmailVerified(user),
   };
 };
 
@@ -44,12 +73,20 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     });
   }
 
+  if (!ctx.isEmailVerified) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'EMAIL_NOT_VERIFIED',
+    });
+  }
+
   // Try to get user profile (foreign keys reference profiles.id)
   let profileId = ctx.user.id;
   let userRole: 'user' | 'admin' = 'user';
   let userStatus: 'active' | 'disabled' | 'banned' = 'active';
+  const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabaseAdmin;
 
-  const { data: profile, error: profileError } = await ctx.supabase
+  const { data: profile, error: profileError } = await userScopedSupabase
     .from('profiles')
     .select('id, role, credits, status')
     .eq('id', ctx.user.id)
@@ -62,7 +99,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
     if (isNotFound) {
       // Profile doesn't exist, try to create one
-      const { data: newProfile, error: createError } = await ctx.supabase
+      const { data: newProfile, error: createError } = await ctx.supabaseAdmin
         .from('profiles')
         .insert({
           id: ctx.user.id,
@@ -78,7 +115,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
         // If insert failed due to conflict (profile already exists), try to fetch again
         if (createError.code === '23505') {
-          const { data: existingProfile } = await ctx.supabase
+          const { data: existingProfile } = await userScopedSupabase
             .from('profiles')
             .select('id, role, credits, status')
             .eq('id', ctx.user.id)
@@ -136,6 +173,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   return next({
     ctx: {
       ...ctx,
+      supabase: userScopedSupabase,
       user: ctx.user,
       profileId,
       userRole,
@@ -156,5 +194,10 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
     });
   }
 
-  return next({ ctx });
+  return next({
+    ctx: {
+      ...ctx,
+      supabase: ctx.supabaseAdmin,
+    },
+  });
 });

@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { formatUsdFromCents } from '@/lib/currency';
 
 interface CreditPackage {
   id: string;
@@ -43,6 +44,7 @@ interface CreditPackage {
   price: number;
   credits_amount: number;
   bonus_credits: number;
+  stripe_price_id?: string | null;
   sort_order: number;
   is_popular: string;
   active: string;
@@ -55,6 +57,8 @@ interface MembershipPlan {
   level: 'free' | 'pro' | 'gold';
   monthly_price: number;
   yearly_price: number;
+  stripe_monthly_price_id?: string | null;
+  stripe_yearly_price_id?: string | null;
   monthly_credits: number;
   yearly_credits: number;
   monthly_bonus_credits: number;
@@ -83,6 +87,7 @@ export default function AdminPackagesPage() {
     price: '',
     creditsAmount: '',
     bonusCredits: '0',
+    stripePriceId: '',
     sortOrder: '0',
     isPopular: 'false',
     active: 'true',
@@ -95,10 +100,12 @@ export default function AdminPackagesPage() {
     name: '',
     level: 'pro' as 'free' | 'pro' | 'gold',
     monthlyPrice: '',
-    yearlyPrice: '',
-    monthlyCredits: '',
-    yearlyCredits: '',
-    monthlyBonusCredits: '',
+      yearlyPrice: '',
+      stripeMonthlyPriceId: '',
+      stripeYearlyPriceId: '',
+      monthlyCredits: '',
+      yearlyCredits: '',
+      monthlyBonusCredits: '',
     packageDiscount: '100',
     maxContextMessages: '20',
     features: '',
@@ -159,6 +166,7 @@ export default function AdminPackagesPage() {
       price: '',
       creditsAmount: '',
       bonusCredits: '0',
+      stripePriceId: '',
       sortOrder: '0',
       isPopular: 'false',
       active: 'true',
@@ -173,6 +181,7 @@ export default function AdminPackagesPage() {
       price: (pkg.price / 100).toString(),
       creditsAmount: pkg.credits_amount.toString(),
       bonusCredits: (pkg.bonus_credits || 0).toString(),
+      stripePriceId: pkg.stripe_price_id || '',
       sortOrder: (pkg.sort_order || 0).toString(),
       isPopular: pkg.is_popular || 'false',
       active: pkg.active || 'true',
@@ -188,6 +197,7 @@ export default function AdminPackagesPage() {
       price: '',
       creditsAmount: '',
       bonusCredits: '0',
+      stripePriceId: '',
       sortOrder: '0',
       isPopular: 'false',
       active: 'true',
@@ -207,6 +217,7 @@ export default function AdminPackagesPage() {
         price: priceInCents,
         creditsAmount,
         bonusCredits,
+        stripePriceId: packageFormData.stripePriceId || undefined,
         sortOrder,
         isPopular: packageFormData.isPopular as 'true' | 'false',
         active: packageFormData.active as 'true' | 'false',
@@ -217,6 +228,7 @@ export default function AdminPackagesPage() {
         price: priceInCents,
         creditsAmount,
         bonusCredits,
+        stripePriceId: packageFormData.stripePriceId || undefined,
         sortOrder,
         isPopular: packageFormData.isPopular as 'true' | 'false',
         active: packageFormData.active as 'true' | 'false',
@@ -245,6 +257,8 @@ export default function AdminPackagesPage() {
       level: 'pro',
       monthlyPrice: '',
       yearlyPrice: '',
+      stripeMonthlyPriceId: '',
+      stripeYearlyPriceId: '',
       monthlyCredits: '',
       yearlyCredits: '',
       monthlyBonusCredits: '0',
@@ -263,6 +277,8 @@ export default function AdminPackagesPage() {
       level: plan.level,
       monthlyPrice: (plan.monthly_price / 100).toString(),
       yearlyPrice: (plan.yearly_price / 100).toString(),
+      stripeMonthlyPriceId: plan.stripe_monthly_price_id || '',
+      stripeYearlyPriceId: plan.stripe_yearly_price_id || '',
       monthlyCredits: plan.monthly_credits.toString(),
       yearlyCredits: plan.yearly_credits.toString(),
       monthlyBonusCredits: plan.monthly_bonus_credits.toString(),
@@ -285,6 +301,8 @@ export default function AdminPackagesPage() {
       level: planFormData.level,
       monthlyPrice: Math.round(parseFloat(planFormData.monthlyPrice || '0') * 100),
       yearlyPrice: Math.round(parseFloat(planFormData.yearlyPrice || '0') * 100),
+      stripeMonthlyPriceId: planFormData.stripeMonthlyPriceId || undefined,
+      stripeYearlyPriceId: planFormData.stripeYearlyPriceId || undefined,
       monthlyCredits: parseInt(planFormData.monthlyCredits || '0'),
       yearlyCredits: parseInt(planFormData.yearlyCredits || '0'),
       monthlyBonusCredits: parseInt(planFormData.monthlyBonusCredits || '0'),
@@ -334,11 +352,11 @@ export default function AdminPackagesPage() {
   const activePlanCount = planList.filter((p: MembershipPlan) => p.is_active === 'true').length;
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
               套餐管理
             </h1>
             <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
@@ -349,19 +367,19 @@ export default function AdminPackagesPage() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList
-            className="mb-6"
+            className="mb-2 flex h-auto justify-start gap-1 overflow-x-auto p-1"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
           >
             <TabsTrigger
               value="credit-packages"
-              className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+              className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
             >
               <Package className="h-4 w-4 mr-2" />
               积分加油包
             </TabsTrigger>
             <TabsTrigger
               value="membership-plans"
-              className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+              className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
             >
               <Crown className="h-4 w-4 mr-2" />
               会员等级
@@ -369,8 +387,8 @@ export default function AdminPackagesPage() {
           </TabsList>
 
           {/* Credit Packages Tab */}
-          <TabsContent value="credit-packages">
-            <div className="flex justify-end mb-4">
+          <TabsContent value="credit-packages" className="space-y-4">
+            <div className="flex justify-end">
               <Button
                 onClick={openCreatePackageDialog}
                 data-testid="admin-credit-package-create-trigger"
@@ -433,15 +451,17 @@ export default function AdminPackagesPage() {
             </div>
 
             {/* Packages Table */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-packages-credit-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-0">
-                <Table>
+                <div className="overflow-x-auto">
+                <Table className="min-w-[980px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>套餐名称</TableHead>
-                      <TableHead>价格</TableHead>
+                      <TableHead>价格 (USD)</TableHead>
                       <TableHead>积分数量</TableHead>
                       <TableHead>赠送积分</TableHead>
+                      <TableHead>Stripe</TableHead>
                       <TableHead>排序</TableHead>
                       <TableHead>标签</TableHead>
                       <TableHead>状态</TableHead>
@@ -468,7 +488,7 @@ export default function AdminPackagesPage() {
                           <div className="flex items-center gap-1">
                             <DollarSign className="h-4 w-4 text-emerald-400" />
                             <span style={{ color: 'var(--text-primary)' }}>
-                              ¥{(pkg.price / 100).toFixed(2)}
+                              {formatUsdFromCents(pkg.price)}
                             </span>
                           </div>
                         </TableCell>
@@ -490,6 +510,13 @@ export default function AdminPackagesPage() {
                             </div>
                           ) : (
                             <span style={{ color: 'var(--text-disabled)' }}>-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {pkg.stripe_price_id ? (
+                            <Badge className="bg-emerald-500/20 text-emerald-400">已配置</Badge>
+                          ) : (
+                            <Badge className="bg-amber-500/20 text-amber-400">未配置</Badge>
                           )}
                         </TableCell>
                         <TableCell>
@@ -556,20 +583,33 @@ export default function AdminPackagesPage() {
                     ))}
                     {packageList.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                        <TableCell colSpan={9} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                           暂无积分套餐，点击上方按钮创建
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
 
           {/* Membership Plans Tab */}
-          <TabsContent value="membership-plans">
-            <div className="flex justify-end mb-4">
+          <TabsContent value="membership-plans" className="space-y-4">
+            <div
+              className="rounded-lg border p-4"
+              style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
+            >
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                会员价格（USD）、上下架和 Stripe Price ID 在本页维护；历史保留、导出权限和批量导出策略在
+                <a href="/admin/settings" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
+                  系统设置 / 会员权限
+                </a>
+                中统一配置。本页解决“卖什么、卖多少钱、是否上架”，设置页解决“买完后拥有哪些历史保留与导出权限”。
+              </p>
+            </div>
+            <div className="flex justify-end">
               <Button
                 onClick={openCreatePlanDialog}
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
@@ -631,14 +671,16 @@ export default function AdminPackagesPage() {
             </div>
 
             {/* Membership Plans Table */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-packages-membership-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-0">
-                <Table>
+                <div className="overflow-x-auto">
+                <Table className="min-w-[1080px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>会员等级</TableHead>
-                      <TableHead>月付价格</TableHead>
-                      <TableHead>年付价格</TableHead>
+                      <TableHead>月付价格 (USD)</TableHead>
+                      <TableHead>年付价格 (USD)</TableHead>
+                      <TableHead>Stripe</TableHead>
                       <TableHead>月积分</TableHead>
                       <TableHead>年积分</TableHead>
                       <TableHead>状态</TableHead>
@@ -675,13 +717,23 @@ export default function AdminPackagesPage() {
                           </TableCell>
                           <TableCell>
                             <span style={{ color: 'var(--text-primary)' }}>
-                              ¥{(plan.monthly_price / 100).toFixed(2)}/月
+                              {formatUsdFromCents(plan.monthly_price)}/月
                             </span>
                           </TableCell>
                           <TableCell>
                             <span style={{ color: 'var(--text-primary)' }}>
-                              ¥{(plan.yearly_price / 100).toFixed(2)}/年
+                              {formatUsdFromCents(plan.yearly_price)}/年
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <Badge className={plan.stripe_monthly_price_id ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}>
+                                月付 {plan.stripe_monthly_price_id ? '已配置' : '未配置'}
+                              </Badge>
+                              <Badge className={plan.stripe_yearly_price_id ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}>
+                                年付 {plan.stripe_yearly_price_id ? '已配置' : '未配置'}
+                              </Badge>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
@@ -748,13 +800,14 @@ export default function AdminPackagesPage() {
                     })}
                     {planList.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                        <TableCell colSpan={8} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                           暂无会员等级，点击上方按钮创建
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -786,7 +839,7 @@ export default function AdminPackagesPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>价格 (元)</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>价格 (USD)</Label>
                   <Input
                     data-testid="credit-package-price-input"
                     type="number"
@@ -852,6 +905,19 @@ export default function AdminPackagesPage() {
                     数字越小排序越靠前
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>Stripe Price ID</Label>
+                <Input
+                  value={packageFormData.stripePriceId}
+                  onChange={(e) => setPackageFormData({ ...packageFormData, stripePriceId: e.target.value })}
+                  placeholder="price_xxx"
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
+                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  用于真实 Checkout 的一次性支付 Price ID
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -974,7 +1040,7 @@ export default function AdminPackagesPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (元)</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>月付价格 (USD)</Label>
                   <Input
                     data-testid="membership-plan-monthly-price-input"
                     type="number"
@@ -987,7 +1053,7 @@ export default function AdminPackagesPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (元)</Label>
+                  <Label style={{ color: 'var(--text-secondary)' }}>年付价格 (USD)</Label>
                   <Input
                     data-testid="membership-plan-yearly-price-input"
                     type="number"
@@ -995,6 +1061,28 @@ export default function AdminPackagesPage() {
                     value={planFormData.yearlyPrice}
                     onChange={(e) => setPlanFormData({ ...planFormData, yearlyPrice: e.target.value })}
                     placeholder="如：99"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>Stripe 月付 Price ID</Label>
+                  <Input
+                    value={planFormData.stripeMonthlyPriceId}
+                    onChange={(e) => setPlanFormData({ ...planFormData, stripeMonthlyPriceId: e.target.value })}
+                    placeholder="price_xxx"
+                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>Stripe 年付 Price ID</Label>
+                  <Input
+                    value={planFormData.stripeYearlyPriceId}
+                    onChange={(e) => setPlanFormData({ ...planFormData, stripeYearlyPriceId: e.target.value })}
+                    placeholder="price_xxx"
                     className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                   />
                 </div>

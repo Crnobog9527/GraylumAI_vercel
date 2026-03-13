@@ -87,3 +87,12 @@
 - 先判断任务属于：`聊天主链` / `管理后台` / `计费` / `数据库`。
 - 明确你要改的“页面或接口”与“验收句子”。
 - 按 `docs/AGENT_COMMAND_PLAYBOOK.md` 模板发指令。
+
+## 10) 当前严格签核结论
+- 全站严格签核总表：`docs/STRICT_SIGNOFF_STATUS.md`
+- 如果你只想知道“现在能不能说除了支付都完了”，先看这份总表，不要只看单独的后台矩阵或安全审计。
+- 这份总表的判定标准比“主链路可用”更严格：只要还有 follow-up、accepted risk、或缺少全站级证明，就不会判成“全部完成”。
+- 上线前发布准备与演练入口：
+  - `docs/RELEASE_PREP_CHECKLIST.md`
+  - `docs/runbooks/PRE_RELEASE_REHEARSAL.md`
+  - `docs/STRIPE_ENABLEMENT_CHECKLIST.md`

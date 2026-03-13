@@ -174,6 +174,29 @@ export const diagnosticsRouter = router({
       }
     }),
 
+  getLatestRuntimeProof: adminProcedure
+    .input(z.object({
+      hours: z.number().min(1).max(168).default(72),
+    }).optional())
+    .query(async ({ ctx, input }) => {
+      const service = new DiagnosticsService({
+        supabase: ctx.supabase,
+        userId: ctx.profileId,
+      });
+
+      try {
+        return await service.getLatestRuntimeProof(input?.hours ?? 72);
+      } catch (error) {
+        console.error('Failed to get latest runtime proof:', error);
+        return {
+          found: false,
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Failed to load runtime proof',
+          checkedAt: new Date().toISOString(),
+        };
+      }
+    }),
+
   /**
    * 获取最近的诊断运行记录
    */
@@ -188,7 +211,7 @@ export const diagnosticsRouter = router({
         .from('diagnostic_results')
         .select('batch_id, run_type, created_at')
         .order('created_at', { ascending: false })
-        .limit(limit * 11); // 每个 batch 最多 11 条
+        .limit(limit * 16); // 为新增诊断项预留充足批次容量
 
       if (error) {
         console.error('Failed to get recent runs:', error);

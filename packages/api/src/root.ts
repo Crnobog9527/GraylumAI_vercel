@@ -6,11 +6,13 @@ import { ticketRouter } from './routers/ticket';
 import { settingsRouter } from './routers/settings';
 import { modelRouter } from './routers/model';
 import { invitationRouter } from './routers/invitation';
+import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
 import { aiRouter } from './routers/ai';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
+import { paymentsRouter } from './routers/payments';
 
 /**
  * 主路由器
@@ -25,11 +27,13 @@ export const appRouter = router({
   settings: settingsRouter,
   model: modelRouter,
   invitation: invitationRouter,
+  checkin: checkinRouter,
   admin: adminRouter,
   modules: modulesRouter,
   ai: aiRouter,
   diagnostics: diagnosticsRouter,
   costs: costsRouter,
+  payments: paymentsRouter,
 });
 
 /**

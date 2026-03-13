@@ -124,22 +124,12 @@ function ConversationItem({
   return (
     <div
       data-testid="conversation-item"
-      className="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
+      className="group relative flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-[background-color,border-color,transform,opacity] duration-200 motion-reduce:transition-none hover:bg-[var(--bg-tertiary)] hover:border-[var(--border-secondary)]"
       style={{
         background: isSelected || isActive ? 'var(--color-primary-10)' : 'transparent',
         border: isSelected || isActive ? '1px solid var(--color-primary-20)' : '1px solid transparent',
       }}
       onClick={isManaging ? onToggleSelection : onSelect}
-      onMouseEnter={(e) => {
-        if (!isActive && !isSelected) {
-          e.currentTarget.style.background = 'var(--bg-tertiary)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive && !isSelected) {
-          e.currentTarget.style.background = 'transparent';
-        }
-      }}
     >
       {isManaging && (
         <Checkbox
@@ -180,7 +170,7 @@ function ConversationItem({
               variant="ghost"
               size="icon"
               aria-label="打开对话操作菜单"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity duration-200 motion-reduce:transition-none"
               style={{ color: 'var(--text-tertiary)' }}
               onClick={(e) => e.stopPropagation()}
             >

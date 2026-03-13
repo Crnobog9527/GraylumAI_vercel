@@ -37,7 +37,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
 type TransactionType = 'deduction' | 'addition' | 'purchase' | 'refund';
@@ -46,7 +45,7 @@ interface Transaction {
   id: string;
   user_id: string;
   amount: number;
-  type: TransactionType;
+  type: string;
   description: string | null;
   created_at: string;
   profiles: {
@@ -70,6 +69,16 @@ const typeConfig: Record<TransactionType, { label: string; color: string; icon: 
   purchase: { label: '购买', color: 'bg-blue-500/20 text-blue-400', icon: ShoppingCart },
   refund: { label: '退款', color: 'bg-amber-500/20 text-amber-400', icon: RotateCcw },
 };
+
+const fallbackTransactionConfig = {
+  label: '其他',
+  color: 'bg-zinc-500/20 text-zinc-300',
+  icon: CreditCard,
+} satisfies { label: string; color: string; icon: React.ElementType };
+
+function getTransactionConfig(type: string) {
+  return typeConfig[type as TransactionType] ?? fallbackTransactionConfig;
+}
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -165,34 +174,39 @@ export default function AdminTransactionsPage() {
     setCurrentPage(1);
   };
 
-  // Loading state
-  if (isLoading) {
-    return <AdminLoadingState />;
-  }
-
   // Error state
-  if (error) {
+  if (error && !data) {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
+  const isInitialLoading = isLoading && !data;
+
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
             交易记录
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
             查看所有用户的积分交易记录 · 共 {total.toLocaleString()} 条记录
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          {isInitialLoading && (
+            <Badge
+              data-testid="admin-transactions-loading-badge"
+              className="border border-[var(--border-primary)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+            >
+              数据加载中
+            </Badge>
+          )}
           {hasActiveFilters && (
             <Button
               variant="outline"
               onClick={clearAllFilters}
-              className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+              className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
             >
               <X className="h-4 w-4 mr-2" />
               清除筛选
@@ -201,7 +215,7 @@ export default function AdminTransactionsPage() {
           <Button
             variant="outline"
             onClick={() => refetch()}
-            className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+            className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             刷新
@@ -211,7 +225,7 @@ export default function AdminTransactionsPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-transactions-stat-additions" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-emerald-500/20">
@@ -227,7 +241,7 @@ export default function AdminTransactionsPage() {
           </CardContent>
         </Card>
 
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-transactions-stat-deductions" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-rose-500/20">
@@ -243,7 +257,7 @@ export default function AdminTransactionsPage() {
           </CardContent>
         </Card>
 
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-transactions-stat-purchases" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-blue-500/20">
@@ -259,7 +273,7 @@ export default function AdminTransactionsPage() {
           </CardContent>
         </Card>
 
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-transactions-stat-refunds" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-xl bg-amber-500/20">
@@ -277,7 +291,7 @@ export default function AdminTransactionsPage() {
       </div>
 
       {/* Advanced Filters */}
-      <Card className="mb-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <Card data-testid="admin-transactions-filters" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
         <CardHeader className="pb-4">
           <CardTitle className="text-base flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             <Filter className="h-4 w-4" />
@@ -319,6 +333,7 @@ export default function AdminTransactionsPage() {
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
                         <Input
+                          data-testid="admin-transactions-user-search"
                           value={userSearch}
                           onChange={(e) => setUserSearch(e.target.value)}
                           placeholder="搜索用户邮箱或昵称..."
@@ -411,7 +426,7 @@ export default function AdminTransactionsPage() {
           </div>
 
           {/* Quick Date Presets */}
-          <div className="flex items-center gap-2 pt-2">
+          <div className="flex flex-wrap items-center gap-2 pt-2">
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>快捷:</span>
             <Button
               variant="outline"
@@ -456,27 +471,27 @@ export default function AdminTransactionsPage() {
       </Card>
 
       {/* Type Filter Tabs */}
-      <Tabs value={typeFilter} onValueChange={(v) => {
+      <Tabs data-testid="admin-transactions-type-tabs" value={typeFilter} onValueChange={(v) => {
         setTypeFilter(v as typeof typeFilter);
         setCurrentPage(1);
-      }} className="mb-6">
-        <TabsList className="bg-[var(--bg-tertiary)]">
-          <TabsTrigger value="all" className="data-[state=active]:bg-[var(--bg-secondary)]">
+      }}>
+        <TabsList className="flex h-auto justify-start gap-1 overflow-x-auto bg-[var(--bg-tertiary)] p-1">
+          <TabsTrigger value="all" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             全部
           </TabsTrigger>
-          <TabsTrigger value="addition" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="addition" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <ArrowUpCircle className="h-4 w-4 mr-1 text-emerald-400" />
             增加
           </TabsTrigger>
-          <TabsTrigger value="deduction" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="deduction" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <ArrowDownCircle className="h-4 w-4 mr-1 text-rose-400" />
             扣除
           </TabsTrigger>
-          <TabsTrigger value="purchase" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="purchase" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <ShoppingCart className="h-4 w-4 mr-1 text-blue-400" />
             购买
           </TabsTrigger>
-          <TabsTrigger value="refund" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="refund" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <RotateCcw className="h-4 w-4 mr-1 text-amber-400" />
             退款
           </TabsTrigger>
@@ -484,90 +499,97 @@ export default function AdminTransactionsPage() {
       </Tabs>
 
       {/* Transactions Table */}
-      <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <Card data-testid="admin-transactions-table-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>用户</TableHead>
-                <TableHead>类型</TableHead>
-                <TableHead>金额</TableHead>
-                <TableHead>描述</TableHead>
-                <TableHead>时间</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {transactions.map((transaction: Transaction) => {
-                const config = typeConfig[transaction.type];
-                const TypeIcon = config.icon;
-                const isPositive = transaction.amount > 0;
-                return (
-                  <TableRow key={transaction.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-9 h-9 rounded-lg flex items-center justify-center"
-                          style={{ background: 'var(--bg-tertiary)' }}
+          <div className="overflow-x-auto">
+            <Table className="min-w-[760px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>用户</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead>金额</TableHead>
+                  <TableHead>描述</TableHead>
+                  <TableHead>时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transactions.map((transaction: Transaction) => {
+                  const config = getTransactionConfig(transaction.type);
+                  const TypeIcon = config.icon;
+                  const isPositive = transaction.amount > 0;
+                  return (
+                    <TableRow key={transaction.id} data-testid={`admin-transaction-row-${transaction.id}`}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-lg flex items-center justify-center"
+                            style={{ background: 'var(--bg-tertiary)' }}
+                          >
+                            {transaction.profiles?.avatar_url ? (
+                              <img
+                                src={transaction.profiles.avatar_url}
+                                alt=""
+                                className="w-full h-full rounded-lg object-cover"
+                              />
+                            ) : (
+                              <User className="h-4 w-4 text-[var(--text-tertiary)]" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                              {transaction.profiles?.nickname || '未知用户'}
+                            </p>
+                            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                              {transaction.profiles?.email || transaction.user_id.slice(0, 8) + '...'}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={config.color}>
+                          <TypeIcon className="h-3 w-3 mr-1" />
+                          {config.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className="font-semibold"
+                          style={{ color: isPositive ? 'var(--success)' : 'var(--error)' }}
                         >
-                          {transaction.profiles?.avatar_url ? (
-                            <img
-                              src={transaction.profiles.avatar_url}
-                              alt=""
-                              className="w-full h-full rounded-lg object-cover"
-                            />
-                          ) : (
-                            <User className="h-4 w-4 text-[var(--text-tertiary)]" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                            {transaction.profiles?.nickname || '未知用户'}
-                          </p>
-                          <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                            {transaction.profiles?.email || transaction.user_id.slice(0, 8) + '...'}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={config.color}>
-                        <TypeIcon className="h-3 w-3 mr-1" />
-                        {config.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className="font-semibold"
-                        style={{ color: isPositive ? 'var(--success)' : 'var(--error)' }}
-                      >
-                        {isPositive ? '+' : ''}{transaction.amount.toLocaleString()}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm truncate max-w-[200px] block" style={{ color: 'var(--text-tertiary)' }}>
-                        {transaction.description || '-'}
-                      </span>
-                    </TableCell>
-                    <TableCell style={{ color: 'var(--text-tertiary)' }}>
-                      {new Date(transaction.created_at).toLocaleString('zh-CN')}
+                          {isPositive ? '+' : ''}{transaction.amount.toLocaleString()}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm truncate max-w-[200px] block" style={{ color: 'var(--text-tertiary)' }}>
+                          {transaction.description || '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell style={{ color: 'var(--text-tertiary)' }}>
+                        {new Date(transaction.created_at).toLocaleString('zh-CN')}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!isInitialLoading && transactions.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      data-testid="admin-transactions-empty-state"
+                      colSpan={5}
+                      className="text-center py-12"
+                      style={{ color: 'var(--text-disabled)' }}
+                    >
+                      {hasActiveFilters ? '没有符合筛选条件的交易记录' : '暂无交易记录'}
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              {transactions.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
-                    {hasActiveFilters ? '没有符合筛选条件的交易记录' : '暂无交易记录'}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          </div>
 
           {/* Pagination */}
           {total > 0 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t" style={{ borderColor: 'var(--border-primary)' }}>
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-4 border-t px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6" style={{ borderColor: 'var(--border-primary)' }}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                 <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   共 {total.toLocaleString()} 条记录
                 </span>
@@ -598,7 +620,7 @@ export default function AdminTransactionsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   第 {currentPage} / {totalPages || 1} 页
                 </span>

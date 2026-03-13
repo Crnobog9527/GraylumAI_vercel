@@ -1,5 +1,6 @@
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -33,6 +34,8 @@ export const userRouter = router({
         credits: 0,
         membership_level: 'free',
         status: 'active',
+        auth_provider: ctx.authProvider,
+        email_verified: ctx.isEmailVerified,
         created_at: new Date().toISOString(),
       };
     }
@@ -43,6 +46,8 @@ export const userRouter = router({
       ...userProfile,
       nickname: displayName,
       full_name: displayName,
+      auth_provider: ctx.authProvider,
+      email_verified: ctx.isEmailVerified,
     };
   }),
 
@@ -52,12 +57,15 @@ export const userRouter = router({
       const { data, error } = await ctx.supabase
         .from('profiles')
         .update({ nickname: input.nickname, avatar_url: input.avatarUrl })
-        .eq('id', ctx.profileId);
+        .eq('id', ctx.profileId)
+        .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at')
+        .single();
+
       if (error) {
         console.error('updateUserProfile error:', error.message, error.code);
-        // 即使更新失败也不抛出错误，返回 null
-        return null;
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
+
       return data;
     }),
 

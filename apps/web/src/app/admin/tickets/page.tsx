@@ -90,6 +90,35 @@ interface Ticket {
   ticket_replies: TicketReply[];
 }
 
+const isImageAttachment = (url: string) => {
+  const urlWithoutParams = url.split('?')[0];
+  return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(urlWithoutParams);
+};
+
+function TicketAttachmentTile({ url, index }: { url: string; index: number }) {
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+  if (!isImageAttachment(url) || imageLoadFailed) {
+    return (
+      <div className="aspect-square bg-[var(--bg-tertiary)] flex flex-col items-center justify-center p-2">
+        <Image className="h-8 w-8 text-[var(--text-tertiary)]" />
+        <span className="text-xs mt-1 text-[var(--text-disabled)] truncate max-w-full">
+          {imageLoadFailed ? `附件 ${index + 1}` : '文件'}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={`附件 ${index + 1}`}
+      className="w-full h-full object-cover aspect-square"
+      onError={() => setImageLoadFailed(true)}
+    />
+  );
+}
+
 const statusConfig: Record<TicketStatus, { label: string; color: string; icon: React.ElementType }> = {
   open: { label: '待处理', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', icon: AlertCircle },
   in_progress: { label: '处理中', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30', icon: Clock },
@@ -191,12 +220,6 @@ export default function AdminTicketsPage() {
     return '?';
   };
 
-  const isImageFile = (url: string) => {
-    // Remove query parameters before checking extension
-    const urlWithoutParams = url.split('?')[0];
-    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(urlWithoutParams);
-  };
-
   // Loading state
   if (isLoading) {
     return <AdminLoadingState />;
@@ -217,9 +240,9 @@ export default function AdminTicketsPage() {
 
   return (
     <TooltipProvider>
-      <div className="p-8 overflow-auto">
+      <div className="p-8 overflow-auto" data-testid="admin-tickets-page">
         {/* Page Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8" data-testid="admin-tickets-header">
           <div>
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
               工单管理
@@ -272,7 +295,10 @@ export default function AdminTicketsPage() {
         </Tabs>
 
         {/* Tickets Table */}
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card
+          data-testid="admin-tickets-table-card"
+          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+        >
           <CardContent className="p-0">
             <Table>
               <TableHeader>
@@ -543,29 +569,7 @@ export default function AdminTicketsPage() {
                               rel="noopener noreferrer"
                               className="group relative rounded-lg overflow-hidden border border-[var(--border-primary)] hover:border-[var(--color-primary)] transition-colors"
                             >
-                              {isImageFile(url) ? (
-                                <img
-                                  src={url}
-                                  alt={`附件 ${index + 1}`}
-                                  className="w-full h-full object-cover aspect-square"
-                                  onError={(e) => {
-                                    // Fallback to icon if image fails to load
-                                    const target = e.target as HTMLImageElement;
-                                    target.style.display = 'none';
-                                    target.parentElement?.classList.add('flex', 'items-center', 'justify-center', 'bg-[var(--bg-tertiary)]');
-                                    const icon = document.createElement('div');
-                                    icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--text-tertiary)]"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
-                                    target.parentElement?.appendChild(icon);
-                                  }}
-                                />
-                              ) : (
-                                <div className="aspect-square bg-[var(--bg-tertiary)] flex flex-col items-center justify-center p-2">
-                                  <FileText className="h-8 w-8 text-[var(--text-tertiary)]" />
-                                  <span className="text-xs mt-1 text-[var(--text-disabled)] truncate max-w-full">
-                                    文件
-                                  </span>
-                                </div>
-                              )}
+                              <TicketAttachmentTile url={url} index={index} />
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <Download className="h-5 w-5 text-white" />
                               </div>

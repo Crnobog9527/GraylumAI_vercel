@@ -58,7 +58,7 @@ export default function ModelSelector({
           "bg-[var(--bg-secondary)]/80 backdrop-blur-sm",
           "border border-[var(--border-primary)]",
           "hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)]",
-          "transition-all duration-200",
+          "transition-[background-color,border-color,color,box-shadow] duration-200 motion-reduce:transition-none",
           "text-[var(--text-primary)]"
         )}
       >
@@ -87,7 +87,7 @@ export default function ModelSelector({
       </SelectTrigger>
       <SelectContent
         className={cn(
-          "bg-[var(--bg-secondary)]/95 backdrop-blur-xl",
+          "bg-[var(--bg-secondary)]/95 backdrop-blur-lg md:backdrop-blur-xl",
           "border border-[var(--border-primary)]"
         )}
       >

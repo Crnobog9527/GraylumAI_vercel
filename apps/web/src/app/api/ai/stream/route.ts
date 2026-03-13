@@ -9,15 +9,24 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
-import { BillingService } from '@repo/api/src/services/billing';
+import { BillingService, calculateTokenCostWithPricing, getModelPricing } from '@repo/api/src/services/billing';
 import { buildCachedPrompt } from '@repo/api/src/services/promptCacheBuilder';
-import { needsRealtimeData, selectModel } from '@repo/api/src/services/modelRouter';
+import { ContextManager } from '@repo/api/src/services/contextManager';
+import { upsertContextSnapshot } from '@repo/api/src/services/contextSnapshots';
+import {
+  decideWebSearch,
+  getSystemDefaultModelForRole,
+  selectModel,
+  shouldUpgradeAssistantRoute,
+  type TaskType,
+} from '@repo/api/src/services/modelRouter';
 import {
   applyUserPromptTemplate,
   buildRuntimeSystemPrompt,
   getChatRuntimeSettings,
   resolveActiveChatPrompt,
 } from '@repo/api/src/services/chatRuntime';
+import { countTokens, estimateOutputTokens } from '@repo/api/src/services/tokenCounter';
 import {
   getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
@@ -52,7 +61,12 @@ interface RuntimeModelConfig {
   provider: string;
   apiEndpoint: string | null;
   enableWebSearch: boolean;
+  tokenCountingSupported: boolean;
+  tokenCountingMethod: string;
+  tokenizerFamily: string | null;
 }
+
+type TokenCounterProvider = 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
 
 async function getUserAccountStatus(supabase: any, userId: string): Promise<'active' | 'disabled' | 'banned'> {
   const { data: profile, error } = await supabase
@@ -68,6 +82,25 @@ async function getUserAccountStatus(supabase: any, userId: string): Promise<'act
   if (profile.status === 'disabled') return 'disabled';
   if (profile.status === 'banned') return 'banned';
   return 'active';
+}
+
+async function getFreeTierUsageCount(supabase: any, userId: string): Promise<number> {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const { count, error } = await supabase
+    .from('ai_usage_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('status', 'success')
+    .gte('created_at', startOfDay.toISOString());
+
+  if (error) {
+    console.error('Failed to load free-tier usage count:', error);
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 function estimateTokens(text: string): number {
@@ -163,7 +196,7 @@ async function getRuntimeModelConfig(
   if (options.runtimeModelId) {
     const { data } = await supabase
       .from('ai_models')
-      .select('id, model_id, name, provider, max_tokens, input_token_cost, output_token_cost, api_key, api_endpoint, enable_web_search')
+      .select('id, model_id, name, provider, max_tokens, input_token_cost, output_token_cost, api_key, api_endpoint, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family')
       .eq('id', options.runtimeModelId)
       .single();
 
@@ -179,6 +212,9 @@ async function getRuntimeModelConfig(
         provider: data.provider || 'anthropic',
         apiEndpoint: data.api_endpoint || null,
         enableWebSearch: data.enable_web_search === 'true',
+        tokenCountingSupported: data.token_counting_supported === 'true',
+        tokenCountingMethod: data.token_counting_method || 'unsupported',
+        tokenizerFamily: data.tokenizer_family || null,
       };
     }
   }
@@ -194,39 +230,9 @@ async function getRuntimeModelConfig(
     provider: options.fallbackProvider,
     apiEndpoint: null,
     enableWebSearch: options.fallbackEnableWebSearch,
-  };
-}
-
-async function saveMessages(
-  supabase: any,
-  conversationId: string,
-  userMessage: string,
-  assistantMessage: string
-): Promise<{ userMessageId: string | null; assistantMessageId: string | null }> {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert([
-      {
-        conversation_id: conversationId,
-        role: 'user',
-        content: userMessage,
-      },
-      {
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: assistantMessage,
-      },
-    ])
-    .select('id, role');
-
-  if (error) {
-    console.error('Failed to save chat messages:', error);
-    return { userMessageId: null, assistantMessageId: null };
-  }
-
-  return {
-    userMessageId: data?.find((item: { role: string }) => item.role === 'user')?.id ?? null,
-    assistantMessageId: data?.find((item: { role: string }) => item.role === 'assistant')?.id ?? null,
+    tokenCountingSupported: true,
+    tokenCountingMethod: 'anthropic_count_tokens',
+    tokenizerFamily: 'anthropic',
   };
 }
 
@@ -236,6 +242,8 @@ function buildAnthropicPayload(params: {
   messages: ClaudeMessage[];
   systemPrompt?: string;
   enablePromptCache: boolean;
+  enableWebSearch?: boolean;
+  maxWebSearchUses?: number;
 }) {
   const cachedPrompt = buildCachedPrompt({
     systemPrompt: params.systemPrompt,
@@ -250,6 +258,17 @@ function buildAnthropicPayload(params: {
       stream: true,
       messages: cachedPrompt.messages,
       ...(cachedPrompt.system ? { system: cachedPrompt.system } : {}),
+      ...(params.enableWebSearch
+        ? {
+            tools: [
+              {
+                type: 'web_search_20250305',
+                name: 'web_search',
+                max_uses: params.maxWebSearchUses ?? 1,
+              },
+            ],
+          }
+        : {}),
     },
     cachePoints: cachedPrompt.cachePoints,
   };
@@ -274,6 +293,27 @@ function buildOpenAICompatibleMessages(params: {
   }
 
   return messages;
+}
+
+function getGoogleApiKey(explicitKey?: string | null) {
+  return explicitKey?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim() ||
+    process.env.GEMINI_API_KEY?.trim() ||
+    null;
+}
+
+function mapTaskTypeToOutputEstimate(taskType: TaskType): Parameters<typeof estimateOutputTokens>[1] {
+  switch (taskType) {
+    case 'coding':
+      return 'coding';
+    case 'compression':
+    case 'search_synthesis':
+      return 'summary';
+    case 'lightweight_transform':
+      return 'translation';
+    default:
+      return 'chat';
+  }
 }
 
 const MAX_CONTEXT_MESSAGES = 100;
@@ -307,7 +347,13 @@ export async function POST(request: NextRequest) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
     const {
       data: { user },
       error: authError,
@@ -321,13 +367,13 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = user.id;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const billingService = new BillingService({
-      supabase,
+      supabase: supabaseAdmin,
       userId,
     });
 
-    const userStatus = await getUserAccountStatus(supabase, userId);
+    const userStatus = await getUserAccountStatus(supabaseAuth, userId);
     if (userStatus === 'disabled') {
       return new Response(
         JSON.stringify({ error: '账号已被禁用，请联系管理员' }),
@@ -372,35 +418,83 @@ export async function POST(request: NextRequest) {
     }
 
     const conversation = await getOrCreateConversation(
-      supabase,
+      supabaseAuth,
       userId,
       conversationId,
       message.substring(0, 50)
     );
-    const history = await getConversationHistory(supabase, conversation.id, MAX_CONTEXT_MESSAGES);
+    const history = await getConversationHistory(supabaseAuth, conversation.id, MAX_CONTEXT_MESSAGES);
     const conversationTurns = Math.floor(history.length / 2);
-    const runtimeSettings = await getChatRuntimeSettings(supabase);
+    const runtimeSettings = await getChatRuntimeSettings(supabaseAdmin);
 
-    const { modelConfig, routingReason } = await selectModel({
-      supabase,
+    if (message.length > runtimeSettings.maxInputCharacters) {
+      return new Response(
+        JSON.stringify({ error: `输入内容超过限制，当前最多允许 ${runtimeSettings.maxInputCharacters} 个字符` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (history.length >= runtimeSettings.maxMessagesPerConversation) {
+      return new Response(
+        JSON.stringify({ error: `当前对话已达到 ${runtimeSettings.maxMessagesPerConversation} 条消息上限，请新建对话后继续` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const initialSelection = await selectModel({
+      supabase: supabaseAdmin,
       conversationId: conversation.id,
       message,
       conversationTurns,
       userPreferredModel: modelId,
     });
+    let { modelConfig, routingReason, routingDecision } = initialSelection;
 
-    const activePrompt = await resolveActiveChatPrompt(supabase, {
+    const preFlightUpgrade = shouldUpgradeAssistantRoute({
+      message,
+      decision: routingDecision,
+      minConfidence: runtimeSettings.smartRoutingMinConfidence,
+    });
+
+    if (preFlightUpgrade.shouldUpgrade) {
+      let primaryModelId =
+        runtimeSettings.primaryModelId ??
+        runtimeSettings.sonnetModelId ??
+        runtimeSettings.defaultModelId;
+
+      if (!primaryModelId) {
+        const primaryFallback = await getSystemDefaultModelForRole(supabaseAdmin, 'primary');
+        primaryModelId = primaryFallback.id;
+      }
+
+      if (primaryModelId && primaryModelId !== modelConfig.id) {
+        const upgradedSelection = await selectModel({
+          supabase: supabaseAdmin,
+          conversationId: conversation.id,
+          message,
+          conversationTurns,
+          userPreferredModel: primaryModelId,
+        });
+
+        modelConfig = upgradedSelection.modelConfig;
+        routingDecision = {
+          ...routingDecision,
+          modelRole: 'primary',
+          assistantEligible: false,
+          reasonCodes: [...routingDecision.reasonCodes, ...preFlightUpgrade.reasonCodes, 'route_upgraded_preflight'],
+        };
+        routingReason = `${routingReason}; route_upgraded_preflight; reasons=${preFlightUpgrade.reasonCodes.join(',')}`;
+      }
+    }
+
+    const activePrompt = await resolveActiveChatPrompt(supabaseAdmin, {
       platform: 'web',
       modelId: modelConfig.id,
     });
     const systemPrompt = buildRuntimeSystemPrompt(activePrompt);
     const transformedMessage = applyUserPromptTemplate(activePrompt, message);
-    const providerMessages: ClaudeMessage[] = [
-      ...history,
-      { role: 'user', content: transformedMessage },
-    ];
 
-    const runtimeModel = await getRuntimeModelConfig(supabase, {
+    const runtimeModel = await getRuntimeModelConfig(supabaseAdmin, {
       runtimeModelId: modelConfig.id,
       fallbackModelId: modelConfig.modelId,
       fallbackName: modelConfig.name,
@@ -411,20 +505,84 @@ export async function POST(request: NextRequest) {
       fallbackEnableWebSearch: modelConfig.enableWebSearch,
     });
 
-    const estimatedInputTokens =
-      providerMessages.reduce((sum, entry) => sum + estimateTokens(typeof entry.content === 'string'
-        ? entry.content
-        : entry.content.map((block) => block.text ?? '').join('\n')), 0) +
-      estimateTokens(systemPrompt ?? '');
-    const estimatedOutputTokens = 1000;
-    const estimatedCredits = Math.ceil(
-      (estimatedInputTokens * runtimeModel.inputTokenCost +
-        estimatedOutputTokens * runtimeModel.outputTokenCost) /
-      1000000
+    if (!runtimeModel.tokenCountingSupported) {
+      return new Response(
+        JSON.stringify({ error: `模型 ${runtimeModel.name} 未配置可验证的 token 计数能力，禁止进入生产计费路径` }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const contextManager = new ContextManager(supabaseAuth);
+    const loadedContext = await contextManager.loadContext(conversation.id);
+    const builtContext = contextManager.buildMessages(
+      loadedContext,
+      transformedMessage,
+      systemPrompt,
     );
+    const providerMessages = builtContext.messages;
+    const tokenCounterProvider: TokenCounterProvider =
+      runtimeModel.tokenCountingMethod === 'anthropic_count_tokens'
+        ? 'anthropic'
+        : runtimeModel.tokenCountingMethod === 'gemini_count_tokens'
+          ? 'google'
+          : runtimeModel.tokenCountingMethod === 'verified_openai_tokenizer'
+            ? 'openai'
+            : runtimeModel.provider === 'anthropic' ||
+                runtimeModel.provider === 'openai' ||
+                runtimeModel.provider === 'google' ||
+                runtimeModel.provider === 'builtin'
+              ? runtimeModel.provider
+              : 'custom';
+
+    const countedInput = await countTokens({
+      model: runtimeModel.modelId,
+      provider: tokenCounterProvider,
+      apiKey: runtimeModel.provider === 'google'
+        ? getGoogleApiKey(runtimeModel.apiKey)
+        : getConfiguredProviderApiKey(runtimeModel.apiKey),
+      apiEndpoint: runtimeModel.apiEndpoint,
+      tokenizerFamily: runtimeModel.tokenizerFamily,
+      messages: providerMessages.map((entry: ClaudeMessage) => ({
+        role: entry.role,
+        content: entry.content,
+      })),
+      system: systemPrompt,
+    }, {
+      useOfficial: runtimeModel.tokenCountingMethod !== 'provider_usage',
+      fallbackToEstimate: true,
+    });
+
+    const searchDecision = runtimeSettings.enableSmartSearchDecision
+      ? decideWebSearch(message)
+      : {
+          shouldSearch: false,
+          confidence: 1,
+          estimatedSearchCount: 0,
+          reasonCodes: ['smart_search_disabled'],
+        };
+
+    const estimatedUsage: TokenUsage = {
+      inputTokens: countedInput.inputTokens,
+      outputTokens: estimateOutputTokens(
+        countedInput.inputTokens,
+        mapTaskTypeToOutputEstimate(routingDecision.taskType),
+      ),
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    };
+    const pricing = await getModelPricing(supabaseAdmin, runtimeModel.modelId);
+    const estimatedCost = calculateTokenCostWithPricing(estimatedUsage, pricing, {
+      searchCount: searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0,
+    });
+    const estimatedCredits = estimatedCost.credits +
+      ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits);
 
     const balance = await billingService.getBalance();
-    if (balance < estimatedCredits) {
+    const freeTierUsedToday = runtimeSettings.enableFreeTier ? await getFreeTierUsageCount(supabaseAuth, userId) : 0;
+    const canUseFreeTier = runtimeSettings.enableFreeTier
+      && balance <= 0
+      && freeTierUsedToday < runtimeSettings.freeTierMessages;
+    if (balance < estimatedCredits && !canUseFreeTier) {
       await billingService.recordUsageLog({
         conversationId: conversation.id,
         requestId,
@@ -437,33 +595,45 @@ export async function POST(request: NextRequest) {
         metadata: {
           estimatedCredits,
           balance,
+          freeTierEnabled: runtimeSettings.enableFreeTier,
+          freeTierUsedToday,
+          freeTierMessages: runtimeSettings.freeTierMessages,
           routingReason,
+          promptId: activePrompt?.id ?? null,
+          promptName: activePrompt?.name ?? null,
         },
       });
 
       return new Response(
-        JSON.stringify({ error: '积分不足' }),
+        JSON.stringify({
+          error: runtimeSettings.enableFreeTier && balance <= 0
+            ? `免费体验次数已用完，当前每日上限为 ${runtimeSettings.freeTierMessages} 次`
+            : '积分不足',
+        }),
         { status: 402, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const preDeduct = await billingService.preDeduct(estimatedCredits, {
-      reason: 'AI 对话预扣',
-      requestId,
-    });
+    const preDeduct = canUseFreeTier
+      ? null
+      : await billingService.preDeduct(estimatedCredits, {
+        reason: 'AI 对话预扣',
+        requestId,
+      });
 
-    await supabase
-      .from('conversations')
-      .update({ model_id: modelConfig.id })
-      .eq('id', conversation.id)
-      .eq('user_id', userId);
-
-    const webSearchRequested = runtimeSettings.enableSmartSearchDecision && needsRealtimeData(message);
-    const webSearchAvailable = webSearchRequested && runtimeModel.enableWebSearch;
-    const apiKey = getConfiguredProviderApiKey(runtimeModel.apiKey);
+    const webSearchRequested = searchDecision.shouldSearch &&
+      searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
+    const webSearchAvailable = webSearchRequested &&
+      runtimeModel.enableWebSearch &&
+      ['anthropic', 'google'].includes(runtimeModel.provider);
+    const apiKey = runtimeModel.provider === 'google'
+      ? getGoogleApiKey(runtimeModel.apiKey)
+      : getConfiguredProviderApiKey(runtimeModel.apiKey);
 
     if (!apiKey) {
-      await billingService.refund(preDeduct.preDeductId, '未配置 API Key');
+      if (preDeduct) {
+        await billingService.refund(preDeduct.preDeductId, '未配置 API Key');
+      }
       await billingService.recordUsageLog({
         conversationId: conversation.id,
         requestId,
@@ -472,6 +642,13 @@ export async function POST(request: NextRequest) {
         errorMessage: '未配置 API Key',
         inputLength: message.length,
         latencyMs: 0,
+        metadata: {
+          freeTierUsed: canUseFreeTier,
+          freeTierUsedToday,
+          freeTierMessages: runtimeSettings.freeTierMessages,
+          promptId: activePrompt?.id ?? null,
+          promptName: activePrompt?.name ?? null,
+        },
       });
 
       return new Response(
@@ -485,6 +662,8 @@ export async function POST(request: NextRequest) {
         const startedAt = Date.now();
         let fullContent = '';
         let cachePoints = 0;
+        let actualSearchCount = 0;
+        let webSearchExecuted = false;
         let usage: TokenUsage = {
           inputTokens: 0,
           outputTokens: 0,
@@ -500,7 +679,11 @@ export async function POST(request: NextRequest) {
               modelUsed: runtimeModel.modelId,
               requestId,
               routingReason,
+              selectedModel: runtimeModel.name,
+              taskType: routingDecision.taskType,
+              routingConfidence: routingDecision.confidence,
               promptId: activePrompt?.id ?? null,
+              promptName: activePrompt?.name ?? null,
             })}\n\n`)
           );
 
@@ -509,12 +692,33 @@ export async function POST(request: NextRequest) {
             apiKey,
           });
 
+          if (webSearchAvailable) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({
+                type: 'search_started',
+                estimatedSearchCount: searchDecision.estimatedSearchCount,
+                reasonCodes: searchDecision.reasonCodes,
+              })}\n\n`)
+            );
+          }
+
+          if (preFlightUpgrade.shouldUpgrade && routingDecision.modelRole === 'primary') {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({
+                type: 'route_upgraded',
+                modelUsed: runtimeModel.modelId,
+                selectedModel: runtimeModel.name,
+                reasonCodes: preFlightUpgrade.reasonCodes,
+              })}\n\n`)
+            );
+          }
+
           if (openAICompatible) {
             const endpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) ||
               'https://openrouter.ai/api/v1/chat/completions';
             const response = await fetch(endpoint, {
               method: 'POST',
-              headers: getOpenAICompatibleHeaders(apiKey),
+              headers: getOpenAICompatibleHeaders(apiKey, runtimeSettings.siteName),
               body: JSON.stringify({
                 model: runtimeModel.modelId,
                 max_tokens: runtimeModel.maxTokens,
@@ -572,6 +776,93 @@ export async function POST(request: NextRequest) {
                 }
               }
             }
+          } else if (runtimeModel.provider === 'google') {
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(runtimeModel.modelId)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey ?? '')}`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  contents: providerMessages.map((entry: ClaudeMessage) => ({
+                    role: entry.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: typeof entry.content === 'string'
+                      ? entry.content
+                      : entry.content.map((block: { text?: string }) => block.text ?? '').join('\n') }],
+                  })),
+                  ...(systemPrompt
+                    ? {
+                        systemInstruction: {
+                          role: 'system',
+                          parts: [{ text: systemPrompt }],
+                        },
+                      }
+                    : {}),
+                  generationConfig: {
+                    maxOutputTokens: runtimeModel.maxTokens,
+                  },
+                  ...(webSearchAvailable
+                    ? {
+                        tools: [{ google_search: {} }],
+                      }
+                    : {}),
+                }),
+              },
+            );
+
+            if (!response.ok) {
+              const providerError = await getProviderErrorMessage(response);
+              throw new Error(`Gemini API error: ${response.status} - ${providerError}`);
+            }
+
+            webSearchExecuted = webSearchAvailable;
+            actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
+
+            const reader = response.body?.getReader();
+            if (!reader) {
+              throw new Error('No response body');
+            }
+
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6).trim();
+                if (!data) continue;
+
+                try {
+                  const event = JSON.parse(data);
+                  const parts = event.candidates?.[0]?.content?.parts ?? [];
+                  const delta = parts
+                    .map((part: { text?: string }) => part.text ?? '')
+                    .join('');
+
+                  if (delta) {
+                    fullContent += delta;
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
+                    );
+                  }
+
+                  if (event.usageMetadata) {
+                    usage.inputTokens = event.usageMetadata.promptTokenCount || usage.inputTokens;
+                    usage.outputTokens = event.usageMetadata.candidatesTokenCount || usage.outputTokens;
+                  }
+                } catch {
+                  // Ignore malformed Gemini stream frames.
+                }
+              }
+            }
           } else {
             const anthropicPayload = buildAnthropicPayload({
               modelId: runtimeModel.modelId,
@@ -579,6 +870,8 @@ export async function POST(request: NextRequest) {
               messages: providerMessages,
               systemPrompt,
               enablePromptCache: runtimeSettings.enablePromptCache,
+              enableWebSearch: webSearchAvailable,
+              maxWebSearchUses: searchDecision.estimatedSearchCount,
             });
             cachePoints = anthropicPayload.cachePoints;
 
@@ -596,6 +889,9 @@ export async function POST(request: NextRequest) {
               const providerError = await getProviderErrorMessage(response);
               throw new Error(`Anthropic API error: ${response.status} - ${providerError}`);
             }
+
+            webSearchExecuted = webSearchAvailable;
+            actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
 
             const reader = response.body?.getReader();
             if (!reader) {
@@ -637,6 +933,12 @@ export async function POST(request: NextRequest) {
                       usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || usage.cacheReadTokens;
                       usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || usage.cacheCreationTokens;
                     }
+                  } else if (event.type === 'content_block_start') {
+                    const blockType = event.content_block?.type;
+                    if (blockType === 'server_tool_use' || blockType === 'web_search_tool_result') {
+                      webSearchExecuted = true;
+                      actualSearchCount = Math.max(actualSearchCount, 1);
+                    }
                   }
                 } catch {
                   // Ignore malformed provider frames.
@@ -645,8 +947,18 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          if (webSearchAvailable) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({
+                type: 'search_finished',
+                executed: webSearchExecuted,
+                searchCount: actualSearchCount,
+              })}\n\n`)
+            );
+          }
+
           if (!usage.inputTokens) {
-            usage.inputTokens = estimatedInputTokens;
+            usage.inputTokens = countedInput.inputTokens;
           }
           if (!usage.outputTokens) {
             usage.outputTokens = estimateTokens(fullContent);
@@ -654,67 +966,44 @@ export async function POST(request: NextRequest) {
 
           checkOutputSecurity(fullContent);
 
-          const messageIds = await saveMessages(
-            supabase,
-            conversation.id,
-            message,
-            fullContent
-          );
-
           if (conversation.isNew) {
             const title = message.length > 50 ? `${message.substring(0, 47)}...` : message;
-            await supabase
+            await supabaseAuth
               .from('conversations')
-              .update({ title, model_id: modelConfig.id })
+              .update({ title })
               .eq('id', conversation.id);
           }
 
-          const actualCredits = Math.ceil(
-            (usage.inputTokens * runtimeModel.inputTokenCost +
-              usage.outputTokens * runtimeModel.outputTokenCost -
-              usage.cacheReadTokens * runtimeModel.inputTokenCost * 0.9) /
-            1000000
-          );
-          const totalCostUsd = (
-            (usage.inputTokens * runtimeModel.inputTokenCost +
-              usage.outputTokens * runtimeModel.outputTokenCost) /
-            1000000000
-          );
-          const refundAmount = Math.max(0, preDeduct.estimatedCredits - actualCredits);
-
-          await billingService.settle(
-            preDeduct.preDeductId,
-            actualCredits,
-            usage,
-            messageIds.assistantMessageId
-              ? {
-                messageId: messageIds.assistantMessageId,
-                conversationId: conversation.id,
-                content: fullContent,
-              }
-              : undefined
-          );
-
-          await billingService.recordTokenStats({
+          const calculatedCost = calculateTokenCostWithPricing(usage, pricing, {
+            searchCount: actualSearchCount,
+          });
+          const actualCredits = canUseFreeTier
+            ? 0
+            : calculatedCost.credits + (actualSearchCount * runtimeSettings.searchSurchargeCredits);
+          const finalizeResult = await billingService.finalizeAISuccess({
             conversationId: conversation.id,
-            messageId: messageIds.assistantMessageId ?? undefined,
+            userMessage: message,
+            assistantMessage: fullContent,
             modelUsed: runtimeModel.modelId,
             usage,
-            costUsd: totalCostUsd,
+            costUsd: calculatedCost.costUsd,
             credits: actualCredits,
-          });
-
-          await billingService.recordUsageLog({
-            conversationId: conversation.id,
+            preDeductId: preDeduct?.preDeductId ?? null,
             requestId,
-            modelId: runtimeModel.modelId,
-            status: 'success',
             inputLength: message.length,
             latencyMs: Date.now() - startedAt,
+            searchCount: actualSearchCount,
             ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
             userAgent: request.headers.get('user-agent') ?? undefined,
-            metadata: {
+            tokenMetadata: {
+              count_method: runtimeModel.tokenCountingMethod,
+              count_source: countedInput.countSource,
+              counter_version: countedInput.counterVersion,
+              routing_decision: routingDecision,
+            },
+            usageMetadata: {
               routingReason,
+              routingDecision,
               promptId: activePrompt?.id ?? null,
               promptName: activePrompt?.name ?? null,
               promptCacheEnabled: runtimeSettings.enablePromptCache,
@@ -722,11 +1011,48 @@ export async function POST(request: NextRequest) {
               cachePoints,
               webSearchRequested,
               webSearchAvailable,
-              webSearchExecuted: false,
+              webSearchExecuted,
+              webSearchCount: actualSearchCount,
               selectedModelRecordId: modelConfig.id,
               selectedModelProvider: runtimeModel.provider,
+              freeTierUsed: canUseFreeTier,
+              freeTierUsedToday,
+              freeTierMessages: runtimeSettings.freeTierMessages,
             },
           });
+
+          if (builtContext.truncated || loadedContext.summary) {
+            await upsertContextSnapshot(supabaseAuth, {
+              conversationId: conversation.id,
+              snapshotType: 'compression_checkpoint',
+              content: loadedContext.summary ?? providerMessages.slice(0, Math.max(1, providerMessages.length - 1))
+                .map((entry: ClaudeMessage) => `${entry.role}: ${typeof entry.content === 'string' ? entry.content : entry.content.map((block: { text?: string }) => block.text ?? '').join('\n')}`)
+                .join('\n\n'),
+              sourceMessageEndId: finalizeResult.assistantMessageId,
+              sourceMessageCount: providerMessages.length,
+              metadata: {
+                totalTokens: loadedContext.totalTokens,
+                truncated: builtContext.truncated,
+                truncationReason: builtContext.truncationReason ?? null,
+                hasSummary: loadedContext.summary ? true : false,
+              },
+            });
+          }
+
+          if (webSearchExecuted && fullContent) {
+            await upsertContextSnapshot(supabaseAuth, {
+              conversationId: conversation.id,
+              snapshotType: 'search_digest',
+              content: fullContent,
+              sourceMessageEndId: finalizeResult.assistantMessageId,
+              sourceMessageCount: 2,
+              metadata: {
+                searchCount: actualSearchCount,
+                requestId,
+                modelUsed: runtimeModel.modelId,
+              },
+            });
+          }
 
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({
@@ -734,35 +1060,40 @@ export async function POST(request: NextRequest) {
               usage,
               cost: {
                 creditsDeducted: actualCredits,
-                estimatedCredits: preDeduct.estimatedCredits,
-                refunded: refundAmount,
+                estimatedCredits: preDeduct?.estimatedCredits ?? 0,
+                refunded: finalizeResult.refundedCredits,
               },
               conversationId: conversation.id,
+              modelUsed: runtimeModel.modelId,
+              searchCount: actualSearchCount,
+              routingReason,
             })}\n\n`)
           );
         } catch (error) {
           const messageText = error instanceof Error ? error.message : 'Unknown error';
-          await billingService.refund(
-            preDeduct.preDeductId,
-            `AI 调用失败: ${messageText}`
-          );
-          await billingService.recordUsageLog({
+          await billingService.finalizeAIFailure({
             conversationId: conversation.id,
             requestId,
-            modelId: runtimeModel.modelId,
-            status: 'failed',
-            errorMessage: messageText,
+            modelUsed: runtimeModel.modelId,
+            reason: `AI 调用失败: ${messageText}`,
+            preDeductId: preDeduct?.preDeductId ?? null,
             inputLength: message.length,
             latencyMs: Date.now() - startedAt,
             ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
             userAgent: request.headers.get('user-agent') ?? undefined,
-            metadata: {
+            usageMetadata: {
               routingReason,
+              routingDecision,
               promptId: activePrompt?.id ?? null,
+              promptName: activePrompt?.name ?? null,
               promptCacheEnabled: runtimeSettings.enablePromptCache,
               webSearchRequested,
               webSearchAvailable,
-              webSearchExecuted: false,
+              webSearchExecuted,
+              webSearchCount: actualSearchCount,
+              freeTierUsed: canUseFreeTier,
+              freeTierUsedToday,
+              freeTierMessages: runtimeSettings.freeTierMessages,
             },
           });
 

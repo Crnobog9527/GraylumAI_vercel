@@ -105,7 +105,7 @@ export default function PromptModuleGrid({
             size="sm"
             onClick={() => setActiveCategory(cat)}
             className={cn(
-              'rounded-full transition-all',
+              'rounded-full transition-colors duration-200',
               activeCategory === cat
                 ? 'bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-black'
                 : 'border-[var(--border-primary)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-10)]'
@@ -128,7 +128,7 @@ export default function PromptModuleGrid({
               key={module.id}
               onClick={() => onSelect(module)}
               className={cn(
-                'group relative p-5 rounded-2xl border-2 text-left transition-all duration-300',
+                'group relative rounded-2xl border-2 p-5 text-left transition-[transform,box-shadow,border-color] duration-300',
                 'hover:shadow-lg hover:-translate-y-1',
                 color.bg,
                 color.border,
@@ -149,7 +149,7 @@ export default function PromptModuleGrid({
                     </Badge>
                   )}
                   <ChevronRight
-                    className="h-4 w-4 group-hover:translate-x-1 transition-all"
+                    className="h-4 w-4 transition-transform group-hover:translate-x-1"
                     style={{ color: 'var(--text-tertiary)' }}
                   />
                 </div>

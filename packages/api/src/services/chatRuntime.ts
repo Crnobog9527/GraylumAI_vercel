@@ -7,9 +7,22 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface ChatRuntimeSettings {
+  siteName?: string;
   enableSmartRouting: boolean;
   enableSmartSearchDecision: boolean;
   enablePromptCache: boolean;
+  enableFreeTier: boolean;
+  freeTierMessages: number;
+  maxMessagesPerConversation: number;
+  maxInputCharacters: number;
+  enableLongTextWarning: boolean;
+  longTextWarningThreshold: number;
+  showTokenUsageStats: boolean;
+  smartRoutingMinConfidence: number;
+  searchDecisionMinConfidence: number;
+  searchSurchargeCredits: number;
+  primaryModelId?: string;
+  assistantModelId?: string;
   defaultModelId?: string;
   sonnetModelId?: string;
   haikuModelId?: string;
@@ -39,6 +52,19 @@ function parseStringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function parseNumberValue(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
 export async function getChatRuntimeSettings(
   supabase: SupabaseClient
 ): Promise<ChatRuntimeSettings> {
@@ -49,6 +75,19 @@ export async function getChatRuntimeSettings(
       'enable_smart_routing',
       'enable_smart_search_decision',
       'enable_prompt_cache',
+      'enable_free_tier',
+      'free_tier_messages',
+      'max_messages_per_conversation',
+      'max_input_characters',
+      'enable_long_text_warning',
+      'long_text_warning_threshold',
+      'show_token_usage_stats',
+      'smart_routing_min_confidence',
+      'search_decision_min_confidence',
+      'search_surcharge_credits',
+      'primary_model_id',
+      'assistant_model_id',
+      'site_name',
       'ai_models',
     ]);
 
@@ -60,6 +99,7 @@ export async function getChatRuntimeSettings(
   const aiModelsConfig = (rawSettings.get('ai_models') as Record<string, unknown> | null) ?? {};
 
   return {
+    siteName: parseStringValue(rawSettings.get('site_name')),
     enableSmartRouting: parseBooleanValue(
       rawSettings.get('enable_smart_routing'),
       parseBooleanValue(aiModelsConfig.enableSmartRouting, true)
@@ -72,6 +112,18 @@ export async function getChatRuntimeSettings(
       rawSettings.get('enable_prompt_cache'),
       parseBooleanValue(aiModelsConfig.enablePromptCache, true)
     ),
+    enableFreeTier: parseBooleanValue(rawSettings.get('enable_free_tier'), false),
+    freeTierMessages: parseNumberValue(rawSettings.get('free_tier_messages'), 5),
+    maxMessagesPerConversation: parseNumberValue(rawSettings.get('max_messages_per_conversation'), 100),
+    maxInputCharacters: parseNumberValue(rawSettings.get('max_input_characters'), 2500),
+    enableLongTextWarning: parseBooleanValue(rawSettings.get('enable_long_text_warning'), true),
+    longTextWarningThreshold: parseNumberValue(rawSettings.get('long_text_warning_threshold'), 5000),
+    showTokenUsageStats: parseBooleanValue(rawSettings.get('show_token_usage_stats'), true),
+    smartRoutingMinConfidence: parseNumberValue(rawSettings.get('smart_routing_min_confidence'), 0.72),
+    searchDecisionMinConfidence: parseNumberValue(rawSettings.get('search_decision_min_confidence'), 0.75),
+    searchSurchargeCredits: parseNumberValue(rawSettings.get('search_surcharge_credits'), 0),
+    primaryModelId: parseStringValue(rawSettings.get('primary_model_id')) ?? parseStringValue(aiModelsConfig.primaryModelId),
+    assistantModelId: parseStringValue(rawSettings.get('assistant_model_id')) ?? parseStringValue(aiModelsConfig.assistantModelId),
     defaultModelId: parseStringValue(aiModelsConfig.defaultModelId),
     sonnetModelId: parseStringValue(aiModelsConfig.sonnetModelId),
     haikuModelId: parseStringValue(aiModelsConfig.haikuModelId),

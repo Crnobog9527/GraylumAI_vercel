@@ -156,6 +156,9 @@ importers:
       '@trpc/react-query':
         specifier: ^11.8.1
         version: 11.8.1(@tanstack/react-query@5.90.20(react@19.2.3))(@trpc/client@11.8.1(@trpc/server@11.8.1(typescript@5.9.3))(typescript@5.9.3))(@trpc/server@11.8.1(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
+      '@trpc/server':
+        specifier: ^11.8.1
+        version: 11.8.1(typescript@5.9.3)
       '@upstash/ratelimit':
         specifier: ^2.0.8
         version: 2.0.8(@upstash/redis@1.36.1)
@@ -223,6 +226,9 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.3(@types/react@19.2.9)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       eslint:
         specifier: ^9
         version: 9.39.2(jiti@2.6.1)
@@ -247,12 +253,18 @@ importers:
       '@upstash/redis':
         specifier: ^1.36.1
         version: 1.36.1
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       pino:
         specifier: ^10.3.0
         version: 10.3.0
       pino-pretty:
         specifier: ^13.1.3
         version: 13.1.3
+      stripe:
+        specifier: ^20.4.1
+        version: 20.4.1(@types/node@20.19.30)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -264,7 +276,17 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.19.30)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.46.0)
 
-  packages/db: {}
+  packages/db:
+    dependencies:
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      drizzle-kit:
+        specifier: ^0.31.8
+        version: 0.31.8
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(@upstash/redis@1.36.1)(pg@8.17.2)(postgres@3.4.8)
 
   packages/eslint-config-custom: {}
 
@@ -3910,6 +3932,15 @@ packages:
   strip-json-comments@5.0.3:
     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
     engines: {node: '>=14.16'}
+
+  stripe@20.4.1:
+    resolution: {integrity: sha512-axCguHItc8Sxt0HC6aSkdVRPffjYPV7EQqZRb2GkIa8FzWDycE7nHJM19C6xAIynH1Qp1/BHiopSi96jGBxT0w==}
+    engines: {node: '>=16'}
+    peerDependencies:
+      '@types/node': '>=16'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   styled-jsx@5.1.6:
     resolution: {integrity: sha512-qSVyDTeMotdvQYoHWLNGwRFJHC+i+ZvdBRYosOFgC+Wg1vx4frN2/RG/NA7SYqqvKNLf39P2LSRA2pu6n0XYZA==}
@@ -7702,6 +7733,10 @@ snapshots:
   strip-json-comments@3.1.1: {}
 
   strip-json-comments@5.0.3: {}
+
+  stripe@20.4.1(@types/node@20.19.30):
+    optionalDependencies:
+      '@types/node': 20.19.30
 
   styled-jsx@5.1.6(@babel/core@7.28.6)(react@19.2.3):
     dependencies:

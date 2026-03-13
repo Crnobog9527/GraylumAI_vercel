@@ -38,7 +38,7 @@ export default function StatsCard({
 
   return (
     <div
-      className="rounded-2xl p-6 transition-all duration-300 hover:shadow-lg hover:shadow-black/20"
+      className="rounded-2xl p-6 transition-[box-shadow,border-color,transform] duration-200 motion-reduce:transition-none hover:shadow-lg hover:shadow-black/20"
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)'

@@ -64,7 +64,7 @@ export default function SixStepsGuide({ onStartAnalysis }: SixStepsGuideProps) {
   };
 
   return (
-    <div className="mb-16">
+    <div className="mb-16" data-testid="home-onboarding-guide">
       {/* Header - 标题区域 */}
       <div className="text-center mb-12">
         {/* 微标签 */}

@@ -1,99 +1,90 @@
 # 部署指南
 
-> 部署由 **Vercel Git Integration** 自动处理，推送代码即自动部署。
+## 当前发布顺序
+
+1. 先完成非支付发布准备
+2. 在锁定的 Vercel preview / staging 环境做完整预发布演练
+3. 关闭演练中发现的最后非支付问题
+4. 最后接入并验收 Stripe
+5. 再做正式生产发布
+
+相关文档：
+
+- [RELEASE_PREP_CHECKLIST.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/RELEASE_PREP_CHECKLIST.md)
+- [PRE_RELEASE_REHEARSAL.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/runbooks/PRE_RELEASE_REHEARSAL.md)
+- [STRIPE_ENABLEMENT_CHECKLIST.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/STRIPE_ENABLEMENT_CHECKLIST.md)
 
 ## 环境概览
 
-| 环境 | 触发条件 | URL |
-|------|----------|-----|
-| **Production** | 推送到 `main` | 你的 Vercel 域名 |
-| **Preview** | 任何 PR 或其他分支 | 自动生成 |
+| 环境 | 作用 | 说明 |
+|------|------|------|
+| `Preview / Staging` | 预发布演练 | 锁定单个部署版本，不允许中途切换 |
+| `Production` | 正式上线 | 只在 preview 演练通过且 Stripe 验收通过后发布 |
 
----
+## 关键环境变量
 
-## Vercel 环境变量配置
+### 非支付发布准备
 
-在 Vercel Dashboard 配置（不是 GitHub Secrets）：
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_SITE_NAME`
+- `NEXT_PUBLIC_SUPPORT_EMAIL`
+- `NEXT_PUBLIC_SENTRY_DSN`
+- AI provider keys
 
-```
-Vercel Dashboard → Project → Settings → Environment Variables
-```
+### Stripe 阶段
 
-### 必需变量
+- `STRIPE_SECRET_KEY`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
 
-| 变量名 | 说明 |
-|--------|------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 Key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 服务端 Key |
-| `ANTHROPIC_API_KEY` | Claude API Key |
+### 外部配置
 
-### 可选变量
+- Supabase Auth redirect URLs
+- `verify-email` 回跳地址
+- Vercel preview / production base URL
+- Deployment Protection bypass cookie
+- Stripe Checkout return URLs
+- Stripe webhook endpoint
 
-| 变量名 | 说明 |
-|--------|------|
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry 错误监控 |
-| `DATABASE_URL` | 直连数据库（Drizzle 迁移用） |
+## 推荐命令
 
----
-
-## 部署流程
-
-### 日常开发
+### 本地发布前基线
 
 ```bash
-# 1. 创建功能分支
-git checkout -b feature/xxx
-
-# 2. 开发并提交
-git commit -m "feat: xxx"
-
-# 3. 推送并创建 PR
-git push origin feature/xxx
-# Vercel 自动创建 Preview 部署
-
-# 4. PR 合并到 main 后自动部署到生产
+pnpm release:preflight
 ```
 
-### 发布检查清单
+### Preview / staging 预发布演练
 
-部署前确认：
-- [ ] 本地测试通过
-- [ ] PR 的 CI 检查通过
-- [ ] Preview 环境功能验证
+```bash
+pnpm release:preflight:preview -- --preview-url <preview-url> --bypass-cookie <cookie>
+```
 
-部署后验证：
-- [ ] 网站可访问
-- [ ] 登录/AI 对话正常
-- [ ] 管理后台可访问
+### 隔离 destructive 演练
 
----
+```bash
+pnpm release:preflight:destructive -- --preview-url <preview-url> --bypass-cookie <cookie>
+```
 
 ## 回滚
 
-### 方法 1: Vercel Dashboard（推荐）
+### Vercel Dashboard（推荐）
 
-1. 打开 Vercel Dashboard → Deployments
+1. 打开 `Deployments`
 2. 找到上一个稳定版本
-3. 点击 `...` → `Promote to Production`
+3. `Promote to Production`
 
-### 方法 2: Git Revert
+### Git 回滚
 
 ```bash
 git revert HEAD
 git push origin main
-# 自动触发重新部署
 ```
 
----
+## accepted risk
 
-## 常见问题
-
-**Q: 部署失败？**
-→ 检查 Vercel Dashboard 的构建日志
-
-**Q: 环境变量不生效？**
-→ 确认在 Vercel Dashboard 配置，不是 GitHub Secrets
-
-**Q: 如何手动触发部署？**
-→ Vercel Dashboard → Deployments → Redeploy
+- Supabase 免费套餐无法启用 `Leaked Password Protection`
+- 当前将其记录为平台级 accepted risk，不阻塞非支付上线准备

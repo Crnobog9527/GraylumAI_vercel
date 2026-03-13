@@ -90,8 +90,9 @@ export function getWarningBorderColor(level: WarningLevel): string {
 /**
  * 获取积分余额
  */
-export function useCreditsBalance() {
+export function useCreditsBalance(options?: { enabled?: boolean }) {
   const query = trpc.credits.getBalance.useQuery(undefined, {
+    enabled: options?.enabled ?? true,
     staleTime: 30 * 1000, // 30秒内不重新请求
     refetchOnWindowFocus: true, // 窗口聚焦时刷新
   });
@@ -291,13 +292,11 @@ export function ConsumeCreditsButton({
     }
 
     try {
-      const result = await deduct(amount, {
+      await deduct(amount, {
         reason: '服务消费',
         referenceId: serviceId,
         referenceType: 'service',
       });
-      
-      console.log('扣除成功:', result);
       alert(`成功消费 ${amount} 积分`);
     } catch (err) {
       console.error('扣除失败:', err);

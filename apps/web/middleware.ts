@@ -1,14 +1,27 @@
 import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
   '/login',
+  '/register',
+  '/verify-email',
+  '/maintenance',
+  '/contact',
+  '/tutorials',
+  '/faq',
+  '/terms',
+  '/privacy',
+  '/acceptable-use',
+  '/auth',
   '/landing',
   '/api',
   '/_next',
+  '/_vercel',
   '/favicon.ico',
 ];
 
@@ -28,6 +41,17 @@ function needsRateLimit(pathname: string): boolean {
   return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
 }
 
+function isMaintenanceBypassPath(pathname: string): boolean {
+  return (
+    pathname === '/maintenance' ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/_vercel') ||
+    pathname === '/favicon.ico'
+  );
+}
+
 // 获取客户端 IP
 function getClientIP(request: NextRequest): string {
   const forwarded = request.headers.get('x-forwarded-for');
@@ -43,6 +67,42 @@ function getClientIP(request: NextRequest): string {
 
 // 创建 Redis 速率限制器 (懒加载)
 let rateLimiter: Ratelimit | null = null;
+let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
+
+async function isMaintenanceModeEnabled(
+  _request: NextRequest
+): Promise<boolean> {
+  if (maintenanceCache && maintenanceCache.expiresAt > Date.now()) {
+    return maintenanceCache.enabled;
+  }
+
+  try {
+    const maintenanceClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    );
+
+    const { data, error } = await maintenanceClient
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'maintenance_mode')
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Middleware] Failed to read maintenance mode:', error);
+      maintenanceCache = { enabled: false, expiresAt: Date.now() + 1_000 };
+      return false;
+    }
+
+    const enabled = data?.value === true || data?.value === 'true';
+    maintenanceCache = { enabled, expiresAt: Date.now() + 2_000 };
+    return enabled;
+  } catch (error) {
+    console.error('[Middleware] Unexpected maintenance mode error:', error);
+    maintenanceCache = { enabled: false, expiresAt: Date.now() + 1_000 };
+    return false;
+  }
+}
 
 function getRateLimiter(): Ratelimit | null {
   if (rateLimiter) return rateLimiter;
@@ -152,6 +212,29 @@ export async function middleware(request: NextRequest) {
 
   // 获取用户会话
   const { data: { user } } = await supabase.auth.getUser();
+  const userIsVerified = isEmailVerified(user);
+  const maintenanceModeEnabled = await isMaintenanceModeEnabled(request);
+  let isAdminUser = false;
+
+  if (maintenanceModeEnabled && user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    isAdminUser = profile?.role === 'admin';
+  }
+
+  if (maintenanceModeEnabled && !isAdminUser && !isMaintenanceBypassPath(pathname)) {
+    const maintenanceUrl = new URL('/maintenance', request.url);
+    maintenanceUrl.searchParams.set('from', `${pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(maintenanceUrl);
+  }
+
+  if (maintenanceModeEnabled && isAdminUser && pathname === '/maintenance') {
+    return NextResponse.redirect(new URL('/admin', request.url));
+  }
 
   // ========================================
   // 认证与路由逻辑
@@ -174,7 +257,13 @@ export async function middleware(request: NextRequest) {
     // 公开路径允许访问
     if (isPublicPath(pathname)) {
       // 已登录用户访问登录页时重定向到首页
-      if (pathname === '/login' && user) {
+      if ((pathname === '/login' || pathname === '/register') && user) {
+        if (!userIsVerified) {
+          const verifyUrl = new URL('/verify-email', request.url);
+          verifyUrl.searchParams.set('email', user.email ?? '');
+          verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+          return NextResponse.redirect(verifyUrl);
+        }
         return NextResponse.redirect(new URL('/', request.url));
       }
       return supabaseResponse;
@@ -186,6 +275,13 @@ export async function middleware(request: NextRequest) {
       const redirectTarget = `${pathname}${request.nextUrl.search}`;
       loginUrl.searchParams.set('redirect', redirectTarget);
       return NextResponse.redirect(loginUrl);
+    }
+
+    if (!userIsVerified) {
+      const verifyUrl = new URL('/verify-email', request.url);
+      verifyUrl.searchParams.set('email', user.email ?? '');
+      verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
+      return NextResponse.redirect(verifyUrl);
     }
 
     return supabaseResponse;
@@ -225,8 +321,21 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
+    if (!isPublicPath(pathname) && user && !userIsVerified) {
+      const verifyUrl = new URL('/verify-email', request.url);
+      verifyUrl.searchParams.set('email', user.email ?? '');
+      verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
+      return NextResponse.redirect(verifyUrl);
+    }
+
     // 已登录用户访问登录页时重定向到首页
-    if (pathname === '/login' && user) {
+    if ((pathname === '/login' || pathname === '/register') && user) {
+      if (!userIsVerified) {
+        const verifyUrl = new URL('/verify-email', request.url);
+        verifyUrl.searchParams.set('email', user.email ?? '');
+        verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+        return NextResponse.redirect(verifyUrl);
+      }
       return NextResponse.redirect(new URL('/', request.url));
     }
   }

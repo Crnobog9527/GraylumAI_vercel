@@ -1,5 +1,3 @@
-'use client';
-
 import {
   Search,
   Users,
@@ -74,8 +72,7 @@ export default function FeaturesSection() {
             </span>
           </h2>
           <p className="text-lg text-[#B0B0B0] max-w-2xl mx-auto">
-            经过验证的 6 步增长方法论，结合 AI 的强大能力，
-            让每一步都事半功倍。
+            经过验证的 6 步增长方法论，结合 AI 的强大能力，让每一步都事半功倍。
           </p>
         </div>
 
@@ -86,7 +83,7 @@ export default function FeaturesSection() {
             return (
               <div
                 key={feature.step}
-                className="group relative p-6 md:p-8 rounded-2xl bg-[#1A1A1A]/80 border border-[#333333] hover:border-[#FFD700]/50 transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_0_40px_rgba(255,215,0,0.1)]"
+                className="group relative rounded-2xl border border-[#333333] bg-[#1A1A1A]/80 p-6 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-2 hover:border-[#FFD700]/50 hover:shadow-[0_0_28px_rgba(255,215,0,0.08)] md:p-8"
                 style={{
                   animationDelay: `${index * 0.1}s`,
                 }}

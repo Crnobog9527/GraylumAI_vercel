@@ -38,7 +38,14 @@ interface TicketReply {
   id: string;
   message: string;
   is_admin_reply: boolean;
+  attachments?: string[];
   created_date: string;
+}
+
+interface PendingAttachment {
+  name: string;
+  path: string;
+  previewUrl: string;
 }
 
 const categoryOptions = [
@@ -119,7 +126,7 @@ const TicketListView = memo(function TicketListView({
       <div className="flex gap-2 mb-6">
         <button
           onClick={() => setActiveTab('active')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none"
           style={{
             background: activeTab === 'active' ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
             color: activeTab === 'active' ? 'var(--color-primary)' : 'var(--text-secondary)',
@@ -139,7 +146,7 @@ const TicketListView = memo(function TicketListView({
         </button>
         <button
           onClick={() => setActiveTab('closed')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-[background-color,border-color,color] duration-200 motion-reduce:transition-none"
           style={{
             background: activeTab === 'closed' ? 'rgba(255, 215, 0, 0.1)' : 'transparent',
             color: activeTab === 'closed' ? 'var(--color-primary)' : 'var(--text-secondary)',
@@ -186,18 +193,10 @@ const TicketListView = memo(function TicketListView({
                 key={ticket.id}
                 data-testid="ticket-list-item"
                 onClick={() => onSelectTicket(ticket)}
-                className="p-4 rounded-xl cursor-pointer transition-all duration-200"
+                className="p-4 rounded-xl cursor-pointer transition-[border-color,transform,box-shadow] duration-200 motion-reduce:transition-none hover:translate-x-1 hover:border-[rgba(255,215,0,0.3)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
                 style={{
                   background: 'var(--bg-primary)',
                   border: '1px solid var(--border-primary)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 215, 0, 0.3)';
-                  e.currentTarget.style.transform = 'translateX(4px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border-primary)';
-                  e.currentTarget.style.transform = 'translateX(0)';
                 }}
               >
                 <div className="flex items-start justify-between gap-4">
@@ -449,6 +448,27 @@ const TicketDetailView = memo(function TicketDetailView({
                   <p className="whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>
                     {reply.message}
                   </p>
+                  {reply.attachments && reply.attachments.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                      {reply.attachments.map((url, index) => (
+                        <a
+                          key={index}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block rounded-lg overflow-hidden border transition-all hover:border-yellow-500/50"
+                          style={{ borderColor: 'var(--border-primary)' }}
+                        >
+                          <img
+                            src={url}
+                            alt={`回复附件 ${index + 1}`}
+                            className="w-full h-32 object-cover"
+                            loading="lazy"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -515,20 +535,20 @@ const CreateTicketForm = memo(function CreateTicketForm({
 }: {
   user: MockUser;
   onBack: () => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 }) {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     category: 'technical_support'
   });
-  const [attachments, setAttachments] = useState<{ name: string; url: string }[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
 
   // tRPC mutation for creating ticket
   const createMutation = trpc.ticket.createTicket.useMutation({
-    onSuccess: () => {
-      onSuccess();
+    onSuccess: async () => {
+      await onSuccess();
     },
     onError: (error) => {
       console.error('Failed to create ticket:', error);
@@ -571,7 +591,8 @@ const CreateTicketForm = memo(function CreateTicketForm({
 
         if (response.ok) {
           const data = await response.json();
-          setAttachments(prev => [...prev, { name: file.name, url: data.url }]);
+          const previewUrl = URL.createObjectURL(file);
+          setAttachments(prev => [...prev, { name: file.name, path: data.path, previewUrl }]);
         } else {
           console.error('Upload failed:', await response.text());
         }
@@ -582,7 +603,14 @@ const CreateTicketForm = memo(function CreateTicketForm({
   };
 
   const removeAttachment = (index: number) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
+    setAttachments(prev => {
+      const target = prev[index];
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -594,7 +622,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
       title: formData.title.trim(),
       description: formData.description.trim(),
       category: formData.category,
-      attachments: attachments.map(a => a.url),
+      attachments: attachments.map(a => a.path),
     });
   };
 
@@ -713,7 +741,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
                   style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}
                 >
                   <div className="flex items-center gap-3">
-                    <img src={att.url} alt={att.name} loading="lazy" className="w-12 h-12 object-cover rounded" />
+                    <img src={att.previewUrl} alt={att.name} loading="lazy" className="w-12 h-12 object-cover rounded" />
                     <span className="text-sm truncate max-w-[200px]" style={{ color: 'var(--text-primary)' }}>
                       {att.name}
                     </span>
@@ -800,6 +828,7 @@ export default function TicketsPanel({
         id: r.id,
         message: r.message,
         is_admin_reply: r.is_admin_reply,
+        attachments: r.attachments || [],
         created_date: r.created_at,
       })) || [],
     }));
@@ -824,8 +853,8 @@ export default function TicketsPanel({
     changeView('create');
   };
 
-  const handleCreateSuccess = () => {
-    refetch();
+  const handleCreateSuccess = async () => {
+    await refetch();
     changeView('list');
   };
 

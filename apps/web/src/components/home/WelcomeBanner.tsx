@@ -35,6 +35,7 @@ export default function WelcomeBanner({ user }: WelcomeBannerProps) {
 
   return (
     <div
+      data-testid="home-welcome-banner"
       className="card card-featured p-8 md:p-10 mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6"
       style={{
         background: 'var(--bg-secondary)',

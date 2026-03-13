@@ -125,10 +125,10 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
   const BannerContent = ({ clickable = false }: { clickable?: boolean }) => (
     <div className="flex items-center gap-3 flex-1 min-w-0">
       <div
-        className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-transform duration-300 hover:scale-110"
+        className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-transform duration-200 motion-reduce:transition-none hover:scale-105"
         style={{
           background: style.iconBg,
-          boxShadow: `0 0 16px ${style.glowColor}`,
+          boxShadow: `0 0 12px ${style.glowColor}`,
         }}
       >
         <IconComponent className="h-4 w-4" style={{ color: style.iconColor }} />
@@ -169,32 +169,34 @@ export default function GlobalBanner({ banners = [] }: GlobalBannerProps) {
     </div>
   );
 
-  const wrapperClass = "group flex items-center gap-3 flex-1 min-w-0 transition-all duration-200";
+  const wrapperClass = "group flex items-center gap-3 flex-1 min-w-0 transition-[color,transform,opacity] duration-200 motion-reduce:transition-none";
 
   return (
     <>
       <div
         data-testid={`global-banner-${banner.id}`}
-        className={`w-full px-4 py-2.5 relative z-40 overflow-hidden transition-all duration-500 ${
+        className={`w-full px-4 py-2.5 relative z-40 overflow-hidden transition-[opacity,max-height] duration-500 motion-reduce:transition-none ${
           isVisible ? 'opacity-100 max-h-16' : 'opacity-0 max-h-0'
         }`}
         style={{
           background: style.gradient,
           borderBottom: `1px solid ${style.border}`,
-          backdropFilter: 'blur(10px)',
+          backdropFilter: 'blur(8px)',
         }}
       >
         {/* 动态光效背景 */}
         <div
           className="absolute inset-0 pointer-events-none animate-banner-glow-left"
           style={{
-            background: `radial-gradient(ellipse 40% 100% at 15% 50%, ${style.glowColor} 0%, transparent 70%)`,
+            background: `radial-gradient(ellipse 34% 100% at 15% 50%, ${style.glowColor} 0%, transparent 70%)`,
+            opacity: 0.8,
           }}
         />
         <div
           className="absolute inset-0 pointer-events-none animate-banner-glow-right"
           style={{
-            background: `radial-gradient(ellipse 35% 100% at 85% 50%, ${style.glowColor} 0%, transparent 70%)`,
+            background: `radial-gradient(ellipse 30% 100% at 85% 50%, ${style.glowColor} 0%, transparent 70%)`,
+            opacity: 0.75,
           }}
         />
 

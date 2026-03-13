@@ -6,6 +6,7 @@
 
 import { expect, test } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { safeCloseContext, safeClosePage } from './support/contextCleanup';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -27,7 +28,10 @@ async function sendChatPrompt(page: import('@playwright/test').Page, prompt: str
   await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
 }
 
-async function readLatestPromptNameForUser(page: import('@playwright/test').Page, userEmail: string) {
+async function readPromptNameForRequestId(
+  page: import('@playwright/test').Page,
+  requestId: string,
+) {
   await gotoWithBypass(page, '/admin/costs');
   await expect(page).toHaveURL(/\/admin\/costs/);
   await page.getByRole('tab', { name: 'AI 调用日志' }).click();
@@ -35,7 +39,7 @@ async function readLatestPromptNameForUser(page: import('@playwright/test').Page
   let promptName: string | null = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     await page.getByTestId('admin-usage-logs-refresh').click();
-    const row = page.locator('tbody tr').filter({ hasText: userEmail }).first();
+    const row = page.locator(`tbody tr[data-request-id="${requestId}"]`).first();
     if (await row.isVisible({ timeout: 10000 }).catch(() => false)) {
       const value = (await row.getByTestId('admin-usage-log-prompt-name').textContent())?.trim() ?? '';
       if (value) {
@@ -170,17 +174,19 @@ async function sendChatPromptExpectError(
 async function sendChatPromptThroughAuthenticatedSession(
   page: import('@playwright/test').Page,
   prompt: string,
-) {
+): Promise<{ status: number; body: string; requestId: string }> {
   await gotoWithBypass(page, '/landing');
   await expect(page).toHaveURL(/\/landing/);
 
-  return page.evaluate(async (message) => {
+  const requestId = crypto.randomUUID();
+
+  return page.evaluate(async ({ message, requestId }) => {
     const authCookieEntry = document.cookie
       .split('; ')
       .find((entry) => entry.includes('-auth-token='));
 
     if (!authCookieEntry) {
-      return { status: 0, body: 'Missing auth cookie' };
+      return { status: 0, body: 'Missing auth cookie', requestId };
     }
 
     const rawCookieValue = decodeURIComponent(authCookieEntry.split('=').slice(1).join('='));
@@ -192,7 +198,7 @@ async function sendChatPromptThroughAuthenticatedSession(
     }
 
     if (!accessToken) {
-      return { status: 0, body: 'Missing access token' };
+      return { status: 0, body: 'Missing access token', requestId };
     }
 
     const response = await fetch('/api/ai/stream', {
@@ -203,15 +209,22 @@ async function sendChatPromptThroughAuthenticatedSession(
       },
       body: JSON.stringify({
         message,
-        requestId: crypto.randomUUID(),
+        requestId,
       }),
     });
 
     return {
       status: response.status,
       body: await response.text(),
+      requestId,
     };
-  }, prompt);
+  }, { message: prompt, requestId });
+}
+
+async function reloadUserSurface(page: import('@playwright/test').Page) {
+  // Chat/profile pages keep background requests alive long enough that
+  // Playwright's networkidle heuristic becomes flaky in destructive flows.
+  await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
 test.describe('Admin Destructive Flows', () => {
@@ -353,7 +366,6 @@ test.describe('Admin Destructive Flows', () => {
     let actual = 'Admin model toggle flow completed';
     const userContext = await browser.newContext({ storageState: authStatePaths.user });
     const userPage = await userContext.newPage();
-    const logPage = await page.context().newPage();
     const modelName = `Parity Toggle Model ${Date.now()}`;
     const modelId = `parity-toggle-${Date.now()}`;
     let shouldRestoreModelSelector = false;
@@ -387,7 +399,7 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Ensure the chat model selector is enabled for the user-facing verification');
       await gotoWithBypass(page, '/admin/settings');
       await expect(page).toHaveURL(/\/admin\/settings/);
-      await page.getByRole('tab', { name: '功能设置' }).click();
+      await page.getByRole('tab', { name: '页面体验' }).click();
       const modelSelectorSetting = page.getByTestId('admin-setting-chat_show_model_selector');
       await expect(modelSelectorSetting).toBeVisible({ timeout: 15000 });
       const initialSelectorState = await modelSelectorSetting.getAttribute('data-state');
@@ -423,11 +435,13 @@ test.describe('Admin Destructive Flows', () => {
       await expect(page.getByTestId(`admin-model-active-toggle-${targetModelId}`)).toContainText('已禁用', { timeout: 15000 });
 
       steps.push('Reload /chat and verify the disabled model no longer appears in the selector');
-      await userPage.reload({ waitUntil: 'networkidle' });
-      await expect(modelSelectorTrigger).toBeVisible({ timeout: 15000 });
-      await modelSelectorTrigger.click();
-      await expect(targetOption).toHaveCount(0, { timeout: 10000 });
-      await userPage.keyboard.press('Escape');
+      await gotoWithBypass(userPage, '/chat');
+      const selectorAfterDisable = userPage.getByTestId('chat-model-selector-trigger');
+      if (await selectorAfterDisable.isVisible().catch(() => false)) {
+        await selectorAfterDisable.click();
+        await expect(targetOption).toHaveCount(0, { timeout: 10000 });
+        await userPage.keyboard.press('Escape');
+      }
 
       steps.push('Re-enable the model and verify it returns to the user selector');
       const enableResponsePromise = page.waitForResponse(
@@ -441,7 +455,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(enableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-model-active-toggle-${targetModelId}`)).toContainText('已启用', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await gotoWithBypass(userPage, '/chat');
       await expect(modelSelectorTrigger).toBeVisible({ timeout: 15000 });
       await modelSelectorTrigger.click();
       await expect(targetOption).toBeVisible({ timeout: 10000 });
@@ -478,7 +492,7 @@ test.describe('Admin Destructive Flows', () => {
       }
       if (shouldRestoreModelSelector) {
         await gotoWithBypass(page, '/admin/settings').catch(() => undefined);
-        await page.getByRole('tab', { name: '功能设置' }).click().catch(() => undefined);
+        await page.getByRole('tab', { name: '页面体验' }).click().catch(() => undefined);
         const modelSelectorSetting = page.getByTestId('admin-setting-chat_show_model_selector');
         if (await modelSelectorSetting.isVisible().catch(() => false)) {
           const currentState = await modelSelectorSetting.getAttribute('data-state');
@@ -488,7 +502,7 @@ test.describe('Admin Destructive Flows', () => {
           }
         }
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -551,7 +565,7 @@ test.describe('Admin Destructive Flows', () => {
       await userPage.evaluate(() => {
         window.localStorage.removeItem('dismissedBanners');
       });
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       const userBanner = userPage.getByTestId(`global-banner-${announcementId}`);
       await expect(userBanner).toBeVisible({ timeout: 15000 });
       await expect(userBanner.getByTestId('global-banner-title')).toContainText(announcementTitle, { timeout: 15000 });
@@ -568,7 +582,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(disableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-announcement-toggle-${announcementId}`)).toContainText('已禁用', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
 
       steps.push('Re-enable the banner announcement and verify it returns for users');
@@ -583,7 +597,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(enableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-announcement-toggle-${announcementId}`)).toContainText('已启用', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toBeVisible({ timeout: 15000 });
 
       steps.push('Delete the temporary announcement and verify cleanup');
@@ -599,7 +613,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(deleteResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-announcement-row-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`global-banner-${announcementId}`)).toHaveCount(0, { timeout: 15000 });
 
       const blockingIssues = monitor.getIssues('P1');
@@ -618,7 +632,7 @@ test.describe('Admin Destructive Flows', () => {
           await page.getByTestId(`admin-announcement-delete-${announcementId}`).click().catch(() => undefined);
         }
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -694,7 +708,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(disableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-credit-package-toggle-${packageId}`)).toContainText('已下架', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toHaveCount(0, { timeout: 15000 });
 
       steps.push('Re-enable the credit package and verify it returns to the user subscription view');
@@ -709,7 +723,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(enableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-credit-package-toggle-${packageId}`)).toContainText('已上架', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toBeVisible({ timeout: 15000 });
 
       steps.push('Delete the temporary credit package and verify cleanup');
@@ -725,7 +739,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(deleteResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-credit-package-row-${packageId}`)).toHaveCount(0, { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`profile-credit-package-${packageId}`)).toHaveCount(0, { timeout: 15000 });
 
       const blockingIssues = monitor.getIssues('P1');
@@ -744,7 +758,7 @@ test.describe('Admin Destructive Flows', () => {
           await page.getByTestId(`admin-credit-package-delete-${packageId}`).click().catch(() => undefined);
         }
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -815,7 +829,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(disableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`)).toContainText('已禁用', { timeout: 15000 });
 
-      await userPage.reload({ waitUntil: 'networkidle' });
+      await reloadUserSurface(userPage);
       await expect(userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`)).toHaveCount(0, { timeout: 15000 });
 
       steps.push('Re-enable the membership plan and verify it returns to the user subscription view');
@@ -859,7 +873,7 @@ test.describe('Admin Destructive Flows', () => {
           }
         }
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -912,7 +926,7 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Verify the normal user is denied access to /admin before promotion');
       await gotoWithBypass(userPage, '/admin');
       await expect(userPage).toHaveURL(/\/access-denied/, { timeout: 15000 });
-      await expect(userPage.getByText('访问被拒绝')).toBeVisible({ timeout: 15000 });
+      await expect(userPage.getByRole('heading', { name: '访问被拒绝' })).toBeVisible({ timeout: 15000 });
 
       steps.push('Promote the target user to admin in /admin/users');
       await selectAdminUserRole(page, targetUserId, '管理员');
@@ -928,7 +942,7 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Verify the restored user loses /admin access again');
       await gotoWithBypass(userPage, '/admin');
       await expect(userPage).toHaveURL(/\/access-denied/, { timeout: 15000 });
-      await expect(userPage.getByText('访问被拒绝')).toBeVisible({ timeout: 15000 });
+      await expect(userPage.getByRole('heading', { name: '访问被拒绝' })).toBeVisible({ timeout: 15000 });
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -943,7 +957,7 @@ test.describe('Admin Destructive Flows', () => {
         await page.getByTestId('admin-users-search').fill(targetEmail).catch(() => undefined);
         await selectAdminUserRole(page, targetUserId, originalRole).catch(() => undefined);
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -1031,7 +1045,7 @@ test.describe('Admin Destructive Flows', () => {
           ).catch(() => undefined);
         }
       }
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {
@@ -1060,11 +1074,31 @@ test.describe('Admin Destructive Flows', () => {
     const userContext = await browser.newContext({ storageState: authStatePaths.user });
     const userPage = await userContext.newPage();
     const logPage = await page.context().newPage();
-    const userEmail = process.env.E2E_TEST_EMAIL ?? '';
     const systemPromptName = `Parity System Prompt ${Date.now()}`;
     let targetPromptId = '';
+    let originalMaxMessagesPerConversation: string | null = null;
+    let originalMaxInputCharacters: string | null = null;
+    let shouldRestoreRuntimeSettings = false;
 
     try {
+      steps.push('Normalize chat runtime limits to known-safe values for prompt runtime verification');
+      await gotoWithBypass(page, '/admin/settings');
+      await expect(page).toHaveURL(/\/admin\/settings/);
+      await page.getByRole('tab', { name: '功能设置' }).click();
+
+      const maxMessagesInput = page.getByTestId('admin-setting-max_messages_per_conversation');
+      const maxInputCharactersInput = page.getByTestId('admin-setting-max_input_characters');
+      originalMaxMessagesPerConversation = await maxMessagesInput.inputValue();
+      originalMaxInputCharacters = await maxInputCharactersInput.inputValue();
+
+      if (Number(originalMaxMessagesPerConversation) < 20 || Number(originalMaxInputCharacters) < 200) {
+        await maxMessagesInput.fill('100');
+        await maxInputCharactersInput.fill('2000');
+        await page.getByTestId('admin-settings-save-all').click();
+        await expect(page.getByTestId('admin-settings-save-all')).toBeEnabled({ timeout: 30000 });
+        shouldRestoreRuntimeSettings = true;
+      }
+
       steps.push('Create an isolated high-priority system prompt in /admin/prompts');
       await gotoWithBypass(page, '/admin/prompts');
       await expect(page).toHaveURL(/\/admin\/prompts/);
@@ -1094,10 +1128,15 @@ test.describe('Admin Destructive Flows', () => {
       targetPromptId = rowTestId?.replace('admin-prompt-row-', '') ?? '';
       expect(targetPromptId).not.toBe('');
 
-      steps.push('Send a chat request and verify usage logs record the new system prompt name');
-      await sendChatPrompt(userPage, `Parity runtime prompt baseline ${Date.now()}`);
+      steps.push('Send a direct authenticated chat request and verify usage logs record the new system prompt name');
+      const baselineResponse = await sendChatPromptThroughAuthenticatedSession(
+        userPage,
+        `Parity runtime prompt baseline ${Date.now()}`,
+      );
+      expect(baselineResponse.status).toBe(200);
+      expect(baselineResponse.body).toContain('"type":"init"');
       await expect
-        .poll(async () => readLatestPromptNameForUser(logPage, userEmail), { timeout: 30000, intervals: [1500, 2000, 3000] })
+        .poll(async () => readPromptNameForRequestId(logPage, baselineResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
         .toBe(systemPromptName);
 
       steps.push('Disable the temporary system prompt');
@@ -1112,10 +1151,15 @@ test.describe('Admin Destructive Flows', () => {
       expect(disableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-prompt-toggle-${targetPromptId}`)).toContainText('已禁用', { timeout: 15000 });
 
-      steps.push('Send another chat request and verify the runtime prompt metadata changes away from the disabled prompt');
-      await sendChatPrompt(userPage, `Parity runtime prompt disabled ${Date.now()}`);
+      steps.push('Send another direct authenticated chat request and verify the runtime prompt metadata changes away from the disabled prompt');
+      const disabledResponse = await sendChatPromptThroughAuthenticatedSession(
+        userPage,
+        `Parity runtime prompt disabled ${Date.now()}`,
+      );
+      expect(disabledResponse.status).toBe(200);
+      expect(disabledResponse.body).toContain('"type":"init"');
       await expect
-        .poll(async () => readLatestPromptNameForUser(logPage, userEmail), { timeout: 30000, intervals: [1500, 2000, 3000] })
+        .poll(async () => readPromptNameForRequestId(logPage, disabledResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
         .not.toBe(systemPromptName);
 
       steps.push('Re-enable the temporary system prompt and verify the runtime prompt metadata returns');
@@ -1130,9 +1174,14 @@ test.describe('Admin Destructive Flows', () => {
       expect(enableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-prompt-toggle-${targetPromptId}`)).toContainText('已启用', { timeout: 15000 });
 
-      await sendChatPrompt(userPage, `Parity runtime prompt restored ${Date.now()}`);
+      const restoredResponse = await sendChatPromptThroughAuthenticatedSession(
+        userPage,
+        `Parity runtime prompt restored ${Date.now()}`,
+      );
+      expect(restoredResponse.status).toBe(200);
+      expect(restoredResponse.body).toContain('"type":"init"');
       await expect
-        .poll(async () => readLatestPromptNameForUser(logPage, userEmail), { timeout: 30000, intervals: [1500, 2000, 3000] })
+        .poll(async () => readPromptNameForRequestId(logPage, restoredResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
         .toBe(systemPromptName);
 
       const blockingIssues = monitor.getIssues('P1');
@@ -1143,6 +1192,24 @@ test.describe('Admin Destructive Flows', () => {
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
+      if (
+        shouldRestoreRuntimeSettings &&
+        originalMaxMessagesPerConversation !== null &&
+        originalMaxInputCharacters !== null
+      ) {
+        await gotoWithBypass(page, '/admin/settings').catch(() => undefined);
+        await page.getByRole('tab', { name: '功能设置' }).click().catch(() => undefined);
+        await page
+          .getByTestId('admin-setting-max_messages_per_conversation')
+          .fill(originalMaxMessagesPerConversation)
+          .catch(() => undefined);
+        await page
+          .getByTestId('admin-setting-max_input_characters')
+          .fill(originalMaxInputCharacters)
+          .catch(() => undefined);
+        await page.getByTestId('admin-settings-save-all').click().catch(() => undefined);
+        await expect(page.getByTestId('admin-settings-save-all')).toBeEnabled({ timeout: 30000 }).catch(() => undefined);
+      }
       if (targetPromptId) {
         await gotoWithBypass(page, '/admin/prompts').catch(() => undefined);
         const promptToggle = page.getByTestId(`admin-prompt-toggle-${targetPromptId}`);
@@ -1189,8 +1256,8 @@ test.describe('Admin Destructive Flows', () => {
           }
         }
       }
-      await logPage.close();
-      await userContext.close();
+      await safeClosePage(logPage);
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {

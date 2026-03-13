@@ -96,7 +96,7 @@ export default function PromptModuleCard({
     <button
       onClick={onClick}
       className={cn(
-        'w-full p-4 rounded-xl border-2 text-left transition-all duration-200',
+        'w-full p-4 rounded-xl border-2 text-left transition-[background-color,border-color,box-shadow,transform] duration-200 motion-reduce:transition-none',
         classes.card,
         isSelected && 'ring-2 ring-offset-2 ring-[var(--color-primary)] ring-offset-[var(--bg-primary)]'
       )}

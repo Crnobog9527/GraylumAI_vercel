@@ -243,6 +243,16 @@ async function callClaudeAPI(params: {
   };
 }
 
+function getTokenCounterProvider(model: {
+  provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
+  tokenCountingMethod?: string;
+}): 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin' {
+  if (model.tokenCountingMethod === 'anthropic_count_tokens') return 'anthropic';
+  if (model.tokenCountingMethod === 'gemini_count_tokens') return 'google';
+  if (model.tokenCountingMethod === 'verified_openai_tokenizer') return 'openai';
+  return model.provider;
+}
+
 // ============================================
 // AI Router
 // ============================================
@@ -265,7 +275,6 @@ export const aiRouter = router({
       // 0. 幂等性检查 - 如果请求已完成，直接返回缓存结果
       const idempotencyCheck = await billingService.checkIdempotency(requestId);
       if (idempotencyCheck.exists && idempotencyCheck.result) {
-        console.log(`[Idempotency] Returning cached response for request ${requestId}`);
         // 获取完整的缓存响应
         const { data: cachedResponse } = await ctx.supabase
           .from('messages')
@@ -310,13 +319,34 @@ export const aiRouter = router({
         userPreferredModel: input.modelId,
       });
 
+      if (!modelConfig.tokenCountingSupported) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `模型 ${modelConfig.name} 未配置可验证的 token 计数能力，禁止进入生产计费路径`,
+        });
+      }
+
+      if (modelConfig.provider !== 'anthropic') {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `非流式入口暂仅支持 Anthropic 直连模型，当前模型 ${modelConfig.name} 请改走流式运行时`,
+        });
+      }
+
       // 5. 估算成本
-      const estimatedInputTokens = estimateTokensFromString(input.message) +
-        history.reduce((sum, m) => sum + estimateTokensFromString(m.content), 0);
-      const estimatedCost = estimateRequestCost(
-        modelConfig.modelId,
-        estimatedInputTokens
-      );
+      const countedInput = await countTokens({
+        model: modelConfig.modelId,
+        provider: getTokenCounterProvider(modelConfig),
+        messages: [
+          ...history,
+          { role: 'user', content: input.message },
+        ],
+      }, {
+        useOfficial: true,
+        fallbackToEstimate: true,
+      });
+      const estimatedInputTokens = countedInput.inputTokens;
+      const estimatedCost = estimateRequestCost(modelConfig.modelId, estimatedInputTokens);
 
       // 6. 安全检查 (包括余额)
       await preAICallSecurityChecks(
@@ -358,15 +388,42 @@ export const aiRouter = router({
           // 可选: 在这里可以添加更多处理逻辑，如通知管理员
         }
 
-        // 10. 保存消息
-        const savedMessages = await saveMessages(
-          ctx.supabase,
-          conversation.id,
-          input.message,
-          aiResponse.content
+        // 10. 计算实际成本 (使用数据库动态定价)
+        const pricing = await getModelPricing(ctx.supabase, modelConfig.modelId);
+        const { credits: actualCredits, costUsd, breakdown } = calculateTokenCostWithPricing(
+          aiResponse.usage,
+          pricing
         );
 
-        // 11. 如果是新对话，更新标题
+        // 11. 原子化写消息、记账和统计
+        const latencyMs = Date.now() - startTime;
+        const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
+          ?? ctx.headers?.get?.('x-real-ip')
+          ?? 'unknown';
+        const userAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
+        const finalizeResult = await billingService.finalizeAISuccess({
+          conversationId: conversation.id,
+          userMessage: input.message,
+          assistantMessage: aiResponse.content,
+          modelUsed: modelConfig.modelId,
+          usage: aiResponse.usage,
+          costUsd,
+          credits: actualCredits,
+          preDeductId: preDeductResult.preDeductId,
+          requestId,
+          inputLength: input.message.length,
+          latencyMs,
+          ipAddress,
+          userAgent,
+          tokenMetadata: {
+            count_method: modelConfig.tokenCountingMethod ?? countedInput.method,
+            count_source: countedInput.countSource,
+            counter_version: countedInput.counterVersion,
+          },
+          usageMetadata: { routingReason },
+        });
+
+        // 12. 如果是新对话，更新标题
         if (conversation.isNew) {
           await updateConversationTitle(
             ctx.supabase,
@@ -375,39 +432,7 @@ export const aiRouter = router({
           );
         }
 
-        // 12. 计算实际成本 (使用数据库动态定价)
-        const pricing = await getModelPricing(ctx.supabase, modelConfig.modelId);
-        const { credits: actualCredits, costUsd, breakdown } = calculateTokenCostWithPricing(
-          aiResponse.usage,
-          pricing
-        );
-
-        // 13. 结算 (包含响应信息用于幂等性缓存)
-        await billingService.settle(
-          preDeductResult.preDeductId,
-          actualCredits,
-          aiResponse.usage,
-          {
-            messageId: savedMessages.assistantMessageId,
-            conversationId: conversation.id,
-            content: aiResponse.content,
-          }
-        );
-
-        // 14. 记录统计
-        await billingService.recordTokenStats({
-          conversationId: conversation.id,
-          messageId: savedMessages.assistantMessageId,
-          modelUsed: modelConfig.modelId,
-          usage: aiResponse.usage,
-          costUsd,
-          credits: actualCredits,
-        });
-
-        // 15. 记录使用日志 (P1-9: 补全日志信息)
-        const latencyMs = Date.now() - startTime;
-
-        // 记录 AI 调用完成日志
+        // 13. 记录 AI 调用完成日志
         logger.ai.callComplete(
           modelConfig.modelId,
           aiResponse.usage.inputTokens,
@@ -417,27 +442,10 @@ export const aiRouter = router({
           requestId,
           { userId: ctx.profileId, conversationId: conversation.id }
         );
-        // 从请求头获取 IP 和 User-Agent
-        const ipAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
-          ?? ctx.headers?.get?.('x-real-ip')
-          ?? 'unknown';
-        const userAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
 
-        await billingService.recordUsageLog({
-          conversationId: conversation.id,
-          requestId, // P1-9: 添加 request_id
-          modelId: modelConfig.modelId,
-          status: 'success',
-          inputLength: input.message.length,
-          latencyMs,
-          ipAddress, // P1-9: 添加 IP 地址
-          userAgent, // P1-9: 添加 User-Agent
-          metadata: { routingReason },
-        });
-
-        // 16. 返回响应
+        // 14. 返回响应
         return {
-          messageId: savedMessages.assistantMessageId,
+          messageId: finalizeResult.assistantMessageId ?? '',
           conversationId: conversation.id,
           content: aiResponse.content,
           modelUsed: modelConfig.modelId,
@@ -461,28 +469,22 @@ export const aiRouter = router({
           { userId: ctx.profileId, conversationId: conversation.id }
         );
 
-        // 失败退费
-        await billingService.refund(
-          preDeductResult.preDeductId,
-          error instanceof Error ? error.message : 'AI 调用失败'
-        );
-
-        // 记录失败日志 (P1-9: 补全日志信息)
         const failIpAddress = ctx.headers?.get?.('x-forwarded-for')?.split(',')[0]?.trim()
           ?? ctx.headers?.get?.('x-real-ip')
           ?? 'unknown';
         const failUserAgent = ctx.headers?.get?.('user-agent') ?? 'unknown';
 
-        await billingService.recordUsageLog({
+        await billingService.finalizeAIFailure({
           conversationId: conversation.id,
-          requestId, // P1-9: 添加 request_id
-          modelId: modelConfig.modelId,
-          status: 'failed',
-          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          requestId,
+          modelUsed: modelConfig.modelId,
+          reason: error instanceof Error ? error.message : 'Unknown error',
+          preDeductId: preDeductResult.preDeductId,
           inputLength: input.message.length,
           latencyMs: failLatencyMs,
-          ipAddress: failIpAddress, // P1-9: 添加 IP 地址
-          userAgent: failUserAgent, // P1-9: 添加 User-Agent
+          ipAddress: failIpAddress,
+          userAgent: failUserAgent,
+          usageMetadata: { routingReason },
         });
 
         throw error;

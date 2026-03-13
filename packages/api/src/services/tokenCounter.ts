@@ -1,37 +1,40 @@
 /**
  * Token Counter Service
  *
- * Token 计数服务
- * 支持官方 API 精确计数和本地快速估算
+ * Provider-aware token counting with official Anthropic/Gemini support and
+ * safe fallbacks for providers that only expose authoritative post-response
+ * usage metadata.
  */
 
 import type { AIMessage } from '../types/ai';
-import { getFallbackProviderApiKey, looksLikeOpenRouterKey } from './providerUtils';
+import {
+  getConfiguredProviderApiKey,
+  getFallbackProviderApiKey,
+  looksLikeOpenRouterKey,
+} from './providerUtils';
 
-// ============================================
-// 常量
-// ============================================
-
-const COUNT_TOKENS_URL = 'https://api.anthropic.com/v1/messages/count_tokens';
+const ANTHROPIC_COUNT_TOKENS_URL = 'https://api.anthropic.com/v1/messages/count_tokens';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const ANTHROPIC_VERSION = '2023-06-01';
 
-/**
- * 本地估算的字符/Token 比率
- * 中文约 1.5 字符/Token，英文约 4 字符/Token
- * 取平均值进行估算
- */
 const CHARS_PER_TOKEN = {
   chinese: 1.5,
   english: 4,
-  mixed: 2.5, // 混合文本
+  mixed: 2.5,
 };
 
-// ============================================
-// 类型定义
-// ============================================
+export type CountSource =
+  | 'anthropic_count_tokens'
+  | 'gemini_count_tokens'
+  | 'provider_usage'
+  | 'estimate';
 
 export interface TokenCountParams {
   model: string;
+  provider?: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
+  apiKey?: string | null;
+  apiEndpoint?: string | null;
+  tokenizerFamily?: string | null;
   messages: Array<{
     role: 'user' | 'assistant';
     content: string | Array<{ type: string; text?: string; source?: unknown }>;
@@ -47,6 +50,8 @@ export interface TokenCountParams {
 export interface TokenCountResult {
   inputTokens: number;
   method: 'official' | 'estimate';
+  countSource: CountSource;
+  counterVersion: string;
   breakdown?: {
     messages: number;
     system: number;
@@ -54,209 +59,208 @@ export interface TokenCountResult {
   };
 }
 
-// ============================================
-// 官方 API 计数
-// ============================================
+function inferProvider(params: Pick<TokenCountParams, 'provider' | 'model' | 'apiEndpoint' | 'tokenizerFamily'>) {
+  if (params.provider) return params.provider;
+  const model = params.model.toLowerCase();
+  const endpoint = params.apiEndpoint?.toLowerCase() ?? '';
+  const family = params.tokenizerFamily?.toLowerCase() ?? '';
 
-/**
- * 使用官方 count_tokens API 精确计算
- * @see https://docs.anthropic.com/en/docs/build-with-claude/token-counting
- */
-export async function countTokensOfficial(params: TokenCountParams): Promise<number> {
-  const apiKey = getFallbackProviderApiKey();
-
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY / ANTHROPIC_API_KEY not configured');
-  }
-
-  if (looksLikeOpenRouterKey(apiKey)) {
-    throw new Error('Official token counting requires ANTHROPIC_API_KEY; OpenRouter keys fall back to estimate mode');
-  }
-
-  const response = await fetch(COUNT_TOKENS_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify({
-      model: params.model,
-      messages: params.messages,
-      system: params.system,
-      tools: params.tools,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token counting failed: ${error}`);
-  }
-
-  const data = await response.json() as { input_tokens: number };
-  return data.input_tokens;
+  if (model.startsWith('claude') || family === 'anthropic') return 'anthropic';
+  if (model.startsWith('gemini') || family === 'gemini') return 'google';
+  if (model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3') || family === 'openai') return 'openai';
+  if (endpoint.includes('openrouter') || endpoint.includes('chat/completions')) return 'custom';
+  return 'custom';
 }
 
-// ============================================
-// 本地估算
-// ============================================
+function resolveProviderApiKey(params: Pick<TokenCountParams, 'provider' | 'apiKey'>) {
+  if (params.apiKey?.trim()) return params.apiKey.trim();
 
-/**
- * 检测文本语言类型
- */
+  if (params.provider === 'google') {
+    return process.env.GOOGLE_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || null;
+  }
+
+  return getFallbackProviderApiKey();
+}
+
+function normalizeMessageContent(content: TokenCountParams['messages'][number]['content']) {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text' && block.text)
+    .map((block) => block.text)
+    .join('\n');
+}
+
+function toGeminiContents(messages: TokenCountParams['messages']) {
+  return messages.map((message) => ({
+    role: message.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: normalizeMessageContent(message.content) }],
+  }));
+}
+
+export async function countTokensOfficial(params: TokenCountParams): Promise<{ inputTokens: number; countSource: CountSource }> {
+  const provider = inferProvider(params);
+  const apiKey = resolveProviderApiKey({ provider, apiKey: params.apiKey });
+
+  if (!apiKey) {
+    throw new Error('No provider API key available for official token counting');
+  }
+
+  if (provider === 'anthropic') {
+    if (looksLikeOpenRouterKey(apiKey)) {
+      throw new Error('OpenRouter keys do not support Anthropic official count_tokens');
+    }
+
+    const response = await fetch(ANTHROPIC_COUNT_TOKENS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        system: params.system,
+        tools: params.tools,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Anthropic token counting failed: ${await response.text()}`);
+    }
+
+    const data = await response.json() as { input_tokens: number };
+    return { inputTokens: data.input_tokens, countSource: 'anthropic_count_tokens' };
+  }
+
+  if (provider === 'google') {
+    const response = await fetch(
+      `${GEMINI_API_BASE}/${encodeURIComponent(params.model)}:countTokens?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: toGeminiContents(params.messages),
+          ...(params.system
+            ? {
+                systemInstruction: {
+                  role: 'system',
+                  parts: [{ text: params.system }],
+                },
+              }
+            : {}),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Gemini token counting failed: ${await response.text()}`);
+    }
+
+    const data = await response.json() as { totalTokens?: number };
+    return {
+      inputTokens: data.totalTokens ?? 0,
+      countSource: 'gemini_count_tokens',
+    };
+  }
+
+  throw new Error(`Official token counting is not supported for provider ${provider}`);
+}
+
 function detectLanguage(text: string): 'chinese' | 'english' | 'mixed' {
-  // 统计中文字符比例
   const chineseChars = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
   const totalChars = text.length;
-
   if (totalChars === 0) return 'english';
-
   const chineseRatio = chineseChars / totalChars;
-
   if (chineseRatio > 0.5) return 'chinese';
   if (chineseRatio < 0.1) return 'english';
   return 'mixed';
 }
 
-/**
- * 估算字符串的 Token 数
- */
 export function estimateTokensFromString(text: string): number {
   if (!text) return 0;
-
   const language = detectLanguage(text);
-  const charsPerToken = CHARS_PER_TOKEN[language];
-
-  return Math.ceil(text.length / charsPerToken);
+  return Math.ceil(text.length / CHARS_PER_TOKEN[language]);
 }
 
-/**
- * 估算消息的 Token 数
- */
 export function estimateTokensFromMessage(message: AIMessage): number {
-  let tokens = 0;
-
-  // Role overhead (approximately 4 tokens per message)
-  tokens += 4;
+  let tokens = 4;
 
   if (typeof message.content === 'string') {
     tokens += estimateTokensFromString(message.content);
-  } else if (Array.isArray(message.content)) {
-    for (const block of message.content) {
-      if (block.type === 'text' && 'text' in block) {
-        tokens += estimateTokensFromString(block.text as string);
-      } else if (block.type === 'image') {
-        // 图片按固定 Token 数估算 (取决于分辨率)
-        tokens += 1000; // 平均估算
-      } else if (block.type === 'document') {
-        // PDF 文档按页数估算
-        tokens += 2000; // 平均每页
-      }
+    return tokens;
+  }
+
+  for (const block of message.content) {
+    if (block.type === 'text' && 'text' in block) {
+      tokens += estimateTokensFromString(block.text as string);
+    } else if (block.type === 'image') {
+      tokens += 1000;
+    } else if (block.type === 'document') {
+      tokens += 2000;
     }
   }
 
   return tokens;
 }
 
-/**
- * 估算消息列表的 Token 数
- */
 export function estimateTokensFromMessages(messages: AIMessage[]): number {
-  let total = 0;
-
-  for (const message of messages) {
-    total += estimateTokensFromMessage(message);
-  }
-
-  // 添加格式开销 (约 3-5 tokens)
-  total += 5;
-
-  return total;
+  return messages.reduce((sum, message) => sum + estimateTokensFromMessage(message), 5);
 }
 
-/**
- * 估算系统提示词的 Token 数
- */
 export function estimateSystemTokens(systemPrompt?: string): number {
   if (!systemPrompt) return 0;
-
-  // System prompt overhead
   return estimateTokensFromString(systemPrompt) + 10;
 }
 
-/**
- * 估算工具定义的 Token 数
- */
 export function estimateToolsTokens(tools?: TokenCountParams['tools']): number {
-  if (!tools || tools.length === 0) return 0;
-
-  let total = 0;
-
-  for (const tool of tools) {
-    // 工具名称和描述
-    total += estimateTokensFromString(tool.name);
-    total += estimateTokensFromString(tool.description);
-
-    // 输入 schema (JSON 序列化后估算)
-    const schemaStr = JSON.stringify(tool.input_schema);
-    total += estimateTokensFromString(schemaStr);
-
-    // 工具格式开销
-    total += 20;
-  }
-
-  return total;
+  if (!tools?.length) return 0;
+  return tools.reduce((sum, tool) => {
+    return sum +
+      estimateTokensFromString(tool.name) +
+      estimateTokensFromString(tool.description) +
+      estimateTokensFromString(JSON.stringify(tool.input_schema)) +
+      20;
+  }, 0);
 }
 
-// ============================================
-// 统一入口
-// ============================================
-
-/**
- * 计算 Token 数 (带降级)
- *
- * 优先使用官方 API，失败时降级到本地估算
- */
 export async function countTokens(
   params: TokenCountParams,
   options: {
     useOfficial?: boolean;
     fallbackToEstimate?: boolean;
-  } = {}
+  } = {},
 ): Promise<TokenCountResult> {
   const { useOfficial = true, fallbackToEstimate = true } = options;
 
-  // 尝试官方 API
   if (useOfficial) {
     try {
-      const inputTokens = await countTokensOfficial(params);
+      const result = await countTokensOfficial(params);
       return {
-        inputTokens,
+        inputTokens: result.inputTokens,
         method: 'official',
+        countSource: result.countSource,
+        counterVersion: '2026-03-10',
       };
     } catch (error) {
       console.warn('Official token counting failed, falling back to estimate:', error);
-
       if (!fallbackToEstimate) {
         throw error;
       }
     }
   }
 
-  // 本地估算
   const messagesTokens = params.messages.reduce((sum, msg) => {
-    const content = typeof msg.content === 'string'
-      ? msg.content
-      : msg.content.map(b => ('text' in b ? b.text : '')).join('');
-    return sum + estimateTokensFromString(content) + 4; // +4 for role overhead
+    return sum + estimateTokensFromString(normalizeMessageContent(msg.content)) + 4;
   }, 0);
-
   const systemTokens = estimateSystemTokens(params.system);
   const toolsTokens = estimateToolsTokens(params.tools);
 
   return {
     inputTokens: messagesTokens + systemTokens + toolsTokens,
     method: 'estimate',
+    countSource: 'estimate',
+    counterVersion: '2026-03-10',
     breakdown: {
       messages: messagesTokens,
       system: systemTokens,
@@ -265,34 +269,22 @@ export async function countTokens(
   };
 }
 
-/**
- * 快速估算 (仅本地，不调用 API)
- * 用于 UI 预览
- */
 export function quickEstimate(text: string): number {
   return estimateTokensFromString(text);
 }
 
-/**
- * 估算输出 Token 数
- * 基于输入长度和任务类型
- */
 export function estimateOutputTokens(
   inputTokens: number,
-  taskType: 'chat' | 'coding' | 'summary' | 'translation' = 'chat'
+  taskType: 'chat' | 'coding' | 'summary' | 'translation' = 'chat',
 ): number {
   const ratios: Record<string, number> = {
-    chat: 0.5, // 对话通常输出较短
-    coding: 1.5, // 代码可能较长
-    summary: 0.3, // 摘要较短
-    translation: 1.0, // 翻译约等长
+    chat: 0.5,
+    coding: 1.5,
+    summary: 0.3,
+    translation: 1.0,
   };
 
-  const ratio = ratios[taskType] ?? 0.5;
-  const estimated = Math.ceil(inputTokens * ratio);
-
-  // 限制在合理范围内
-  return Math.max(100, Math.min(4096, estimated));
+  return Math.max(100, Math.min(4096, Math.ceil(inputTokens * (ratios[taskType] ?? 0.5))));
 }
 
 export default {

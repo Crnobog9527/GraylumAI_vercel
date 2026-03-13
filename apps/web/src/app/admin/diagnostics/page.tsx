@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Activity, PlayCircle, RefreshCw, CheckCircle, XCircle,
@@ -193,6 +193,23 @@ interface RunResult {
   };
 }
 
+interface RuntimeProof {
+  found: boolean;
+  status: DiagnosticStatus;
+  message: string;
+  checkedAt: string;
+  usageLog?: Record<string, unknown>;
+  tokenStats?: Record<string, unknown>;
+  settle?: Record<string, unknown>;
+  transaction?: Record<string, unknown>;
+  snapshots?: {
+    searchDigest: boolean;
+    compressionCheckpoint: boolean;
+    rollingSummary: boolean;
+  };
+  checks?: Record<string, boolean>;
+}
+
 export default function AdminDiagnosticsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<DiagnosticCategory | 'all'>('all');
@@ -205,18 +222,22 @@ export default function AdminDiagnosticsPage() {
   const { data: latestResults, refetch: refetchLatest, error: latestError } = trpc.diagnostics.getLatestResults.useQuery();
   const { data: summaryStats, refetch: refetchSummary, error: summaryError } = trpc.diagnostics.getSummaryStats.useQuery();
   const { data: healthCheck, refetch: refetchHealth, error: healthError } = trpc.diagnostics.healthCheck.useQuery();
+  const { data: runtimeProof, refetch: refetchRuntimeProof } = trpc.diagnostics.getLatestRuntimeProof.useQuery();
   const { data: recentRuns } = trpc.diagnostics.getRecentRuns.useQuery();
   const { data: testDefinitions } = trpc.diagnostics.getTestDefinitions.useQuery();
 
-  // Log any query errors
-  if (latestError) console.error('latestResults error:', latestError);
-  if (summaryError) console.error('summaryStats error:', summaryError);
-  if (healthError) console.error('healthCheck error:', healthError);
+  const queryErrorMessage =
+    latestError?.message ?? summaryError?.message ?? healthError?.message ?? null;
+
+  useEffect(() => {
+    if (queryErrorMessage) {
+      setErrorMessage(queryErrorMessage);
+    }
+  }, [queryErrorMessage]);
 
   // Mutations
   const runAllMutation = trpc.diagnostics.runAllTests.useMutation({
     onSuccess: (data) => {
-      console.log('runAllTests success, data:', data);
       // 直接使用返回的结果，不依赖数据库
       if (data && data.results) {
         setLocalResults(data.results);
@@ -230,6 +251,7 @@ export default function AdminDiagnosticsPage() {
       refetchLatest();
       refetchSummary();
       refetchHealth();
+      refetchRuntimeProof();
       setIsRunning(false);
       setErrorMessage(null);
     },
@@ -242,7 +264,6 @@ export default function AdminDiagnosticsPage() {
 
   const runCategoryMutation = trpc.diagnostics.runCategoryTests.useMutation({
     onSuccess: (data) => {
-      console.log('runCategoryTests success, data:', data);
       if (data && data.results) {
         setLocalResults(data.results);
       }
@@ -254,6 +275,7 @@ export default function AdminDiagnosticsPage() {
       }
       refetchLatest();
       refetchSummary();
+      refetchRuntimeProof();
       setIsRunning(false);
       setErrorMessage(null);
     },
@@ -266,7 +288,6 @@ export default function AdminDiagnosticsPage() {
 
   const runSingleMutation = trpc.diagnostics.runSingleTest.useMutation({
     onSuccess: (data) => {
-      console.log('runSingleTest success, data:', data);
       if (data) {
         // 更新本地结果中的对应测试
         setLocalResults(prev => {
@@ -281,6 +302,7 @@ export default function AdminDiagnosticsPage() {
       }
       refetchLatest();
       refetchSummary();
+      refetchRuntimeProof();
       setErrorMessage(null);
     },
     onError: (error) => {
@@ -301,14 +323,8 @@ export default function AdminDiagnosticsPage() {
   });
 
   const handleRunAll = () => {
-    console.log('handleRunAll called');
-    console.log('mutation state:', { isPending: runAllMutation.isPending, isError: runAllMutation.isError });
     setIsRunning(true);
-    runAllMutation.mutate({}, {
-      onSettled: () => {
-        console.log('mutation settled');
-      }
-    });
+    runAllMutation.mutate({});
   };
 
   const handleRunCategory = (category: DiagnosticCategory) => {
@@ -368,14 +384,48 @@ export default function AdminDiagnosticsPage() {
   const healthStatus = healthCheck?.status ?? 'healthy';
   const healthColor = healthStatus === 'healthy' ? 'text-emerald-400' : healthStatus === 'warning' ? 'text-amber-400' : 'text-red-400';
   const healthBgColor = healthStatus === 'healthy' ? 'bg-emerald-500/20' : healthStatus === 'warning' ? 'bg-amber-500/20' : 'bg-red-500/20';
+  const runtimeProofData = runtimeProof as RuntimeProof | undefined;
+  const runtimeProofRequestId =
+    runtimeProofData?.usageLog && typeof runtimeProofData.usageLog.request_id === 'string'
+      ? runtimeProofData.usageLog.request_id
+      : null;
+  const runtimeProofModelId =
+    runtimeProofData?.usageLog && typeof runtimeProofData.usageLog.model_id === 'string'
+      ? runtimeProofData.usageLog.model_id
+      : null;
+  const runtimeProofCredits =
+    runtimeProofData?.tokenStats && runtimeProofData.tokenStats.total_credits !== undefined
+      ? String(runtimeProofData.tokenStats.total_credits)
+      : '--';
+  const runtimeProofSearchCount =
+    runtimeProofData?.tokenStats && runtimeProofData.tokenStats.web_search_count !== undefined
+      ? String(runtimeProofData.tokenStats.web_search_count)
+      : '--';
+  const runtimeProofStatus = runtimeProofData?.status ?? 'warning';
+  const runtimeProofChecks = Object.entries(runtimeProofData?.checks ?? {});
+  const runtimeProofOkCount = runtimeProofChecks.filter(([, ok]) => ok).length;
+  const runtimeProofColor =
+    runtimeProofStatus === 'passed'
+      ? 'text-emerald-400'
+      : runtimeProofStatus === 'warning'
+        ? 'text-amber-400'
+        : runtimeProofStatus === 'error'
+          ? 'text-red-400'
+          : 'text-red-400';
+  const runtimeProofBg =
+    runtimeProofStatus === 'passed'
+      ? 'bg-emerald-500/20'
+      : runtimeProofStatus === 'warning'
+        ? 'bg-amber-500/20'
+        : 'bg-red-500/20';
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div>
-            <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
               系统诊断
             </h1>
             <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
@@ -388,13 +438,13 @@ export default function AdminDiagnosticsPage() {
             系统{healthStatus === 'healthy' ? '健康' : healthStatus === 'warning' ? '警告' : '异常'}
           </Badge>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Button
             data-testid="admin-diagnostics-cleanup-trigger"
             variant="outline"
             onClick={handleCleanup}
             disabled={cleanupMutation.isPending}
-            className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+            className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
           >
             <Trash2 className="h-4 w-4 mr-2" />
             清理旧记录
@@ -402,7 +452,7 @@ export default function AdminDiagnosticsPage() {
           <Button
             onClick={handleRunAll}
             disabled={isRunning}
-            className="bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white"
+            className="w-full bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white sm:w-auto"
           >
             {isRunning ? (
               <>
@@ -562,18 +612,118 @@ export default function AdminDiagnosticsPage() {
         </Card>
       </div>
 
+      <Card
+        className="mb-8"
+        data-testid="runtime-proof-card"
+        style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+      >
+        <CardContent className="p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-xl ${runtimeProofBg}`}>
+                  <Activity className={`h-6 w-6 ${runtimeProofColor}`} />
+                </div>
+                <div>
+                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>最新真实运行证据</p>
+                  <p
+                    className="text-xl font-semibold"
+                    data-testid="runtime-proof-message"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    {runtimeProofData?.message ?? '尚未加载'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <Badge
+                  className={`${runtimeProofBg} ${runtimeProofColor}`}
+                  data-testid="runtime-proof-status"
+                >
+                  {statusConfig[runtimeProofStatus].label}
+                </Badge>
+                <span>校验项 {runtimeProofOkCount}/{runtimeProofChecks.length || 0}</span>
+                {runtimeProofRequestId && (
+                  <span className="font-mono">request {runtimeProofRequestId.slice(0, 18)}...</span>
+                )}
+                {runtimeProofModelId && (
+                  <span>model {runtimeProofModelId}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchRuntimeProof()}
+                className="border-[var(--border-primary)]"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                刷新证据
+              </Button>
+            </div>
+          </div>
+
+          {runtimeProofChecks.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              {runtimeProofChecks.map(([key, ok]) => (
+                <div
+                  key={key}
+                  className="flex items-center justify-between rounded-lg px-3 py-2"
+                  style={{ background: 'var(--bg-tertiary)' }}
+                >
+                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    {key}
+                  </span>
+                  <Badge className={ok ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}>
+                    {ok ? '一致' : '异常'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
+              <p style={{ color: 'var(--text-tertiary)' }}>搜索快照</p>
+              <p style={{ color: 'var(--text-primary)' }}>
+                {runtimeProofData?.snapshots?.searchDigest ? '存在' : '无'}
+              </p>
+            </div>
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
+              <p style={{ color: 'var(--text-tertiary)' }}>压缩快照</p>
+              <p style={{ color: 'var(--text-primary)' }}>
+                {runtimeProofData?.snapshots?.compressionCheckpoint ? '存在' : '无'}
+              </p>
+            </div>
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
+              <p style={{ color: 'var(--text-tertiary)' }}>积分</p>
+              <p style={{ color: 'var(--text-primary)' }}>
+                {runtimeProofCredits}
+              </p>
+            </div>
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
+              <p style={{ color: 'var(--text-tertiary)' }}>联网次数</p>
+              <p style={{ color: 'var(--text-primary)' }}>
+                {runtimeProofSearchCount}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Tabs */}
       <Tabs defaultValue="results" className="space-y-6">
-        <TabsList className="bg-[var(--bg-tertiary)]">
-          <TabsTrigger value="results" className="data-[state=active]:bg-[var(--bg-secondary)]">
+        <TabsList className="flex h-auto justify-start gap-1 overflow-x-auto bg-[var(--bg-tertiary)] p-1">
+          <TabsTrigger value="results" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <Activity className="h-4 w-4 mr-2" />
             测试结果
           </TabsTrigger>
-          <TabsTrigger value="health" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="health" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <Server className="h-4 w-4 mr-2" />
             健康检查
           </TabsTrigger>
-          <TabsTrigger value="history" className="data-[state=active]:bg-[var(--bg-secondary)]">
+          <TabsTrigger value="history" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <History className="h-4 w-4 mr-2" />
             运行历史
           </TabsTrigger>
@@ -582,7 +732,7 @@ export default function AdminDiagnosticsPage() {
         {/* Results Tab */}
         <TabsContent value="results" className="space-y-6">
           {/* Category Filter */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>筛选:</span>
             <Button
               variant={selectedCategory === 'all' ? 'default' : 'outline'}
@@ -610,9 +760,10 @@ export default function AdminDiagnosticsPage() {
           </div>
 
           {/* Results Table */}
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-diagnostics-results-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-0">
-              <Table>
+              <div className="overflow-x-auto">
+              <Table className="min-w-[920px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10"></TableHead>
@@ -642,6 +793,7 @@ export default function AdminDiagnosticsPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

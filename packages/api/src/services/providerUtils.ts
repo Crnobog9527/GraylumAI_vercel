@@ -58,12 +58,17 @@ export function usesOpenAICompatibleApi(params: {
     looksLikeOpenRouterKey(params.apiKey);
 }
 
-export function getOpenAICompatibleHeaders(apiKey: string) {
+export function getOpenAICompatibleHeaders(apiKey: string, appTitle?: string) {
+  const resolvedTitle = appTitle?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_NAME?.trim() ||
+    process.env.NEXT_PUBLIC_APP_NAME?.trim() ||
+    'GraylumAI';
+
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
     'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-    'X-Title': 'GraylumAI',
+    'X-Title': resolvedTitle,
   };
 }
 

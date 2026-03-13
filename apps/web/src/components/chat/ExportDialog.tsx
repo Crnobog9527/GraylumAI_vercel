@@ -141,7 +141,7 @@ export default function ExportDialog({
                     onClick={() => setSelectedFormat(format.value)}
                     disabled={isExporting}
                     className={cn(
-                      'flex flex-col items-center gap-2 p-3 rounded-xl border transition-all',
+                      'flex flex-col items-center gap-2 p-3 rounded-xl border transition-[background-color,border-color,color,box-shadow] duration-200 motion-reduce:transition-none',
                       isSelected
                         ? 'border-[var(--color-primary)]'
                         : 'border-[var(--border-primary)] hover:border-[var(--border-secondary)]'
