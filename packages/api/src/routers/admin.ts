@@ -1,6 +1,7 @@
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
 
 export const adminRouter = router({
   /**
@@ -367,16 +368,18 @@ export const adminRouter = router({
       const replyUsersMap = new Map((replyUsersData ?? []).map(u => [u.id, u]));
 
       // 组装工单数据
-      const tickets = ticketsData.map(ticket => ({
+      const tickets = await Promise.all(ticketsData.map(async (ticket) => ({
         ...ticket,
+        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
         user: ticket.user_id ? usersMap.get(ticket.user_id) ?? null : null,
-        ticket_replies: (repliesData ?? [])
+        ticket_replies: await Promise.all((repliesData ?? [])
           .filter(r => r.ticket_id === ticket.id)
-          .map(reply => ({
+          .map(async (reply) => ({
             ...reply,
+            attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
             user: reply.user_id ? replyUsersMap.get(reply.user_id) ?? null : null,
-          })),
-      }));
+          }))),
+      })));
 
       return {
         tickets,
@@ -459,7 +462,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'planned' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -479,16 +482,18 @@ export const adminRouter = router({
         query = query.lte('created_at', input.endDate);
       }
 
-      const { data, error, count } = await query;
+      const [transactionsResult, statsQuery] = await Promise.all([
+        query,
+        ctx.supabase
+          .from('credit_transactions')
+          .select('type, amount'),
+      ]);
+
+      const { data, error, count } = transactionsResult;
 
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
-
-      // Calculate statistics
-      const statsQuery = await ctx.supabase
-        .from('credit_transactions')
-        .select('type, amount');
 
       const stats = {
         totalAdditions: 0,
@@ -851,6 +856,7 @@ export const adminRouter = router({
       price: z.number().int().positive(), // In cents
       creditsAmount: z.number().int().positive(),
       bonusCredits: z.number().int().min(0).default(0),
+      stripePriceId: z.string().trim().min(1).max(255).optional(),
       sortOrder: z.number().int().min(0).default(0),
       isPopular: z.enum(['true', 'false']).default('false'),
       active: z.enum(['true', 'false']).default('true'),
@@ -863,6 +869,7 @@ export const adminRouter = router({
           price: input.price,
           credits_amount: input.creditsAmount,
           bonus_credits: input.bonusCredits,
+          stripe_price_id: input.stripePriceId ?? null,
           sort_order: input.sortOrder,
           is_popular: input.isPopular,
           active: input.active,
@@ -887,6 +894,7 @@ export const adminRouter = router({
       price: z.number().int().positive().optional(),
       creditsAmount: z.number().int().positive().optional(),
       bonusCredits: z.number().int().min(0).optional(),
+      stripePriceId: z.string().trim().min(1).max(255).nullable().optional(),
       sortOrder: z.number().int().min(0).optional(),
       isPopular: z.enum(['true', 'false']).optional(),
       active: z.enum(['true', 'false']).optional(),
@@ -897,6 +905,7 @@ export const adminRouter = router({
       if (input.price) updateData.price = input.price;
       if (input.creditsAmount) updateData.credits_amount = input.creditsAmount;
       if (input.bonusCredits !== undefined) updateData.bonus_credits = input.bonusCredits;
+      if (input.stripePriceId !== undefined) updateData.stripe_price_id = input.stripePriceId || null;
       if (input.sortOrder !== undefined) updateData.sort_order = input.sortOrder;
       if (input.isPopular) updateData.is_popular = input.isPopular;
       if (input.active) updateData.active = input.active;
@@ -1617,6 +1626,8 @@ export const adminRouter = router({
       level: z.enum(['free', 'pro', 'gold']).default('pro'),
       monthlyPrice: z.number().int().min(0), // In cents
       yearlyPrice: z.number().int().min(0), // In cents
+      stripeMonthlyPriceId: z.string().trim().min(1).max(255).optional(),
+      stripeYearlyPriceId: z.string().trim().min(1).max(255).optional(),
       monthlyCredits: z.number().int().min(0),
       yearlyCredits: z.number().int().min(0),
       monthlyBonusCredits: z.number().int().min(0).default(0),
@@ -1633,6 +1644,8 @@ export const adminRouter = router({
           level: input.level,
           monthly_price: input.monthlyPrice,
           yearly_price: input.yearlyPrice,
+          stripe_monthly_price_id: input.stripeMonthlyPriceId ?? null,
+          stripe_yearly_price_id: input.stripeYearlyPriceId ?? null,
           monthly_credits: input.monthlyCredits,
           yearly_credits: input.yearlyCredits,
           monthly_bonus_credits: input.monthlyBonusCredits,
@@ -1662,6 +1675,8 @@ export const adminRouter = router({
       level: z.enum(['free', 'pro', 'gold']).optional(),
       monthlyPrice: z.number().int().min(0).optional(),
       yearlyPrice: z.number().int().min(0).optional(),
+      stripeMonthlyPriceId: z.string().trim().min(1).max(255).nullable().optional(),
+      stripeYearlyPriceId: z.string().trim().min(1).max(255).nullable().optional(),
       monthlyCredits: z.number().int().min(0).optional(),
       yearlyCredits: z.number().int().min(0).optional(),
       monthlyBonusCredits: z.number().int().min(0).optional(),
@@ -1682,6 +1697,8 @@ export const adminRouter = router({
       if (input.level !== undefined) updateData.level = input.level;
       if (input.monthlyPrice !== undefined) updateData.monthly_price = input.monthlyPrice;
       if (input.yearlyPrice !== undefined) updateData.yearly_price = input.yearlyPrice;
+      if (input.stripeMonthlyPriceId !== undefined) updateData.stripe_monthly_price_id = input.stripeMonthlyPriceId || null;
+      if (input.stripeYearlyPriceId !== undefined) updateData.stripe_yearly_price_id = input.stripeYearlyPriceId || null;
       if (input.monthlyCredits !== undefined) updateData.monthly_credits = input.monthlyCredits;
       if (input.yearlyCredits !== undefined) updateData.yearly_credits = input.yearlyCredits;
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;

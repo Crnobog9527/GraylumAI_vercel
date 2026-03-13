@@ -6,61 +6,15 @@
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
-import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
+import { getSystemSettingValue, setCreditsForUserEmail, setSystemSettingValue } from './support/creditFixtures';
+import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
-async function readCreditsFromRow(row: Locator) {
-  const creditsCell = row.locator('td').nth(4);
-  const rawText = await creditsCell.textContent();
-  return Number((rawText ?? '').replace(/[^\d-]/g, ''));
-}
-
 async function setUserCredits(browser: Browser, targetCredits: number, reason: string) {
-  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+  if (!hasCredentials('user')) {
     throw new Error('E2E admin and user credentials are required for credit adjustment.');
   }
-
-  const context = await browser.newContext({ storageState: authStatePaths.admin });
-  const page = await context.newPage();
-
-  try {
-    await applyDeploymentProtectionBypass(page);
-    await page.goto(new URL('/admin/users', process.env.PLAYWRIGHT_BASE_URL).toString());
-    await expect(page).toHaveURL(/\/admin\/users/);
-
-    const targetEmail = getCredentials('user').email;
-    await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
-    const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
-    await expect(targetRow).toBeVisible({ timeout: 15000 });
-
-    const currentCredits = await readCreditsFromRow(targetRow);
-    const delta = targetCredits - currentCredits;
-
-    if (delta === 0) {
-      return currentCredits;
-    }
-
-    await targetRow.getByRole('button', { name: '积分' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
-    await page.locator('input[type="number"]').fill(String(delta));
-    await page.locator('input[placeholder="奖励积分、退款等..."]').fill(reason);
-
-    const adjustResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/trpc/admin.adjustUserCredits') &&
-        response.request().method() === 'POST',
-      { timeout: 20000 },
-    );
-    await page.getByRole('button', { name: '确认调整' }).click();
-    const adjustResponse = await adjustResponsePromise;
-    expect(adjustResponse.status()).toBe(200);
-    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
-    await expect.poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 }).toBe(targetCredits);
-
-    return currentCredits;
-  } finally {
-    await context.close();
-  }
+  return setCreditsForUserEmail(getCredentials('user').email, targetCredits, reason);
 }
 
 test.describe('User Supplemental Flows', () => {
@@ -75,7 +29,7 @@ test.describe('User Supplemental Flows', () => {
 
       steps.push('Wait for the route guard to redirect to /login');
       await page.waitForURL(/\/login/, { timeout: 15000 });
-      await expect(page.getByRole('button', { name: 'Login' })).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('form').getByRole('button', { name: /^登录$|^Login$/i })).toBeVisible({ timeout: 10000 });
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -108,14 +62,19 @@ test.describe('User Supplemental Flows', () => {
       test.setTimeout(90000);
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
-      const prompt = `Parity empty credits ${Date.now()}`;
+      const prompt = `低积分${Date.now()}`;
       let actual = 'Low balance guard blocked chat send at zero credits';
       let originalCredits: number | null = null;
+      let originalFreeTierSetting: unknown;
       let streamRequestCount = 0;
 
       try {
         steps.push('Reduce the E2E user credits to zero through admin adjustment');
         originalCredits = await setUserCredits(browser, 0, `Parity low-balance test ${Date.now()}`);
+
+        steps.push('Disable free-tier access so the zero-credit guard path is deterministic');
+        originalFreeTierSetting = await getSystemSettingValue('enable_free_tier');
+        await setSystemSettingValue('enable_free_tier', 'false');
 
         steps.push('Open /chat and attempt to send a new prompt');
         await gotoWithBypass(page, '/chat');
@@ -125,19 +84,19 @@ test.describe('User Supplemental Flows', () => {
             streamRequestCount += 1;
           }
         });
-        await page.locator('textarea[placeholder="请输入您的问题..."]').fill(prompt);
+        await page.locator('textarea[placeholder]').fill(prompt);
+        await expect(page.getByRole('button', { name: '发送' })).toBeEnabled({ timeout: 10000 });
         await page.getByRole('button', { name: '发送' }).click();
 
         steps.push('Verify the empty-balance dialog appears and no stream request is sent');
-        const lowBalanceDialog = page.getByRole('alertdialog');
-        await expect(lowBalanceDialog).toBeVisible({ timeout: 10000 });
-        await expect(lowBalanceDialog.getByRole('heading', { name: '积分已用完' })).toBeVisible({ timeout: 10000 });
-        await expect(lowBalanceDialog.getByText('请充值积分后继续使用 AI 对话功能', { exact: false })).toBeVisible({ timeout: 10000 });
+        const lowBalanceTitle = page.getByRole('heading', { name: '积分已用完' });
+        await expect(lowBalanceTitle).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('请充值积分后继续使用 AI 对话功能', { exact: false })).toBeVisible({ timeout: 10000 });
         await page.waitForTimeout(2000);
         expect(streamRequestCount).toBe(0);
 
         steps.push('Use the recharge CTA and confirm navigation to subscription management');
-        await lowBalanceDialog.getByRole('button', { name: '立即充值' }).click();
+        await page.getByRole('button', { name: '立即充值' }).click();
         await expect(page).toHaveURL(/\/profile\?tab=subscription/, { timeout: 10000 });
         await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
@@ -148,6 +107,9 @@ test.describe('User Supplemental Flows', () => {
         monitor.addAssertionIssue(actual, 'P1');
         throw error;
       } finally {
+        if (originalFreeTierSetting !== undefined) {
+          await setSystemSettingValue('enable_free_tier', originalFreeTierSetting);
+        }
         if (originalCredits !== null) {
           await setUserCredits(browser, originalCredits, `Restore credits after low-balance parity test ${Date.now()}`);
         }
@@ -173,7 +135,7 @@ test.describe('User Supplemental Flows', () => {
     test.use({ storageState: authStatePaths.user });
     test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for supplemental user flows');
 
-    test('should expose security settings dialogs and close the password dialog only after valid input', async ({ page }, testInfo) => {
+    test('should expose real security settings flows without relying on fake verification or password stubs', async ({ page }, testInfo) => {
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
       let actual = 'Security settings interactions completed';
@@ -181,35 +143,35 @@ test.describe('User Supplemental Flows', () => {
       try {
         steps.push('Open /profile?tab=security and verify the security shell');
         await gotoWithBypass(page, '/profile?tab=security');
-        await expect(page.getByRole('heading', { name: '账户安全' })).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('h3').filter({ hasText: '账户安全' })).toBeVisible({ timeout: 10000 });
         await expect(page.getByText(getCredentials('user').email)).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('登录方式')).toBeVisible({ timeout: 10000 });
 
-        const verifyButton = page.getByRole('button', { name: '验证邮箱' });
-        if (await verifyButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-          steps.push('Open the email verification dialog when the account is not yet verified');
-          await verifyButton.click();
-          await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
-          await expect(page.getByText('验证码已发送至')).toBeVisible({ timeout: 10000 });
-          await page.getByRole('button', { name: '取消' }).click();
-          await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10000 });
+        const resendVerificationButton = page.getByRole('button', { name: '重发验证邮件' });
+        if (await resendVerificationButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+          steps.push('Record that the current E2E user still requires email verification support');
+          await expect(page.getByText('未验证')).toBeVisible({ timeout: 10000 });
+          await expect(page.getByRole('button', { name: '查看说明' })).toBeVisible({ timeout: 10000 });
         } else {
           steps.push('Record that the current E2E user is already email-verified');
-          actual = 'Security settings interactions completed; email verification CTA already satisfied for current E2E user';
+          await expect(
+            page.getByText(/已验证|Google 账户默认已完成邮箱验证/)
+          ).toBeVisible({ timeout: 10000 });
+          actual = 'Security settings interactions completed; email verification requirements already satisfied for current E2E user';
         }
 
-        steps.push('Open the password dialog and verify invalid input does not close it');
+        steps.push('Open the password dialog and verify invalid input is rejected without closing the dialog');
         await page.getByRole('button', { name: '修改' }).click();
         await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
-        await page.locator('#current').fill('wrong-current-password');
-        await page.locator('#new').fill('12345678');
-        await page.locator('#confirm').fill('12345679');
+        await page.locator('#current-password').fill('wrong-current-password');
+        await page.locator('#new-password').fill('12345678');
+        await page.locator('#confirm-password').fill('12345679');
         await page.getByRole('button', { name: '确认修改' }).click();
         await expect(page.getByRole('dialog')).toBeVisible({ timeout: 2000 });
+        await expect(page.getByText('两次输入的新密码不一致')).toBeVisible({ timeout: 10000 });
 
-        steps.push('Provide valid input and verify the dialog closes');
-        await page.locator('#confirm').fill('12345678');
-        await page.getByRole('button', { name: '确认修改' }).click();
+        steps.push('Close the dialog explicitly because password updates now require a real current password');
+        await page.getByRole('button', { name: '取消' }).click();
         await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 5000 });
 
         const blockingIssues = monitor.getIssues('P1');
@@ -225,7 +187,52 @@ test.describe('User Supplemental Flows', () => {
             title: 'profile-security-settings',
             role: 'user',
             route: '/profile?tab=security',
-            expected: 'Authenticated users can inspect account security details, open the verification and password dialogs, and only close password changes after valid input.',
+            expected: 'Authenticated users can inspect real security-state details, see verification status, and invalid password changes are rejected without depending on fake success dialogs.',
+          },
+          actual,
+          steps,
+          monitor.getIssues(),
+        );
+      }
+    });
+
+    test('should open a real invitation dialog with a generated invitation code', async ({ page }, testInfo) => {
+      const steps: string[] = [];
+      const monitor = createIssueMonitor(page);
+      let actual = 'Invitation dialog rendered with live invitation data';
+
+      try {
+        steps.push('Open /profile?tab=profile and locate the invitation action card');
+        await gotoWithBypass(page, '/profile?tab=profile');
+        await expect(page.getByText('快捷操作')).toBeVisible({ timeout: 10000 });
+        const inviteCard = page.getByTestId('profile-invite-card');
+        await expect(inviteCard).toBeVisible({ timeout: 10000 });
+
+        steps.push('Open the invitation dialog');
+        await inviteCard.click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog).toBeVisible({ timeout: 10000 });
+        await expect(dialog.getByRole('heading', { name: '邀请好友' })).toBeVisible({ timeout: 10000 });
+
+        steps.push('Verify the generated invitation code and copy actions are present');
+        await expect(page.getByTestId('profile-invitation-code')).toBeVisible({ timeout: 15000 });
+        await expect(dialog.getByRole('button', { name: '复制邀请码' })).toBeVisible({ timeout: 10000 });
+        await expect(dialog.getByRole('button', { name: '复制链接' })).toBeVisible({ timeout: 10000 });
+
+        const blockingIssues = monitor.getIssues('P1');
+        expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+      } catch (error) {
+        actual = error instanceof Error ? error.message : 'Unknown invitation dialog failure';
+        monitor.addAssertionIssue(actual, 'P1');
+        throw error;
+      } finally {
+        await writeFlowAudit(
+          testInfo,
+          {
+            title: 'profile-invitation-dialog',
+            role: 'user',
+            route: '/profile',
+            expected: 'Authenticated users can open a live invitation dialog, view a generated invitation code, and copy both the code and invite link.',
           },
           actual,
           steps,
@@ -248,11 +255,26 @@ test.describe('User Supplemental Flows', () => {
         steps.push('Switch category and sort order');
         await page.getByRole('button', { name: '营销文案' }).click();
         await page.getByRole('button', { name: /最新上线|最受欢迎/ }).click();
-        await page.getByRole('menuitem', { name: '🔥 最受欢迎' }).click();
+        const popularMenuItem = page.locator('[role="menuitem"]').filter({ hasText: '🔥 最受欢迎' }).first();
+        const popularTextFallback = page.locator('text=🔥 最受欢迎').last();
+
+        const usedRoleLocator = await popularMenuItem.isVisible().catch(() => false);
+        if (usedRoleLocator) {
+          await popularMenuItem.click({ force: true });
+        } else {
+          await expect(popularTextFallback).toBeVisible({ timeout: 10000 });
+          await popularTextFallback.click({ force: true });
+        }
         await expect(page.getByRole('button', { name: /最受欢迎/ })).toBeVisible({ timeout: 10000 });
 
-        steps.push('Open the first module detail dialog');
-        const firstUseButton = page.getByRole('button', { name: '立即使用' }).first();
+        steps.push('Open the first available module detail dialog');
+        let availableUseButtons = page.getByRole('button', { name: '立即使用' });
+        if (await availableUseButtons.count() === 0) {
+          steps.push('Fallback to 全部功能 because the selected category has no visible modules in the current fixture data');
+          await page.getByRole('button', { name: '全部功能' }).click();
+          availableUseButtons = page.getByRole('button', { name: '立即使用' });
+        }
+        const firstUseButton = availableUseButtons.first();
         await expect(firstUseButton).toBeVisible({ timeout: 15000 });
         await firstUseButton.click();
         const detailDialog = page.getByRole('dialog');

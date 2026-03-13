@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { escapeHtml, simpleMarkdown } from './messageSanitization';
 
 // ============================================
 // 类型定义
@@ -20,55 +21,6 @@ interface MessageStreamProps {
   enableMarkdown?: boolean;
   enableCodeHighlight?: boolean;
   typingSpeed?: number; // 毫秒/字符，0 表示立即显示
-}
-
-// ============================================
-// 工具函数
-// ============================================
-
-/**
- * 简单的 Markdown 转 HTML
- * 支持: 粗体、斜体、代码块、行内代码、链接
- */
-function simpleMarkdown(text: string): string {
-  // 代码块
-  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre class="bg-muted rounded-md p-3 my-2 overflow-x-auto"><code class="language-${lang || 'text'}">${escapeHtml(code.trim())}</code></pre>`;
-  });
-
-  // 行内代码
-  text = text.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 rounded">$1</code>');
-
-  // 粗体
-  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-  // 斜体
-  text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-  // 链接
-  text = text.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline">$1</a>'
-  );
-
-  // 换行
-  text = text.replace(/\n/g, '<br />');
-
-  return text;
-}
-
-/**
- * HTML 转义
- */
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;',
-  };
-  return text.replace(/[&<>"']/g, (m) => map[m]);
 }
 
 // ============================================

@@ -205,14 +205,14 @@ export const chatRouter = router({
           .eq('conversation_id', conv.id)
           .eq('is_deleted', 'false');
 
-        // 获取该对话消耗的积分（从 token_stats 或 billing_history）
+        // 获取该对话消耗的积分（从 token_stats 统计实际结算积分）
         const { data: usageLogs } = await ctx.supabase
-          .from('billing_history')
-          .select('amount')
+          .from('token_stats')
+          .select('total_credits')
           .eq('user_id', ctx.profileId)
-          .eq('reference_id', conv.id);
+          .eq('conversation_id', conv.id);
 
-        const creditsUsed = (usageLogs || []).reduce((sum: number, log: any) => sum + Math.abs(log.amount || 0), 0);
+        const creditsUsed = (usageLogs || []).reduce((sum: number, log: any) => sum + (log.total_credits || 0), 0);
 
         return {
           ...conv,
@@ -259,33 +259,25 @@ export const chatRouter = router({
   deleteConversation: protectedProcedure
     .input(z.object({ conversationId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const deletedAt = new Date().toISOString();
+      const { data, error } = await ctx.supabase.rpc('soft_delete_conversation', {
+        p_conversation_id: input.conversationId,
+        p_user_id: ctx.profileId,
+      });
 
-      const { error: messageDeleteError } = await ctx.supabase
-        .from('messages')
-        .update({ is_deleted: true, deleted_at: deletedAt })
-        .eq('conversation_id', input.conversationId)
-        .eq('is_deleted', 'false');
-
-      if (messageDeleteError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageDeleteError.message });
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
-      const { error } = await ctx.supabase
-        .from('conversations')
-        .update({ is_deleted: true, deleted_at: deletedAt })
-        .eq('id', input.conversationId)
-        .eq('user_id', ctx.profileId)
-        .eq('is_deleted', 'false');
+      if (!data) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: '无权删除该对话' });
+      }
 
-      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       return { success: true };
     }),
 
   deleteConversations: protectedProcedure
     .input(z.object({ conversationIds: z.array(z.string().uuid()).min(1).max(100) }))
     .mutation(async ({ ctx, input }) => {
-      const deletedAt = new Date().toISOString();
       const { data: ownedConversations, error: ownedError } = await ctx.supabase
         .from('conversations')
         .select('id')
@@ -302,24 +294,21 @@ export const chatRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: '包含无权操作的对话' });
       }
 
-      const { error: messageDeleteError } = await ctx.supabase
-        .from('messages')
-        .update({ is_deleted: true, deleted_at: deletedAt })
-        .in('conversation_id', ownedConversationIds)
-        .eq('is_deleted', 'false');
+      for (const conversationId of ownedConversationIds) {
+        const { data, error } = await ctx.supabase.rpc('soft_delete_conversation', {
+          p_conversation_id: conversationId,
+          p_user_id: ctx.profileId,
+        });
 
-      if (messageDeleteError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageDeleteError.message });
+        if (error) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        }
+
+        if (!data) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: '包含无权操作的对话' });
+        }
       }
 
-      const { error } = await ctx.supabase
-        .from('conversations')
-        .update({ is_deleted: true, deleted_at: deletedAt })
-        .in('id', ownedConversationIds)
-        .eq('user_id', ctx.profileId)
-        .eq('is_deleted', 'false');
-
-      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       return { success: true, deletedCount: ownedConversationIds.length };
     }),
 
@@ -343,6 +332,52 @@ export const chatRouter = router({
         .eq('conversation_id', input.conversationId)
         .eq('is_deleted', 'false')
         .order('created_at', { ascending: true });
+    }),
+
+  getConversationTokenStats: protectedProcedure
+    .input(z.object({ conversationId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data: conversation } = await ctx.supabase
+        .from('conversations')
+        .select('id')
+        .eq('id', input.conversationId)
+        .eq('user_id', ctx.profileId)
+        .eq('is_deleted', 'false')
+        .single();
+
+      if (!conversation) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+
+      const { data: stats, error } = await ctx.supabase
+        .from('token_stats')
+        .select('input_tokens, output_tokens, total_credits, created_at')
+        .eq('user_id', ctx.profileId)
+        .eq('conversation_id', input.conversationId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      const last = stats?.[0];
+      const totals = (stats ?? []).reduce(
+        (sum, row) => ({
+          inputTokens: sum.inputTokens + (row.input_tokens ?? 0),
+          outputTokens: sum.outputTokens + (row.output_tokens ?? 0),
+          credits: sum.credits + (row.total_credits ?? 0),
+        }),
+        { inputTokens: 0, outputTokens: 0, credits: 0 }
+      );
+
+      return {
+        lastInputTokens: last?.input_tokens ?? 0,
+        lastOutputTokens: last?.output_tokens ?? 0,
+        totalInputTokens: totals.inputTokens,
+        totalOutputTokens: totals.outputTokens,
+        totalCredits: totals.credits,
+        requestCount: stats?.length ?? 0,
+      };
     }),
 
   /**

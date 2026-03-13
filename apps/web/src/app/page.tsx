@@ -7,7 +7,9 @@ import GlobalBanner from '@/components/layout/GlobalBanner';
 import WelcomeBanner from '@/components/home/WelcomeBanner';
 import SixStepsGuide from '@/components/home/SixStepsGuide';
 import UpdatesSection from '@/components/home/UpdatesSection';
+import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import { createClient } from '@/lib/supabase';
+import { isEmailVerified } from '@/lib/auth';
 import { trpc } from '@/trpc/client';
 
 /**
@@ -38,6 +40,11 @@ export default function HomePage() {
         return;
       }
 
+      if (!isEmailVerified(user)) {
+        router.replace(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent('/')}`);
+        return;
+      }
+
       setIsAuthenticated(true);
       setIsLoading(false);
     };
@@ -55,6 +62,17 @@ export default function HomePage() {
   const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery(
     undefined,
     { enabled: isAuthenticated }
+  );
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const showOnboarding =
+    systemSettings?.home_show_onboarding === true || systemSettings?.home_show_onboarding === 'true';
+  const showFeaturedModules =
+    systemSettings?.home_show_featured_modules === true || systemSettings?.home_show_featured_modules === 'true';
+  const { data: featuredModules, isLoading: isFeaturedModulesLoading } = trpc.modules.getFeaturedModules.useQuery(
+    { limit: 4 },
+    { enabled: isAuthenticated && showFeaturedModules }
   );
 
   // 从 tRPC 获取横幅公告
@@ -216,7 +234,23 @@ export default function HomePage() {
         }}
       >
         <WelcomeBanner user={user} />
-        <SixStepsGuide />
+        {showOnboarding && <SixStepsGuide />}
+        {showFeaturedModules && !isFeaturedModulesLoading && featuredModules && featuredModules.length > 0 && (
+          <FeaturedModules
+            featuredModules={featuredModules.map((module) => ({
+              id: module.id,
+              title: module.title,
+              description: module.description ?? '',
+              icon: module.icon ?? '✨',
+              image_url: module.image_url ?? '',
+              badge_type: (module.badge_type as 'hot' | 'new' | 'recommend') ?? 'recommend',
+              badge_text: module.badge_text ?? '',
+              credits_display: module.credits_display ?? '',
+              usage_count: module.usage_count ?? 0,
+            }))}
+            onModuleClick={() => router.push('/marketplace')}
+          />
+        )}
         <UpdatesSection announcements={announcements} isLoading={isAnnouncementsLoading} />
       </div>
     </div>

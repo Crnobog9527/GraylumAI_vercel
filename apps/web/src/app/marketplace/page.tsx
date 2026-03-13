@@ -84,7 +84,7 @@ export default function MarketplacePage() {
 
       {/* 2. 顶部中央 - 主金色光源 */}
       <div
-        className="absolute -top-20 left-1/2 -translate-x-1/2 w-[800px] h-[500px] rounded-full opacity-70 blur-[120px]"
+        className="absolute -top-12 left-1/2 -translate-x-1/2 h-[240px] w-[320px] rounded-full opacity-35 blur-[64px] md:-top-16 md:h-[420px] md:w-[680px] md:opacity-55 md:blur-[96px]"
         style={{
           background: `radial-gradient(circle, var(--color-primary) 0%, rgba(255,180,0,0.5) 40%, transparent 70%)`,
           willChange: 'transform, opacity',
@@ -94,7 +94,7 @@ export default function MarketplacePage() {
 
       {/* 3. 左下角 - 紫色/蓝色渐变光晕 */}
       <div
-        className="absolute bottom-0 -left-32 w-[600px] h-[600px] rounded-full opacity-50 blur-[110px]"
+        className="absolute -left-16 bottom-0 h-[220px] w-[220px] rounded-full opacity-24 blur-[56px] md:-left-24 md:h-[480px] md:w-[480px] md:opacity-40 md:blur-[88px]"
         style={{
           background: `linear-gradient(45deg, rgba(99,102,241,0.8) 0%, rgba(139,92,246,0.6) 50%, transparent 100%)`,
           willChange: 'transform',
@@ -104,7 +104,7 @@ export default function MarketplacePage() {
 
       {/* 4. 右下角 - 青绿色光晕 */}
       <div
-        className="absolute -bottom-20 -right-20 w-[500px] h-[500px] rounded-full opacity-45 blur-[100px]"
+        className="absolute -bottom-6 -right-8 h-[200px] w-[200px] rounded-full opacity-22 blur-[54px] md:-bottom-16 md:-right-16 md:h-[420px] md:w-[420px] md:opacity-35 md:blur-[84px]"
         style={{
           background: `radial-gradient(circle, rgba(34,197,94,0.7) 0%, rgba(20,184,166,0.5) 50%, transparent 80%)`,
           willChange: 'transform, opacity',
@@ -114,7 +114,7 @@ export default function MarketplacePage() {
 
       {/* 5. 中部偏右 - 橙色点缀 */}
       <div
-        className="absolute top-1/2 right-1/4 w-[400px] h-[400px] rounded-full opacity-35 blur-[90px]"
+        className="absolute right-6 top-[55%] h-[150px] w-[150px] rounded-full opacity-16 blur-[44px] md:right-1/4 md:top-1/2 md:h-[320px] md:w-[320px] md:opacity-26 md:blur-[72px]"
         style={{
           background: `radial-gradient(circle, var(--color-secondary) 0%, transparent 60%)`,
           willChange: 'transform, opacity',
@@ -243,7 +243,7 @@ export default function MarketplacePage() {
 
         {/* 筛选栏 */}
         <div
-          className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10 sticky top-16 z-40 backdrop-blur-xl py-4 px-6 rounded-2xl animate-slideUp"
+          className="animate-slideUp sticky top-[72px] z-40 mb-8 flex flex-col gap-4 rounded-2xl px-4 py-3 backdrop-blur-sm md:top-16 md:mb-10 md:px-6 md:py-4 md:backdrop-blur-md"
           style={{
             background: 'linear-gradient(135deg, rgba(30,30,35,0.9) 0%, rgba(20,20,25,0.95) 100%)',
             border: '1px solid rgba(255,215,0,0.1)',
@@ -256,7 +256,7 @@ export default function MarketplacePage() {
               <button
                 key={cat.id}
                 onClick={() => { setSelectedCategory(cat.id); setPage(1); }}
-                className="px-5 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-300 hover:scale-105"
+                className="whitespace-nowrap rounded-xl px-5 py-2.5 text-sm font-medium transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none"
                 style={{
                   background: selectedCategory === cat.id
                     ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
@@ -274,15 +274,15 @@ export default function MarketplacePage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs hidden md:block" style={{ color: 'var(--text-disabled)' }}>
+          <div className="flex items-center justify-between gap-3 md:justify-end">
+            <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
               共 {totalModules} 个工具
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
-                  className="rounded-xl h-10 text-sm font-medium transition-all duration-300 hover:scale-105"
+                  className="h-10 rounded-xl text-sm font-medium transition-[background-color,color,border-color] duration-200 motion-reduce:transition-none"
                   style={{
                     background: 'rgba(255,255,255,0.03)',
                     borderColor: 'rgba(255,255,255,0.08)',
@@ -326,7 +326,7 @@ export default function MarketplacePage() {
             <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
             {modules.map((module, index) => (
               <div
                 key={module.id}
@@ -388,7 +388,7 @@ export default function MarketplacePage() {
         {/* 分页 */}
         {totalPages > 1 && (
           <div
-            className="flex items-center justify-center gap-3 py-6 px-8 rounded-2xl mx-auto max-w-fit"
+            className="flex flex-wrap items-center justify-center gap-3 py-4 px-4 md:px-8 rounded-2xl mx-auto max-w-full md:max-w-fit"
             style={{
               background: 'linear-gradient(135deg, rgba(30,30,35,0.8) 0%, rgba(20,20,25,0.9) 100%)',
               border: '1px solid rgba(255,215,0,0.1)',
@@ -400,7 +400,7 @@ export default function MarketplacePage() {
               size="icon"
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-110 disabled:opacity-30"
+              className="h-10 w-10 rounded-xl transition-[background-color,color,border-color] duration-200 motion-reduce:transition-none disabled:opacity-30"
               style={{
                 background: 'rgba(255,255,255,0.03)',
                 borderColor: 'rgba(255,255,255,0.08)',
@@ -410,13 +410,13 @@ export default function MarketplacePage() {
               <ChevronLeft className="h-4 w-4" />
             </Button>
 
-            <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-2">
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
                 <Button
                   key={p}
                   variant={page === p ? 'default' : 'outline'}
                   onClick={() => setPage(p)}
-                  className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-110"
+                  className="h-10 w-10 rounded-xl transition-[background-color,color,border-color,box-shadow] duration-200 motion-reduce:transition-none"
                   style={{
                     background: page === p
                       ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
@@ -437,7 +437,7 @@ export default function MarketplacePage() {
               size="icon"
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-110 disabled:opacity-30"
+              className="h-10 w-10 rounded-xl transition-[background-color,color,border-color] duration-200 motion-reduce:transition-none disabled:opacity-30"
               style={{
                 background: 'rgba(255,255,255,0.03)',
                 borderColor: 'rgba(255,255,255,0.08)',
@@ -447,7 +447,7 @@ export default function MarketplacePage() {
               <ChevronRight className="h-4 w-4" />
             </Button>
 
-            <div className="h-6 w-px mx-2" style={{ background: 'var(--border-primary)' }} />
+            <div className="hidden md:block h-6 w-px mx-2" style={{ background: 'var(--border-primary)' }} />
 
             <span className="text-sm font-medium" style={{ color: 'var(--text-tertiary)' }}>
               第 <span style={{ color: 'var(--color-primary)' }}>{page}</span> / {totalPages} 页

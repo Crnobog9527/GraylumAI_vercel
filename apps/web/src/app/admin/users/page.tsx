@@ -214,23 +214,23 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
             用户管理
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
             管理平台用户、权限和积分 · 共 {total.toLocaleString()} 位用户
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           {hasActiveFilters && (
             <Button
               variant="outline"
               onClick={clearAllFilters}
-              className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+              className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
             >
               清除筛选
             </Button>
@@ -239,7 +239,7 @@ export default function AdminUsersPage() {
             data-testid="admin-users-refresh"
             variant="outline"
             onClick={() => refetch()}
-            className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+            className="w-full border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] sm:w-auto"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             刷新
@@ -248,7 +248,7 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Filters */}
-      <Card className="mb-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <Card data-testid="admin-users-filters" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
         <CardHeader className="pb-4">
           <CardTitle className="text-base flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             <Filter className="h-4 w-4" />
@@ -345,9 +345,10 @@ export default function AdminUsersPage() {
       </Card>
 
       {/* Users Table */}
-      <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+      <Card data-testid="admin-users-table-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
         <CardContent className="p-0">
-          <Table>
+          <div className="overflow-x-auto">
+          <Table className="min-w-[980px]">
             <TableHeader>
               <TableRow>
                 <TableHead>用户</TableHead>
@@ -514,11 +515,12 @@ export default function AdminUsersPage() {
               )}
             </TableBody>
           </Table>
+          </div>
 
           {/* Pagination */}
           {total > 0 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t" style={{ borderColor: 'var(--border-primary)' }}>
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-4 border-t px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6" style={{ borderColor: 'var(--border-primary)' }}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                 <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   共 {total.toLocaleString()} 位用户
                 </span>
@@ -546,7 +548,7 @@ export default function AdminUsersPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
                   第 {currentPage} / {totalPages || 1} 页
                 </span>

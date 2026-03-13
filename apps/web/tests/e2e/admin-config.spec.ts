@@ -4,10 +4,18 @@
  * This code is proprietary and confidential.
  */
 
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import { authStatePaths, hasCredentials } from './support/auth';
-import { gotoWithBypass } from './support/deploymentProtection';
+import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { safeCloseContext } from './support/contextCleanup';
+import {
+  getAiUsageLogByRequestId,
+  createConversationFixtureForUserEmail,
+  createTokenStatsFixture,
+  softDeleteConversationFixture,
+} from './support/creditFixtures';
+import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
+import { isLocalPlaywrightBaseUrl, probeShowsRegionRestriction } from './support/runtimeConstraints';
 
 async function acceptNextDialog(page: Page) {
   return page.waitForEvent('dialog', { timeout: 15000 }).then((dialog) => dialog.accept());
@@ -16,6 +24,207 @@ async function acceptNextDialog(page: Page) {
 async function openSelectAndChoose(trigger: Locator, optionText: string) {
   await trigger.click();
   await trigger.page().getByRole('option', { name: new RegExp(optionText, 'i') }).click();
+}
+
+async function saveAllSettings(page: Page) {
+  const saveAllButton = page.getByTestId('admin-settings-save-all');
+  await saveAllButton.click();
+  await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
+}
+
+async function setSwitchState(toggle: Locator, enabled: boolean) {
+  await expect(toggle).toBeVisible({ timeout: 10000 });
+  const currentState = (await toggle.getAttribute('data-state')) === 'checked';
+  if (currentState !== enabled) {
+    await toggle.click();
+  }
+}
+
+type StreamProbeResult = {
+  status: number;
+  body: string;
+  events: Array<Record<string, unknown>>;
+};
+
+async function streamChatEventsThroughAuthenticatedSession(
+  page: Page,
+  prompt: string,
+): Promise<StreamProbeResult> {
+  await gotoWithBypass(page, '/landing');
+  await expect(page).toHaveURL(/\/landing/);
+
+  return page.evaluate(async (message) => {
+    const authCookieEntry = document.cookie
+      .split('; ')
+      .find((entry) => entry.includes('-auth-token='));
+
+    if (!authCookieEntry) {
+      return { status: 0, body: 'Missing auth cookie', events: [] };
+    }
+
+    const rawCookieValue = decodeURIComponent(authCookieEntry.split('=').slice(1).join('='));
+    let accessToken = '';
+
+    if (rawCookieValue.startsWith('base64-')) {
+      const parsed = JSON.parse(atob(rawCookieValue.slice(7)));
+      accessToken = parsed.access_token ?? '';
+    }
+
+    if (!accessToken) {
+      return { status: 0, body: 'Missing access token', events: [] };
+    }
+
+    const response = await fetch('/api/ai/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        message,
+        requestId: crypto.randomUUID(),
+      }),
+    });
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      return {
+        status: response.status,
+        body: await response.text(),
+        events: [],
+      };
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let rawBody = '';
+    const events: Array<Record<string, unknown>> = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      rawBody += chunk;
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (!payload) continue;
+
+        try {
+          events.push(JSON.parse(payload) as Record<string, unknown>);
+        } catch {
+          // Ignore malformed provider keepalive frames.
+        }
+      }
+    }
+
+    return {
+      status: response.status,
+      body: rawBody,
+      events,
+    };
+  }, prompt);
+}
+
+function clearIntentionalStreamAbortIssues(
+  monitor: ReturnType<typeof createIssueMonitor>,
+) {
+  monitor.removeIssues((issue) =>
+    (issue.source === 'requestfailed'
+      && issue.method === 'POST'
+      && issue.url?.includes('/api/ai/stream')
+      && issue.message === 'net::ERR_ABORTED')
+    || (issue.source === 'console' && issue.message === 'Streaming error: network error')
+    || (issue.source === 'pageerror' && issue.message === 'signal is aborted without reason')
+  );
+}
+
+function clearExpectedMessageLimitIssues(
+  monitor: ReturnType<typeof createIssueMonitor>,
+) {
+  monitor.removeIssues((issue) =>
+    (issue.source === 'response'
+      && issue.method === 'POST'
+      && issue.status === 400
+      && issue.url?.includes('/api/ai/stream'))
+    || (issue.source === 'console'
+      && issue.message?.includes('当前对话已达到')
+      && issue.message?.includes('消息上限'))
+    || (issue.source === 'console'
+      && issue.message === 'Failed to load resource: the server responded with a status of 400 (Bad Request)')
+  );
+}
+
+async function readCreditsFromRow(row: Locator) {
+  const creditsCell = row.locator('td').nth(4);
+  const rawText = await creditsCell.textContent();
+  return Number((rawText ?? '').replace(/[^\d-]/g, ''));
+}
+
+async function setUserCredits(browser: Browser, targetCredits: number, reason: string) {
+  if (!hasCredentials('admin') || !hasCredentials('user')) {
+    throw new Error('E2E admin and user credentials are required for credit adjustment.');
+  }
+
+  const context = await browser.newContext({ storageState: authStatePaths.admin });
+  const page = await context.newPage();
+
+  try {
+    await gotoWithBypass(page, '/admin/users');
+    await expect(page).toHaveURL(/\/admin\/users/);
+
+    const targetEmail = getCredentials('user').email;
+    await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
+    const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
+    await expect(targetRow).toBeVisible({ timeout: 15000 });
+
+    const currentCredits = await readCreditsFromRow(targetRow);
+    const delta = targetCredits - currentCredits;
+    if (delta === 0) {
+      return currentCredits;
+    }
+
+    await targetRow.getByRole('button', { name: '积分' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+    await page.locator('input[type="number"]').fill(String(delta));
+    await page.locator('input[placeholder="奖励积分、退款等..."]').fill(reason);
+
+    const adjustResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/trpc/admin.adjustUserCredits') &&
+        response.request().method() === 'POST',
+      { timeout: 20000 },
+    );
+    await page.getByRole('button', { name: '确认调整' }).click();
+    const adjustResponse = await adjustResponsePromise;
+    expect(adjustResponse.status()).toBe(200);
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
+    await expect.poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 }).toBe(targetCredits);
+
+    return currentCredits;
+  } finally {
+    await safeCloseContext(context);
+  }
+}
+
+async function saveMaintenanceMode(
+  page: Page,
+  enabled: boolean,
+  saveAllButton: Locator,
+  maintenanceSwitch: Locator,
+) {
+  await expect(maintenanceSwitch).toBeVisible({ timeout: 10000 });
+  const currentState = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
+  if (currentState !== enabled) {
+    await maintenanceSwitch.click();
+  }
+  await saveAllButton.click();
+  await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
 }
 
 test.describe('Admin Config Flows', () => {
@@ -27,7 +236,7 @@ test.describe('Admin Config Flows', () => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const siteNameInput = page.getByTestId('admin-setting-site_name');
-    const saveAllButton = page.getByTestId('admin-settings-save-all');
+    const supportEmailInput = page.getByTestId('admin-setting-support_email');
     let actual = 'Global settings flow completed';
 
     try {
@@ -36,16 +245,36 @@ test.describe('Admin Config Flows', () => {
       await expect(page).toHaveURL(/\/admin\/settings/);
 
       const originalSiteName = (await siteNameInput.inputValue()).trim();
+      const originalSupportEmail = (await supportEmailInput.inputValue()).trim();
       const updatedSiteName = `Parity Config ${Date.now()}`;
+      const updatedSupportEmail = `parity-${Date.now()}@example.com`;
 
-      steps.push('Update the site name and save all settings');
+      steps.push('Update the site name and support email, then save all settings');
       await siteNameInput.fill(updatedSiteName);
-      await saveAllButton.click();
-      await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
+      await supportEmailInput.fill(updatedSupportEmail);
+      await saveAllSettings(page);
 
       steps.push('Reload and verify the new site name persisted');
       await page.reload();
       await expect(siteNameInput).toHaveValue(updatedSiteName, { timeout: 15000 });
+      await expect(supportEmailInput).toHaveValue(updatedSupportEmail, { timeout: 15000 });
+
+      steps.push('Verify the landing page, contact page, and maintenance page pick up the updated branding and support email');
+      await gotoWithBypass(page, '/landing');
+      await expect(page).toHaveTitle(new RegExp(updatedSiteName));
+      await expect(page.getByText(updatedSiteName, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
+        timeout: 15000,
+      });
+      await gotoWithBypass(page, '/contact');
+      await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
+        timeout: 15000,
+      });
+      await gotoWithBypass(page, '/maintenance');
+      await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
+        timeout: 15000,
+      });
+      await gotoWithBypass(page, '/admin/settings');
 
       const membershipPlan = page.getByTestId(/^membership-plan-/).first();
       const membershipPlanCount = await membershipPlan.count();
@@ -80,10 +309,10 @@ test.describe('Admin Config Flows', () => {
         actual = 'Global settings verified; membership plan settings unavailable in current preview data';
       }
 
-      steps.push('Restore the original site name');
+      steps.push('Restore the original site name and support email');
       await siteNameInput.fill(originalSiteName);
-      await saveAllButton.click();
-      await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
+      await supportEmailInput.fill(originalSupportEmail);
+      await saveAllSettings(page);
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -107,36 +336,154 @@ test.describe('Admin Config Flows', () => {
     }
   });
 
-  test('should create, edit, toggle, and delete announcements while restoring chat page settings', async ({ page }, testInfo) => {
+  test('should redirect public visitors to maintenance mode while allowing admins to continue', async ({ browser, page }, testInfo) => {
+    test.setTimeout(90000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const publicContext = await browser.newContext({
+      storageState: { cookies: [], origins: [] },
+    });
+    const publicPage = await publicContext.newPage();
+    const publicMonitor = createIssueMonitor(publicPage);
+    const maintenanceSwitch = page.getByTestId('admin-setting-maintenance_mode');
+    const saveAllButton = page.getByTestId('admin-settings-save-all');
+    let actual = 'Maintenance mode redirected public visitors and preserved admin access';
+    let originalMaintenanceState: boolean | null = null;
+
+    try {
+      steps.push('Open /admin/settings and capture the original maintenance mode state');
+      await gotoWithBypass(page, '/admin/settings');
+      await expect(page).toHaveURL(/\/admin\/settings/);
+      originalMaintenanceState = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
+
+      steps.push('Enable maintenance mode from the admin settings page');
+      await saveMaintenanceMode(page, true, saveAllButton, maintenanceSwitch);
+
+      // Middleware caches the maintenance flag briefly to avoid hammering Supabase.
+      await page.waitForTimeout(2500);
+
+      steps.push('Verify the admin can still access /admin while maintenance mode is enabled');
+      await gotoWithBypass(page, '/admin');
+      await expect(page).toHaveURL(/\/admin/);
+
+      steps.push('Verify a public visitor is redirected from /login to /maintenance');
+      await applyDeploymentProtectionBypass(publicPage);
+      await publicPage.goto('/login');
+      await publicPage.waitForURL(/\/maintenance/, { timeout: 15000 });
+      await expect(publicPage.getByRole('heading', { name: /维护中/ })).toBeVisible({ timeout: 10000 });
+
+      const blockingIssues = [
+        ...monitor.getIssues('P1'),
+        ...publicMonitor.getIssues('P1'),
+      ];
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown maintenance mode failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (originalMaintenanceState !== null) {
+        try {
+          steps.push('Restore the original maintenance mode state');
+          await gotoWithBypass(page, '/admin/settings');
+          await saveMaintenanceMode(page, originalMaintenanceState, saveAllButton, maintenanceSwitch);
+          await page.waitForTimeout(2500);
+        } catch (restoreError) {
+          const restoreMessage =
+            restoreError instanceof Error
+              ? restoreError.message
+              : 'Failed to restore maintenance mode state';
+          monitor.addAssertionIssue(`Maintenance mode cleanup failed: ${restoreMessage}`, 'P1');
+        }
+      }
+      await safeCloseContext(publicContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-maintenance-mode',
+          role: 'admin',
+          route: '/admin/settings,/login,/maintenance',
+          expected: 'Admins can enable maintenance mode without locking themselves out, and public visitors are redirected to the maintenance page until the setting is restored.',
+        },
+        actual,
+        steps,
+        [...monitor.getIssues(), ...publicMonitor.getIssues()],
+      );
+    }
+  });
+
+  test('should save page-experience settings from admin settings and keep announcement CRUD isolated', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const title = `Parity Announcement ${Date.now()}`;
     const editedTitle = `${title} Edited`;
-    const chatPromptInput = page.getByTestId('announcement-chat-prompt-input');
-    const saveChatSettingsButton = page.getByTestId('announcement-save-chat-settings');
-    let actual = 'Announcement management flow completed';
+    let actual = 'Settings ownership and announcement CRUD flow completed';
 
     try {
-      steps.push('Open /admin/announcements');
-      await gotoWithBypass(page, '/admin/announcements');
-      await expect(page).toHaveURL(/\/admin\/announcements/);
-      await page.getByRole('tab', { name: '页面设置' }).click();
+      steps.push('Open /admin/settings and switch to 页面体验');
+      await gotoWithBypass(page, '/admin/settings');
+      await expect(page).toHaveURL(/\/admin\/settings/);
+      await page.getByRole('tab', { name: '页面体验' }).click();
+
+      const chatPromptInput = page.getByTestId('admin-setting-chat_prompt_text');
+      const chatWelcomeInput = page.getByTestId('admin-setting-chat_welcome_message');
+      const chatModelSelectorSwitch = page.getByTestId('admin-setting-chat_show_model_selector');
+      const chatBillingHintInput = page.getByTestId('admin-setting-chat_billing_hint');
+      const homeOnboardingSwitch = page.getByTestId('admin-setting-home_show_onboarding');
+      const homeFeaturedSwitch = page.getByTestId('admin-setting-home_show_featured_modules');
       await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
 
       const originalChatPrompt = await chatPromptInput.inputValue();
+      const originalChatWelcome = await chatWelcomeInput.inputValue();
+      const originalChatBillingHint = await chatBillingHintInput.inputValue();
+      const originalModelSelectorState = (await chatModelSelectorSwitch.getAttribute('data-state')) === 'checked';
+      const originalOnboardingState = (await homeOnboardingSwitch.getAttribute('data-state')) === 'checked';
+      const originalFeaturedState = (await homeFeaturedSwitch.getAttribute('data-state')) === 'checked';
       const updatedChatPrompt = `Parity welcome prompt ${Date.now()}`;
+      const updatedChatWelcome = `欢迎来到新的聊天页 ${Date.now()}`;
+      const updatedBillingHint = `Parity billing hint ${Date.now()}`;
 
-      steps.push('Update chat page settings and verify they persist');
+      steps.push('Update page-experience settings from the canonical settings page');
       await chatPromptInput.fill(updatedChatPrompt);
-      const chatSettingsDialogPromise = acceptNextDialog(page);
-      await saveChatSettingsButton.click();
-      await chatSettingsDialogPromise;
+      await chatWelcomeInput.fill(updatedChatWelcome);
+      await chatBillingHintInput.fill(updatedBillingHint);
+      await setSwitchState(chatModelSelectorSwitch, !originalModelSelectorState);
+      await setSwitchState(homeOnboardingSwitch, !originalOnboardingState);
+      await setSwitchState(homeFeaturedSwitch, !originalFeaturedState);
+      await saveAllSettings(page);
       await page.reload();
-      await page.getByRole('tab', { name: '页面设置' }).click();
+      await page.getByRole('tab', { name: '页面体验' }).click();
       await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
       await expect(chatPromptInput).toHaveValue(updatedChatPrompt, { timeout: 15000 });
+      await expect(chatWelcomeInput).toHaveValue(updatedChatWelcome, { timeout: 15000 });
+      await expect(chatBillingHintInput).toHaveValue(updatedBillingHint, { timeout: 15000 });
 
-      steps.push('Create a new banner announcement');
+      steps.push('Verify chat and home surfaces consume the updated page-experience settings');
+      await gotoWithBypass(page, '/chat');
+      await expect(page.getByText(updatedChatWelcome)).toBeVisible({ timeout: 15000 });
+      await expect(page.locator(`textarea[placeholder="${updatedChatPrompt}"]`)).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText(updatedBillingHint, { exact: false })).toBeVisible({ timeout: 10000 });
+      if (originalModelSelectorState) {
+        await expect(page.getByTestId('chat-model-selector-trigger')).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId('chat-model-selector-trigger')).toBeVisible({ timeout: 10000 });
+      }
+
+      await gotoWithBypass(page, '/');
+      if (originalOnboardingState) {
+        await expect(page.getByTestId('home-onboarding-guide')).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId('home-onboarding-guide')).toBeVisible({ timeout: 10000 });
+      }
+      if (originalFeaturedState) {
+        await expect(page.getByTestId('featured-modules-section')).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId('featured-modules-section')).toBeVisible({ timeout: 10000 });
+      }
+
+      steps.push('Open /admin/announcements and verify CRUD remains isolated to announcement management');
+      await gotoWithBypass(page, '/admin/announcements');
       await page.getByRole('tab', { name: '横幅公告' }).click();
       await page.getByRole('button', { name: '添加' }).first().click();
       await page.getByTestId('announcement-title-input').fill(title);
@@ -170,13 +517,17 @@ test.describe('Admin Config Flows', () => {
       await deleteDialogPromise;
       await expect(editedRow).toHaveCount(0, { timeout: 15000 });
 
-      steps.push('Restore the original chat page setting');
-      await page.getByRole('tab', { name: '页面设置' }).click();
+      steps.push('Restore the original page-experience settings from /admin/settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '页面体验' }).click();
       await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
       await chatPromptInput.fill(originalChatPrompt);
-      const restoreDialogPromise = acceptNextDialog(page);
-      await saveChatSettingsButton.click();
-      await restoreDialogPromise;
+      await chatWelcomeInput.fill(originalChatWelcome);
+      await chatBillingHintInput.fill(originalChatBillingHint);
+      await setSwitchState(chatModelSelectorSwitch, originalModelSelectorState);
+      await setSwitchState(homeOnboardingSwitch, originalOnboardingState);
+      await setSwitchState(homeFeaturedSwitch, originalFeaturedState);
+      await saveAllSettings(page);
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -188,14 +539,522 @@ test.describe('Admin Config Flows', () => {
       await writeFlowAudit(
         testInfo,
         {
-          title: 'admin-announcements-crud',
+          title: 'admin-settings-page-experience-and-announcements-crud',
           role: 'admin',
-          route: '/admin/announcements',
-          expected: 'Admin users can save chat page settings, create/edit/toggle/delete announcements, and restore settings without blocking issues.',
+          route: '/admin/settings,/admin/announcements,/chat,/',
+          expected: 'Admin users manage page-experience settings from /admin/settings, those settings affect chat and home surfaces, and announcement CRUD remains isolated to /admin/announcements.',
         },
         actual,
         steps,
         monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should apply chat runtime feature settings from admin settings to the live chat surface', async ({ browser, page }, testInfo) => {
+    test.setTimeout(120000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Chat runtime settings flow completed';
+    let seededConversationId: string | null = null;
+    const seededConversationTitle = `Parity runtime stats fixture ${Date.now()}`;
+
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    const userMonitor = createIssueMonitor(userPage);
+
+    try {
+      steps.push('Open /admin/settings and update chat runtime settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+
+      const maxInputInput = page.getByTestId('admin-setting-max_input_characters');
+      const maxMessagesPerConversationInput = page.getByTestId('admin-setting-max_messages_per_conversation');
+      const enableLongTextWarningSwitch = page.getByTestId('admin-setting-enable_long_text_warning');
+      const longTextThresholdInput = page.getByTestId('admin-setting-long_text_warning_threshold');
+      const showTokenUsageStatsSwitch = page.getByTestId('admin-setting-show_token_usage_stats');
+
+      const originalMaxInput = await maxInputInput.inputValue();
+      const originalMaxMessagesPerConversation = await maxMessagesPerConversationInput.inputValue();
+      const originalLongTextThreshold = await longTextThresholdInput.inputValue();
+      const originalLongTextWarningState = (await enableLongTextWarningSwitch.getAttribute('data-state')) === 'checked';
+      const originalTokenUsageStatsState = (await showTokenUsageStatsSwitch.getAttribute('data-state')) === 'checked';
+
+      await maxInputInput.fill('40');
+      await maxMessagesPerConversationInput.fill('2');
+      await longTextThresholdInput.fill('10');
+      await setSwitchState(enableLongTextWarningSwitch, true);
+      await setSwitchState(showTokenUsageStatsSwitch, true);
+      await saveAllSettings(page);
+
+      steps.push('Seed a metered conversation fixture so token usage visibility does not depend on local live model output');
+      const conversationFixture = await createConversationFixtureForUserEmail(getCredentials('user').email, {
+        title: seededConversationTitle,
+        userMessage: '请总结后台设置影响路径。',
+        assistantMessage: '后台设置已同步到前台运行时。',
+      });
+      seededConversationId = conversationFixture.id;
+      await createTokenStatsFixture({
+        conversationId: conversationFixture.id,
+        userId: conversationFixture.userId,
+        inputTokens: 128,
+        outputTokens: 256,
+        totalCredits: 12,
+        totalCostUsd: '0.018000',
+      });
+
+      steps.push('Open /chat and verify the updated runtime constraints appear on the live surface');
+      await gotoWithBypass(userPage, '/chat');
+      const textarea = userPage.locator('textarea[placeholder]');
+      await expect(textarea).toHaveAttribute('maxlength', '40', { timeout: 10000 });
+
+      const prompt = '请用一句话总结后台设置影响路径';
+      await textarea.fill(prompt);
+      await userPage.getByRole('button', { name: '发送' }).click();
+      await expect(userPage.getByText('长文本发送确认')).toBeVisible({ timeout: 10000 });
+      await userPage.getByRole('button', { name: '再检查一下' }).click();
+      await expect(userPage.getByText('长文本发送确认')).toHaveCount(0, { timeout: 10000 });
+
+      steps.push('Open the seeded metered conversation and verify token usage stats become visible');
+      const meteredConversation = userPage
+        .getByTestId('conversation-item')
+        .filter({ hasText: seededConversationTitle })
+        .first();
+      await expect(meteredConversation).toBeVisible({ timeout: 15000 });
+      await meteredConversation.click();
+      await expect(userPage.getByTestId('chat-token-usage-stats')).toBeVisible({ timeout: 15000 });
+
+      steps.push('Verify the seeded conversation is blocked once the per-conversation message limit is reached');
+      const assistantCountBeforeBlockedSend = await userPage.locator('[data-testid="chat-message"][data-message-role="assistant"]').count();
+      await textarea.fill('继续');
+      await userPage.getByRole('button', { name: '发送' }).click();
+      await expect(userPage.getByText('当前对话已达到 2 条消息上限，请新建对话后继续')).toBeVisible({ timeout: 15000 });
+      await expect.poll(
+        () => userPage.locator('[data-testid="chat-message"][data-message-role="assistant"]').count(),
+        { timeout: 5000 }
+      ).toBe(assistantCountBeforeBlockedSend);
+      clearExpectedMessageLimitIssues(userMonitor);
+
+      steps.push('Disable token usage stats and verify the live chat surface hides the stats panel');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await setSwitchState(showTokenUsageStatsSwitch, false);
+      await saveAllSettings(page);
+
+      await gotoWithBypass(userPage, '/chat');
+      await expect(userPage.getByTestId('chat-token-usage-stats')).toHaveCount(0);
+
+      steps.push('Restore the original chat runtime settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await maxInputInput.fill(originalMaxInput);
+      await maxMessagesPerConversationInput.fill(originalMaxMessagesPerConversation);
+      await longTextThresholdInput.fill(originalLongTextThreshold);
+      await setSwitchState(enableLongTextWarningSwitch, originalLongTextWarningState);
+      await setSwitchState(showTokenUsageStatsSwitch, originalTokenUsageStatsState);
+      await saveAllSettings(page);
+
+      const blockingIssues = [
+        ...monitor.getIssues('P1'),
+        ...userMonitor.getIssues('P1'),
+      ];
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown chat runtime settings failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (seededConversationId) {
+        await softDeleteConversationFixture(seededConversationId);
+      }
+      await safeCloseContext(userContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-settings-chat-runtime-effects',
+          role: 'admin',
+          route: '/admin/settings,/chat',
+          expected: 'Admin feature settings update the live chat constraints, long-text confirmation, and token usage visibility from the canonical settings page.',
+        },
+        actual,
+        steps,
+        [...monitor.getIssues(), ...userMonitor.getIssues()],
+      );
+    }
+  });
+
+  test('should toggle free-tier chat access from admin settings for zero-credit users', async ({ browser, page }, testInfo) => {
+    test.setTimeout(120000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Free-tier gating flow completed';
+    let originalCredits: number | null = null;
+
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    const userMonitor = createIssueMonitor(userPage);
+
+    try {
+      steps.push('Set the user credits to zero to exercise the zero-balance path');
+      originalCredits = await setUserCredits(browser, 0, `Parity free-tier toggle ${Date.now()}`);
+
+      steps.push('Enable free tier and set the daily free message count to 1');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+
+      const enableFreeTierSwitch = page.getByTestId('admin-setting-enable_free_tier');
+      const freeTierMessagesInput = page.getByTestId('admin-setting-free_tier_messages');
+      const originalFreeTierState = (await enableFreeTierSwitch.getAttribute('data-state')) === 'checked';
+      const originalFreeTierMessages = await freeTierMessagesInput.inputValue();
+
+      await setSwitchState(enableFreeTierSwitch, true);
+      await freeTierMessagesInput.fill('1');
+      await saveAllSettings(page);
+
+      steps.push('Verify a zero-credit user can initiate a chat request when free tier is enabled');
+      await gotoWithBypass(userPage, '/chat');
+      let streamRequestCount = 0;
+      userPage.on('request', (request) => {
+        if (request.url().includes('/api/ai/stream') && request.method() === 'POST') {
+          streamRequestCount += 1;
+        }
+      });
+      await userPage.locator('textarea[placeholder]').fill(`Parity free tier request ${Date.now()}`);
+      await userPage.getByRole('button', { name: '发送' }).click();
+      await expect.poll(() => streamRequestCount, { timeout: 15000 }).toBeGreaterThan(0);
+      await expect(userPage.getByRole('alertdialog')).toHaveCount(0);
+      const stopButton = userPage.getByRole('button', { name: '停止' });
+      if (await stopButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await stopButton.click();
+        await expect(userPage.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 15000 });
+      }
+      clearIntentionalStreamAbortIssues(userMonitor);
+
+      steps.push('Disable free tier and verify the same zero-credit user is blocked again');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await setSwitchState(enableFreeTierSwitch, false);
+      await saveAllSettings(page);
+
+      await gotoWithBypass(userPage, '/chat');
+      const blockedRequestBaseline = streamRequestCount;
+      await userPage.locator('textarea[placeholder]').fill(`Parity blocked free tier request ${Date.now()}`);
+      await userPage.getByRole('button', { name: '发送' }).click();
+      await expect(userPage.getByRole('heading', { name: '积分已用完' })).toBeVisible({ timeout: 10000 });
+      await userPage.waitForTimeout(1500);
+      expect(streamRequestCount).toBe(blockedRequestBaseline);
+      clearIntentionalStreamAbortIssues(userMonitor);
+
+      steps.push('Restore the original free-tier settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await setSwitchState(enableFreeTierSwitch, originalFreeTierState);
+      await freeTierMessagesInput.fill(originalFreeTierMessages);
+      await saveAllSettings(page);
+
+      const blockingIssues = [
+        ...monitor.getIssues('P1'),
+        ...userMonitor.getIssues('P1'),
+      ];
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown free-tier gating failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      if (originalCredits !== null) {
+        await setUserCredits(browser, originalCredits, `Restore credits after free-tier toggle ${Date.now()}`);
+      }
+      await safeCloseContext(userContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-settings-free-tier-effects',
+          role: 'admin',
+          route: '/admin/settings,/chat',
+          expected: 'Admin users can enable free-tier chat access for zero-credit users and disabling it restores the low-balance guard.',
+        },
+        actual,
+        steps,
+        [...monitor.getIssues(), ...userMonitor.getIssues()],
+      );
+    }
+  });
+
+  test('should toggle smart routing from admin settings and change preview runtime upgrade behavior', async ({ browser, page }, testInfo) => {
+    test.skip(isLocalPlaywrightBaseUrl(), 'Smart-routing effect proof requires a deployed Vercel preview.');
+    test.setTimeout(120000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = '查今天全球AI三条要闻及影响，仅回已阅。';
+    let actual = 'Smart routing toggle changed preview route-upgrade behavior as expected';
+    let originalSmartRoutingState: boolean | null = null;
+    let originalCredits: number | null = null;
+
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+
+    try {
+      steps.push('Ensure the E2E user has enough credits for two direct preview runtime probes');
+      originalCredits = await setUserCredits(browser, 120, `Preview smart routing probe ${Date.now()}`);
+
+      steps.push('Open /admin/settings and switch to 功能设置');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+
+      const smartRoutingSwitch = page.getByTestId('admin-setting-enable_smart_routing');
+      originalSmartRoutingState = (await smartRoutingSwitch.getAttribute('data-state')) === 'checked';
+
+      steps.push('Disable smart routing and save settings');
+      await setSwitchState(smartRoutingSwitch, false);
+      await saveAllSettings(page);
+
+      steps.push('Probe the deployed preview runtime and verify route_upgraded is absent while smart routing is disabled');
+      const disabledProbe = await streamChatEventsThroughAuthenticatedSession(userPage, prompt);
+      expect(disabledProbe.status, disabledProbe.body).toBe(200);
+      expect(probeShowsRegionRestriction(disabledProbe)).toBe(false);
+      const disabledRouteUpgradeEvent = disabledProbe.events.find((event) => event.type === 'route_upgraded');
+      const disabledCompleteEvent = disabledProbe.events.find((event) => event.type === 'complete');
+      expect(disabledRouteUpgradeEvent, disabledProbe.body).toBeFalsy();
+      expect(String(disabledCompleteEvent?.routingReason ?? '')).not.toContain('route_upgraded_preflight');
+
+      steps.push('Re-enable smart routing and save settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await setSwitchState(smartRoutingSwitch, true);
+      await saveAllSettings(page);
+
+      steps.push('Probe the deployed preview runtime again and verify route_upgraded returns');
+      const enabledProbe = await streamChatEventsThroughAuthenticatedSession(userPage, prompt);
+      expect(enabledProbe.status, enabledProbe.body).toBe(200);
+      expect(probeShowsRegionRestriction(enabledProbe)).toBe(false);
+      const enabledRouteUpgradeEvent = enabledProbe.events.find((event) => event.type === 'route_upgraded');
+      const enabledCompleteEvent = enabledProbe.events.find((event) => event.type === 'complete');
+      expect(enabledRouteUpgradeEvent, enabledProbe.body).toBeTruthy();
+      expect(String(enabledCompleteEvent?.routingReason ?? '')).toContain('route_upgraded_preflight');
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown smart-routing preview effect failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      if (originalSmartRoutingState !== null) {
+        try {
+          await gotoWithBypass(page, '/admin/settings');
+          await page.getByRole('tab', { name: '功能设置' }).click();
+          await setSwitchState(page.getByTestId('admin-setting-enable_smart_routing'), originalSmartRoutingState);
+          await saveAllSettings(page);
+        } catch {
+          // Preserve the original assertion failure; restoration best effort only.
+        }
+      }
+      if (originalCredits !== null) {
+        await setUserCredits(browser, originalCredits, `Restore credits after smart routing probe ${Date.now()}`);
+      }
+      await safeCloseContext(userContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-settings-smart-routing-preview-effects',
+          role: 'admin',
+          route: '/admin/settings,/api/ai/stream',
+          expected: 'Disabling smart routing removes route_upgraded in preview runtime probes, and re-enabling it restores the route_upgraded SSE event.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should toggle smart search decision from admin settings and change preview search events', async ({ browser, page }, testInfo) => {
+    test.skip(isLocalPlaywrightBaseUrl(), 'Smart-search effect proof requires a deployed Vercel preview.');
+    test.setTimeout(120000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const prompt = '联网搜索今天全球AI三条要闻并只回已阅。';
+    let actual = 'Smart search decision toggle changed preview runtime metadata as expected';
+    let originalSmartSearchState: boolean | null = null;
+    let originalCredits: number | null = null;
+
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+
+    try {
+      steps.push('Ensure the E2E user has enough credits for two direct preview search probes');
+      originalCredits = await setUserCredits(browser, 120, `Preview smart search probe ${Date.now()}`);
+
+      steps.push('Open /admin/settings and switch to 功能设置');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+
+      const smartSearchSwitch = page.getByTestId('admin-setting-enable_smart_search_decision');
+      originalSmartSearchState = (await smartSearchSwitch.getAttribute('data-state')) === 'checked';
+
+      steps.push('Disable smart search decision and save settings');
+      await setSwitchState(smartSearchSwitch, false);
+      await saveAllSettings(page);
+
+      steps.push('Probe the deployed preview runtime and verify usage metadata records webSearchRequested=false while smart search is disabled');
+      const disabledProbe = await streamChatEventsThroughAuthenticatedSession(userPage, prompt);
+      expect(disabledProbe.status, disabledProbe.body).toBe(200);
+      expect(probeShowsRegionRestriction(disabledProbe)).toBe(false);
+      const disabledInitEvent = disabledProbe.events.find((event) => event.type === 'init');
+      const disabledRequestId = String(disabledInitEvent?.requestId ?? '');
+      await expect
+        .poll(async () => {
+          const usageLog = disabledRequestId ? await getAiUsageLogByRequestId(disabledRequestId) : null;
+          const metadata = usageLog?.metadata as Record<string, unknown> | undefined;
+          return metadata?.webSearchRequested ?? null;
+        }, { timeout: 15000 })
+        .toBe(false);
+
+      steps.push('Re-enable smart search decision and save settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '功能设置' }).click();
+      await setSwitchState(smartSearchSwitch, true);
+      await saveAllSettings(page);
+
+      steps.push('Probe the deployed preview runtime again and verify usage metadata records webSearchRequested=true');
+      const enabledProbe = await streamChatEventsThroughAuthenticatedSession(userPage, prompt);
+      expect(enabledProbe.status, enabledProbe.body).toBe(200);
+      expect(probeShowsRegionRestriction(enabledProbe)).toBe(false);
+      const enabledInitEvent = enabledProbe.events.find((event) => event.type === 'init');
+      const enabledRequestId = String(enabledInitEvent?.requestId ?? '');
+      await expect
+        .poll(async () => {
+          const usageLog = enabledRequestId ? await getAiUsageLogByRequestId(enabledRequestId) : null;
+          const metadata = usageLog?.metadata as Record<string, unknown> | undefined;
+          return metadata?.webSearchRequested ?? null;
+        }, { timeout: 15000 })
+        .toBe(true);
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown smart-search preview effect failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      if (originalSmartSearchState !== null) {
+        try {
+          await gotoWithBypass(page, '/admin/settings');
+          await page.getByRole('tab', { name: '功能设置' }).click();
+          await setSwitchState(page.getByTestId('admin-setting-enable_smart_search_decision'), originalSmartSearchState);
+          await saveAllSettings(page);
+        } catch {
+          // Preserve the original assertion failure; restoration best effort only.
+        }
+      }
+      if (originalCredits !== null) {
+        await setUserCredits(browser, originalCredits, `Restore credits after smart search probe ${Date.now()}`);
+      }
+      await safeCloseContext(userContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-settings-smart-search-preview-effects',
+          role: 'admin',
+          route: '/admin/settings,/api/ai/stream',
+          expected: 'Disabling smart search decision makes preview ai_usage_logs record webSearchRequested=false, and re-enabling it restores webSearchRequested=true for the same runtime probe shape.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should apply check-in and invitation reward settings to the profile surface', async ({ browser, page }, testInfo) => {
+    test.setTimeout(90000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Check-in and invitation settings flow completed';
+
+    const userContext = await browser.newContext({ storageState: authStatePaths.user });
+    const userPage = await userContext.newPage();
+    const userMonitor = createIssueMonitor(userPage);
+
+    try {
+      steps.push('Update check-in rewards from /admin/settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '签到福利' }).click();
+
+      const checkinDay1Input = page.getByTestId('admin-setting-checkin_day1');
+      const monthlyBonusInput = page.getByTestId('admin-setting-checkin_monthly_bonus');
+      const originalCheckinDay1 = await checkinDay1Input.inputValue();
+      const originalMonthlyBonus = await monthlyBonusInput.inputValue();
+      const updatedCheckinDay1 = String(60 + (Date.now() % 10));
+      const updatedMonthlyBonus = String(90 + (Date.now() % 10));
+
+      await checkinDay1Input.fill(updatedCheckinDay1);
+      await monthlyBonusInput.fill(updatedMonthlyBonus);
+      await saveAllSettings(page);
+
+      steps.push('Update invitation rewards from /admin/settings');
+      await page.getByRole('tab', { name: '邀请奖励' }).click();
+      const inviterRewardInput = page.getByTestId('admin-setting-invite_inviter_reward');
+      const inviteeRewardInput = page.getByTestId('admin-setting-invite_invitee_reward');
+      const originalInviterReward = await inviterRewardInput.inputValue();
+      const originalInviteeReward = await inviteeRewardInput.inputValue();
+      const updatedInviterReward = String(110 + (Date.now() % 10));
+      const updatedInviteeReward = String(70 + (Date.now() % 10));
+
+      await inviterRewardInput.fill(updatedInviterReward);
+      await inviteeRewardInput.fill(updatedInviteeReward);
+      await saveAllSettings(page);
+
+      steps.push('Verify the profile check-in dialog reflects the new reward ladder and monthly bonus');
+      await gotoWithBypass(userPage, '/profile');
+      await userPage.getByTestId('profile-checkin-card').click();
+      const checkinDialog = userPage.getByTestId('profile-checkin-dialog');
+      await expect(checkinDialog).toBeVisible({ timeout: 10000 });
+      await expect(checkinDialog.getByText(`+${updatedCheckinDay1}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
+      await expect(checkinDialog.getByText(`+${updatedMonthlyBonus}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
+      await userPage.keyboard.press('Escape');
+
+      steps.push('Verify the invitation dialog reflects the updated inviter and invitee rewards');
+      await userPage.getByTestId('profile-invite-card').click();
+      const inviteDialog = userPage.getByRole('dialog');
+      await expect(inviteDialog.getByRole('heading', { name: '邀请好友' })).toBeVisible({ timeout: 10000 });
+      await expect(inviteDialog.getByText(`+${updatedInviterReward}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
+      await expect(inviteDialog.getByText(`+${updatedInviteeReward}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
+      await userPage.keyboard.press('Escape');
+
+      steps.push('Restore the original reward settings');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '签到福利' }).click();
+      await checkinDay1Input.fill(originalCheckinDay1);
+      await monthlyBonusInput.fill(originalMonthlyBonus);
+      await page.getByRole('tab', { name: '邀请奖励' }).click();
+      await inviterRewardInput.fill(originalInviterReward);
+      await inviteeRewardInput.fill(originalInviteeReward);
+      await saveAllSettings(page);
+
+      const blockingIssues = [
+        ...monitor.getIssues('P1'),
+        ...userMonitor.getIssues('P1'),
+      ];
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown reward settings failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await safeCloseContext(userContext);
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'admin-settings-checkin-invite-effects',
+          role: 'admin',
+          route: '/admin/settings,/profile',
+          expected: 'Admin users can change check-in and invitation reward settings from /admin/settings, and the profile check-in/invitation dialogs reflect the new values.',
+        },
+        actual,
+        steps,
+        [...monitor.getIssues(), ...userMonitor.getIssues()],
       );
     }
   });

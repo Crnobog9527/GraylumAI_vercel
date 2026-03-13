@@ -132,13 +132,17 @@ function CostOverviewTab() {
   const { data: distribution, isLoading: distLoading } = trpc.costs.getModelDistribution.useQuery({ days });
   const { data: topUsers, isLoading: usersLoading } = trpc.costs.getTopUsers.useQuery({ days, limit: 10 });
   const { data: cacheEfficiency } = trpc.costs.getCacheEfficiency.useQuery({ days });
-
-  if (overviewLoading) {
-    return <AdminLoadingState message="加载成本数据..." />;
-  }
+  const isInitialLoading = overviewLoading && !overview;
 
   return (
     <div className="space-y-8">
+      {isInitialLoading && (
+        <div className="flex items-center justify-end">
+          <Badge className="border border-[var(--border-primary)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+            加载成本数据中
+          </Badge>
+        </div>
+      )}
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
@@ -168,7 +172,7 @@ function CostOverviewTab() {
       </div>
 
       {/* 时间范围选择 */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>成本趋势</h3>
         <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
           <SelectTrigger
@@ -234,7 +238,7 @@ function CostOverviewTab() {
       {/* 模型分布和高消耗用户 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 模型分布饼图 */}
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-costs-distribution-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <PieChart className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
@@ -300,6 +304,7 @@ function CostOverviewTab() {
                 {(topUsers ?? []).map((user, index) => (
                   <div
                     key={user.userId}
+                    data-testid={`admin-costs-top-user-row-${user.userId}`}
                     className="flex items-center justify-between p-3 rounded-lg"
                     style={{ background: 'var(--bg-tertiary)' }}
                   >
@@ -347,8 +352,8 @@ function UsageLogsTab() {
   return (
     <div className="space-y-4">
       {/* 筛选器 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-4">
           <Select value={status} onValueChange={(v) => { setStatus(v as typeof status); setPage(1); }}>
             <SelectTrigger className="w-32 bg-zinc-800 border-zinc-700">
               <SelectValue />
@@ -367,14 +372,15 @@ function UsageLogsTab() {
       </div>
 
       {/* 日志表格 */}
-      <Card className="bg-zinc-800/50 border-zinc-700">
+      <Card data-testid="admin-costs-usage-logs-section" className="bg-zinc-800/50 border-zinc-700">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="h-96 flex items-center justify-center">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
             </div>
           ) : (
-            <Table>
+            <div className="overflow-x-auto">
+            <Table className="min-w-[880px]">
               <TableHeader>
                 <TableRow className="border-zinc-700">
                   <TableHead className="text-zinc-400">时间</TableHead>
@@ -388,7 +394,12 @@ function UsageLogsTab() {
               </TableHeader>
               <TableBody>
                 {(data?.logs ?? []).map((log) => (
-                  <TableRow key={log.id} data-testid={`admin-usage-log-row-${log.id}`} className="border-zinc-700">
+                  <TableRow
+                    key={log.id}
+                    data-testid={`admin-usage-log-row-${log.id}`}
+                    data-request-id={log.requestId ?? ''}
+                    className="border-zinc-700"
+                  >
                     <TableCell className="text-zinc-300 text-sm">
                       {formatDateTime(log.createdAt)}
                     </TableCell>
@@ -419,19 +430,31 @@ function UsageLogsTab() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {(data?.logs?.length ?? 0) === 0 && (
+                  <TableRow>
+                    <TableCell
+                      data-testid="admin-costs-usage-logs-empty"
+                      colSpan={7}
+                      className="py-12 text-center text-zinc-500"
+                    >
+                      暂无 AI 调用日志
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
       {/* 分页 */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-zinc-500">
             共 {data?.total ?? 0} 条记录
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -479,14 +502,15 @@ function TokenStatsTab() {
       </div>
 
       {/* Token 统计表格 */}
-      <Card className="bg-zinc-800/50 border-zinc-700">
+      <Card data-testid="admin-costs-token-stats-section" className="bg-zinc-800/50 border-zinc-700">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="h-96 flex items-center justify-center">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
             </div>
           ) : (
-            <Table>
+            <div className="overflow-x-auto">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow className="border-zinc-700">
                   <TableHead className="text-zinc-400">时间</TableHead>
@@ -499,7 +523,7 @@ function TokenStatsTab() {
               </TableHeader>
               <TableBody>
                 {(data?.stats ?? []).map((stat) => (
-                  <TableRow key={stat.id} className="border-zinc-700">
+                  <TableRow key={stat.id} data-testid={`admin-token-stat-row-${stat.id}`} className="border-zinc-700">
                     <TableCell className="text-zinc-300 text-sm">
                       {formatDateTime(stat.createdAt)}
                     </TableCell>
@@ -526,19 +550,31 @@ function TokenStatsTab() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {(data?.stats?.length ?? 0) === 0 && (
+                  <TableRow>
+                    <TableCell
+                      data-testid="admin-costs-token-stats-empty"
+                      colSpan={6}
+                      className="py-12 text-center text-zinc-500"
+                    >
+                      暂无 Token 统计
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
       {/* 分页 */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-zinc-500">
             共 {data?.total ?? 0} 条记录
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -567,11 +603,11 @@ function TokenStatsTab() {
 
 export default function AICostsPage() {
   return (
-    <div className="p-8 space-y-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* 页面标题 */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="flex items-center gap-3 text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
             <BarChart3 className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
             AI 成本监控
           </h1>
@@ -584,26 +620,26 @@ export default function AICostsPage() {
       {/* 选项卡 */}
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList
-          className="mb-2"
+          className="mb-2 flex h-auto justify-start gap-1 overflow-x-auto p-1"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
         >
           <TabsTrigger
             value="overview"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <TrendingUp className="h-4 w-4 mr-2" />
             成本概览
           </TabsTrigger>
           <TabsTrigger
             value="logs"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <Activity className="h-4 w-4 mr-2" />
             AI 调用日志
           </TabsTrigger>
           <TabsTrigger
             value="tokens"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
+            className="shrink-0 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
           >
             <Database className="h-4 w-4 mr-2" />
             Token 统计

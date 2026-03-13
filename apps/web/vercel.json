@@ -3,7 +3,8 @@
   "framework": "nextjs",
   "git": {
     "deploymentEnabled": {
-      "main": true
+      "main": true,
+      "staging": true
     }
   },
   "crons": [

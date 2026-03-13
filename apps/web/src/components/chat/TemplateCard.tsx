@@ -67,7 +67,7 @@ export default function TemplateCard({
         onClick={onClick}
         className={cn(
           'flex items-center gap-3 p-3 rounded-xl border',
-          'hover:shadow-md transition-all duration-300',
+          'transition-colors duration-300 hover:shadow-md',
           'text-left w-full group'
         )}
         style={{
@@ -92,7 +92,7 @@ export default function TemplateCard({
           </p>
         </div>
         <ArrowRight
-          className="h-4 w-4 group-hover:translate-x-1 transition-all"
+          className="h-4 w-4 transition-transform group-hover:translate-x-1"
           style={{ color: 'var(--text-tertiary)' }}
         />
       </button>
@@ -104,7 +104,7 @@ export default function TemplateCard({
       onClick={onClick}
       className={cn(
         'relative overflow-hidden cursor-pointer group',
-        'hover:shadow-xl transition-all duration-500 hover:-translate-y-1'
+        'transition-[transform,box-shadow] duration-500 hover:-translate-y-1 hover:shadow-xl'
       )}
       style={{
         background: 'var(--bg-secondary)',

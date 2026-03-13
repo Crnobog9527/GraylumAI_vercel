@@ -1,21 +1,35 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
 import ChatHeader from '@/components/chat/ChatHeader';
 import ModelSelector from '@/components/chat/ModelSelector';
 import ExportDialog from '@/components/chat/ExportDialog';
+import TokenUsageStats from '@/components/chat/TokenUsageStats';
 import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
 import { useCreditsBalance, CREDIT_THRESHOLDS, getWarningLevel } from '@/hooks/use-credits';
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
+import { createClient } from '@/lib/supabase';
+import { isEmailVerified } from '@/lib/auth';
 
 interface Message {
   id: string;
@@ -25,17 +39,54 @@ interface Message {
   isStreaming?: boolean;
 }
 
+function estimateTokens(text: string) {
+  const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const otherChars = text.length - chineseChars;
+  return Math.ceil(chineseChars / 1.5 + otherChars / 4);
+}
+
 export default function ChatPage() {
+  const router = useRouter();
   const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [lowBalanceDialogOpen, setLowBalanceDialogOpen] = useState(false);
+  const [longTextConfirmOpen, setLongTextConfirmOpen] = useState(false);
+  const [pendingLongTextMessage, setPendingLongTextMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { banners } = useBanner();
+  const { banners } = useBanner({ enabled: isAuthenticated });
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        const redirectTarget = `${window.location.pathname}${window.location.search}`;
+        router.replace(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+        return;
+      }
+
+      if (!isEmailVerified(user)) {
+        const redirectTarget = `${window.location.pathname}${window.location.search}`;
+        router.replace(
+          `/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`
+        );
+        return;
+      }
+
+      setIsAuthenticated(true);
+      setIsAuthChecking(false);
+    };
+
+    checkAuth();
+  }, [router]);
 
   const utils = trpc.useUtils();
 
@@ -44,25 +95,51 @@ export default function ChatPage() {
     credits,
     warningLevel,
     refetch: refetchCreditsBalance,
-  } = useCreditsBalance();
+  } = useCreditsBalance({ enabled: isAuthenticated });
 
   // Fetch system settings for chat page configuration
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const { data: systemSettings, refetch: refetchSystemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
   const maxInputCharacters = Number(systemSettings?.max_input_characters ?? 2500) || 2500;
+  const enableFreeTier = systemSettings?.enable_free_tier === true || systemSettings?.enable_free_tier === 'true';
+  const enableLongTextWarning =
+    systemSettings?.enable_long_text_warning === undefined
+      ? true
+      : systemSettings?.enable_long_text_warning === true || systemSettings?.enable_long_text_warning === 'true';
+  const longTextWarningThreshold = Number(systemSettings?.long_text_warning_threshold ?? 5000) || 5000;
+  const showTokenUsageStats =
+    systemSettings?.show_token_usage_stats === undefined
+      ? true
+      : systemSettings?.show_token_usage_stats === true || systemSettings?.show_token_usage_stats === 'true';
+  const chatPromptText =
+    typeof systemSettings?.chat_prompt_text === 'string' && systemSettings.chat_prompt_text.trim()
+      ? systemSettings.chat_prompt_text.trim()
+      : '请输入您的问题...';
+  const chatWelcomeMessage =
+    typeof systemSettings?.chat_welcome_message === 'string' && systemSettings.chat_welcome_message.trim()
+      ? systemSettings.chat_welcome_message.trim()
+      : '请输入您的问题，AI将为您解答';
   const chatBillingHint = typeof systemSettings?.chat_billing_hint === 'string' && systemSettings.chat_billing_hint
     ? systemSettings.chat_billing_hint
       .replace('{input}', String(systemSettings?.input_credits_per_1k ?? 1))
       .replace('{output}', String(systemSettings?.output_credits_per_1k ?? 5))
     : '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
+  const inputCreditsPer1k = Number(systemSettings?.input_credits_per_1k ?? 1) || 1;
+  const outputCreditsPer1k = Number(systemSettings?.output_credits_per_1k ?? 5) || 5;
 
   // Fetch export permissions (based on membership level)
-  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const canExport = exportPermissions?.allowExport ?? false;
   const canBatchExport = exportPermissions?.allowBatchExport ?? false;
 
   // Fetch active AI models for model selector
-  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
   const activeModels = (modelsData ?? []).map((m) => ({
     id: m.id,
     name: m.name,
@@ -80,7 +157,10 @@ export default function ChatPage() {
   }, [activeModels, selectedModelId]);
 
   // Fetch conversations
-  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery();
+  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery(
+    undefined,
+    { enabled: isAuthenticated }
+  );
   const conversations = conversationsData?.data || [];
 
   // Get current conversation
@@ -103,6 +183,7 @@ export default function ChatPage() {
     onMessageComplete: () => {
       // 消息完成后刷新对话列表（可能创建了新对话）
       utils.chat.getConversations.invalidate();
+      utils.chat.getConversationTokenStats.invalidate();
       refreshConversationList();
     },
     onConversationCreated: (newConversationId) => {
@@ -150,7 +231,7 @@ export default function ChatPage() {
   // Fetch messages for active conversation (用于切换对话时加载历史)
   const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
     { conversationId: activeConversationId! },
-    { enabled: !!activeConversationId && streamingMessages.length === 0 }
+    { enabled: isAuthenticated && !!activeConversationId && streamingMessages.length === 0 }
   );
 
   // 合并历史消息和流式消息
@@ -164,6 +245,27 @@ export default function ChatPage() {
         isStreaming: m.isStreaming,
       }))
     : historyMessages;
+  const { data: conversationTokenStats } = trpc.chat.getConversationTokenStats.useQuery(
+    { conversationId: activeConversationId! },
+    {
+      enabled: isAuthenticated && showTokenUsageStats && !!activeConversationId,
+    }
+  );
+  const latestAssistantUsage = [...streamingMessages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && (message.usage || message.cost));
+  const latestStreamInputTokens = latestAssistantUsage?.usage?.inputTokens ?? 0;
+  const latestStreamOutputTokens = latestAssistantUsage?.usage?.outputTokens ?? 0;
+  const latestStreamCredits = latestAssistantUsage?.cost?.credits ?? 0;
+  const usingLiveUsage = latestStreamInputTokens > 0 || latestStreamOutputTokens > 0 || latestStreamCredits > 0;
+  const tokenStatsSummary = {
+    lastInputTokens: usingLiveUsage ? latestStreamInputTokens : conversationTokenStats?.lastInputTokens ?? 0,
+    lastOutputTokens: usingLiveUsage ? latestStreamOutputTokens : conversationTokenStats?.lastOutputTokens ?? 0,
+    lastCredits: usingLiveUsage ? latestStreamCredits : 0,
+    totalInputTokens: (conversationTokenStats?.totalInputTokens ?? 0) + (usingLiveUsage ? latestStreamInputTokens : 0),
+    totalOutputTokens: (conversationTokenStats?.totalOutputTokens ?? 0) + (usingLiveUsage ? latestStreamOutputTokens : 0),
+    totalCredits: (conversationTokenStats?.totalCredits ?? 0) + (usingLiveUsage ? latestStreamCredits : 0),
+  };
 
   // 当切换对话时，加载历史记录
   useEffect(() => {
@@ -191,17 +293,43 @@ export default function ChatPage() {
   const handleNewChat = useCallback(() => {
     setActiveConversation(null);
     setInputMessage('');
+    setPendingLongTextMessage(null);
     clearChat();
-  }, [setActiveConversation, clearChat]);
+  }, [clearChat, setActiveConversation]);
 
-  const handleSend = useCallback(async () => {
+  const maxReachableTokensAtCharLimit = Math.ceil(maxInputCharacters / 1.5);
+  const longTextFallbackCharThreshold = Math.max(1, Math.floor(maxInputCharacters * 0.8));
+
+  const handleSend = useCallback(async (forceLongText = false) => {
     if (!inputMessage.trim() || isProcessing) return;
+
+    if (inputMessage.length > maxInputCharacters) {
+      return;
+    }
+
+    const estimatedInputTokens = estimateTokens(inputMessage);
+    const shouldWarnForLength =
+      longTextWarningThreshold > maxReachableTokensAtCharLimit &&
+      inputMessage.length >= longTextFallbackCharThreshold;
+    if (
+      enableLongTextWarning &&
+      (estimatedInputTokens >= longTextWarningThreshold || shouldWarnForLength) &&
+      !forceLongText &&
+      pendingLongTextMessage !== inputMessage
+    ) {
+      setPendingLongTextMessage(inputMessage);
+      setLongTextConfirmOpen(true);
+      return;
+    }
 
     // 发送前主动刷新一次余额，避免使用过期缓存继续向后端发起流式请求。
     const latestBalance = await refetchCreditsBalance();
     const latestCredits = latestBalance.data?.credits ?? credits;
     const latestWarningLevel = getWarningLevel(latestCredits);
-    const latestCanSendMessage = latestCredits > CREDIT_THRESHOLDS.EMPTY;
+    const latestSettings = systemSettings ?? (await refetchSystemSettings()).data ?? systemSettings;
+    const latestEnableFreeTier =
+      latestSettings?.enable_free_tier === true || latestSettings?.enable_free_tier === 'true';
+    const latestCanSendMessage = latestCredits > CREDIT_THRESHOLDS.EMPTY || latestEnableFreeTier;
 
     // 发送前检查积分余额
     if (!latestCanSendMessage) {
@@ -211,7 +339,7 @@ export default function ChatPage() {
     }
 
     // 积分不足但仍可发送，显示警告（critical 级别）
-    if (latestWarningLevel === 'critical') {
+    if (latestWarningLevel === 'critical' && latestCredits > 0) {
       setLowBalanceDialogOpen(true);
       // 继续发送，用户可以在弹窗中选择"稍后再说"
     }
@@ -225,12 +353,36 @@ export default function ChatPage() {
     await sendStreamingMessage(messageToSend, {
       modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
     });
-  }, [inputMessage, isProcessing, refetchCreditsBalance, credits, sendStreamingMessage, showModelSelector, selectedModelId]);
+    if (pendingLongTextMessage === messageToSend) {
+      setPendingLongTextMessage(null);
+    }
+  }, [
+    credits,
+    enableLongTextWarning,
+    inputMessage,
+    isProcessing,
+    longTextFallbackCharThreshold,
+    longTextWarningThreshold,
+    maxReachableTokensAtCharLimit,
+    maxInputCharacters,
+    pendingLongTextMessage,
+    refetchCreditsBalance,
+    refetchSystemSettings,
+    selectedModelId,
+    sendStreamingMessage,
+    showModelSelector,
+    systemSettings,
+  ]);
+
+  const estimatedPendingInputTokens = pendingLongTextMessage ? estimateTokens(pendingLongTextMessage) : 0;
+  const estimatedPendingCredits = pendingLongTextMessage
+    ? ((estimatedPendingInputTokens / 1000) * inputCreditsPer1k + outputCreditsPer1k)
+    : 0;
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   }, [handleSend]);
 
@@ -260,6 +412,14 @@ export default function ChatPage() {
     }
   }, [isEditingTitle, currentConversation]);
 
+  if (isAuthChecking || !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
+        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg-primary)' }}>
       {/* 顶部导航 */}
@@ -274,9 +434,6 @@ export default function ChatPage() {
         <style>{`
           .chat-input-box:focus-within {
             border-color: rgba(255, 215, 0, 0.5) !important;
-          }
-          .conversation-item:hover {
-            background: rgba(255, 215, 0, 0.05) !important;
           }
         `}</style>
 
@@ -295,11 +452,11 @@ export default function ChatPage() {
           {/* 静态背景光晕 */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0, contain: 'layout paint' }}>
             <div
-              className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 rounded-full opacity-[0.08] blur-[100px]"
+              className="absolute -top-1/4 -right-1/4 w-[40%] h-[40%] rounded-full opacity-[0.06] blur-[84px]"
               style={{ background: 'var(--color-primary)' }}
             />
             <div
-              className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 rounded-full opacity-[0.15] blur-[120px]"
+              className="absolute -bottom-1/4 -left-1/4 w-[42%] h-[42%] rounded-full opacity-[0.1] blur-[96px]"
               style={{ background: 'var(--color-secondary)' }}
             />
           </div>
@@ -348,8 +505,8 @@ export default function ChatPage() {
                 <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
                   开始新对话
                 </h2>
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  请输入您的问题，AI将为您解答
+                <p className="text-sm whitespace-pre-line text-center max-w-lg" style={{ color: 'var(--text-tertiary)' }}>
+                  {chatWelcomeMessage}
                 </p>
               </div>
             ) : (
@@ -460,8 +617,9 @@ export default function ChatPage() {
                     value={inputMessage}
                     onChange={(e) => setInputMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="请输入您的问题..."
+                    placeholder={chatPromptText}
                     disabled={isProcessing}
+                    maxLength={maxInputCharacters}
                     className="flex-1 min-h-[44px] max-h-[120px] resize-none border-0 focus-visible:ring-0 py-2 px-2 text-base bg-transparent"
                     style={{ color: 'var(--text-primary)' }}
                     rows={1}
@@ -484,8 +642,8 @@ export default function ChatPage() {
                       </Button>
                     ) : (
                       <Button
-                        onClick={handleSend}
-                        disabled={!inputMessage.trim() || isProcessing}
+                        onClick={() => void handleSend()}
+                        disabled={!inputMessage.trim() || isProcessing || inputMessage.length > maxInputCharacters}
                         className="h-9 px-5 gap-2 rounded-xl font-medium"
                         style={{
                           background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
@@ -513,6 +671,9 @@ export default function ChatPage() {
               >
                 {chatBillingHint}
               </div>
+              {showTokenUsageStats && activeConversationId && (
+                <TokenUsageStats {...tokenStatsSummary} />
+              )}
             </div>
           </div>
         </div>
@@ -536,6 +697,36 @@ export default function ChatPage() {
         credits={credits}
         warningLevel={warningLevel}
       />
+      <AlertDialog
+        open={longTextConfirmOpen}
+        onOpenChange={(open) => {
+          setLongTextConfirmOpen(open);
+          if (!open) {
+            setPendingLongTextMessage(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>长文本发送确认</AlertDialogTitle>
+            <AlertDialogDescription>
+              当前输入预计约 {estimatedPendingInputTokens.toLocaleString()} tokens，
+              可能消耗约 {estimatedPendingCredits.toFixed(2)} 积分。继续发送后会按实际输出结算。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再检查一下</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setLongTextConfirmOpen(false);
+                void handleSend(true);
+              }}
+            >
+              继续发送
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

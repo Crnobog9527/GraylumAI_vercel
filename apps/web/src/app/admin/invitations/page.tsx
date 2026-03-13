@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
 } from 'recharts';
@@ -76,15 +75,11 @@ export default function AdminInvitationsPage() {
     refetchRecords();
   };
 
-  // Loading state
-  if (statsLoading) {
-    return <AdminLoadingState />;
-  }
-
   const stats = statsData?.stats ?? { total: 0, rewarded: 0, rejected: 0, pending: 0, highRisk: 0, totalRewards: 0 };
   const trend = statsData?.trend ?? [];
   const riskDistribution = statsData?.riskDistribution ?? [];
   const recordList = (records ?? []) as InvitationRecord[];
+  const isInitialLoading = statsLoading && !statsData;
 
   return (
     <div className="p-8 overflow-auto">
@@ -99,10 +94,12 @@ export default function AdminInvitationsPage() {
             </p>
           </div>
           <Button
+            data-testid="admin-invitations-refresh"
             onClick={handleRefresh}
             variant="outline"
             className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
           >
+            {isInitialLoading && <span className="mr-2 text-xs">加载中</span>}
             <RefreshCw className="h-4 w-4 mr-2" />
             刷新数据
           </Button>
@@ -110,7 +107,7 @@ export default function AdminInvitationsPage() {
 
         {/* Stats Cards - 6 cards */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-total" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-blue-500/20">
@@ -124,7 +121,7 @@ export default function AdminInvitationsPage() {
             </CardContent>
           </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-rewarded" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-500/20">
@@ -138,7 +135,7 @@ export default function AdminInvitationsPage() {
             </CardContent>
           </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-pending" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-amber-500/20">
@@ -152,7 +149,7 @@ export default function AdminInvitationsPage() {
             </CardContent>
           </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-rejected" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-rose-500/20">
@@ -166,7 +163,7 @@ export default function AdminInvitationsPage() {
             </CardContent>
           </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-high-risk" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-violet-500/20">
@@ -180,7 +177,7 @@ export default function AdminInvitationsPage() {
             </CardContent>
           </Card>
 
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-invitations-stat-rewards" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-indigo-500/20">
@@ -255,7 +252,7 @@ export default function AdminInvitationsPage() {
         </div>
 
         {/* Invitation Records */}
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+        <Card data-testid="admin-invitations-records-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -268,6 +265,7 @@ export default function AdminInvitationsPage() {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
                   <Input
+                    data-testid="admin-invitations-search"
                     placeholder="搜索邮箱或邀请码..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -276,6 +274,7 @@ export default function AdminInvitationsPage() {
                 </div>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger
+                    data-testid="admin-invitations-status-filter"
                     className="w-32 bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                   >
                     <SelectValue />
@@ -297,7 +296,7 @@ export default function AdminInvitationsPage() {
                 <RefreshCw className="h-8 w-8 animate-spin mx-auto" style={{ color: 'var(--text-tertiary)' }} />
               </div>
             ) : recordList.length === 0 ? (
-              <div className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
+              <div data-testid="admin-invitations-empty-state" className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
                 暂无邀请记录
               </div>
             ) : (
@@ -318,6 +317,7 @@ export default function AdminInvitationsPage() {
                     {recordList.slice(0, 100).map((record) => (
                       <tr
                         key={record.id}
+                        data-testid={`admin-invitation-row-${record.id}`}
                         className="hover:bg-[var(--bg-tertiary)]"
                         style={{ borderBottom: '1px solid var(--border-secondary)' }}
                       >

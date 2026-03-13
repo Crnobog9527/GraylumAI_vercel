@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   Home,
   MessageSquare,
@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { createClient } from '@/lib/supabase';
+import { buildAppHref, resolveSiteName } from '@/lib/site-config';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
 import { AlertTriangle } from 'lucide-react';
@@ -39,7 +40,10 @@ const navItems = [
 
 export function AppHeader() {
   const pathname = usePathname();
-  const router = useRouter();
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const {
     credits,
     isLoading: isCreditsLoading,
@@ -57,6 +61,10 @@ export function AppHeader() {
     refetchOnWindowFocus: false,
   });
   const isAdmin = userProfile?.role === 'admin';
+  const siteName =
+    typeof systemSettings?.site_name === 'string' && systemSettings.site_name.trim()
+      ? systemSettings.site_name.trim()
+      : resolveSiteName();
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -65,16 +73,7 @@ export function AppHeader() {
       await supabase.auth.signOut();
 
       // 根据环境跳转到不同的着陆页
-      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-      const isProduction = hostname.includes('graylum.com');
-
-      if (isProduction) {
-        // 生产环境: 跳转到 www 域名的着陆页
-        window.location.href = 'https://www.graylum.com';
-      } else {
-        // 开发环境: 跳转到带 domain 参数的着陆页
-        router.push('/landing?domain=www');
-      }
+      window.location.href = buildAppHref('/landing');
     } catch (error) {
       console.error('Logout failed:', error);
     } finally {
@@ -84,7 +83,7 @@ export function AppHeader() {
 
   return (
     <header
-      className="h-16 border-b sticky top-0 z-50 backdrop-blur-xl"
+      className="sticky top-0 z-50 h-16 border-b backdrop-blur-md md:backdrop-blur-xl"
       style={{
         background: 'rgba(10, 10, 10, 0.95)',
         borderColor: 'var(--border-primary)'
@@ -103,7 +102,7 @@ export function AppHeader() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 group">
           <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-105"
+            className="flex h-9 w-9 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-105"
             style={{
               background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
               boxShadow: '0 0 20px rgba(255, 215, 0, 0.3)'
@@ -119,7 +118,7 @@ export function AppHeader() {
               WebkitTextFillColor: 'transparent'
             }}
           >
-            GraylumAI
+            {siteName}
           </span>
         </Link>
 
@@ -134,7 +133,7 @@ export function AppHeader() {
               <Link key={item.href} href={item.href}>
                 <Button
                   variant="ghost"
-                  className="gap-2 px-4 h-10 rounded-xl transition-all duration-200"
+                  className="h-10 gap-2 rounded-xl px-4 transition-colors duration-200"
                   style={{
                     background: isActive ? 'var(--color-primary-10)' : 'transparent',
                     color: isActive ? 'var(--color-primary)' : 'var(--text-secondary)',
@@ -154,7 +153,7 @@ export function AppHeader() {
           {/* Credits badge with warning styles */}
           <Link href="/profile?tab=subscription">
             <div
-              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl cursor-pointer transition-all duration-200 hover:opacity-90"
+              className="hidden cursor-pointer items-center gap-2 rounded-xl px-4 py-2 transition-opacity duration-200 hover:opacity-90 sm:flex"
               style={{
                 background: warningBgColor,
                 border: `1px solid ${warningBorderColor}`

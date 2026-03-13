@@ -41,7 +41,7 @@ export default function FeaturedModules({ featuredModules = [], onModuleClick }:
   }
 
   return (
-    <div className="mb-12">
+    <div className="mb-12" data-testid="featured-modules-section">
       {/* 标题区域 */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">

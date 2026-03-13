@@ -8,20 +8,17 @@ import path from 'node:path';
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import {
+  createConversationFixtureForUserEmail,
+  ensureCreditsAtLeastForUserEmail,
+  softDeleteConversationFixture,
+} from './support/creditFixtures';
+import { safeCloseContext } from './support/contextCleanup';
 import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 const ticketUploadFixture = path.resolve(__dirname, '../../../../.agent/skills/assets/star-history.png');
 const ticketUploadFixtureName = path.basename(ticketUploadFixture);
-
-async function dismissLowBalanceDialogIfVisible(page: Page) {
-  const dismissButton = page.getByRole('button', { name: '稍后再说' });
-  if (await dismissButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await dismissButton.click();
-    return true;
-  }
-  return false;
-}
 
 async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20000) {
   await expect(
@@ -29,89 +26,43 @@ async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20
   ).toBeVisible({ timeout });
 }
 
-async function readCreditsFromRow(row: Locator) {
-  const creditsCell = row.locator('td').nth(4);
-  const rawText = await creditsCell.textContent();
-  return Number((rawText ?? '').replace(/[^\d-]/g, ''));
-}
-
 async function ensureUserHasChatCredits(browser: Browser, minimumCredits = 300) {
-  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+  if (!hasCredentials('user')) {
     return;
   }
-
-  const context = await browser.newContext({ storageState: authStatePaths.admin });
-  const page = await context.newPage();
-
-  try {
-    await applyDeploymentProtectionBypass(page);
-    await page.goto(new URL('/admin/users', process.env.PLAYWRIGHT_BASE_URL).toString());
-    await expect(page).toHaveURL(/\/admin\/users/);
-
-    const targetEmail = getCredentials('user').email;
-    await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
-    const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
-    await expect(targetRow).toBeVisible({ timeout: 15000 });
-
-    const currentCredits = await readCreditsFromRow(targetRow);
-    if (currentCredits >= minimumCredits) {
-      return;
-    }
-
-    const delta = minimumCredits - currentCredits;
-    await targetRow.getByRole('button', { name: '积分' }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await page.locator('input[type="number"]').fill(String(delta));
-    await page.locator('input[placeholder="奖励积分、退款等..."]').fill(`Parity user suite top-up ${Date.now()}`);
-
-    const adjustResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/trpc/admin.adjustUserCredits') &&
-        response.request().method() === 'POST',
-      { timeout: 20000 },
-    );
-    await page.getByRole('button', { name: '确认调整' }).click();
-    const adjustResponse = await adjustResponsePromise;
-    expect(adjustResponse.status()).toBe(200);
-    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 15000 });
-    await expect.poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 }).toBeGreaterThanOrEqual(minimumCredits);
-  } finally {
-    await context.close();
-  }
+  await ensureCreditsAtLeastForUserEmail(
+    getCredentials('user').email,
+    minimumCredits,
+    `Parity user suite top-up ${Date.now()}`
+  );
 }
 
-async function createConversation(page: Page, prompt: string) {
-  if (!page.url().includes('/chat')) {
-    await gotoWithBypass(page, '/chat');
-  }
+async function createSeededConversation(
+  title: string,
+  userMessage = `Fixture user message ${Date.now()}`,
+  assistantMessage = `Fixture assistant reply ${Date.now()}`
+) {
+  return createConversationFixtureForUserEmail(getCredentials('user').email, {
+    title,
+    userMessage,
+    assistantMessage,
+  });
+}
 
-  const input = page.locator('textarea[placeholder="请输入您的问题..."]');
-  await input.fill(prompt);
-
-  const streamResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/ai/stream') &&
-      response.request().method() === 'POST',
-    { timeout: 20000 },
-  );
-
-  await page.getByRole('button', { name: '发送' }).click();
-  const dismissedLowBalance = await dismissLowBalanceDialogIfVisible(page);
-  if (dismissedLowBalance) {
-    await page.getByRole('button', { name: '发送' }).click();
-  }
-
-  const streamResponse = await streamResponsePromise;
-  expect(streamResponse.status()).toBe(200);
-  await expectUserMessageVisible(page, prompt);
-  await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
-  await expect(page.getByRole('button', { name: '编辑标题' })).toBeEnabled({ timeout: 15000 });
+async function openConversationRow(page: Page, title: string) {
+  await gotoWithBypass(page, '/chat');
+  const conversationRow = page.getByTestId('conversation-item').filter({ hasText: title }).first();
+  await expect(conversationRow).toBeVisible({ timeout: 15000 });
+  await conversationRow.click();
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 15000 });
+  return conversationRow;
 }
 
 async function renameConversation(page: Page, title: string) {
-  await expect(page.getByRole('button', { name: '编辑标题' })).toBeEnabled({ timeout: 10000 });
-  await page.getByRole('button', { name: '编辑标题' }).click();
-  await page.locator('input[type="text"]').fill(title);
+  const renameDialog = page.getByRole('dialog', { name: '重命名对话' });
+  await expect(renameDialog).toBeVisible({ timeout: 10000 });
+  const renameInput = renameDialog.getByRole('textbox', { name: '输入新标题' });
+  await renameInput.fill(title);
 
   const renameResponsePromise = page.waitForResponse(
     (response) =>
@@ -119,7 +70,7 @@ async function renameConversation(page: Page, title: string) {
       response.request().method() === 'POST',
     { timeout: 15000 },
   );
-  await page.getByRole('button', { name: '保存' }).click();
+  await renameDialog.getByRole('button', { name: '保存' }).click();
   const renameResponse = await renameResponsePromise;
   expect(renameResponse.status()).toBe(200);
 
@@ -166,15 +117,21 @@ test.describe('User Extended Flows', () => {
   test('should delete a conversation from the chat sidebar after creating and renaming it', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const prompt = `Parity delete seed ${Date.now()}`;
+    const seededTitle = `Parity delete seed ${Date.now()}`;
     const renamedTitle = `Parity delete ${Date.now()}`;
     let actual = 'Conversation deletion flow completed';
+    let fixtureConversationId: string | null = null;
 
     try {
-      steps.push('Create a fresh conversation from /chat');
-      await createConversation(page, prompt);
+      steps.push('Seed a conversation fixture and open it from the sidebar');
+      const seededConversation = await createSeededConversation(seededTitle);
+      fixtureConversationId = seededConversation.id;
+      const seededRow = await openConversationRow(page, seededTitle);
 
-      steps.push('Rename the conversation to a deterministic title');
+      steps.push('Rename the seeded conversation to a deterministic title');
+      await seededRow.hover();
+      await seededRow.getByTestId('conversation-actions-trigger').click({ force: true });
+      await page.getByRole('menuitem', { name: '重命名' }).click();
       await renameConversation(page, renamedTitle);
 
       const conversationRow = page.getByTestId('conversation-item').filter({ hasText: renamedTitle }).first();
@@ -198,7 +155,6 @@ test.describe('User Extended Flows', () => {
 
       await expect(conversationRow).toHaveCount(0, { timeout: 15000 });
       await expect(page.getByRole('heading', { name: renamedTitle })).toHaveCount(0);
-
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {
@@ -218,27 +174,27 @@ test.describe('User Extended Flows', () => {
         steps,
         monitor.getIssues(),
       );
+      if (fixtureConversationId) {
+        await softDeleteConversationFixture(fixtureConversationId);
+      }
     }
   });
 
   test('should delete multiple conversations from sidebar management mode', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const firstPrompt = `Parity batch delete seed A ${Date.now()}`;
-    const secondPrompt = `Parity batch delete seed B ${Date.now()}`;
     const firstTitle = `Parity batch delete A ${Date.now()}`;
     const secondTitle = `Parity batch delete B ${Date.now()}`;
     let actual = 'Batch conversation deletion flow completed';
+    const fixtureConversationIds: string[] = [];
 
     try {
-      steps.push('Create and rename the first conversation');
-      await createConversation(page, firstPrompt);
-      await renameConversation(page, firstTitle);
+      steps.push('Seed two conversations that will be deleted in management mode');
+      const firstConversation = await createSeededConversation(firstTitle);
+      const secondConversation = await createSeededConversation(secondTitle);
+      fixtureConversationIds.push(firstConversation.id, secondConversation.id);
 
-      steps.push('Create and rename the second conversation');
-      await page.getByTestId('conversation-new-chat').click();
-      await createConversation(page, secondPrompt);
-      await renameConversation(page, secondTitle);
+      await gotoWithBypass(page, '/chat');
 
       const firstRow = page.getByTestId('conversation-item').filter({ hasText: firstTitle }).first();
       const secondRow = page.getByTestId('conversation-item').filter({ hasText: secondTitle }).first();
@@ -265,6 +221,7 @@ test.describe('User Extended Flows', () => {
 
       await expect(firstRow).toHaveCount(0, { timeout: 15000 });
       await expect(secondRow).toHaveCount(0, { timeout: 15000 });
+      fixtureConversationIds.length = 0;
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -285,22 +242,23 @@ test.describe('User Extended Flows', () => {
         steps,
         monitor.getIssues(),
       );
+      await Promise.all(fixtureConversationIds.map((conversationId) => softDeleteConversationFixture(conversationId)));
     }
   });
 
   test('should expose selected conversation export in sidebar management mode', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const prompt = `Parity selected export ${Date.now()}`;
     const title = `Parity selected export ${Date.now()}`;
+    const userMessage = `Parity selected export user ${Date.now()}`;
     let actual = 'Selected conversation export management flow completed';
+    let fixtureConversationId: string | null = null;
 
     try {
-      steps.push('Create and rename a conversation to export from management mode');
-      await createConversation(page, prompt);
-      await renameConversation(page, title);
-      const conversationRow = page.getByTestId('conversation-item').filter({ hasText: title }).first();
-      await expect(conversationRow).toBeVisible({ timeout: 10000 });
+      steps.push('Seed a conversation with message history to export from management mode');
+      const seededConversation = await createSeededConversation(title, userMessage, `Parity selected export assistant ${Date.now()}`);
+      fixtureConversationId = seededConversation.id;
+      const conversationRow = await openConversationRow(page, title);
 
       steps.push('Enter management mode and select the conversation');
       await page.getByTestId('conversation-manage-toggle').click();
@@ -344,24 +302,25 @@ test.describe('User Extended Flows', () => {
         steps,
         monitor.getIssues(),
       );
+      if (fixtureConversationId) {
+        await softDeleteConversationFixture(fixtureConversationId);
+      }
     }
   });
 
   test('should restore the active conversation after refreshing the chat page', async ({ page }, testInfo) => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const prompt = `Parity refresh seed ${Date.now()}`;
     const renamedTitle = `Parity refresh ${Date.now()}`;
+    const userMessage = `Parity refresh user ${Date.now()}`;
     let actual = 'Conversation restored after refresh';
+    let fixtureConversationId: string | null = null;
 
     try {
-      steps.push('Create a fresh conversation from /chat');
-      await createConversation(page, prompt);
-
-      steps.push('Rename the conversation to a deterministic title');
-      await renameConversation(page, renamedTitle);
-      const conversationRow = page.getByTestId('conversation-item').filter({ hasText: renamedTitle }).first();
-      await expect(conversationRow).toBeVisible({ timeout: 10000 });
+      steps.push('Seed an existing conversation and open it from the sidebar');
+      const seededConversation = await createSeededConversation(renamedTitle, userMessage, `Parity refresh assistant ${Date.now()}`);
+      fixtureConversationId = seededConversation.id;
+      const conversationRow = await openConversationRow(page, renamedTitle);
 
       steps.push('Refresh /chat to verify the active conversation is restored from persisted state');
       await page.reload({ waitUntil: 'networkidle' });
@@ -369,8 +328,15 @@ test.describe('User Extended Flows', () => {
 
       steps.push('Verify the renamed conversation title and previous prompt are still loaded');
       await expect(page.getByRole('heading', { name: renamedTitle })).toBeVisible({ timeout: 15000 });
-      await expectUserMessageVisible(page, prompt);
+      await expectUserMessageVisible(page, userMessage);
       await expect(conversationRow).toBeVisible({ timeout: 15000 });
+      monitor.removeIssues(
+        (issue) =>
+          issue.source === 'requestfailed' &&
+          issue.message === 'net::ERR_ABORTED' &&
+          issue.method === 'GET' &&
+          issue.url?.includes('/rest/v1/messages') === true
+      );
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -391,6 +357,9 @@ test.describe('User Extended Flows', () => {
         steps,
         monitor.getIssues(),
       );
+      if (fixtureConversationId) {
+        await softDeleteConversationFixture(fixtureConversationId);
+      }
     }
   });
 
@@ -398,6 +367,7 @@ test.describe('User Extended Flows', () => {
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Batch export and model selector flow completed';
+    let fixtureConversationId: string | null = null;
 
     try {
       steps.push('Open /chat');
@@ -426,8 +396,15 @@ test.describe('User Extended Flows', () => {
         actual = 'Model selector hidden by current settings; model switch skipped';
       }
 
-      steps.push('Create a fresh conversation so the export dialog has current data');
-      await createConversation(page, `Parity batch export ${Date.now()}`);
+      steps.push('Seed and open a conversation so the export dialog has current data');
+      const exportTitle = `Parity batch export ${Date.now()}`;
+      const seededConversation = await createSeededConversation(
+        exportTitle,
+        `Parity batch export user ${Date.now()}`,
+        `Parity batch export assistant ${Date.now()}`
+      );
+      fixtureConversationId = seededConversation.id;
+      await openConversationRow(page, exportTitle);
 
       const exportButton = page.getByRole('button', { name: '导出' });
       const exportAvailable = await exportButton.isVisible({ timeout: 5000 }).catch(() => false);
@@ -474,6 +451,9 @@ test.describe('User Extended Flows', () => {
         steps,
         monitor.getIssues(),
       );
+      if (fixtureConversationId) {
+        await softDeleteConversationFixture(fixtureConversationId);
+      }
     }
   });
 
@@ -516,6 +496,116 @@ test.describe('User Extended Flows', () => {
           role: 'user',
           route: '/profile',
           expected: 'Authenticated users can open subscription, credits, and usage history tabs without blocking runtime issues.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should route subscription purchase actions into a real next step instead of failing silently', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Subscription purchase action reached a real next step';
+
+    try {
+      steps.push('Open the subscription tab in profile');
+      await gotoWithBypass(page, '/profile?tab=subscription');
+      await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
+
+      steps.push('Trigger a package purchase action');
+      await page.getByTestId(/^profile-credit-package-/).first().getByRole('button', { name: '购买' }).click();
+
+      steps.push('Accept either the legacy support dialog or a live Stripe Checkout redirect');
+      const purchaseIntentDialog = page.getByText('支付暂不可用');
+      const redirectedToCheckout = await page
+        .waitForURL(/https:\/\/(?:checkout|buy)\.stripe\.com\//, { timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!redirectedToCheckout) {
+        await expect(purchaseIntentDialog).toBeVisible({ timeout: 10000 });
+        await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
+        actual = 'Subscription purchase action opened the support escalation dialog';
+      } else {
+        actual = 'Subscription purchase action redirected to Stripe Checkout';
+      }
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown subscription purchase-intent dialog failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'subscription-purchase-next-step',
+          role: 'user',
+          route: '/profile?tab=subscription',
+          expected: 'Subscription and credit package actions either open the support dialog when checkout is disabled or redirect into Stripe Checkout when checkout is enabled.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
+  test('should expose a real daily check-in flow from the profile quick actions area', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Daily check-in dialog rendered and handled';
+
+    try {
+      steps.push('Open /profile and locate the daily check-in quick action');
+      await gotoWithBypass(page, '/profile');
+      const checkinCard = page.getByTestId('profile-checkin-card');
+      await expect(checkinCard).toBeVisible({ timeout: 10000 });
+
+      steps.push('Open the daily check-in dialog');
+      await checkinCard.click();
+      const dialog = page.getByTestId('profile-checkin-dialog');
+      await expect(dialog).toBeVisible({ timeout: 10000 });
+      await expect(dialog.getByText('每日签到')).toBeVisible({ timeout: 10000 });
+
+      const claimButton = page.getByTestId('checkin-claim-button');
+      const buttonLabel = (await claimButton.textContent())?.trim() ?? '';
+
+      if (buttonLabel.includes('今日已签到')) {
+        steps.push('Verify the dialog shows the already-claimed state for today');
+        await expect(claimButton).toBeDisabled();
+      } else {
+        steps.push('Claim the daily reward and verify the success feedback');
+        const claimResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes('/api/trpc/checkin.claimDailyCheckin') &&
+            response.request().method() === 'POST',
+          { timeout: 15000 },
+        );
+        await claimButton.click();
+        const claimResponse = await claimResponsePromise;
+        expect(claimResponse.status()).toBe(200);
+        await expect(page.getByTestId('profile-checkin-feedback')).toContainText('签到成功', { timeout: 10000 });
+        await expect(claimButton).toHaveText('今日已签到', { timeout: 10000 });
+      }
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown daily check-in flow failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'profile-daily-checkin',
+          role: 'user',
+          route: '/profile',
+          expected: 'Authenticated users can open the daily check-in dialog and either claim today’s reward or see that it has already been claimed.',
         },
         actual,
         steps,

@@ -1,10 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { trpc } from '@/trpc/client';
-import { ShieldCheck } from 'lucide-react';
-import AdminSidebar from './AdminSidebar';
+import { Menu, ShieldCheck } from 'lucide-react';
+import AdminSidebar, { getAdminPageMeta } from './AdminSidebar';
+import { Button } from '@/components/ui/button';
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 
 interface AdminGuardProps {
   children: React.ReactNode;
@@ -21,6 +27,9 @@ interface AdminGuardProps {
  */
 export default function AdminGuard({ children }: AdminGuardProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const currentPage = getAdminPageMeta(pathname);
 
   // Use a simple admin check query
   const { data: stats, isLoading, error } = trpc.admin.getStatistics.useQuery(undefined, {
@@ -112,8 +121,60 @@ export default function AdminGuard({ children }: AdminGuardProps) {
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--bg-primary)' }}>
       <AdminSidebar />
-      <div className="flex-1 overflow-auto">
-        {children}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div
+          className="md:hidden sticky top-0 z-30 px-4 py-3 flex items-center gap-3"
+          style={{
+            background: 'rgba(10, 10, 12, 0.92)',
+            borderBottom: '1px solid var(--border-primary)',
+            backdropFilter: 'blur(14px)',
+          }}
+        >
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <SheetTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="打开后台菜单"
+                className="shrink-0 border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              side="left"
+              className="w-[88vw] max-w-80 p-0"
+              style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}
+            >
+              <AdminSidebar mobile onNavigate={() => setMobileNavOpen(false)} />
+            </SheetContent>
+          </Sheet>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-xs uppercase tracking-[0.22em]" style={{ color: 'var(--text-disabled)' }}>
+              Admin
+            </div>
+            <div className="truncate font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {currentPage.name}
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            className="shrink-0 px-2 text-sm text-[var(--text-secondary)]"
+            onClick={() => router.push('/chat')}
+          >
+            返回应用
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          <div className="mx-auto w-full max-w-[1600px]">
+            {children}
+          </div>
+        </div>
       </div>
     </div>
   );

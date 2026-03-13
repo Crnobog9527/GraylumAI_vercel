@@ -4,18 +4,21 @@ import FeaturesSection from '@/components/landing/FeaturesSection';
 import PricingSection from '@/components/landing/PricingSection';
 import CTASection from '@/components/landing/CTASection';
 import LandingFooter from '@/components/landing/LandingFooter';
+import { getPublicSiteSettings } from '@/lib/public-site';
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const { siteName, supportEmail } = await getPublicSiteSettings();
+
   return (
     <>
-      <LandingHeader />
+      <LandingHeader siteName={siteName} />
       <main>
         <HeroSection />
         <FeaturesSection />
         <PricingSection />
         <CTASection />
       </main>
-      <LandingFooter />
+      <LandingFooter siteName={siteName} supportEmail={supportEmail} />
     </>
   );
 }

@@ -14,7 +14,7 @@ interface Transaction {
   id: string;
   type: string;
   amount: number;
-  balance_after: number;
+  balance_after: number | null;
   description?: string;
   created_date: string;
 }
@@ -66,14 +66,14 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
 
   return (
     <div
-      className="rounded-2xl p-6 md:p-8 mt-6 transition-all duration-300"
+      className="mt-6 rounded-2xl p-6 md:p-8"
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-primary)',
         boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
       }}
     >
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
         <div className="flex items-center gap-3">
           <div
             className="p-2 rounded-lg"
@@ -84,13 +84,13 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>每日消耗趋势</h3>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <div className="text-right">
+          <div className="text-left md:text-right">
             <span style={{ color: 'var(--text-tertiary)' }}>14日总计</span>
             <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>
               {stats.totalUsage.toLocaleString()}
             </span>
           </div>
-          <div className="text-right hidden md:block">
+          <div className="text-left md:text-right hidden md:block">
             <span style={{ color: 'var(--text-tertiary)' }}>日均</span>
             <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>
               {stats.avgUsage.toLocaleString()}
@@ -107,7 +107,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
           return (
             <div key={index} className="flex-1 flex flex-col items-center gap-1">
               <div
-                className="w-full rounded-t transition-all duration-300 hover:opacity-80"
+                className="w-full rounded-t transition-opacity duration-200 hover:opacity-80"
                 style={{
                   height: `${heightPercent}%`,
                   minHeight: '4px',
@@ -133,7 +133,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
 
   // 从 API 获取积分统计数据
   const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
-  const { data: allTimeSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'year' });
+  const { data: allTimeSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'all' });
   const monthlyUsed = creditsSummary?.totalSpent ?? 0;
   const totalUsed = allTimeSummary?.totalSpent ?? user?.total_credits_used ?? 0;
 
@@ -147,13 +147,15 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
       id: tx.id,
       type: tx.type,
       amount: tx.amount,
-      balance_after: tx.balance_after ?? 0,
+      balance_after: tx.balance_after ?? null,
       description: tx.reason ?? tx.description ?? '',
       created_date: tx.created_at,
     }));
   }, [transactionsData]);
 
   const typeLabels: Record<string, string> = {
+    addition: '积分增加',
+    deduction: '积分消耗',
     purchase: '购买积分',
     usage: '积分消耗',
     consumption: '积分消耗',
@@ -169,6 +171,8 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
   };
 
   const typeIcons: Record<string, { icon: typeof Package; color: string }> = {
+    addition: { icon: Crown, color: 'var(--success)' },
+    deduction: { icon: Zap, color: 'var(--color-primary)' },
     purchase: { icon: Package, color: 'var(--success)' },
     usage: { icon: Zap, color: 'var(--color-primary)' },
     consumption: { icon: Zap, color: 'var(--color-primary)' },
@@ -187,7 +191,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     <>
       {/* 积分概览 */}
       <div
-        className="rounded-2xl p-6 md:p-8 mb-6 transition-all duration-300"
+        className="mb-6 rounded-2xl p-6 md:p-8"
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-primary)',
@@ -200,7 +204,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8">
             <div>
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>积分余额</div>
               <div
@@ -215,12 +219,24 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
               </div>
             </div>
 
-            <div className="pl-8 hidden md:block" style={{ borderLeft: '1px solid var(--border-primary)' }}>
+            <div
+              className="rounded-xl p-4 md:rounded-none md:p-0 md:pl-8"
+              style={{
+                borderLeft: '1px solid transparent',
+                background: 'var(--bg-primary)',
+              }}
+            >
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>本月消耗</div>
               <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{monthlyUsed.toLocaleString()}</div>
             </div>
 
-            <div className="pl-8 hidden md:block" style={{ borderLeft: '1px solid var(--border-primary)' }}>
+            <div
+              className="rounded-xl p-4 md:rounded-none md:p-0 md:pl-8"
+              style={{
+                borderLeft: '1px solid transparent',
+                background: 'var(--bg-primary)',
+              }}
+            >
               <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>累计消耗</div>
               <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{totalUsed.toLocaleString()}</div>
             </div>
@@ -255,25 +271,17 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         ) : (
         <div className="space-y-4">
           {transactions.map((tx) => {
-            const typeConfig = typeIcons[tx.type] || typeIcons.consumption;
+            const typeConfig = typeIcons[tx.type] || typeIcons.deduction;
             const Icon = typeConfig.icon;
             const txDate = new Date(tx.created_date);
 
             return (
               <div
                 key={tx.id}
-                className="flex flex-col md:flex-row md:items-center justify-between p-4 rounded-xl transition-all duration-200"
+                className="flex flex-col justify-between rounded-xl border p-4 md:flex-row md:items-center"
                 style={{
                   background: 'var(--bg-primary)',
                   border: '1px solid var(--border-primary)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 215, 0, 0.2)';
-                  e.currentTarget.style.boxShadow = '0 4px 15px rgba(0,0,0,0.2)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--border-primary)';
-                  e.currentTarget.style.boxShadow = 'none';
                 }}
               >
                 <div className="flex items-start gap-4 mb-4 md:mb-0">
@@ -295,13 +303,15 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
 
                 <div className="flex flex-1 md:justify-end items-center gap-4 md:gap-8">
                   <div className="text-right">
-                    <div
+                  <div
                       className="font-bold"
                       style={{ color: tx.amount > 0 ? 'var(--success)' : 'var(--error)' }}
                     >
                       {tx.amount > 0 ? '+' : ''}{tx.amount} 积分
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--text-disabled)' }}>余额：{tx.balance_after}</div>
+                    {typeof tx.balance_after === 'number' && (
+                      <div className="text-xs" style={{ color: 'var(--text-disabled)' }}>余额：{tx.balance_after}</div>
+                    )}
                   </div>
 
                   <div className="text-right min-w-[100px]">
@@ -319,7 +329,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         </div>
         )}
 
-        <div className="flex items-center justify-between mt-8 pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mt-8 pt-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
           <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>共 {transactions.length} 条记录</span>
         </div>
       </div>

@@ -16,6 +16,7 @@ import {
 } from '../types/billing';
 import { type TokenUsage, type CostBreakdown } from '../types/ai';
 import { logger } from '../lib/logger';
+import { applyInvitationRebateForSpend } from './invitationRebate';
 
 // ============================================
 // 类型定义
@@ -66,6 +67,47 @@ export interface AbortSettleResult {
 export interface BillingContext {
   supabase: SupabaseClient;
   userId: string;
+}
+
+export interface FinalizeAISuccessParams {
+  conversationId: string;
+  userMessage: string;
+  assistantMessage: string;
+  modelUsed: string;
+  usage: TokenUsage;
+  costUsd: number;
+  credits: number;
+  preDeductId?: string | null;
+  requestId?: string;
+  inputLength?: number;
+  latencyMs?: number;
+  searchCount?: number;
+  ipAddress?: string;
+  userAgent?: string;
+  tokenMetadata?: Record<string, unknown>;
+  usageMetadata?: Record<string, unknown>;
+}
+
+export interface FinalizeAISuccessResult {
+  userMessageId: string | null;
+  assistantMessageId: string | null;
+  transactionId: string | null;
+  billingId: string | null;
+  balanceAfter: number;
+  refundedCredits: number;
+}
+
+export interface FinalizeAIFailureParams {
+  modelUsed: string;
+  reason: string;
+  preDeductId?: string | null;
+  conversationId?: string;
+  requestId?: string;
+  inputLength?: number;
+  latencyMs?: number;
+  ipAddress?: string;
+  userAgent?: string;
+  usageMetadata?: Record<string, unknown>;
 }
 
 // ============================================
@@ -161,14 +203,15 @@ export function calculateTokenCost(
  */
 export function calculateTokenCostWithPricing(
   usage: TokenUsage,
-  pricing: ModelPricingInfo
+  pricing: ModelPricingInfo,
+  options: { searchCount?: number } = {}
 ): { credits: number; costUsd: number; breakdown: CostBreakdown } {
   // 计算各项成本 (美元)
   const inputCostUsd = (usage.inputTokens / 1_000_000) * pricing.inputPer1M;
   const outputCostUsd = (usage.outputTokens / 1_000_000) * pricing.outputPer1M;
   const cacheWriteCostUsd = ((usage.cacheCreationTokens ?? 0) / 1_000_000) * (pricing.cacheWritePer1M ?? 0);
   const cacheReadCostUsd = ((usage.cacheReadTokens ?? 0) / 1_000_000) * (pricing.cacheReadPer1M ?? 0);
-  const searchCostUsd = 0; // Web search cost would be calculated separately
+  const searchCostUsd = ((options.searchCount ?? 0) / 1000) * (pricing.searchPer1K ?? 0);
 
   const totalCostUsd = inputCostUsd + outputCostUsd + cacheWriteCostUsd + cacheReadCostUsd + searchCostUsd;
 
@@ -183,7 +226,7 @@ export function calculateTokenCostWithPricing(
     output: Math.ceil(outputCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
     cacheWrite: Math.ceil(cacheWriteCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
     cacheRead: Math.ceil(cacheReadCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
-    search: 0,
+    search: Math.ceil(searchCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
     total: totalCredits,
   };
 
@@ -232,6 +275,46 @@ export class BillingService {
   constructor(ctx: BillingContext) {
     this.supabase = ctx.supabase;
     this.userId = ctx.userId;
+  }
+
+  private async applyInvitationRebate(consumedCredits: number, preDeductId: string) {
+    try {
+      await applyInvitationRebateForSpend({
+        supabase: this.supabase,
+        inviteeId: this.userId,
+        consumedCredits,
+        preDeductId,
+      });
+    } catch (error) {
+      console.error('[Billing] Failed to apply invitation rebate:', error);
+    }
+  }
+
+  private async persistMessages(conversationId: string, userMessage: string, assistantMessage: string) {
+    const { data, error } = await this.supabase
+      .from('messages')
+      .insert([
+        {
+          conversation_id: conversationId,
+          role: 'user',
+          content: userMessage,
+        },
+        {
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: assistantMessage,
+        },
+      ])
+      .select('id, role');
+
+    if (error) {
+      throw new Error(`Failed to persist AI messages: ${error.message}`);
+    }
+
+    return {
+      userMessageId: data?.find((item: { role: string }) => item.role === 'user')?.id ?? null,
+      assistantMessageId: data?.find((item: { role: string }) => item.role === 'assistant')?.id ?? null,
+    };
   }
 
   /**
@@ -399,8 +482,6 @@ export class BillingService {
       const idempotencyCheck = await this.checkIdempotency(requestId);
       if (idempotencyCheck.exists) {
         // 请求已存在，返回之前的记录
-        console.log(`[Idempotency] Request ${requestId} already exists, returning cached result`);
-
         // 获取之前的预扣信息
         const { data: existingPreDeduct } = await this.supabase
           .from('billing_history')
@@ -534,6 +615,7 @@ export class BillingService {
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {
       const result = rpcResult[0];
+      await this.applyInvitationRebate(result.actual_credits, preDeductId);
       return {
         actualCredits: result.actual_credits,
         difference: result.difference,
@@ -643,6 +725,8 @@ export class BillingService {
       preDeductId,
       { balanceAfter: finalProfile?.credits ?? 0 }
     );
+
+    await this.applyInvitationRebate(actualCredits, preDeductId);
 
     return {
       actualCredits,
@@ -823,6 +907,7 @@ export class BillingService {
     // 如果 RPC 函数存在且执行成功
     if (!rpcError && rpcResult && rpcResult.length > 0) {
       const result = rpcResult[0];
+      await this.applyInvitationRebate(result.consumed_credits, preDeductId);
       return {
         consumedCredits: result.consumed_credits,
         refundedCredits: result.refunded_credits,
@@ -924,11 +1009,166 @@ export class BillingService {
       .eq('id', this.userId)
       .single();
 
+    await this.applyInvitationRebate(consumedCredits, preDeductId);
+
     return {
       consumedCredits,
       refundedCredits,
       balanceAfter: finalProfile?.credits ?? 0,
     };
+  }
+
+  async finalizeAISuccess(params: FinalizeAISuccessParams): Promise<FinalizeAISuccessResult> {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_success', {
+        p_user_id: this.userId,
+        p_conversation_id: params.conversationId,
+        p_user_message: params.userMessage,
+        p_assistant_message: params.assistantMessage,
+        p_model_used: params.modelUsed,
+        p_total_cost_usd: params.costUsd.toFixed(6),
+        p_total_credits: params.credits,
+        p_pre_deduct_id: params.preDeductId ?? null,
+        p_usage: params.usage,
+        p_token_metadata: params.tokenMetadata ?? {},
+        p_usage_metadata: params.usageMetadata ?? {},
+        p_request_id: params.requestId ?? null,
+        p_input_length: params.inputLength ?? null,
+        p_latency_ms: params.latencyMs ?? null,
+        p_search_count: params.searchCount ?? 0,
+        p_ip_address: params.ipAddress ?? null,
+        p_user_agent: params.userAgent ?? null,
+      });
+
+      if (!rpcResponse.error && rpcResponse.data?.[0]) {
+        const result = rpcResponse.data[0];
+        if (params.preDeductId && params.credits > 0) {
+          await this.applyInvitationRebate(params.credits, params.preDeductId);
+        }
+
+        return {
+          userMessageId: result.user_message_id ?? null,
+          assistantMessageId: result.assistant_message_id ?? null,
+          transactionId: result.transaction_id ?? null,
+          billingId: result.settle_id ?? null,
+          balanceAfter: result.balance_after ?? 0,
+          refundedCredits: result.refunded_credits ?? 0,
+        };
+      }
+
+      if (rpcResponse.error) {
+        console.warn('[Billing] atomic_finalize_ai_success unavailable, falling back:', rpcResponse.error.message);
+      }
+    }
+
+    const messageIds = await this.persistMessages(
+      params.conversationId,
+      params.userMessage,
+      params.assistantMessage,
+    );
+
+    let refundedCredits = 0;
+    let balanceAfter = await this.getBalance();
+
+    if (params.preDeductId) {
+      const settleResult = await this.settle(
+        params.preDeductId,
+        params.credits,
+        params.usage,
+        messageIds.assistantMessageId
+          ? {
+              messageId: messageIds.assistantMessageId,
+              conversationId: params.conversationId,
+              content: params.assistantMessage,
+            }
+          : undefined,
+      );
+      refundedCredits = Math.max(0, settleResult.difference);
+      balanceAfter = settleResult.balanceAfter;
+    }
+
+    await this.recordTokenStats({
+      conversationId: params.conversationId,
+      messageId: messageIds.assistantMessageId ?? undefined,
+      modelUsed: params.modelUsed,
+      usage: params.usage,
+      costUsd: params.costUsd,
+      credits: params.credits,
+      searchCount: params.searchCount ?? 0,
+      metadata: params.tokenMetadata,
+    });
+
+    await this.recordUsageLog({
+      conversationId: params.conversationId,
+      requestId: params.requestId,
+      modelId: params.modelUsed,
+      status: 'success',
+      inputLength: params.inputLength,
+      latencyMs: params.latencyMs,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      metadata: params.usageMetadata,
+    });
+
+    return {
+      userMessageId: messageIds.userMessageId,
+      assistantMessageId: messageIds.assistantMessageId,
+      transactionId: null,
+      billingId: null,
+      balanceAfter,
+      refundedCredits,
+    };
+  }
+
+  async finalizeAIFailure(params: FinalizeAIFailureParams): Promise<RefundResult> {
+    const rpcFn = (this.supabase as { rpc?: Function }).rpc;
+    if (typeof rpcFn === 'function') {
+      const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_failure', {
+        p_user_id: this.userId,
+        p_model_used: params.modelUsed,
+        p_reason: params.reason,
+        p_pre_deduct_id: params.preDeductId ?? null,
+        p_conversation_id: params.conversationId ?? null,
+        p_request_id: params.requestId ?? null,
+        p_input_length: params.inputLength ?? null,
+        p_latency_ms: params.latencyMs ?? null,
+        p_ip_address: params.ipAddress ?? null,
+        p_user_agent: params.userAgent ?? null,
+        p_usage_metadata: params.usageMetadata ?? {},
+      });
+
+      if (!rpcResponse.error && rpcResponse.data?.[0]) {
+        return {
+          refundAmount: rpcResponse.data[0].refund_amount ?? 0,
+          balanceAfter: rpcResponse.data[0].balance_after ?? 0,
+        };
+      }
+
+      if (rpcResponse.error) {
+        console.warn('[Billing] atomic_finalize_ai_failure unavailable, falling back:', rpcResponse.error.message);
+      }
+    }
+
+    let refundResult: RefundResult = { refundAmount: 0, balanceAfter: await this.getBalance() };
+    if (params.preDeductId) {
+      refundResult = await this.refund(params.preDeductId, params.reason);
+    }
+
+    await this.recordUsageLog({
+      conversationId: params.conversationId,
+      requestId: params.requestId,
+      modelId: params.modelUsed,
+      status: 'failed',
+      errorMessage: params.reason,
+      inputLength: params.inputLength,
+      latencyMs: params.latencyMs,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+      metadata: params.usageMetadata,
+    });
+
+    return refundResult;
   }
 
   /**
@@ -941,6 +1181,8 @@ export class BillingService {
     usage: TokenUsage;
     costUsd: number;
     credits: number;
+    searchCount?: number;
+    metadata?: Record<string, unknown>;
   }): Promise<void> {
     const { error } = await this.supabase
       .from('token_stats')
@@ -953,9 +1195,10 @@ export class BillingService {
         output_tokens: params.usage.outputTokens,
         cached_tokens: params.usage.cacheReadTokens ?? 0,
         cache_creation_tokens: params.usage.cacheCreationTokens ?? 0,
-        web_search_count: 0,
+        web_search_count: params.searchCount ?? 0,
         total_cost_usd: params.costUsd.toFixed(6),
         total_credits: params.credits,
+        metadata: params.metadata ?? {},
       });
 
     if (error) {

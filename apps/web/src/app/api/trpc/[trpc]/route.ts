@@ -26,7 +26,11 @@ const handler = async (req: NextRequest) => {
     endpoint: '/api/trpc',
     req,
     router: appRouter,
-    createContext: () => createTRPCContext({ headers: req.headers, user }),
+    createContext: () => createTRPCContext({
+      headers: req.headers,
+      user,
+      supabaseAuth: authClient,
+    }),
   });
 };
 

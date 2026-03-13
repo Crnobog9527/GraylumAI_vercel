@@ -5,8 +5,11 @@
 
 import { trpc } from '@/trpc/client';
 
-export function useBanner() {
-  const { data: bannerData, isLoading } = trpc.settings.getBannerAnnouncement.useQuery();
+export function useBanner(options?: { enabled?: boolean }) {
+  const { data: bannerData, isLoading } = trpc.settings.getBannerAnnouncement.useQuery(
+    undefined,
+    { enabled: options?.enabled ?? true }
+  );
 
   // 转换为 GlobalBanner 组件需要的格式
   const banners = bannerData ? [{

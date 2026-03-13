@@ -4,6 +4,8 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { resolveSiteName } from '@/lib/site-config';
+import { trpc } from '@/trpc/client';
 import {
   LayoutDashboard, Bot, Wand2, Package, Users,
   CreditCard, Settings, ChevronLeft, Shield, DollarSign,
@@ -34,17 +36,39 @@ const menuItems: MenuItem[] = [
   { name: '系统设置', icon: Settings, href: '/admin/settings' },
 ];
 
-export default function AdminSidebar() {
+export function getAdminPageMeta(pathname: string | null) {
+  const matchedItem = menuItems.find((item) =>
+    pathname === item.href || (item.href !== '/admin' && pathname?.startsWith(item.href))
+  );
+
+  return matchedItem ?? menuItems[0];
+}
+
+export default function AdminSidebar({
+  mobile = false,
+  onNavigate,
+}: {
+  mobile?: boolean;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const siteName =
+    typeof systemSettings?.site_name === 'string' && systemSettings.site_name.trim()
+      ? systemSettings.site_name.trim()
+      : resolveSiteName();
 
   return (
     <div
-      className="w-64 min-h-screen flex flex-col"
+      className={cn(
+        "flex flex-col",
+        mobile ? "w-full min-h-0" : "hidden md:flex w-64 min-h-screen shrink-0"
+      )}
       style={{ background: 'var(--bg-primary)', borderRight: '1px solid var(--border-primary)' }}
     >
       {/* Header */}
       <div
-        className="p-6"
+        className={cn("p-6", mobile && "pb-4")}
         style={{ borderBottom: '1px solid var(--border-primary)' }}
       >
         <div className="flex items-center gap-3">
@@ -56,7 +80,7 @@ export default function AdminSidebar() {
           </div>
           <div>
             <h1 className="font-bold" style={{ color: 'var(--text-primary)' }}>管理后台</h1>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>GraylumAI 控制面板</p>
+            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{siteName} 控制面板</p>
           </div>
         </div>
       </div>
@@ -69,15 +93,16 @@ export default function AdminSidebar() {
             (item.href !== '/admin' && pathname?.startsWith(item.href));
 
           return (
-            <Link key={item.href} href={item.href}>
+            <Link key={item.href} href={item.href} onClick={onNavigate}>
               <Button
                 variant="ghost"
                 className={cn(
-                  "w-full justify-start gap-3 h-11 text-sm font-medium transition-all duration-200",
+                  "w-full justify-start gap-3 h-11 text-sm font-medium transition-[background-color,color,border-color] duration-200 motion-reduce:transition-none",
                   isActive
                     ? "bg-[var(--color-primary-20)] text-[var(--color-primary)] hover:bg-[var(--color-primary-30)]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                 )}
+                aria-current={isActive ? 'page' : undefined}
               >
                 <Icon className="h-5 w-5" />
                 {item.name}
@@ -92,7 +117,7 @@ export default function AdminSidebar() {
         className="p-4 space-y-2"
         style={{ borderTop: '1px solid var(--border-primary)' }}
       >
-        <Link href="/chat">
+        <Link href="/chat" onClick={onNavigate}>
           <Button
             variant="outline"
             className="w-full justify-start gap-3 border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"

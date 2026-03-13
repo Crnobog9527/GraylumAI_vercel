@@ -10,10 +10,11 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { classifyTask, selectModel, needsRealtimeData } from './modelRouter';
+import { classifyTask, classifyTaskComplexity, selectModel, needsRealtimeData } from './modelRouter';
 import { countTokens, quickEstimate } from './tokenCounter';
 import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
 import { BillingService, calculateTokenCost, estimateRequestCost } from './billing';
+import { runDailyBillingReconciliation } from './billingReconciliation';
 import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
 import { getConfiguredProviderApiKeySource } from './providerUtils';
@@ -63,6 +64,23 @@ export interface DiagnosticContext {
   runType?: 'manual' | 'cron' | 'ci';
 }
 
+export interface LatestRuntimeProof {
+  found: boolean;
+  status: DiagnosticStatus;
+  message: string;
+  checkedAt: string;
+  usageLog?: Record<string, unknown>;
+  tokenStats?: Record<string, unknown>;
+  settle?: Record<string, unknown>;
+  transaction?: Record<string, unknown>;
+  snapshots?: {
+    searchDigest: boolean;
+    compressionCheckpoint: boolean;
+    rollingSummary: boolean;
+  };
+  checks?: Record<string, boolean>;
+}
+
 // ============================================
 // 测试定义
 // ============================================
@@ -75,6 +93,7 @@ const TEST_DEFINITIONS = [
   { id: 'ai_context_compress', name: '上下文压缩测试', category: 'ai' as DiagnosticCategory },
   { id: 'ai_realtime_keywords', name: '实时数据关键词测试', category: 'ai' as DiagnosticCategory },
   { id: 'ai_model_status', name: 'AI 模型状态检查', category: 'ai' as DiagnosticCategory },
+  { id: 'ai_live_runtime_proof', name: '真实运行证据测试', category: 'ai' as DiagnosticCategory },
 
   // 计费功能测试 (3项)
   { id: 'billing_prededuct', name: '预扣计费测试', category: 'billing' as DiagnosticCategory },
@@ -98,6 +117,233 @@ function generateBatchId(): string {
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function parseIsoTime(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function hasRoutingEvidence(
+  tokenMetadata: Record<string, unknown>,
+  usageMetadata: Record<string, unknown>,
+): boolean {
+  return Boolean(
+    tokenMetadata.routing_decision ||
+    tokenMetadata.routingReason ||
+    usageMetadata.routingDecision ||
+    usageMetadata.routingReason,
+  );
+}
+
+export function matchBillingSettleByRequestId(
+  settleCandidates: Array<Record<string, unknown>>,
+  requestId: string | null | undefined,
+): Record<string, unknown> | null {
+  if (!requestId) return null;
+
+  for (const row of settleCandidates) {
+    const metadata = asRecord(row.metadata);
+    if (metadata.requestId === requestId) {
+      return row;
+    }
+  }
+
+  return null;
+}
+
+export function matchBillingSettleForUsage(
+  settleCandidates: Array<Record<string, unknown>>,
+  usageLog: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const exact = matchBillingSettleByRequestId(
+    settleCandidates,
+    typeof usageLog.request_id === 'string' ? usageLog.request_id : null,
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const conversationId = typeof usageLog.conversation_id === 'string' ? usageLog.conversation_id : null;
+  const usageTimestamp = parseIsoTime(usageLog.created_at);
+  if (!conversationId) {
+    return null;
+  }
+
+  const conversationMatches = settleCandidates.filter((row) => {
+    const metadata = asRecord(row.metadata);
+    const response = asRecord(metadata.response);
+    return response.conversationId === conversationId || response.conversation_id === conversationId;
+  });
+
+  if (conversationMatches.length === 0) {
+    return null;
+  }
+
+  if (usageTimestamp === null) {
+    return conversationMatches[0] ?? null;
+  }
+
+  return conversationMatches.reduce<Record<string, unknown> | null>((best, row) => {
+    if (best === null) return row;
+
+    const bestDiff = Math.abs((parseIsoTime(best.created_at) ?? usageTimestamp) - usageTimestamp);
+    const rowDiff = Math.abs((parseIsoTime(row.created_at) ?? usageTimestamp) - usageTimestamp);
+    return rowDiff < bestDiff ? row : best;
+  }, null);
+}
+
+export async function loadLatestRuntimeProof(
+  supabase: SupabaseClient,
+  hours: number = 72,
+): Promise<LatestRuntimeProof> {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+  const { data: usageLog } = await supabase
+    .from('ai_usage_logs')
+    .select('id, user_id, conversation_id, request_id, model_id, latency_ms, created_at, metadata')
+    .eq('status', 'success')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!usageLog) {
+    return {
+      found: false,
+      status: 'warning',
+      message: `最近 ${hours} 小时内暂无成功 AI 请求，无法生成真实运行证据`,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const usageMetadata = asRecord(usageLog.metadata);
+  const usageTimestamp = parseIsoTime(usageLog.created_at);
+  const expectedSearchCount = Number(usageMetadata.webSearchCount ?? 0) || 0;
+  const searchExecuted = usageMetadata.webSearchExecuted === true || expectedSearchCount > 0;
+  const freeTierUsed = usageMetadata.freeTierUsed === true;
+
+  const { data: tokenCandidates } = await supabase
+    .from('token_stats')
+    .select('id, conversation_id, message_id, model_used, total_credits, web_search_count, total_cost_usd, metadata, created_at')
+    .eq('conversation_id', usageLog.conversation_id)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  const tokenStats = (tokenCandidates ?? []).reduce<Record<string, unknown> | null>((best, row) => {
+    if (!row) return best;
+    if (best === null) return row;
+
+    const rowTime = parseIsoTime(row.created_at);
+    const bestTime = parseIsoTime(best.created_at);
+
+    if (usageTimestamp === null || rowTime === null || bestTime === null) return best;
+
+    const rowDiff = Math.abs(rowTime - usageTimestamp);
+    const bestDiff = Math.abs(bestTime - usageTimestamp);
+    return rowDiff < bestDiff ? row : best;
+  }, null);
+
+  const { data: settleCandidates } = await supabase
+    .from('billing_history')
+    .select('id, transaction_id, amount, operation_type, metadata, created_at')
+    .eq('user_id', usageLog.user_id)
+    .eq('operation_type', 'settle')
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  const settle = matchBillingSettleForUsage(
+    (settleCandidates ?? []) as Array<Record<string, unknown>>,
+    usageLog as Record<string, unknown>,
+  );
+
+  const { data: transaction } = settle?.transaction_id
+    ? await supabase
+      .from('credit_transactions')
+      .select('id, type, amount, description, created_at')
+      .eq('id', settle.transaction_id)
+      .maybeSingle()
+    : { data: null };
+
+  const { data: snapshotRows } = await supabase
+    .from('conversation_context_snapshots')
+    .select('snapshot_type, created_at')
+    .eq('conversation_id', usageLog.conversation_id)
+    .in('snapshot_type', ['search_digest', 'compression_checkpoint', 'rolling_summary'])
+    .order('created_at', { ascending: false });
+
+  const tokenMetadata = tokenStats ? asRecord(tokenStats.metadata) : {};
+  const settleMetadata = settle ? asRecord(settle.metadata) : {};
+  const legacySettleWithoutTransaction = Boolean(settle && !settle.transaction_id && !freeTierUsed);
+  const snapshots = {
+    searchDigest: (snapshotRows ?? []).some((row) => row.snapshot_type === 'search_digest'),
+    compressionCheckpoint: (snapshotRows ?? []).some((row) => row.snapshot_type === 'compression_checkpoint'),
+    rollingSummary: (snapshotRows ?? []).some((row) => row.snapshot_type === 'rolling_summary'),
+  };
+
+  const checks = {
+    usageLogFound: true,
+    tokenStatsFound: Boolean(tokenStats),
+    modelMatched: tokenStats ? tokenStats.model_used === usageLog.model_id : false,
+    routingCaptured: hasRoutingEvidence(tokenMetadata, usageMetadata),
+    settleRecorded: freeTierUsed ? true : Boolean(settle),
+    creditsMatched: tokenStats
+      ? freeTierUsed
+        ? Number(tokenStats.total_credits ?? 0) === 0
+        : Number(tokenStats.total_credits ?? -1) === Number(settleMetadata.actualCredits ?? Math.abs(Number(settle?.amount ?? 0)))
+      : false,
+    searchCountMatched: tokenStats
+      ? Number(tokenStats.web_search_count ?? 0) === expectedSearchCount
+      : false,
+    searchSnapshotMatched: searchExecuted ? snapshots.searchDigest : true,
+    transactionLinked: freeTierUsed ? true : Boolean(transaction),
+  };
+
+  const criticalOk =
+    checks.tokenStatsFound &&
+    checks.modelMatched &&
+    checks.routingCaptured &&
+    checks.settleRecorded &&
+    checks.creditsMatched &&
+    checks.searchCountMatched &&
+    checks.searchSnapshotMatched &&
+    checks.transactionLinked;
+
+  const legacyCompatibleOk =
+    legacySettleWithoutTransaction &&
+    checks.tokenStatsFound &&
+    checks.modelMatched &&
+    checks.routingCaptured &&
+    checks.settleRecorded &&
+    checks.creditsMatched &&
+    checks.searchCountMatched &&
+    checks.searchSnapshotMatched;
+
+  return {
+    found: true,
+    status: criticalOk ? 'passed' : legacyCompatibleOk ? 'warning' : 'failed',
+    message: criticalOk
+      ? `已验证最近一次真实请求: model=${usageLog.model_id}, credits=${tokenStats?.total_credits ?? 0}, search=${tokenStats?.web_search_count ?? 0}`
+      : legacyCompatibleOk
+        ? '已找到最近一次真实请求，但该记录来自旧账务路径，缺少 credit_transactions 关联；请生成一条新的真实请求以完成原子证据链'
+        : '最近一次真实 AI 请求存在账务或运行时证据不一致',
+    checkedAt: new Date().toISOString(),
+    usageLog,
+    tokenStats: tokenStats ?? undefined,
+    settle: settle ?? undefined,
+    transaction: transaction ?? undefined,
+    snapshots,
+    checks,
+  };
 }
 
 async function measureLatency<T>(fn: () => Promise<T>): Promise<{ result: T; latencyMs: number }> {
@@ -124,8 +370,11 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       const runtimeSettings = await getChatRuntimeSettings(ctx.supabase);
       // 测试简单任务分类
       const simpleTask = classifyTask('你好', 0);
+      const simpleTaskComplexity = classifyTaskComplexity('你好', 0);
       const complexTask = classifyTask('请帮我写一个完整的用户管理系统，包括登录、注册、权限管理功能', 0);
+      const complexTaskComplexity = classifyTaskComplexity('请帮我写一个完整的用户管理系统，包括登录、注册、权限管理功能', 0);
       const multiTurnTask = classifyTask('继续', 5);
+      const multiTurnTaskComplexity = classifyTaskComplexity('继续', 5);
 
       // 测试模型选择
       const routingResult = await selectModel({
@@ -137,18 +386,24 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       return {
         smartRoutingEnabled: runtimeSettings.enableSmartRouting,
         simpleTask,
+        simpleTaskComplexity,
         complexTask,
+        complexTaskComplexity,
         multiTurnTask,
+        multiTurnTaskComplexity,
         selectedModel: routingResult.modelConfig.name,
         routingReason: routingResult.routingReason,
+        routingDecision: routingResult.routingDecision,
       };
     });
 
     // 验证结果
     const isValid =
-      result.simpleTask === 'simple' &&
-      result.complexTask === 'complex' &&
-      result.multiTurnTask === 'complex' &&
+      result.simpleTask === 'greeting' &&
+      result.simpleTaskComplexity === 'simple' &&
+      result.complexTask === 'coding' &&
+      result.complexTaskComplexity === 'complex' &&
+      result.multiTurnTaskComplexity === 'complex' &&
       result.selectedModel !== undefined;
 
     return {
@@ -157,7 +412,7 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       category,
       status: isValid ? 'passed' : 'failed',
       message: isValid
-        ? `路由正常: 开关=${result.smartRoutingEnabled ? '开启' : '关闭'}, 简单=${result.simpleTask}, 复杂=${result.complexTask}`
+        ? `路由正常: 开关=${result.smartRoutingEnabled ? '开启' : '关闭'}, 简单=${result.simpleTask}/${result.simpleTaskComplexity}, 复杂=${result.complexTask}/${result.complexTaskComplexity}`
         : '路由分类异常',
       details: result,
       latencyMs,
@@ -471,6 +726,35 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
   }
 }
 
+async function testAILiveRuntimeProof(ctx: DiagnosticContext): Promise<DiagnosticTestResult> {
+  const testId = 'ai_live_runtime_proof';
+  const testName = '真实运行证据测试';
+  const category: DiagnosticCategory = 'ai';
+
+  try {
+    const { result, latencyMs } = await measureLatency(async () => loadLatestRuntimeProof(ctx.supabase));
+
+    return {
+      testId,
+      testName,
+      category,
+      status: result.status,
+      message: result.message,
+      details: result as unknown as Record<string, unknown>,
+      latencyMs,
+    };
+  } catch (error) {
+    return {
+      testId,
+      testName,
+      category,
+      status: 'error',
+      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      latencyMs: 0,
+    };
+  }
+}
+
 
 // ============================================
 // 计费功能测试
@@ -610,32 +894,13 @@ async function testBillingReconcile(ctx: DiagnosticContext): Promise<DiagnosticT
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
-      // 获取测试用户
-      const { data: testUser } = await ctx.supabase
-        .from('profiles')
-        .select('id, credits')
-        .eq('email', 'system-test@graylum.internal')
-        .single();
-
-      if (!testUser) {
-        return {
-          testUserExists: false,
-          reconcileValid: false,
-        };
-      }
-
-      // 检查 billing_history 表结构
-      const { data: billingHistory } = await ctx.supabase
-        .from('billing_history')
-        .select('id, operation_type, amount')
-        .eq('user_id', testUser.id)
-        .limit(1);
-
+      const reconciliation = await runDailyBillingReconciliation(ctx.supabase);
       return {
-        testUserExists: true,
-        testUserCredits: testUser.credits,
-        billingHistoryAccessible: billingHistory !== null,
-        reconcileValid: true,
+        reconcileValid: reconciliation.success,
+        mismatches: reconciliation.mismatches,
+        summary: reconciliation.summary,
+        periodStart: reconciliation.periodStart,
+        periodEnd: reconciliation.periodEnd,
       };
     });
 
@@ -644,9 +909,9 @@ async function testBillingReconcile(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: result.reconcileValid ? 'passed' : 'warning',
-      message: result.testUserExists
-        ? `测试账户余额: ${result.testUserCredits} 积分`
-        : '测试账户不存在，请运行数据库迁移',
+      message: result.reconcileValid
+        ? `对账通过: 成功请求 ${result.summary.successfulAiRequests}, Token 统计 ${result.summary.tokenStatsCount}`
+        : `发现 ${result.mismatches.length} 条对账异常`,
       details: result,
       latencyMs,
     };
@@ -864,6 +1129,7 @@ export class DiagnosticsService {
       testContextCompression,
       testRealtimeKeywords,
       testAIModelStatus,
+      testAILiveRuntimeProof,
       testBillingPrededuct,
       testBillingIdempotency,
       testBillingReconcile,
@@ -914,7 +1180,7 @@ export class DiagnosticsService {
 
     // 根据类别选择测试
     const testMap: Record<DiagnosticCategory, Array<(ctx: DiagnosticContext) => Promise<DiagnosticTestResult>>> = {
-      ai: [testAIRouting, testTokenCalculation, testPromptCache, testContextCompression, testRealtimeKeywords, testAIModelStatus],
+      ai: [testAIRouting, testTokenCalculation, testPromptCache, testContextCompression, testRealtimeKeywords, testAIModelStatus, testAILiveRuntimeProof],
       billing: [testBillingPrededuct, testBillingIdempotency, testBillingReconcile],
       security: [testRateLimit, testCircuitBreaker, testRLSIsolation],
       performance: [],
@@ -961,6 +1227,7 @@ export class DiagnosticsService {
       ai_prompt_cache: testPromptCache,
       ai_context_compress: testContextCompression,
       ai_realtime_keywords: testRealtimeKeywords,
+      ai_live_runtime_proof: testAILiveRuntimeProof,
       billing_prededuct: testBillingPrededuct,
       billing_idempotency: testBillingIdempotency,
       billing_reconcile: testBillingReconcile,
@@ -1051,6 +1318,10 @@ export class DiagnosticsService {
     };
   }
 
+  async getLatestRuntimeProof(hours: number = 72): Promise<LatestRuntimeProof> {
+    return loadLatestRuntimeProof(this.supabase, hours);
+  }
+
   // ============================================
   // 私有方法
   // ============================================
@@ -1091,16 +1362,12 @@ export class DiagnosticsService {
       batch_id: batchId,
     }));
 
-    console.log('[Diagnostics] Saving results to database, records:', records.length, 'userId:', this.userId);
-
     const { error } = await this.supabase.from('diagnostic_results').insert(records);
 
     if (error) {
       console.error('[Diagnostics] Failed to save diagnostic results:', error.message, error.code, error.details);
       return { saved: false, error: `${error.message} (${error.code})` };
     }
-
-    console.log('[Diagnostics] Results saved successfully');
     return { saved: true };
   }
 

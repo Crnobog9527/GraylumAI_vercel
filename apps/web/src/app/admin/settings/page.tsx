@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
-  Trash2, Download, Clock, AlertTriangle, CheckCircle
+  Trash2, Download, Clock, AlertTriangle, CheckCircle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -14,12 +14,13 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 
-// 完整的系统设置定义 (35项)
+// 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
   // General (3项)
-  site_name: { value: 'AI Chat Platform', type: 'string', label: '平台名称', description: '显示在全站的平台名称' },
-  support_email: { value: 'support@example.com', type: 'string', label: '客服邮箱', description: '用户支持咨询邮箱' },
+  site_name: { value: DEFAULT_SITE_NAME, type: 'string', label: '平台名称', description: '显示在全站的平台名称' },
+  support_email: { value: DEFAULT_SUPPORT_EMAIL, type: 'string', label: '客服邮箱', description: '用户支持咨询邮箱' },
   maintenance_mode: { value: 'false', type: 'boolean', label: '维护模式', description: '开启后向用户显示维护信息' },
 
   // Credits & Billing (5项)
@@ -38,9 +39,18 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   enable_long_text_warning: { value: 'true', type: 'boolean', label: '启用长文本预警', description: '开启后，超长文本会提示预计消耗积分' },
   show_token_usage_stats: { value: 'true', type: 'boolean', label: '显示Token使用统计', description: '在聊天页面显示本次请求和累计的Token使用情况' },
   chat_show_model_selector: { value: 'true', type: 'boolean', label: '显示模型选择器', description: '在聊天界面显示AI模型选择下拉框' },
+  chat_prompt_text: { value: '请选择一个模型开始对话', type: 'string', label: '聊天提示文案', description: '聊天输入框 placeholder 文案' },
+  chat_welcome_message: { value: '你好！有什么可以帮助你的吗？', type: 'string', label: '聊天欢迎消息', description: '聊天页空状态欢迎文案' },
   chat_billing_hint: { value: '⚡ 按实际Token消耗计费：输入 {input}积分/1K tokens，输出 {output}积分/1K tokens', type: 'string', label: '计费提示文案', description: '聊天页面底部显示的计费说明' },
+  home_show_onboarding: { value: 'true', type: 'boolean', label: '显示新手引导', description: '首页显示六步引导模块' },
+  home_show_featured_modules: { value: 'true', type: 'boolean', label: '显示精选模块', description: '首页显示精选推荐模块' },
   enable_smart_routing: { value: 'true', type: 'boolean', label: '启用智能路由', description: '根据用户问题自动分类任务类型并推荐最合适的AI模型' },
-  enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '通过关键词检测自动判断是否需要联网；当前仅做判断与记录，不自动发起外部联网请求' },
+  smart_routing_min_confidence: { value: '0.72', type: 'number', label: '智能路由最小置信度', description: '轻任务命中该阈值后才允许走辅助模型' },
+  primary_model_id: { value: '', type: 'string', label: '主力模型 ID', description: '复杂推理、写作、代码等任务的默认主力模型记录 ID' },
+  assistant_model_id: { value: '', type: 'string', label: '辅助模型 ID', description: '轻任务、压缩、搜索摘要等任务的默认辅助模型记录 ID' },
+  enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
+  search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
+  search_surcharge_credits: { value: '0', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的站内积分成本' },
   enable_prompt_cache: { value: 'true', type: 'boolean', label: '启用 API 缓存', description: '为 Anthropic 请求构造可缓存提示词，以便记录和利用 prompt caching 命中数据' },
 
   // Checkin (6项)
@@ -70,7 +80,8 @@ const settingGroups = {
   billing: ['new_user_credits', 'input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits', 'first_purchase_bonus_percent'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
-  features: ['enable_smart_routing', 'enable_smart_search_decision', 'enable_prompt_cache', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats', 'chat_show_model_selector', 'chat_billing_hint'],
+  experience: ['chat_show_model_selector', 'chat_prompt_text', 'chat_welcome_message', 'chat_billing_hint', 'home_show_onboarding', 'home_show_featured_modules'],
+  features: ['enable_smart_routing', 'smart_routing_min_confidence', 'primary_model_id', 'assistant_model_id', 'enable_smart_search_decision', 'search_decision_min_confidence', 'search_surcharge_credits', 'enable_prompt_cache', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats'],
 };
 
 interface SettingData {
@@ -210,6 +221,7 @@ export default function AdminSettingsPage() {
           data-testid={`admin-setting-${key}`}
           checked={data.value === 'true'}
           onCheckedChange={(checked) => handleSettingChange(key, checked.toString())}
+          className="self-start md:self-center"
         />
       );
     }
@@ -220,7 +232,7 @@ export default function AdminSettingsPage() {
           type="number"
           value={data.value}
           onChange={(e) => handleSettingChange(key, e.target.value)}
-          className="max-w-[120px] bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+          className="w-full max-w-full sm:max-w-[160px] bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
         />
       );
     }
@@ -229,7 +241,7 @@ export default function AdminSettingsPage() {
         data-testid={`admin-setting-${key}`}
         value={data.value}
         onChange={(e) => handleSettingChange(key, e.target.value)}
-        className="max-w-md bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+        className="w-full max-w-full md:max-w-md bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
       />
     );
   };
@@ -241,10 +253,10 @@ export default function AdminSettingsPage() {
       return (
         <div
           key={key}
-          className="flex items-center justify-between py-4"
+          className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between"
           style={{ borderBottom: '1px solid var(--border-primary)' }}
         >
-          <div className="flex-1 pr-4">
+          <div className="flex-1 md:pr-4">
             <Label className="text-base" style={{ color: 'var(--text-primary)' }}>
               {data.label}
             </Label>
@@ -267,11 +279,11 @@ export default function AdminSettingsPage() {
   }
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
             系统设置
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
@@ -282,7 +294,7 @@ export default function AdminSettingsPage() {
           data-testid="admin-settings-save-all"
           onClick={handleSaveAll}
           disabled={saving}
-          className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 gap-2"
+          className="w-full gap-2 bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 sm:w-auto"
         >
           {saving ? (
             <RefreshCw className="h-4 w-4 animate-spin" />
@@ -296,30 +308,34 @@ export default function AdminSettingsPage() {
       {/* Settings Tabs */}
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList
-          className="grid w-full grid-cols-6 h-auto p-1"
+          className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
         >
-          <TabsTrigger value="general" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="general" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <Settings className="h-4 w-4" />
             基础设置
           </TabsTrigger>
-          <TabsTrigger value="billing" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="billing" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <CreditCard className="h-4 w-4" />
             积分计费
           </TabsTrigger>
-          <TabsTrigger value="checkin" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="checkin" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <Gift className="h-4 w-4" />
             签到福利
           </TabsTrigger>
-          <TabsTrigger value="referral" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="referral" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <Users className="h-4 w-4" />
             邀请奖励
           </TabsTrigger>
-          <TabsTrigger value="features" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="experience" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+            <MessageSquare className="h-4 w-4" />
+            页面体验
+          </TabsTrigger>
+          <TabsTrigger value="features" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <Sliders className="h-4 w-4" />
             功能设置
           </TabsTrigger>
-          <TabsTrigger value="membership" className="gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
+          <TabsTrigger value="membership" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <Crown className="h-4 w-4" />
             会员权限
           </TabsTrigger>
@@ -327,7 +343,7 @@ export default function AdminSettingsPage() {
 
         {/* General Tab */}
         <TabsContent value="general">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-settings-general-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>基础设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>平台基本配置</CardDescription>
@@ -340,7 +356,7 @@ export default function AdminSettingsPage() {
 
         {/* Billing Tab */}
         <TabsContent value="billing">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-settings-billing-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>积分计费设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
@@ -398,7 +414,7 @@ export default function AdminSettingsPage() {
 
         {/* Checkin Tab */}
         <TabsContent value="checkin">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-settings-checkin-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>签到系统</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
@@ -413,7 +429,7 @@ export default function AdminSettingsPage() {
 
         {/* Referral Tab */}
         <TabsContent value="referral">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-settings-referral-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>邀请奖励设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
@@ -437,9 +453,24 @@ export default function AdminSettingsPage() {
           </Card>
         </TabsContent>
 
+        {/* Experience Tab */}
+        <TabsContent value="experience">
+          <Card data-testid="admin-settings-experience-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <CardHeader>
+              <CardTitle style={{ color: 'var(--text-primary)' }}>页面体验设置</CardTitle>
+              <CardDescription style={{ color: 'var(--text-tertiary)' }}>
+                统一管理聊天页和首页的展示文案与模块开关
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {renderSettingGroup(settingGroups.experience)}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Features Tab */}
         <TabsContent value="features">
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-settings-features-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>功能设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
@@ -456,7 +487,7 @@ export default function AdminSettingsPage() {
         <TabsContent value="membership">
           <div className="space-y-6">
             {/* Membership Plans Permissions */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-settings-membership-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                   <Crown className="h-5 w-5 text-amber-500" />
@@ -467,6 +498,18 @@ export default function AdminSettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                <div
+                  className="mb-4 rounded-lg border p-4"
+                  style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
+                >
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    套餐价格、积分发放和 Stripe Price ID 在
+                    <a href="/admin/packages" className="ml-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
+                      套餐管理
+                    </a>
+                    维护；这里仅负责会员历史保留、导出权限和批量导出策略。运营调整价格或上下架时，请返回套餐管理页面，不要在本页寻找计费入口。
+                  </p>
+                </div>
                 {!membershipPlans || (membershipPlans as MembershipPlan[]).length === 0 ? (
                   <div
                     className="p-6 rounded-lg text-center"
@@ -493,7 +536,7 @@ export default function AdminSettingsPage() {
                           className="p-4 rounded-lg"
                           style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-primary)' }}
                         >
-                          <div className="flex items-center justify-between mb-4">
+                          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div className="flex items-center gap-3">
                               <Badge className={levelColors[plan.level] || 'bg-gray-500/20 text-gray-400'}>
                                 {plan.level.toUpperCase()}
@@ -507,7 +550,7 @@ export default function AdminSettingsPage() {
                               size="sm"
                               onClick={() => handleSaveMembershipSetting(plan.id)}
                               disabled={updateMembershipPlan.isPending}
-                              className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+                              className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90 md:w-auto"
                             >
                               <Save className="h-3 w-3 mr-1" />
                               保存

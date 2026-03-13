@@ -51,12 +51,29 @@ function classifyConsoleSeverity(type: string): IssueSeverity {
   return type === 'error' ? 'P1' : 'P2';
 }
 
+function shouldIgnoreConsoleMessage(text: string) {
+  // App Router navigation can abort Supabase's in-flight getUser() probe while the page
+  // is being replaced, which surfaces as a noisy but non-user-visible fetch error.
+  return (
+    text.includes('TypeError: Failed to fetch') &&
+    text.includes('SupabaseAuthClient._getUser') &&
+    text.includes('supabase_auth-js_dist_module')
+  )
+    // Remote Vercel previews can emit a generic console error after an internal
+    // OPTIONS handshake to the preview root is rejected with an empty 400.
+    || text === 'Failed to load resource: the server responded with a status of 400 ()';
+}
+
 function shouldIgnoreRequestFailure(url: string, method: string, message: string) {
   if (url.includes('/.well-known/vercel/jwe') || url.includes('/.well-known/vercel-user-meta')) {
     return true;
   }
 
   if (url.includes('vercel.live/login/validate')) {
+    return true;
+  }
+
+  if (url.includes('vercel.live/_next-live/feedback/feedback.html') && message === 'net::ERR_ABORTED') {
     return true;
   }
 
@@ -72,6 +89,30 @@ function shouldIgnoreRequestFailure(url: string, method: string, message: string
     (url.includes('_rsc=') || url.includes('/api/trpc/'))
   ) {
     return true;
+  }
+
+  // Supabase auth may cancel the background getUser() fetch when the browser navigates away.
+  if (message === 'net::ERR_ABORTED' && method === 'GET' && url.includes('/auth/v1/user')) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldIgnoreResponseIssue(url: string, method: string, status: number, statusText: string) {
+  if (
+    method === 'OPTIONS'
+    && status === 400
+    && statusText.trim() === ''
+  ) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/') {
+        return true;
+      }
+    } catch {
+      return false;
+    }
   }
 
   return false;
@@ -151,7 +192,7 @@ export function createIssueMonitor(page: Page) {
     if (!['error', 'warning'].includes(type)) return;
 
     const text = message.text().trim();
-    if (!text || text.includes('favicon.ico')) return;
+    if (!text || text.includes('favicon.ico') || shouldIgnoreConsoleMessage(text)) return;
 
     issues.push({
       severity: classifyConsoleSeverity(type),
@@ -188,6 +229,10 @@ export function createIssueMonitor(page: Page) {
     const request = response.request();
     const resourceType = request.resourceType();
     if (!relevantResourceTypes.has(resourceType) || !shouldTrackUrl(response.url()) || response.status() < 400) {
+      return;
+    }
+
+    if (shouldIgnoreResponseIssue(response.url(), request.method(), response.status(), response.statusText())) {
       return;
     }
 

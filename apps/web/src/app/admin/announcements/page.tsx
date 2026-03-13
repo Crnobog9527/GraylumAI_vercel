@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   Megaphone, Plus, Pencil, Trash2, Check, X,
   Info, AlertTriangle, CheckCircle, XCircle,
-  Calendar, RefreshCw, Globe, Home, MessageSquare,
-  Link2, Palette, Tag, ArrowUpDown, Settings, Sparkles
+  Calendar, RefreshCw, Globe, Home,
+  Link2, Palette, Tag, ArrowUpDown, Sparkles
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -97,7 +96,7 @@ const tagColorOptions = [
 ];
 
 export default function AdminAnnouncementsPage() {
-  const [activeTab, setActiveTab] = useState<'banner' | 'homepage' | 'settings'>('banner');
+  const [activeTab, setActiveTab] = useState<'banner' | 'homepage'>('banner');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [formData, setFormData] = useState({
@@ -115,67 +114,6 @@ export default function AdminAnnouncementsPage() {
     startDate: '',
     endDate: '',
   });
-
-  // Chat page settings state
-  const [chatSettings, setChatSettings] = useState({
-    showModelSelector: true,
-    chatPromptText: '请选择一个模型开始对话',
-    welcomeMessage: '你好！有什么可以帮助你的吗？',
-  });
-
-  // Homepage guide settings state
-  const [homeGuideSettings, setHomeGuideSettings] = useState({
-    showOnboarding: true,
-    showFeaturedModules: true,
-  });
-
-  // Fetch system settings to initialize values
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
-
-  // Update system settings mutation
-  const updateSetting = trpc.settings.updateSystemSettings.useMutation();
-
-  // Initialize settings from database
-  useEffect(() => {
-    if (systemSettings) {
-      setChatSettings({
-        showModelSelector: systemSettings.chat_show_model_selector === true || systemSettings.chat_show_model_selector === 'true',
-        chatPromptText: (systemSettings.chat_prompt_text as string) || '请选择一个模型开始对话',
-        welcomeMessage: (systemSettings.chat_welcome_message as string) || '你好！有什么可以帮助你的吗？',
-      });
-      setHomeGuideSettings({
-        showOnboarding: systemSettings.home_show_onboarding === true || systemSettings.home_show_onboarding === 'true',
-        showFeaturedModules: systemSettings.home_show_featured_modules === true || systemSettings.home_show_featured_modules === 'true',
-      });
-    }
-  }, [systemSettings]);
-
-  // Save chat page settings
-  const handleSaveChatSettings = async () => {
-    try {
-      await Promise.all([
-        updateSetting.mutateAsync({ key: 'chat_show_model_selector', value: chatSettings.showModelSelector }),
-        updateSetting.mutateAsync({ key: 'chat_prompt_text', value: chatSettings.chatPromptText }),
-        updateSetting.mutateAsync({ key: 'chat_welcome_message', value: chatSettings.welcomeMessage }),
-      ]);
-      alert('聊天页面设置保存成功！');
-    } catch {
-      alert('保存失败，请重试');
-    }
-  };
-
-  // Save homepage guide settings
-  const handleSaveHomeGuideSettings = async () => {
-    try {
-      await Promise.all([
-        updateSetting.mutateAsync({ key: 'home_show_onboarding', value: homeGuideSettings.showOnboarding }),
-        updateSetting.mutateAsync({ key: 'home_show_featured_modules', value: homeGuideSettings.showFeaturedModules }),
-      ]);
-      alert('首页引导设置保存成功！');
-    } catch {
-      alert('保存失败，请重试');
-    }
-  };
 
   const { data, isLoading, error, refetch } = trpc.admin.getAllAnnouncements.useQuery({
     limit: 100,
@@ -475,7 +413,7 @@ export default function AdminAnnouncementsPage() {
             公告管理
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            管理横幅公告、首页公告和聊天页面设置
+            管理横幅公告和首页公告
           </p>
         </div>
         <Button
@@ -575,13 +513,6 @@ export default function AdminAnnouncementsPage() {
             <Home className="h-4 w-4 mr-2" />
             首页公告
           </TabsTrigger>
-          <TabsTrigger
-            value="settings"
-            className="data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            页面设置
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="banner">
@@ -590,120 +521,6 @@ export default function AdminAnnouncementsPage() {
 
         <TabsContent value="homepage">
           {renderAnnouncementTable(homepageAnnouncements, 'homepage')}
-        </TabsContent>
-
-        <TabsContent value="settings">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Chat Page Settings */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <MessageSquare className="h-5 w-5" />
-                  聊天页面设置
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-                  <div>
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>显示模型选择器</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>允许用户在聊天页面切换模型</p>
-                  </div>
-                  <Switch
-                    checked={chatSettings.showModelSelector}
-                    onCheckedChange={(checked) => setChatSettings({ ...chatSettings, showModelSelector: checked })}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>聊天提示文案</Label>
-                  <Input
-                    data-testid="announcement-chat-prompt-input"
-                    value={chatSettings.chatPromptText}
-                    onChange={(e) => setChatSettings({ ...chatSettings, chatPromptText: e.target.value })}
-                    placeholder="请选择一个模型开始对话"
-                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>欢迎消息</Label>
-                  <Textarea
-                    data-testid="announcement-chat-welcome-input"
-                    value={chatSettings.welcomeMessage}
-                    onChange={(e) => setChatSettings({ ...chatSettings, welcomeMessage: e.target.value })}
-                    placeholder="你好！有什么可以帮助你的吗？"
-                    rows={3}
-                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                  />
-                </div>
-
-                <Button
-                  data-testid="announcement-save-chat-settings"
-                  className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
-                  onClick={handleSaveChatSettings}
-                  disabled={updateSetting.isPending}
-                >
-                  {updateSetting.isPending ? '保存中...' : '保存聊天页面设置'}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Homepage Guide Settings */}
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Home className="h-5 w-5" />
-                  首页引导设置
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    首页引导设置可以配置：
-                  </p>
-                  <ul className="mt-2 space-y-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    <li>• 新手引导步骤和提示</li>
-                    <li>• 精选模块展示顺序</li>
-                    <li>• 快捷入口配置</li>
-                    <li>• 推荐功能卡片</li>
-                  </ul>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-                  <div>
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>显示新手引导</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>新用户首次访问时显示</p>
-                  </div>
-                  <Switch
-                    data-testid="announcement-home-onboarding-switch"
-                    checked={homeGuideSettings.showOnboarding}
-                    onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showOnboarding: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-                  <div>
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>显示精选模块</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>在首页展示推荐功能模块</p>
-                  </div>
-                  <Switch
-                    data-testid="announcement-home-featured-switch"
-                    checked={homeGuideSettings.showFeaturedModules}
-                    onCheckedChange={(checked) => setHomeGuideSettings({ ...homeGuideSettings, showFeaturedModules: checked })}
-                  />
-                </div>
-
-                <Button
-                  data-testid="announcement-save-home-settings"
-                  className="w-full bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
-                  onClick={handleSaveHomeGuideSettings}
-                  disabled={updateSetting.isPending}
-                >
-                  {updateSetting.isPending ? '保存中...' : '保存首页引导设置'}
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
       </Tabs>
 

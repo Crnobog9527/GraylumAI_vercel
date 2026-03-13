@@ -65,6 +65,9 @@ interface AIModel {
   input_token_cost_above_200k: number;
   output_token_cost_above_200k: number;
   web_search_cost: number;
+  token_counting_supported: string;
+  token_counting_method: string;
+  tokenizer_family?: string | null;
   is_active: string;
   config?: Record<string, unknown>;
   created_at: string;
@@ -228,6 +231,24 @@ export default function AdminModelsPage() {
       default:
         return { label: '未知', color: 'bg-gray-500/20 text-gray-400', icon: HelpCircle };
     }
+  };
+
+  const getTokenCountingInfo = (model: AIModel) => {
+    if (model.token_counting_supported === 'true') {
+      return {
+        label: model.token_counting_method === 'anthropic_count_tokens'
+          ? '官方 Anthropic'
+          : model.token_counting_method === 'gemini_count_tokens'
+            ? '官方 Gemini'
+            : '可信 tokenizer',
+        color: 'bg-emerald-500/20 text-emerald-400',
+      };
+    }
+
+    return {
+      label: '禁止计费',
+      color: 'bg-rose-500/20 text-rose-400',
+    };
   };
 
   const resetForm = () => {
@@ -399,6 +420,7 @@ export default function AdminModelsPage() {
                   <TableHead>提供商</TableHead>
                   <TableHead>模型 ID</TableHead>
                   <TableHead>Token 限制</TableHead>
+                  <TableHead>Token 计数</TableHead>
                   <TableHead>联网搜索</TableHead>
                   <TableHead>API 状态</TableHead>
                   <TableHead>启用状态</TableHead>
@@ -446,6 +468,23 @@ export default function AdminModelsPage() {
                       </TableCell>
                       <TableCell style={{ color: 'var(--text-secondary)' }}>
                         {model.max_tokens?.toLocaleString()} / {(model.input_limit / 1000).toFixed(0)}K
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const info = getTokenCountingInfo(model);
+                          return (
+                            <div className="space-y-1">
+                              <Badge className={info.color}>
+                                {info.label}
+                              </Badge>
+                              {model.tokenizer_family && (
+                                <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                                  family: {model.tokenizer_family}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         {model.enable_web_search === 'true' ? (
@@ -533,7 +572,7 @@ export default function AdminModelsPage() {
                 })}
                 {modelList.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                    <TableCell colSpan={9} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                       暂无 AI 模型，点击上方按钮添加
                     </TableCell>
                   </TableRow>
@@ -597,6 +636,9 @@ export default function AdminModelsPage() {
                     <SelectItem value="builtin">内置 (支持联网)</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  保存时会自动推断该模型是否具备可验证的 token 计数能力；不支持者会被标记为“禁止计费”。
+                </p>
               </div>
 
               <div className="space-y-2">

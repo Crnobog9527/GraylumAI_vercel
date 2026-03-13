@@ -27,6 +27,7 @@ import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
 import { createClient } from '@/lib/supabase';
+import { isEmailVerified } from '@/lib/auth';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -44,6 +45,12 @@ function ProfilePageContent() {
       if (!user) {
         const redirectTarget = `${window.location.pathname}${window.location.search}`;
         router.replace(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+        return;
+      }
+
+      if (!isEmailVerified(user)) {
+        const redirectTarget = `${window.location.pathname}${window.location.search}`;
+        router.replace(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`);
         return;
       }
 
@@ -104,6 +111,7 @@ function ProfilePageContent() {
     total_credits_used: creditsSummary?.totalSpent ?? 0,
     total_credits_purchased: creditsSummary?.totalEarned ?? 0,
     subscription_tier: (userProfile as any)?.membership_level ?? 'free',
+    auth_provider: (userProfile as any)?.auth_provider ?? 'email',
     email_verified: (userProfile as any)?.email_verified ?? false,
     created_date: userProfile?.created_at ?? new Date().toISOString(),
   }), [userProfile, creditsBalance, creditsSummary]);
@@ -126,11 +134,6 @@ function ProfilePageContent() {
     setLocalUser(updatedUser);
   };
 
-  const handleLogout = async () => {
-    // TODO: Implement logout via tRPC
-    console.log('Logout');
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
@@ -145,7 +148,7 @@ function ProfilePageContent() {
       <div className="absolute inset-0 pointer-events-none">
         {/* 顶部金色光晕 - 静态 */}
         <div
-          className="absolute -top-32 left-1/3 w-[500px] h-[300px] rounded-full opacity-40 blur-[80px]"
+          className="absolute -top-16 left-1/3 h-[150px] w-[220px] rounded-full opacity-22 blur-[48px] md:-top-24 md:h-[240px] md:w-[420px] md:opacity-30 md:blur-[68px]"
           style={{
             background: 'var(--color-primary)',
             contain: 'layout paint',
@@ -153,7 +156,7 @@ function ProfilePageContent() {
         />
         {/* 左下紫色光晕 - 静态 */}
         <div
-          className="absolute bottom-0 left-0 w-[400px] h-[400px] rounded-full opacity-25 blur-[100px]"
+          className="absolute bottom-0 left-0 h-[180px] w-[180px] rounded-full opacity-14 blur-[52px] md:h-[320px] md:w-[320px] md:opacity-18 md:blur-[80px]"
           style={{
             background: 'rgba(139,92,246,0.5)',
             contain: 'layout paint',
@@ -170,13 +173,6 @@ function ProfilePageContent() {
         />
       </div>
 
-      {/* 动画样式 - 精简 */}
-      <style>{`
-        .card-hover:hover {
-          border-color: rgba(255, 215, 0, 0.3) !important;
-        }
-      `}</style>
-
       {/* 顶部导航 */}
       <AppHeader />
 
@@ -184,7 +180,7 @@ function ProfilePageContent() {
       <GlobalBanner banners={banners} />
 
       <div className="container mx-auto px-4 py-8 max-w-7xl relative" style={{ zIndex: 1 }}>
-        <div className="flex flex-col md:flex-row gap-8">
+        <div className="flex flex-col md:flex-row gap-4 md:gap-8">
           {/* Mobile Sidebar Trigger */}
           <div className="md:hidden mb-4">
             <Sheet>
@@ -204,13 +200,13 @@ function ProfilePageContent() {
               </SheetTrigger>
               <SheetContent
                 side="left"
-                className="w-72 p-0 pt-6"
+                className="w-[88vw] max-w-80 p-0 pt-6"
                 style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}
               >
                 <ProfileSidebar
+                  mobile
                   activeTab={activeTab}
                   onTabChange={setActiveTab}
-                  onLogout={handleLogout}
                 />
               </SheetContent>
             </Sheet>
@@ -220,7 +216,6 @@ function ProfilePageContent() {
           <ProfileSidebar
             activeTab={activeTab}
             onTabChange={setActiveTab}
-            onLogout={handleLogout}
           />
 
           {/* Main Content */}
@@ -237,6 +232,7 @@ function ProfilePageContent() {
                   user={effectiveUser}
                   onNavigateToTickets={handleNavigateToCreateTicket}
                   onNavigateToSecurity={handleNavigateToSecurity}
+                  onUserUpdate={handleUserUpdate}
                 />
               </>
             )}

@@ -6,6 +6,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { safeCloseContext } from './support/contextCleanup';
 import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -67,7 +68,7 @@ test.describe('Admin Operations Flows', () => {
       await expect(page.getByText('近期运行记录')).toBeVisible({ timeout: 10000 });
       await page.getByRole('tab', { name: '健康检查' }).click();
       await expect(page.getByText('系统健康检查')).toBeVisible({ timeout: 10000 });
-      await page.getByRole('button', { name: '刷新' }).click();
+      await page.getByRole('button', { name: '刷新', exact: true }).click();
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -135,6 +136,7 @@ test.describe('Admin Operations Flows', () => {
   });
 
   test('should open operational read pages and exercise their primary tabs or filters', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Operational read pages flow completed';
@@ -142,35 +144,121 @@ test.describe('Admin Operations Flows', () => {
     try {
       steps.push('Open /admin/transactions and use a transaction tab and search filter');
       await gotoWithBypass(page, '/admin/transactions');
-      await expect(page.getByText('交易记录')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-transactions-stat-additions')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-transactions-filters')).toBeVisible({ timeout: 15000 });
       await page.getByRole('tab', { name: '增加' }).click().catch(() => undefined);
-      await page.locator('input[placeholder="搜索用户邮箱或昵称..."]').fill('e2e');
+      await expect(page.getByTestId('admin-transactions-type-tabs')).toContainText('增加');
+      await page.getByPlaceholder('搜索用户邮箱或昵称...').fill('e2e');
+      await expect(page.getByTestId('admin-transactions-table-card')).toBeVisible({ timeout: 10000 });
+      const transactionRows = page.locator('[data-testid^="admin-transaction-row-"]');
+      const loadingBadge = page.getByTestId('admin-transactions-loading-badge');
+      await expect
+        .poll(async () => {
+          const transactionRowCount = await transactionRows.count();
+          const emptyVisible = await page.getByTestId('admin-transactions-empty-state').isVisible().catch(() => false);
+          const loadingVisible = await loadingBadge.isVisible().catch(() => false);
+          return transactionRowCount > 0 || emptyVisible || !loadingVisible;
+        }, { timeout: 15000 })
+        .toBe(true);
+      const transactionRowCount = await transactionRows.count();
+      if (transactionRowCount > 0) {
+        await expect(transactionRows.first()).toBeVisible({ timeout: 10000 });
+      } else {
+        await expect(page.getByTestId('admin-transactions-empty-state')).toBeVisible({ timeout: 15000 });
+      }
 
       steps.push('Open /admin/finance and switch to API statistics');
       await gotoWithBypass(page, '/admin/finance');
-      await expect(page.getByText('财务统计')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-finance-page')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-finance-header')).toContainText('财务统计');
+      await expect(page.getByTestId('admin-finance-tabs')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-finance-overview-revenue')).toBeVisible({ timeout: 15000 });
       await page.getByRole('tab', { name: 'API 统计' }).click();
+      await expect(page.getByTestId('admin-finance-api-section')).toBeVisible({ timeout: 10000 });
+      await page.getByRole('tab', { name: '模型渠道' }).click();
+      await expect(page.getByTestId('admin-finance-models-section')).toBeVisible({ timeout: 10000 });
+      const financeModelRows = page.locator('[data-testid^="admin-finance-model-row-"]');
+      const financeModelRowCount = await financeModelRows.count();
+      if (financeModelRowCount > 0) {
+        await expect(financeModelRows.first()).toBeVisible({ timeout: 10000 });
+      }
 
-      steps.push('Open /admin/invitations and verify search and refresh controls');
+      steps.push('Open /admin/invitations and verify search, filter, and refresh controls');
       await gotoWithBypass(page, '/admin/invitations');
-      await expect(page.getByText('邀请管理')).toBeVisible({ timeout: 10000 });
-      await page.locator('input[placeholder="搜索邮箱或邀请码..."]').fill('test');
-      await page.getByRole('button', { name: '刷新数据' }).click();
+      await expect(page.getByTestId('admin-invitations-stat-total')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-invitations-records-section')).toBeVisible({ timeout: 15000 });
+      await page.getByPlaceholder('搜索邮箱或邀请码...').fill('test');
+      await page.getByTestId('admin-invitations-status-filter').click();
+      await page.getByRole('option', { name: '已发放' }).click();
+      await page.getByTestId('admin-invitations-refresh').click();
+      const invitationRows = page.locator('[data-testid^="admin-invitation-row-"]');
+      const invitationRowCount = await invitationRows.count();
+      if (invitationRowCount > 0) {
+        await expect(invitationRows.first()).toBeVisible({ timeout: 10000 });
+      } else {
+        await expect(page.getByTestId('admin-invitations-empty-state')).toBeVisible({ timeout: 10000 });
+      }
 
       steps.push('Open /admin/costs and switch the report tab');
       await gotoWithBypass(page, '/admin/costs');
-      await expect(page.getByText('成本趋势')).toBeVisible({ timeout: 10000 });
-      await page.getByRole('tab').nth(1).click();
-
-      steps.push('Open /admin/performance and switch to token statistics');
-      await gotoWithBypass(page, '/admin/performance');
-      await expect(page.getByText('AI 性能监控')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-costs-distribution-card')).toBeVisible({ timeout: 15000 });
+      await page.getByRole('tab', { name: 'AI 调用日志' }).click();
+      await expect(page.getByTestId('admin-costs-usage-logs-section')).toBeVisible({ timeout: 10000 });
+      const usageRows = page.locator('[data-testid^="admin-usage-log-row-"]');
+      await expect
+        .poll(async () => {
+          const usageRowCount = await usageRows.count();
+          const usageEmptyVisible = await page.getByTestId('admin-costs-usage-logs-empty').isVisible().catch(() => false);
+          return usageRowCount > 0 || usageEmptyVisible;
+        }, { timeout: 10000 })
+        .toBe(true);
+      const usageRowCount = await usageRows.count();
+      if (usageRowCount > 0) {
+        await expect(usageRows.first()).toBeVisible({ timeout: 10000 });
+      } else {
+        await expect(page.getByTestId('admin-costs-usage-logs-empty')).toBeVisible({ timeout: 10000 });
+      }
       await page.getByRole('tab', { name: 'Token 统计' }).click();
+      await expect(page.getByTestId('admin-costs-token-stats-section')).toBeVisible({ timeout: 10000 });
+      const tokenRows = page.locator('[data-testid^="admin-token-stat-row-"]');
+      await expect
+        .poll(async () => {
+          const tokenRowCount = await tokenRows.count();
+          const tokenEmptyVisible = await page.getByTestId('admin-costs-token-stats-empty').isVisible().catch(() => false);
+          return tokenRowCount > 0 || tokenEmptyVisible;
+        }, { timeout: 10000 })
+        .toBe(true);
+      const tokenRowCount = await tokenRows.count();
+      if (tokenRowCount > 0) {
+        await expect(tokenRows.first()).toBeVisible({ timeout: 10000 });
+      } else {
+        await expect(page.getByTestId('admin-costs-token-stats-empty')).toBeVisible({ timeout: 10000 });
+      }
+
+      steps.push('Open /admin/performance and switch through overview, token, and model statistics');
+      await gotoWithBypass(page, '/admin/performance');
+      await expect(page.getByTestId('admin-performance-tabs')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-performance-overview-requests')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-performance-activity-trend')).toBeVisible({ timeout: 15000 });
+      await page.getByRole('tab', { name: 'Token 统计' }).click();
+      await expect(page.getByTestId('admin-performance-token-summary')).toBeVisible({ timeout: 15000 });
+      const modelsTab = page.getByRole('tab', { name: '模型使用' });
+      await modelsTab.click();
+      await expect(modelsTab).toHaveAttribute('data-state', 'active');
+      await expect(page.getByText('AI 模型使用情况', { exact: true })).toBeVisible({ timeout: 15000 });
+      const performanceModelRows = page.locator('[data-testid^="admin-performance-model-row-"]');
+      const performanceModelRowCount = await performanceModelRows.count();
+      if (performanceModelRowCount > 0) {
+        await expect(performanceModelRows.first()).toBeVisible({ timeout: 15000 });
+      } else {
+        await expect(page.getByTestId('admin-performance-models-empty')).toBeVisible({ timeout: 15000 });
+      }
 
       steps.push('Open /admin/tickets and verify the detail sheet shell is available');
       await gotoWithBypass(page, '/admin/tickets');
-      await expect(page.getByText('工单管理')).toBeVisible({ timeout: 10000 });
-      await page.getByRole('tab', { name: '全部' }).click();
+      await expect(page.getByTestId('admin-tickets-page')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-tickets-header')).toContainText('工单管理');
+      await expect(page.getByTestId('admin-tickets-table-card')).toBeVisible({ timeout: 10000 });
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -291,7 +379,7 @@ test.describe('Admin Operations Flows', () => {
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
-      await userContext.close();
+      await safeCloseContext(userContext);
       await writeFlowAudit(
         testInfo,
         {

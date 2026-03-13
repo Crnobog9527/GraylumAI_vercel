@@ -15,6 +15,7 @@ export const BillingOperationType = {
   PRE_DEDUCT: 'pre_deduct',
   SETTLE: 'settle',
   REFUND: 'refund',
+  ABORT_SETTLE: 'abort_settle',
 } as const;
 
 export type BillingOperationType = typeof BillingOperationType[keyof typeof BillingOperationType];
@@ -78,7 +79,7 @@ export const RefundRequestSchema = z.object({
  */
 export const BillingQuerySchema = z.object({
   userId: z.string().uuid().optional(),
-  operationType: z.enum(['pre_deduct', 'settle', 'refund']).optional(),
+  operationType: z.enum(['pre_deduct', 'settle', 'refund', 'abort_settle']).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
   limit: z.number().min(1).max(100).optional().default(50),
@@ -92,7 +93,7 @@ export const BillingHistoryRecordSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
   transactionId: z.string().uuid().nullable(),
-  operationType: z.enum(['pre_deduct', 'settle', 'refund']),
+  operationType: z.enum(['pre_deduct', 'settle', 'refund', 'abort_settle']),
   amount: z.number(),
   reason: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()).nullable(),

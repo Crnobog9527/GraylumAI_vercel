@@ -11,7 +11,7 @@ import { z } from 'zod';
 // 类型定义
 // ============================================
 
-interface CostOverview {
+export interface CostOverview {
   todayCost: number;
   todayCalls: number;
   monthCost: number;
@@ -19,7 +19,7 @@ interface CostOverview {
   avgCostPerCall: number;
 }
 
-interface ModelDistribution {
+export interface ModelDistribution {
   modelId: string;
   modelName: string;
   calls: number;
@@ -27,13 +27,13 @@ interface ModelDistribution {
   percentage: number;
 }
 
-interface DailyCost {
+export interface DailyCost {
   date: string;
   cost: number;
   calls: number;
 }
 
-interface TopUser {
+export interface TopUser {
   userId: string;
   email: string;
   nickname: string;
@@ -41,8 +41,9 @@ interface TopUser {
   totalCalls: number;
 }
 
-interface UsageLog {
+export interface UsageLog {
   id: string;
+  requestId: string | null;
   userId: string;
   userEmail: string;
   modelId: string;
@@ -54,7 +55,7 @@ interface UsageLog {
   createdAt: string;
 }
 
-interface TokenStat {
+export interface TokenStat {
   id: string;
   conversationId: string;
   modelUsed: string;
@@ -263,6 +264,7 @@ export const costsRouter = router({
         .from('ai_usage_logs')
         .select(`
           id,
+          request_id,
           user_id,
           model_id,
           status,
@@ -290,6 +292,7 @@ export const costsRouter = router({
 
       const logs: UsageLog[] = (data ?? []).map((record: any) => ({
         id: record.id,
+        requestId: record.request_id ?? null,
         userId: record.user_id,
         userEmail: record.profiles?.email ?? 'unknown',
         modelId: record.model_id,

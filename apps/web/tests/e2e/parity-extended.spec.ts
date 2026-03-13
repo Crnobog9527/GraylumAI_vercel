@@ -6,6 +6,7 @@
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { safeCloseContext } from './support/contextCleanup';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -98,7 +99,7 @@ async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number
       .poll(async () => readCreditsFromRow(targetRow), { timeout: 15000 })
       .toBeGreaterThanOrEqual(minimumCredits);
   } finally {
-    await context.close();
+    await safeCloseContext(context);
   }
 }
 

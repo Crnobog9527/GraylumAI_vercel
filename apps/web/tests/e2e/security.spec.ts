@@ -1,5 +1,54 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
+import { TRPCClientError, createTRPCProxyClient, httpBatchLink } from '@trpc/client';
+import type { AppRouter } from '@repo/api/src/root';
+import { simpleMarkdown } from '../../src/components/ai/messageSanitization';
 import { gotoWithBypass } from './support/deploymentProtection';
+import { authStatePaths, hasCredentials } from './support/auth';
+
+function getBaseUrl() {
+  return process.env.PLAYWRIGHT_BASE_URL ?? process.env.BASE_URL ?? 'http://127.0.0.1:3000';
+}
+
+const ticketUploadFixture = path.resolve(__dirname, '../../../../.agent/skills/assets/star-history.png');
+
+async function createCookieHeader(storageStatePath: string) {
+  const raw = await readFile(storageStatePath, 'utf8');
+  const state = JSON.parse(raw) as { cookies?: Array<{ name: string; value: string; expires?: number }> };
+  const now = Date.now() / 1000;
+
+  return (state.cookies ?? [])
+    .filter((cookie) => !cookie.expires || cookie.expires === -1 || cookie.expires > now)
+    .map((cookie) => `${cookie.name}=${cookie.value}`)
+    .join('; ');
+}
+
+async function createAuthedTrpcClient(storageStatePath: string) {
+  const cookie = await createCookieHeader(storageStatePath);
+
+  return createTRPCProxyClient<AppRouter>({
+    links: [
+      httpBatchLink({
+        url: `${getBaseUrl()}/api/trpc`,
+        headers() {
+          return cookie ? { cookie } : {};
+        },
+      }),
+    ],
+  });
+}
+
+async function expectDenied(promise: Promise<unknown>) {
+  try {
+    await promise;
+    throw new Error('Expected request to be denied');
+  } catch (error) {
+    expect(error).toBeInstanceOf(TRPCClientError);
+    const message = error instanceof Error ? error.message : '';
+    expect(message).toMatch(/FORBIDDEN|UNAUTHORIZED|NOT_FOUND|not found|permission|unauthorized/i);
+  }
+}
 
 /**
  * Security E2E Tests
@@ -17,6 +66,14 @@ test.describe('Security', () => {
   // XSS Prevention Tests
   // ============================================
   test.describe('XSS Prevention', () => {
+    test('should sanitize javascript links in streamed markdown helpers', async () => {
+      const rendered = simpleMarkdown('[danger](javascript:alert(1))\n<script>alert("xss")</script>');
+
+      expect(rendered).toContain('href="#"');
+      expect(rendered).not.toContain('javascript:alert');
+      expect(rendered).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    });
+
     test('should escape script tags in user input display', async ({ page }) => {
       await gotoWithBypass(page, '/login');
 
@@ -155,7 +212,7 @@ test.describe('Security', () => {
 
     test('should not expose admin API endpoints publicly', async ({ page }) => {
       // Try to access admin API directly
-      const response = await page.request.get('/api/trpc/admin.getStats');
+      const response = await page.request.get('/api/trpc/admin.getStatistics');
 
       // Should return unauthorized or not found
       expect([401, 403, 404, 500]).toContain(response.status());
@@ -327,19 +384,30 @@ test.describe('Security', () => {
 
       // Rapidly submit login attempts
       for (let i = 0; i < 15; i++) {
+        if (!page.url().includes('/login')) {
+          break;
+        }
         await page.fill('input[type="email"], input[name="email"]', `test${i}@example.com`);
         await page.fill('input[type="password"], input[name="password"]', 'password');
-        await page.click('button[type="submit"]');
+        const submitButton = page.locator('button[type="submit"]');
+        if (!(await submitButton.isEnabled())) {
+          break;
+        }
+        await submitButton.click();
         await page.waitForTimeout(100);
       }
 
       // Wait for rate limit message
       await page.waitForTimeout(1000);
 
-      // Check for rate limit indication (may or may not trigger depending on server config)
-      const pageContent = await page.content();
-      // Just ensure the page is still functional
-      await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
+      // Check for rate limit indication (may or may not trigger depending on server config).
+      // The auth flow may now redirect to verify-email after repeated attempts, so
+      // the main assertion is that the auth surface remains in a valid state.
+      if (page.url().includes('/verify-email')) {
+        await expect(page.getByRole('heading', { name: /验证|verify/i })).toBeVisible();
+      } else {
+        await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
+      }
     });
   });
 
@@ -361,45 +429,136 @@ test.describe('Security', () => {
 // Authenticated Security Tests
 // ============================================
 test.describe('Authenticated Security', () => {
-  test.use({ storageState: 'tests/.auth/user.json' });
+  test.skip(
+    !hasCredentials('user') || !hasCredentials('admin'),
+    'Authenticated security flows require both E2E_TEST_* and E2E_ADMIN_* credentials'
+  );
 
-  test.skip('should not allow accessing other users data', async ({ page }) => {
-    // Try to access another user's profile via URL manipulation
-    // This requires knowing another user's ID
+  test.use({ storageState: authStatePaths.user });
 
-    await gotoWithBypass(page, '/profile/some-other-user-id');
+  test('should reject representative admin write procedures for authenticated non-admin users', async () => {
+    const userClient = await createAuthedTrpcClient(authStatePaths.user);
+    const adminClient = await createAuthedTrpcClient(authStatePaths.admin);
 
-    // Should either redirect or show access denied
-    const url = page.url();
-    expect(url).not.toContain('some-other-user-id');
+    const adminUsers = await adminClient.admin.getAllUsers.query({
+      limit: 10,
+      offset: 0,
+      role: 'admin',
+    });
+    const adminUserId = adminUsers.users[0]?.id;
+
+    expect(adminUserId).toBeTruthy();
+
+    await expectDenied(
+      userClient.settings.updateSystemSettings.mutate({
+        key: 'support_email',
+        value: `security-denied-${Date.now()}@example.com`,
+      })
+    );
+
+    await expectDenied(
+      userClient.admin.updateUserStatus.mutate({
+        userId: adminUserId!,
+        status: 'active',
+        reason: 'security-regression-check',
+      })
+    );
   });
 
-  test.skip('should sanitize chat input before submission', async ({ page }) => {
-    await gotoWithBypass(page, '/chat');
+  test('should enforce self-only access for tickets and conversations across users', async () => {
+    const userClient = await createAuthedTrpcClient(authStatePaths.user);
+    const adminClient = await createAuthedTrpcClient(authStatePaths.admin);
+    const suffix = Date.now();
 
-    // Wait for chat interface
-    await page.waitForSelector('[data-testid="chat-input"], textarea, input[type="text"]', { timeout: 10000 });
-
-    // Try XSS in chat
-    const xssPayload = '<script>alert("xss")</script>';
-    await page.fill('[data-testid="chat-input"], textarea, input[type="text"]', xssPayload);
-
-    // Track dialogs
-    const dialogs: string[] = [];
-    page.on('dialog', (dialog) => {
-      dialogs.push(dialog.message());
-      dialog.dismiss();
+    const adminConversation = await adminClient.chat.createConversation.mutate({
+      title: `Security isolation ${suffix}`,
+    });
+    const adminTicket = await adminClient.ticket.createTicket.mutate({
+      title: `Security ticket ${suffix}`,
+      description: `Security ticket body ${suffix}`,
+      category: 'other',
     });
 
-    // Submit (if possible)
-    const submitButton = page.locator('[data-testid="chat-submit"], button[type="submit"]');
-    if (await submitButton.isVisible()) {
-      await submitButton.click();
+    try {
+      await expectDenied(
+        userClient.chat.getMessages.query({
+          conversationId: adminConversation.id,
+        })
+      );
+
+      await expectDenied(
+        userClient.ticket.getTicketById.query({
+          ticketId: adminTicket.id,
+        })
+      );
+    } finally {
+      await adminClient.chat.deleteConversation.mutate({
+        conversationId: adminConversation.id,
+      }).catch(() => undefined);
+      await adminClient.ticket.closeTicket.mutate({
+        ticketId: adminTicket.id,
+      }).catch(() => undefined);
     }
+  });
 
-    await page.waitForTimeout(2000);
+  test('should return private attachment paths on upload and signed URLs on authorized ticket reads', async ({ page }) => {
+    const userClient = await createAuthedTrpcClient(authStatePaths.user);
+    const adminClient = await createAuthedTrpcClient(authStatePaths.admin);
+    const suffix = Date.now();
+    const ticketTitle = `Security attachment ${suffix}`;
+    const ticketDescription = `Security attachment body ${suffix}`;
+    let createdTicketId: string | null = null;
 
-    // Should not trigger alert
-    expect(dialogs.length).toBe(0);
+    try {
+      await gotoWithBypass(page, '/profile?tab=tickets');
+      await page.getByTestId('ticket-create-button').click();
+      await expect(page.getByText('创建新工单')).toBeVisible({ timeout: 10000 });
+
+      await page.getByPlaceholder('简要描述您的问题').fill(ticketTitle);
+      await page.getByPlaceholder('请详细描述您遇到的问题...').fill(ticketDescription);
+
+      const uploadResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/upload') &&
+          response.request().method() === 'POST',
+        { timeout: 15000 },
+      );
+      await page.locator('#ticket-attachment').setInputFiles(ticketUploadFixture);
+      const uploadResponse = await uploadResponsePromise;
+      expect(uploadResponse.status()).toBe(200);
+
+      const uploadBody = await uploadResponse.json();
+      expect(uploadBody.path).toBeTruthy();
+      expect(uploadBody.path).not.toMatch(/^https?:\/\//);
+      expect(uploadBody.url).toBeUndefined();
+
+      const createResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/trpc/ticket.createTicket') &&
+          response.request().method() === 'POST',
+        { timeout: 15000 },
+      );
+      await page.getByRole('button', { name: '提交工单' }).click();
+      const createResponse = await createResponsePromise;
+      expect(createResponse.status()).toBe(200);
+
+      const tickets = await userClient.ticket.getTickets.query();
+      const createdTicket = tickets.find((ticket) => ticket.title === ticketTitle);
+      expect(createdTicket).toBeTruthy();
+      createdTicketId = createdTicket?.id ?? null;
+
+      expect(createdTicket?.attachments?.[0]).toContain('/storage/v1/object/sign/ticket-attachments/');
+      expect(createdTicket?.attachments?.[0]).not.toContain('/storage/v1/object/public/ticket-attachments/');
+
+      await expectDenied(
+        adminClient.ticket.getTicketById.query({
+          ticketId: createdTicketId!,
+        })
+      );
+    } finally {
+      if (createdTicketId) {
+        await userClient.ticket.closeTicket.mutate({ ticketId: createdTicketId }).catch(() => undefined);
+      }
+    }
   });
 });

@@ -33,8 +33,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { formatUsd } from '@/lib/currency';
 
 type TimeRange = '7d' | '14d' | '30d';
 type HealthStatus = 'healthy' | 'warning' | 'critical';
@@ -54,7 +54,7 @@ const formatNumber = (num: number) => {
 const formatCost = (cost: number) => {
   if (cost < 0.01) return `$${cost.toFixed(6)}`;
   if (cost < 1) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(2)}`;
+  return formatUsd(cost);
 };
 
 export default function AdminPerformancePage() {
@@ -64,15 +64,11 @@ export default function AdminPerformancePage() {
     timeRange,
   });
 
-  // Loading state
-  if (isLoading) {
-    return <AdminLoadingState />;
-  }
-
-  // Error state
-  if (error) {
+  if (error && !data) {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
+
+  const isInitialLoading = isLoading && !data;
 
   const conversations = data?.conversations ?? { total: 0, today: 0, thisWeek: 0, thisMonth: 0, inRange: 0 };
   const messages = data?.messages ?? {
@@ -97,7 +93,7 @@ export default function AdminPerformancePage() {
   const HealthIcon = healthInfo.icon;
 
   return (
-    <div className="p-8 overflow-auto">
+    <div className="p-8 overflow-auto" data-testid="admin-performance-page">
       {/* Page Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
@@ -116,6 +112,14 @@ export default function AdminPerformancePage() {
           </Badge>
         </div>
         <div className="flex items-center gap-3">
+          {isInitialLoading ? (
+            <Badge
+              variant="secondary"
+              className="border border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)]"
+            >
+              正在加载性能数据...
+            </Badge>
+          ) : null}
           {/* Time Range Selector */}
           <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
             <SelectTrigger className="w-[140px] bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]">
@@ -134,13 +138,13 @@ export default function AdminPerformancePage() {
             className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            刷新数据
+            {isInitialLoading ? '加载中...' : '刷新数据'}
           </Button>
         </div>
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs data-testid="admin-performance-tabs" defaultValue="overview" className="space-y-6">
         <TabsList className="bg-[var(--bg-tertiary)]">
           <TabsTrigger value="overview" className="data-[state=active]:bg-[var(--bg-secondary)]">
             <Gauge className="h-4 w-4 mr-2" />
@@ -164,7 +168,7 @@ export default function AdminPerformancePage() {
         <TabsContent value="overview" className="space-y-6">
           {/* Performance Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-performance-overview-requests" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -183,7 +187,7 @@ export default function AdminPerformancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-performance-overview-latency" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -202,7 +206,7 @@ export default function AdminPerformancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-performance-overview-cache" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -222,7 +226,7 @@ export default function AdminPerformancePage() {
               </CardContent>
             </Card>
 
-            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <Card data-testid="admin-performance-overview-errors" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -355,7 +359,7 @@ export default function AdminPerformancePage() {
           </div>
 
           {/* Activity Chart */}
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-performance-activity-trend" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                 <TrendingUp className="h-5 w-5" />
@@ -479,7 +483,7 @@ export default function AdminPerformancePage() {
           </div>
 
           {/* Token Distribution */}
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-performance-token-summary" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>Token 使用分布</CardTitle>
             </CardHeader>
@@ -598,7 +602,7 @@ export default function AdminPerformancePage() {
           </div>
 
           {/* Cost Breakdown */}
-          <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <Card data-testid="admin-performance-models-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>成本明细</CardTitle>
             </CardHeader>
@@ -679,7 +683,7 @@ export default function AdminPerformancePage() {
                       ? ((model.conversationCount / conversations.total) * 100).toFixed(1)
                       : '0';
                     return (
-                      <TableRow key={model.id}>
+                      <TableRow key={model.id} data-testid={`admin-performance-model-row-${model.id}`}>
                         <TableCell>
                           <div className="flex items-center gap-3">
                             <div
@@ -730,7 +734,12 @@ export default function AdminPerformancePage() {
                   })}
                   {modelUsage.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                      <TableCell
+                        data-testid="admin-performance-models-empty"
+                        colSpan={7}
+                        className="text-center py-12"
+                        style={{ color: 'var(--text-disabled)' }}
+                      >
                         暂无模型使用数据
                       </TableCell>
                     </TableRow>

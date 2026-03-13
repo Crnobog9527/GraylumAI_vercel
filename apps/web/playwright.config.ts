@@ -61,6 +61,11 @@ export default defineConfig({
     {
       name: 'setup',
       testMatch: /.*\.setup\.ts/,
+      use: {
+        trace: 'off',
+        screenshot: 'off',
+        video: 'off',
+      },
     },
 
     // Desktop Chrome
