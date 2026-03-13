@@ -9,7 +9,11 @@ import { authStatePaths } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 
 test.describe('preview-only stripe smoke', () => {
-  test.skip(!process.env.PLAYWRIGHT_BASE_URL?.includes('vercel.app'), 'Preview-only Stripe smoke.');
+  const previewBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
+  const isHostedPreviewTarget =
+    previewBaseUrl.includes('vercel.app') || previewBaseUrl.includes('staging.graylum.com');
+
+  test.skip(!isHostedPreviewTarget, 'Preview-only Stripe smoke.');
 
   test('public login page remains reachable on preview', async ({ page }) => {
     await gotoWithBypass(page, '/login');
