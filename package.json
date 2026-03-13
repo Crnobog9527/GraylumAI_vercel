@@ -27,6 +27,17 @@
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.28.1",
+  "pnpm": {
+    "overrides": {
+      "@eslint/config-array>minimatch": "3.1.4",
+      "@eslint/eslintrc>minimatch": "3.1.4",
+      "@sentry/node>minimatch": "9.0.7",
+      "eslint>minimatch": "3.1.4",
+      "glob>minimatch": "9.0.7",
+      "terser-webpack-plugin>serialize-javascript": "7.0.3",
+      "rollup": "4.59.0"
+    }
+  },
   "devDependencies": {
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8",

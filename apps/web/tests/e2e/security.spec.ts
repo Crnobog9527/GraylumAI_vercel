@@ -5,10 +5,10 @@ import { TRPCClientError, createTRPCProxyClient, httpBatchLink } from '@trpc/cli
 import type { AppRouter } from '@repo/api/src/root';
 import { simpleMarkdown } from '../../src/components/ai/messageSanitization';
 import { gotoWithBypass } from './support/deploymentProtection';
-import { authStatePaths } from './support/auth';
+import { authStatePaths, hasCredentials } from './support/auth';
 
 function getBaseUrl() {
-  return process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3001';
+  return process.env.PLAYWRIGHT_BASE_URL ?? process.env.BASE_URL ?? 'http://127.0.0.1:3000';
 }
 
 const ticketUploadFixture = path.resolve(__dirname, '../../../../.agent/skills/assets/star-history.png');
@@ -429,6 +429,11 @@ test.describe('Security', () => {
 // Authenticated Security Tests
 // ============================================
 test.describe('Authenticated Security', () => {
+  test.skip(
+    !hasCredentials('user') || !hasCredentials('admin'),
+    'Authenticated security flows require both E2E_TEST_* and E2E_ADMIN_* credentials'
+  );
+
   test.use({ storageState: authStatePaths.user });
 
   test('should reject representative admin write procedures for authenticated non-admin users', async () => {
