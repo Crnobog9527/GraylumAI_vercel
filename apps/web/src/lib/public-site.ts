@@ -10,13 +10,29 @@ import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
 
+function parseBooleanSetting(value: unknown, fallback: boolean) {
+  if (value === true || value === 'true') {
+    return true;
+  }
+
+  if (value === false || value === 'false') {
+    return false;
+  }
+
+  return fallback;
+}
+
 export async function getPublicSiteSettings() {
   noStore();
 
   try {
     const ctx = await createTRPCContext({ headers: new Headers() });
     const caller = appRouter.createCaller(ctx);
-    const settings = await caller.settings.getSystemSettings();
+    const [settings, membershipPlans, featuredModules] = await Promise.all([
+      caller.settings.getSystemSettings(),
+      caller.settings.getMembershipPlans(),
+      caller.modules.getFeaturedModules({ limit: 4 }),
+    ]);
 
     return {
       siteName:
@@ -27,11 +43,19 @@ export async function getPublicSiteSettings() {
         typeof settings.support_email === 'string' && settings.support_email.trim()
           ? settings.support_email.trim()
           : resolveSupportEmail(),
+      showOnboarding: parseBooleanSetting(settings.home_show_onboarding, true),
+      showFeaturedModules: parseBooleanSetting(settings.home_show_featured_modules, true),
+      membershipPlans,
+      featuredModules,
     };
   } catch {
     return {
       siteName: resolveSiteName(),
       supportEmail: resolveSupportEmail(),
+      showOnboarding: true,
+      showFeaturedModules: true,
+      membershipPlans: [],
+      featuredModules: [],
     };
   }
 }

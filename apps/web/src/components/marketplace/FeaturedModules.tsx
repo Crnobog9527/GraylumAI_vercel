@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Star } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface FeaturedModule {
   id: string;
@@ -23,6 +24,8 @@ interface FeaturedModulesProps {
 }
 
 export default function FeaturedModules({ featuredModules = [], onModuleClick }: FeaturedModulesProps) {
+  const router = useRouter();
+
   const getBadgeStyle = (type?: string) => {
     switch (type) {
       case 'new':
@@ -39,6 +42,30 @@ export default function FeaturedModules({ featuredModules = [], onModuleClick }:
   if (featuredModules.length === 0) {
     return null;
   }
+
+  const handleFeatureClick = (featured: FeaturedModule) => {
+    if (onModuleClick) {
+      onModuleClick(featured);
+      return;
+    }
+
+    if (featured.link_url) {
+      if (/^https?:\/\//i.test(featured.link_url)) {
+        window.location.assign(featured.link_url);
+        return;
+      }
+
+      router.push(featured.link_url);
+      return;
+    }
+
+    if (featured.link_module_id) {
+      router.push(`/marketplace?module=${featured.link_module_id}`);
+      return;
+    }
+
+    router.push('/marketplace');
+  };
 
   return (
     <div className="mb-12" data-testid="featured-modules-section">
@@ -72,8 +99,8 @@ export default function FeaturedModules({ featuredModules = [], onModuleClick }:
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {featuredModules.slice(0, 2).map((featured, index) => {
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {featuredModules.map((featured, index) => {
           const badgeStyle = getBadgeStyle(featured.badge_type);
           return (
             <div
@@ -163,7 +190,7 @@ export default function FeaturedModules({ featuredModules = [], onModuleClick }:
                   )}
                 </div>
                 <Button
-                  onClick={() => onModuleClick && onModuleClick(featured)}
+                  onClick={() => handleFeatureClick(featured)}
                   className="rounded-xl px-6 h-11 font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg"
                   style={{
                     background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',

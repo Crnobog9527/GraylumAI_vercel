@@ -38,6 +38,38 @@ const syncCheckoutInput = z.object({
   sessionId: z.string().min(1),
 });
 
+type BillingRecord = {
+  id: string;
+  itemType: 'credit_package' | 'membership_plan';
+  title: string;
+  description: string;
+  status: string;
+  amountTotal: number;
+  currency: string;
+  billingCycle: 'one_time' | 'monthly' | 'yearly';
+  createdAt: string;
+  fulfilledAt: string | null;
+  invoiceNumber: string | null;
+  invoicePdfUrl: string | null;
+  hostedInvoiceUrl: string | null;
+  receiptUrl: string | null;
+};
+
+type PaymentOrderBillingRow = {
+  id: string;
+  item_id: string;
+  item_type: 'credit_package' | 'membership_plan' | string;
+  billing_cycle: 'one_time' | 'monthly' | 'yearly' | null;
+  stripe_checkout_session_id: string | null;
+  stripe_invoice_id: string | null;
+  amount_total: number | string | null;
+  currency: string | null;
+  status: string;
+  payment_status: string | null;
+  fulfilled_at: string | null;
+  created_at: string;
+};
+
 function toCheckoutConfigError(message: string) {
   return new TRPCError({
     code: 'BAD_REQUEST',
@@ -53,6 +85,109 @@ function assertPaymentPersistenceConfigured(hasSupabaseAdminPrivileges: boolean)
   throw toCheckoutConfigError(
     'Stripe checkout requires SUPABASE_SERVICE_ROLE_KEY to persist payment orders and subscriptions'
   );
+}
+
+async function loadPaymentItemNames(
+  supabase: any,
+  orders: Array<{ item_id: string; item_type: string }>
+): Promise<{
+  creditPackageNames: Map<string, string>;
+  membershipPlanNames: Map<string, string>;
+}> {
+  const creditPackageIds = orders
+    .filter((order) => order.item_type === 'credit_package')
+    .map((order) => order.item_id);
+  const membershipPlanIds = orders
+    .filter((order) => order.item_type === 'membership_plan')
+    .map((order) => order.item_id);
+
+  const [creditPackagesResult, membershipPlansResult] = await Promise.all([
+    creditPackageIds.length > 0
+      ? supabase
+          .from('credit_packages')
+          .select('id, name')
+          .in('id', creditPackageIds)
+      : Promise.resolve({ data: [], error: null }),
+    membershipPlanIds.length > 0
+      ? supabase
+          .from('membership_plans')
+          .select('id, name')
+          .in('id', membershipPlanIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (creditPackagesResult.error) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: creditPackagesResult.error.message,
+    });
+  }
+
+  if (membershipPlansResult.error) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: membershipPlansResult.error.message,
+    });
+  }
+
+  return {
+    creditPackageNames: new Map<string, string>(
+      (creditPackagesResult.data ?? []).map((item: { id: string; name: string }) => [item.id, item.name]),
+    ),
+    membershipPlanNames: new Map<string, string>(
+      (membershipPlansResult.data ?? []).map((item: { id: string; name: string }) => [item.id, item.name]),
+    ),
+  };
+}
+
+async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClient> | null, order: any) {
+  if (!stripe) {
+    return {
+      invoiceNumber: null,
+      invoicePdfUrl: null,
+      hostedInvoiceUrl: null,
+      receiptUrl: null,
+    };
+  }
+
+  if (order.stripe_invoice_id) {
+    const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
+    return {
+      invoiceNumber: invoice.number ?? null,
+      invoicePdfUrl: invoice.invoice_pdf ?? null,
+      hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+      receiptUrl: null,
+    };
+  }
+
+  if (!order.stripe_checkout_session_id) {
+    return {
+      invoiceNumber: null,
+      invoicePdfUrl: null,
+      hostedInvoiceUrl: null,
+      receiptUrl: null,
+    };
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, {
+    expand: ['payment_intent.latest_charge'],
+  });
+
+  const paymentIntent = typeof session.payment_intent === 'object'
+    ? session.payment_intent
+    : null;
+  const latestCharge = paymentIntent?.latest_charge;
+  const receiptUrl =
+    latestCharge && typeof latestCharge === 'object' && 'receipt_url' in latestCharge
+      ? latestCharge.receipt_url ?? null
+      : null;
+
+  return {
+    invoiceNumber: null,
+    invoicePdfUrl: null,
+    hostedInvoiceUrl: null,
+    receiptUrl,
+  };
 }
 
 export const paymentsRouter = router({
@@ -412,5 +547,86 @@ export const paymentsRouter = router({
         stripeSubscriptionId: syncedOrder?.stripe_subscription_id ?? null,
         stripeInvoiceId: syncedOrder?.stripe_invoice_id ?? null,
       };
+    }),
+  listBillingRecords: protectedProcedure
+    .query(async ({ ctx }) => {
+      const { data: orders, error } = await ctx.supabase
+        .from('payment_orders')
+        .select([
+          'id',
+          'item_id',
+          'item_type',
+          'billing_cycle',
+          'stripe_checkout_session_id',
+          'stripe_invoice_id',
+          'amount_total',
+          'currency',
+          'status',
+          'payment_status',
+          'fulfilled_at',
+          'created_at',
+        ].join(','))
+        .eq('user_id', ctx.profileId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error.message,
+        });
+      }
+
+      const billingOrders = (orders ?? []) as unknown as PaymentOrderBillingRow[];
+
+      const rawOrders = billingOrders.filter((order) => {
+        if (order.item_type === 'membership_plan') {
+          return Boolean(order.stripe_invoice_id);
+        }
+
+        return Boolean(order.fulfilled_at) || order.payment_status === 'paid' || order.status === 'completed';
+      });
+
+      const { creditPackageNames, membershipPlanNames } = await loadPaymentItemNames(ctx.supabase, rawOrders);
+      let stripe: ReturnType<typeof getStripeClient> | null = null;
+
+      try {
+        stripe = getStripeClient();
+      } catch {
+        stripe = null;
+      }
+
+      const records = await Promise.all(
+        rawOrders.map(async (order): Promise<BillingRecord> => {
+          const stripeDocuments = await loadStripeBillingDocument(stripe, order);
+          const itemType: BillingRecord['itemType'] =
+            order.item_type === 'membership_plan' ? 'membership_plan' : 'credit_package';
+          const title: string = itemType === 'membership_plan'
+            ? membershipPlanNames.get(order.item_id) ?? '会员订阅'
+            : creditPackageNames.get(order.item_id) ?? '积分加油包';
+          const billingCycle: BillingRecord['billingCycle'] = order.billing_cycle ?? 'one_time';
+
+          return {
+            id: order.id,
+            itemType,
+            title,
+            description:
+              itemType === 'membership_plan'
+                ? `订阅账单 · ${billingCycle === 'yearly' ? '年付' : '月付'}`
+                : '一次性积分购买',
+            status: order.status,
+            amountTotal: Number(order.amount_total ?? 0) / 100,
+            currency: order.currency ?? 'usd',
+            billingCycle,
+            createdAt: order.created_at,
+            fulfilledAt: order.fulfilled_at,
+            invoiceNumber: stripeDocuments.invoiceNumber,
+            invoicePdfUrl: stripeDocuments.invoicePdfUrl,
+            hostedInvoiceUrl: stripeDocuments.hostedInvoiceUrl,
+            receiptUrl: stripeDocuments.receiptUrl,
+          };
+        }),
+      );
+
+      return records;
     }),
 });

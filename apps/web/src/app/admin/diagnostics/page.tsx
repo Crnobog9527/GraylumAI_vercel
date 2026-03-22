@@ -379,6 +379,9 @@ export default function AdminDiagnosticsPage() {
 
   // 优先使用本地摘要
   const displaySummary = localSummary || summaryStats;
+  const showingCurrentRun = localResults.length > 0;
+  const persistedFailedCount = (latestResults ?? []).filter((result) => result.status === 'failed' || result.status === 'error').length;
+  const latestPersistedRun = (recentRuns ?? [])[0];
 
   // Health status
   const healthStatus = healthCheck?.status ?? 'healthy';
@@ -428,10 +431,13 @@ export default function AdminDiagnosticsPage() {
             <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>
               系统诊断
             </h1>
-            <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              一键测试所有关键功能，确保系统健康运行
-            </p>
-          </div>
+              <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                一键测试所有关键功能，确保系统健康运行
+              </p>
+              <p className="mt-2 text-sm" style={{ color: 'var(--text-disabled)' }}>
+                本页会区分“本次运行结果”和“最近一次已持久化历史”，避免把旧失败误当成当前运行失败。
+              </p>
+            </div>
           {/* Health Status Badge */}
           <Badge className={`${healthBgColor} ${healthColor} px-3 py-1 text-sm`}>
             <Server className="h-4 w-4 mr-1" />
@@ -478,8 +484,9 @@ export default function AdminDiagnosticsPage() {
           <div className="flex items-center gap-3">
             <XCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
             <div className="flex-1">
-              <p className="font-medium text-red-400">测试运行失败</p>
+              <p className="font-medium text-red-400">本次运行失败</p>
               <p className="text-sm text-red-300 mt-1">{errorMessage}</p>
+              <p className="text-xs text-red-300/70 mt-1">最近一次已持久化历史结果仍会保留在下方历史区域。</p>
             </div>
             <Button
               variant="ghost"
@@ -731,6 +738,27 @@ export default function AdminDiagnosticsPage() {
 
         {/* Results Tab */}
         <TabsContent value="results" className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardContent className="p-4">
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>当前展示结果</p>
+                <p className="mt-1 font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {showingCurrentRun ? '本次运行结果' : '最近一次已持久化结果'}
+                </p>
+              </CardContent>
+            </Card>
+            <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+              <CardContent className="p-4">
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>最近一次已持久化运行</p>
+                <p className="mt-1 font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {latestPersistedRun
+                    ? `${new Date(latestPersistedRun.createdAt).toLocaleString('zh-CN')} · 失败项 ${persistedFailedCount}`
+                    : '暂无历史记录'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Category Filter */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>筛选:</span>

@@ -20,6 +20,7 @@ import {
   type MockUser
 } from '@/components/profile/PersonalInfoCard';
 import { SubscriptionCard, CreditStatsCard } from '@/components/profile/SubscriptionCard';
+import BillingRecordsCard from '@/components/profile/BillingRecordsCard';
 import { CreditRecordsCard } from '@/components/profile/CreditRecordsCard';
 import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
@@ -28,6 +29,7 @@ import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
 import { createClient } from '@/lib/supabase';
 import { isEmailVerified } from '@/lib/auth';
+import { buildAuthHref } from '@/lib/site-config';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -44,13 +46,15 @@ function ProfilePageContent() {
 
       if (!user) {
         const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+        router.replace(buildAuthHref(`/login?redirect=${encodeURIComponent(redirectTarget)}`));
         return;
       }
 
       if (!isEmailVerified(user)) {
         const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`);
+        router.replace(
+          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`)
+        );
         return;
       }
 
@@ -240,6 +244,7 @@ function ProfilePageContent() {
             {activeTab === 'subscription' && (
               <>
                 <SubscriptionCard user={effectiveUser} />
+                <BillingRecordsCard />
                 <CreditStatsCard user={effectiveUser} />
               </>
             )}

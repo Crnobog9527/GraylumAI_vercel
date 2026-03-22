@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Mail, Sparkles } from 'lucide-react';
-import { resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
+import { buildAuthHref, resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
 
 const footerLinks = {
   product: {
@@ -45,7 +45,7 @@ export default function LandingFooter({
     <footer id="about" className="relative bg-[#0A0A0A] border-t border-[#333333]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main Footer */}
-        <div className="grid grid-cols-1 gap-10 py-16 md:grid-cols-[1.4fr,1fr,0.8fr,0.9fr]">
+        <div className="grid grid-cols-1 gap-10 py-16 md:grid-cols-2 xl:grid-cols-[1.4fr,1fr,1fr,1fr,1fr]">
           {/* Brand Column */}
           <div>
             <Link href="/landing" className="mb-4 flex items-center gap-2">
@@ -96,13 +96,13 @@ export default function LandingFooter({
           </p>
           <div className="flex items-center gap-6">
             <Link
-              href="/login"
+              href={buildAuthHref('/login')}
               className="text-sm text-[#B0B0B0] hover:text-[#FFD700] transition-colors"
             >
               登录
             </Link>
             <Link
-              href="/login?action=signup"
+              href={buildAuthHref('/login?action=signup')}
               className="text-sm px-4 py-2 bg-[#FFD700]/10 text-[#FFD700] rounded-lg hover:bg-[#FFD700]/20 transition-colors"
             >
               免费注册

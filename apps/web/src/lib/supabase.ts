@@ -1,4 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr';
+import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 export function createClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -8,5 +9,7 @@ export function createClient() {
     throw new Error('Missing Supabase environment variables');
   }
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
+    cookieOptions: resolveSupabaseCookieOptions(),
+  });
 }

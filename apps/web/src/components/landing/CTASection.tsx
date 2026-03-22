@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, Sparkles } from 'lucide-react';
+import { buildAuthHref } from '@/lib/site-config';
 const PARTICLES = Array.from({ length: 10 }, (_, index) => ({
   left: `${(index * 17 + (index % 3) * 11) % 100}%`,
   top: `${(index * 23 + (index % 4) * 7) % 100}%`,
@@ -62,7 +63,7 @@ export default function CTASection() {
 
         <div className="flex items-center justify-center">
           <Link
-            href="/login?action=signup"
+            href={buildAuthHref('/login?action=signup')}
             className="group inline-flex items-center gap-3 rounded-2xl bg-gradient-to-r from-[#FFD700] to-[#FFA500] px-10 py-5 text-xl font-bold text-[#0A0A0A] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[0_0_28px_rgba(255,215,0,0.38)]"
           >
             免费开始

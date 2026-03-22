@@ -2,6 +2,31 @@ import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
+import { ConversationCleanupService } from '../services/conversationCleanup';
+import {
+  finishScheduledJobRun,
+  getLatestScheduledJobRun,
+  SCHEDULED_JOB_KEYS,
+  startScheduledJobRun,
+} from '../services/scheduledJobRuns';
+
+const promptCategorySchema = z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']);
+const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
+const promptBatchPatchSchema = z.object({
+  description: z.string().max(500).nullable().optional(),
+  systemPrompt: z.string().max(10000).nullable().optional(),
+  userPromptTemplate: z.string().max(10000).nullable().optional(),
+  modelId: z.string().uuid().nullable().optional(),
+  platform: promptPlatformSchema.optional(),
+  features: z.array(z.string()).nullable().optional(),
+  userQuestions: z.array(z.string()).nullable().optional(),
+  icon: z.string().max(50).optional(),
+  category: promptCategorySchema.optional(),
+  sortOrder: z.number().int().min(0).max(1000).optional(),
+}).refine(
+  (patch) => Object.values(patch).some((value) => value !== undefined),
+  { message: 'At least one patch field is required' },
+);
 
 export const adminRouter = router({
   /**
@@ -495,6 +520,29 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
+      const userIds = Array.from(new Set((data ?? []).map((transaction) => transaction.user_id).filter(Boolean)));
+      let profilesById = new Map<string, {
+        id: string;
+        email: string | null;
+        nickname: string | null;
+        avatar_url: string | null;
+      }>();
+
+      if (userIds.length > 0) {
+        const { data: profiles, error: profilesError } = await ctx.supabase
+          .from('profiles')
+          .select('id, email, nickname, avatar_url')
+          .in('id', userIds);
+
+        if (profilesError) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: profilesError.message });
+        }
+
+        profilesById = new Map(
+          (profiles ?? []).map((profile) => [profile.id, profile]),
+        );
+      }
+
       const stats = {
         totalAdditions: 0,
         totalDeductions: 0,
@@ -510,7 +558,10 @@ export const adminRouter = router({
       });
 
       return {
-        transactions: data ?? [],
+        transactions: (data ?? []).map((transaction) => ({
+          ...transaction,
+          profiles: profilesById.get(transaction.user_id) ?? null,
+        })),
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
         stats,
@@ -1157,7 +1208,7 @@ export const adminRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(100).default(50),
       offset: z.number().min(0).default(0),
-      category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).optional(),
+      category: promptCategorySchema.optional(),
       activeOnly: z.boolean().default(false),
     }))
     .query(async ({ ctx, input }) => {
@@ -1222,12 +1273,12 @@ export const adminRouter = router({
       systemPrompt: z.string().max(10000).optional(),
       userPromptTemplate: z.string().max(10000).optional(),
       modelId: z.string().uuid().optional(),
-      platform: z.enum(['all', 'web', 'mobile', 'desktop', 'api']).default('all'),
+      platform: promptPlatformSchema.default('all'),
       features: z.array(z.string()).optional(),
       userQuestions: z.array(z.string()).optional(),
       icon: z.string().max(50).default('Wand2'),
       // Original fields
-      category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).default('general'),
+      category: promptCategorySchema.default('general'),
       sortOrder: z.number().int().min(0).max(1000).default(0),
       isSystem: z.enum(['true', 'false']).default('false'),
     }))
@@ -1274,12 +1325,12 @@ export const adminRouter = router({
       systemPrompt: z.string().max(10000).nullable().optional(),
       userPromptTemplate: z.string().max(10000).nullable().optional(),
       modelId: z.string().uuid().nullable().optional(),
-      platform: z.enum(['all', 'web', 'mobile', 'desktop', 'api']).optional(),
+      platform: promptPlatformSchema.optional(),
       features: z.array(z.string()).nullable().optional(),
       userQuestions: z.array(z.string()).nullable().optional(),
       icon: z.string().max(50).optional(),
       // Original fields
-      category: z.enum(['general', 'assistant', 'creative', 'coding', 'translation', 'analysis']).optional(),
+      category: promptCategorySchema.optional(),
       sortOrder: z.number().int().min(0).max(1000).optional(),
       active: z.enum(['true', 'false']).optional(),
       isSystem: z.enum(['true', 'false']).optional(),
@@ -1315,6 +1366,109 @@ export const adminRouter = router({
       }
 
       return data;
+    }),
+
+  batchUpdatePrompts: adminProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      patch: promptBatchPatchSchema,
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const updateData: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (input.patch.description !== undefined) updateData.description = input.patch.description;
+      if (input.patch.systemPrompt !== undefined) updateData.system_prompt = input.patch.systemPrompt;
+      if (input.patch.userPromptTemplate !== undefined) updateData.user_prompt_template = input.patch.userPromptTemplate;
+      if (input.patch.modelId !== undefined) updateData.model_id = input.patch.modelId;
+      if (input.patch.platform !== undefined) updateData.platform = input.patch.platform;
+      if (input.patch.features !== undefined) updateData.features = input.patch.features ? JSON.stringify(input.patch.features) : null;
+      if (input.patch.userQuestions !== undefined) updateData.user_questions = input.patch.userQuestions ? JSON.stringify(input.patch.userQuestions) : null;
+      if (input.patch.icon !== undefined) updateData.icon = input.patch.icon;
+      if (input.patch.category !== undefined) updateData.category = input.patch.category;
+      if (input.patch.sortOrder !== undefined) updateData.sort_order = input.patch.sortOrder;
+
+      const { data, error } = await ctx.supabase
+        .from('prompts')
+        .update(updateData)
+        .in('id', input.ids)
+        .select('id');
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return {
+        updatedIds: (data ?? []).map((prompt) => prompt.id),
+        updatedCount: data?.length ?? 0,
+      };
+    }),
+
+  batchSetPromptActive: adminProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      active: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('prompts')
+        .update({
+          active: input.active ? 'true' : 'false',
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', input.ids)
+        .select('id');
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return {
+        updatedIds: (data ?? []).map((prompt) => prompt.id),
+        updatedCount: data?.length ?? 0,
+        active: input.active,
+      };
+    }),
+
+  batchDeletePrompts: adminProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { data: prompts, error: promptError } = await ctx.supabase
+        .from('prompts')
+        .select('id, is_system')
+        .in('id', input.ids);
+
+      if (promptError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: promptError.message });
+      }
+
+      const deletableIds = (prompts ?? [])
+        .filter((prompt) => prompt.is_system !== 'true')
+        .map((prompt) => prompt.id);
+      const blockedIds = (prompts ?? [])
+        .filter((prompt) => prompt.is_system === 'true')
+        .map((prompt) => prompt.id);
+
+      if (deletableIds.length > 0) {
+        const { error } = await ctx.supabase
+          .from('prompts')
+          .delete()
+          .in('id', deletableIds);
+
+        if (error) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        }
+      }
+
+      return {
+        deletedIds: deletableIds,
+        deletedCount: deletableIds.length,
+        blockedIds,
+        blockedCount: blockedIds.length,
+      };
     }),
 
   /**
@@ -1750,91 +1904,45 @@ export const adminRouter = router({
    */
   cleanupExpiredConversations: adminProcedure
     .mutation(async ({ ctx }) => {
-      // Get all membership plans with their retention settings
-      const { data: plans, error: plansError } = await ctx.supabase
-        .from('membership_plans')
-        .select('level, history_retention_days');
-
-      if (plansError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: plansError.message });
-      }
-
-      // Build retention map (default to 30 days if not set)
-      const retentionMap: Record<string, number> = { free: 7, pro: 30, gold: 90 };
-      plans?.forEach(plan => {
-        if (plan.level && plan.history_retention_days) {
-          retentionMap[plan.level] = plan.history_retention_days;
-        }
+      const runId = await startScheduledJobRun({
+        supabase: ctx.supabase,
+        jobKey: SCHEDULED_JOB_KEYS.conversationCleanup,
+        triggerSource: 'manual',
       });
 
-      // Get all users with their membership levels
-      const { data: profiles, error: profilesError } = await ctx.supabase
-        .from('profiles')
-        .select('id, membership_level');
+      try {
+        const service = new ConversationCleanupService({ supabase: ctx.supabase });
+        const result = await service.run();
 
-      if (profilesError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: profilesError.message });
+        await finishScheduledJobRun({
+          supabase: ctx.supabase,
+          runId,
+          status: 'success',
+          summary: {
+            deletedCount: result.deletedCount,
+            stats: result.stats,
+          },
+        });
+
+        return {
+          success: true,
+          deletedCount: result.deletedCount,
+          stats: result.stats,
+          message: `清理完成，已删除 ${result.deletedCount} 个过期对话`,
+        };
+      } catch (error) {
+        await finishScheduledJobRun({
+          supabase: ctx.supabase,
+          runId,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Unknown cleanup error',
+        });
+
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : '对话清理失败',
+        });
       }
-
-      let totalDeleted = 0;
-      const now = new Date();
-      const deletedAt = now.toISOString();
-
-      // Soft-delete expired conversations so cleanup remains auditable and consistent with chat-side deletion.
-      for (const profile of profiles ?? []) {
-        const membershipLevel = profile.membership_level || 'free';
-        const retentionDays = retentionMap[membershipLevel] || 30;
-        const cutoffDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
-
-        const { data: expiredConversations, error: expiredError } = await ctx.supabase
-          .from('conversations')
-          .select('id')
-          .eq('user_id', profile.id)
-          .eq('is_deleted', 'false')
-          .lt('created_at', cutoffDate.toISOString());
-
-        if (expiredError) {
-          console.error(`Failed to query expired conversations for user ${profile.id}:`, expiredError);
-          continue;
-        }
-
-        const conversationIds = (expiredConversations ?? []).map((conversation) => conversation.id);
-        if (conversationIds.length === 0) {
-          continue;
-        }
-
-        const { error: messageError } = await ctx.supabase
-          .from('messages')
-          .update({ is_deleted: true, deleted_at: deletedAt })
-          .in('conversation_id', conversationIds)
-          .eq('is_deleted', 'false');
-
-        if (messageError) {
-          console.error(`Failed to soft-delete messages for user ${profile.id}:`, messageError);
-          continue;
-        }
-
-        const { data: updatedConversations, error: conversationError } = await ctx.supabase
-          .from('conversations')
-          .update({ is_deleted: true, deleted_at: deletedAt })
-          .in('id', conversationIds)
-          .eq('user_id', profile.id)
-          .eq('is_deleted', 'false')
-          .select('id');
-
-        if (conversationError) {
-          console.error(`Failed to soft-delete conversations for user ${profile.id}:`, conversationError);
-          continue;
-        }
-
-        totalDeleted += updatedConversations?.length ?? 0;
-      }
-
-      return {
-        success: true,
-        deletedCount: totalDeleted,
-        message: `清理完成，已删除 ${totalDeleted} 个过期对话`,
-      };
     }),
 
   /**
@@ -1842,44 +1950,16 @@ export const adminRouter = router({
    */
   getCleanupStats: adminProcedure
     .query(async ({ ctx }) => {
-      // Get membership plans
-      const { data: plans } = await ctx.supabase
-        .from('membership_plans')
-        .select('level, history_retention_days');
-
-      const retentionMap: Record<string, number> = { free: 7, pro: 30, gold: 90 };
-      plans?.forEach(plan => {
-        if (plan.level && plan.history_retention_days) {
-          retentionMap[plan.level] = plan.history_retention_days;
-        }
-      });
-
-      // Count conversations by membership level that would be deleted
-      const now = new Date();
-      const stats: { level: string; retentionDays: number; expiredCount: number }[] = [];
-
-      for (const [level, days] of Object.entries(retentionMap)) {
-        const cutoffDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-
-        const { count } = await ctx.supabase
-          .from('conversations')
-          .select('id, profiles!inner(membership_level)', { count: 'exact', head: true })
-          .eq('profiles.membership_level', level)
-          .eq('is_deleted', 'false')
-          .lt('created_at', cutoffDate.toISOString());
-
-        stats.push({
-          level,
-          retentionDays: days,
-          expiredCount: count ?? 0,
-        });
-      }
-
-      const totalExpired = stats.reduce((sum, s) => sum + s.expiredCount, 0);
+      const service = new ConversationCleanupService({ supabase: ctx.supabase });
+      const [{ stats, totalExpired }, latestRun] = await Promise.all([
+        service.getCleanupStats(),
+        getLatestScheduledJobRun(ctx.supabase, SCHEDULED_JOB_KEYS.conversationCleanup),
+      ]);
 
       return {
         stats,
         totalExpired,
+        latestRun,
       };
     }),
 

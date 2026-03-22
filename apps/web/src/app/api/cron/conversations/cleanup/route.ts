@@ -1,22 +1,16 @@
-/**
- * Vercel Cron Job - Ticket Auto Close
- *
- * 工单在后台首次回复后，如果 48 小时内没有用户回复，则自动关闭并写入系统消息。
- */
-
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
+  ConversationCleanupService,
   finishScheduledJobRun,
   SCHEDULED_JOB_KEYS,
   startScheduledJobRun,
-  TicketAutoCloseService,
 } from '@repo/api/src/services';
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function isAuthorizedCronRequest(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -42,24 +36,21 @@ async function handleRequest(request: Request) {
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseServiceKey) {
-    return NextResponse.json(
-      { error: 'Missing Supabase configuration' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
   }
 
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const runId = await startScheduledJobRun({
       supabase,
-      jobKey: SCHEDULED_JOB_KEYS.ticketAutoClose,
+      jobKey: SCHEDULED_JOB_KEYS.conversationCleanup,
       triggerSource: 'cron',
     });
 
     try {
-      console.info('[Cron][ticket_auto_close] started');
+      console.info('[Cron][conversation_cleanup] started');
 
-      const service = new TicketAutoCloseService({ supabase });
+      const service = new ConversationCleanupService({ supabase });
       const result = await service.run();
 
       await finishScheduledJobRun({
@@ -67,24 +58,19 @@ async function handleRequest(request: Request) {
         runId,
         status: 'success',
         summary: {
-          checked: result.checked,
-          eligible: result.eligible,
-          closed: result.closed,
+          deletedCount: result.deletedCount,
+          stats: result.stats,
         },
       });
 
-      console.info('[Cron][ticket_auto_close] completed', {
-        checked: result.checked,
-        eligible: result.eligible,
-        closed: result.closed,
+      console.info('[Cron][conversation_cleanup] completed', {
+        deletedCount: result.deletedCount,
       });
 
       return NextResponse.json({
         success: true,
-        checked: result.checked,
-        eligible: result.eligible,
-        closed: result.closed,
-        decisions: result.decisions,
+        deletedCount: result.deletedCount,
+        stats: result.stats,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -92,13 +78,13 @@ async function handleRequest(request: Request) {
         supabase,
         runId,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown auto-close error',
+        error: error instanceof Error ? error.message : 'Unknown cleanup error',
       });
 
       throw error;
     }
   } catch (error) {
-    console.error('Cron ticket auto-close failed:', error);
+    console.error('Cron conversation cleanup failed:', error);
 
     return NextResponse.json(
       {
@@ -106,7 +92,7 @@ async function handleRequest(request: Request) {
         error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString(),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

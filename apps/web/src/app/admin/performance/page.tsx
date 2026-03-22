@@ -104,11 +104,14 @@ export default function AdminPerformancePage() {
             <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
               实时监控 AI 服务性能和资源使用情况
             </p>
+            <p className="mt-2 text-sm" style={{ color: 'var(--text-disabled)' }}>
+              状态阈值说明：错误率 &gt; 2% 或平均响应时间 &gt; 2000ms 记为“异常”；错误率 &gt; 1% 或平均响应时间 &gt; 1500ms 记为“警告”。
+            </p>
           </div>
           {/* Health Status Badge */}
           <Badge className={`${healthInfo.bgColor} ${healthInfo.color} px-3 py-1 text-sm`}>
             <HealthIcon className="h-4 w-4 mr-1" />
-            系统 {healthInfo.label}
+            AI 服务 {healthInfo.label}
           </Badge>
         </div>
         <div className="flex items-center gap-3">

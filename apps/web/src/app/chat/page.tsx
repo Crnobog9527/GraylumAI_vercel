@@ -30,6 +30,7 @@ import { useCreditsBalance, CREDIT_THRESHOLDS, getWarningLevel } from '@/hooks/u
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
 import { createClient } from '@/lib/supabase';
 import { isEmailVerified } from '@/lib/auth';
+import { buildAuthHref } from '@/lib/site-config';
 
 interface Message {
   id: string;
@@ -69,14 +70,14 @@ export default function ChatPage() {
 
       if (!user) {
         const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(`/login?redirect=${encodeURIComponent(redirectTarget)}`);
+        router.replace(buildAuthHref(`/login?redirect=${encodeURIComponent(redirectTarget)}`));
         return;
       }
 
       if (!isEmailVerified(user)) {
         const redirectTarget = `${window.location.pathname}${window.location.search}`;
         router.replace(
-          `/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`
+          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`)
         );
         return;
       }

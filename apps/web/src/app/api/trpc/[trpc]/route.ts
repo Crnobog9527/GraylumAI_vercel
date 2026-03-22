@@ -3,12 +3,15 @@ import { type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
+import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 const handler = async (req: NextRequest) => {
+  const hostname = new URL(req.url).hostname.toLowerCase();
   const authClient = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: resolveSupabaseCookieOptions(hostname),
       cookies: {
         getAll() {
           return req.cookies.getAll();

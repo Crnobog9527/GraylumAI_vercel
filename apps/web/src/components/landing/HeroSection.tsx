@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, TrendingUp, Users, Zap } from 'lucide-react';
+import { buildAuthHref } from '@/lib/site-config';
 
 export default function HeroSection() {
   return (
@@ -69,7 +70,7 @@ export default function HeroSection() {
         {/* CTA Buttons */}
         <div className="landing-fade-in-up landing-delay-300 mb-16 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <Link
-            href="/login?action=signup"
+            href={buildAuthHref('/login?action=signup')}
             className="group flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#FFD700] to-[#FFA500] px-8 py-4 text-lg font-bold text-[#0A0A0A] transition-[transform,box-shadow] duration-200 hover:-translate-y-1 hover:shadow-[0_0_24px_rgba(255,215,0,0.32)]"
           >
             免费开始

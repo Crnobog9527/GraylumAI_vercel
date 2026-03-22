@@ -10,6 +10,7 @@ import UpdatesSection from '@/components/home/UpdatesSection';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import { createClient } from '@/lib/supabase';
 import { isEmailVerified } from '@/lib/auth';
+import { buildAuthHref } from '@/lib/site-config';
 import { trpc } from '@/trpc/client';
 
 /**
@@ -36,12 +37,14 @@ export default function HomePage() {
 
       if (!user) {
         // 未登录，重定向到登录页
-        router.replace('/login');
+        router.replace(buildAuthHref('/login'));
         return;
       }
 
       if (!isEmailVerified(user)) {
-        router.replace(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent('/')}`);
+        router.replace(
+          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent('/')}`)
+        );
         return;
       }
 
@@ -247,6 +250,8 @@ export default function HomePage() {
               badge_text: module.badge_text ?? '',
               credits_display: module.credits_display ?? '',
               usage_count: module.usage_count ?? 0,
+              link_url: module.link_url ?? undefined,
+              link_module_id: module.link_module_id ?? undefined,
             }))}
             onModuleClick={() => router.push('/marketplace')}
           />
