@@ -99,15 +99,6 @@ function LoginPageContent() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    const maintenanceModeEnabled =
-      systemSettings?.maintenance_mode === true || systemSettings?.maintenance_mode === 'true';
-
-    if (maintenanceModeEnabled) {
-      window.location.replace('/maintenance');
-    }
-  }, [systemSettings]);
-
   const handleLogin = async () => {
     setPendingAction('login');
     setStatus(null);

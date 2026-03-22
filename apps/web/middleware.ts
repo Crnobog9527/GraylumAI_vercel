@@ -46,6 +46,10 @@ function isMaintenanceBypassPath(pathname: string): boolean {
   return (
     pathname === '/maintenance' ||
     pathname.startsWith('/landing') ||
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/verify-email' ||
+    pathname.startsWith('/admin') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/auth') ||
     pathname.startsWith('/_next') ||
