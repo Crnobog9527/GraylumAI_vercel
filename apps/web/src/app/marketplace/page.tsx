@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -35,10 +36,14 @@ const categories = [
   { id: 'video', label: '视频制作' },
   { id: 'business', label: '商务办公' },
   { id: 'education', label: '教育学习' },
+  { id: 'coding', label: '编程开发' },
+  { id: 'analysis', label: '分析洞察' },
+  { id: 'creative', label: '创意策划' },
   { id: 'other', label: '其他分类' }
 ];
 
-export default function MarketplacePage() {
+function MarketplacePageContent() {
+  const searchParams = useSearchParams();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'popular'>('newest');
   const [page, setPage] = useState(1);
@@ -64,6 +69,32 @@ export default function MarketplacePage() {
   const modules = modulesData?.modules ?? [];
   const totalModules = modulesData?.total ?? 0;
   const totalPages = Math.ceil(totalModules / itemsPerPage);
+  const requestedModuleId = searchParams.get('module');
+
+  useEffect(() => {
+    if (!requestedModuleId) {
+      return;
+    }
+
+    const requestedModule =
+      modules.find((module) => module.id === requestedModuleId) ??
+      featuredModules?.find((module) => module.id === requestedModuleId);
+
+    if (!requestedModule) {
+      return;
+    }
+
+    setSelectedModule({
+      id: requestedModule.id,
+      title: requestedModule.title,
+      description: requestedModule.description ?? '',
+      icon: requestedModule.icon ?? 'Sparkles',
+      category: requestedModule.category,
+      platform: requestedModule.platform ?? '',
+      usage_count: requestedModule.usage_count ?? 0,
+    });
+    setDialogOpen(true);
+  }, [featuredModules, modules, requestedModuleId]);
 
   return (
     <div
@@ -238,7 +269,20 @@ export default function MarketplacePage() {
             badge_text: m.badge_text ?? '',
             credits_display: m.credits_display ?? '',
             usage_count: m.usage_count ?? 0,
-          }))} />
+            link_url: m.link_url ?? undefined,
+            link_module_id: m.link_module_id ?? undefined,
+          }))}
+          onModuleClick={(featured) => {
+            setSelectedModule({
+              id: featured.id,
+              title: featured.title,
+              description: featured.description,
+              icon: featured.icon ?? 'Sparkles',
+              usage_count: featured.usage_count ?? 0,
+            });
+            setDialogOpen(true);
+          }}
+        />
         )}
 
         {/* 筛选栏 */}
@@ -463,5 +507,20 @@ export default function MarketplacePage() {
         onOpenChange={setDialogOpen}
       />
     </div>
+  );
+}
+
+export default function MarketplacePage() {
+  return (
+    <Suspense
+      fallback={
+        <div
+          className="min-h-screen"
+          style={{ background: 'var(--bg-primary)' }}
+        />
+      }
+    >
+      <MarketplacePageContent />
+    </Suspense>
   );
 }

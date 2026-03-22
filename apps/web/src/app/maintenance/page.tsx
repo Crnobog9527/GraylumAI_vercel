@@ -1,12 +1,28 @@
 'use client';
 
-import Link from 'next/link';
+import { useState } from 'react';
 import { AlertTriangle, ArrowLeft, Mail, ShieldAlert } from 'lucide-react';
+import { sanitizeRedirectTarget } from '@/lib/auth';
 import { resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
 import { trpc } from '@/trpc/client';
 
+function isMaintenanceModeEnabled(value: unknown) {
+  return value === true || value === 'true';
+}
+
+function resolveMaintenanceReturnTarget() {
+  if (typeof window === 'undefined') {
+    return '/profile';
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  return sanitizeRedirectTarget(searchParams.get('from'));
+}
+
 export default function MaintenancePage() {
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const { data: systemSettings, refetch } = trpc.settings.getSystemSettings.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -19,6 +35,32 @@ export default function MaintenancePage() {
     typeof systemSettings?.support_email === 'string' && systemSettings.support_email.trim()
       ? systemSettings.support_email.trim()
       : resolveSupportEmail();
+  const maintenanceModeEnabled = isMaintenanceModeEnabled(systemSettings?.maintenance_mode);
+
+  const handleReturnHome = () => {
+    window.location.assign('/landing');
+  };
+
+  const handleRefreshStatus = async () => {
+    setIsCheckingStatus(true);
+    setStatusMessage(null);
+
+    try {
+      const latestSettings = await refetch();
+      const latestMaintenanceModeEnabled = isMaintenanceModeEnabled(latestSettings.data?.maintenance_mode);
+
+      if (latestMaintenanceModeEnabled) {
+        setStatusMessage('维护仍在进行中，请稍后再试。');
+        return;
+      }
+
+      window.location.assign(resolveMaintenanceReturnTarget());
+    } catch {
+      setStatusMessage('状态检查失败，请稍后重试。');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
 
   return (
     <main
@@ -73,21 +115,29 @@ export default function MaintenancePage() {
           </div>
 
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link
-              href="/landing"
+            <button
+              type="button"
+              onClick={handleReturnHome}
               className="inline-flex items-center gap-2 rounded-2xl border border-[rgba(255,255,255,0.08)] px-4 py-3 text-sm text-[#f2f2f2] transition hover:bg-[rgba(255,255,255,0.04)]"
             >
               <ArrowLeft className="h-4 w-4" />
               返回首页
-            </Link>
+            </button>
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={handleRefreshStatus}
+              disabled={isCheckingStatus}
               className="rounded-2xl bg-[#f2c94c] px-4 py-3 text-sm font-medium text-black transition hover:bg-[#f7d96c]"
             >
-              重新检查状态
+              {isCheckingStatus ? '检查中...' : '重新检查状态'}
             </button>
           </div>
+
+          {(statusMessage || !maintenanceModeEnabled) ? (
+            <p className="mt-4 text-sm text-[#b5b5b5]">
+              {statusMessage ?? '维护已结束，正在为您恢复访问。'}
+            </p>
+          ) : null}
         </section>
       </div>
     </main>

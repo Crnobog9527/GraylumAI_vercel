@@ -1,6 +1,6 @@
 # 全站严格签核状态总表
 
-Last updated: 2026-03-12
+Last updated: 2026-03-22
 
 ## Summary
 
@@ -8,7 +8,7 @@ Last updated: 2026-03-12
 
 - 非支付主链路已经完成严格签核所需的主要验证
 - 后台验收、关键设置生效、Vercel 运行时证据、本地安全/RLS 收尾和本地性能最终签核都已有对应证据
-- 当前明确未完成的大项只剩支付闭环
+- Stripe preview / production 发布动作、生产 webhook 可达性、生产 checkout smoke，以及第一笔真实 live 支付验收已经完成
 - 少量注释、样式命名和文档层面的历史技术债仍存在，但不再构成功能签核阻塞
 
 ## 严格签核矩阵
@@ -26,16 +26,13 @@ Last updated: 2026-03-12
 | 安全漏洞扫描/审计 | `基本通过` | 关键问题已修，关键回归已补，Supabase Security Advisor 的代码/数据库问题已清空；剩余主要是免费套餐下的 `Leaked Password Protection` accepted risk 与未来 drift 审计要求 |
 | 网站性能优化 | `通过` | [`PHASE4_LOCAL_PERFORMANCE_BASELINE.md`](./PHASE4_LOCAL_PERFORMANCE_BASELINE.md) 已记录 landing/public、marketplace、profile、chat、admin 高价值页面的最终本地验证与签核证据 |
 | Vercel 运行时最终证据 | `通过` | 真实流式、`route_upgraded`、abort、diagnostics runtime proof、smart routing/search decision effect proof 都已在 preview 闭环 |
-| 支付闭环 | `基本通过` | Stripe 测试环境密钥、`price_xxx`、checkout 成功/取消/失败、webhook 签名校验、重放幂等、积分到账和会员到账都已在本地 `test mode` 验证；部署环境 preview 已验证登录、webhook 路由可达，且点击购买会真实跳转到 Stripe Checkout |
+| 支付闭环 | `通过` | Stripe 本地 `test mode` 验收、preview smoke、production webhook 可达性、production checkout smoke，以及 2026-03-22 的第一笔真实 live 支付验收均已完成；`payment_orders`、`credit_transactions` 与用户积分到账结果一致 |
 
 ## 当前仍阻止“全站严格签核完成”的项目
 
-### 1. Stripe 正式发布前仍有最后发布动作
+当前无新的功能级阻塞项。
 
-Stripe 代码、测试密钥、价格和本地 `test mode` 验收已经完成，但正式发布前仍有两类发布动作：
-
-- 在 Vercel preview / production 配齐 Stripe 环境变量后，完成部署环境购买 smoke
-- 正式生产配置与支付发布检查
+按本次严格签核口径，阻塞“全站严格签核完成”的 Stripe 最终发布动作已经闭环。
 
 ## 当前发布操作状态
 
@@ -45,7 +42,8 @@ Stripe 代码、测试密钥、价格和本地 `test mode` 验收已经完成，
   - [`runbooks/PRE_RELEASE_REHEARSAL.md`](./runbooks/PRE_RELEASE_REHEARSAL.md)
   - [`runbooks/PRODUCTION_RELEASE.md`](./runbooks/PRODUCTION_RELEASE.md)
   - [`STRIPE_ENABLEMENT_CHECKLIST.md`](./STRIPE_ENABLEMENT_CHECKLIST.md)
-- 当前唯一明确未完成的大功能：Stripe 最终发布动作
+- Stripe 最终发布动作：已完成
+- 2026-03-22 真实 live 支付验收：已完成
 
 ## 非阻塞后续项
 
@@ -67,8 +65,20 @@ Stripe 代码、测试密钥、价格和本地 `test mode` 验收已经完成，
 在严格签核口径下，当前最准确的结论是：
 
 - 非支付主功能、后台验收、关键设置生效、Vercel 运行时证据、本地安全/RLS 收尾和本地性能签核已经通过
-- Stripe 本地 `test mode` 验收也已经基本通过
-- 当前仍未完成并阻止“全站严格签核完成”的只剩支付的最终发布动作
+- Stripe 本地 `test mode`、preview、production smoke 与真实 live 支付验收均已通过
+- 当前已无明确阻止“全站严格签核完成”的功能级阻塞项
+
+## 2026-03-22 生产支付验收结果
+
+- 真实 Checkout Session：`cs_live_a1sjgMfsnWUiwrAVx6PC0yDI6qTJJLx6jbE1CiEkRl5n6Z7LsTaek1A5ST`
+- 订单：`payment_orders.id = 1774081a-8423-432c-ab4f-b1bc49242fd2`
+- 订单状态：`status=completed`，`payment_status=paid`
+- 完成时间：`2026-03-22T04:12:55.398Z`
+- 用户：`simonni@grayscalegroup.cn`
+- 支付前积分：`2796`
+- 支付后积分：`3296`
+- 积分交易：新增 `purchase +500`，描述为 `Stripe 购买积分包: 测试`
+- 备注：本次 `amount_total=95` 与 `credit_packages.price=100` 的差异来自生产 `pro.package_discount=95`，属于会员折扣生效，不属于 Stripe Price 配置漂移
 
 ## 证据来源
 

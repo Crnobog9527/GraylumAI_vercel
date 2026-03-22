@@ -19,13 +19,12 @@ export const modulesRouter = router({
       let query = ctx.supabase
         .from('modules')
         .select('*', { count: 'exact' })
-        .eq('active', true);
+        .eq('active', 'true');
 
       // Apply category filter
       if (category && category !== 'all') {
         if (category === 'other') {
-          // 'other' includes misc categories
-          query = query.in('category', ['tool', 'analysis', 'coding', 'creative', 'audio', 'other']);
+          query = query.eq('category', 'other');
         } else {
           query = query.eq('category', category);
         }
@@ -71,8 +70,8 @@ export const modulesRouter = router({
       const { data: modules, error } = await ctx.supabase
         .from('modules')
         .select('*')
-        .eq('active', true)
-        .eq('is_featured', true)
+        .eq('active', 'true')
+        .eq('is_featured', 'true')
         .order('sort_order', { ascending: true })
         .limit(limit);
 
@@ -97,7 +96,7 @@ export const modulesRouter = router({
         .from('modules')
         .select('*')
         .eq('id', input.id)
-        .eq('active', true)
+        .eq('active', 'true')
         .single();
 
       if (error || !module) {

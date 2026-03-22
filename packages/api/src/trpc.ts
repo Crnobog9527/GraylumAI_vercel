@@ -5,6 +5,29 @@ import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 
+function deriveProfileNickname(user: User): string {
+  const metadata = user.user_metadata ?? {};
+  const candidates = [
+    metadata.nickname,
+    metadata.display_name,
+    metadata.full_name,
+    metadata.name,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim().slice(0, 80);
+    }
+  }
+
+  const emailPrefix = user.email?.split('@')[0]?.trim();
+  if (emailPrefix) {
+    return emailPrefix.slice(0, 80);
+  }
+
+  return `user-${user.id.slice(0, 8)}`;
+}
+
 export const createTRPCContext = async (opts: {
   headers: Headers;
   user?: User | null;
@@ -85,10 +108,12 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   let userRole: 'user' | 'admin' = 'user';
   let userStatus: 'active' | 'disabled' | 'banned' = 'active';
   const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabaseAdmin;
+  const derivedNickname = deriveProfileNickname(ctx.user);
+  const normalizedEmail = ctx.user.email ?? null;
 
   const { data: profile, error: profileError } = await userScopedSupabase
     .from('profiles')
-    .select('id, role, credits, status')
+    .select('id, role, credits, status, nickname, email')
     .eq('id', ctx.user.id)
     .single();
 
@@ -103,11 +128,12 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
         .from('profiles')
         .insert({
           id: ctx.user.id,
-          email: ctx.user.email,
+          email: normalizedEmail,
+          nickname: derivedNickname,
           role: 'user',
           // credits property omitted to use database default of 100
         })
-        .select('id, role, credits, status')
+        .select('id, role, credits, status, nickname, email')
         .single();
 
       if (createError) {
@@ -116,10 +142,10 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
         // If insert failed due to conflict (profile already exists), try to fetch again
         if (createError.code === '23505') {
           const { data: existingProfile } = await userScopedSupabase
-            .from('profiles')
-            .select('id, role, credits, status')
-            .eq('id', ctx.user.id)
-            .single();
+              .from('profiles')
+              .select('id, role, credits, status, nickname, email')
+              .eq('id', ctx.user.id)
+              .single();
 
           if (existingProfile) {
             profileId = existingProfile.id;
@@ -154,6 +180,19 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     profileId = profile.id;
     userRole = profile.role || 'user';
     userStatus = profile.status || 'active';
+
+    const shouldBackfillNickname = !profile.nickname?.trim();
+    const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
+
+    if (shouldBackfillNickname || shouldSyncEmail) {
+      await ctx.supabaseAdmin
+        .from('profiles')
+        .update({
+          ...(shouldBackfillNickname ? { nickname: derivedNickname } : {}),
+          ...(shouldSyncEmail ? { email: normalizedEmail } : {}),
+        })
+        .eq('id', ctx.user.id);
+    }
   }
 
   if (userStatus === 'disabled') {

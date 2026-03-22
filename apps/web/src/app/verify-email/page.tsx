@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -104,7 +105,7 @@ function VerifyEmailPageContent() {
 
     setResending(true);
     const supabase = createClient();
-    const emailRedirectTo = new URL('/auth/callback', window.location.origin);
+    const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
     emailRedirectTo.searchParams.set('next', redirectTarget);
 
     const { error } = await supabase.auth.resend({
@@ -135,7 +136,7 @@ function VerifyEmailPageContent() {
     setSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace(`/login?email=${encodeURIComponent(email)}`);
+    router.replace(buildAuthHref(`/login?email=${encodeURIComponent(email)}`));
   };
 
   if (checking) {
@@ -252,7 +253,7 @@ function VerifyEmailPageContent() {
                 验证成功后将进入 <span className="font-mono text-[#f2f2f2]">{redirectTarget}</span>
               </div>
               <div className="flex items-center gap-3">
-                <Link href={`/login?email=${encodeURIComponent(email)}`} className="text-[#f2c94c] underline-offset-4 hover:underline">
+                <Link href={buildAuthHref(`/login?email=${encodeURIComponent(email)}`)} className="text-[#f2c94c] underline-offset-4 hover:underline">
                   返回登录页
                 </Link>
                 <button

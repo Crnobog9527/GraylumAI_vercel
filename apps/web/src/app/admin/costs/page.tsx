@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { formatUsd } from '@/lib/currency';
 import {
   LineChart,
   Line,
@@ -47,6 +48,7 @@ import {
 } from 'recharts';
 
 const COLORS = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
+type CostMetric = 'credits' | 'usd';
 
 function formatCredits(credits: number): string {
   if (credits >= 10000) {
@@ -55,17 +57,27 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString();
 }
 
-function formatTooltipCredits(
+function formatMetricValue(metric: CostMetric, value: number): string {
+  if (metric === 'usd') {
+    if (value < 0.01) return formatUsd(value);
+    return formatUsd(value);
+  }
+
+  return formatCredits(value);
+}
+
+function formatTooltipValue(
+  metric: CostMetric,
   value: number | string | ReadonlyArray<number | string> | undefined
 ): string {
   const normalizedValue = Array.isArray(value) ? value[0] : value;
 
   if (typeof normalizedValue === 'number') {
-    return formatCredits(normalizedValue);
+    return formatMetricValue(metric, normalizedValue);
   }
 
   const numericValue = Number(normalizedValue);
-  return Number.isFinite(numericValue) ? formatCredits(numericValue) : '0';
+  return Number.isFinite(numericValue) ? formatMetricValue(metric, numericValue) : '0';
 }
 
 function formatDate(dateStr: string): string {
@@ -124,15 +136,20 @@ function StatCard({
   );
 }
 
-function CostOverviewTab() {
+function CostOverviewTab({ metric }: { metric: CostMetric }) {
   const [days, setDays] = useState<number>(7);
 
-  const { data: overview, isLoading: overviewLoading } = trpc.costs.getOverview.useQuery({});
-  const { data: trend, isLoading: trendLoading } = trpc.costs.getCostTrend.useQuery({ days });
-  const { data: distribution, isLoading: distLoading } = trpc.costs.getModelDistribution.useQuery({ days });
-  const { data: topUsers, isLoading: usersLoading } = trpc.costs.getTopUsers.useQuery({ days, limit: 10 });
-  const { data: cacheEfficiency } = trpc.costs.getCacheEfficiency.useQuery({ days });
+  const { data: overview, isLoading: overviewLoading } = trpc.costs.getOverview.useQuery({ metric });
+  const { data: trend, isLoading: trendLoading } = trpc.costs.getCostTrend.useQuery({ days, metric });
+  const { data: distribution, isLoading: distLoading } = trpc.costs.getModelDistribution.useQuery({ days, metric });
+  const { data: topUsers, isLoading: usersLoading } = trpc.costs.getTopUsers.useQuery({ days, limit: 10, metric });
+  const { data: cacheEfficiency } = trpc.costs.getCacheEfficiency.useQuery({ days, metric });
   const isInitialLoading = overviewLoading && !overview;
+  const metricLabel = metric === 'usd' ? '美元成本' : '积分消耗';
+  const metricUnit = metric === 'usd' ? 'USD' : '积分';
+  const cacheSavingsText = metric === 'usd'
+    ? formatMetricValue(metric, cacheEfficiency?.savedValue ?? 0)
+    : `${formatMetricValue(metric, cacheEfficiency?.savedValue ?? 0)} 积分`;
 
   return (
     <div className="space-y-8">
@@ -146,26 +163,34 @@ function CostOverviewTab() {
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
-          title="今日消耗"
-          value={formatCredits(overview?.todayCost ?? 0)}
-          subValue={`${overview?.todayCalls ?? 0} 次调用`}
+          title={`今日${metric === 'usd' ? '成本' : '消耗'}`}
+          value={formatMetricValue(metric, overview?.todayCost ?? 0)}
+          subValue={
+            metric === 'usd'
+              ? `${overview?.todayCalls ?? 0} 次调用 · ${formatCredits(overview?.todayCredits ?? 0)} 积分`
+              : `${overview?.todayCalls ?? 0} 次调用 · ${formatUsd(overview?.todayUsd ?? 0)}`
+          }
           icon={DollarSign}
         />
         <StatCard
-          title="本月累计"
-          value={formatCredits(overview?.monthCost ?? 0)}
-          subValue={`${overview?.monthCalls ?? 0} 次调用`}
+          title={`本月${metric === 'usd' ? '累计成本' : '累计消耗'}`}
+          value={formatMetricValue(metric, overview?.monthCost ?? 0)}
+          subValue={
+            metric === 'usd'
+              ? `${overview?.monthCalls ?? 0} 次调用 · ${formatCredits(overview?.monthCredits ?? 0)} 积分`
+              : `${overview?.monthCalls ?? 0} 次调用 · ${formatUsd(overview?.monthUsd ?? 0)}`
+          }
           icon={TrendingUp}
         />
         <StatCard
-          title="平均成本/次"
-          value={formatCredits(overview?.avgCostPerCall ?? 0)}
+          title={metric === 'usd' ? '平均成本/次' : '平均积分/次'}
+          value={formatMetricValue(metric, overview?.avgCostPerCall ?? 0)}
           icon={Activity}
         />
         <StatCard
           title="缓存命中率"
           value={`${cacheEfficiency?.hitRate ?? 0}%`}
-          subValue={`节省 ${formatCredits(cacheEfficiency?.savedCredits ?? 0)} 积分`}
+          subValue={`节省 ${cacheSavingsText}`}
           icon={Zap}
           trend="up"
         />
@@ -173,7 +198,7 @@ function CostOverviewTab() {
 
       {/* 时间范围选择 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>成本趋势</h3>
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{metricLabel}趋势</h3>
         <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
           <SelectTrigger
             className="w-32"
@@ -209,7 +234,7 @@ function CostOverviewTab() {
                 <YAxis
                   stroke="#71717a"
                   fontSize={12}
-                  tickFormatter={(v) => formatCredits(v)}
+                  tickFormatter={(v) => formatMetricValue(metric, Number(v))}
                 />
                 <Tooltip
                   contentStyle={{
@@ -218,7 +243,7 @@ function CostOverviewTab() {
                     borderRadius: '8px',
                   }}
                   labelStyle={{ color: '#a1a1aa' }}
-                  formatter={(value) => [formatTooltipCredits(value), '积分']}
+                  formatter={(value) => [formatTooltipValue(metric, value), metricUnit]}
                   labelFormatter={(label) => `日期: ${label}`}
                 />
                 <Line
@@ -242,7 +267,7 @@ function CostOverviewTab() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <PieChart className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              模型使用分布
+              模型${metric === 'usd' ? '成本' : '积分'}分布
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -278,7 +303,7 @@ function CostOverviewTab() {
                       border: '1px solid #3f3f46',
                       borderRadius: '8px',
                     }}
-                    formatter={(value) => [formatTooltipCredits(value), '积分']}
+                    formatter={(value) => [formatTooltipValue(metric, value), metricUnit]}
                   />
                 </RechartsPieChart>
               </ResponsiveContainer>
@@ -291,7 +316,7 @@ function CostOverviewTab() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <Users className="h-5 w-5 text-cyan-400" />
-              高消耗用户 TOP 10
+              {metric === 'usd' ? '高成本用户 TOP 10' : '高积分消耗用户 TOP 10'}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -318,12 +343,14 @@ function CostOverviewTab() {
                         {index + 1}
                       </span>
                       <div>
-                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{user.nickname || user.email}</p>
+                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                          {user.nickname && user.email ? `${user.nickname} (${user.email})` : user.nickname || user.email}
+                        </p>
                         <p className="text-xs" style={{ color: 'var(--text-disabled)' }}>{user.totalCalls} 次调用</p>
                       </div>
                     </div>
                     <span className="text-sm font-medium" style={{ color: 'var(--color-primary)' }}>
-                      {formatCredits(user.totalCost)}
+                      {formatMetricValue(metric, user.totalCost)}
                     </span>
                   </div>
                 ))}
@@ -602,6 +629,8 @@ function TokenStatsTab() {
 }
 
 export default function AICostsPage() {
+  const [metric, setMetric] = useState<CostMetric>('usd');
+
   return (
     <div className="space-y-6 p-4 md:p-8">
       {/* 页面标题 */}
@@ -612,8 +641,19 @@ export default function AICostsPage() {
             AI 成本监控
           </h1>
           <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>
-            追踪 AI 调用成本、Token 使用和模型分布
+            清楚区分美元成本与积分消耗，避免把积分统计误读为真实成本
           </p>
+        </div>
+        <div className="w-full sm:w-48">
+          <Select value={metric} onValueChange={(value) => setMetric(value as CostMetric)}>
+            <SelectTrigger style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
+              <SelectItem value="usd">美元成本视图</SelectItem>
+              <SelectItem value="credits">积分视图</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -647,7 +687,7 @@ export default function AICostsPage() {
         </TabsList>
 
         <TabsContent value="overview">
-          <CostOverviewTab />
+          <CostOverviewTab metric={metric} />
         </TabsContent>
 
         <TabsContent value="logs">

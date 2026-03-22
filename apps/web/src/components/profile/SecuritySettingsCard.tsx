@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
+import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,7 +60,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
-      const emailRedirectTo = new URL('/auth/callback', window.location.origin);
+      const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
       emailRedirectTo.searchParams.set('next', '/profile?tab=security');
 
       const { error } = await supabase.auth.resend({
@@ -223,7 +224,9 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                     size="sm"
                     onClick={() =>
                       router.push(
-                        `/verify-email?email=${encodeURIComponent(user?.email || '')}&redirect=${encodeURIComponent('/profile?tab=security')}`
+                        buildAuthHref(
+                          `/verify-email?email=${encodeURIComponent(user?.email || '')}&redirect=${encodeURIComponent('/profile?tab=security')}`
+                        )
                       )
                     }
                     style={{ color: 'var(--text-secondary)' }}

@@ -731,6 +731,32 @@ export default function AdminSettingsPage() {
                 <div className="mt-3 text-sm" data-testid="admin-settings-cleanup-status" style={{ color: 'var(--text-secondary)' }}>
                   {cleanupMessage || '尚未执行清理'}
                 </div>
+                {cleanupStats?.latestRun && (
+                  <div
+                    className="mt-2 rounded-lg border px-3 py-3 text-sm"
+                    style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)' }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                      <span>最近自动清理：</span>
+                      <Badge className={cleanupStats.latestRun.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' : cleanupStats.latestRun.status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}>
+                        {cleanupStats.latestRun.status === 'success' ? '成功' : cleanupStats.latestRun.status === 'error' ? '失败' : '执行中'}
+                      </Badge>
+                      <span style={{ color: 'var(--text-tertiary)' }}>
+                        {new Date(cleanupStats.latestRun.started_at).toLocaleString('zh-CN')}
+                      </span>
+                    </div>
+                    {cleanupStats.latestRun.summary?.deletedCount != null && (
+                      <div className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                        自动清理删除了 {cleanupStats.latestRun.summary.deletedCount} 个对话记录
+                      </div>
+                    )}
+                    {cleanupStats.latestRun.error && (
+                      <div className="mt-1 text-red-400">
+                        {cleanupStats.latestRun.error}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

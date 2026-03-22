@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
@@ -44,6 +45,7 @@ function needsRateLimit(pathname: string): boolean {
 function isMaintenanceBypassPath(pathname: string): boolean {
   return (
     pathname === '/maintenance' ||
+    pathname.startsWith('/landing') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/auth') ||
     pathname.startsWith('/_next') ||
@@ -193,6 +195,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: resolveSupabaseCookieOptions(normalizedHostname),
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -242,6 +245,16 @@ export async function middleware(request: NextRequest) {
 
   // 公开站点域名: 展示着陆页 (公开访问)
   if (isPublicSiteDomain) {
+    if (user) {
+      const appUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
+      return NextResponse.redirect(appUrl);
+    }
+
+    if (pathname === '/login' || pathname === '/register' || pathname === '/verify-email' || pathname.startsWith('/auth')) {
+      const authUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
+      return NextResponse.redirect(authUrl);
+    }
+
     // 根路径重写到着陆页
     if (pathname === '/') {
       const url = request.nextUrl.clone();

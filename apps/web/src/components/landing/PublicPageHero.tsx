@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import { buildAuthHref } from '@/lib/site-config';
 
 type PageAction = {
   label: string;
@@ -48,7 +49,11 @@ export default function PublicPageHero({
           <div className="flex flex-col gap-3 sm:flex-row">
             {primaryAction ? (
               <Link
-                href={primaryAction.href}
+                href={
+                  primaryAction.href.startsWith('/login') || primaryAction.href.startsWith('/register')
+                    ? buildAuthHref(primaryAction.href)
+                    : primaryAction.href
+                }
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#FFD700] to-[#FFA500] px-6 py-3 font-semibold text-[#0A0A0A] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_10px_rgba(255,215,0,0.16)]"
               >
                 {primaryAction.label}

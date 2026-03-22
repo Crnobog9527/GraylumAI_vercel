@@ -41,6 +41,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
@@ -89,10 +90,21 @@ const categoryConfig: Record<PromptCategory, { label: string; color: string; ico
   analysis: { label: '分析', color: 'bg-rose-500/20 text-rose-400', icon: BarChart3 },
 };
 
+const BATCH_NO_CHANGE = '__UNCHANGED__' as const;
+type BatchSentinel = typeof BATCH_NO_CHANGE;
+type BatchEditForm = {
+  category: PromptCategory | BatchSentinel;
+  platform: Platform | BatchSentinel;
+  modelId: string | BatchSentinel;
+  icon: string | BatchSentinel;
+};
+
 export default function AdminPromptsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<PromptCategory | 'all'>('all');
+  const [selectedPromptIds, setSelectedPromptIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -107,6 +119,12 @@ export default function AdminPromptsPage() {
     category: 'general' as PromptCategory,
     sortOrder: '0',
     isSystem: false,
+  });
+  const [batchForm, setBatchForm] = useState<BatchEditForm>({
+    category: BATCH_NO_CHANGE,
+    platform: BATCH_NO_CHANGE,
+    modelId: BATCH_NO_CHANGE,
+    icon: BATCH_NO_CHANGE,
   });
 
   // Fetch models for selector
@@ -134,6 +152,34 @@ export default function AdminPromptsPage() {
   const deletePrompt = trpc.admin.deletePrompt.useMutation({
     onSuccess: () => {
       refetch();
+    }
+  });
+  const batchUpdatePrompts = trpc.admin.batchUpdatePrompts.useMutation({
+    onSuccess: () => {
+      refetch();
+      setBatchEditOpen(false);
+      setSelectedPromptIds([]);
+      setBatchForm({
+        category: BATCH_NO_CHANGE,
+        platform: BATCH_NO_CHANGE,
+        modelId: BATCH_NO_CHANGE,
+        icon: BATCH_NO_CHANGE,
+      });
+    }
+  });
+  const batchSetPromptActive = trpc.admin.batchSetPromptActive.useMutation({
+    onSuccess: () => {
+      refetch();
+      setSelectedPromptIds([]);
+    }
+  });
+  const batchDeletePrompts = trpc.admin.batchDeletePrompts.useMutation({
+    onSuccess: (result) => {
+      refetch();
+      setSelectedPromptIds([]);
+      if (result.blockedCount > 0) {
+        alert(`已删除 ${result.deletedCount} 个提示词，跳过 ${result.blockedCount} 个系统提示词`);
+      }
     }
   });
 
@@ -268,6 +314,73 @@ export default function AdminPromptsPage() {
     }
   };
 
+  const handleTogglePromptSelection = (promptId: string, checked: boolean) => {
+    setSelectedPromptIds((current) => {
+      if (checked) {
+        return current.includes(promptId) ? current : [...current, promptId];
+      }
+      return current.filter((id) => id !== promptId);
+    });
+  };
+
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedPromptIds(prompts.map((prompt: Prompt) => prompt.id));
+      return;
+    }
+
+    setSelectedPromptIds([]);
+  };
+
+  const handleBatchSetActive = (active: boolean) => {
+    if (selectedPromptIds.length === 0) return;
+    batchSetPromptActive.mutate({
+      ids: selectedPromptIds,
+      active,
+    });
+  };
+
+  const handleOpenBatchEdit = () => {
+    if (selectedPromptIds.length === 0) return;
+    setBatchForm({
+      category: BATCH_NO_CHANGE,
+      platform: BATCH_NO_CHANGE,
+      modelId: BATCH_NO_CHANGE,
+      icon: BATCH_NO_CHANGE,
+    });
+    setBatchEditOpen(true);
+  };
+
+  const handleBatchEditSubmit = () => {
+    const patch: Record<string, unknown> = {};
+
+    if (batchForm.category !== BATCH_NO_CHANGE) patch.category = batchForm.category;
+    if (batchForm.platform !== BATCH_NO_CHANGE) patch.platform = batchForm.platform;
+    if (batchForm.modelId !== BATCH_NO_CHANGE) patch.modelId = batchForm.modelId === 'none' ? null : batchForm.modelId;
+    if (batchForm.icon !== BATCH_NO_CHANGE) patch.icon = batchForm.icon;
+
+    if (Object.keys(patch).length === 0) {
+      alert('请至少选择一个要批量更新的字段');
+      return;
+    }
+
+    batchUpdatePrompts.mutate({
+      ids: selectedPromptIds,
+      patch,
+    });
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedPromptIds.length === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedPromptIds.length} 个提示词吗？系统提示词会自动跳过。`)) {
+      return;
+    }
+
+    batchDeletePrompts.mutate({
+      ids: selectedPromptIds,
+    });
+  };
+
   // Loading state
   if (isLoading) {
     return <AdminLoadingState />;
@@ -279,6 +392,8 @@ export default function AdminPromptsPage() {
   }
 
   const prompts = data?.prompts ?? [];
+  const hasSelectedPrompts = selectedPromptIds.length > 0;
+  const allPromptsSelected = prompts.length > 0 && selectedPromptIds.length === prompts.length;
   const stats = data?.stats ?? {
     total: 0, active: 0, inactive: 0, system: 0,
     byCategory: { general: 0, assistant: 0, creative: 0, coding: 0, translation: 0, analysis: 0 }
@@ -314,6 +429,55 @@ export default function AdminPromptsPage() {
             </Button>
           </div>
         </div>
+
+        {hasSelectedPrompts && (
+          <Card className="mb-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+            <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  已选择 {selectedPromptIds.length} 个提示词
+                </p>
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  支持批量启用、禁用、删除，以及批量编辑共享字段
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleOpenBatchEdit}
+                  className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  批量编辑
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleBatchSetActive(true)}
+                  className="border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  批量启用
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleBatchSetActive(false)}
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  批量禁用
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleBatchDelete}
+                  className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  批量删除
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -406,6 +570,13 @@ export default function AdminPromptsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[48px]">
+                    <Checkbox
+                      checked={allPromptsSelected}
+                      onCheckedChange={(checked) => handleToggleSelectAll(Boolean(checked))}
+                      aria-label="Select all prompts"
+                    />
+                  </TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead>分类</TableHead>
                   <TableHead>排序</TableHead>
@@ -418,8 +589,16 @@ export default function AdminPromptsPage() {
                 {prompts.map((prompt: Prompt) => {
                   const config = categoryConfig[prompt.category];
                   const CategoryIcon = config.icon;
+                  const isSelected = selectedPromptIds.includes(prompt.id);
                   return (
                     <TableRow key={prompt.id} data-testid={`admin-prompt-row-${prompt.id}`}>
+                      <TableCell>
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => handleTogglePromptSelection(prompt.id, Boolean(checked))}
+                          aria-label={`Select prompt ${prompt.name}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <div
@@ -507,7 +686,7 @@ export default function AdminPromptsPage() {
                 })}
                 {prompts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
+                    <TableCell colSpan={7} className="text-center py-12" style={{ color: 'var(--text-disabled)' }}>
                       暂无提示词，点击上方按钮创建
                     </TableCell>
                   </TableRow>
@@ -738,6 +917,119 @@ export default function AdminPromptsPage() {
                 className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
               >
                 {createPrompt.isPending || updatePrompt.isPending ? '保存中...' : '保存'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={batchEditOpen} onOpenChange={setBatchEditOpen}>
+          <DialogContent
+            className="max-w-xl"
+            style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
+          >
+            <DialogHeader>
+              <DialogTitle style={{ color: 'var(--text-primary)' }}>
+                批量编辑共享字段
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                将为选中的 {selectedPromptIds.length} 个提示词统一更新分类、平台、模型或图标。未选择的字段保持不变。
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>分类</Label>
+                  <Select
+                    value={batchForm.category}
+                    onValueChange={(value) => setBatchForm({ ...batchForm, category: value as PromptCategory | BatchSentinel })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
+                      {Object.entries(categoryConfig).map(([key, config]) => (
+                        <SelectItem key={key} value={key}>{config.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>适用平台</Label>
+                  <Select
+                    value={batchForm.platform}
+                    onValueChange={(value) => setBatchForm({ ...batchForm, platform: value as Platform | BatchSentinel })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
+                      {Object.entries(platformConfig).map(([key, label]) => (
+                        <SelectItem key={key} value={key}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>指定模型</Label>
+                  <Select
+                    value={batchForm.modelId}
+                    onValueChange={(value) => setBatchForm({ ...batchForm, modelId: value })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
+                      <SelectItem value="none">清空模型限制</SelectItem>
+                      {modelsData?.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>{model.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label style={{ color: 'var(--text-secondary)' }}>图标</Label>
+                  <Select
+                    value={batchForm.icon}
+                    onValueChange={(value) => setBatchForm({ ...batchForm, icon: value })}
+                  >
+                    <SelectTrigger className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+                      <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
+                      {iconOptions.map((icon) => (
+                        <SelectItem key={icon} value={icon}>{icon}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setBatchEditOpen(false)}
+                className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handleBatchEditSubmit}
+                disabled={batchUpdatePrompts.isPending}
+                className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
+              >
+                {batchUpdatePrompts.isPending ? '保存中...' : '应用到选中项'}
               </Button>
             </DialogFooter>
           </DialogContent>

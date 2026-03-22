@@ -146,6 +146,18 @@ export const userActivityLogs = pgTable('user_activity_logs', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const scheduledJobRuns = pgTable('scheduled_job_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobKey: text('job_key').notNull(),
+  triggerSource: text('trigger_source', { enum: ['manual', 'cron'] }).default('cron').notNull(),
+  status: text('status', { enum: ['running', 'success', 'error'] }).default('running').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  summary: jsonb('summary').default({}).notNull(),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const announcements = pgTable('announcements', {
   id: uuid('id').primaryKey().defaultRandom(),
   title: text('title').notNull(),

@@ -63,6 +63,37 @@ interface UserProfile {
   avatar_url?: string | null;
 }
 
+function formatUserDisplay(profile: Transaction['profiles'] | UserProfile | null, fallbackUserId?: string) {
+  const nickname = profile?.nickname?.trim();
+  const email = profile?.email?.trim();
+
+  if (nickname && email) {
+    return {
+      primary: `${nickname} (${email})`,
+      secondary: email,
+    };
+  }
+
+  if (nickname) {
+    return {
+      primary: nickname,
+      secondary: fallbackUserId ? `${fallbackUserId.slice(0, 8)}...` : '',
+    };
+  }
+
+  if (email) {
+    return {
+      primary: email,
+      secondary: email,
+    };
+  }
+
+  return {
+    primary: fallbackUserId ? `${fallbackUserId.slice(0, 8)}...` : '未命名用户',
+    secondary: fallbackUserId ? `${fallbackUserId.slice(0, 8)}...` : '',
+  };
+}
+
 const typeConfig: Record<TransactionType, { label: string; color: string; icon: React.ElementType }> = {
   addition: { label: '增加', color: 'bg-emerald-500/20 text-emerald-400', icon: ArrowUpCircle },
   deduction: { label: '扣除', color: 'bg-rose-500/20 text-rose-400', icon: ArrowDownCircle },
@@ -136,7 +167,7 @@ export default function AdminTransactionsPage() {
   // Handle user selection
   const handleUserSelect = (user: UserProfile) => {
     setSelectedUserId(user.id);
-    setSelectedUserName(user.nickname || user.email);
+    setSelectedUserName(formatUserDisplay(user, user.id).primary);
     setUserSearch('');
     setIsUserSearchOpen(false);
     setCurrentPage(1);
@@ -517,6 +548,7 @@ export default function AdminTransactionsPage() {
                   const config = getTransactionConfig(transaction.type);
                   const TypeIcon = config.icon;
                   const isPositive = transaction.amount > 0;
+                  const userDisplay = formatUserDisplay(transaction.profiles, transaction.user_id);
                   return (
                     <TableRow key={transaction.id} data-testid={`admin-transaction-row-${transaction.id}`}>
                       <TableCell>
@@ -537,10 +569,10 @@ export default function AdminTransactionsPage() {
                           </div>
                           <div>
                             <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                              {transaction.profiles?.nickname || '未知用户'}
+                              {userDisplay.primary}
                             </p>
                             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                              {transaction.profiles?.email || transaction.user_id.slice(0, 8) + '...'}
+                              {userDisplay.secondary}
                             </p>
                           </div>
                         </div>

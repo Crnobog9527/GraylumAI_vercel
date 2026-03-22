@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Menu, X, Sparkles } from 'lucide-react';
-import { resolveSiteName } from '@/lib/site-config';
+import { buildAuthHref, resolveSiteName } from '@/lib/site-config';
 
 const NAV_LINKS = [
   { label: '功能', href: '/landing#features' },
@@ -79,13 +79,13 @@ export default function LandingHeader({ siteName = resolveSiteName() }: { siteNa
           {/* Desktop CTA Buttons */}
           <div className="hidden md:flex items-center gap-4">
             <Link
-              href="/login"
+              href={buildAuthHref('/login')}
               className="text-[#B0B0B0] hover:text-white transition-colors text-sm font-medium"
             >
               登录
             </Link>
             <Link
-              href="/login?action=signup"
+              href={buildAuthHref('/login?action=signup')}
               className="rounded-lg bg-gradient-to-r from-[#FFD700] to-[#FFA500] px-5 py-2.5 text-sm font-semibold text-[#0A0A0A] transition-[transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_10px_rgba(255,215,0,0.16)]"
             >
               免费开始
@@ -117,13 +117,13 @@ export default function LandingHeader({ siteName = resolveSiteName() }: { siteNa
               ))}
               <div className="flex flex-col gap-3 pt-4 border-t border-[#333333]">
                 <Link
-                  href="/login"
+                  href={buildAuthHref('/login')}
                   className="text-center text-[#B0B0B0] hover:text-white transition-colors text-sm font-medium py-2"
                 >
                   登录
                 </Link>
                 <Link
-                  href="/login?action=signup"
+                  href={buildAuthHref('/login?action=signup')}
                   className="text-center px-5 py-2.5 bg-gradient-to-r from-[#FFD700] to-[#FFA500] text-[#0A0A0A] rounded-lg font-semibold text-sm"
                 >
                   免费开始

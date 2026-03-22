@@ -7,16 +7,24 @@
 import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 
+const costMetricSchema = z.enum(['credits', 'usd']);
+type CostMetric = z.infer<typeof costMetricSchema>;
+
 // ============================================
 // 类型定义
 // ============================================
 
 export interface CostOverview {
+  metric: CostMetric;
   todayCost: number;
   todayCalls: number;
   monthCost: number;
   monthCalls: number;
   avgCostPerCall: number;
+  todayCredits: number;
+  todayUsd: number;
+  monthCredits: number;
+  monthUsd: number;
 }
 
 export interface ModelDistribution {
@@ -25,12 +33,16 @@ export interface ModelDistribution {
   calls: number;
   cost: number;
   percentage: number;
+  credits: number;
+  usd: number;
 }
 
 export interface DailyCost {
   date: string;
   cost: number;
   calls: number;
+  credits: number;
+  usd: number;
 }
 
 export interface TopUser {
@@ -39,6 +51,8 @@ export interface TopUser {
   nickname: string;
   totalCost: number;
   totalCalls: number;
+  totalCredits: number;
+  totalUsd: number;
 }
 
 export interface UsageLog {
@@ -77,8 +91,9 @@ export const costsRouter = router({
   getOverview: adminProcedure
     .input(z.object({
       timezone: z.string().optional().default('Asia/Shanghai'),
+      metric: costMetricSchema.optional().default('usd'),
     }))
-    .query(async ({ ctx }): Promise<CostOverview> => {
+    .query(async ({ ctx, input }): Promise<CostOverview> => {
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -86,27 +101,36 @@ export const costsRouter = router({
       // 今日成本
       const { data: todayData } = await ctx.supabase
         .from('token_stats')
-        .select('total_credits')
+        .select('total_credits, total_cost_usd')
         .gte('created_at', todayStart.toISOString());
 
-      const todayCost = todayData?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0;
+      const todayCredits = todayData?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0;
+      const todayUsd = todayData?.reduce((sum, r) => sum + parseFloat(r.total_cost_usd ?? '0'), 0) ?? 0;
       const todayCalls = todayData?.length ?? 0;
 
       // 本月成本
       const { data: monthData } = await ctx.supabase
         .from('token_stats')
-        .select('total_credits')
+        .select('total_credits, total_cost_usd')
         .gte('created_at', monthStart.toISOString());
 
-      const monthCost = monthData?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0;
+      const monthCredits = monthData?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0;
+      const monthUsd = monthData?.reduce((sum, r) => sum + parseFloat(r.total_cost_usd ?? '0'), 0) ?? 0;
       const monthCalls = monthData?.length ?? 0;
+      const todayCost = input.metric === 'usd' ? todayUsd : todayCredits;
+      const monthCost = input.metric === 'usd' ? monthUsd : monthCredits;
 
       return {
+        metric: input.metric,
         todayCost,
         todayCalls,
         monthCost,
         monthCalls,
         avgCostPerCall: monthCalls > 0 ? Math.round(monthCost / monthCalls) : 0,
+        todayCredits,
+        todayUsd,
+        monthCredits,
+        monthUsd,
       };
     }),
 
@@ -116,6 +140,7 @@ export const costsRouter = router({
   getCostTrend: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(7),
+      metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<DailyCost[]> => {
       const startDate = new Date();
@@ -123,33 +148,40 @@ export const costsRouter = router({
 
       const { data } = await ctx.supabase
         .from('token_stats')
-        .select('total_credits, created_at')
+        .select('total_credits, total_cost_usd, created_at')
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: true });
 
       // 按日期分组
-      const dailyMap = new Map<string, { cost: number; calls: number }>();
+      const dailyMap = new Map<string, { credits: number; usd: number; calls: number }>();
 
       // 初始化所有日期
       for (let i = 0; i < input.days; i++) {
         const date = new Date();
         date.setDate(date.getDate() - i);
         const dateStr = date.toISOString().split('T')[0];
-        dailyMap.set(dateStr!, { cost: 0, calls: 0 });
+        dailyMap.set(dateStr!, { credits: 0, usd: 0, calls: 0 });
       }
 
       // 聚合数据
       data?.forEach(record => {
         const dateStr = new Date(record.created_at).toISOString().split('T')[0];
-        const existing = dailyMap.get(dateStr!) ?? { cost: 0, calls: 0 };
+        const existing = dailyMap.get(dateStr!) ?? { credits: 0, usd: 0, calls: 0 };
         dailyMap.set(dateStr!, {
-          cost: existing.cost + (record.total_credits ?? 0),
+          credits: existing.credits + (record.total_credits ?? 0),
+          usd: existing.usd + parseFloat(record.total_cost_usd ?? '0'),
           calls: existing.calls + 1,
         });
       });
 
       return Array.from(dailyMap.entries())
-        .map(([date, data]) => ({ date, ...data }))
+        .map(([date, data]) => ({
+          date,
+          calls: data.calls,
+          credits: data.credits,
+          usd: data.usd,
+          cost: input.metric === 'usd' ? data.usd : data.credits,
+        }))
         .sort((a, b) => a.date.localeCompare(b.date));
     }),
 
@@ -159,6 +191,7 @@ export const costsRouter = router({
   getModelDistribution: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(30),
+      metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<ModelDistribution[]> => {
       const startDate = new Date();
@@ -166,20 +199,23 @@ export const costsRouter = router({
 
       const { data } = await ctx.supabase
         .from('token_stats')
-        .select('model_used, total_credits')
+        .select('model_used, total_credits, total_cost_usd')
         .gte('created_at', startDate.toISOString());
 
       // 按模型分组
-      const modelMap = new Map<string, { calls: number; cost: number }>();
+      const modelMap = new Map<string, { calls: number; credits: number; usd: number }>();
       let totalCost = 0;
 
       data?.forEach(record => {
         const modelId = record.model_used ?? 'unknown';
-        const existing = modelMap.get(modelId) ?? { calls: 0, cost: 0 };
-        const cost = record.total_credits ?? 0;
+        const existing = modelMap.get(modelId) ?? { calls: 0, credits: 0, usd: 0 };
+        const credits = record.total_credits ?? 0;
+        const usd = parseFloat(record.total_cost_usd ?? '0');
+        const cost = input.metric === 'usd' ? usd : credits;
         modelMap.set(modelId, {
           calls: existing.calls + 1,
-          cost: existing.cost + cost,
+          credits: existing.credits + credits,
+          usd: existing.usd + usd,
         });
         totalCost += cost;
       });
@@ -189,8 +225,10 @@ export const costsRouter = router({
           modelId,
           modelName: getModelDisplayName(modelId),
           calls: data.calls,
-          cost: data.cost,
-          percentage: totalCost > 0 ? Math.round((data.cost / totalCost) * 100) : 0,
+          cost: input.metric === 'usd' ? data.usd : data.credits,
+          credits: data.credits,
+          usd: data.usd,
+          percentage: totalCost > 0 ? Math.round(((input.metric === 'usd' ? data.usd : data.credits) / totalCost) * 100) : 0,
         }))
         .sort((a, b) => b.cost - a.cost);
     }),
@@ -202,6 +240,7 @@ export const costsRouter = router({
     .input(z.object({
       days: z.number().min(1).max(90).default(30),
       limit: z.number().min(1).max(50).default(10),
+      metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<TopUser[]> => {
       const startDate = new Date();
@@ -212,6 +251,7 @@ export const costsRouter = router({
         .select(`
           user_id,
           total_credits,
+          total_cost_usd,
           profiles!inner (
             email,
             nickname
@@ -225,19 +265,27 @@ export const costsRouter = router({
         nickname: string;
         totalCost: number;
         totalCalls: number;
+        totalCredits: number;
+        totalUsd: number;
       }>();
 
       data?.forEach((record: any) => {
         const userId = record.user_id;
         const existing = userMap.get(userId) ?? {
-          email: record.profiles?.email ?? 'unknown',
-          nickname: record.profiles?.nickname ?? 'unknown',
+          email: record.profiles?.email ?? '',
+          nickname: record.profiles?.nickname ?? '',
           totalCost: 0,
           totalCalls: 0,
+          totalCredits: 0,
+          totalUsd: 0,
         };
+        const totalCredits = existing.totalCredits + (record.total_credits ?? 0);
+        const totalUsd = existing.totalUsd + parseFloat(record.total_cost_usd ?? '0');
         userMap.set(userId, {
           ...existing,
-          totalCost: existing.totalCost + (record.total_credits ?? 0),
+          totalCredits,
+          totalUsd,
+          totalCost: input.metric === 'usd' ? totalUsd : totalCredits,
           totalCalls: existing.totalCalls + 1,
         });
       });
@@ -349,19 +397,22 @@ export const costsRouter = router({
   getCacheEfficiency: adminProcedure
     .input(z.object({
       days: z.number().min(1).max(90).default(7),
+      metric: costMetricSchema.optional().default('usd'),
     }))
     .query(async ({ ctx, input }): Promise<{
       totalRequests: number;
       cacheHits: number;
       hitRate: number;
       savedCredits: number;
+      savedUsd: number;
+      savedValue: number;
     }> => {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - input.days);
 
       const { data } = await ctx.supabase
         .from('token_stats')
-        .select('cached_tokens, input_tokens, total_credits')
+        .select('cached_tokens, input_tokens, total_credits, total_cost_usd')
         .gte('created_at', startDate.toISOString());
 
       const totalRequests = data?.length ?? 0;
@@ -383,12 +434,17 @@ export const costsRouter = router({
       const savedCredits = totalInputTokens > 0
         ? Math.round((totalCachedTokens / totalInputTokens) * 0.9 * (data?.reduce((sum, r) => sum + (r.total_credits ?? 0), 0) ?? 0))
         : 0;
+      const savedUsd = totalInputTokens > 0
+        ? (totalCachedTokens / totalInputTokens) * 0.9 * (data?.reduce((sum, r) => sum + parseFloat(r.total_cost_usd ?? '0'), 0) ?? 0)
+        : 0;
 
       return {
         totalRequests,
         cacheHits,
         hitRate: totalRequests > 0 ? Math.round((cacheHits / totalRequests) * 100) : 0,
         savedCredits,
+        savedUsd,
+        savedValue: input.metric === 'usd' ? savedUsd : savedCredits,
       };
     }),
 });
