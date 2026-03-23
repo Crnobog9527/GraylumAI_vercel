@@ -26,6 +26,22 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
 ];
 
+// 公开站点路径 - 仅允许公共内容留在 public 域
+const PUBLIC_SITE_PATHS = [
+  '/maintenance',
+  '/landing',
+  '/contact',
+  '/tutorials',
+  '/faq',
+  '/terms',
+  '/privacy',
+  '/acceptable-use',
+  '/api',
+  '/_next',
+  '/_vercel',
+  '/favicon.ico',
+];
+
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
   '/api/ai/stream',
@@ -37,6 +53,10 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(path => pathname.startsWith(path));
 }
 
+function isPublicSitePath(pathname: string): boolean {
+  return PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path));
+}
+
 // 判断是否需要速率限制
 function needsRateLimit(pathname: string): boolean {
   return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
@@ -45,13 +65,8 @@ function needsRateLimit(pathname: string): boolean {
 function isMaintenanceBypassPath(pathname: string): boolean {
   return (
     pathname === '/maintenance' ||
-    pathname.startsWith('/landing') ||
-    pathname === '/login' ||
-    pathname === '/register' ||
-    pathname === '/verify-email' ||
     pathname.startsWith('/admin') ||
     pathname.startsWith('/api') ||
-    pathname.startsWith('/auth') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/_vercel') ||
     pathname === '/favicon.ico'
@@ -96,8 +111,8 @@ async function isMaintenanceModeEnabled(
 
     if (error) {
       console.error('[Middleware] Failed to read maintenance mode:', error);
-      maintenanceCache = { enabled: false, expiresAt: Date.now() + 1_000 };
-      return false;
+      maintenanceCache = { enabled: true, expiresAt: Date.now() + 1_000 };
+      return true;
     }
 
     const enabled = data?.value === true || data?.value === 'true';
@@ -105,8 +120,8 @@ async function isMaintenanceModeEnabled(
     return enabled;
   } catch (error) {
     console.error('[Middleware] Unexpected maintenance mode error:', error);
-    maintenanceCache = { enabled: false, expiresAt: Date.now() + 1_000 };
-    return false;
+    maintenanceCache = { enabled: true, expiresAt: Date.now() + 1_000 };
+    return true;
   }
 }
 
@@ -233,6 +248,27 @@ export async function middleware(request: NextRequest) {
     isAdminUser = profile?.role === 'admin';
   }
 
+  // ========================================
+  // 认证与路由逻辑
+  // ========================================
+
+  // 公开站点域名: 展示着陆页 (公开访问)
+  if (isPublicSiteDomain) {
+    // 根路径重写到着陆页
+    if (pathname === '/') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/landing';
+      return NextResponse.rewrite(url);
+    }
+
+    if (isPublicSitePath(pathname)) {
+      return supabaseResponse;
+    }
+
+    const appUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
+    return NextResponse.redirect(appUrl);
+  }
+
   if (maintenanceModeEnabled && !isAdminUser && !isMaintenanceBypassPath(pathname)) {
     const maintenanceUrl = new URL('/maintenance', request.url);
     maintenanceUrl.searchParams.set('from', `${pathname}${request.nextUrl.search}`);
@@ -243,29 +279,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/admin', request.url));
   }
 
-  // ========================================
-  // 认证与路由逻辑
-  // ========================================
-
-  // 公开站点域名: 展示着陆页 (公开访问)
-  if (isPublicSiteDomain) {
-    if (user) {
-      const appUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
-      return NextResponse.redirect(appUrl);
-    }
-
-    if (pathname === '/login' || pathname === '/register' || pathname === '/verify-email' || pathname.startsWith('/auth')) {
-      const authUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
-      return NextResponse.redirect(authUrl);
-    }
-
-    // 根路径重写到着陆页
-    if (pathname === '/') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/landing';
-      return NextResponse.rewrite(url);
-    }
-    // www 域名允许所有访问，不需要认证
+  // www 域名允许所有访问，不需要认证
+  if (isPublicSitePath(pathname)) {
     return supabaseResponse;
   }
 

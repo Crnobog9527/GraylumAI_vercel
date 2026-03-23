@@ -3,6 +3,33 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { isStripeCheckoutConfigured } from '../services/stripe';
 
+const USER_FACING_SYSTEM_SETTING_KEYS = [
+  'site_name',
+  'support_email',
+  'maintenance_mode',
+  'home_show_onboarding',
+  'home_show_featured_modules',
+  'chat_show_model_selector',
+  'max_input_characters',
+  'enable_free_tier',
+  'free_tier_messages',
+  'enable_long_text_warning',
+  'long_text_warning_threshold',
+  'show_token_usage_stats',
+  'chat_prompt_text',
+  'chat_welcome_message',
+  'chat_billing_hint',
+  'input_credits_per_1k',
+  'output_credits_per_1k',
+] as const;
+
+function reduceSettings(data: Array<{ key: string; value: unknown }>) {
+  return data.reduce((acc: Record<string, unknown>, setting) => ({
+    ...acc,
+    [setting.key]: setting.value,
+  }), {});
+}
+
 export const settingsRouter = router({
   /**
    * 获取首页公告 (公开接口)
@@ -79,16 +106,26 @@ export const settingsRouter = router({
   getSystemSettings: publicProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('system_settings')
-      .select('*');
+      .select('key, value')
+      .in('key', [...USER_FACING_SYSTEM_SETTING_KEYS]);
 
     if (error) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
     }
 
-    return data.reduce((acc: Record<string, unknown>, setting: { key: string; value: unknown }) => ({
-      ...acc,
-      [setting.key]: setting.value
-    }), {});
+    return reduceSettings(data ?? []);
+  }),
+
+  getAdminSystemSettings: adminProcedure.query(async ({ ctx }) => {
+    const { data, error } = await ctx.supabase
+      .from('system_settings')
+      .select('key, value');
+
+    if (error) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+    }
+
+    return reduceSettings(data ?? []);
   }),
 
   // Admin only: Update system settings

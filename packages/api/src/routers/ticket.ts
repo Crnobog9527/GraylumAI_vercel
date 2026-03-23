@@ -19,7 +19,7 @@ const dbToCategoryMap: Record<string, string> = {
   feature: 'feature_request',
   bug: 'bug_report',
   account: 'account_issue',
-  billing: 'other',
+  billing: 'billing',
   other: 'other',
 };
 

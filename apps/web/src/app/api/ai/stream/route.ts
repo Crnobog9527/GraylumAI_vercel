@@ -9,6 +9,7 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { filterAIOutput, logger } from '@repo/api/src/services';
 import { BillingService, calculateTokenCostWithPricing, getModelPricing } from '@repo/api/src/services/billing';
 import { buildCachedPrompt } from '@repo/api/src/services/promptCacheBuilder';
 import { ContextManager } from '@repo/api/src/services/contextManager';
@@ -68,10 +69,13 @@ interface RuntimeModelConfig {
 
 type TokenCounterProvider = 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
 
-async function getUserAccountStatus(supabase: any, userId: string): Promise<'active' | 'disabled' | 'banned'> {
+async function getUserSecurityProfile(
+  supabase: any,
+  userId: string
+): Promise<{ status: 'active' | 'disabled' | 'banned'; role: 'user' | 'admin' }> {
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('status')
+    .select('status, role')
     .eq('id', userId)
     .single();
 
@@ -79,9 +83,26 @@ async function getUserAccountStatus(supabase: any, userId: string): Promise<'act
     throw new Error('用户资料不存在');
   }
 
-  if (profile.status === 'disabled') return 'disabled';
-  if (profile.status === 'banned') return 'banned';
-  return 'active';
+  return {
+    status: profile.status === 'disabled' || profile.status === 'banned' ? profile.status : 'active',
+    role: profile.role === 'admin' ? 'admin' : 'user',
+  };
+}
+
+async function isMaintenanceModeEnabled(supabase: any): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'maintenance_mode')
+    .maybeSingle();
+
+  if (error) {
+    console.error('[AI Stream] Failed to read maintenance mode:', error);
+    return true;
+  }
+
+  const value = data?.value;
+  return value === true || value === 'true';
 }
 
 async function getFreeTierUsageCount(supabase: any, userId: string): Promise<number> {
@@ -107,25 +128,6 @@ function estimateTokens(text: string): number {
   const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
   const otherChars = text.length - chineseChars;
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
-}
-
-function checkOutputSecurity(content: string): boolean {
-  const sensitivePatterns = [
-    /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-    /password\s*[:=]\s*["']?[^\s"']{8,}/i,
-    /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-    /sk-[a-zA-Z0-9]{48}/i,
-    /sk-ant-[a-zA-Z0-9-_]{95}/i,
-  ];
-
-  for (const pattern of sensitivePatterns) {
-    if (pattern.test(content)) {
-      console.warn('[Security] Detected potential sensitive content in AI output');
-      return false;
-    }
-  }
-
-  return true;
 }
 
 async function getOrCreateConversation(
@@ -373,17 +375,25 @@ export async function POST(request: NextRequest) {
       userId,
     });
 
-    const userStatus = await getUserAccountStatus(supabaseAuth, userId);
-    if (userStatus === 'disabled') {
+    const userSecurityProfile = await getUserSecurityProfile(supabaseAuth, userId);
+    if (userSecurityProfile.status === 'disabled') {
       return new Response(
         JSON.stringify({ error: '账号已被禁用，请联系管理员' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
-    if (userStatus === 'banned') {
+    if (userSecurityProfile.status === 'banned') {
       return new Response(
         JSON.stringify({ error: '账号已被封禁' }),
         { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const maintenanceModeEnabled = await isMaintenanceModeEnabled(supabaseAdmin);
+    if (maintenanceModeEnabled && userSecurityProfile.role !== 'admin') {
+      return new Response(
+        JSON.stringify({ error: '系统维护中，暂时无法使用 AI 对话功能' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -762,9 +772,6 @@ export async function POST(request: NextRequest) {
                   const delta = event.choices?.[0]?.delta?.content || '';
                   if (delta) {
                     fullContent += delta;
-                    controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
-                    );
                   }
 
                   if (event.usage) {
@@ -849,9 +856,6 @@ export async function POST(request: NextRequest) {
 
                   if (delta) {
                     fullContent += delta;
-                    controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
-                    );
                   }
 
                   if (event.usageMetadata) {
@@ -920,9 +924,6 @@ export async function POST(request: NextRequest) {
                   if (event.type === 'content_block_delta') {
                     const delta = event.delta?.text || '';
                     fullContent += delta;
-                    controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: delta })}\n\n`)
-                    );
                   } else if (event.type === 'message_delta') {
                     if (event.usage) {
                       usage.outputTokens = event.usage.output_tokens || usage.outputTokens;
@@ -964,7 +965,17 @@ export async function POST(request: NextRequest) {
             usage.outputTokens = estimateTokens(fullContent);
           }
 
-          checkOutputSecurity(fullContent);
+          const filteredOutput = filterAIOutput(fullContent);
+          const assistantContent = filteredOutput.content;
+
+          if (filteredOutput.blocked || filteredOutput.sanitized) {
+            logger.security.contentBlocked(
+              user.id,
+              filteredOutput.reasons.join(',') || 'output_filtered',
+              'output',
+              { requestId, conversationId: conversation.id }
+            );
+          }
 
           if (conversation.isNew) {
             const title = message.length > 50 ? `${message.substring(0, 47)}...` : message;
@@ -983,7 +994,7 @@ export async function POST(request: NextRequest) {
           const finalizeResult = await billingService.finalizeAISuccess({
             conversationId: conversation.id,
             userMessage: message,
-            assistantMessage: fullContent,
+            assistantMessage: assistantContent,
             modelUsed: runtimeModel.modelId,
             usage,
             costUsd: calculatedCost.costUsd,
@@ -1039,11 +1050,11 @@ export async function POST(request: NextRequest) {
             });
           }
 
-          if (webSearchExecuted && fullContent) {
+          if (webSearchExecuted && assistantContent) {
             await upsertContextSnapshot(supabaseAuth, {
               conversationId: conversation.id,
               snapshotType: 'search_digest',
-              content: fullContent,
+              content: assistantContent,
               sourceMessageEndId: finalizeResult.assistantMessageId,
               sourceMessageCount: 2,
               metadata: {
@@ -1052,6 +1063,12 @@ export async function POST(request: NextRequest) {
                 modelUsed: runtimeModel.modelId,
               },
             });
+          }
+
+          if (assistantContent) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: assistantContent })}\n\n`)
+            );
           }
 
           controller.enqueue(

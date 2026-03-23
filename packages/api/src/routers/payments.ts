@@ -471,7 +471,7 @@ export const paymentsRouter = router({
 
       const stripe = getStripeClient();
       const session = await stripe.checkout.sessions.retrieve(input.sessionId, {
-        expand: ['payment_intent', 'subscription'],
+        expand: ['payment_intent', 'subscription', 'invoice'],
       });
 
       const sessionUserId =
@@ -513,11 +513,18 @@ export const paymentsRouter = router({
 
           await syncSubscriptionState(ctx.supabaseAdmin, subscription);
 
-          const invoices = await stripe.invoices.list({
-            subscription: subscriptionId,
-            limit: 10,
-          });
-          const paidInvoice = invoices.data.find((invoice) => invoice.status === 'paid');
+          const expandedInvoice =
+            typeof session.invoice === 'string'
+              ? await stripe.invoices.retrieve(session.invoice)
+              : session.invoice ?? null;
+
+          const paidInvoice = expandedInvoice?.status === 'paid'
+            ? expandedInvoice
+            : (await stripe.invoices.list({
+                subscription: subscriptionId,
+                limit: 10,
+              })).data.find((invoice) => invoice.status === 'paid') ?? null;
+
           if (paidInvoice) {
             await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
           }

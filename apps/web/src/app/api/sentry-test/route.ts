@@ -1,5 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
+import { createServerClient } from '@supabase/ssr';
+import { createClient } from '@supabase/supabase-js';
+import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 /**
  * Sentry 测试端点
@@ -12,7 +15,44 @@ import * as Sentry from "@sentry/nextjs";
  * 2. 30 秒内检查 Sentry 后台是否收到错误报告
  * 3. 错误报告应包含用户信息和请求详情
  */
-export async function GET(request: Request) {
+async function isPreviewAdminRequest(request: NextRequest): Promise<boolean> {
+  const hostname = new URL(request.url).hostname.toLowerCase();
+  const authClient = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookieOptions: resolveSupabaseCookieOptions(hostname),
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll() {
+          // Read-only auth check.
+        },
+      },
+    }
+  );
+
+  const { data: { user } } = await authClient.auth.getUser();
+  if (!user) {
+    return false;
+  }
+
+  const adminClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  );
+
+  const { data: profile } = await adminClient
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  return profile?.role === 'admin';
+}
+
+export async function GET(request: NextRequest) {
   // 生产环境禁用此测试端点
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json(
@@ -20,6 +60,20 @@ export async function GET(request: Request) {
       { status: 404 }
     );
   }
+
+  const hostname = new URL(request.url).hostname.toLowerCase();
+  const isLocalRequest = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  if (!isLocalRequest) {
+    const isAdminRequest = await isPreviewAdminRequest(request);
+    if (!isAdminRequest) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      );
+    }
+  }
+
   // Add test context for better error tracking
   Sentry.setContext("sentry_test", {
     purpose: "验证 Sentry 配置",
@@ -82,6 +136,6 @@ export async function GET(request: Request) {
 }
 
 // Also support POST for alternative testing
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   return GET(request);
 }

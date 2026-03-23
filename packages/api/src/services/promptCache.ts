@@ -241,12 +241,15 @@ export function aggregateCacheStats(
       const inputTokens = record.input_tokens ?? 0;
       const cachedTokens = record.cached_tokens ?? 0;
       const cacheCreation = record.cache_creation_tokens ?? 0;
+      const cacheHit = cachedTokens > 0;
 
       return {
         totalRequests: acc.totalRequests + 1,
-        totalInputTokens: acc.totalInputTokens + inputTokens + cachedTokens,
+        totalInputTokens: acc.totalInputTokens + inputTokens + cachedTokens + cacheCreation,
         totalCachedTokens: acc.totalCachedTokens + cachedTokens,
         totalCacheCreation: acc.totalCacheCreation + cacheCreation,
+        cacheHits: acc.cacheHits + (cacheHit ? 1 : 0),
+        cacheMisses: acc.cacheMisses + (cacheHit ? 0 : 1),
       };
     },
     {
@@ -254,12 +257,14 @@ export function aggregateCacheStats(
       totalInputTokens: 0,
       totalCachedTokens: 0,
       totalCacheCreation: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
     }
   );
 
   const hitRate =
-    stats.totalInputTokens > 0
-      ? stats.totalCachedTokens / stats.totalInputTokens
+    stats.totalRequests > 0
+      ? stats.cacheHits / stats.totalRequests
       : 0;
 
   // Estimate cost savings (cached tokens are 90% cheaper)
@@ -267,8 +272,8 @@ export function aggregateCacheStats(
 
   return {
     totalRequests: stats.totalRequests,
-    cacheHits: stats.totalCachedTokens > 0 ? stats.totalRequests : 0,
-    cacheMisses: stats.totalCachedTokens === 0 ? stats.totalRequests : 0,
+    cacheHits: stats.cacheHits,
+    cacheMisses: stats.cacheMisses,
     hitRate: Math.round(hitRate * 100),
     tokensSaved: stats.totalCachedTokens,
     costSaved: Math.round(costSaved),

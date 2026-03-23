@@ -4,6 +4,10 @@ import { TRPCError } from '@trpc/server';
 import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
 import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
+  getAdminMembershipOverrideErrorMessage,
+  isStripeManagedSubscriptionActive,
+} from '../services/subscriptionOverrides';
+import {
   finishScheduledJobRun,
   getLatestScheduledJobRun,
   SCHEDULED_JOB_KEYS,
@@ -507,11 +511,29 @@ export const adminRouter = router({
         query = query.lte('created_at', input.endDate);
       }
 
-      const [transactionsResult, statsQuery] = await Promise.all([
+      let statsQuery = ctx.supabase
+        .from('credit_transactions')
+        .select('type, amount');
+
+      if (input.type) {
+        statsQuery = statsQuery.eq('type', input.type);
+      }
+
+      if (input.userId) {
+        statsQuery = statsQuery.eq('user_id', input.userId);
+      }
+
+      if (input.startDate) {
+        statsQuery = statsQuery.gte('created_at', input.startDate);
+      }
+
+      if (input.endDate) {
+        statsQuery = statsQuery.lte('created_at', input.endDate);
+      }
+
+      const [transactionsResult, statsResult] = await Promise.all([
         query,
-        ctx.supabase
-          .from('credit_transactions')
-          .select('type, amount'),
+        statsQuery,
       ]);
 
       const { data, error, count } = transactionsResult;
@@ -550,7 +572,7 @@ export const adminRouter = router({
         totalRefunds: 0,
       };
 
-      statsQuery.data?.forEach((t: { type: string; amount: number }) => {
+      statsResult.data?.forEach((t: { type: string; amount: number }) => {
         if (t.type === 'addition') stats.totalAdditions += t.amount;
         else if (t.type === 'deduction') stats.totalDeductions += Math.abs(t.amount);
         else if (t.type === 'purchase') stats.totalPurchases += t.amount;
@@ -590,6 +612,7 @@ export const adminRouter = router({
       }
 
       const newCredits = Math.max(0, profile.credits + input.amount);
+      const actualAdjustment = newCredits - profile.credits;
 
       // Update credits
       const { data, error } = await ctx.supabase
@@ -603,24 +626,26 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
-      // Record transaction
-      await ctx.supabase.from('credit_transactions').insert({
-        user_id: input.userId,
-        amount: input.amount,
-        type: input.amount > 0 ? 'addition' : 'deduction',
-        description: `[Admin] ${input.reason}`,
-      });
+      if (actualAdjustment !== 0) {
+        await ctx.supabase.from('credit_transactions').insert({
+          user_id: input.userId,
+          amount: actualAdjustment,
+          type: actualAdjustment > 0 ? 'addition' : 'deduction',
+          description: `[Admin] ${input.reason}`,
+        });
+      }
 
       // Log the activity
       await ctx.supabase.from('user_activity_logs').insert({
         user_id: input.userId,
         admin_id: ctx.profileId,
-        action: `积分调整: ${input.amount > 0 ? '+' : ''}${input.amount}`,
+        action: `积分调整: ${actualAdjustment > 0 ? '+' : ''}${actualAdjustment}`,
         action_type: 'credit_adjustment',
         details: {
           previousCredits: profile.credits,
           newCredits,
-          adjustment: input.amount,
+          requestedAdjustment: input.amount,
+          appliedAdjustment: actualAdjustment,
           reason: input.reason,
         },
       });
@@ -628,7 +653,7 @@ export const adminRouter = router({
       return {
         previousCredits: profile.credits,
         newCredits,
-        adjustment: input.amount,
+        adjustment: actualAdjustment,
       };
     }),
 
@@ -805,6 +830,7 @@ export const adminRouter = router({
       }
 
       const previousLevel = profile.membership_level;
+      const overrideTimestamp = new Date().toISOString();
 
       // Update membership level
       const { data, error } = await ctx.supabase
@@ -816,6 +842,76 @@ export const adminRouter = router({
 
       if (error) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      const { data: latestSubscription } = await ctx.supabase
+        .from('user_subscriptions')
+        .select('id, metadata, stripe_subscription_id, status')
+        .eq('user_id', input.userId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (
+        input.membershipLevel !== previousLevel &&
+        latestSubscription &&
+        isStripeManagedSubscriptionActive({
+          stripeSubscriptionId: latestSubscription.stripe_subscription_id,
+          status: latestSubscription.status,
+        })
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: getAdminMembershipOverrideErrorMessage(),
+        });
+      }
+
+      if (latestSubscription?.id) {
+        let targetPlanId: string | null = null;
+
+        if (input.membershipLevel !== 'free') {
+          const { data: targetPlan, error: targetPlanError } = await ctx.supabase
+            .from('membership_plans')
+            .select('id')
+            .eq('level', input.membershipLevel)
+            .eq('is_active', 'true')
+            .order('sort_order', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (targetPlanError) {
+            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: targetPlanError.message });
+          }
+
+          targetPlanId = targetPlan?.id ?? null;
+        }
+
+        const metadata = latestSubscription.metadata && typeof latestSubscription.metadata === 'object'
+          ? latestSubscription.metadata
+          : {};
+
+        const { error: subscriptionSyncError } = await ctx.supabase
+          .from('user_subscriptions')
+          .update({
+            membership_plan_id: targetPlanId,
+            status: 'admin_override',
+            updated_at: overrideTimestamp,
+            metadata: {
+              ...metadata,
+              adminOverride: {
+                adminId: ctx.profileId,
+                overriddenAt: overrideTimestamp,
+                previousLevel,
+                newLevel: input.membershipLevel,
+                reason: input.reason ?? null,
+              },
+            },
+          })
+          .eq('id', latestSubscription.id);
+
+        if (subscriptionSyncError) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: subscriptionSyncError.message });
+        }
       }
 
       // Log the activity
@@ -1537,6 +1633,10 @@ export const adminRouter = router({
         .from('token_stats')
         .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
 
+      const { data: paymentOrders } = await ctx.supabase
+        .from('payment_orders')
+        .select('amount_total, currency, status, payment_status, created_at');
+
       const { data: usageLogs } = await ctx.supabase
         .from('ai_usage_logs')
         .select('status, created_at');
@@ -1703,18 +1803,15 @@ export const adminRouter = router({
         costUsd: parseFloat((modelUsageByToken[model.model_id]?.costUsd || 0).toFixed(6)),
       })) ?? [];
 
-      // Revenue estimation from purchases (credits sold * estimated price)
-      // Assume average credit package price for estimation
-      const avgCreditPackagePrice = packages && packages.length > 0
-        ? packages.reduce((sum, p) => sum + p.price, 0) / packages.length
-        : 0;
-      const avgCreditPackageAmount = packages && packages.length > 0
-        ? packages.reduce((sum, p) => sum + p.credits_amount, 0) / packages.length
-        : 1;
-      const pricePerCredit = avgCreditPackageAmount > 0 ? avgCreditPackagePrice / avgCreditPackageAmount : 0;
+      const actualRevenue = paymentOrders?.reduce((sum, order) => {
+        if (order.status !== 'completed') return sum;
+        if (order.payment_status !== 'paid' && order.payment_status !== 'no_payment_required') return sum;
+        if (order.currency && order.currency.toLowerCase() !== 'usd') return sum;
+        return sum + (order.amount_total ?? 0);
+      }, 0) ?? 0;
 
       const financeOverview = {
-        estimatedRevenue: Math.round(transactionStats.totalPurchases * pricePerCredit), // in cents
+        estimatedRevenue: actualRevenue,
         creditsConsumed: transactionStats.totalDeductions,
         creditsPurchased: transactionStats.totalPurchases,
         creditsGiven: transactionStats.totalAdditions,
@@ -1983,77 +2080,127 @@ export const adminRouter = router({
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      // Get conversations statistics
-      const { data: conversations, count: totalConversations } = await ctx.supabase
-        .from('conversations')
-        .select('id, created_at, model_id', { count: 'exact' });
+      const [
+        conversationTotalResult,
+        conversationTodayResult,
+        conversationWeekResult,
+        conversationMonthResult,
+        conversationsInRangeResult,
+        messageTotalResult,
+        messageUserResult,
+        messageAssistantResult,
+        messageTodayResult,
+        messageWeekResult,
+        messageMonthResult,
+        messagesInRangeResult,
+        ticketTotalResult,
+        ticketOpenResult,
+        ticketInProgressResult,
+        ticketClosedResult,
+        modelsResult,
+        allTokenStatsResult,
+        usageLogsResult,
+        conversationsForModelUsageResult,
+      ] = await Promise.all([
+        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }),
+        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', todayStart.toISOString()),
+        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', sevenDaysAgo.toISOString()),
+        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo.toISOString()),
+        ctx.supabase
+          .from('conversations')
+          .select('model_id, created_at')
+          .gte('created_at', rangeStart.toISOString()),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).eq('role', 'user'),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).eq('role', 'assistant'),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', todayStart.toISOString()),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', sevenDaysAgo.toISOString()),
+        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo.toISOString()),
+        ctx.supabase
+          .from('messages')
+          .select('role, created_at')
+          .gte('created_at', rangeStart.toISOString()),
+        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }),
+        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'in_progress'),
+        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'closed'),
+        ctx.supabase
+          .from('ai_models')
+          .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
+        ctx.supabase
+          .from('token_stats')
+          .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
+          .gte('created_at', rangeStart.toISOString()),
+        ctx.supabase
+          .from('ai_usage_logs')
+          .select('status, latency_ms, created_at')
+          .gte('created_at', rangeStart.toISOString()),
+        ctx.supabase
+          .from('conversations')
+          .select('id, model_id, created_at')
+          .gte('created_at', rangeStart.toISOString()),
+      ]);
 
-      // Get messages statistics with content for token estimation
-      const { data: messages, count: totalMessages } = await ctx.supabase
-        .from('messages')
-        .select('id, role, created_at, content', { count: 'exact' });
+      const results = [
+        conversationTotalResult,
+        conversationTodayResult,
+        conversationWeekResult,
+        conversationMonthResult,
+        conversationsInRangeResult,
+        messageTotalResult,
+        messageUserResult,
+        messageAssistantResult,
+        messageTodayResult,
+        messageWeekResult,
+        messageMonthResult,
+        messagesInRangeResult,
+        ticketTotalResult,
+        ticketOpenResult,
+        ticketInProgressResult,
+        ticketClosedResult,
+        modelsResult,
+        allTokenStatsResult,
+        usageLogsResult,
+        conversationsForModelUsageResult,
+      ];
 
-      // Get AI models with pricing
-      const { data: models } = await ctx.supabase
-        .from('ai_models')
-        .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active');
+      for (const result of results) {
+        if (result.error) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: result.error.message });
+        }
+      }
 
-      // Get tickets statistics
-      const { data: tickets, count: totalTickets } = await ctx.supabase
-        .from('tickets')
-        .select('id, status, created_at', { count: 'exact' });
+      const conversationsInRange = conversationsInRangeResult.data ?? [];
+      const messagesInRange = messagesInRangeResult.data ?? [];
+      const models = modelsResult.data ?? [];
+      const tokenStatsInRange = allTokenStatsResult.data ?? [];
+      const usageLogs = usageLogsResult.data ?? [];
+      const conversationsForModelUsage = conversationsForModelUsageResult.data ?? [];
 
-      // Filter by time range
-      const rangeConversations = conversations?.filter(c => new Date(c.created_at) >= rangeStart) ?? [];
-      const rangeMessages = messages?.filter(m => new Date(m.created_at) >= rangeStart) ?? [];
-
-      // Calculate conversation stats
       const conversationStats = {
-        total: totalConversations ?? 0,
-        today: 0,
-        thisWeek: 0,
-        thisMonth: 0,
-        inRange: rangeConversations.length,
+        total: conversationTotalResult.count ?? 0,
+        today: conversationTodayResult.count ?? 0,
+        thisWeek: conversationWeekResult.count ?? 0,
+        thisMonth: conversationMonthResult.count ?? 0,
+        inRange: conversationsInRangeResult.count ?? 0,
       };
 
-      conversations?.forEach(c => {
-        const createdAt = new Date(c.created_at);
-        if (createdAt >= todayStart) conversationStats.today++;
-        if (createdAt >= sevenDaysAgo) conversationStats.thisWeek++;
-        if (createdAt >= thirtyDaysAgo) conversationStats.thisMonth++;
-      });
-
-      // Calculate message stats
       const messageStats = {
-        total: totalMessages ?? 0,
-        userMessages: messages?.filter(m => m.role === 'user').length ?? 0,
-        assistantMessages: messages?.filter(m => m.role === 'assistant').length ?? 0,
-        today: 0,
-        thisWeek: 0,
-        thisMonth: 0,
-        inRange: rangeMessages.length,
+        total: messageTotalResult.count ?? 0,
+        userMessages: messageUserResult.count ?? 0,
+        assistantMessages: messageAssistantResult.count ?? 0,
+        today: messageTodayResult.count ?? 0,
+        thisWeek: messageWeekResult.count ?? 0,
+        thisMonth: messageMonthResult.count ?? 0,
+        inRange: messagesInRangeResult.count ?? 0,
       };
 
-      messages?.forEach(m => {
-        const createdAt = new Date(m.created_at);
-        if (createdAt >= todayStart) messageStats.today++;
-        if (createdAt >= sevenDaysAgo) messageStats.thisWeek++;
-        if (createdAt >= thirtyDaysAgo) messageStats.thisMonth++;
-      });
-
-      // Calculate ticket stats
       const ticketStats = {
-        total: totalTickets ?? 0,
-        open: tickets?.filter(t => t.status === 'open').length ?? 0,
-        inProgress: tickets?.filter(t => t.status === 'in_progress').length ?? 0,
-        closed: tickets?.filter(t => t.status === 'closed').length ?? 0,
+        total: ticketTotalResult.count ?? 0,
+        open: ticketOpenResult.count ?? 0,
+        inProgress: ticketInProgressResult.count ?? 0,
+        closed: ticketClosedResult.count ?? 0,
       };
-
-      // Model usage stats with cost estimation
-      const { data: allTokenStats } = await ctx.supabase
-        .from('token_stats')
-        .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
-        .gte('created_at', rangeStart.toISOString());
 
       const modelUsageByToken = new Map<string, {
         requestCount: number;
@@ -2064,7 +2211,7 @@ export const adminRouter = router({
         cachedTokens: number;
       }>();
 
-      for (const stat of allTokenStats ?? []) {
+      for (const stat of tokenStatsInRange) {
         const current = modelUsageByToken.get(stat.model_used) ?? {
           requestCount: 0,
           credits: 0,
@@ -2082,8 +2229,18 @@ export const adminRouter = router({
         modelUsageByToken.set(stat.model_used, current);
       }
 
-      const modelUsage = models?.map(model => {
-        const modelConversations = conversations?.filter(c => c.model_id === model.id) ?? [];
+      const conversationsByModel = new Map<string, number>();
+      for (const conversation of conversationsForModelUsage) {
+        if (!conversation.model_id) {
+          continue;
+        }
+        conversationsByModel.set(
+          conversation.model_id,
+          (conversationsByModel.get(conversation.model_id) ?? 0) + 1
+        );
+      }
+
+      const modelUsage = models.map((model) => {
         const usage = modelUsageByToken.get(model.model_id) ?? {
           requestCount: 0,
           credits: 0,
@@ -2098,7 +2255,7 @@ export const adminRouter = router({
           name: model.name,
           provider: model.provider,
           isActive: model.is_active,
-          conversationCount: modelConversations.length,
+          conversationCount: conversationsByModel.get(model.id) ?? 0,
           requestCount: usage.requestCount,
           creditsConsumed: usage.credits,
           totalCostUsd: parseFloat(usage.costUsd.toFixed(6)),
@@ -2109,9 +2266,8 @@ export const adminRouter = router({
           outputTokenCost: model.output_token_cost ?? 0,
           webSearchCost: model.web_search_cost ?? 0,
         };
-      }) ?? [];
+      });
 
-      // Daily activity for the selected range
       const dailyActivity: Record<string, { conversations: number; messages: number; requests: number }> = {};
       for (let i = 0; i < days; i++) {
         const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
@@ -2119,22 +2275,22 @@ export const adminRouter = router({
         dailyActivity[dateKey] = { conversations: 0, messages: 0, requests: 0 };
       }
 
-      conversations?.forEach(c => {
-        const dateKey = new Date(c.created_at).toISOString().split('T')[0];
+      for (const conversation of conversationsInRange) {
+        const dateKey = new Date(conversation.created_at).toISOString().split('T')[0];
         if (dailyActivity[dateKey]) {
           dailyActivity[dateKey].conversations++;
         }
-      });
+      }
 
-      messages?.forEach(m => {
-        const dateKey = new Date(m.created_at).toISOString().split('T')[0];
+      for (const message of messagesInRange) {
+        const dateKey = new Date(message.created_at).toISOString().split('T')[0];
         if (dailyActivity[dateKey]) {
           dailyActivity[dateKey].messages++;
-          if (m.role === 'assistant') {
-            dailyActivity[dateKey].requests++; // Each assistant message = 1 API request
+          if (message.role === 'assistant') {
+            dailyActivity[dateKey].requests++;
           }
         }
-      });
+      }
 
       const dailyChartData = Object.entries(dailyActivity)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -2143,28 +2299,22 @@ export const adminRouter = router({
           ...data,
         }));
 
-      // Calculate averages
       const averages = {
         messagesPerConversation: conversationStats.total > 0
           ? Math.round(messageStats.total / conversationStats.total)
           : 0,
         conversationsPerDay: Math.round(conversationStats.inRange / days),
         messagesPerDay: Math.round(messageStats.inRange / days),
-        requestsPerDay: Math.round(rangeMessages.filter(m => m.role === 'assistant').length / days),
+        requestsPerDay: Math.round(messagesInRange.filter((message) => message.role === 'assistant').length / days),
       };
 
-      // === AI Performance Statistics ===
-      // Total API requests (assistant messages = API calls)
-      const totalRequests = messages?.filter(m => m.role === 'assistant').length ?? 0;
-      const rangeRequests = rangeMessages.filter(m => m.role === 'assistant').length;
+      const totalRequests = messageAssistantResult.count ?? 0;
+      const rangeRequests = messagesInRange.filter((message) => message.role === 'assistant').length;
 
-      // === Real Token Usage from token_stats table ===
-      // Get actual token statistics for the time range
-      const tokenStatsInRange = allTokenStats ?? [];
-      const inputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
-      const outputTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.output_tokens ?? 0), 0);
-      const cacheReadTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cached_tokens ?? 0), 0);
-      const cacheCreationTokens = tokenStatsInRange.reduce((sum, s) => sum + (s.cache_creation_tokens ?? 0), 0);
+      const inputTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.input_tokens ?? 0), 0);
+      const outputTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.output_tokens ?? 0), 0);
+      const cacheReadTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cached_tokens ?? 0), 0);
+      const cacheCreationTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.cache_creation_tokens ?? 0), 0);
 
       const totalCost = tokenStatsInRange.reduce(
         (sum, stat) => sum + parseFloat(stat.total_cost_usd ?? '0'),
@@ -2172,49 +2322,35 @@ export const adminRouter = router({
       );
       const avgCostPerRequest = rangeRequests > 0 ? totalCost / rangeRequests : 0;
       const cacheSavings = tokenStatsInRange.reduce((sum, stat) => {
-        const model = models?.find((item) => item.model_id === stat.model_used);
+        const model = models.find((item) => item.model_id === stat.model_used);
         if (!model) return sum;
         return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1000000000);
       }, 0);
 
-      // === Real Performance Metrics from ai_usage_logs ===
-      // Get actual AI usage logs for the time range
-      const { data: usageLogs } = await ctx.supabase
-        .from('ai_usage_logs')
-        .select('status, latency_ms, created_at')
-        .gte('created_at', rangeStart.toISOString());
-
-      const logsInRange = usageLogs ?? [];
-      const successLogs = logsInRange.filter(log => log.status === 'success');
-      const failedLogs = logsInRange.filter(log => log.status !== 'success');
-
-      // Calculate real error rate
-      const totalLogs = logsInRange.length;
+      const successLogs = usageLogs.filter((log) => log.status === 'success');
+      const failedLogs = usageLogs.filter((log) => log.status !== 'success');
+      const totalLogs = usageLogs.length;
       const errorRate = totalLogs > 0 ? (failedLogs.length / totalLogs) * 100 : 0;
 
-      // Calculate real response times from successful requests
       const latencies = successLogs
-        .map(log => log.latency_ms)
-        .filter((l): l is number => l !== null && l !== undefined)
+        .map((log) => log.latency_ms)
+        .filter((latency): latency is number => latency !== null && latency !== undefined)
         .sort((a, b) => a - b);
 
       const avgResponseTime = latencies.length > 0
-        ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
+        ? latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length
         : 0;
 
-      // P95 response time
       const p95Index = Math.floor(latencies.length * 0.95);
       const p95ResponseTime = latencies.length > 0
         ? latencies[p95Index] ?? latencies[latencies.length - 1]
         : 0;
 
-      // === Real Cache Hit Rate from token_stats ===
       const totalInputWithoutCache = inputTokens + cacheReadTokens;
       const cacheHitRate = totalInputWithoutCache > 0
         ? (cacheReadTokens / totalInputWithoutCache) * 100
         : 0;
 
-      // Health status based on metrics
       let healthStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
       if (errorRate > 2 || avgResponseTime > 2000) healthStatus = 'critical';
       else if (errorRate > 1 || avgResponseTime > 1500) healthStatus = 'warning';

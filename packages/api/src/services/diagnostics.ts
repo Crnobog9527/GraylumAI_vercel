@@ -1040,7 +1040,8 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
 
   try {
     const { result, latencyMs } = await measureLatency(async () => {
-      // 检查关键表的 RLS 状态
+      // 这里使用的是 service-role 上下文，无法直接验证用户视角的 RLS 效果。
+      // 退而求其次，只做表可访问性检查，并显式标记为未验证，避免误报 passed。
       const tablesToCheck = [
         'profiles',
         'conversations',
@@ -1052,13 +1053,16 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
         'ai_usage_logs',
       ];
 
-      // 使用 service role 查询 RLS 状态 (需要通过 SQL 检查)
-      // 由于无法直接查询 pg_class，我们验证表是否存在且可访问
       const tableStatuses: Record<string, boolean> = {};
+      const inaccessibleTables: string[] = [];
 
       for (const table of tablesToCheck) {
         const { error } = await ctx.supabase.from(table).select('id').limit(0);
-        tableStatuses[table] = !error;
+        const isAccessible = !error;
+        tableStatuses[table] = isAccessible;
+        if (!isAccessible) {
+          inaccessibleTables.push(table);
+        }
       }
 
       const accessibleTables = Object.values(tableStatuses).filter(Boolean).length;
@@ -1066,8 +1070,11 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
       return {
         tablesToCheck: tablesToCheck.length,
         accessibleTables,
+        inaccessibleTables,
         tableStatuses,
-        rlsConfigured: accessibleTables >= tablesToCheck.length * 0.8,
+        rlsConfigured: false,
+        rlsVerified: false,
+        verificationMode: 'service-role-unverified',
       };
     });
 
@@ -1075,8 +1082,8 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
       testId,
       testName,
       category,
-      status: result.rlsConfigured ? 'passed' : 'warning',
-      message: `表访问检查: ${result.accessibleTables}/${result.tablesToCheck} 表可访问`,
+      status: 'warning',
+      message: `无法通过 service-role 客户端验证 RLS 隔离，仅确认 ${result.accessibleTables}/${result.tablesToCheck} 张表可访问`,
       details: result,
       latencyMs,
     };

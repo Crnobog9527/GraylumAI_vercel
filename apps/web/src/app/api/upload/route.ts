@@ -3,6 +3,22 @@ import { createClient } from '@supabase/supabase-js';
 
 const TICKET_ATTACHMENT_BUCKET = 'ticket-attachments';
 
+async function isMaintenanceModeEnabled(supabaseAdmin: any) {
+  const { data, error } = await supabaseAdmin
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'maintenance_mode')
+    .maybeSingle();
+
+  if (error) {
+    console.error('[Upload API] Failed to read maintenance mode:', error);
+    return true;
+  }
+
+  const value = data && typeof data === 'object' && 'value' in data ? data.value : null;
+  return value === true || value === 'true';
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Get auth token from header
@@ -23,6 +39,23 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const maintenanceModeEnabled = await isMaintenanceModeEnabled(supabaseAdmin);
+
+    if (maintenanceModeEnabled) {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profile?.role !== 'admin') {
+        return NextResponse.json(
+          { error: '系统维护中，暂时无法上传附件' },
+          { status: 503 }
+        );
+      }
     }
 
     // Parse form data

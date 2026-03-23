@@ -1,5 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { appRouter } from '@repo/api/src/root';
+import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
@@ -46,6 +48,25 @@ export async function GET(request: NextRequest) {
     verifyUrl.searchParams.set('email', user.email ?? '');
     verifyUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(verifyUrl);
+  }
+
+  const pendingInviteCode =
+    user?.user_metadata && typeof user.user_metadata.invite_code === 'string'
+      ? user.user_metadata.invite_code.trim()
+      : '';
+
+  if (user && pendingInviteCode) {
+    try {
+      const ctx = await createTRPCContext({
+        headers: request.headers,
+        user,
+        supabaseAuth: supabase,
+      });
+      const caller = appRouter.createCaller(ctx);
+      await caller.invitation.claimInvitationCode({ code: pendingInviteCode });
+    } catch (error) {
+      console.error('[Auth Callback] Invitation claim failed:', error);
+    }
   }
 
   return response;

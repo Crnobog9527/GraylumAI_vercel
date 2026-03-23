@@ -12,30 +12,15 @@ import {
   startScheduledJobRun,
   TicketAutoCloseService,
 } from '@repo/api/src/services';
-
-const CRON_SECRET = process.env.CRON_SECRET;
+import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function isAuthorizedCronRequest(request: Request) {
-  const authHeader = request.headers.get('authorization');
-
-  if (CRON_SECRET) {
-    return authHeader === `Bearer ${CRON_SECRET}`;
-  }
-
-  const userAgent = request.headers.get('user-agent') ?? '';
-  if (userAgent.includes('vercel-cron')) {
-    return true;
-  }
-
-  return process.env.NODE_ENV !== 'production';
-}
-
 async function handleRequest(request: Request) {
-  if (!isAuthorizedCronRequest(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const unauthorizedResponse = validateCronRequest(request, 'ticket_auto_close');
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

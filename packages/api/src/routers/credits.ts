@@ -76,11 +76,32 @@ const GetTransactionsInput = z.object({
  * 当前 credit_transactions 表不包含 idempotency_key 列，
  * 因此这里只保留接口兼容性，不执行数据库级幂等检查。
  */
-async function checkIdempotency(
-  _supabase: any,
-  _userId: string,
-  _idempotencyKey: string
+export async function checkIdempotency(
+  supabase: any,
+  userId: string,
+  idempotencyKey: string
 ): Promise<{ exists: boolean; transactionId?: string }> {
+  const { data, error } = await supabase
+    .from('credit_transactions')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('idempotency_key', idempotencyKey)
+    .maybeSingle();
+
+  if (error) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `幂等性检查失败: ${error.message}`,
+    });
+  }
+
+  if (data?.id) {
+    return {
+      exists: true,
+      transactionId: data.id,
+    };
+  }
+
   return {
     exists: false,
   };
@@ -230,6 +251,7 @@ export const creditsRouter = router({
           type: 'deduction',
           amount: -amount, // 负数表示扣除
           description: reason ?? '积分消费',
+          idempotency_key: idempotencyKey ?? null,
         })
         .select()
         .single();
@@ -328,6 +350,7 @@ export const creditsRouter = router({
           type: normalizedType,
           amount: amount, // 正数表示增加
           description: reason ?? getDefaultReason(type),
+          idempotency_key: idempotencyKey ?? null,
         })
         .select()
         .single();

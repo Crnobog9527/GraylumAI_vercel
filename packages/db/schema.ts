@@ -48,8 +48,12 @@ export const creditTransactions = pgTable('credit_transactions', {
   amount: integer('amount').notNull(),
   type: text('type', { enum: ['deduction', 'addition', 'purchase', 'refund'] }).notNull(),
   description: text('description'),
+  idempotencyKey: text('idempotency_key'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdempotencyKeyUnique: uniqueIndex('idx_credit_transactions_user_idempotency_key')
+    .on(table.userId, table.idempotencyKey),
+}));
 
 // --- 配置表 ---
 

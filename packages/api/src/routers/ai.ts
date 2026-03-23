@@ -17,9 +17,9 @@ import {
 import {
   preAICallSecurityChecks,
   checkInputSecurity,
-  checkOutputSecurity,
 } from '../middleware/securityChecks';
 import {
+  filterAIOutput,
   BillingService,
   calculateTokenCostWithPricing,
   estimateRequestCost,
@@ -381,11 +381,14 @@ export const aiRouter = router({
         });
 
         // 9.5. 输出安全检查 (P1-4: 应用输出安全过滤)
-        const isOutputSafe = checkOutputSecurity(aiResponse.content);
-        if (!isOutputSafe) {
-          // 记录警告日志，但不阻止响应 (避免影响正常使用)
-          console.warn(`[Security] Potential sensitive content detected in AI response for request ${requestId}`);
-          // 可选: 在这里可以添加更多处理逻辑，如通知管理员
+        const filteredOutput = filterAIOutput(aiResponse.content);
+        if (filteredOutput.blocked || filteredOutput.sanitized) {
+          logger.security.contentBlocked(
+            ctx.profileId,
+            filteredOutput.reasons.join(',') || 'output_filtered',
+            'output',
+            { requestId, conversationId: conversation.id }
+          );
         }
 
         // 10. 计算实际成本 (使用数据库动态定价)
@@ -404,7 +407,7 @@ export const aiRouter = router({
         const finalizeResult = await billingService.finalizeAISuccess({
           conversationId: conversation.id,
           userMessage: input.message,
-          assistantMessage: aiResponse.content,
+          assistantMessage: filteredOutput.content,
           modelUsed: modelConfig.modelId,
           usage: aiResponse.usage,
           costUsd,
@@ -447,7 +450,7 @@ export const aiRouter = router({
         return {
           messageId: finalizeResult.assistantMessageId ?? '',
           conversationId: conversation.id,
-          content: aiResponse.content,
+          content: filteredOutput.content,
           modelUsed: modelConfig.modelId,
           usage: aiResponse.usage,
           cost: {

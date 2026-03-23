@@ -11,7 +11,19 @@ function getBaseUrl() {
   return process.env.PLAYWRIGHT_BASE_URL ?? process.env.BASE_URL ?? 'http://127.0.0.1:3000';
 }
 
-const ticketUploadFixture = path.resolve(__dirname, '../../../../.agent/skills/assets/star-history.png');
+function hasLiveSupabaseRuntime() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return false;
+  }
+
+  return !supabaseUrl.includes('placeholder') && supabaseAnonKey !== 'placeholder-key';
+}
+
+const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
+const hasAuthRuntime = hasLiveSupabaseRuntime();
 
 async function createCookieHeader(storageStatePath: string) {
   const raw = await readFile(storageStatePath, 'utf8');
@@ -73,6 +85,8 @@ test.describe('Security', () => {
       expect(rendered).not.toContain('javascript:alert');
       expect(rendered).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
     });
+
+    test.skip(!hasAuthRuntime, 'Login/register XSS checks require a live Supabase runtime');
 
     test('should escape script tags in user input display', async ({ page }) => {
       await gotoWithBypass(page, '/login');
@@ -136,6 +150,8 @@ test.describe('Security', () => {
   // Authentication Security Tests
   // ============================================
   test.describe('Authentication Security', () => {
+    test.skip(!hasAuthRuntime, 'Authentication checks require a live Supabase runtime');
+
     test('should protect chat page from unauthenticated access', async ({ page }) => {
       // Clear any stored auth state
       await page.context().clearCookies();
@@ -215,7 +231,7 @@ test.describe('Security', () => {
       const response = await page.request.get('/api/trpc/admin.getStatistics');
 
       // Should return unauthorized or not found
-      expect([401, 403, 404, 500]).toContain(response.status());
+      expect([401, 403, 404, 500, 503]).toContain(response.status());
     });
   });
 
@@ -223,6 +239,8 @@ test.describe('Security', () => {
   // Input Validation Tests
   // ============================================
   test.describe('Input Validation', () => {
+    test.skip(!hasAuthRuntime, 'Login validation checks require a live Supabase runtime');
+
     test('should validate email format on login', async ({ page }) => {
       await gotoWithBypass(page, '/login');
 
@@ -379,6 +397,8 @@ test.describe('Security', () => {
   // Rate Limiting UI Effects Tests
   // ============================================
   test.describe('Rate Limiting', () => {
+    test.skip(!hasAuthRuntime, 'Rate limiting checks require a live Supabase runtime');
+
     test('should show appropriate message when rate limited', async ({ page }) => {
       await gotoWithBypass(page, '/login');
 
@@ -430,8 +450,8 @@ test.describe('Security', () => {
 // ============================================
 test.describe('Authenticated Security', () => {
   test.skip(
-    !hasCredentials('user') || !hasCredentials('admin'),
-    'Authenticated security flows require both E2E_TEST_* and E2E_ADMIN_* credentials'
+    !hasAuthRuntime || !hasCredentials('user') || !hasCredentials('admin'),
+    'Authenticated security flows require live Supabase config plus both E2E_TEST_* and E2E_ADMIN_* credentials'
   );
 
   test.use({ storageState: authStatePaths.user });
