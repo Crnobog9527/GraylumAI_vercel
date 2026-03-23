@@ -57,7 +57,6 @@ function LoginPageContent() {
     refetchOnWindowFocus: false,
   });
   const utils = trpc.useUtils();
-  const claimInvitationCode = trpc.invitation.claimInvitationCode.useMutation();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -173,44 +172,11 @@ function LoginPageContent() {
       return;
     }
 
-    if (trimmedInviteCode && data.user?.id && data.user.email) {
-      try {
-        const claimResult = await claimInvitationCode.mutateAsync({
-          code: trimmedInviteCode,
-          inviteeId: data.user.id,
-          inviteeEmail: data.user.email,
-        });
-
-        if (claimResult.status === 'rejected') {
-          setStatus({
-            tone: 'info',
-            message: `注册成功，但邀请码奖励未发放：${claimResult.blockReason ?? '触发邀请限制。'}`,
-          });
-          window.location.assign(
-            buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-          );
-          return;
-        }
-      } catch (claimError) {
-        setStatus({
-          tone: 'info',
-          message:
-            claimError instanceof Error
-              ? `注册成功，但邀请码奖励处理失败：${claimError.message}`
-              : '注册成功，但邀请码奖励处理失败。',
-        });
-        window.location.assign(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
-        );
-        return;
-      }
-    }
-
     setStatus({
       tone: 'success',
       message:
         trimmedInviteCode
-          ? '注册成功，邀请码奖励已记录，验证邮件已发送。请先完成邮箱验证。'
+          ? '注册成功，邀请码将在完成邮箱验证后自动处理。'
           : '注册成功，验证邮件已发送。请先完成邮箱验证。',
     });
 

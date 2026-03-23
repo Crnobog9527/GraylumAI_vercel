@@ -46,6 +46,7 @@ import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { RoleBadge } from '@/components/ui/status-badge';
 import { TableEmptyState } from '@/components/ui/empty-state';
+import { toast } from '@/components/ui/sonner';
 
 type UserStatus = 'active' | 'disabled' | 'banned';
 type MembershipLevel = 'free' | 'pro' | 'gold';
@@ -156,7 +157,10 @@ export default function AdminUsersPage() {
     onSuccess: () => {
       utils.admin.getAllUsers.invalidate();
       utils.admin.getUserDetails.invalidate();
-    }
+    },
+    onError: (error) => {
+      toast.error(error.message || '会员等级更新失败');
+    },
   });
 
   const updateRole = trpc.admin.updateUserRole.useMutation({

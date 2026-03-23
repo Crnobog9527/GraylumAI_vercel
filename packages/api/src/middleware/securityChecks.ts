@@ -81,6 +81,41 @@ export const SIGNATURE_CONFIG = {
   prefix: 'GRAYLUM-HMAC-SHA256',
 };
 
+const SENSITIVE_OUTPUT_PATTERNS = [
+  /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
+  /password\s*[:=]\s*["']?[^\s"']{8,}/i,
+  /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
+  /sk-[a-zA-Z0-9]{48}/i,
+  /sk-ant-[a-zA-Z0-9-_]{95}/i,
+];
+
+function maskSensitiveValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 4) {
+    return '****';
+  }
+
+  return `${trimmed.slice(0, 2)}${'*'.repeat(Math.max(trimmed.length - 4, 4))}${trimmed.slice(-2)}`;
+}
+
+function sanitizeSensitiveMatch(match: string): string {
+  const assignment = match.match(/^([^:=]+[:=]\s*["']?)([^"'\s]+)(["']?)$/i);
+  if (assignment) {
+    return `${assignment[1]}${maskSensitiveValue(assignment[2])}${assignment[3]}`;
+  }
+
+  return maskSensitiveValue(match);
+}
+
+function normalizeSecurityInput(message: string): string {
+  return message
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 // ============================================
 // 速率限制器
 // ============================================
@@ -303,20 +338,22 @@ export async function preAICallSecurityChecks(
  * 检测潜在的 Prompt 注入攻击
  */
 export function checkInputSecurity(message: string): void {
+  const normalizedMessage = normalizeSecurityInput(message);
+
   // 检测常见的 Prompt 注入模式
   const suspiciousPatterns = [
-    /ignore\s+(all\s+)?(previous|above)\s+(instructions?|prompts?)/i,
-    /disregard\s+(all\s+)?(previous|above)/i,
-    /forget\s+(everything|all)/i,
-    /new\s+instructions?:/i,
-    /system\s*prompt:/i,
-    /\[INST\]/i,
-    /<\|im_start\|>/i,
-    /<<SYS>>/i,
+    /ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|above)\s+(?:instructions?|prompts?)(?:\s+given)?/,
+    /disregard\s+(?:all\s+)?(?:the\s+)?(?:previous|above)(?:\s+(?:instructions?|prompts?|rules?|commands?))?/,
+    /forget\s+(everything|all)/,
+    /new\s+instructions?:/,
+    /system\s*prompt:/,
+    /\[inst\]/,
+    /<\|im_start\|>/,
+    /<<sys>>/,
   ];
 
   for (const pattern of suspiciousPatterns) {
-    if (pattern.test(message)) {
+    if (pattern.test(normalizedMessage)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: '检测到潜在的不安全输入',
@@ -491,16 +528,7 @@ export async function checkRequestSignature(
  * 检测 AI 输出中的敏感内容
  */
 export function checkOutputSecurity(content: string): boolean {
-  // 检测敏感信息泄露模式
-  const sensitivePatterns = [
-    /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-    /password\s*[:=]\s*["']?[^\s"']{8,}/i,
-    /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-    /sk-[a-zA-Z0-9]{48}/i, // OpenAI API key pattern
-    /sk-ant-[a-zA-Z0-9-_]{95}/i, // Anthropic API key pattern
-  ];
-
-  for (const pattern of sensitivePatterns) {
+  for (const pattern of SENSITIVE_OUTPUT_PATTERNS) {
     if (pattern.test(content)) {
       console.warn('Detected potential sensitive content in AI output');
       return false;
@@ -508,6 +536,16 @@ export function checkOutputSecurity(content: string): boolean {
   }
 
   return true;
+}
+
+export function sanitizeOutputSecurity(content: string): string {
+  let sanitized = content;
+
+  for (const pattern of SENSITIVE_OUTPUT_PATTERNS) {
+    sanitized = sanitized.replace(pattern, (match) => sanitizeSensitiveMatch(match));
+  }
+
+  return sanitized;
 }
 
 export default {
@@ -518,6 +556,7 @@ export default {
   checkUserStatus,
   checkInputSecurity,
   checkOutputSecurity,
+  sanitizeOutputSecurity,
   // 签名验证
   generateSignature,
   verifyTimestamp,

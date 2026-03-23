@@ -108,7 +108,7 @@ export default function AdminSettingsPage() {
   const [cleanupMessage, setCleanupMessage] = useState('');
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
-  const { data: savedSettings, isLoading, refetch } = trpc.settings.getSystemSettings.useQuery();
+  const { data: savedSettings, isLoading, refetch } = trpc.settings.getAdminSystemSettings.useQuery();
   const { data: membershipPlans, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
   const { data: cleanupStats, refetch: refetchStats } = trpc.admin.getCleanupStats.useQuery();
 

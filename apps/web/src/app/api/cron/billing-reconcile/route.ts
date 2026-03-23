@@ -2,28 +2,15 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runDailyBillingReconciliation } from '@repo/api/src/services/billingReconciliation';
 import { logger } from '@repo/api/src/services';
-
-const CRON_SECRET = process.env.CRON_SECRET;
+import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-function isAuthorized(request: Request) {
-  const authHeader = request.headers.get('authorization');
-  if (CRON_SECRET) {
-    return authHeader === `Bearer ${CRON_SECRET}`;
-  }
-
-  const userAgent = request.headers.get('user-agent') ?? '';
-  if (process.env.NODE_ENV === 'production') {
-    return userAgent.includes('vercel-cron');
-  }
-  return true;
-}
-
 export async function GET(request: Request) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const unauthorizedResponse = validateCronRequest(request, 'billing-reconcile');
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   const startedAt = Date.now();

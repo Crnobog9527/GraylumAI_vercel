@@ -156,21 +156,21 @@ export default function AdminTicketsPage() {
   const tickets = (data?.tickets ?? []) as Ticket[];
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      const refreshed = await refetch();
       if (selectedTicket) {
-        const updated = tickets.find(t => t.id === selectedTicket.id);
+        const updated = refreshed.data?.tickets?.find(t => t.id === selectedTicket.id);
         if (updated) setSelectedTicket(updated);
       }
     }
   });
 
   const replyMutation = trpc.admin.replyToTicket.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      const refreshed = await refetch();
       setReplyContent('');
       if (selectedTicket) {
-        const updated = tickets.find(t => t.id === selectedTicket.id);
+        const updated = refreshed.data?.tickets?.find(t => t.id === selectedTicket.id);
         if (updated) setSelectedTicket(updated);
       }
     }

@@ -18,37 +18,15 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { DiagnosticsService } from '@repo/api/src/services/diagnostics';
-
-// Vercel Cron 验证密钥
-const CRON_SECRET = process.env.CRON_SECRET;
+import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 最长执行 60 秒
 
 export async function GET(request: Request) {
-  // 验证 Cron 请求
-  const authHeader = request.headers.get('authorization');
-
-  // Vercel Cron 会发送 Bearer token
-  if (CRON_SECRET) {
-    if (authHeader !== `Bearer ${CRON_SECRET}`) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-  } else {
-    // 如果没有配置 CRON_SECRET，检查是否来自 Vercel Cron
-    const userAgent = request.headers.get('user-agent') ?? '';
-    if (!userAgent.includes('vercel-cron')) {
-      // 生产环境拒绝未授权请求
-      if (process.env.NODE_ENV === 'production') {
-        return NextResponse.json(
-          { error: 'Unauthorized - CRON_SECRET not configured' },
-          { status: 401 }
-        );
-      }
-    }
+  const unauthorizedResponse = validateCronRequest(request, 'diagnostics');
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
   }
 
   try {

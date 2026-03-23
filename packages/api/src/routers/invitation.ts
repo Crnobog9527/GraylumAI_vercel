@@ -53,7 +53,7 @@ export const invitationRouter = router({
     .query(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('invitations')
-        .select('*')
+        .select('code')
         .eq('code', input.code)
         .eq('status', 'active')
         .single();
@@ -61,18 +61,22 @@ export const invitationRouter = router({
       if (error || !data) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Invalid or used invitation code.' });
       }
-      return data;
+      return { valid: true as const };
     }),
 
-  // Public: Claim an invitation code after sign-up
-  claimInvitationCode: publicProcedure
+  // Protected: Claim an invitation code for the authenticated user
+  claimInvitationCode: protectedProcedure
     .input(z.object({
       code: z.string().min(1),
-      inviteeId: z.string().uuid(),
-      inviteeEmail: z.string().email(),
     }))
     .mutation(async ({ ctx, input }) => {
       const normalizedCode = input.code.trim();
+      const inviteeId = ctx.profileId;
+      const inviteeEmail = ctx.user.email;
+
+      if (!inviteeEmail) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '当前账号缺少邮箱信息。' });
+      }
 
       const { data: invitation, error: invitationError } = await ctx.supabase
         .from('invitations')
@@ -89,7 +93,7 @@ export const invitationRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: '邀请码无效或已使用。' });
       }
 
-      if (invitation.created_by === input.inviteeId) {
+      if (invitation.created_by === inviteeId) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '不能使用自己的邀请码。' });
       }
 
@@ -97,7 +101,7 @@ export const invitationRouter = router({
         .from('invitation_records')
         .select('id')
         .eq('invite_code', normalizedCode)
-        .eq('invitee_id', input.inviteeId)
+        .eq('invitee_id', inviteeId)
         .maybeSingle();
 
       if (existingRecordError) {
@@ -132,7 +136,7 @@ export const invitationRouter = router({
         ctx.supabase
           .from('profiles')
           .select('id, email, credits')
-          .eq('id', input.inviteeId)
+          .eq('id', inviteeId)
           .maybeSingle(),
         loadInvitationRuntimeSettings(ctx.supabase),
         ctx.supabase
@@ -224,7 +228,7 @@ export const invitationRouter = router({
           const { error: updateInviteeError } = await ctx.supabase
             .from('profiles')
             .update(updateInviteePayload)
-            .eq('id', input.inviteeId);
+            .eq('id', inviteeId);
 
           if (updateInviteeError) {
             throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: updateInviteeError.message });
@@ -234,8 +238,8 @@ export const invitationRouter = router({
         const { error: createInviteeProfileError } = await ctx.supabase
           .from('profiles')
           .insert({
-            id: input.inviteeId,
-            email: input.inviteeEmail,
+            id: inviteeId,
+            email: inviteeEmail,
             role: 'user',
             credits: settings.newUserCredits + inviteeReward,
           });
@@ -264,8 +268,8 @@ export const invitationRouter = router({
           invite_code: normalizedCode,
           inviter_id: inviterProfile.id,
           inviter_email: inviterProfile.email,
-          invitee_id: input.inviteeId,
-          invitee_email: input.inviteeEmail,
+          invitee_id: inviteeId,
+          invitee_email: inviteeEmail,
           status: decision.status,
           risk_level: decision.riskLevel,
           block_reason: decision.blockReason,
@@ -282,11 +286,11 @@ export const invitationRouter = router({
 
       const { error: invitationUpdateError } = await ctx.supabase
         .from('invitations')
-        .update({
-          status: 'used',
-          used_by: input.inviteeId,
-        })
-        .eq('code', normalizedCode);
+          .update({
+            status: 'used',
+            used_by: inviteeId,
+          })
+          .eq('code', normalizedCode);
 
       if (invitationUpdateError) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: invitationUpdateError.message });
@@ -298,12 +302,12 @@ export const invitationRouter = router({
               user_id: inviterProfile.id,
               amount: inviterReward,
               type: 'addition',
-              description: `邀请奖励：${input.inviteeEmail} 注册成功`,
+              description: `邀请奖励：${inviteeEmail} 注册成功`,
             }
           : null,
         inviteeReward > 0
           ? {
-              user_id: input.inviteeId,
+              user_id: inviteeId,
               amount: inviteeReward,
               type: 'addition',
               description: `邀请码奖励：使用 ${normalizedCode} 完成注册`,
