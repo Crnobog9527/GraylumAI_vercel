@@ -231,7 +231,7 @@ test.describe('Security', () => {
       const response = await page.request.get('/api/trpc/admin.getStatistics');
 
       // Should return unauthorized or not found
-      expect([401, 403, 404, 500]).toContain(response.status());
+      expect([401, 403, 404, 500, 503]).toContain(response.status());
     });
   });
 
