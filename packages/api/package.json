@@ -32,8 +32,8 @@
   },
   "dependencies": {
     "dotenv": "^17.2.3",
-    "@supabase/supabase-js": "^2.91.1",
-    "@trpc/server": "^11.8.1",
+    "@supabase/supabase-js": "^2.99.3",
+    "@trpc/server": "^11.14.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.1",
     "pino": "^10.3.0",
