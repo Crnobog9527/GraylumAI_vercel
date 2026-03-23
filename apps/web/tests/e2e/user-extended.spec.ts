@@ -17,7 +17,7 @@ import { safeCloseContext } from './support/contextCleanup';
 import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
-const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.txt');
+const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
 const ticketUploadFixtureName = path.basename(ticketUploadFixture);
 
 async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20000) {
