@@ -11,7 +11,7 @@ function getBaseUrl() {
   return process.env.PLAYWRIGHT_BASE_URL ?? process.env.BASE_URL ?? 'http://127.0.0.1:3000';
 }
 
-const ticketUploadFixture = path.resolve(__dirname, '../../../../.agent/skills/assets/star-history.png');
+const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.txt');
 
 async function createCookieHeader(storageStatePath: string) {
   const raw = await readFile(storageStatePath, 'utf8');
