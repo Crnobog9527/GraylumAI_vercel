@@ -18,3 +18,4 @@ tests/.auth/user.json
 .env*.local
 .audit-output/
 .release-output/
+.agent/skills/

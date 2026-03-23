@@ -1,1 +1,0 @@
-Graylum security E2E attachment fixture.
