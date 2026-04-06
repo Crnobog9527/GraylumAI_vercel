@@ -126,6 +126,25 @@ export interface ModelPricingInfo {
 /** 定价缓存 (避免每次请求都查询数据库) */
 const pricingCache = new Map<string, { pricing: ModelPricingInfo; expiry: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeRequestId(requestId?: string | null): string | undefined {
+  const trimmed = requestId?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (UUID_PATTERN.test(trimmed)) {
+    return trimmed;
+  }
+
+  logger.warn('billing', 'billing_request_id_invalid_uuid', {
+    requestIdLength: trimmed.length,
+  });
+
+  return undefined;
+}
 
 /**
  * 从数据库获取模型定价
@@ -441,7 +460,8 @@ export class BillingService {
     options: { reason?: string; requestId?: string } | string = {}
   ): Promise<PreDeductResult> {
     const normalizedOptions = typeof options === 'string' ? { reason: options } : options;
-    const { reason = 'AI 对话预扣', requestId } = normalizedOptions;
+    const { reason = 'AI 对话预扣' } = normalizedOptions;
+    const requestId = normalizeRequestId(normalizedOptions.requestId);
 
     // 尝试使用原子化 RPC 函数
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
@@ -1019,6 +1039,7 @@ export class BillingService {
   }
 
   async finalizeAISuccess(params: FinalizeAISuccessParams): Promise<FinalizeAISuccessResult> {
+    const requestId = normalizeRequestId(params.requestId);
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
     if (typeof rpcFn === 'function') {
       const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_success', {
@@ -1033,7 +1054,7 @@ export class BillingService {
         p_usage: params.usage,
         p_token_metadata: params.tokenMetadata ?? {},
         p_usage_metadata: params.usageMetadata ?? {},
-        p_request_id: params.requestId ?? null,
+        p_request_id: requestId ?? null,
         p_input_length: params.inputLength ?? null,
         p_latency_ms: params.latencyMs ?? null,
         p_search_count: params.searchCount ?? 0,
@@ -1101,7 +1122,7 @@ export class BillingService {
 
     await this.recordUsageLog({
       conversationId: params.conversationId,
-      requestId: params.requestId,
+      requestId,
       modelId: params.modelUsed,
       status: 'success',
       inputLength: params.inputLength,
@@ -1122,6 +1143,7 @@ export class BillingService {
   }
 
   async finalizeAIFailure(params: FinalizeAIFailureParams): Promise<RefundResult> {
+    const requestId = normalizeRequestId(params.requestId);
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
     if (typeof rpcFn === 'function') {
       const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_failure', {
@@ -1130,7 +1152,7 @@ export class BillingService {
         p_reason: params.reason,
         p_pre_deduct_id: params.preDeductId ?? null,
         p_conversation_id: params.conversationId ?? null,
-        p_request_id: params.requestId ?? null,
+        p_request_id: requestId ?? null,
         p_input_length: params.inputLength ?? null,
         p_latency_ms: params.latencyMs ?? null,
         p_ip_address: params.ipAddress ?? null,
@@ -1157,7 +1179,7 @@ export class BillingService {
 
     await this.recordUsageLog({
       conversationId: params.conversationId,
-      requestId: params.requestId,
+      requestId,
       modelId: params.modelUsed,
       status: 'failed',
       errorMessage: params.reason,

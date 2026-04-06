@@ -585,7 +585,7 @@ describe('Race Condition Prevention (Conceptual)', () => {
 
 describe('Idempotency', () => {
   it('should detect duplicate request IDs', async () => {
-    const requestId = 'unique-request-123';
+    const requestId = '4c7f0e36-7c38-4ce8-86b2-59d72ff8c0e1';
 
     // Create mock that returns existing record for idempotency check
     const createChain = (table: string) => {
@@ -633,6 +633,49 @@ describe('Idempotency', () => {
     // Should return idempotent result
     expect(result.idempotent).toBe(true);
     expect(result.preDeductId).toBe('existing-pre-deduct');
+  });
+
+  it('should ignore non-UUID request IDs before atomic pre-deduct', async () => {
+    const mockSupabase = createMockSupabase({ credits: 1000 }) as BillingContext['supabase'] & {
+      rpc: ReturnType<typeof vi.fn>;
+    };
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    const result = await service.preDeduct(100, { requestId: 'not-a-uuid' });
+
+    expect(result.preDeductId).toBe('test-billing-id');
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'atomic_pre_deduct',
+      expect.objectContaining({
+        p_request_id: null,
+      }),
+    );
+  });
+
+  it('should ignore non-UUID request IDs before atomic AI failure finalize', async () => {
+    const mockSupabase = createMockSupabase({ credits: 1000 }) as BillingContext['supabase'] & {
+      rpc: ReturnType<typeof vi.fn>;
+    };
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    await service.finalizeAIFailure({
+      modelUsed: 'claude-sonnet-4-20250514',
+      reason: 'test failure',
+      requestId: 'still-not-a-uuid',
+    });
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'atomic_finalize_ai_failure',
+      expect.objectContaining({
+        p_request_id: null,
+      }),
+    );
   });
 });
 
