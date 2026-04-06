@@ -106,4 +106,85 @@ describe('modelRouter admin model redaction', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).not.toHaveProperty('api_key');
   });
+
+  it('marks OpenRouter-compatible models as provider usage billing', async () => {
+    const inserted: Array<Record<string, unknown>> = [];
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'ai_models') {
+          return {
+            insert(payload: Record<string, unknown>) {
+              inserted.push(payload);
+              return {
+                select() {
+                  return {
+                    single() {
+                      return Promise.resolve({
+                        data: {
+                          id: 'model-2',
+                          ...payload,
+                          config: null,
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+            update() {
+              return {
+                eq() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    const caller = createAdminCaller(supabase);
+    await caller.createModel({
+      name: 'Claude 4.6 Opus',
+      modelId: 'anthropic/claude-opus-4.6',
+      provider: 'openai',
+      apiKey: 'sk-or-test',
+      apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    });
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
+      tokenizer_family: 'openai',
+    });
+  });
 });

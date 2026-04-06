@@ -75,6 +75,14 @@ function inferTokenCountingMetadata(params: {
   const openAITokenizerVerified = VERIFIED_OPENAI_TOKENIZER_PREFIXES.some((prefix) => modelId.startsWith(prefix));
   const openAICompatibleProvider = provider === 'openai' || endpoint.includes('openrouter') || endpoint.includes('chat/completions');
 
+  if (openAICompatibleProvider && endpoint.includes('openrouter')) {
+    return {
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
+      tokenizer_family: 'openai',
+    };
+  }
+
   if (openAICompatibleProvider && openAITokenizerVerified) {
     return {
       token_counting_supported: 'true',

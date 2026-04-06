@@ -239,6 +239,8 @@ export default function AdminModelsPage() {
           ? '官方 Anthropic'
           : model.token_counting_method === 'gemini_count_tokens'
             ? '官方 Gemini'
+            : model.token_counting_method === 'provider_usage'
+              ? '供应商 usage'
             : '可信 tokenizer',
         color: 'bg-emerald-500/20 text-emerald-400',
       };
