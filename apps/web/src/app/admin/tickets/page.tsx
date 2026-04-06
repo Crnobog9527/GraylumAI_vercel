@@ -231,11 +231,11 @@ export default function AdminTicketsPage() {
   }
 
   // Count tickets by status
-  const statusCounts = {
-    all: data?.total ?? 0,
-    open: tickets.filter(t => t.status === 'open').length,
-    in_progress: tickets.filter(t => t.status === 'in_progress').length,
-    closed: tickets.filter(t => t.status === 'closed').length,
+  const statusCounts = data?.statusCounts ?? {
+    all: 0,
+    open: 0,
+    in_progress: 0,
+    closed: 0,
   };
 
   return (

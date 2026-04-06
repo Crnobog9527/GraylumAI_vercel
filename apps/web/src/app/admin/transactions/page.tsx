@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   CreditCard, TrendingUp, TrendingDown, RefreshCw,
@@ -40,6 +40,7 @@ import {
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
 type TransactionType = 'deduction' | 'addition' | 'purchase' | 'refund';
+type ExtendedTransactionType = TransactionType | 'checkin';
 
 interface Transaction {
   id: string;
@@ -94,9 +95,10 @@ function formatUserDisplay(profile: Transaction['profiles'] | UserProfile | null
   };
 }
 
-const typeConfig: Record<TransactionType, { label: string; color: string; icon: React.ElementType }> = {
+const typeConfig: Record<ExtendedTransactionType, { label: string; color: string; icon: React.ElementType }> = {
   addition: { label: '增加', color: 'bg-emerald-500/20 text-emerald-400', icon: ArrowUpCircle },
   deduction: { label: '扣除', color: 'bg-rose-500/20 text-rose-400', icon: ArrowDownCircle },
+  checkin: { label: '签到', color: 'bg-cyan-500/20 text-cyan-400', icon: Calendar },
   purchase: { label: '购买', color: 'bg-blue-500/20 text-blue-400', icon: ShoppingCart },
   refund: { label: '退款', color: 'bg-amber-500/20 text-amber-400', icon: RotateCcw },
 };
@@ -108,14 +110,14 @@ const fallbackTransactionConfig = {
 } satisfies { label: string; color: string; icon: React.ElementType };
 
 function getTransactionConfig(type: string) {
-  return typeConfig[type as TransactionType] ?? fallbackTransactionConfig;
+  return typeConfig[type as ExtendedTransactionType] ?? fallbackTransactionConfig;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 export default function AdminTransactionsPage() {
   // Filter state
-  const [typeFilter, setTypeFilter] = useState<TransactionType | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<ExtendedTransactionType | 'all'>('all');
   const [userSearch, setUserSearch] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedUserName, setSelectedUserName] = useState<string>('');
@@ -138,25 +140,22 @@ export default function AdminTransactionsPage() {
   });
 
   // User search query
-  const { data: usersData } = trpc.admin.getAllUsers.useQuery({
-    limit: 10,
-    offset: 0,
-  });
-
-  // Filter users based on search input
-  const filteredUsers = useMemo(() => {
-    if (!usersData?.users || !userSearch.trim()) return [];
-    const search = userSearch.toLowerCase();
-    return usersData.users.filter((user: UserProfile) =>
-      user.email?.toLowerCase().includes(search) ||
-      user.nickname?.toLowerCase().includes(search)
-    ).slice(0, 5);
-  }, [usersData?.users, userSearch]);
+  const trimmedUserSearch = userSearch.trim();
+  const { data: filteredUsers = [] } = trpc.admin.searchUsers.useQuery(
+    {
+      query: trimmedUserSearch,
+      limit: 5,
+    },
+    {
+      enabled: !selectedUserId && trimmedUserSearch.length >= 2,
+    },
+  );
 
   const transactions = data?.transactions ?? [];
   const total = data?.total ?? 0;
   const stats = data?.stats ?? {
     totalAdditions: 0,
+    totalCheckins: 0,
     totalDeductions: 0,
     totalPurchases: 0,
     totalRefunds: 0,
@@ -255,7 +254,7 @@ export default function AdminTransactionsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2 xl:grid-cols-5">
         <Card data-testid="admin-transactions-stat-additions" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
@@ -282,6 +281,22 @@ export default function AdminTransactionsPage() {
                 <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总扣除</p>
                 <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
                   -{stats.totalDeductions.toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card data-testid="admin-transactions-stat-checkins" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-xl bg-cyan-500/20">
+                <Calendar className="h-6 w-6 text-cyan-400" />
+              </div>
+              <div>
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>总签到</p>
+                <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                  +{stats.totalCheckins.toLocaleString()}
                 </p>
               </div>
             </div>
@@ -517,6 +532,10 @@ export default function AdminTransactionsPage() {
           <TabsTrigger value="deduction" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <ArrowDownCircle className="h-4 w-4 mr-1 text-rose-400" />
             扣除
+          </TabsTrigger>
+          <TabsTrigger value="checkin" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
+            <Calendar className="h-4 w-4 mr-1 text-cyan-400" />
+            签到
           </TabsTrigger>
           <TabsTrigger value="purchase" className="shrink-0 data-[state=active]:bg-[var(--bg-secondary)]">
             <ShoppingCart className="h-4 w-4 mr-1 text-blue-400" />

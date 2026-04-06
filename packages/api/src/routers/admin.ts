@@ -1,7 +1,9 @@
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
+import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
   getAdminMembershipOverrideErrorMessage,
@@ -32,12 +34,63 @@ const promptBatchPatchSchema = z.object({
   { message: 'At least one patch field is required' },
 );
 
+function createAdminOperationError(operation: string, cause: unknown) {
+  return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function logAdminEndpointMetric(
+  endpoint: string,
+  startedAt: number,
+  context: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  logger.info('api', 'admin_endpoint_profile', {
+    endpoint,
+    durationMs: Date.now() - startedAt,
+    ...context,
+  });
+}
+
+type TicketStatusSummary = {
+  all: number;
+  open: number;
+  in_progress: number;
+  closed: number;
+};
+
+function createEmptyTicketStatusSummary(): TicketStatusSummary {
+  return {
+    all: 0,
+    open: 0,
+    in_progress: 0,
+    closed: 0,
+  };
+}
+
+function summarizeTicketStatuses(tickets: Array<{ status: string | null | undefined }> | null | undefined): TicketStatusSummary {
+  const summary = createEmptyTicketStatusSummary();
+
+  for (const ticket of tickets ?? []) {
+    summary.all += 1;
+
+    if (ticket.status === 'open') summary.open += 1;
+    else if (ticket.status === 'in_progress') summary.in_progress += 1;
+    else if (ticket.status === 'closed') summary.closed += 1;
+  }
+
+  return summary;
+}
+
 export const adminRouter = router({
   /**
    * Get enhanced dashboard statistics
    * Returns comprehensive overview for the admin dashboard
    */
   getStatistics: adminProcedure.query(async ({ ctx }) => {
+    const startedAt = Date.now();
     // Calculate date ranges
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -46,70 +99,58 @@ export const adminRouter = router({
 
     // Fetch all statistics in parallel for better performance
     const [
-      usersResult,
+      profilesAggregateResult,
       ticketsResult,
       invitationsResult,
-      creditsResult,
       recentUsersResult,
-      // Time-based stats
-      usersToday,
-      usersThisWeek,
-      usersThisMonth,
-      // Conversations stats
       conversationsTotal,
-      conversationsToday,
-      conversationsThisWeek,
-      // Transactions for trends
+      recentConversationsResult,
       transactionsResult,
-      // Models for usage stats
       modelsResult,
-      // Credit transactions by type
       creditTransactionsResult,
-      // Top active users (by conversations)
       topUsersResult,
     ] = await Promise.all([
-      // Total users count
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      // Aggregate user counts and credits from one shared dataset
+      ctx.supabase
+        .from('profiles')
+        .select('id, created_at, credits')
+        .eq('is_deleted', false),
 
       // Tickets by status
-      ctx.supabase.from('tickets').select('status'),
+      ctx.supabase
+        .from('tickets')
+        .select('status')
+        .eq('is_deleted', false),
 
       // Invitations by status
       ctx.supabase.from('invitations').select('status'),
-
-      // Total credits in system
-      ctx.supabase.from('profiles').select('credits'),
 
       // Recent users (last 10)
       ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, role, credits, created_at')
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(10),
 
-      // Users registered today
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
-
-      // Users registered this week
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
-
-      // Users registered this month
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', monthStart),
-
       // Total conversations
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }),
+      ctx.supabase
+        .from('conversations')
+        .select('id', { count: 'planned', head: true })
+        .eq('is_deleted', false),
 
-      // Conversations today
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+      // Recent conversations for today/week rollups
+      ctx.supabase
+        .from('conversations')
+        .select('created_at')
+        .eq('is_deleted', false)
+        .gte('created_at', weekStart),
 
-      // Conversations this week
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
-
-      // Recent transactions for trends (last 30 days)
+      // Recent transactions for trends (last 7 days)
       ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at')
-        .gte('created_at', new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .gte('created_at', weekStart)
         .order('created_at', { ascending: true }),
 
       // Active models with usage
@@ -125,9 +166,44 @@ export const adminRouter = router({
       ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, credits')
+        .eq('is_deleted', false)
         .order('credits', { ascending: false })
         .limit(5),
     ]);
+
+    const profiles = profilesAggregateResult.data ?? [];
+    const totalCredits = profiles.reduce((sum, user) => sum + (user.credits ?? 0), 0);
+    const userStats = {
+      total: profiles.length,
+      today: 0,
+      thisWeek: 0,
+      thisMonth: 0,
+    };
+
+    for (const profile of profiles) {
+      if (profile.created_at >= todayStart) {
+        userStats.today += 1;
+      }
+      if (profile.created_at >= weekStart) {
+        userStats.thisWeek += 1;
+      }
+      if (profile.created_at >= monthStart) {
+        userStats.thisMonth += 1;
+      }
+    }
+
+    const recentConversations = recentConversationsResult.data ?? [];
+    const conversationStats = {
+      total: conversationsTotal.count ?? 0,
+      today: 0,
+      thisWeek: recentConversations.length,
+    };
+
+    for (const conversation of recentConversations) {
+      if (conversation.created_at >= todayStart) {
+        conversationStats.today += 1;
+      }
+    }
 
     // Calculate ticket statistics
     const ticketStats = {
@@ -145,19 +221,18 @@ export const adminRouter = router({
       expired: invitationsResult.data?.filter(i => i.status === 'expired').length ?? 0,
     };
 
-    // Calculate total credits
-    const totalCredits = creditsResult.data?.reduce((sum, user) => sum + (user.credits ?? 0), 0) ?? 0;
-
     // Calculate credit transactions stats
     const transactionStats = {
       totalDeductions: 0,
       totalAdditions: 0,
+      totalCheckins: 0,
       totalPurchases: 0,
       totalRefunds: 0,
     };
     creditTransactionsResult.data?.forEach((t: { type: string; amount: number }) => {
       if (t.type === 'deduction') transactionStats.totalDeductions += Math.abs(t.amount);
       else if (t.type === 'addition') transactionStats.totalAdditions += t.amount;
+      else if (t.type === 'checkin') transactionStats.totalCheckins += t.amount;
       else if (t.type === 'purchase') transactionStats.totalPurchases += t.amount;
       else if (t.type === 'refund') transactionStats.totalRefunds += t.amount;
     });
@@ -172,7 +247,9 @@ export const adminRouter = router({
       ) ?? [];
 
       const additions = dayTransactions
-        .filter((t: { type: string }) => t.type === 'addition' || t.type === 'purchase')
+        .filter((t: { type: string }) =>
+          t.type === 'addition' || t.type === 'purchase' || t.type === 'refund' || t.type === 'checkin'
+        )
         .reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
       const deductions = dayTransactions
         .filter((t: { type: string }) => t.type === 'deduction')
@@ -190,20 +267,16 @@ export const adminRouter = router({
     const openTicketRatio = ticketStats.total > 0 ? ticketStats.open / ticketStats.total : 0;
     const systemHealth = openTicketRatio > 0.5 ? 'warning' : openTicketRatio > 0.3 ? 'attention' : 'healthy';
 
-    return {
+    const result = {
       users: {
-        total: usersResult.count ?? 0,
-        today: usersToday.count ?? 0,
-        thisWeek: usersThisWeek.count ?? 0,
-        thisMonth: usersThisMonth.count ?? 0,
+        total: userStats.total,
+        today: userStats.today,
+        thisWeek: userStats.thisWeek,
+        thisMonth: userStats.thisMonth,
         recentUsers: recentUsersResult.data ?? [],
         topUsers: topUsersResult.data ?? [],
       },
-      conversations: {
-        total: conversationsTotal.count ?? 0,
-        today: conversationsToday.count ?? 0,
-        thisWeek: conversationsThisWeek.count ?? 0,
-      },
+      conversations: conversationStats,
       tickets: ticketStats,
       invitations: invitationStats,
       credits: {
@@ -217,6 +290,15 @@ export const adminRouter = router({
       trends: trendData,
       systemHealth,
     };
+
+    logAdminEndpointMetric('admin.getStatistics', startedAt, {
+      queryCount: 10,
+      countStrategy: 'planned',
+      userCount: result.users.total,
+      conversationTotal: result.conversations.total,
+    });
+
+    return result;
   }),
 
   /**
@@ -232,9 +314,11 @@ export const adminRouter = router({
       role: z.enum(['user', 'admin']).optional(),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       let query = ctx.supabase
         .from('profiles')
-        .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'exact' })
+        .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'planned' })
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -261,14 +345,47 @@ export const adminRouter = router({
       const { data, error, count } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取用户列表', error);
       }
 
-      return {
+      const result = {
         users: data ?? [],
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };
+
+      logAdminEndpointMetric('admin.getAllUsers', startedAt, {
+        queryCount: 1,
+        countStrategy: 'planned',
+        pageSize: input.limit,
+        returnedCount: result.users.length,
+      });
+
+      return result;
+    }),
+
+  /**
+   * Search users for admin filters and selectors
+   */
+  searchUsers: adminProcedure
+    .input(z.object({
+      query: z.string().trim().min(1),
+      limit: z.number().min(1).max(20).default(5),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('profiles')
+        .select('id, email, nickname, avatar_url')
+        .eq('is_deleted', false)
+        .or(`email.ilike.%${input.query}%,nickname.ilike.%${input.query}%`)
+        .order('created_at', { ascending: false })
+        .limit(input.limit);
+
+      if (error) {
+        throw createAdminOperationError('搜索用户', error);
+      }
+
+      return data ?? [];
     }),
 
   /**
@@ -302,7 +419,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新用户角色', error);
       }
 
       // Log the activity
@@ -333,10 +450,12 @@ export const adminRouter = router({
       offset: z.number().min(0).default(0),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       // 查询工单（不使用外键关联，改为分步查询以避免 schema cache 问题）
       let query = ctx.supabase
         .from('tickets')
         .select('*', { count: 'exact' })
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -353,14 +472,35 @@ export const adminRouter = router({
       const { data: ticketsData, error, count } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取工单列表', error);
       }
+
+      let statusCountsQuery = ctx.supabase
+        .from('tickets')
+        .select('status')
+        .eq('is_deleted', false);
+
+      if (input.category) {
+        statusCountsQuery = statusCountsQuery.eq('category', input.category);
+      }
+      if (input.priority) {
+        statusCountsQuery = statusCountsQuery.eq('priority', input.priority);
+      }
+
+      const { data: statusCountRows, error: statusCountsError } = await statusCountsQuery;
+
+      if (statusCountsError) {
+        throw createAdminOperationError('读取工单列表', statusCountsError);
+      }
+
+      const statusCounts = summarizeTicketStatuses(statusCountRows);
 
       if (!ticketsData || ticketsData.length === 0) {
         return {
           tickets: [],
           total: count ?? 0,
           hasMore: false,
+          statusCounts,
         };
       }
 
@@ -396,25 +536,51 @@ export const adminRouter = router({
       const usersMap = new Map((usersData ?? []).map(u => [u.id, u]));
       const replyUsersMap = new Map((replyUsersData ?? []).map(u => [u.id, u]));
 
-      // 组装工单数据
-      const tickets = await Promise.all(ticketsData.map(async (ticket) => ({
-        ...ticket,
-        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
-        user: ticket.user_id ? usersMap.get(ticket.user_id) ?? null : null,
-        ticket_replies: await Promise.all((repliesData ?? [])
+      const attachmentBatches = ticketsData.flatMap((ticket) => [
+        {
+          key: `ticket:${ticket.id}`,
+          value: ticket.attachments,
+          ownerIds: [ticket.user_id],
+        },
+        ...((repliesData ?? [])
           .filter(r => r.ticket_id === ticket.id)
-          .map(async (reply) => ({
-            ...reply,
-            attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
-            user: reply.user_id ? replyUsersMap.get(reply.user_id) ?? null : null,
+          .map((reply) => ({
+            key: `reply:${reply.id}`,
+            value: reply.attachments,
+            ownerIds: [ticket.user_id, reply.user_id],
           }))),
-      })));
+      ]);
+      const signedAttachments = await issueSignedAttachmentUrlsByBatch(ctx.supabaseAdmin, attachmentBatches);
 
-      return {
+      // 组装工单数据
+      const tickets = ticketsData.map((ticket) => ({
+        ...ticket,
+        attachments: signedAttachments.get(`ticket:${ticket.id}`) ?? [],
+        user: ticket.user_id ? usersMap.get(ticket.user_id) ?? null : null,
+        ticket_replies: (repliesData ?? [])
+          .filter(r => r.ticket_id === ticket.id)
+          .map((reply) => ({
+            ...reply,
+            attachments: signedAttachments.get(`reply:${reply.id}`) ?? [],
+            user: reply.user_id ? replyUsersMap.get(reply.user_id) ?? null : null,
+          })),
+      }));
+
+      const result = {
         tickets,
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
+        statusCounts,
       };
+
+      logAdminEndpointMetric('admin.getAllTickets', startedAt, {
+        queryCount: 5,
+        countStrategy: 'exact',
+        pageSize: input.limit,
+        returnedCount: result.tickets.length,
+      });
+
+      return result;
     }),
 
   /**
@@ -437,7 +603,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新工单状态', error);
       }
 
       return data;
@@ -464,7 +630,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('回复工单', error);
       }
 
       // 同时更新工单的 updated_at
@@ -483,7 +649,7 @@ export const adminRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
-      type: z.enum(['deduction', 'addition', 'purchase', 'refund']).optional(),
+      type: z.enum(['deduction', 'addition', 'checkin', 'purchase', 'refund']).optional(),
       userId: z.string().uuid().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
@@ -491,7 +657,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*', { count: 'planned' })
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -539,7 +705,7 @@ export const adminRouter = router({
       const { data, error, count } = transactionsResult;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取积分流水', error);
       }
 
       const userIds = Array.from(new Set((data ?? []).map((transaction) => transaction.user_id).filter(Boolean)));
@@ -557,7 +723,7 @@ export const adminRouter = router({
           .in('id', userIds);
 
         if (profilesError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: profilesError.message });
+          throw createAdminOperationError('读取积分流水', profilesError);
         }
 
         profilesById = new Map(
@@ -567,6 +733,7 @@ export const adminRouter = router({
 
       const stats = {
         totalAdditions: 0,
+        totalCheckins: 0,
         totalDeductions: 0,
         totalPurchases: 0,
         totalRefunds: 0,
@@ -574,6 +741,7 @@ export const adminRouter = router({
 
       statsResult.data?.forEach((t: { type: string; amount: number }) => {
         if (t.type === 'addition') stats.totalAdditions += t.amount;
+        else if (t.type === 'checkin') stats.totalCheckins += t.amount;
         else if (t.type === 'deduction') stats.totalDeductions += Math.abs(t.amount);
         else if (t.type === 'purchase') stats.totalPurchases += t.amount;
         else if (t.type === 'refund') stats.totalRefunds += t.amount;
@@ -623,7 +791,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('调整用户积分', error);
       }
 
       if (actualAdjustment !== 0) {
@@ -669,6 +837,7 @@ export const adminRouter = router({
       userId: z.string().uuid(),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       // Get user profile with all fields
       const { data: profile, error: profileError } = await ctx.supabase
         .from('profiles')
@@ -685,8 +854,8 @@ export const adminRouter = router({
         conversationsResult,
         creditsSpentResult,
         ticketsResult,
+        recentLogsResult,
       ] = await Promise.all([
-        // Fetch conversation IDs first; message count must be based on these IDs
         ctx.supabase
           .from('conversations')
           .select('id')
@@ -702,34 +871,28 @@ export const adminRouter = router({
         // Tickets created
         ctx.supabase
           .from('tickets')
-          .select('id', { count: 'exact', head: true })
+          .select('id')
           .eq('user_id', input.userId),
+
+        ctx.supabase
+          .from('user_activity_logs')
+          .select('*')
+          .eq('user_id', input.userId)
+          .order('created_at', { ascending: false })
+          .limit(10),
       ]);
 
       if (conversationsResult.error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: conversationsResult.error.message });
+        throw createAdminOperationError('读取用户详情', conversationsResult.error);
       }
       if (creditsSpentResult.error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: creditsSpentResult.error.message });
+        throw createAdminOperationError('读取用户详情', creditsSpentResult.error);
       }
       if (ticketsResult.error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ticketsResult.error.message });
+        throw createAdminOperationError('读取用户详情', ticketsResult.error);
       }
-
-      const conversationIds = (conversationsResult.data ?? []).map((conversation) => conversation.id);
-      let totalMessages = 0;
-
-      if (conversationIds.length > 0) {
-        const { count: messageCount, error: messageError } = await ctx.supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .in('conversation_id', conversationIds);
-
-        if (messageError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: messageError.message });
-        }
-
-        totalMessages = messageCount ?? 0;
+      if (recentLogsResult.error) {
+        throw createAdminOperationError('读取用户详情', recentLogsResult.error);
       }
 
       // Calculate total credits spent
@@ -737,24 +900,37 @@ export const adminRouter = router({
         (sum, t) => sum + Math.abs(t.amount), 0
       ) ?? 0;
 
-      // Get recent activity logs
-      const { data: recentLogs } = await ctx.supabase
-        .from('user_activity_logs')
-        .select('*')
-        .eq('user_id', input.userId)
-        .order('created_at', { ascending: false })
-        .limit(10);
+      const conversationIds = (conversationsResult.data ?? []).map((conversation) => conversation.id);
+      const messageCountResult = conversationIds.length > 0
+        ? await ctx.supabase
+            .from('messages')
+            .select('id', { count: 'planned', head: true })
+            .in('conversation_id', conversationIds)
+        : { count: 0, error: null };
 
-      return {
+      if (messageCountResult.error) {
+        throw createAdminOperationError('读取用户详情', messageCountResult.error);
+      }
+
+      const result = {
         profile,
         stats: {
           totalConversations: conversationsResult.data?.length ?? 0,
-          totalMessages,
+          totalMessages: messageCountResult.count ?? 0,
           totalCreditsSpent,
-          totalTickets: ticketsResult.count ?? 0,
+          totalTickets: ticketsResult.data?.length ?? 0,
         },
-        recentActivity: recentLogs ?? [],
+        recentActivity: recentLogsResult.data ?? [],
       };
+
+      logAdminEndpointMetric('admin.getUserDetails', startedAt, {
+        queryCount: conversationIds.length > 0 ? 5 : 4,
+        countStrategy: conversationIds.length > 0 ? 'mixed' : 'local_only',
+        hasMessagesCount: conversationIds.length > 0,
+        recentActivityCount: result.recentActivity.length,
+      });
+
+      return result;
     }),
 
   /**
@@ -789,7 +965,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新用户状态', error);
       }
 
       // Log the activity
@@ -841,7 +1017,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新用户会员等级', error);
       }
 
       const { data: latestSubscription } = await ctx.supabase
@@ -880,7 +1056,7 @@ export const adminRouter = router({
             .maybeSingle();
 
           if (targetPlanError) {
-            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: targetPlanError.message });
+            throw createAdminOperationError('更新用户会员等级', targetPlanError);
           }
 
           targetPlanId = targetPlan?.id ?? null;
@@ -910,7 +1086,7 @@ export const adminRouter = router({
           .eq('id', latestSubscription.id);
 
         if (subscriptionSyncError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: subscriptionSyncError.message });
+          throw createAdminOperationError('更新用户会员等级', subscriptionSyncError);
         }
       }
 
@@ -941,13 +1117,14 @@ export const adminRouter = router({
       offset: z.number().min(0).default(0),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       let query = ctx.supabase
         .from('user_activity_logs')
         .select(`
           *,
           user:profiles!user_activity_logs_user_id_fkey(id, email, nickname, avatar_url),
           admin:profiles!user_activity_logs_admin_id_fkey(id, email, nickname, avatar_url)
-        `, { count: 'exact' })
+        `, { count: 'planned' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -962,14 +1139,23 @@ export const adminRouter = router({
       const { data, error, count } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取用户操作日志', error);
       }
 
-      return {
+      const result = {
         logs: data ?? [],
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };
+
+      logAdminEndpointMetric('admin.getUserActivityLogs', startedAt, {
+        queryCount: 1,
+        countStrategy: 'planned',
+        pageSize: input.limit,
+        returnedCount: result.logs.length,
+      });
+
+      return result;
     }),
 
   // ============================================
@@ -988,10 +1174,41 @@ export const adminRouter = router({
         .order('price', { ascending: true });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取积分包列表', error);
       }
 
       return data ?? [];
+    }),
+
+  /**
+   * Get packages page bootstrap data
+   */
+  getPackagesDashboard: adminProcedure
+    .query(async ({ ctx }) => {
+      const [packagesResult, membershipPlansResult] = await Promise.all([
+        ctx.supabase
+          .from('credit_packages')
+          .select('*')
+          .order('sort_order', { ascending: true })
+          .order('price', { ascending: true }),
+        ctx.supabase
+          .from('membership_plans')
+          .select('*')
+          .order('sort_order', { ascending: true }),
+      ]);
+
+      if (packagesResult.error) {
+        throw createAdminOperationError('读取积分包列表', packagesResult.error);
+      }
+
+      if (membershipPlansResult.error) {
+        throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
+      }
+
+      return {
+        packages: packagesResult.data ?? [],
+        membershipPlans: membershipPlansResult.data ?? [],
+      };
     }),
 
   /**
@@ -1025,7 +1242,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('创建积分包', error);
       }
 
       return data;
@@ -1065,7 +1282,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新积分包', error);
       }
 
       return data;
@@ -1085,7 +1302,7 @@ export const adminRouter = router({
         .eq('id', input.id);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('删除积分包', error);
       }
 
       return { success: true };
@@ -1105,9 +1322,10 @@ export const adminRouter = router({
       activeOnly: z.boolean().default(false),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       let query = ctx.supabase
         .from('announcements')
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'planned' })
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -1119,7 +1337,7 @@ export const adminRouter = router({
       const { data, error, count } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取公告列表', error);
       }
 
       // Get stats
@@ -1139,12 +1357,21 @@ export const adminRouter = router({
         },
       };
 
-      return {
+      const result = {
         announcements: data ?? [],
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
         stats,
       };
+
+      logAdminEndpointMetric('admin.getAllAnnouncements', startedAt, {
+        queryCount: 2,
+        countStrategy: 'planned',
+        pageSize: input.limit,
+        returnedCount: result.announcements.length,
+      });
+
+      return result;
     }),
 
   /**
@@ -1190,7 +1417,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('创建公告', error);
       }
 
       return data;
@@ -1244,7 +1471,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新公告', error);
       }
 
       return data;
@@ -1264,7 +1491,7 @@ export const adminRouter = router({
         .eq('id', input.id);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('删除公告', error);
       }
 
       return { success: true };
@@ -1287,7 +1514,7 @@ export const adminRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取有效公告', error);
       }
 
       return data ?? [];
@@ -1308,9 +1535,10 @@ export const adminRouter = router({
       activeOnly: z.boolean().default(false),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       let query = ctx.supabase
         .from('prompts')
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'planned' })
         .order('sort_order', { ascending: false })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
@@ -1326,7 +1554,7 @@ export const adminRouter = router({
       const { data, error, count } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取提示词列表', error);
       }
 
       // Get stats
@@ -1349,12 +1577,103 @@ export const adminRouter = router({
         },
       };
 
-      return {
+      const result = {
         prompts: data ?? [],
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
         stats,
       };
+
+      logAdminEndpointMetric('admin.getAllPrompts', startedAt, {
+        queryCount: 2,
+        countStrategy: 'planned',
+        pageSize: input.limit,
+        returnedCount: result.prompts.length,
+      });
+
+      return result;
+    }),
+
+  /**
+   * Get prompts page bootstrap data
+   */
+  getPromptsDashboard: adminProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(50),
+      offset: z.number().min(0).default(0),
+      category: promptCategorySchema.optional(),
+      activeOnly: z.boolean().default(false),
+    }))
+    .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
+      let promptsQuery = ctx.supabase
+        .from('prompts')
+        .select('*', { count: 'planned' })
+        .order('sort_order', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(input.offset, input.offset + input.limit - 1);
+
+      if (input.category) {
+        promptsQuery = promptsQuery.eq('category', input.category);
+      }
+
+      if (input.activeOnly) {
+        promptsQuery = promptsQuery.eq('active', 'true');
+      }
+
+      const [promptsResult, statsQuery, modelsResult] = await Promise.all([
+        promptsQuery,
+        ctx.supabase
+          .from('prompts')
+          .select('active, category, is_system'),
+        ctx.supabase
+          .from('ai_models')
+          .select('id, name, model_id, provider, description, enable_web_search, max_tokens')
+          .eq('is_active', 'true')
+          .order('name'),
+      ]);
+
+      if (promptsResult.error) {
+        throw createAdminOperationError('读取提示词列表', promptsResult.error);
+      }
+      if (statsQuery.error) {
+        throw createAdminOperationError('读取提示词列表', statsQuery.error);
+      }
+      if (modelsResult.error) {
+        throw createAdminOperationError('读取提示词列表', modelsResult.error);
+      }
+
+      const statsRows = statsQuery.data ?? [];
+      const result = {
+        prompts: promptsResult.data ?? [],
+        total: promptsResult.count ?? 0,
+        hasMore: (promptsResult.count ?? 0) > input.offset + input.limit,
+        stats: {
+          total: statsRows.length,
+          active: statsRows.filter((prompt) => prompt.active === 'true').length,
+          inactive: statsRows.filter((prompt) => prompt.active === 'false').length,
+          system: statsRows.filter((prompt) => prompt.is_system === 'true').length,
+          byCategory: {
+            general: statsRows.filter((prompt) => prompt.category === 'general').length,
+            assistant: statsRows.filter((prompt) => prompt.category === 'assistant').length,
+            creative: statsRows.filter((prompt) => prompt.category === 'creative').length,
+            coding: statsRows.filter((prompt) => prompt.category === 'coding').length,
+            translation: statsRows.filter((prompt) => prompt.category === 'translation').length,
+            analysis: statsRows.filter((prompt) => prompt.category === 'analysis').length,
+          },
+        },
+        models: modelsResult.data ?? [],
+      };
+
+      logAdminEndpointMetric('admin.getPromptsDashboard', startedAt, {
+        queryCount: 3,
+        countStrategy: 'planned',
+        pageSize: input.limit,
+        returnedCount: result.prompts.length,
+        modelCount: result.models.length,
+      });
+
+      return result;
     }),
 
   /**
@@ -1402,7 +1721,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('创建提示词', error);
       }
 
       return data;
@@ -1458,7 +1777,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新提示词', error);
       }
 
       return data;
@@ -1492,7 +1811,7 @@ export const adminRouter = router({
         .select('id');
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('批量更新提示词', error);
       }
 
       return {
@@ -1517,7 +1836,7 @@ export const adminRouter = router({
         .select('id');
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('批量启停提示词', error);
       }
 
       return {
@@ -1538,7 +1857,7 @@ export const adminRouter = router({
         .in('id', input.ids);
 
       if (promptError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: promptError.message });
+        throw createAdminOperationError('批量删除提示词', promptError);
       }
 
       const deletableIds = (prompts ?? [])
@@ -1555,7 +1874,7 @@ export const adminRouter = router({
           .in('id', deletableIds);
 
         if (error) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+          throw createAdminOperationError('批量删除提示词', error);
         }
       }
 
@@ -1592,7 +1911,7 @@ export const adminRouter = router({
         .eq('id', input.id);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('删除提示词', error);
       }
 
       return { success: true };
@@ -1862,10 +2181,47 @@ export const adminRouter = router({
         .order('sort_order', { ascending: true });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('读取会员方案列表', error);
       }
 
       return data ?? [];
+    }),
+
+  /**
+   * Get settings page bootstrap data
+   */
+  getSettingsDashboard: adminProcedure
+    .query(async ({ ctx }) => {
+      const service = new ConversationCleanupService({ supabase: ctx.supabase });
+      const [systemSettingsResult, membershipPlansResult, cleanupStatsResult, latestRun] = await Promise.all([
+        ctx.supabase.from('system_settings').select('key, value'),
+        ctx.supabase
+          .from('membership_plans')
+          .select('*')
+          .order('sort_order', { ascending: true }),
+        service.getCleanupStats(),
+        getLatestScheduledJobRun(ctx.supabase, SCHEDULED_JOB_KEYS.conversationCleanup),
+      ]);
+
+      if (systemSettingsResult.error) {
+        throw createAdminOperationError('读取系统设置', systemSettingsResult.error);
+      }
+
+      if (membershipPlansResult.error) {
+        throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
+      }
+
+      return {
+        systemSettings: Object.fromEntries(
+          (systemSettingsResult.data ?? []).map((setting) => [setting.key, setting.value]),
+        ),
+        membershipPlans: membershipPlansResult.data ?? [],
+        cleanupStats: {
+          stats: cleanupStatsResult.stats,
+          totalExpired: cleanupStatsResult.totalExpired,
+          latestRun,
+        },
+      };
     }),
 
   /**
@@ -1910,7 +2266,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('创建会员方案', error);
       }
 
       return data;
@@ -1970,7 +2326,7 @@ export const adminRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('更新会员方案', error);
       }
 
       return data;
@@ -1990,7 +2346,7 @@ export const adminRouter = router({
         .eq('id', input.id);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createAdminOperationError('删除会员方案', error);
       }
 
       return { success: true };
@@ -2032,13 +2388,10 @@ export const adminRouter = router({
           supabase: ctx.supabase,
           runId,
           status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown cleanup error',
+          error: '自动清理失败，请稍后重试',
         });
 
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: error instanceof Error ? error.message : '对话清理失败',
-        });
+        throw createSafeInternalError(error, '对话清理失败，请稍后重试');
       }
     }),
 
@@ -2072,6 +2425,7 @@ export const adminRouter = router({
       timeRange: z.enum(['7d', '14d', '30d']).default('14d'),
     }))
     .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
       const now = new Date();
       const daysMap = { '7d': 7, '14d': 14, '30d': 30 };
       const days = daysMap[input.timeRange];
@@ -2079,127 +2433,117 @@ export const adminRouter = router({
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const rangeStartIso = rangeStart.toISOString();
+      const todayStartIso = todayStart.toISOString();
+      const sevenDaysAgoIso = sevenDaysAgo.toISOString();
+      const thirtyDaysAgoIso = thirtyDaysAgo.toISOString();
 
       const [
         conversationTotalResult,
-        conversationTodayResult,
-        conversationWeekResult,
-        conversationMonthResult,
-        conversationsInRangeResult,
+        recentConversationsResult,
         messageTotalResult,
         messageUserResult,
         messageAssistantResult,
-        messageTodayResult,
-        messageWeekResult,
-        messageMonthResult,
-        messagesInRangeResult,
-        ticketTotalResult,
-        ticketOpenResult,
-        ticketInProgressResult,
-        ticketClosedResult,
+        recentMessagesResult,
+        ticketsResult,
         modelsResult,
         allTokenStatsResult,
         usageLogsResult,
-        conversationsForModelUsageResult,
       ] = await Promise.all([
-        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }),
-        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', todayStart.toISOString()),
-        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', sevenDaysAgo.toISOString()),
-        ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo.toISOString()),
+        ctx.supabase
+          .from('conversations')
+          .select('id', { count: 'planned', head: true })
+          .eq('is_deleted', false),
         ctx.supabase
           .from('conversations')
           .select('model_id, created_at')
-          .gte('created_at', rangeStart.toISOString()),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).eq('role', 'user'),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).eq('role', 'assistant'),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', todayStart.toISOString()),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', sevenDaysAgo.toISOString()),
-        ctx.supabase.from('messages').select('id', { count: 'exact', head: true }).gte('created_at', thirtyDaysAgo.toISOString()),
+          .eq('is_deleted', false)
+          .gte('created_at', thirtyDaysAgoIso),
+        ctx.supabase
+          .from('messages')
+          .select('id', { count: 'planned', head: true })
+          .eq('is_deleted', false),
+        ctx.supabase
+          .from('messages')
+          .select('id', { count: 'planned', head: true })
+          .eq('is_deleted', false)
+          .eq('role', 'user'),
+        ctx.supabase
+          .from('messages')
+          .select('id', { count: 'planned', head: true })
+          .eq('is_deleted', false)
+          .eq('role', 'assistant'),
         ctx.supabase
           .from('messages')
           .select('role, created_at')
-          .gte('created_at', rangeStart.toISOString()),
-        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }),
-        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'open'),
-        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'in_progress'),
-        ctx.supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('status', 'closed'),
+          .eq('is_deleted', false)
+          .gte('created_at', thirtyDaysAgoIso),
+        ctx.supabase
+          .from('tickets')
+          .select('status')
+          .eq('is_deleted', false),
         ctx.supabase
           .from('ai_models')
           .select('id, name, model_id, provider, input_token_cost, output_token_cost, web_search_cost, is_active'),
         ctx.supabase
           .from('token_stats')
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
-          .gte('created_at', rangeStart.toISOString()),
+          .gte('created_at', rangeStartIso),
         ctx.supabase
           .from('ai_usage_logs')
           .select('status, latency_ms, created_at')
-          .gte('created_at', rangeStart.toISOString()),
-        ctx.supabase
-          .from('conversations')
-          .select('id, model_id, created_at')
-          .gte('created_at', rangeStart.toISOString()),
+          .gte('created_at', rangeStartIso),
       ]);
 
       const results = [
         conversationTotalResult,
-        conversationTodayResult,
-        conversationWeekResult,
-        conversationMonthResult,
-        conversationsInRangeResult,
+        recentConversationsResult,
         messageTotalResult,
         messageUserResult,
         messageAssistantResult,
-        messageTodayResult,
-        messageWeekResult,
-        messageMonthResult,
-        messagesInRangeResult,
-        ticketTotalResult,
-        ticketOpenResult,
-        ticketInProgressResult,
-        ticketClosedResult,
+        recentMessagesResult,
+        ticketsResult,
         modelsResult,
         allTokenStatsResult,
         usageLogsResult,
-        conversationsForModelUsageResult,
       ];
 
       for (const result of results) {
         if (result.error) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: result.error.message });
+          throw createAdminOperationError('读取性能统计', result.error);
         }
       }
 
-      const conversationsInRange = conversationsInRangeResult.data ?? [];
-      const messagesInRange = messagesInRangeResult.data ?? [];
+      const recentConversations = recentConversationsResult.data ?? [];
+      const recentMessages = recentMessagesResult.data ?? [];
+      const tickets = ticketsResult.data ?? [];
       const models = modelsResult.data ?? [];
       const tokenStatsInRange = allTokenStatsResult.data ?? [];
       const usageLogs = usageLogsResult.data ?? [];
-      const conversationsForModelUsage = conversationsForModelUsageResult.data ?? [];
 
       const conversationStats = {
         total: conversationTotalResult.count ?? 0,
-        today: conversationTodayResult.count ?? 0,
-        thisWeek: conversationWeekResult.count ?? 0,
-        thisMonth: conversationMonthResult.count ?? 0,
-        inRange: conversationsInRangeResult.count ?? 0,
+        today: 0,
+        thisWeek: 0,
+        thisMonth: 0,
+        inRange: 0,
       };
 
       const messageStats = {
         total: messageTotalResult.count ?? 0,
         userMessages: messageUserResult.count ?? 0,
         assistantMessages: messageAssistantResult.count ?? 0,
-        today: messageTodayResult.count ?? 0,
-        thisWeek: messageWeekResult.count ?? 0,
-        thisMonth: messageMonthResult.count ?? 0,
-        inRange: messagesInRangeResult.count ?? 0,
+        today: 0,
+        thisWeek: 0,
+        thisMonth: 0,
+        inRange: 0,
       };
 
       const ticketStats = {
-        total: ticketTotalResult.count ?? 0,
-        open: ticketOpenResult.count ?? 0,
-        inProgress: ticketInProgressResult.count ?? 0,
-        closed: ticketClosedResult.count ?? 0,
+        total: tickets.length,
+        open: 0,
+        inProgress: 0,
+        closed: 0,
       };
 
       const modelUsageByToken = new Map<string, {
@@ -2229,8 +2573,50 @@ export const adminRouter = router({
         modelUsageByToken.set(stat.model_used, current);
       }
 
+      const conversationsInRange: typeof recentConversations = [];
+      for (const conversation of recentConversations) {
+        if (conversation.created_at >= todayStartIso) {
+          conversationStats.today += 1;
+        }
+        if (conversation.created_at >= sevenDaysAgoIso) {
+          conversationStats.thisWeek += 1;
+        }
+        conversationStats.thisMonth += 1;
+
+        if (conversation.created_at >= rangeStartIso) {
+          conversationStats.inRange += 1;
+          conversationsInRange.push(conversation);
+        }
+      }
+
+      const messagesInRange: typeof recentMessages = [];
+      for (const message of recentMessages) {
+        if (message.created_at >= todayStartIso) {
+          messageStats.today += 1;
+        }
+        if (message.created_at >= sevenDaysAgoIso) {
+          messageStats.thisWeek += 1;
+        }
+        messageStats.thisMonth += 1;
+
+        if (message.created_at >= rangeStartIso) {
+          messageStats.inRange += 1;
+          messagesInRange.push(message);
+        }
+      }
+
+      for (const ticket of tickets) {
+        if (ticket.status === 'open') {
+          ticketStats.open += 1;
+        } else if (ticket.status === 'in_progress') {
+          ticketStats.inProgress += 1;
+        } else if (ticket.status === 'closed') {
+          ticketStats.closed += 1;
+        }
+      }
+
       const conversationsByModel = new Map<string, number>();
-      for (const conversation of conversationsForModelUsage) {
+      for (const conversation of conversationsInRange) {
         if (!conversation.model_id) {
           continue;
         }
@@ -2255,7 +2641,7 @@ export const adminRouter = router({
           name: model.name,
           provider: model.provider,
           isActive: model.is_active,
-          conversationCount: conversationsByModel.get(model.id) ?? 0,
+          conversationCount: conversationsByModel.get(model.model_id) ?? 0,
           requestCount: usage.requestCount,
           creditsConsumed: usage.credits,
           totalCostUsd: parseFloat(usage.costUsd.toFixed(6)),
@@ -2299,17 +2685,22 @@ export const adminRouter = router({
           ...data,
         }));
 
+      const rangeAssistantCount = dailyChartData.reduce(
+        (sum, day) => sum + day.requests,
+        0,
+      );
+
       const averages = {
         messagesPerConversation: conversationStats.total > 0
           ? Math.round(messageStats.total / conversationStats.total)
           : 0,
         conversationsPerDay: Math.round(conversationStats.inRange / days),
         messagesPerDay: Math.round(messageStats.inRange / days),
-        requestsPerDay: Math.round(messagesInRange.filter((message) => message.role === 'assistant').length / days),
+        requestsPerDay: Math.round(rangeAssistantCount / days),
       };
 
       const totalRequests = messageAssistantResult.count ?? 0;
-      const rangeRequests = messagesInRange.filter((message) => message.role === 'assistant').length;
+      const rangeRequests = rangeAssistantCount;
 
       const inputTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.input_tokens ?? 0), 0);
       const outputTokens = tokenStatsInRange.reduce((sum, stat) => sum + (stat.output_tokens ?? 0), 0);
@@ -2380,7 +2771,7 @@ export const adminRouter = router({
         estimatedMonthly: parseFloat((totalCost * (30 / days)).toFixed(2)),
       };
 
-      return {
+      const result = {
         timeRange: input.timeRange,
         conversations: conversationStats,
         messages: messageStats,
@@ -2392,5 +2783,15 @@ export const adminRouter = router({
         tokenUsage,
         costStats,
       };
+
+      logAdminEndpointMetric('admin.getPerformanceStats', startedAt, {
+        queryCount: 10,
+        countStrategy: 'planned',
+        timeRange: input.timeRange,
+        conversationTotal: result.conversations.total,
+        messageTotal: result.messages.total,
+      });
+
+      return result;
     }),
 });
