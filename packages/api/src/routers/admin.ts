@@ -69,41 +69,42 @@ export const adminRouter = router({
       topUsersResult,
     ] = await Promise.all([
       // Total users count
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
 
       // Tickets by status
-      ctx.supabase.from('tickets').select('status'),
+      ctx.supabase.from('tickets').select('status').eq('is_deleted', false),
 
       // Invitations by status
       ctx.supabase.from('invitations').select('status'),
 
       // Total credits in system
-      ctx.supabase.from('profiles').select('credits'),
+      ctx.supabase.from('profiles').select('credits').eq('is_deleted', false),
 
       // Recent users (last 10)
       ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, role, credits, created_at')
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(10),
 
       // Users registered today
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_deleted', false).gte('created_at', todayStart),
 
       // Users registered this week
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_deleted', false).gte('created_at', weekStart),
 
       // Users registered this month
-      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).gte('created_at', monthStart),
+      ctx.supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_deleted', false).gte('created_at', monthStart),
 
       // Total conversations
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }),
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('is_deleted', false),
 
       // Conversations today
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('is_deleted', false).gte('created_at', todayStart),
 
       // Conversations this week
-      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).gte('created_at', weekStart),
+      ctx.supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('is_deleted', false).gte('created_at', weekStart),
 
       // Recent transactions for trends (last 30 days)
       ctx.supabase
@@ -125,6 +126,7 @@ export const adminRouter = router({
       ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, credits')
+        .eq('is_deleted', false)
         .order('credits', { ascending: false })
         .limit(5),
     ]);
@@ -172,7 +174,9 @@ export const adminRouter = router({
       ) ?? [];
 
       const additions = dayTransactions
-        .filter((t: { type: string }) => t.type === 'addition' || t.type === 'purchase')
+        .filter((t: { type: string }) =>
+          t.type === 'addition' || t.type === 'purchase' || t.type === 'refund' || t.type === 'checkin'
+        )
         .reduce((sum: number, t: { amount: number }) => sum + t.amount, 0);
       const deductions = dayTransactions
         .filter((t: { type: string }) => t.type === 'deduction')
@@ -235,6 +239,7 @@ export const adminRouter = router({
       let query = ctx.supabase
         .from('profiles')
         .select('id, email, nickname, avatar_url, role, status, membership_level, credits, last_login_at, last_ip, created_at', { count: 'exact' })
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -269,6 +274,30 @@ export const adminRouter = router({
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
       };
+    }),
+
+  /**
+   * Search users for admin filters and selectors
+   */
+  searchUsers: adminProcedure
+    .input(z.object({
+      query: z.string().trim().min(1),
+      limit: z.number().min(1).max(20).default(5),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('profiles')
+        .select('id, email, nickname, avatar_url')
+        .eq('is_deleted', false)
+        .or(`email.ilike.%${input.query}%,nickname.ilike.%${input.query}%`)
+        .order('created_at', { ascending: false })
+        .limit(input.limit);
+
+      if (error) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      }
+
+      return data ?? [];
     }),
 
   /**
@@ -337,6 +366,7 @@ export const adminRouter = router({
       let query = ctx.supabase
         .from('tickets')
         .select('*', { count: 'exact' })
+        .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -356,11 +386,37 @@ export const adminRouter = router({
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
       }
 
+      let statusCountsQuery = ctx.supabase
+        .from('tickets')
+        .select('status')
+        .eq('is_deleted', false);
+
+      if (input.category) {
+        statusCountsQuery = statusCountsQuery.eq('category', input.category);
+      }
+      if (input.priority) {
+        statusCountsQuery = statusCountsQuery.eq('priority', input.priority);
+      }
+
+      const { data: statusCountRows, error: statusCountsError } = await statusCountsQuery;
+
+      if (statusCountsError) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: statusCountsError.message });
+      }
+
+      const statusCounts = {
+        all: statusCountRows?.length ?? 0,
+        open: statusCountRows?.filter(t => t.status === 'open').length ?? 0,
+        in_progress: statusCountRows?.filter(t => t.status === 'in_progress').length ?? 0,
+        closed: statusCountRows?.filter(t => t.status === 'closed').length ?? 0,
+      };
+
       if (!ticketsData || ticketsData.length === 0) {
         return {
           tickets: [],
           total: count ?? 0,
           hasMore: false,
+          statusCounts,
         };
       }
 
@@ -414,6 +470,7 @@ export const adminRouter = router({
         tickets,
         total: count ?? 0,
         hasMore: (count ?? 0) > input.offset + input.limit,
+        statusCounts,
       };
     }),
 
@@ -483,7 +540,7 @@ export const adminRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
-      type: z.enum(['deduction', 'addition', 'purchase', 'refund']).optional(),
+      type: z.enum(['deduction', 'addition', 'checkin', 'purchase', 'refund']).optional(),
       userId: z.string().uuid().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
@@ -491,7 +548,7 @@ export const adminRouter = router({
     .query(async ({ ctx, input }) => {
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('*', { count: 'planned' })
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
@@ -567,6 +624,7 @@ export const adminRouter = router({
 
       const stats = {
         totalAdditions: 0,
+        totalCheckins: 0,
         totalDeductions: 0,
         totalPurchases: 0,
         totalRefunds: 0,
@@ -574,6 +632,7 @@ export const adminRouter = router({
 
       statsResult.data?.forEach((t: { type: string; amount: number }) => {
         if (t.type === 'addition') stats.totalAdditions += t.amount;
+        else if (t.type === 'checkin') stats.totalCheckins += t.amount;
         else if (t.type === 'deduction') stats.totalDeductions += Math.abs(t.amount);
         else if (t.type === 'purchase') stats.totalPurchases += t.amount;
         else if (t.type === 'refund') stats.totalRefunds += t.amount;

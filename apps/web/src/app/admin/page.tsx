@@ -89,7 +89,7 @@ export default function AdminDashboardPage() {
           <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${healthStatus.bgColor}`}>
             <HealthIcon className={`h-4 w-4 ${healthStatus.color}`} />
             <span className={`text-sm font-medium ${healthStatus.color}`}>
-              系统状态: {healthStatus.label}
+              工单状态: {healthStatus.label}
             </span>
           </div>
           <Button
@@ -122,7 +122,7 @@ export default function AdminDashboardPage() {
           color="blue"
         />
         <StatsCard
-          title="系统积分"
+          title="账户积分总额"
           value={(stats?.credits.totalInSystem ?? 0).toLocaleString()}
           icon={Coins}
           color="amber"
@@ -206,7 +206,7 @@ export default function AdminDashboardPage() {
                 <p className="text-xl font-bold text-amber-400">{stats?.users.thisMonth ?? 0}</p>
               </div>
               <div className="p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>活跃模型</p>
+                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>已启用模型</p>
                 <p className="text-xl font-bold text-rose-400">{stats?.models.activeCount ?? 0}</p>
               </div>
             </div>
@@ -281,14 +281,14 @@ export default function AdminDashboardPage() {
                 <p className="text-2xl font-bold text-blue-400">
                   {(stats?.credits.transactions?.totalPurchases ?? 0).toLocaleString()}
                 </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>累计购买</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>累计购入积分</p>
               </div>
               <div className="p-4 rounded-lg text-center" style={{ background: 'var(--bg-tertiary)' }}>
                 <Gift className="h-8 w-8 mx-auto mb-2 text-amber-400" />
                 <p className="text-2xl font-bold text-amber-400">
                   {(stats?.credits.transactions?.totalRefunds ?? 0).toLocaleString()}
                 </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>累计退款</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>累计退回积分</p>
               </div>
             </div>
           </CardContent>
