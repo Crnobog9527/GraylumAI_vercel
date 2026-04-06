@@ -54,7 +54,6 @@ interface AIModel {
   name: string;
   model_id: string;
   provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
-  api_key?: string;
   api_endpoint?: string;
   description?: string;
   max_tokens: number;
@@ -272,7 +271,7 @@ export default function AdminModelsPage() {
       name: model.name || '',
       modelId: model.model_id || '',
       provider: model.provider || 'anthropic',
-      apiKey: model.api_key || '',
+      apiKey: '',
       apiEndpoint: model.api_endpoint || '',
       description: model.description || '',
       maxTokens: model.max_tokens || 4096,
@@ -288,13 +287,30 @@ export default function AdminModelsPage() {
   };
 
   const handleSubmit = () => {
+    const payload = {
+      name: formData.name,
+      modelId: formData.modelId,
+      provider: formData.provider,
+      apiEndpoint: formData.apiEndpoint,
+      description: formData.description,
+      maxTokens: formData.maxTokens,
+      inputLimit: formData.inputLimit,
+      enableWebSearch: formData.enableWebSearch,
+      inputTokenCost: formData.inputTokenCost,
+      outputTokenCost: formData.outputTokenCost,
+      inputTokenCostAbove200k: formData.inputTokenCostAbove200k,
+      outputTokenCostAbove200k: formData.outputTokenCostAbove200k,
+      webSearchCost: formData.webSearchCost,
+      ...(formData.apiKey.trim() ? { apiKey: formData.apiKey.trim() } : {}),
+    };
+
     if (selectedModel) {
       updateModel.mutate({
         id: selectedModel.id,
-        ...formData,
+        ...payload,
       });
     } else {
-      createModel.mutate(formData);
+      createModel.mutate(payload);
     }
   };
 
@@ -648,9 +664,14 @@ export default function AdminModelsPage() {
                   type="password"
                   value={formData.apiKey}
                   onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  placeholder="sk-..."
+                  placeholder={selectedModel ? '留空则保持当前密钥' : 'sk-...'}
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
+                {selectedModel && (
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    出于安全原因，已配置的密钥不会回显；留空将保持原值。
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

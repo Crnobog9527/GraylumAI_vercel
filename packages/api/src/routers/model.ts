@@ -32,6 +32,11 @@ type TokenCountingMetadata = {
   tokenizer_family: string | null;
 };
 
+function stripSensitiveModelFields<T extends { api_key?: string | null }>(model: T): Omit<T, 'api_key'> {
+  const { api_key: _apiKey, ...safeModel } = model;
+  return safeModel;
+}
+
 const VERIFIED_OPENAI_TOKENIZER_PREFIXES = [
   'gpt-4.1',
   'gpt-4o',
@@ -244,13 +249,13 @@ export const modelRouter = router({
   getAvailableModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('*')
+      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, input_token_cost, output_token_cost, input_token_cost_above_200k, output_token_cost_above_200k, web_search_cost, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
     }
-    return data;
+    return (data ?? []).map((model) => stripSensitiveModelFields(model));
   }),
 
   // Admin only: Create a new AI model
