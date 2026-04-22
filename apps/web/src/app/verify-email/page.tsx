@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
@@ -119,7 +120,7 @@ function VerifyEmailPageContent() {
     if (error) {
       setMessage({
         tone: 'error',
-        text: error.message,
+        text: getSafeErrorMessage(error, '验证邮件发送失败，请稍后重试。'),
       });
       setResending(false);
       return;

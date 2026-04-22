@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
+import { getErrorMessageText, getSafeErrorMessage } from '@/lib/safe-error-message';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl, resolveSiteName } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
@@ -109,7 +110,7 @@ function LoginPageContent() {
     });
 
     if (error) {
-      const shouldRouteToVerify = /confirm|verified|verification|email/i.test(error.message);
+      const shouldRouteToVerify = /confirm|verified|verification|email/i.test(getErrorMessageText(error));
       if (shouldRouteToVerify) {
         window.location.assign(
           buildAuthHref(`/verify-email?email=${encodeURIComponent(email)}&redirect=${encodeURIComponent(redirectTarget)}`)
@@ -117,7 +118,10 @@ function LoginPageContent() {
         return;
       }
 
-      setStatus({ tone: 'error', message: error.message });
+      setStatus({
+        tone: 'error',
+        message: getSafeErrorMessage(error, '登录失败，请检查账号信息后重试。'),
+      });
       setPendingAction(null);
       return;
     }
@@ -144,7 +148,7 @@ function LoginPageContent() {
       } catch (error) {
         setStatus({
           tone: 'error',
-          message: error instanceof Error ? error.message : '邀请码无效或已使用。',
+          message: getSafeErrorMessage(error, '邀请码无效或已使用。'),
         });
         setPendingAction(null);
         return;
@@ -167,7 +171,10 @@ function LoginPageContent() {
     });
 
     if (error) {
-      setStatus({ tone: 'error', message: error.message });
+      setStatus({
+        tone: 'error',
+        message: getSafeErrorMessage(error, '注册失败，请稍后重试。'),
+      });
       setPendingAction(null);
       return;
     }
@@ -199,7 +206,10 @@ function LoginPageContent() {
     });
 
     if (error) {
-      setStatus({ tone: 'error', message: error.message });
+      setStatus({
+        tone: 'error',
+        message: getSafeErrorMessage(error, 'Google 登录失败，请稍后重试。'),
+      });
       setPendingAction(null);
     }
   };

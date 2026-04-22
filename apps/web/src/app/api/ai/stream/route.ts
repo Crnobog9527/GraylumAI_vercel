@@ -16,7 +16,7 @@ import { ContextManager } from '@repo/api/src/services/contextManager';
 import { upsertContextSnapshot } from '@repo/api/src/services/contextSnapshots';
 import {
   decideWebSearch,
-  getSystemDefaultModelForRole,
+  getSystemDefaultModels,
   selectModel,
   shouldUpgradeAssistantRoute,
   type TaskType,
@@ -31,7 +31,6 @@ import { countTokens, estimateOutputTokens } from '@repo/api/src/services/tokenC
 import {
   getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
-  getProviderErrorMessage,
   normalizeOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
 } from '@repo/api/src/services/providerUtils';
@@ -69,6 +68,35 @@ interface RuntimeModelConfig {
 
 type TokenCounterProvider = 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
 
+const STREAM_AUTH_FAILURE_MESSAGE = '身份验证失败，请重新登录';
+const STREAM_RUNTIME_FAILURE_MESSAGE = 'AI 响应生成失败，请稍后重试';
+const STREAM_SERVICE_UNAVAILABLE_MESSAGE = 'AI 对话服务暂时不可用，请稍后重试';
+const STREAM_PROVIDER_FAILURE_MESSAGE = '上游 AI 服务请求失败';
+const STREAM_PROVIDER_EMPTY_BODY_MESSAGE = '上游 AI 服务未返回响应体';
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function logAiStreamError(message: string, metadata?: Record<string, unknown>) {
+  logger.error('ai', message, metadata);
+}
+
+function normalizeRequestId(requestId?: string): string | undefined {
+  const trimmed = requestId?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (UUID_PATTERN.test(trimmed)) {
+    return trimmed;
+  }
+
+  logAiStreamError('ai_stream_invalid_request_id_ignored', {
+    requestIdLength: trimmed.length,
+  });
+
+  return undefined;
+}
+
 async function getUserSecurityProfile(
   supabase: any,
   userId: string
@@ -97,7 +125,7 @@ async function isMaintenanceModeEnabled(supabase: any): Promise<boolean> {
     .maybeSingle();
 
   if (error) {
-    console.error('[AI Stream] Failed to read maintenance mode:', error);
+    logAiStreamError('ai_stream_maintenance_mode_read_failed');
     return true;
   }
 
@@ -117,7 +145,7 @@ async function getFreeTierUsageCount(supabase: any, userId: string): Promise<num
     .gte('created_at', startOfDay.toISOString());
 
   if (error) {
-    console.error('Failed to load free-tier usage count:', error);
+    logAiStreamError('ai_stream_free_tier_usage_count_failed');
     return 0;
   }
 
@@ -128,6 +156,10 @@ function estimateTokens(text: string): number {
   const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
   const otherChars = text.length - chineseChars;
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
+}
+
+function recordStageTiming(stageTimings: Record<string, number>, name: string, startedAt: number) {
+  stageTimings[name] = Date.now() - startedAt;
 }
 
 async function getOrCreateConversation(
@@ -324,10 +356,12 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
 
   try {
+    const requestStartedAt = Date.now();
+    const stageTimings: Record<string, number> = {};
     const body: StreamRequest = await request.json();
     const { conversationId, modelId } = body;
     const message = body.message?.trim();
-    const requestId = body.requestId ?? crypto.randomUUID();
+    const requestId = normalizeRequestId(body.requestId) ?? crypto.randomUUID();
 
     if (!message) {
       return new Response(
@@ -360,10 +394,15 @@ export async function POST(request: NextRequest) {
       data: { user },
       error: authError,
     } = await supabaseAuth.auth.getUser(token);
+    recordStageTiming(stageTimings, 'auth', requestStartedAt);
 
     if (authError || !user) {
+      logAiStreamError('ai_stream_auth_failed', {
+        hasAuthError: Boolean(authError),
+        hasUser: Boolean(user),
+      });
       return new Response(
-        JSON.stringify({ error: `身份验证失败: ${authError?.message || '会话已过期'}` }),
+        JSON.stringify({ error: STREAM_AUTH_FAILURE_MESSAGE }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -375,7 +414,18 @@ export async function POST(request: NextRequest) {
       userId,
     });
 
-    const userSecurityProfile = await getUserSecurityProfile(supabaseAuth, userId);
+    const profileStartedAt = Date.now();
+    const maintenanceStartedAt = Date.now();
+    const runtimeSettingsStartedAt = Date.now();
+    const [userSecurityProfile, maintenanceModeEnabled, runtimeSettings] = await Promise.all([
+      getUserSecurityProfile(supabaseAuth, userId),
+      isMaintenanceModeEnabled(supabaseAdmin),
+      getChatRuntimeSettings(supabaseAdmin),
+    ]);
+    recordStageTiming(stageTimings, 'profile', profileStartedAt);
+    recordStageTiming(stageTimings, 'maintenance', maintenanceStartedAt);
+    recordStageTiming(stageTimings, 'runtime_settings', runtimeSettingsStartedAt);
+
     if (userSecurityProfile.status === 'disabled') {
       return new Response(
         JSON.stringify({ error: '账号已被禁用，请联系管理员' }),
@@ -389,7 +439,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const maintenanceModeEnabled = await isMaintenanceModeEnabled(supabaseAdmin);
     if (maintenanceModeEnabled && userSecurityProfile.role !== 'admin') {
       return new Response(
         JSON.stringify({ error: '系统维护中，暂时无法使用 AI 对话功能' }),
@@ -397,25 +446,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const rateLimitStartedAt = Date.now();
     const rateLimitResult = await checkRateLimit(userId, 'ai_stream');
+    recordStageTiming(stageTimings, 'rate_limit', rateLimitStartedAt);
     if (!rateLimitResult.success) {
+      const isRateLimitUnavailable = rateLimitResult.reason === 'unavailable';
       await billingService.recordUsageLog({
         requestId,
-        status: 'rate_limited',
+        status: isRateLimitUnavailable ? 'failed' : 'rate_limited',
         modelId: 'unknown',
         inputLength: message.length,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
+        errorMessage: isRateLimitUnavailable ? 'rate_limit_unavailable' : undefined,
       });
 
       return new Response(
         JSON.stringify({
-          error: '请求过于频繁',
-          message: `请在 ${rateLimitResult.retryAfter} 秒后重试`,
+          error: isRateLimitUnavailable ? '服务暂不可用' : '请求过于频繁',
+          message: isRateLimitUnavailable
+            ? '限流服务暂时不可用，请稍后重试'
+            : `请在 ${rateLimitResult.retryAfter} 秒后重试`,
           retryAfter: rateLimitResult.retryAfter,
         }),
         {
-          status: 429,
+          status: isRateLimitUnavailable ? 503 : 429,
           headers: {
             'Content-Type': 'application/json',
             'X-RateLimit-Limit': rateLimitResult.limit.toString(),
@@ -427,15 +482,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const defaultModelsStartedAt = Date.now();
+    const defaultModelsPromise = getSystemDefaultModels(supabaseAdmin, { runtimeSettings });
+    const conversationStartedAt = Date.now();
     const conversation = await getOrCreateConversation(
       supabaseAuth,
       userId,
       conversationId,
       message.substring(0, 50)
     );
-    const history = await getConversationHistory(supabaseAuth, conversation.id, MAX_CONTEXT_MESSAGES);
+    recordStageTiming(stageTimings, 'conversation_lookup_or_create', conversationStartedAt);
+
+    const historyStartedAt = Date.now();
+    const [history, defaultModels] = await Promise.all([
+      getConversationHistory(supabaseAuth, conversation.id, MAX_CONTEXT_MESSAGES),
+      defaultModelsPromise,
+    ]);
+    recordStageTiming(stageTimings, 'conversation_history', historyStartedAt);
+    recordStageTiming(stageTimings, 'routing_defaults', defaultModelsStartedAt);
     const conversationTurns = Math.floor(history.length / 2);
-    const runtimeSettings = await getChatRuntimeSettings(supabaseAdmin);
 
     if (message.length > runtimeSettings.maxInputCharacters) {
       return new Response(
@@ -451,14 +516,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const routingStartedAt = Date.now();
     const initialSelection = await selectModel({
       supabase: supabaseAdmin,
       conversationId: conversation.id,
       message,
       conversationTurns,
       userPreferredModel: modelId,
+      runtimeSettings,
+      defaultModels,
     });
     let { modelConfig, routingReason, routingDecision } = initialSelection;
+    recordStageTiming(stageTimings, 'model_routing', routingStartedAt);
 
     const preFlightUpgrade = shouldUpgradeAssistantRoute({
       message,
@@ -470,21 +539,21 @@ export async function POST(request: NextRequest) {
       let primaryModelId =
         runtimeSettings.primaryModelId ??
         runtimeSettings.sonnetModelId ??
-        runtimeSettings.defaultModelId;
-
-      if (!primaryModelId) {
-        const primaryFallback = await getSystemDefaultModelForRole(supabaseAdmin, 'primary');
-        primaryModelId = primaryFallback.id;
-      }
+        runtimeSettings.defaultModelId ??
+        defaultModels.primary.id;
 
       if (primaryModelId && primaryModelId !== modelConfig.id) {
+        const rerouteStartedAt = Date.now();
         const upgradedSelection = await selectModel({
           supabase: supabaseAdmin,
           conversationId: conversation.id,
           message,
           conversationTurns,
           userPreferredModel: primaryModelId,
+          runtimeSettings,
+          defaultModels,
         });
+        recordStageTiming(stageTimings, 'model_rerouting', rerouteStartedAt);
 
         modelConfig = upgradedSelection.modelConfig;
         routingDecision = {
@@ -497,38 +566,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const activePrompt = await resolveActiveChatPrompt(supabaseAdmin, {
-      platform: 'web',
-      modelId: modelConfig.id,
-    });
+    const promptStartedAt = Date.now();
+    const runtimeModelStartedAt = Date.now();
+    const [activePrompt, runtimeModel] = await Promise.all([
+      resolveActiveChatPrompt(supabaseAdmin, {
+        platform: 'web',
+        modelId: modelConfig.id,
+      }),
+      getRuntimeModelConfig(supabaseAdmin, {
+        runtimeModelId: modelConfig.id,
+        fallbackModelId: modelConfig.modelId,
+        fallbackName: modelConfig.name,
+        fallbackProvider: modelConfig.provider,
+        fallbackMaxTokens: modelConfig.maxTokens,
+        fallbackInputTokenCost: modelConfig.inputTokenCost,
+        fallbackOutputTokenCost: modelConfig.outputTokenCost,
+        fallbackEnableWebSearch: modelConfig.enableWebSearch,
+      }),
+    ]);
+    recordStageTiming(stageTimings, 'prompt_resolution', promptStartedAt);
+    recordStageTiming(stageTimings, 'runtime_model', runtimeModelStartedAt);
     const systemPrompt = buildRuntimeSystemPrompt(activePrompt);
     const transformedMessage = applyUserPromptTemplate(activePrompt, message);
 
-    const runtimeModel = await getRuntimeModelConfig(supabaseAdmin, {
-      runtimeModelId: modelConfig.id,
-      fallbackModelId: modelConfig.modelId,
-      fallbackName: modelConfig.name,
-      fallbackProvider: modelConfig.provider,
-      fallbackMaxTokens: modelConfig.maxTokens,
-      fallbackInputTokenCost: modelConfig.inputTokenCost,
-      fallbackOutputTokenCost: modelConfig.outputTokenCost,
-      fallbackEnableWebSearch: modelConfig.enableWebSearch,
-    });
-
     if (!runtimeModel.tokenCountingSupported) {
       return new Response(
-        JSON.stringify({ error: `模型 ${runtimeModel.name} 未配置可验证的 token 计数能力，禁止进入生产计费路径` }),
+        JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     const contextManager = new ContextManager(supabaseAuth);
+    const contextStartedAt = Date.now();
     const loadedContext = await contextManager.loadContext(conversation.id);
     const builtContext = contextManager.buildMessages(
       loadedContext,
       transformedMessage,
       systemPrompt,
     );
+    recordStageTiming(stageTimings, 'context_load', contextStartedAt);
     const providerMessages = builtContext.messages;
     const tokenCounterProvider: TokenCounterProvider =
       runtimeModel.tokenCountingMethod === 'anthropic_count_tokens'
@@ -544,6 +620,9 @@ export async function POST(request: NextRequest) {
               ? runtimeModel.provider
               : 'custom';
 
+    const pricingStartedAt = Date.now();
+    const pricingPromise = getModelPricing(supabaseAdmin, runtimeModel.modelId);
+    const tokenCountStartedAt = Date.now();
     const countedInput = await countTokens({
       model: runtimeModel.modelId,
       provider: tokenCounterProvider,
@@ -561,6 +640,7 @@ export async function POST(request: NextRequest) {
       useOfficial: runtimeModel.tokenCountingMethod !== 'provider_usage',
       fallbackToEstimate: true,
     });
+    recordStageTiming(stageTimings, 'token_counting', tokenCountStartedAt);
 
     const searchDecision = runtimeSettings.enableSmartSearchDecision
       ? decideWebSearch(message)
@@ -580,15 +660,22 @@ export async function POST(request: NextRequest) {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     };
-    const pricing = await getModelPricing(supabaseAdmin, runtimeModel.modelId);
+    const pricing = await pricingPromise;
+    recordStageTiming(stageTimings, 'pricing_lookup', pricingStartedAt);
     const estimatedCost = calculateTokenCostWithPricing(estimatedUsage, pricing, {
       searchCount: searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0,
     });
     const estimatedCredits = estimatedCost.credits +
       ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits);
 
-    const balance = await billingService.getBalance();
-    const freeTierUsedToday = runtimeSettings.enableFreeTier ? await getFreeTierUsageCount(supabaseAuth, userId) : 0;
+    const balanceStartedAt = Date.now();
+    const freeTierStartedAt = Date.now();
+    const [balance, freeTierUsedToday] = await Promise.all([
+      billingService.getBalance(),
+      runtimeSettings.enableFreeTier ? getFreeTierUsageCount(supabaseAuth, userId) : Promise.resolve(0),
+    ]);
+    recordStageTiming(stageTimings, 'balance_lookup', balanceStartedAt);
+    recordStageTiming(stageTimings, 'free_tier_lookup', freeTierStartedAt);
     const canUseFreeTier = runtimeSettings.enableFreeTier
       && balance <= 0
       && freeTierUsedToday < runtimeSettings.freeTierMessages;
@@ -631,6 +718,8 @@ export async function POST(request: NextRequest) {
         requestId,
       });
 
+    stageTimings.preflight = Date.now() - requestStartedAt;
+
     const webSearchRequested = searchDecision.shouldSearch &&
       searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
     const webSearchAvailable = webSearchRequested &&
@@ -662,7 +751,7 @@ export async function POST(request: NextRequest) {
       });
 
       return new Response(
-        JSON.stringify({ error: '未配置 API Key，请在模型管理中配置或设置 OPENROUTER_API_KEY / ANTHROPIC_API_KEY 环境变量' }),
+        JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -670,6 +759,7 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         const startedAt = Date.now();
+        let firstProviderChunkAt: number | null = null;
         let fullContent = '';
         let cachePoints = 0;
         let actualSearchCount = 0;
@@ -692,6 +782,8 @@ export async function POST(request: NextRequest) {
               selectedModel: runtimeModel.name,
               taskType: routingDecision.taskType,
               routingConfidence: routingDecision.confidence,
+              preflightLatencyMs: stageTimings.preflight,
+              stageTimingsMs: stageTimings,
               promptId: activePrompt?.id ?? null,
               promptName: activePrompt?.name ?? null,
             })}\n\n`)
@@ -723,6 +815,7 @@ export async function POST(request: NextRequest) {
             );
           }
 
+          const providerStartedAt = Date.now();
           if (openAICompatible) {
             const endpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) ||
               'https://openrouter.ai/api/v1/chat/completions';
@@ -742,13 +835,17 @@ export async function POST(request: NextRequest) {
             });
 
             if (!response.ok) {
-              const providerError = await getProviderErrorMessage(response);
-              throw new Error(`OpenAI-compatible API error: ${response.status} - ${providerError}`);
+              logAiStreamError('ai_stream_openai_compatible_provider_failed', {
+                provider: runtimeModel.provider,
+                modelId: runtimeModel.modelId,
+                status: response.status,
+              });
+              throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
             }
 
             const reader = response.body?.getReader();
             if (!reader) {
-              throw new Error('No response body');
+              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
             }
 
             const decoder = new TextDecoder();
@@ -757,6 +854,9 @@ export async function POST(request: NextRequest) {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
+              if (firstProviderChunkAt === null) {
+                firstProviderChunkAt = Date.now();
+              }
 
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
@@ -819,8 +919,12 @@ export async function POST(request: NextRequest) {
             );
 
             if (!response.ok) {
-              const providerError = await getProviderErrorMessage(response);
-              throw new Error(`Gemini API error: ${response.status} - ${providerError}`);
+              logAiStreamError('ai_stream_gemini_provider_failed', {
+                provider: runtimeModel.provider,
+                modelId: runtimeModel.modelId,
+                status: response.status,
+              });
+              throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
             }
 
             webSearchExecuted = webSearchAvailable;
@@ -828,7 +932,7 @@ export async function POST(request: NextRequest) {
 
             const reader = response.body?.getReader();
             if (!reader) {
-              throw new Error('No response body');
+              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
             }
 
             const decoder = new TextDecoder();
@@ -837,6 +941,9 @@ export async function POST(request: NextRequest) {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
+              if (firstProviderChunkAt === null) {
+                firstProviderChunkAt = Date.now();
+              }
 
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
@@ -890,8 +997,12 @@ export async function POST(request: NextRequest) {
             });
 
             if (!response.ok) {
-              const providerError = await getProviderErrorMessage(response);
-              throw new Error(`Anthropic API error: ${response.status} - ${providerError}`);
+              logAiStreamError('ai_stream_anthropic_provider_failed', {
+                provider: runtimeModel.provider,
+                modelId: runtimeModel.modelId,
+                status: response.status,
+              });
+              throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
             }
 
             webSearchExecuted = webSearchAvailable;
@@ -899,7 +1010,7 @@ export async function POST(request: NextRequest) {
 
             const reader = response.body?.getReader();
             if (!reader) {
-              throw new Error('No response body');
+              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
             }
 
             const decoder = new TextDecoder();
@@ -908,6 +1019,9 @@ export async function POST(request: NextRequest) {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
+              if (firstProviderChunkAt === null) {
+                firstProviderChunkAt = Date.now();
+              }
 
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
@@ -947,6 +1061,10 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+          stageTimings.provider_stream = Date.now() - providerStartedAt;
+          stageTimings.provider_first_chunk = firstProviderChunkAt === null
+            ? stageTimings.provider_stream
+            : firstProviderChunkAt - providerStartedAt;
 
           if (webSearchAvailable) {
             controller.enqueue(
@@ -1029,6 +1147,7 @@ export async function POST(request: NextRequest) {
               freeTierUsed: canUseFreeTier,
               freeTierUsedToday,
               freeTierMessages: runtimeSettings.freeTierMessages,
+              performanceTimingsMs: stageTimings,
             },
           });
 
@@ -1087,12 +1206,15 @@ export async function POST(request: NextRequest) {
             })}\n\n`)
           );
         } catch (error) {
-          const messageText = error instanceof Error ? error.message : 'Unknown error';
+          logAiStreamError('ai_stream_provider_execution_failed', {
+            modelId: runtimeModel.modelId,
+            requestId,
+          });
           await billingService.finalizeAIFailure({
             conversationId: conversation.id,
             requestId,
             modelUsed: runtimeModel.modelId,
-            reason: `AI 调用失败: ${messageText}`,
+            reason: 'AI 调用失败，请查看服务端日志',
             preDeductId: preDeduct?.preDeductId ?? null,
             inputLength: message.length,
             latencyMs: Date.now() - startedAt,
@@ -1111,11 +1233,14 @@ export async function POST(request: NextRequest) {
               freeTierUsed: canUseFreeTier,
               freeTierUsedToday,
               freeTierMessages: runtimeSettings.freeTierMessages,
+              performanceTimingsMs: stageTimings,
             },
           });
 
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: messageText })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'error', error: STREAM_RUNTIME_FAILURE_MESSAGE })}\n\n`
+            )
           );
         } finally {
           controller.close();
@@ -1131,8 +1256,9 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    logAiStreamError('ai_stream_request_bootstrap_failed');
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

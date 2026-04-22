@@ -7,6 +7,9 @@ import { validateCronRequest } from '@/lib/cron-auth';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
+const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
+
 export async function GET(request: Request) {
   const unauthorizedResponse = validateCronRequest(request, 'billing-reconcile');
   if (unauthorizedResponse) {
@@ -20,7 +23,7 @@ export async function GET(request: Request) {
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
+      return NextResponse.json({ error: CRON_CONFIG_ERROR_MESSAGE }, { status: 500 });
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -58,12 +61,12 @@ export async function GET(request: Request) {
       'billing-reconcile',
       'failed',
       Date.now() - startedAt,
-      error instanceof Error ? error.message : 'Unknown error',
+      '账单对账失败，请查看服务端日志',
     );
 
     return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: CRON_FAILURE_MESSAGE,
       timestamp: new Date().toISOString(),
     }, { status: 500 });
   }

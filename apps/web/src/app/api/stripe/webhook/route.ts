@@ -12,6 +12,7 @@ import {
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
 import type Stripe from 'stripe';
+import { logServerError } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
 
@@ -27,9 +28,9 @@ export async function POST(request: Request) {
   let event: Stripe.Event;
   try {
     event = getStripeClient().webhooks.constructEvent(rawBody, signature, getStripeWebhookSecret());
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid webhook signature';
-    return new Response(message, { status: 400 });
+  } catch {
+    logServerError('billing', 'stripe_webhook_invalid_signature');
+    return new Response('Invalid webhook signature', { status: 400 });
   }
 
   const supabase = createServiceRoleSupabaseClient();
@@ -62,9 +63,11 @@ export async function POST(request: Request) {
       default:
         break;
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Webhook handler failed';
-    return new Response(message, { status: 500 });
+  } catch {
+    logServerError('billing', 'stripe_webhook_handler_failed', {
+      eventType: event.type,
+    });
+    return new Response('Webhook handler failed', { status: 500 });
   }
 
   return Response.json({ received: true });

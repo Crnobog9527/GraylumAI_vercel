@@ -43,25 +43,36 @@ interface DbLogEntry {
   request_id?: string;
 }
 
+function createDevPrettyStream() {
+  if (process.env.NODE_ENV !== "development") {
+    return undefined;
+  }
+
+  try {
+    // Use a direct pretty stream in development so Next.js dev servers do not
+    // need pino's worker-based transport resolution.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pretty = require("pino-pretty");
+    return pretty({
+      colorize: true,
+      translateTime: "SYS:standard",
+      ignore: "pid,hostname",
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+const devPrettyStream = createDevPrettyStream();
+
 // 创建基础 pino logger
 const baseLogger = pino({
   level: process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug"),
-  transport:
-    process.env.NODE_ENV === "development"
-      ? {
-          target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "SYS:standard",
-            ignore: "pid,hostname",
-          },
-        }
-      : undefined,
   base: {
     env: process.env.NODE_ENV,
   },
   timestamp: pino.stdTimeFunctions.isoTime,
-});
+}, devPrettyStream);
 
 /**
  * 应用日志器类

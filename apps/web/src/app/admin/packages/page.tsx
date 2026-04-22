@@ -113,48 +113,49 @@ export default function AdminPackagesPage() {
   });
 
   // Queries
-  const { data: packages, isLoading: packagesLoading, error: packagesError, refetch: refetchPackages } = trpc.admin.getAllPackages.useQuery();
-  const { data: membershipPlans, isLoading: plansLoading, error: plansError, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
+  const { data: dashboard, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = trpc.admin.getPackagesDashboard.useQuery();
+  const packages = dashboard?.packages;
+  const membershipPlans = dashboard?.membershipPlans;
 
   // Credit Package Mutations
   const createPackage = trpc.admin.createPackage.useMutation({
     onSuccess: () => {
-      refetchPackages();
+      refetchDashboard();
       closePackageDialog();
     }
   });
 
   const updatePackage = trpc.admin.updatePackage.useMutation({
     onSuccess: () => {
-      refetchPackages();
+      refetchDashboard();
       closePackageDialog();
     }
   });
 
   const deletePackage = trpc.admin.deletePackage.useMutation({
     onSuccess: () => {
-      refetchPackages();
+      refetchDashboard();
     }
   });
 
   // Membership Plan Mutations
   const createMembershipPlan = trpc.admin.createMembershipPlan.useMutation({
     onSuccess: () => {
-      refetchPlans();
+      refetchDashboard();
       closePlanDialog();
     }
   });
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
     onSuccess: () => {
-      refetchPlans();
+      refetchDashboard();
       closePlanDialog();
     }
   });
 
   const deleteMembershipPlan = trpc.admin.deleteMembershipPlan.useMutation({
     onSuccess: () => {
-      refetchPlans();
+      refetchDashboard();
     }
   });
 
@@ -336,14 +337,14 @@ export default function AdminPackagesPage() {
   };
 
   // Loading state
-  if (packagesLoading || plansLoading) {
+  if (dashboardLoading) {
     return <AdminLoadingState />;
   }
 
   // Error state
-  const error = packagesError || plansError;
+  const error = dashboardError;
   if (error) {
-    return <AdminErrorState error={error} onRetry={() => { refetchPackages(); refetchPlans(); }} />;
+    return <AdminErrorState error={error} onRetry={() => { refetchDashboard(); }} />;
   }
 
   const packageList = packages ?? [];

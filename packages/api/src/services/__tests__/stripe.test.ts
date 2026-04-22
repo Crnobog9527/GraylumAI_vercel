@@ -82,6 +82,21 @@ describe('stripe service helpers', () => {
     ).toBe('http://127.0.0.1:3001');
   });
 
+  it('ignores untrusted header origins and falls back to NEXT_PUBLIC_APP_URL', async () => {
+    const { getStripeAppUrl } = await import('../stripe');
+
+    process.env.NODE_ENV = 'production';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+
+    expect(
+      getStripeAppUrl(
+        new Headers({
+          origin: 'https://evil.example.com',
+        }),
+      ),
+    ).toBe('https://app.example.com');
+  });
+
   it('throws when checkout return URL is requested without NEXT_PUBLIC_APP_URL', async () => {
     const { getStripeAppUrl } = await import('../stripe');
 

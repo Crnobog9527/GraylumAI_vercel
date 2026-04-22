@@ -16,6 +16,7 @@ import {
   CheckCircle, Clock, Send, Upload, X, Image as ImageIcon
 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 
 interface MockUser {
@@ -82,11 +83,15 @@ const categoryMap: Record<string, string> = {
 const TicketListView = memo(function TicketListView({
   tickets,
   isLoading,
+  errorMessage,
+  onRetry,
   onSelectTicket,
   onCreateNew
 }: {
   tickets: Ticket[];
   isLoading: boolean;
+  errorMessage?: string | null;
+  onRetry: () => void;
   onSelectTicket: (ticket: Ticket) => void;
   onCreateNew: () => void;
 }) {
@@ -170,6 +175,29 @@ const TicketListView = memo(function TicketListView({
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
+        </div>
+      ) : errorMessage ? (
+        <div className="text-center py-12">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4" style={{ color: '#EF4444' }} />
+          <p className="mb-2" style={{ color: 'var(--text-primary)' }}>
+            工单暂时加载失败
+          </p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+            {errorMessage}
+          </p>
+          <Button
+            variant="outline"
+            onClick={onRetry}
+            className="gap-2"
+            style={{
+              background: 'var(--bg-primary)',
+              borderColor: 'var(--border-primary)',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <Loader2 className="h-4 w-4" />
+            重新加载
+          </Button>
         </div>
       ) : displayTickets.length === 0 ? (
         <div className="text-center py-12">
@@ -550,8 +578,8 @@ const CreateTicketForm = memo(function CreateTicketForm({
     onSuccess: async () => {
       await onSuccess();
     },
-    onError: (error) => {
-      console.error('Failed to create ticket:', error);
+    onError: () => {
+      logClientDevError('Failed to create ticket');
     },
   });
 
@@ -565,7 +593,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        console.error('Not authenticated');
+        logClientDevError('Not authenticated');
         return;
       }
 
@@ -594,7 +622,7 @@ const CreateTicketForm = memo(function CreateTicketForm({
           const previewUrl = URL.createObjectURL(file);
           setAttachments(prev => [...prev, { name: file.name, path: data.path, previewUrl }]);
         } else {
-          console.error('Upload failed:', await response.text());
+          logClientDevError('Upload failed', { status: response.status });
         }
       }
     } finally {
@@ -810,7 +838,7 @@ export default function TicketsPanel({
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
   // 从 API 获取工单列表
-  const { data: ticketsData, isLoading, refetch } = trpc.ticket.getTickets.useQuery();
+  const { data: ticketsData, isLoading, error, refetch } = trpc.ticket.getTickets.useQuery();
 
   // 转换 API 数据为组件所需格式
   const tickets: Ticket[] = useMemo(() => {
@@ -883,6 +911,10 @@ export default function TicketsPanel({
     <TicketListView
       tickets={tickets}
       isLoading={isLoading}
+      errorMessage={error?.message ?? null}
+      onRetry={() => {
+        void refetch();
+      }}
       onSelectTicket={handleSelectTicket}
       onCreateNew={handleCreateNew}
     />

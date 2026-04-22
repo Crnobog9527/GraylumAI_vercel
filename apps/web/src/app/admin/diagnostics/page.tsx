@@ -33,9 +33,21 @@ import {
 // } from "@/components/ui/collapsible";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import { logClientDevError } from '@/lib/client-log';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 type DiagnosticStatus = 'passed' | 'failed' | 'warning' | 'skipped' | 'error';
 type DiagnosticCategory = 'ai' | 'billing' | 'security' | 'performance' | 'data';
+
+function logDiagnosticsUiError(action: string, error: unknown) {
+  if (process.env.NODE_ENV !== 'development') {
+    return;
+  }
+
+  logClientDevError(`[admin.diagnostics] ${action}`, {
+    error,
+  });
+}
 
 interface TestResult {
   testId: string;
@@ -219,15 +231,14 @@ export default function AdminDiagnosticsPage() {
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
 
   // Queries
-  const { data: latestResults, refetch: refetchLatest, error: latestError } = trpc.diagnostics.getLatestResults.useQuery();
-  const { data: summaryStats, refetch: refetchSummary, error: summaryError } = trpc.diagnostics.getSummaryStats.useQuery();
-  const { data: healthCheck, refetch: refetchHealth, error: healthError } = trpc.diagnostics.healthCheck.useQuery();
-  const { data: runtimeProof, refetch: refetchRuntimeProof } = trpc.diagnostics.getLatestRuntimeProof.useQuery();
-  const { data: recentRuns } = trpc.diagnostics.getRecentRuns.useQuery();
-  const { data: testDefinitions } = trpc.diagnostics.getTestDefinitions.useQuery();
+  const { data: dashboard, refetch: refetchDashboard, error: dashboardError } = trpc.diagnostics.getDashboard.useQuery();
+  const latestResults = dashboard?.latestResults;
+  const summaryStats = dashboard?.summaryStats;
+  const healthCheck = dashboard?.healthCheck;
+  const runtimeProof = dashboard?.runtimeProof;
+  const recentRuns = dashboard?.recentRuns;
 
-  const queryErrorMessage =
-    latestError?.message ?? summaryError?.message ?? healthError?.message ?? null;
+  const queryErrorMessage = dashboardError?.message ?? null;
 
   useEffect(() => {
     if (queryErrorMessage) {
@@ -244,21 +255,18 @@ export default function AdminDiagnosticsPage() {
       }
       // 检查保存状态
       if (data?.saveStatus && !data.saveStatus.saved) {
-        setSaveWarning(`数据库保存失败: ${data.saveStatus.error || '未知错误'}`);
+        setSaveWarning('数据库保存失败，请稍后重试或查看服务端日志。');
       } else {
         setSaveWarning(null);
       }
-      refetchLatest();
-      refetchSummary();
-      refetchHealth();
-      refetchRuntimeProof();
+      refetchDashboard();
       setIsRunning(false);
       setErrorMessage(null);
     },
     onError: (error) => {
       setIsRunning(false);
-      setErrorMessage(error.message || '运行测试失败');
-      console.error('runAllTests error:', error);
+      setErrorMessage(getSafeErrorMessage(error, '运行测试失败，请稍后重试'));
+      logDiagnosticsUiError('runAllTests', error);
     },
   });
 
@@ -269,20 +277,18 @@ export default function AdminDiagnosticsPage() {
       }
       // 检查保存状态
       if (data?.saveStatus && !data.saveStatus.saved) {
-        setSaveWarning(`数据库保存失败: ${data.saveStatus.error || '未知错误'}`);
+        setSaveWarning('数据库保存失败，请稍后重试或查看服务端日志。');
       } else {
         setSaveWarning(null);
       }
-      refetchLatest();
-      refetchSummary();
-      refetchRuntimeProof();
+      refetchDashboard();
       setIsRunning(false);
       setErrorMessage(null);
     },
     onError: (error) => {
       setIsRunning(false);
-      setErrorMessage(error.message || '运行测试失败');
-      console.error('runCategoryTests error:', error);
+      setErrorMessage(getSafeErrorMessage(error, '运行测试失败，请稍后重试'));
+      logDiagnosticsUiError('runCategoryTests', error);
     },
   });
 
@@ -300,25 +306,22 @@ export default function AdminDiagnosticsPage() {
           return [...prev, data];
         });
       }
-      refetchLatest();
-      refetchSummary();
-      refetchRuntimeProof();
+      refetchDashboard();
       setErrorMessage(null);
     },
     onError: (error) => {
-      setErrorMessage(error.message || '运行测试失败');
-      console.error('runSingleTest error:', error);
+      setErrorMessage(getSafeErrorMessage(error, '运行测试失败，请稍后重试'));
+      logDiagnosticsUiError('runSingleTest', error);
     },
   });
 
   const cleanupMutation = trpc.diagnostics.cleanupOldResults.useMutation({
     onSuccess: (data) => {
       setCleanupStatus(`${data.message}，本次处理 ${data.deletedCount} 条记录`);
-      refetchLatest();
-      refetchSummary();
+      refetchDashboard();
     },
     onError: (error) => {
-      setCleanupStatus(error.message || '诊断记录清理失败');
+      setCleanupStatus(getSafeErrorMessage(error, '诊断记录清理失败，请稍后重试'));
     },
   });
 
@@ -659,12 +662,12 @@ export default function AdminDiagnosticsPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetchRuntimeProof()}
-                className="border-[var(--border-primary)]"
-              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchDashboard()}
+                  className="border-[var(--border-primary)]"
+                >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 刷新证据
               </Button>
@@ -838,7 +841,7 @@ export default function AdminDiagnosticsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => refetchHealth()}
+                  onClick={() => refetchDashboard()}
                   className="border-[var(--border-primary)]"
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />

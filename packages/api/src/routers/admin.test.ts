@@ -630,6 +630,148 @@ describe('adminRouter dashboard statistics aggregation', () => {
   });
 });
 
+describe('adminRouter finance stats runtime billing summary', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-29T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('derives runtime billing ranges from active model pricing instead of retired system token settings', async () => {
+    const selectCalls: Array<{ table: string; columns?: string }> = [];
+
+    const adminSupabase = {
+      from(table: string) {
+        const state: { table: string; columns?: string } = { table };
+
+        const execute = async () => {
+          switch (state.table) {
+            case 'credit_transactions':
+              return { data: [], error: null };
+            case 'credit_packages':
+              return { data: [], error: null };
+            case 'profiles':
+              return { data: [{ credits: 100, created_at: '2026-03-28T08:00:00.000Z' }], error: null };
+            case 'ai_models':
+              return {
+                data: [
+                  {
+                    id: 'model-a-row',
+                    name: 'Claude Sonnet',
+                    model_id: 'model-a',
+                    provider: 'anthropic',
+                    is_active: 'true',
+                    input_token_cost: 3000000,
+                    output_token_cost: 15000000,
+                    input_token_cost_above_200k: 0,
+                    output_token_cost_above_200k: 0,
+                    web_search_cost: 200,
+                    max_tokens: 8192,
+                  },
+                  {
+                    id: 'model-b-row',
+                    name: 'Claude Haiku',
+                    model_id: 'model-b',
+                    provider: 'anthropic',
+                    is_active: 'true',
+                    input_token_cost: 800000,
+                    output_token_cost: 4000000,
+                    input_token_cost_above_200k: 0,
+                    output_token_cost_above_200k: 0,
+                    web_search_cost: 0,
+                    max_tokens: 8192,
+                  },
+                  {
+                    id: 'model-c-row',
+                    name: 'Inactive Model',
+                    model_id: 'model-c',
+                    provider: 'openai',
+                    is_active: 'false',
+                    input_token_cost: 9000000,
+                    output_token_cost: 18000000,
+                    input_token_cost_above_200k: 0,
+                    output_token_cost_above_200k: 0,
+                    web_search_cost: 500,
+                    max_tokens: 8192,
+                  },
+                ],
+                error: null,
+              };
+            case 'conversations':
+              return { data: [], error: null };
+            case 'token_stats':
+              return { data: [], error: null };
+            case 'payment_orders':
+              return { data: [], error: null };
+            case 'ai_usage_logs':
+              return { data: [], error: null };
+            case 'billing_history':
+              return { data: [], error: null };
+            case 'system_settings':
+              return {
+                data: [
+                  { key: 'new_user_credits', value: '120' },
+                  { key: 'search_surcharge_credits', value: '7' },
+                  { key: 'input_credits_per_1k', value: '999' },
+                ],
+                error: null,
+              };
+            default:
+              throw new Error(`Unexpected admin table ${state.table}`);
+          }
+        };
+
+        const builder = {
+          select(columns?: string) {
+            state.columns = columns;
+            selectCalls.push({ table: state.table, columns });
+            return builder;
+          },
+          order() {
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+            return execute().then(onFulfilled, onRejected);
+          },
+          catch(onRejected: (reason: unknown) => unknown) {
+            return execute().catch(onRejected);
+          },
+          finally(onFinally: () => void) {
+            return execute().finally(onFinally);
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.getFinanceStats();
+
+    expect(result.runtimeBilling).toEqual({
+      creditsPerUsd: 1000,
+      tokenPriceMultiplier: 1.5,
+      activeModelCount: 2,
+      inputCreditsPer1KRange: { min: 1.2, max: 4.5 },
+      outputCreditsPer1KRange: { min: 6, max: 22.5 },
+      searchCreditsPer1KRange: { min: 300, max: 300 },
+      searchSurchargeCredits: 7,
+      newUserCredits: 120,
+    });
+
+    expect(selectCalls).toContainEqual({
+      table: 'system_settings',
+      columns: '*',
+    });
+  });
+});
+
 describe('adminRouter lightweight admin dashboards', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { describe, expect, it } from 'vitest';
 import { checkIdempotency } from './credits';
 
@@ -59,6 +60,32 @@ describe('checkIdempotency', () => {
 
     await expect(checkIdempotency(supabase, 'user-1', 'idem-miss')).resolves.toEqual({
       exists: false,
+    });
+  });
+
+  it('sanitizes storage errors during idempotency checks', async () => {
+    const supabase = {
+      from() {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: null,
+              error: { message: 'column idempotency_key does not exist' },
+            });
+          },
+        };
+      },
+    };
+
+    await expect(checkIdempotency(supabase, 'user-1', 'idem-fail')).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '积分操作校验失败，请稍后重试',
     });
   });
 });

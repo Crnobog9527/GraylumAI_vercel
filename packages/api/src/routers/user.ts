@@ -1,6 +1,8 @@
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { logger } from '../lib/logger';
+import { createSafeInternalError } from '../lib/publicError';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -21,7 +23,9 @@ export const userRouter = router({
 
     // 对于任何错误都返回默认值，确保页面能正常加载
     if (error || !userProfile) {
-      console.error('getUserProfile error:', error?.message, error?.code, 'profileId:', ctx.profileId);
+      logger.error('auth', 'user_profile_fetch_failed', {
+        code: error?.code ?? null,
+      });
       const email = ctx.user?.email ?? '';
       const displayName = getDisplayName(email);
       return {
@@ -62,8 +66,10 @@ export const userRouter = router({
         .single();
 
       if (error) {
-        console.error('updateUserProfile error:', error.message, error.code);
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        logger.error('auth', 'user_profile_update_failed', {
+          code: error.code,
+        });
+        throw createSafeInternalError(error, '更新个人资料失败，请稍后重试');
       }
 
       return data;
@@ -77,7 +83,9 @@ export const userRouter = router({
       .single();
 
     if (error) {
-      console.error('getUserCredits error:', error.message, error.code, 'profileId:', ctx.profileId);
+      logger.error('billing', 'user_credits_fetch_failed', {
+        code: error.code,
+      });
       // 返回默认值而不是抛出错误
       return 0;
     }
@@ -98,40 +106,43 @@ export const userRouter = router({
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    // 1. 获取对话统计
-    const { data: conversations, error: convError } = await ctx.supabase
-      .from('conversations')
-      .select('id, created_at')
-      .eq('user_id', ctx.profileId);
+    const [conversationsResult, monthlyTransactionsResult, usageLogsResult, messageCountResult] = await Promise.all([
+      ctx.supabase
+        .from('conversations')
+        .select('created_at')
+        .eq('user_id', ctx.profileId),
+      ctx.supabase
+        .from('credit_transactions')
+        .select('amount')
+        .eq('user_id', ctx.profileId)
+        .lt('amount', 0)
+        .gte('created_at', monthStart),
+      ctx.supabase
+        .from('ai_usage_logs')
+        .select('module_name')
+        .eq('user_id', ctx.profileId),
+      ctx.supabase
+        .from('messages')
+        .select('id, conversations!inner(user_id)', { count: 'exact', head: true })
+        .eq('is_deleted', 'false')
+        .eq('conversations.user_id', ctx.profileId),
+    ]);
 
-    // 2. 获取消息统计
-    const { count: messageCount, error: msgError } = await ctx.supabase
-      .from('messages')
-      .select('*', { count: 'exact', head: true })
-      .in('conversation_id', (conversations || []).map(c => c.id));
-
-    // 3. 获取本月积分消耗
-    const { data: monthlyTransactions, error: txError } = await ctx.supabase
-      .from('credit_transactions')
-      .select('amount')
-      .eq('user_id', ctx.profileId)
-      .lt('amount', 0) // 只统计消耗
-      .gte('created_at', monthStart);
+    const conversations = conversationsResult.data ?? [];
+    const convError = conversationsResult.error;
+    const monthlyTransactions = monthlyTransactionsResult.data ?? [];
+    const txError = monthlyTransactionsResult.error;
+    const usageLogs = usageLogsResult.data ?? [];
+    const logsError = usageLogsResult.error;
+    const messageCount = messageCountResult.count ?? 0;
+    const msgError = messageCountResult.error;
 
     // 4. 计算使用天数（有对话的天数）
-    const uniqueDays = new Set(
-      (conversations || []).map(c => new Date(c.created_at).toDateString())
-    );
-
-    // 5. 获取模块使用统计 (从 ai_usage_logs 或 token_stats 获取)
-    const { data: usageLogs, error: logsError } = await ctx.supabase
-      .from('ai_usage_logs')
-      .select('module_name')
-      .eq('user_id', ctx.profileId);
+    const uniqueDays = new Set(conversations.map(c => new Date(c.created_at).toDateString()));
 
     // 统计模块使用次数
     const moduleUsage: Record<string, number> = {};
-    (usageLogs || []).forEach((log: any) => {
+    usageLogs.forEach((log: any) => {
       const moduleName = log.module_name || 'AI 智能对话';
       moduleUsage[moduleName] = (moduleUsage[moduleName] || 0) + 1;
     });
@@ -143,7 +154,7 @@ export const userRouter = router({
       .map(([name, count]) => ({ name, count }));
 
     // 计算本月消耗积分总和
-    const monthlyCreditsUsed = (monthlyTransactions || []).reduce(
+    const monthlyCreditsUsed = monthlyTransactions.reduce(
       (sum, tx) => sum + Math.abs(tx.amount),
       0
     );

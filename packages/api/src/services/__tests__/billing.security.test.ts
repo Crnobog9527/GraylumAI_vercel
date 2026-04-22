@@ -18,6 +18,12 @@ import {
 } from '../billing';
 import { BILLING_CONSTANTS } from '../../types/billing';
 
+const ORIGINAL_ENV = { ...process.env };
+
+beforeEach(() => {
+  process.env = { ...ORIGINAL_ENV, NODE_ENV: 'test' };
+});
+
 // ============================================
 // Mock Supabase Client Factory
 // ============================================
@@ -193,6 +199,10 @@ describe('Cost Manipulation Attack Prevention', () => {
 // ============================================
 
 describe('Insufficient Balance Protection', () => {
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV, NODE_ENV: 'test' };
+  });
+
   it('should block pre-deduct when balance is zero', async () => {
     const mockSupabase = createMockSupabase({ credits: 0 });
     const service = new BillingService({
@@ -235,6 +245,44 @@ describe('Insufficient Balance Protection', () => {
       // If it fails with insufficient credits, that's also acceptable
       expect(error.message).toContain('积分');
     }
+  });
+});
+
+describe('Atomic Billing Enforcement', () => {
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('blocks non-atomic pre-deduct fallback in production', async () => {
+    process.env.NODE_ENV = 'production';
+
+    const mockSupabase = createMockSupabase({ credits: 1000 });
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    await expect(service.preDeduct(100, { reason: 'test' })).rejects.toThrow(
+      'Atomic billing RPC required for preDeduct',
+    );
+  });
+
+  it('blocks non-atomic finalize fallback in production', async () => {
+    process.env.NODE_ENV = 'production';
+
+    const mockSupabase = createMockSupabase({ credits: 1000 });
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    await expect(
+      service.finalizeAIFailure({
+        modelUsed: 'claude-sonnet-4-20250514',
+        reason: 'test failure',
+        preDeductId: 'pre-123',
+      }),
+    ).rejects.toThrow('Atomic billing RPC required for finalizeAIFailure');
   });
 });
 
@@ -585,7 +633,7 @@ describe('Race Condition Prevention (Conceptual)', () => {
 
 describe('Idempotency', () => {
   it('should detect duplicate request IDs', async () => {
-    const requestId = 'unique-request-123';
+    const requestId = '4c7f0e36-7c38-4ce8-86b2-59d72ff8c0e1';
 
     // Create mock that returns existing record for idempotency check
     const createChain = (table: string) => {
@@ -633,6 +681,26 @@ describe('Idempotency', () => {
     // Should return idempotent result
     expect(result.idempotent).toBe(true);
     expect(result.preDeductId).toBe('existing-pre-deduct');
+  });
+
+  it('should ignore non-UUID request IDs before atomic pre-deduct', async () => {
+    const mockSupabase = createMockSupabase({ credits: 1000 }) as BillingContext['supabase'] & {
+      rpc: ReturnType<typeof vi.fn>;
+    };
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    const result = await service.preDeduct(100, { requestId: 'not-a-uuid' });
+
+    expect(result.preDeductId).toBe('test-billing-id');
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'atomic_pre_deduct',
+      expect.objectContaining({
+        p_request_id: null,
+      }),
+    );
   });
 });
 

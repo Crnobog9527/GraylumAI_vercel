@@ -1,6 +1,8 @@
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
 
 // ============================================================================
 // 类型定义
@@ -89,10 +91,7 @@ export async function checkIdempotency(
     .maybeSingle();
 
   if (error) {
-    throw new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: `幂等性检查失败: ${error.message}`,
-    });
+    throw createSafeInternalError(error, '积分操作校验失败，请稍后重试');
   }
 
   if (data?.id) {
@@ -139,7 +138,9 @@ export const creditsRouter = router({
     // 如果查询失败或 profile 不存在，返回默认值而不是抛出错误
     // 这样可以避免因 profile 表结构问题导致页面无法加载
     if (error) {
-      console.error('Credits query error:', error.message, error.code, 'profileId:', ctx.profileId);
+      logger.error('billing', 'credits_balance_query_failed', {
+        code: error.code,
+      });
       // 返回默认值，让页面能够正常显示
       return {
         credits: 0,
@@ -149,7 +150,7 @@ export const creditsRouter = router({
     }
 
     if (!profile) {
-      console.error('Profile not found for credits query, profileId:', ctx.profileId);
+      logger.warn('billing', 'credits_balance_profile_missing');
       return {
         credits: 0,
         creditsExpiringSoon: 0,
@@ -259,7 +260,9 @@ export const creditsRouter = router({
       if (txnError) {
         // 交易记录失败，但积分已扣除
         // 生产环境应该有补偿机制或告警
-        console.error('Failed to record transaction:', txnError);
+        logger.error('billing', 'credits_deduction_transaction_record_failed', {
+          code: txnError.code,
+        });
       }
 
       return {
@@ -356,7 +359,9 @@ export const creditsRouter = router({
         .single();
 
       if (txnError) {
-        console.error('Failed to record transaction:', txnError);
+        logger.error('billing', 'credits_addition_transaction_record_failed', {
+          code: txnError.code,
+        });
       }
 
       return {
@@ -474,7 +479,9 @@ export const creditsRouter = router({
 
       // 如果查询失败（可能是表不存在），返回默认值而不是抛出错误
       if (error) {
-        console.error('getCreditsSummary error:', error.message, error.code);
+        logger.error('billing', 'credits_summary_query_failed', {
+          code: error.code,
+        });
         return {
           totalEarned: 0,
           totalSpent: 0,

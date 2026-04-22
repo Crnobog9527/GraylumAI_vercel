@@ -6,7 +6,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { logClientDevWarn } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 // Types
 export interface StreamMessage {
@@ -191,7 +193,9 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
               } catch (parseError) {
                 // Ignore malformed provider lines, but do not swallow real stream error events.
                 if (parseError instanceof SyntaxError) {
-                  console.warn('Parse error:', parseError);
+                  logClientDevWarn('Parse error while reading stream event', {
+                    errorName: parseError.name,
+                  });
                   continue;
                 }
 
@@ -307,8 +311,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
 
           options.onBalanceChange?.();
         } else {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Unknown error';
+          const errorMessage = getSafeErrorMessage(error, '消息发送失败，请稍后重试。');
 
           setState((prev) => ({
             ...prev,
@@ -375,7 +378,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
         setState((prev) => ({
           ...prev,
           isLoading: false,
-          error: error instanceof Error ? error.message : 'Failed to load history',
+          error: getSafeErrorMessage(error, '加载历史消息失败，请稍后重试。'),
         }));
       }
     },

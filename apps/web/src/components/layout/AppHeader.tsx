@@ -24,6 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref, resolveSiteName } from '@/lib/site-config';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
@@ -74,8 +75,8 @@ export function AppHeader() {
 
       // 根据环境跳转到不同的着陆页
       window.location.href = buildAppHref('/landing');
-    } catch (error) {
-      console.error('Logout failed:', error);
+    } catch {
+      logClientDevError('Logout failed');
     } finally {
       setIsLoggingOut(false);
     }

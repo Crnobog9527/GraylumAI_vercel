@@ -10,6 +10,7 @@
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { TRPCError } from '@trpc/server';
+import { logger } from '../lib/logger';
 
 // ============================================
 // 类型定义
@@ -26,6 +27,8 @@ export interface RateLimitResult {
   reset: number;
   /** 重试等待时间 (秒) */
   retryAfter?: number;
+  /** 失败原因 */
+  reason?: 'rate_limited' | 'unavailable';
 }
 
 export type RateLimitType =
@@ -40,6 +43,14 @@ export type RateLimitType =
 // ============================================
 
 let redis: Redis | null = null;
+
+function shouldFailClosedRateLimit(): boolean {
+  if (process.env.VERCEL_ENV) {
+    return process.env.VERCEL_ENV === 'production';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
 
 function getRedis(): Redis {
   if (!redis) {
@@ -154,10 +165,22 @@ export async function checkRateLimit(
       remaining: result.remaining,
       reset: result.reset,
       retryAfter: result.success ? undefined : Math.ceil((result.reset - Date.now()) / 1000),
+      reason: result.success ? undefined : 'rate_limited',
     };
-  } catch (error) {
-    // Redis 连接失败时，允许请求通过 (fail-open)
-    console.error('[RateLimit] Redis error, allowing request:', error);
+  } catch {
+    if (shouldFailClosedRateLimit()) {
+      logger.error('security', 'rate_limit_backend_unavailable_denying_request');
+      return {
+        success: false,
+        limit: 0,
+        remaining: 0,
+        reset: Date.now() + 60_000,
+        retryAfter: 60,
+        reason: 'unavailable',
+      };
+    }
+
+    logger.error('security', 'rate_limit_backend_unavailable_allowing_request');
     return {
       success: true,
       limit: 0,
@@ -181,6 +204,13 @@ export async function checkRateLimitOrThrow(
   const result = await checkRateLimit(identifier, type);
 
   if (!result.success) {
+    if (result.reason === 'unavailable') {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: '速率限制服务暂时不可用，请稍后再试',
+      });
+    }
+
     throw new TRPCError({
       code: 'TOO_MANY_REQUESTS',
       message: `请求过于频繁，请在 ${result.retryAfter} 秒后重试`,
@@ -205,6 +235,23 @@ export async function checkRateLimitForMiddleware(
   const result = await checkRateLimit(identifier, type);
 
   if (!result.success) {
+    if (result.reason === 'unavailable') {
+      return new Response(
+        JSON.stringify({
+          error: 'Service Unavailable',
+          message: '速率限制服务暂时不可用，请稍后再试',
+          retryAfter: result.retryAfter,
+        }),
+        {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': result.retryAfter?.toString() ?? '60',
+          },
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify({
         error: 'Too Many Requests',

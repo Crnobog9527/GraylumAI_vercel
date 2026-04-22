@@ -11,6 +11,8 @@ import {
   getAiUsageLogByRequestId,
   createConversationFixtureForUserEmail,
   createTokenStatsFixture,
+  getCreditsForUserEmail,
+  setCreditsForUserEmail,
   softDeleteConversationFixture,
 } from './support/creditFixtures';
 import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
@@ -30,6 +32,33 @@ async function saveAllSettings(page: Page) {
   const saveAllButton = page.getByTestId('admin-settings-save-all');
   await saveAllButton.click();
   await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
+}
+
+function chatPromptInput(page: Page) {
+  return page.locator('.chat-input-box textarea').first();
+}
+
+async function setChatPrompt(page: Page, prompt: string) {
+  const input = chatPromptInput(page);
+  const sendButton = page.getByRole('button', { name: '发送' });
+  await expect(input).toBeEditable({ timeout: 20000 });
+
+  await input.fill(prompt);
+  if ((await input.inputValue()) !== prompt || await sendButton.isDisabled()) {
+    await input.fill('');
+    await input.click();
+    await input.type(prompt);
+  }
+  if (await sendButton.isDisabled()) {
+    await input.evaluate((element, value) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, prompt);
+  }
+
+  await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt);
 }
 
 async function setSwitchState(toggle: Locator, enabled: boolean) {
@@ -171,6 +200,15 @@ async function setUserCredits(browser: Browser, targetCredits: number, reason: s
     throw new Error('E2E admin and user credentials are required for credit adjustment.');
   }
 
+  const targetEmail = getCredentials('user').email;
+  try {
+    const snapshot = await getCreditsForUserEmail(targetEmail);
+    await setCreditsForUserEmail(targetEmail, targetCredits, reason);
+    return snapshot.credits;
+  } catch {
+    // Fall back to the admin UI path when direct fixture writes are unavailable.
+  }
+
   const context = await browser.newContext({ storageState: authStatePaths.admin });
   const page = await context.newPage();
 
@@ -178,7 +216,6 @@ async function setUserCredits(browser: Browser, targetCredits: number, reason: s
     await gotoWithBypass(page, '/admin/users');
     await expect(page).toHaveURL(/\/admin\/users/);
 
-    const targetEmail = getCredentials('user').email;
     await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
     const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
@@ -719,7 +756,7 @@ test.describe('Admin Config Flows', () => {
           streamRequestCount += 1;
         }
       });
-      await userPage.locator('textarea[placeholder]').fill(`Parity free tier request ${Date.now()}`);
+      await setChatPrompt(userPage, `Parity free tier request ${Date.now()}`);
       await userPage.getByRole('button', { name: '发送' }).click();
       await expect.poll(() => streamRequestCount, { timeout: 15000 }).toBeGreaterThan(0);
       await expect(userPage.getByRole('alertdialog')).toHaveCount(0);
@@ -738,7 +775,7 @@ test.describe('Admin Config Flows', () => {
 
       await gotoWithBypass(userPage, '/chat');
       const blockedRequestBaseline = streamRequestCount;
-      await userPage.locator('textarea[placeholder]').fill(`Parity blocked free tier request ${Date.now()}`);
+      await setChatPrompt(userPage, `Parity blocked free tier request ${Date.now()}`);
       await userPage.getByRole('button', { name: '发送' }).click();
       await expect(userPage.getByRole('heading', { name: '积分已用完' })).toBeVisible({ timeout: 10000 });
       await userPage.waitForTimeout(1500);

@@ -6,6 +6,7 @@ import { trpc } from '@/trpc/client';
 import { Menu, ShieldCheck } from 'lucide-react';
 import AdminSidebar, { getAdminPageMeta } from './AdminSidebar';
 import { Button } from '@/components/ui/button';
+import { getSafeErrorMessage, isAdminPermissionError } from '@/lib/safe-error-message';
 import {
   Sheet,
   SheetContent,
@@ -39,8 +40,7 @@ export default function AdminGuard({ children }: AdminGuardProps) {
   useEffect(() => {
     // Redirect to access-denied page on FORBIDDEN error
     if (error?.data?.code === 'FORBIDDEN' ||
-        error?.message?.includes('Admin role required') ||
-        error?.message?.includes('permission')) {
+        isAdminPermissionError(error)) {
       router.replace('/access-denied');
     }
   }, [error, router]);
@@ -81,7 +81,7 @@ export default function AdminGuard({ children }: AdminGuardProps) {
   // For other errors, show error message without admin interface
   if (error) {
     // Permission errors are handled by useEffect redirect
-    if (error.message?.includes('Admin role required') || error.message?.includes('permission')) {
+    if (isAdminPermissionError(error)) {
       // Show minimal loading while redirecting
       return (
         <div
@@ -110,7 +110,7 @@ export default function AdminGuard({ children }: AdminGuardProps) {
           }}
         >
           <p style={{ color: 'var(--error)' }}>
-            加载失败: {error.message}
+            加载失败: {getSafeErrorMessage(error, '后台页面加载失败，请稍后重试。')}
           </p>
         </div>
       </div>

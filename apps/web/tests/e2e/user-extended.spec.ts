@@ -529,6 +529,12 @@ test.describe('User Extended Flows', () => {
         await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
         actual = 'Subscription purchase action opened the support escalation dialog';
       } else {
+        monitor.removeIssues((issue) =>
+          (issue.source === 'console' && issue.message === 'Failed to load resource: net::ERR_FAILED') ||
+          (issue.url?.includes('js.stripe.com/v3/.deploy_status_henson.json') ?? false) ||
+          issue.message.includes('js.stripe.com/v3/.deploy_status_henson.json') ||
+          issue.message.includes("origin 'https://checkout.stripe.com'"),
+        );
         actual = 'Subscription purchase action redirected to Stripe Checkout';
       }
 

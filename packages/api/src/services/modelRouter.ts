@@ -7,7 +7,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getChatRuntimeSettings } from './chatRuntime';
+import { getChatRuntimeSettings, type ChatRuntimeSettings } from './chatRuntime';
 
 export interface ModelConfig {
   id: string;
@@ -43,6 +43,8 @@ export interface RoutingContext {
   message: string;
   conversationTurns: number;
   userPreferredModel?: string;
+  runtimeSettings?: ChatRuntimeSettings;
+  defaultModels?: SystemDefaultModels;
 }
 
 export interface RoutingDecision {
@@ -69,6 +71,11 @@ export interface SearchDecision {
 export interface AssistantUpgradeDecision {
   shouldUpgrade: boolean;
   reasonCodes: string[];
+}
+
+export interface SystemDefaultModels {
+  primary: ModelConfig;
+  assistant: ModelConfig;
 }
 
 const DEFAULT_MODELS = {
@@ -363,21 +370,23 @@ function pickBestModelFamilyCandidate(models: ModelConfig[], family: 'primary' |
   })[0];
 }
 
-async function getSystemDefaultModels(supabase: SupabaseClient): Promise<{
-  primary: ModelConfig;
-  assistant: ModelConfig;
-}> {
-  const runtimeSettings = await getChatRuntimeSettings(supabase);
-  const activeModels = await getActiveModelConfigs(supabase);
+export async function getSystemDefaultModels(
+  supabase: SupabaseClient,
+  options: {
+    runtimeSettings?: ChatRuntimeSettings;
+    activeModels?: ModelConfig[];
+  } = {},
+): Promise<SystemDefaultModels> {
+  const runtimeSettings = options.runtimeSettings ?? await getChatRuntimeSettings(supabase);
+  const primaryModelId =
+    runtimeSettings.primaryModelId ?? runtimeSettings.sonnetModelId ?? runtimeSettings.defaultModelId;
+  const assistantModelId = runtimeSettings.assistantModelId ?? runtimeSettings.haikuModelId;
 
-  const explicitPrimary = await getModelConfigFromDb(
-    supabase,
-    runtimeSettings.primaryModelId ?? runtimeSettings.sonnetModelId ?? runtimeSettings.defaultModelId,
-  );
-  const explicitAssistant = await getModelConfigFromDb(
-    supabase,
-    runtimeSettings.assistantModelId ?? runtimeSettings.haikuModelId,
-  );
+  const [activeModels, explicitPrimary, explicitAssistant] = await Promise.all([
+    options.activeModels ? Promise.resolve(options.activeModels) : getActiveModelConfigs(supabase),
+    getModelConfigFromDb(supabase, primaryModelId),
+    getModelConfigFromDb(supabase, assistantModelId),
+  ]);
 
   return {
     primary: explicitPrimary ?? pickBestModelFamilyCandidate(activeModels, 'primary') ?? DEFAULT_MODELS.primary,
@@ -395,7 +404,7 @@ export async function getSystemDefaultModelForRole(
 
 export async function selectModel(ctx: RoutingContext): Promise<RoutingResult> {
   const { supabase, message, conversationTurns, userPreferredModel } = ctx;
-  const runtimeSettings = await getChatRuntimeSettings(supabase);
+  const runtimeSettings = ctx.runtimeSettings ?? await getChatRuntimeSettings(supabase);
 
   if (userPreferredModel) {
     const preferredModel = await getModelConfigFromDb(supabase, userPreferredModel);
@@ -414,7 +423,7 @@ export async function selectModel(ctx: RoutingContext): Promise<RoutingResult> {
     }
   }
 
-  const defaults = await getSystemDefaultModels(supabase);
+  const defaults = ctx.defaultModels ?? await getSystemDefaultModels(supabase, { runtimeSettings });
   const inferred = inferTaskType(message, conversationTurns);
   const assistantEligible = runtimeSettings.enableSmartRouting &&
     ['greeting', 'chitchat', 'lightweight_transform', 'compression', 'search_synthesis', 'simple_qa'].includes(inferred.taskType) &&

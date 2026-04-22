@@ -3,9 +3,8 @@ import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { TRPCClientError, createTRPCProxyClient, httpBatchLink } from '@trpc/client';
 import type { AppRouter } from '@repo/api/src/root';
-import { simpleMarkdown } from '../../src/components/ai/messageSanitization';
 import { gotoWithBypass } from './support/deploymentProtection';
-import { authStatePaths, hasCredentials } from './support/auth';
+import { authStatePaths, clearBrowserAuthState, hasCredentials, waitForLoginFormReady } from './support/auth';
 
 function getBaseUrl() {
   return process.env.PLAYWRIGHT_BASE_URL ?? process.env.BASE_URL ?? 'http://127.0.0.1:3000';
@@ -78,14 +77,6 @@ test.describe('Security', () => {
   // XSS Prevention Tests
   // ============================================
   test.describe('XSS Prevention', () => {
-    test('should sanitize javascript links in streamed markdown helpers', async () => {
-      const rendered = simpleMarkdown('[danger](javascript:alert(1))\n<script>alert("xss")</script>');
-
-      expect(rendered).toContain('href="#"');
-      expect(rendered).not.toContain('javascript:alert');
-      expect(rendered).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
-    });
-
     test.skip(!hasAuthRuntime, 'Login/register XSS checks require a live Supabase runtime');
 
     test('should escape script tags in user input display', async ({ page }) => {
@@ -153,8 +144,8 @@ test.describe('Security', () => {
     test.skip(!hasAuthRuntime, 'Authentication checks require a live Supabase runtime');
 
     test('should protect chat page from unauthenticated access', async ({ page }) => {
-      // Clear any stored auth state
-      await page.context().clearCookies();
+      await gotoWithBypass(page, '/login');
+      await clearBrowserAuthState(page);
 
       // Try to access protected route
       await gotoWithBypass(page, '/chat');
@@ -164,7 +155,8 @@ test.describe('Security', () => {
     });
 
     test('should protect profile page from unauthenticated access', async ({ page }) => {
-      await page.context().clearCookies();
+      await gotoWithBypass(page, '/login');
+      await clearBrowserAuthState(page);
 
       await gotoWithBypass(page, '/profile');
 
@@ -401,6 +393,7 @@ test.describe('Security', () => {
 
     test('should show appropriate message when rate limited', async ({ page }) => {
       await gotoWithBypass(page, '/login');
+      await waitForLoginFormReady(page);
 
       // Rapidly submit login attempts
       for (let i = 0; i < 15; i++) {

@@ -5,13 +5,21 @@ import { DiagnosticsService } from './src/services/diagnostics';
 
 dotenv.config({ path: '../../.env.local' });
 
+function writeStdout(message: string) {
+    process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message: string) {
+    process.stderr.write(`${message}\n`);
+}
+
 async function runDiagnostics() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const userId = '59410ee2-d995-414a-b330-a503a4e0ba6b'; // Active user from profiles table
 
     if (!supabaseUrl || !supabaseKey) {
-        console.error('Missing env vars');
+        writeStderr('Missing env vars');
         process.exit(1);
     }
 
@@ -22,21 +30,21 @@ async function runDiagnostics() {
         runType: 'manual'
     });
 
-    console.log('Running all diagnostic tests...');
+    writeStdout('Running all diagnostic tests...');
     const result = await service.runAllTests();
 
-    console.log('\n--- DIAGNOSTIC RESULTS ---');
-    console.log(`Summary: ${result.summary.passed}/${result.summary.total} passed`);
+    writeStdout('\n--- DIAGNOSTIC RESULTS ---');
+    writeStdout(`Summary: ${result.summary.passed}/${result.summary.total} passed`);
 
     result.results.forEach(r => {
-        console.log(`[${r.status.toUpperCase()}] ${r.testName}: ${r.message}`);
+        writeStdout(`[${r.status.toUpperCase()}] ${r.testName}: ${r.message}`);
         if (r.status === 'failed' || r.status === 'error' || r.testId === 'ai_model_status') {
-            console.log('Details:', JSON.stringify(r.details, null, 2));
+            writeStdout(`Details: ${JSON.stringify(r.details, null, 2)}`);
         }
     });
 }
 
 runDiagnostics().catch(err => {
-    console.error('Diagnostics failed:', err);
+    writeStderr(`Diagnostics failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     process.exit(1);
 });

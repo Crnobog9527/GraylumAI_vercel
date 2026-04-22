@@ -1,7 +1,10 @@
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
 
 const USER_FACING_SYSTEM_SETTING_KEYS = [
   'site_name',
@@ -30,6 +33,15 @@ function reduceSettings(data: Array<{ key: string; value: unknown }>) {
   }), {});
 }
 
+export function getPublicReadClient(ctx: {
+  supabase: SupabaseClient<any, 'public', any>;
+  supabasePublic: SupabaseClient<any, 'public', any>;
+  supabaseAdmin: SupabaseClient<any, 'public', any>;
+  hasSupabaseAdminPrivileges: boolean;
+}) {
+  return ctx.supabasePublic ?? ctx.supabase;
+}
+
 export const settingsRouter = router({
   /**
    * 获取首页公告 (公开接口)
@@ -37,8 +49,9 @@ export const settingsRouter = router({
    */
   getActiveAnnouncements: publicProcedure.query(async ({ ctx }) => {
     const now = new Date().toISOString();
+    const readClient = getPublicReadClient(ctx);
 
-    const { data, error } = await ctx.supabase
+    const { data, error } = await readClient
       .from('announcements')
       .select('id, title, content, type, icon, icon_color, tag, tag_color, banner_link, priority, start_date, end_date, created_at')
       .eq('active', 'true')  // active 是字符串类型
@@ -49,7 +62,9 @@ export const settingsRouter = router({
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Failed to fetch homepage announcements:', error);
+      logger.warn('system', 'settings_homepage_announcements_fetch_failed', {
+        code: error.code,
+      });
       return [];
     }
 
@@ -74,8 +89,9 @@ export const settingsRouter = router({
    */
   getBannerAnnouncement: publicProcedure.query(async ({ ctx }) => {
     const now = new Date().toISOString();
+    const readClient = getPublicReadClient(ctx);
 
-    const { data, error } = await ctx.supabase
+    const { data, error } = await readClient
       .from('announcements')
       .select('id, title, content, type, banner_style, banner_link, tag')
       .eq('active', 'true')  // active 是字符串类型
@@ -104,13 +120,14 @@ export const settingsRouter = router({
 
   // Public: Get system settings (for display purposes)
   getSystemSettings: publicProcedure.query(async ({ ctx }) => {
-    const { data, error } = await ctx.supabase
+    const readClient = getPublicReadClient(ctx);
+    const { data, error } = await readClient
       .from('system_settings')
       .select('key, value')
       .in('key', [...USER_FACING_SYSTEM_SETTING_KEYS]);
 
     if (error) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      throw createSafeInternalError(error, '获取系统设置失败，请稍后重试');
     }
 
     return reduceSettings(data ?? []);
@@ -122,7 +139,7 @@ export const settingsRouter = router({
       .select('key, value');
 
     if (error) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      throw createSafeInternalError(error, '读取系统设置失败，请稍后重试');
     }
 
     return reduceSettings(data ?? []);
@@ -138,7 +155,7 @@ export const settingsRouter = router({
         .select();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createSafeInternalError(error, '更新系统设置失败，请稍后重试');
       }
       return data;
     }),
@@ -149,7 +166,8 @@ export const settingsRouter = router({
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
     const stripeReady = isStripeCheckoutConfigured();
-    const { data, error } = await ctx.supabase
+    const readClient = getPublicReadClient(ctx);
+    const { data, error } = await readClient
       .from('credit_packages')
       .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order, stripe_price_id')
       .eq('active', 'true')
@@ -157,7 +175,9 @@ export const settingsRouter = router({
       .order('price', { ascending: true });
 
     if (error) {
-      console.error('Failed to fetch credit packages:', error);
+      logger.warn('billing', 'settings_credit_packages_fetch_failed', {
+        code: error.code,
+      });
       return [];
     }
 
@@ -179,14 +199,17 @@ export const settingsRouter = router({
    */
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
     const stripeReady = isStripeCheckoutConfigured();
-    const { data, error } = await ctx.supabase
+    const readClient = getPublicReadClient(ctx);
+    const { data, error } = await readClient
       .from('membership_plans')
       .select('*')
       .eq('is_active', 'true')
       .order('sort_order', { ascending: true });
 
     if (error) {
-      console.error('Failed to fetch membership plans:', error);
+      logger.warn('system', 'settings_membership_plans_fetch_failed', {
+        code: error.code,
+      });
       return [];
     }
 

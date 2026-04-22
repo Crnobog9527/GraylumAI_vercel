@@ -23,6 +23,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsd, formatUsdFromCents } from '@/lib/currency';
 
+function formatCreditsRange(range: { min: number; max: number } | null, suffix: string) {
+  if (!range) {
+    return '未配置';
+  }
+
+  if (range.min === range.max) {
+    return `${range.min.toFixed(2)} ${suffix}`;
+  }
+
+  return `${range.min.toFixed(2)} - ${range.max.toFixed(2)} ${suffix}`;
+}
+
 export default function AdminFinancePage() {
   const { data, isLoading, error, refetch } = trpc.admin.getFinanceStats.useQuery();
 
@@ -46,7 +58,16 @@ export default function AdminFinancePage() {
   const apiStats = data?.apiStats ?? { totalRequests: 0, totalConversations: 0, messagesThisMonth: 0, messagesThisWeek: 0 };
   const modelStats = data?.modelStats ?? [];
   const financeOverview = data?.financeOverview ?? { estimatedRevenue: 0, creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
-  const creditsRules = data?.creditsRules ?? { inputCreditsPerK: 1, outputCreditsPerK: 3, webSearchCredits: 5, newUserCredits: 100 };
+  const runtimeBilling = data?.runtimeBilling ?? {
+    creditsPerUsd: 1000,
+    tokenPriceMultiplier: 1.5,
+    activeModelCount: 0,
+    inputCreditsPer1KRange: null,
+    outputCreditsPer1KRange: null,
+    searchCreditsPer1KRange: null,
+    searchSurchargeCredits: 0,
+    newUserCredits: 100,
+  };
 
   // Calculate profit (revenue - estimated cost based on consumption)
   const estimatedProfit = financeOverview.estimatedRevenue - (financeOverview.creditsConsumed * 0.01); // Rough cost estimation
@@ -599,11 +620,11 @@ export default function AdminFinancePage() {
             style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
           >
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              下列积分换算卡片用于运营参考和历史兼容展示。实际运行时成本以
+              本标签页现在展示运行时计费口径：实际扣费取决于活跃模型在
               <a href="/admin/models" className="mx-1 underline hover:no-underline" style={{ color: 'var(--color-primary)' }}>
                 AI 模型管理
               </a>
-              中的单模型定价与实时 token 记账为准；不要把本标签页当作实时 authoritative 计费控制台。
+              中配置的美元成本、实时 token 记账，以及站内积分换算常量；旧的 `system_settings.input/output/web_search` 规则仅保留历史兼容，不再视为 authoritative。
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -611,7 +632,7 @@ export default function AdminFinancePage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                   <Coins className="h-5 w-5" />
-                  参考积分规则
+                  运行时计费基线
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -622,12 +643,12 @@ export default function AdminFinancePage() {
                         <TrendingUp className="h-4 w-4 text-blue-400" />
                       </div>
                       <div>
-                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入 Token 费率</p>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>每 1K Token 消耗积分</p>
+                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>积分兑美元比例</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>站内统一换算基线</p>
                       </div>
                     </div>
                     <Badge className="bg-blue-500/20 text-blue-400 text-lg px-3">
-                      {typeof creditsRules.inputCreditsPerK === 'number' ? creditsRules.inputCreditsPerK : 1}
+                      {runtimeBilling.creditsPerUsd}
                     </Badge>
                   </div>
 
@@ -637,12 +658,12 @@ export default function AdminFinancePage() {
                         <TrendingDown className="h-4 w-4 text-purple-400" />
                       </div>
                       <div>
-                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出 Token 费率</p>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>每 1K Token 消耗积分</p>
+                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>价格倍率</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>用户价格 = API 成本 × 倍率</p>
                       </div>
                     </div>
                     <Badge className="bg-purple-500/20 text-purple-400 text-lg px-3">
-                      {typeof creditsRules.outputCreditsPerK === 'number' ? creditsRules.outputCreditsPerK : 3}
+                      {runtimeBilling.tokenPriceMultiplier.toFixed(2)}x
                     </Badge>
                   </div>
 
@@ -652,12 +673,27 @@ export default function AdminFinancePage() {
                         <Globe className="h-4 w-4 text-emerald-400" />
                       </div>
                       <div>
-                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>联网搜索费用</p>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>每次搜索消耗积分</p>
+                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>活跃计费模型</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>当前参与运行时计费折算</p>
                       </div>
                     </div>
                     <Badge className="bg-emerald-500/20 text-emerald-400 text-lg px-3">
-                      {typeof creditsRules.webSearchCredits === 'number' ? creditsRules.webSearchCredits : 5}
+                      {runtimeBilling.activeModelCount}
+                    </Badge>
+                  </div>
+
+                  <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-amber-500/20">
+                        <Zap className="h-4 w-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>联网附加积分</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>每次真实联网搜索额外增加</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-amber-500/20 text-amber-400 text-lg px-3">
+                      {runtimeBilling.searchSurchargeCredits}
                     </Badge>
                   </div>
                 </div>
@@ -668,11 +704,41 @@ export default function AdminFinancePage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
                   <Users className="h-5 w-5" />
-                  新用户福利
+                  运行时折算与福利
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
+                  <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                    <div>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输入成本区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输入 Token</p>
+                    </div>
+                    <Badge className="bg-blue-500/20 text-blue-400 text-sm px-3 py-1">
+                      {formatCreditsRange(runtimeBilling.inputCreditsPer1KRange, '积分')}
+                    </Badge>
+                  </div>
+
+                  <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                    <div>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>输出成本区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 输出 Token</p>
+                    </div>
+                    <Badge className="bg-purple-500/20 text-purple-400 text-sm px-3 py-1">
+                      {formatCreditsRange(runtimeBilling.outputCreditsPer1KRange, '积分')}
+                    </Badge>
+                  </div>
+
+                  <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
+                    <div>
+                      <p className="font-medium" style={{ color: 'var(--text-primary)' }}>模型联网成本区间</p>
+                      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按活跃模型折算，每 1K 次真实搜索</p>
+                    </div>
+                    <Badge className="bg-emerald-500/20 text-emerald-400 text-sm px-3 py-1">
+                      {formatCreditsRange(runtimeBilling.searchCreditsPer1KRange, '积分')}
+                    </Badge>
+                  </div>
+
                   <div className="flex justify-between items-center p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
                     <div className="flex items-center gap-3">
                       <div className="p-2 rounded-lg bg-[var(--color-primary-20)]">
@@ -684,17 +750,17 @@ export default function AdminFinancePage() {
                       </div>
                     </div>
                     <Badge className="bg-[var(--color-primary-20)] text-[var(--color-primary)] text-lg px-3">
-                      {typeof creditsRules.newUserCredits === 'number' ? creditsRules.newUserCredits : 100}
+                      {runtimeBilling.newUserCredits}
                     </Badge>
                   </div>
                 </div>
 
                 <div className="mt-6 p-4 rounded-lg border" style={{ borderColor: 'var(--border-primary)', background: 'var(--bg-primary)' }}>
-                  <h4 className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>参考计算示例</h4>
+                  <h4 className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>说明</h4>
                   <div className="text-sm space-y-1" style={{ color: 'var(--text-secondary)' }}>
-                    <p>• 发送 1000 Token 输入 = {typeof creditsRules.inputCreditsPerK === 'number' ? creditsRules.inputCreditsPerK : 1} 积分</p>
-                    <p>• 接收 1000 Token 输出 = {typeof creditsRules.outputCreditsPerK === 'number' ? creditsRules.outputCreditsPerK : 3} 积分</p>
-                    <p>• 一次完整对话(1K 输入 + 1K 输出) ≈ {(typeof creditsRules.inputCreditsPerK === 'number' ? creditsRules.inputCreditsPerK : 1) + (typeof creditsRules.outputCreditsPerK === 'number' ? creditsRules.outputCreditsPerK : 3)} 积分</p>
+                    <p>• 实际扣费 = 模型美元成本 × 实时 token 用量 × 积分换算比例 × 价格倍率</p>
+                    <p>• 联网总成本 = 模型搜索成本 + 站内联网附加积分</p>
+                    <p>• 旧的 `input/output/web_search` 系统设置仅作历史兼容，不再作为实时计费真相</p>
                   </div>
                 </div>
               </CardContent>

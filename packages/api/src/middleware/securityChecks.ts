@@ -8,6 +8,7 @@
 import { TRPCError } from '@trpc/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../lib/logger';
 
 // ============================================
 // 类型定义
@@ -455,7 +456,7 @@ export function verifyRequestSignature(
 
   // 如果未配置签名密钥，跳过验证 (开发环境)
   if (!secretKey) {
-    console.warn('[Security] API_SIGNATURE_SECRET not configured, skipping signature verification');
+    logger.warn('security', 'api_signature_secret_not_configured');
     return { valid: true };
   }
 
@@ -530,7 +531,7 @@ export async function checkRequestSignature(
 export function checkOutputSecurity(content: string): boolean {
   for (const pattern of SENSITIVE_OUTPUT_PATTERNS) {
     if (pattern.test(content)) {
-      console.warn('Detected potential sensitive content in AI output');
+      logger.warn('security', 'sensitive_ai_output_detected');
       return false;
     }
   }

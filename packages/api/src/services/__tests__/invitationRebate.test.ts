@@ -11,6 +11,7 @@ import { applyInvitationRebateForSpend } from '../invitationRebate';
 function createMockSupabase(options?: {
   settings?: Array<{ key: string; value: unknown }>;
   invitationRecord?: Record<string, unknown> | null;
+  invitationRecordError?: { message: string } | null;
   existingRebate?: Record<string, unknown> | null;
   inviterCredits?: number;
   directTodayRewards?: number[];
@@ -50,7 +51,7 @@ function createMockSupabase(options?: {
 
   const responseQueue = [
     { data: settings, error: null },
-    { data: invitationRecord, error: null },
+    { data: invitationRecord, error: options?.invitationRecordError ?? null },
     { data: options?.existingRebate ?? null, error: null },
     { data: directTodayRewards.map((value) => ({ inviter_reward: value })), error: null },
     { data: directTotalRewards.map((value) => ({ inviter_reward: value })), error: null },
@@ -198,5 +199,20 @@ describe('applyInvitationRebateForSpend', () => {
     });
     expect(supabase.updates).toEqual([]);
     expect(supabase.inserts).toEqual([]);
+  });
+
+  it('sanitizes invitation binding lookup failures', async () => {
+    const supabase = createMockSupabase({
+      invitationRecordError: { message: 'permission denied for table invitation_records' },
+    });
+
+    await expect(
+      applyInvitationRebateForSpend({
+        supabase,
+        inviteeId: 'invitee-1',
+        consumedCredits: 160,
+        preDeductId: 'pre-123',
+      }),
+    ).rejects.toThrow('读取邀请绑定关系失败');
   });
 });

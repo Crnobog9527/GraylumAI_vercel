@@ -7,6 +7,12 @@ export const SCHEDULED_JOB_KEYS = {
   ticketAutoClose: 'ticket_auto_close',
 } as const;
 
+const SCHEDULED_JOB_ERROR_MESSAGES = {
+  start: 'Failed to start scheduled job run',
+  finish: 'Failed to finish scheduled job run',
+  load: 'Failed to load scheduled job run',
+} as const;
+
 export async function startScheduledJobRun(params: {
   supabase: MinimalSupabaseClient;
   jobKey: string;
@@ -24,7 +30,7 @@ export async function startScheduledJobRun(params: {
     .single();
 
   if (error) {
-    throw new Error(`Failed to start scheduled job run: ${error.message}`);
+    throw new Error(SCHEDULED_JOB_ERROR_MESSAGES.start);
   }
 
   return data.id as string;
@@ -48,7 +54,7 @@ export async function finishScheduledJobRun(params: {
     .eq('id', params.runId);
 
   if (error) {
-    throw new Error(`Failed to finish scheduled job run: ${error.message}`);
+    throw new Error(SCHEDULED_JOB_ERROR_MESSAGES.finish);
   }
 }
 
@@ -65,7 +71,7 @@ export async function getLatestScheduledJobRun(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to load scheduled job run: ${error.message}`);
+    throw new Error(SCHEDULED_JOB_ERROR_MESSAGES.load);
   }
 
   return data;

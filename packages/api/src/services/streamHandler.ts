@@ -16,6 +16,9 @@ type MessageEndEvent = Extract<StreamEvent, { type: 'message_end' }>;
 
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+const STREAM_HANDLER_PUBLIC_ERROR_MESSAGE = 'AI 响应生成失败，请稍后重试';
+const STREAM_HANDLER_PROVIDER_FAILURE_MESSAGE = '上游 AI 服务请求失败';
+const STREAM_HANDLER_EMPTY_RESPONSE_MESSAGE = '上游 AI 服务未返回响应体';
 
 /**
  * SSE 事件类型
@@ -152,12 +155,11 @@ export class StreamHandler {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+        throw new Error(STREAM_HANDLER_PROVIDER_FAILURE_MESSAGE);
       }
 
       if (!response.body) {
-        throw new Error('No response body');
+        throw new Error(STREAM_HANDLER_EMPTY_RESPONSE_MESSAGE);
       }
 
       // 处理流式响应
@@ -322,7 +324,7 @@ export function createSSEStream(
             const errorEvent: StreamEvent = {
               type: 'error',
               code: 'STREAM_ERROR',
-              message: error.message,
+              message: STREAM_HANDLER_PUBLIC_ERROR_MESSAGE,
               retryable: true,
             };
             controller.enqueue(encoder.encode(formatSSEEvent(errorEvent)));
@@ -363,7 +365,7 @@ export function createSSEStream(
         const errorEvent: StreamEvent = {
           type: 'error',
           code: 'STREAM_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: STREAM_HANDLER_PUBLIC_ERROR_MESSAGE,
           retryable: false,
         };
         controller.enqueue(encoder.encode(formatSSEEvent(errorEvent)));

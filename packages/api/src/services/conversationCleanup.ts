@@ -14,11 +14,25 @@ export interface ConversationCleanupResult {
   stats: ConversationCleanupLevelStat[];
 }
 
+type CleanupProfileRow = {
+  id: string;
+  membership_level: string | null;
+};
+
 const DEFAULT_RETENTION_DAYS: Record<string, number> = {
   free: 7,
   pro: 30,
   gold: 90,
 };
+
+const CONVERSATION_CLEANUP_ERRORS = {
+  loadRetentionSettings: 'Failed to load membership retention settings',
+  calculateStats: 'Failed to calculate cleanup stats',
+  loadProfiles: 'Failed to load profiles for cleanup',
+  queryExpiredConversations: 'Failed to query expired conversations for cleanup',
+  softDeleteMessages: 'Failed to soft-delete messages for cleanup',
+  softDeleteConversations: 'Failed to soft-delete conversations for cleanup',
+} as const;
 
 async function buildRetentionMap(supabase: MinimalSupabaseClient) {
   const { data: plans, error } = await supabase
@@ -26,7 +40,7 @@ async function buildRetentionMap(supabase: MinimalSupabaseClient) {
     .select('level, history_retention_days');
 
   if (error) {
-    throw new Error(`Failed to load membership retention settings: ${error.message}`);
+    throw new Error(CONVERSATION_CLEANUP_ERRORS.loadRetentionSettings);
   }
 
   const retentionMap = { ...DEFAULT_RETENTION_DAYS };
@@ -58,11 +72,11 @@ export class ConversationCleanupService {
         .from('conversations')
         .select('id, profiles!inner(membership_level)', { count: 'exact', head: true })
         .eq('profiles.membership_level', level)
-        .eq('is_deleted', 'false')
+        .eq('is_deleted', false)
         .lt('created_at', cutoffDate.toISOString());
 
       if (error) {
-        throw new Error(`Failed to calculate cleanup stats for ${level}: ${error.message}`);
+        throw new Error(`${CONVERSATION_CLEANUP_ERRORS.calculateStats} (${level})`);
       }
 
       stats.push({
@@ -89,7 +103,7 @@ export class ConversationCleanupService {
       .select('id, membership_level');
 
     if (profilesError) {
-      throw new Error(`Failed to load profiles for cleanup: ${profilesError.message}`);
+      throw new Error(CONVERSATION_CLEANUP_ERRORS.loadProfiles);
     }
 
     const statsByLevel = new Map<string, ConversationCleanupLevelStat>();
@@ -102,10 +116,17 @@ export class ConversationCleanupService {
       });
     }
 
+    const profilesByLevel = new Map<string, string[]>();
+    for (const profile of (profiles ?? []) as CleanupProfileRow[]) {
+      const membershipLevel = profile.membership_level || 'free';
+      const bucket = profilesByLevel.get(membershipLevel) ?? [];
+      bucket.push(profile.id);
+      profilesByLevel.set(membershipLevel, bucket);
+    }
+
     let totalDeleted = 0;
 
-    for (const profile of profiles ?? []) {
-      const membershipLevel = profile.membership_level || 'free';
+    for (const [membershipLevel, profileIds] of Array.from(profilesByLevel.entries())) {
       const retentionDays = retentionMap[membershipLevel] ?? DEFAULT_RETENTION_DAYS.free;
       const cutoffDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
       const levelStat = statsByLevel.get(membershipLevel) ?? {
@@ -118,12 +139,12 @@ export class ConversationCleanupService {
       const { data: expiredConversations, error: expiredError } = await this.options.supabase
         .from('conversations')
         .select('id')
-        .eq('user_id', profile.id)
-        .eq('is_deleted', 'false')
+        .in('user_id', profileIds)
+        .eq('is_deleted', false)
         .lt('created_at', cutoffDate.toISOString());
 
       if (expiredError) {
-        throw new Error(`Failed to query expired conversations for ${profile.id}: ${expiredError.message}`);
+        throw new Error(CONVERSATION_CLEANUP_ERRORS.queryExpiredConversations);
       }
 
       const conversationIds = (expiredConversations ?? []).map((conversation) => conversation.id);
@@ -138,22 +159,21 @@ export class ConversationCleanupService {
         .from('messages')
         .update({ is_deleted: true, deleted_at: deletedAt })
         .in('conversation_id', conversationIds)
-        .eq('is_deleted', 'false');
+        .eq('is_deleted', false);
 
       if (messageError) {
-        throw new Error(`Failed to soft-delete messages for ${profile.id}: ${messageError.message}`);
+        throw new Error(CONVERSATION_CLEANUP_ERRORS.softDeleteMessages);
       }
 
       const { data: updatedConversations, error: conversationError } = await this.options.supabase
         .from('conversations')
         .update({ is_deleted: true, deleted_at: deletedAt })
         .in('id', conversationIds)
-        .eq('user_id', profile.id)
-        .eq('is_deleted', 'false')
+        .eq('is_deleted', false)
         .select('id');
 
       if (conversationError) {
-        throw new Error(`Failed to soft-delete conversations for ${profile.id}: ${conversationError.message}`);
+        throw new Error(CONVERSATION_CLEANUP_ERRORS.softDeleteConversations);
       }
 
       const deletedCount = updatedConversations?.length ?? 0;

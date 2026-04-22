@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
@@ -8,9 +7,6 @@ import WelcomeBanner from '@/components/home/WelcomeBanner';
 import SixStepsGuide from '@/components/home/SixStepsGuide';
 import UpdatesSection from '@/components/home/UpdatesSection';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
-import { createClient } from '@/lib/supabase';
-import { isEmailVerified } from '@/lib/auth';
-import { buildAuthHref } from '@/lib/site-config';
 import { trpc } from '@/trpc/client';
 
 /**
@@ -19,88 +15,23 @@ import { trpc } from '@/trpc/client';
  */
 export default function HomePage() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      // 检查是否有 ?domain=www 参数，如果有则重定向到 landing 页
-      const domainParam = new URLSearchParams(window.location.search).get('domain');
-      if (domainParam === 'www') {
-        router.replace('/landing?domain=www');
-        return;
-      }
-
-      // 检查用户登录状态
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        // 未登录，重定向到登录页
-        router.replace(buildAuthHref('/login'));
-        return;
-      }
-
-      if (!isEmailVerified(user)) {
-        router.replace(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent('/')}`)
-        );
-        return;
-      }
-
-      setIsAuthenticated(true);
-      setIsLoading(false);
-    };
-
-    checkAuth();
-  }, [router]);
-
   // 从 tRPC 获取用户数据
-  const { data: userProfile, isLoading: isProfileLoading } = trpc.user.getUserProfile.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
+  const { data: userProfile } = trpc.user.getUserProfile.useQuery();
 
   // 从 tRPC 获取公告数据
-  const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
-  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
+  const { data: announcementsData, isLoading: isAnnouncementsLoading } = trpc.settings.getActiveAnnouncements.useQuery();
+  const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery();
   const showOnboarding =
     systemSettings?.home_show_onboarding === true || systemSettings?.home_show_onboarding === 'true';
   const showFeaturedModules =
     systemSettings?.home_show_featured_modules === true || systemSettings?.home_show_featured_modules === 'true';
   const { data: featuredModules, isLoading: isFeaturedModulesLoading } = trpc.modules.getFeaturedModules.useQuery(
     { limit: 4 },
-    { enabled: isAuthenticated && showFeaturedModules }
+    { enabled: showFeaturedModules }
   );
 
   // 从 tRPC 获取横幅公告
-  const { data: bannerData } = trpc.settings.getBannerAnnouncement.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
-
-  // 加载中或未认证时显示加载状态
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--bg-primary)' }}
-      >
-        <div className="text-center">
-          <div
-            className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-4"
-            style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
-          />
-          <p style={{ color: 'var(--text-secondary)' }}>加载中...</p>
-        </div>
-      </div>
-    );
-  }
+  const { data: bannerData } = trpc.settings.getBannerAnnouncement.useQuery();
 
   // 用户数据 (从 tRPC 获取)
   const user = {

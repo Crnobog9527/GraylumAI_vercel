@@ -47,6 +47,7 @@ import AdminErrorState from '@/components/admin/AdminErrorState';
 import { RoleBadge } from '@/components/ui/status-badge';
 import { TableEmptyState } from '@/components/ui/empty-state';
 import { toast } from '@/components/ui/sonner';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 type UserStatus = 'active' | 'disabled' | 'banned';
 type MembershipLevel = 'free' | 'pro' | 'gold';
@@ -159,7 +160,7 @@ export default function AdminUsersPage() {
       utils.admin.getUserDetails.invalidate();
     },
     onError: (error) => {
-      toast.error(error.message || '会员等级更新失败');
+      toast.error(getSafeErrorMessage(error, '会员等级更新失败，请稍后重试'));
     },
   });
 

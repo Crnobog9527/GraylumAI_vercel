@@ -15,6 +15,7 @@ describe('createTRPCContext', () => {
   });
 
   it('preserves an injected user-scoped Supabase client when user is already known', async () => {
+    const publicClient = { role: 'public-client' };
     const adminClient = { role: 'admin-client' };
     const injectedAuthClient = {
       role: 'auth-client',
@@ -23,7 +24,9 @@ describe('createTRPCContext', () => {
       },
     };
 
-    createClientMock.mockReturnValue(adminClient);
+    createClientMock
+      .mockReturnValueOnce(publicClient)
+      .mockReturnValueOnce(adminClient);
 
     const { createTRPCContext } = await import('./trpc');
     const user = {
@@ -40,8 +43,10 @@ describe('createTRPCContext', () => {
       supabaseAuth: injectedAuthClient as any,
     });
 
-    expect(createClientMock).toHaveBeenCalledTimes(1);
+    expect(createClientMock).toHaveBeenCalledTimes(2);
     expect(ctx.supabaseAdmin).toBe(adminClient);
+    expect(ctx.supabasePublic).toBe(publicClient);
+    expect(ctx.supabase).toBe(injectedAuthClient);
     expect(ctx.supabaseAuth).toBe(injectedAuthClient);
     expect(ctx.hasSupabaseAdminPrivileges).toBe(true);
     expect(ctx.user?.id).toBe('user-1');
@@ -49,6 +54,7 @@ describe('createTRPCContext', () => {
   });
 
   it('hydrates the user from an injected user-scoped Supabase client when needed', async () => {
+    const publicClient = { role: 'public-client' };
     const adminClient = { role: 'admin-client' };
     const injectedAuthClient = {
       auth: {
@@ -67,7 +73,9 @@ describe('createTRPCContext', () => {
       },
     };
 
-    createClientMock.mockReturnValue(adminClient);
+    createClientMock
+      .mockReturnValueOnce(publicClient)
+      .mockReturnValueOnce(adminClient);
 
     const { createTRPCContext } = await import('./trpc');
     const ctx = await createTRPCContext({
@@ -75,24 +83,31 @@ describe('createTRPCContext', () => {
       supabaseAuth: injectedAuthClient as any,
     });
 
-    expect(createClientMock).toHaveBeenCalledTimes(1);
+    expect(createClientMock).toHaveBeenCalledTimes(2);
     expect(injectedAuthClient.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(ctx.supabasePublic).toBe(publicClient);
     expect(ctx.supabaseAuth).toBe(injectedAuthClient);
+    expect(ctx.supabase).toBe(injectedAuthClient);
     expect(ctx.hasSupabaseAdminPrivileges).toBe(true);
     expect(ctx.user?.id).toBe('user-2');
   });
 
   it('marks admin privileges as unavailable when service role key is missing', async () => {
+    const publicClient = { role: 'public-client' };
     const fallbackClient = { role: 'anon-fallback-client' };
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    createClientMock.mockReturnValue(fallbackClient);
+    createClientMock
+      .mockReturnValueOnce(publicClient)
+      .mockReturnValueOnce(fallbackClient);
 
     const { createTRPCContext } = await import('./trpc');
     const ctx = await createTRPCContext({
       headers: new Headers(),
     });
 
-    expect(createClientMock).toHaveBeenCalledTimes(1);
+    expect(createClientMock).toHaveBeenCalledTimes(2);
+    expect(ctx.supabase).toBe(publicClient);
+    expect(ctx.supabasePublic).toBe(publicClient);
     expect(ctx.supabaseAdmin).toBe(fallbackClient);
     expect(ctx.hasSupabaseAdminPrivileges).toBe(false);
   });

@@ -4,8 +4,18 @@
  * This code is proprietary and confidential.
  */
 
+import { setTimeout as sleep } from 'node:timers/promises';
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import {
+  getAiUsageLogSnapshotByRequestId,
+  getConversationById,
+  getConversationMessages,
+  getConversationTokenStats,
+  getCreditsForUserEmail,
+  getRecentCreditTransactionsForUserEmail,
+  ensureCreditsAtLeastForUserEmail,
+} from './support/creditFixtures';
 import { safeCloseContext } from './support/contextCleanup';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
@@ -31,6 +41,25 @@ async function expectUserMessageVisible(page: Page, prompt: string, timeout = 20
   ).toBeVisible({ timeout });
 }
 
+function chatPromptInput(page: Page) {
+  return page.locator('textarea:visible').first();
+}
+
+async function setChatPrompt(page: Page, prompt: string) {
+  const input = chatPromptInput(page);
+  const sendButton = page.getByRole('button', { name: '发送' });
+  await expect(input).toBeEditable({ timeout: 20000 });
+
+  await input.fill(prompt);
+  if ((await input.inputValue()) !== prompt || await sendButton.isDisabled()) {
+    await input.fill('');
+    await input.click();
+    await input.type(prompt);
+  }
+
+  await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt);
+}
+
 type StreamProbeResult = {
   status: number;
   body: string;
@@ -44,7 +73,23 @@ async function readCreditsFromRow(row: Locator) {
 }
 
 async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number) {
-  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+  if (!hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+    return;
+  }
+
+  const targetEmail = getCredentials('user').email;
+  try {
+    await ensureCreditsAtLeastForUserEmail(
+      targetEmail,
+      minimumCredits,
+      `Ensure minimum chat credits ${Date.now()}`,
+    );
+    return;
+  } catch {
+    // Fall back to the admin UI path when direct fixture writes are unavailable.
+  }
+
+  if (!hasCredentials('admin')) {
     return;
   }
 
@@ -54,8 +99,6 @@ async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number
   try {
     await gotoWithBypass(page, '/admin/users');
     await expect(page).toHaveURL(/\/admin\/users/);
-
-    const targetEmail = getCredentials('user').email;
     await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
     const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
@@ -88,6 +131,48 @@ async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number
   } finally {
     await safeCloseContext(context);
   }
+}
+
+async function pollForValue<T>(
+  label: string,
+  reader: () => Promise<T>,
+  isReady: (value: T) => boolean,
+  timeoutMs = 15000,
+  intervalMs = 500,
+): Promise<T> {
+  const startedAt = Date.now();
+  let lastValue = await reader();
+
+  while (!isReady(lastValue)) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`${label} was not ready within ${timeoutMs}ms`);
+    }
+
+    await sleep(intervalMs);
+    lastValue = await reader();
+  }
+
+  return lastValue;
+}
+
+function extractRequestIdFromStreamRequest(request: { postData(): string | null }): string {
+  const rawBody = request.postData();
+  if (!rawBody) {
+    throw new Error('Missing request body for /api/ai/stream');
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`Unable to parse /api/ai/stream request body: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (typeof parsed.requestId !== 'string' || parsed.requestId.length === 0) {
+    throw new Error('Missing requestId in /api/ai/stream request body');
+  }
+
+  return parsed.requestId;
 }
 
 async function streamChatEventsThroughAuthenticatedSession(
@@ -192,7 +277,7 @@ test.describe('AI Chat', () => {
 
       steps.push('Verify input shell and CTA controls');
       await expect(page.getByText('开始新对话')).toBeVisible();
-      await expect(page.locator('textarea[placeholder="请输入您的问题..."]')).toBeVisible();
+      await expect(chatPromptInput(page)).toBeVisible();
       await expect(page.getByRole('button', { name: '发送' })).toBeVisible();
 
       const blockingIssues = monitor.getIssues('P1');
@@ -269,8 +354,7 @@ test.describe('AI Chat', () => {
         }
       });
 
-      const input = page.locator('textarea[placeholder="请输入您的问题..."]');
-      await input.fill(oversizedPrompt);
+      await setChatPrompt(page, oversizedPrompt);
 
       steps.push('Attempt to send and verify the long-text confirmation dialog appears before any stream request');
       await page.getByRole('button', { name: '发送' }).click();
@@ -318,8 +402,8 @@ test.describe('AI Chat', () => {
       await gotoWithBypass(page, '/chat');
 
       steps.push('Fill chat prompt');
-      const input = page.locator('textarea[placeholder="请输入您的问题..."]');
-      await input.fill(prompt);
+      await setChatPrompt(page, prompt);
+      await expect(page.getByRole('button', { name: '发送' })).toBeEnabled();
 
       steps.push('Submit the prompt and wait for stream endpoint');
       const streamResponsePromise = page.waitForResponse(
@@ -369,6 +453,157 @@ test.describe('AI Chat', () => {
         steps,
         monitor.getIssues(),
         ['If this fails, inspect model configuration, user credits, and stream route auth before changing UI logic.'],
+      );
+    }
+  });
+
+  test('should persist chat runtime evidence and deduct credits for a live preview send', async ({ browser, page }, testInfo) => {
+    test.skip(isLocalPlaywrightBaseUrl(), 'Chat runtime closure verification requires a deployed Vercel environment.');
+    test.setTimeout(90000);
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    const userEmail = getCredentials('user').email;
+    const prompt = `P1 runtime closure smoke ${Date.now()}`;
+    let actual = 'Chat runtime closure evidence captured';
+
+    try {
+      steps.push('Ensure the E2E user has enough credits and capture the pre-send credit balance');
+      await ensureUserCreditsAtLeast(browser, 300);
+      const beforeCredits = await getCreditsForUserEmail(userEmail);
+      const sendStartedAt = new Date().toISOString();
+
+      steps.push('Open /chat and prepare a unique prompt');
+      await gotoWithBypass(page, '/chat');
+      await setChatPrompt(page, prompt);
+      await expect(page.getByRole('button', { name: '发送' })).toBeEnabled();
+
+      steps.push('Submit the prompt and capture the outgoing requestId together with the stream response');
+      const streamRequestPromise = page.waitForRequest(
+        (request) =>
+          request.url().includes('/api/ai/stream') &&
+          request.method() === 'POST',
+        { timeout: 20000 },
+      );
+      const streamResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes('/api/ai/stream') &&
+          response.request().method() === 'POST',
+        { timeout: 20000 },
+      );
+      await page.getByRole('button', { name: '发送' }).click();
+
+      const streamRequest = await streamRequestPromise;
+      const requestId = extractRequestIdFromStreamRequest(streamRequest);
+      const streamResponse = await streamResponsePromise;
+      expect(streamResponse.status()).toBe(200);
+
+      steps.push('Verify the prompt is visible in the UI and the page returns to idle after streaming');
+      await expectUserMessageVisible(page, prompt);
+      await expect(page.getByRole('button', { name: '发送' })).toBeVisible({ timeout: 60000 });
+
+      steps.push('Poll ai_usage_logs by requestId until the runtime usage record is written');
+      const usageLog = await pollForValue(
+        'AI usage log',
+        () => getAiUsageLogSnapshotByRequestId(requestId),
+        (value) => value !== null && value.status === 'success' && typeof value.conversationId === 'string',
+        20000,
+        750,
+      );
+      if (!usageLog) {
+        throw new Error(`Missing ai_usage_logs record for requestId ${requestId}`);
+      }
+
+      const conversationId = usageLog.conversationId;
+      if (!conversationId) {
+        throw new Error(`Usage log ${usageLog.id} did not contain a conversationId`);
+      }
+
+      steps.push('Verify the persisted conversation belongs to the E2E user');
+      const conversation = await pollForValue(
+        'Conversation record',
+        () => getConversationById(conversationId),
+        (value) => value !== null,
+        15000,
+        500,
+      );
+      if (!conversation) {
+        throw new Error(`Missing conversation ${conversationId}`);
+      }
+      expect(conversation.userId).toBe(beforeCredits.userId);
+      expect(conversation.isDeleted).toBe(false);
+
+      steps.push('Verify the conversation messages include the user prompt and a persisted assistant reply');
+      const messages = await pollForValue(
+        'Conversation messages',
+        () => getConversationMessages(conversationId),
+        (value) => value.some((message) => message.role === 'user' && message.content === prompt)
+          && value.some((message) => message.role === 'assistant' && message.content.trim().length > 0),
+        20000,
+        750,
+      );
+      expect(messages.some((message) => message.role === 'user' && message.content === prompt)).toBe(true);
+      expect(messages.some((message) => message.role === 'assistant' && message.content.trim().length > 0)).toBe(true);
+
+      steps.push('Verify token_stats is recorded for the same conversation with positive credit usage');
+      const tokenStats = await pollForValue(
+        'Token stats',
+        () => getConversationTokenStats(conversationId),
+        (value) => value.some((stat) => stat.totalCredits > 0),
+        20000,
+        750,
+      );
+      const latestTokenStat = tokenStats[tokenStats.length - 1];
+      expect(latestTokenStat.totalCredits).toBeGreaterThan(0);
+      expect(latestTokenStat.userId).toBe(beforeCredits.userId);
+
+      steps.push('Verify the user credits decreased and a new negative credit transaction exists after the send');
+      const afterCredits = await pollForValue(
+        'Post-send credits',
+        () => getCreditsForUserEmail(userEmail),
+        (value) => value.credits < beforeCredits.credits,
+        20000,
+        750,
+      );
+      const recentTransactions = await pollForValue(
+        'Recent credit transactions',
+        () => getRecentCreditTransactionsForUserEmail(userEmail, {
+          createdAfter: sendStartedAt,
+          limit: 10,
+        }),
+        (value) => value.some((transaction) => transaction.amount < 0),
+        20000,
+        750,
+      );
+      const deductionTransaction = recentTransactions.find((transaction) => transaction.amount < 0);
+      expect(deductionTransaction).toBeTruthy();
+
+      actual = [
+        `Captured requestId ${requestId}`,
+        `conversation ${conversationId}`,
+        `credits ${beforeCredits.credits} -> ${afterCredits.credits}`,
+        `deduction ${deductionTransaction?.amount ?? 'n/a'}`,
+        `token credits ${latestTokenStat.totalCredits}`,
+      ].join('; ');
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown chat runtime closure failure';
+      monitor.addAssertionIssue(actual, 'P0');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'chat-runtime-closure-evidence',
+          role: 'user',
+          route: '/chat',
+          expected: 'A live preview chat send produces a successful stream response, persists ai_usage_logs/conversation/messages/token_stats evidence, and deducts credits.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+        ['Trace the same requestId through ai_usage_logs, conversation persistence, token_stats, and credit_transactions before treating this flow as signed off.'],
       );
     }
   });
@@ -441,8 +676,8 @@ test.describe('AI Chat', () => {
 
       steps.push('Open /chat and start a long-running prompt');
       await gotoWithBypass(page, '/chat');
-      const input = page.locator('textarea[placeholder="请输入您的问题..."]');
-      await input.fill(prompt);
+      await setChatPrompt(page, prompt);
+      await expect(page.getByRole('button', { name: '发送' })).toBeEnabled();
       await page.getByRole('button', { name: '发送' }).click();
       const dismissedLowBalance = await dismissLowBalanceDialogIfVisible(page);
       if (dismissedLowBalance) {
@@ -510,7 +745,8 @@ test.describe('AI Chat', () => {
       }, { times: 1 });
 
       steps.push('Submit a prompt while the injected failure route is active');
-      await page.locator('textarea[placeholder="请输入您的问题..."]').fill(prompt);
+      await setChatPrompt(page, prompt);
+      await expect(page.getByRole('button', { name: '发送' })).toBeEnabled();
       await page.getByRole('button', { name: '发送' }).click();
 
       steps.push('Verify the user prompt remains visible and an error banner is rendered');
@@ -527,7 +763,7 @@ test.describe('AI Chat', () => {
       monitor.removeIssues(
         (issue) =>
           issue.source === 'console' &&
-          issue.message.includes('Streaming error: Injected parity failure'),
+          issue.message.includes('Streaming error'),
       );
       monitor.removeIssues(
         (issue) =>

@@ -5,6 +5,7 @@
  */
 
 import { trpc } from '@/trpc/client';
+import { logClientDevError } from '@/lib/client-log';
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -298,8 +299,8 @@ export function ConsumeCreditsButton({
         referenceType: 'service',
       });
       alert(`成功消费 ${amount} 积分`);
-    } catch (err) {
-      console.error('扣除失败:', err);
+    } catch {
+      logClientDevError('扣除失败');
       alert('积分扣除失败，请重试');
     }
   };

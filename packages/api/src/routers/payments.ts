@@ -7,6 +7,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
+import { logger } from '../lib/logger';
+import { createSafeInternalError } from '../lib/publicError';
 import {
   assertStripeCheckoutConfigured,
   buildStripeMetadata,
@@ -77,14 +79,24 @@ function toCheckoutConfigError(message: string) {
   });
 }
 
+function createPaymentOperationError(operation: string, cause: unknown) {
+  return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function toCheckoutUnavailableError() {
+  return toCheckoutConfigError('支付暂不可用，请稍后重试');
+}
+
+function toItemUnavailableError(message = '该商品暂不可购买，请稍后重试') {
+  return toCheckoutConfigError(message);
+}
+
 function assertPaymentPersistenceConfigured(hasSupabaseAdminPrivileges: boolean) {
   if (hasSupabaseAdminPrivileges) {
     return;
   }
 
-  throw toCheckoutConfigError(
-    'Stripe checkout requires SUPABASE_SERVICE_ROLE_KEY to persist payment orders and subscriptions'
-  );
+  throw toCheckoutUnavailableError();
 }
 
 async function loadPaymentItemNames(
@@ -117,17 +129,11 @@ async function loadPaymentItemNames(
   ]);
 
   if (creditPackagesResult.error) {
-    throw new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: creditPackagesResult.error.message,
-    });
+    throw createPaymentOperationError('读取账单项目', creditPackagesResult.error);
   }
 
   if (membershipPlansResult.error) {
-    throw new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: membershipPlansResult.error.message,
-    });
+    throw createPaymentOperationError('读取账单项目', membershipPlansResult.error);
   }
 
   return {
@@ -141,52 +147,85 @@ async function loadPaymentItemNames(
 }
 
 async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClient> | null, order: any) {
-  if (!stripe) {
-    return {
-      invoiceNumber: null,
-      invoicePdfUrl: null,
-      hostedInvoiceUrl: null,
-      receiptUrl: null,
-    };
-  }
-
-  if (order.stripe_invoice_id) {
-    const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
-    return {
-      invoiceNumber: invoice.number ?? null,
-      invoicePdfUrl: invoice.invoice_pdf ?? null,
-      hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-      receiptUrl: null,
-    };
-  }
-
-  if (!order.stripe_checkout_session_id) {
-    return {
-      invoiceNumber: null,
-      invoicePdfUrl: null,
-      hostedInvoiceUrl: null,
-      receiptUrl: null,
-    };
-  }
-
-  const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, {
-    expand: ['payment_intent.latest_charge'],
-  });
-
-  const paymentIntent = typeof session.payment_intent === 'object'
-    ? session.payment_intent
-    : null;
-  const latestCharge = paymentIntent?.latest_charge;
-  const receiptUrl =
-    latestCharge && typeof latestCharge === 'object' && 'receipt_url' in latestCharge
-      ? latestCharge.receipt_url ?? null
-      : null;
-
-  return {
+  const emptyDocument = {
     invoiceNumber: null,
     invoicePdfUrl: null,
     hostedInvoiceUrl: null,
-    receiptUrl,
+    receiptUrl: null,
+  };
+
+  if (!stripe) {
+    return emptyDocument;
+  }
+
+  try {
+    if (order.stripe_invoice_id) {
+      const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
+      return {
+        invoiceNumber: invoice.number ?? null,
+        invoicePdfUrl: invoice.invoice_pdf ?? null,
+        hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+        receiptUrl: null,
+      };
+    }
+
+    if (!order.stripe_checkout_session_id) {
+      return emptyDocument;
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, {
+      expand: ['payment_intent.latest_charge'],
+    });
+
+    const paymentIntent = typeof session.payment_intent === 'object'
+      ? session.payment_intent
+      : null;
+    const latestCharge = paymentIntent?.latest_charge;
+    const receiptUrl =
+      latestCharge && typeof latestCharge === 'object' && 'receipt_url' in latestCharge
+        ? latestCharge.receipt_url ?? null
+        : null;
+
+    return {
+      invoiceNumber: null,
+      invoicePdfUrl: null,
+      hostedInvoiceUrl: null,
+      receiptUrl,
+    };
+  } catch (error) {
+    logger.warn('billing', 'payments_billing_document_lookup_failed', {
+      orderId: order.id,
+      stripeInvoiceId: order.stripe_invoice_id ?? null,
+      stripeCheckoutSessionId: order.stripe_checkout_session_id ?? null,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      invoiceNumber: null,
+      invoicePdfUrl: null,
+      hostedInvoiceUrl: null,
+      receiptUrl: null,
+    };
+  }
+}
+
+function createStripeBillingDocumentLoader(stripe: ReturnType<typeof getStripeClient> | null) {
+  const documentCache = new Map<string, Promise<Awaited<ReturnType<typeof loadStripeBillingDocument>>>>();
+
+  return async (order: any) => {
+    const cacheKey = order.stripe_invoice_id
+      ? `invoice:${order.stripe_invoice_id}`
+      : order.stripe_checkout_session_id
+        ? `session:${order.stripe_checkout_session_id}`
+        : `order:${order.id}`;
+
+    const cached = documentCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = loadStripeBillingDocument(stripe, order);
+    documentCache.set(cacheKey, promise);
+    return promise;
   };
 }
 
@@ -200,9 +239,7 @@ export const paymentsRouter = router({
         assertStripeCheckoutConfigured();
         stripe = getStripeClient();
       } catch (error) {
-        throw toCheckoutConfigError(
-          error instanceof Error ? error.message : 'Stripe checkout is not configured',
-        );
+        throw toCheckoutUnavailableError();
       }
 
       const { data: profile, error: profileError } = await ctx.supabase
@@ -256,10 +293,7 @@ export const paymentsRouter = router({
         }
 
         if (membershipPlanError) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: membershipPlanError.message,
-          });
+          throw createPaymentOperationError('读取会员折扣', membershipPlanError);
         }
 
         if (creditPackage.active !== 'true') {
@@ -267,7 +301,7 @@ export const paymentsRouter = router({
         }
 
         if (!creditPackage.stripe_price_id) {
-          throw toCheckoutConfigError('该积分包尚未配置 Stripe Price ID');
+          throw toItemUnavailableError();
         }
 
         const { baseAmountCents, discountedAmountCents, normalizedDiscount } =
@@ -277,7 +311,7 @@ export const paymentsRouter = router({
           });
 
         if (discountedAmountCents <= 0) {
-          throw toCheckoutConfigError('该积分包折后金额无效，请先调整会员折扣配置');
+          throw toItemUnavailableError();
         }
 
         const metadata = {
@@ -315,15 +349,20 @@ export const paymentsRouter = router({
                 },
               ];
 
-        const session = await stripe.checkout.sessions.create({
-          mode: 'payment',
-          customer: customerId,
-          client_reference_id: ctx.profileId,
-          line_items: lineItems,
-          success_url: successUrl,
-          cancel_url: cancelUrl,
-          metadata,
-        });
+        let session;
+        try {
+          session = await stripe.checkout.sessions.create({
+            mode: 'payment',
+            customer: customerId,
+            client_reference_id: ctx.profileId,
+            line_items: lineItems,
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata,
+          });
+        } catch (error) {
+          throw createPaymentOperationError('创建支付会话', error);
+        }
 
         const { error: orderError } = await ctx.supabaseAdmin.from('payment_orders').insert({
           user_id: ctx.profileId,
@@ -342,17 +381,11 @@ export const paymentsRouter = router({
         });
 
         if (orderError) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: orderError.message,
-          });
+          throw createPaymentOperationError('保存支付订单', orderError);
         }
 
         if (!session.url) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: 'Stripe 未返回可跳转的支付链接',
-          });
+          throw createPaymentOperationError('创建支付会话', new Error('Stripe checkout URL missing'));
         }
 
         return {
@@ -388,11 +421,7 @@ export const paymentsRouter = router({
           : plan.stripe_yearly_price_id;
 
       if (!selectedPriceId) {
-        throw toCheckoutConfigError(
-          input.billingCycle === 'monthly'
-            ? '该会员套餐尚未配置月付 Stripe Price ID'
-            : '该会员套餐尚未配置年付 Stripe Price ID'
-        );
+        throw toItemUnavailableError('该会员套餐暂不可购买，请稍后重试');
       }
 
       const metadata = buildStripeMetadata({
@@ -403,23 +432,28 @@ export const paymentsRouter = router({
         billingCycle: input.billingCycle,
       });
 
-      const session = await stripe.checkout.sessions.create({
-        mode: 'subscription',
-        customer: customerId,
-        client_reference_id: ctx.profileId,
-        line_items: [
-          {
-            price: selectedPriceId,
-            quantity: 1,
-          },
-        ],
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        metadata,
-        subscription_data: {
+      let session;
+      try {
+        session = await stripe.checkout.sessions.create({
+          mode: 'subscription',
+          customer: customerId,
+          client_reference_id: ctx.profileId,
+          line_items: [
+            {
+              price: selectedPriceId,
+              quantity: 1,
+            },
+          ],
+          success_url: successUrl,
+          cancel_url: cancelUrl,
           metadata,
-        },
-      });
+          subscription_data: {
+            metadata,
+          },
+        });
+      } catch (error) {
+        throw createPaymentOperationError('创建支付会话', error);
+      }
 
       const { error: orderError } = await ctx.supabaseAdmin.from('payment_orders').insert({
         user_id: ctx.profileId,
@@ -439,17 +473,11 @@ export const paymentsRouter = router({
       });
 
       if (orderError) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: orderError.message,
-        });
+        throw createPaymentOperationError('保存支付订单', orderError);
       }
 
       if (!session.url) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Stripe 未返回可跳转的支付链接',
-        });
+        throw createPaymentOperationError('创建支付会话', new Error('Stripe checkout URL missing'));
       }
 
       return {
@@ -464,15 +492,18 @@ export const paymentsRouter = router({
       try {
         assertStripeCheckoutConfigured();
       } catch (error) {
-        throw toCheckoutConfigError(
-          error instanceof Error ? error.message : 'Stripe checkout is not configured',
-        );
+        throw toCheckoutUnavailableError();
       }
 
       const stripe = getStripeClient();
-      const session = await stripe.checkout.sessions.retrieve(input.sessionId, {
-        expand: ['payment_intent', 'subscription', 'invoice'],
-      });
+      let session;
+      try {
+        session = await stripe.checkout.sessions.retrieve(input.sessionId, {
+          expand: ['payment_intent', 'subscription', 'invoice'],
+        });
+      } catch (error) {
+        throw createPaymentOperationError('同步支付会话', error);
+      }
 
       const sessionUserId =
         session.metadata?.userId ??
@@ -486,49 +517,53 @@ export const paymentsRouter = router({
         });
       }
 
-      await upsertPaymentOrderBySession(ctx.supabaseAdmin, session);
+      try {
+        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session);
 
-      if (session.mode === 'payment' && session.payment_status === 'paid') {
-        await fulfillCreditPackageOrder(ctx.supabaseAdmin, session);
-      }
+        if (session.mode === 'payment' && session.payment_status === 'paid') {
+          await fulfillCreditPackageOrder(ctx.supabaseAdmin, session);
+        }
 
-      if (session.mode === 'subscription') {
-        const subscriptionId =
-          typeof session.subscription === 'string'
-            ? session.subscription
-            : session.subscription?.id ?? null;
-
-        if (subscriptionId) {
-          const subscription =
+        if (session.mode === 'subscription') {
+          const subscriptionId =
             typeof session.subscription === 'string'
-              ? await stripe.subscriptions.retrieve(subscriptionId)
-              : session.subscription;
+              ? session.subscription
+              : session.subscription?.id ?? null;
 
-          if (!subscription) {
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: 'Stripe 订阅状态不可用，请稍后重试',
-            });
-          }
+          if (subscriptionId) {
+            const subscription =
+              typeof session.subscription === 'string'
+                ? await stripe.subscriptions.retrieve(subscriptionId)
+                : session.subscription;
 
-          await syncSubscriptionState(ctx.supabaseAdmin, subscription);
+            if (!subscription) {
+              throw new Error('Stripe subscription unavailable');
+            }
 
-          const expandedInvoice =
-            typeof session.invoice === 'string'
-              ? await stripe.invoices.retrieve(session.invoice)
-              : session.invoice ?? null;
+            await syncSubscriptionState(ctx.supabaseAdmin, subscription);
 
-          const paidInvoice = expandedInvoice?.status === 'paid'
-            ? expandedInvoice
-            : (await stripe.invoices.list({
-                subscription: subscriptionId,
-                limit: 10,
-              })).data.find((invoice) => invoice.status === 'paid') ?? null;
+            const expandedInvoice =
+              typeof session.invoice === 'string'
+                ? await stripe.invoices.retrieve(session.invoice)
+                : session.invoice ?? null;
 
-          if (paidInvoice) {
-            await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
+            const paidInvoice = expandedInvoice?.status === 'paid'
+              ? expandedInvoice
+              : (await stripe.invoices.list({
+                  subscription: subscriptionId,
+                  limit: 10,
+                })).data.find((invoice) => invoice.status === 'paid') ?? null;
+
+            if (paidInvoice) {
+              await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
+            }
           }
         }
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        throw createPaymentOperationError('同步支付会话', error);
       }
 
       const { data: syncedOrder, error: syncedOrderError } = await ctx.supabaseAdmin
@@ -538,10 +573,7 @@ export const paymentsRouter = router({
         .maybeSingle();
 
       if (syncedOrderError) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: syncedOrderError.message,
-        });
+        throw createPaymentOperationError('读取支付同步结果', syncedOrderError);
       }
 
       return {
@@ -577,10 +609,7 @@ export const paymentsRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: error.message,
-        });
+        throw createPaymentOperationError('读取账单记录', error);
       }
 
       const billingOrders = (orders ?? []) as unknown as PaymentOrderBillingRow[];
@@ -601,38 +630,44 @@ export const paymentsRouter = router({
       } catch {
         stripe = null;
       }
+      const loadBillingDocument = createStripeBillingDocumentLoader(stripe);
 
-      const records = await Promise.all(
-        rawOrders.map(async (order): Promise<BillingRecord> => {
-          const stripeDocuments = await loadStripeBillingDocument(stripe, order);
-          const itemType: BillingRecord['itemType'] =
-            order.item_type === 'membership_plan' ? 'membership_plan' : 'credit_package';
-          const title: string = itemType === 'membership_plan'
-            ? membershipPlanNames.get(order.item_id) ?? '会员订阅'
-            : creditPackageNames.get(order.item_id) ?? '积分加油包';
-          const billingCycle: BillingRecord['billingCycle'] = order.billing_cycle ?? 'one_time';
+      let records;
+      try {
+        records = await Promise.all(
+          rawOrders.map(async (order): Promise<BillingRecord> => {
+            const stripeDocuments = await loadBillingDocument(order);
+            const itemType: BillingRecord['itemType'] =
+              order.item_type === 'membership_plan' ? 'membership_plan' : 'credit_package';
+            const title: string = itemType === 'membership_plan'
+              ? membershipPlanNames.get(order.item_id) ?? '会员订阅'
+              : creditPackageNames.get(order.item_id) ?? '积分加油包';
+            const billingCycle: BillingRecord['billingCycle'] = order.billing_cycle ?? 'one_time';
 
-          return {
-            id: order.id,
-            itemType,
-            title,
-            description:
-              itemType === 'membership_plan'
-                ? `订阅账单 · ${billingCycle === 'yearly' ? '年付' : '月付'}`
-                : '一次性积分购买',
-            status: order.status,
-            amountTotal: Number(order.amount_total ?? 0) / 100,
-            currency: order.currency ?? 'usd',
-            billingCycle,
-            createdAt: order.created_at,
-            fulfilledAt: order.fulfilled_at,
-            invoiceNumber: stripeDocuments.invoiceNumber,
-            invoicePdfUrl: stripeDocuments.invoicePdfUrl,
-            hostedInvoiceUrl: stripeDocuments.hostedInvoiceUrl,
-            receiptUrl: stripeDocuments.receiptUrl,
-          };
-        }),
-      );
+            return {
+              id: order.id,
+              itemType,
+              title,
+              description:
+                itemType === 'membership_plan'
+                  ? `订阅账单 · ${billingCycle === 'yearly' ? '年付' : '月付'}`
+                  : '一次性积分购买',
+              status: order.status,
+              amountTotal: Number(order.amount_total ?? 0) / 100,
+              currency: order.currency ?? 'usd',
+              billingCycle,
+              createdAt: order.created_at,
+              fulfilledAt: order.fulfilled_at,
+              invoiceNumber: stripeDocuments.invoiceNumber,
+              invoicePdfUrl: stripeDocuments.invoicePdfUrl,
+              hostedInvoiceUrl: stripeDocuments.hostedInvoiceUrl,
+              receiptUrl: stripeDocuments.receiptUrl,
+            };
+          }),
+        );
+      } catch (error) {
+        throw createPaymentOperationError('读取账单记录', error);
+      }
 
       return records;
     }),

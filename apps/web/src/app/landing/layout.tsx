@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { getPublicSiteSettings } from "@/lib/public-site";
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata(): Promise<Metadata> {
   const { siteName } = await getPublicSiteSettings();
   const title = `${siteName} - AI 驱动的社媒增长平台`;

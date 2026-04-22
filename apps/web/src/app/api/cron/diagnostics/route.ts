@@ -19,9 +19,13 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { DiagnosticsService } from '@repo/api/src/services/diagnostics';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { logServerError, logServerInfo } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // 最长执行 60 秒
+
+const CRON_FAILURE_MESSAGE = 'Diagnostics cron failed';
+const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 
 export async function GET(request: Request) {
   const unauthorizedResponse = validateCronRequest(request, 'diagnostics');
@@ -36,7 +40,7 @@ export async function GET(request: Request) {
 
     if (!supabaseUrl || !supabaseServiceKey) {
       return NextResponse.json(
-        { error: 'Missing Supabase configuration' },
+        { error: CRON_CONFIG_ERROR_MESSAGE },
         { status: 500 }
       );
     }
@@ -49,7 +53,12 @@ export async function GET(request: Request) {
       runType: 'cron',
     });
 
+    logServerInfo('system', 'cron_diagnostics_started');
     const result = await diagnosticsService.runAllTests();
+    logServerInfo('system', 'cron_diagnostics_completed', {
+      batchId: result.batchId,
+      passRate: result.summary.passRate,
+    });
 
     // 返回结果摘要
     return NextResponse.json({
@@ -59,13 +68,13 @@ export async function GET(request: Request) {
       summary: result.summary,
       timestamp: new Date().toISOString(),
     });
-  } catch (error) {
-    console.error('Cron diagnostics failed:', error);
+  } catch {
+    logServerError('system', 'cron_diagnostics_failed');
 
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: CRON_FAILURE_MESSAGE,
         timestamp: new Date().toISOString(),
       },
       { status: 500 }

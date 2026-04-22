@@ -3,6 +3,7 @@
 import { AlertCircle, ShieldX } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { getSafeErrorMessage, isAdminPermissionError } from '@/lib/safe-error-message';
 
 interface AdminErrorStateProps {
   error: Error | { message: string };
@@ -10,7 +11,8 @@ interface AdminErrorStateProps {
 }
 
 export default function AdminErrorState({ error, onRetry }: AdminErrorStateProps) {
-  const isPermissionError = error.message.includes('Admin role required');
+  const isPermissionError = isAdminPermissionError(error);
+  const safeMessage = getSafeErrorMessage(error, '加载失败，请稍后重试。');
 
   return (
     <div className="flex-1 p-8">
@@ -41,7 +43,7 @@ export default function AdminErrorState({ error, onRetry }: AdminErrorStateProps
               >
                 {isPermissionError
                   ? '您需要管理员权限才能查看此页面。'
-                  : error.message}
+                  : safeMessage}
               </p>
               {onRetry && !isPermissionError && (
                 <Button

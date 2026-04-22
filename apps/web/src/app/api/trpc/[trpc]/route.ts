@@ -4,16 +4,30 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
+import { logServerError } from '@/lib/server-log';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 import {
   isTrpcRequestAllowedDuringMaintenance,
   parseTrpcProcedurePaths,
 } from '@/lib/trpc-maintenance';
 
+function shouldFailClosedMaintenance(): boolean {
+  if (process.env.VERCEL_ENV) {
+    return process.env.VERCEL_ENV === 'production';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
+
 async function isMaintenanceModeEnabled(): Promise<boolean> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    logServerError('system', 'trpc_service_role_key_missing');
+    return shouldFailClosedMaintenance();
+  }
+
   const maintenanceClient = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
   const { data, error } = await maintenanceClient
@@ -23,8 +37,10 @@ async function isMaintenanceModeEnabled(): Promise<boolean> {
     .maybeSingle();
 
   if (error) {
-    console.error('[tRPC Route] Failed to read maintenance mode:', error);
-    return true;
+    logServerError('system', 'trpc_maintenance_mode_read_failed', {
+      code: error.code,
+    });
+    return shouldFailClosedMaintenance();
   }
 
   return data?.value === true || data?.value === 'true';

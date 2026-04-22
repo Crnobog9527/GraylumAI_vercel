@@ -10,6 +10,8 @@ import PublicPageHero from '@/components/landing/PublicPageHero';
 import { contactChannels } from '@/lib/landing-content';
 import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata() {
   return buildPublicPageMetadata(
     '联系我们',

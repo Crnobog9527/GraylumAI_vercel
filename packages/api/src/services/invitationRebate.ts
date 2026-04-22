@@ -11,6 +11,13 @@ import {
 } from './invitationRuntime';
 
 const INVITATION_REBATE_PREFIX = '邀请消费返利（结算 ';
+const INVITATION_REBATE_ERRORS = {
+  loadBinding: '读取邀请绑定关系失败',
+  loadStatus: '读取邀请返利状态失败',
+  loadInviterProfile: '读取邀请人资料失败',
+  updateInviterCredits: '更新邀请人积分失败',
+  createTransaction: '写入邀请返利记录失败',
+} as const;
 
 export interface InvitationRebateResult {
   status:
@@ -76,7 +83,7 @@ export async function applyInvitationRebateForSpend(args: {
     .maybeSingle();
 
   if (invitationRecordError) {
-    throw new Error(invitationRecordError.message);
+    throw new Error(INVITATION_REBATE_ERRORS.loadBinding);
   }
 
   if (!invitationRecord?.inviter_id) {
@@ -138,7 +145,7 @@ export async function applyInvitationRebateForSpend(args: {
   ].filter(Boolean);
 
   if (queryErrors.length > 0) {
-    throw new Error(queryErrors[0]?.message ?? '读取邀请返利状态失败');
+    throw new Error(INVITATION_REBATE_ERRORS.loadStatus);
   }
 
   if (existingRebateResult.data) {
@@ -185,7 +192,7 @@ export async function applyInvitationRebateForSpend(args: {
     .single();
 
   if (inviterProfileError || !inviterProfile) {
-    throw new Error(inviterProfileError?.message ?? '邀请人资料不存在');
+    throw new Error(INVITATION_REBATE_ERRORS.loadInviterProfile);
   }
 
   const { error: updateInviterError } = await supabase
@@ -196,7 +203,7 @@ export async function applyInvitationRebateForSpend(args: {
     .eq('id', invitationRecord.inviter_id);
 
   if (updateInviterError) {
-    throw new Error(updateInviterError.message);
+    throw new Error(INVITATION_REBATE_ERRORS.updateInviterCredits);
   }
 
   const description = buildRebateDescription(
@@ -216,7 +223,7 @@ export async function applyInvitationRebateForSpend(args: {
     });
 
   if (insertError) {
-    throw new Error(insertError.message);
+    throw new Error(INVITATION_REBATE_ERRORS.createTransaction);
   }
 
   return {

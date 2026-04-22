@@ -127,10 +127,7 @@ export default function AdminPromptsPage() {
     icon: BATCH_NO_CHANGE,
   });
 
-  // Fetch models for selector
-  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
-
-  const { data, isLoading, error, refetch } = trpc.admin.getAllPrompts.useQuery({
+  const { data: dashboard, isLoading, error, refetch } = trpc.admin.getPromptsDashboard.useQuery({
     limit: 50,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
   });
@@ -391,13 +388,14 @@ export default function AdminPromptsPage() {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
-  const prompts = data?.prompts ?? [];
+  const prompts = dashboard?.prompts ?? [];
   const hasSelectedPrompts = selectedPromptIds.length > 0;
   const allPromptsSelected = prompts.length > 0 && selectedPromptIds.length === prompts.length;
-  const stats = data?.stats ?? {
+  const stats = dashboard?.stats ?? {
     total: 0, active: 0, inactive: 0, system: 0,
     byCategory: { general: 0, assistant: 0, creative: 0, coding: 0, translation: 0, analysis: 0 }
   };
+  const modelsData = dashboard?.models ?? [];
 
   return (
     <div className="p-8 overflow-auto">

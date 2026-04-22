@@ -13,9 +13,14 @@ import {
   TicketAutoCloseService,
 } from '@repo/api/src/services';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { logServerError, logServerInfo } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+const CRON_FAILURE_MESSAGE = 'Ticket auto-close failed';
+const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
+const SCHEDULED_RUN_ERROR_MESSAGE = '工单自动关闭失败，请稍后重试';
 
 async function handleRequest(request: Request) {
   const unauthorizedResponse = validateCronRequest(request, 'ticket_auto_close');
@@ -28,7 +33,7 @@ async function handleRequest(request: Request) {
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
-      { error: 'Missing Supabase configuration' },
+      { error: CRON_CONFIG_ERROR_MESSAGE },
       { status: 500 }
     );
   }
@@ -42,7 +47,7 @@ async function handleRequest(request: Request) {
     });
 
     try {
-      console.info('[Cron][ticket_auto_close] started');
+      logServerInfo('system', 'cron_ticket_auto_close_started');
 
       const service = new TicketAutoCloseService({ supabase });
       const result = await service.run();
@@ -58,7 +63,7 @@ async function handleRequest(request: Request) {
         },
       });
 
-      console.info('[Cron][ticket_auto_close] completed', {
+      logServerInfo('system', 'cron_ticket_auto_close_completed', {
         checked: result.checked,
         eligible: result.eligible,
         closed: result.closed,
@@ -77,18 +82,18 @@ async function handleRequest(request: Request) {
         supabase,
         runId,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Unknown auto-close error',
+        error: SCHEDULED_RUN_ERROR_MESSAGE,
       });
 
       throw error;
     }
-  } catch (error) {
-    console.error('Cron ticket auto-close failed:', error);
+  } catch {
+    logServerError('system', 'cron_ticket_auto_close_failed');
 
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: CRON_FAILURE_MESSAGE,
         timestamp: new Date().toISOString(),
       },
       { status: 500 }

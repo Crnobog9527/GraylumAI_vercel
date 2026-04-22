@@ -7,6 +7,7 @@
  */
 
 import type { AIMessage } from '../types/ai';
+import { logger } from '../lib/logger';
 import {
   getConfiguredProviderApiKey,
   getFallbackProviderApiKey,
@@ -15,6 +16,11 @@ import {
 
 const ANTHROPIC_COUNT_TOKENS_URL = 'https://api.anthropic.com/v1/messages/count_tokens';
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const TOKEN_COUNTING_ERRORS = {
+  anthropicFailed: 'Anthropic token counting failed',
+  geminiFailed: 'Gemini token counting failed',
+  unsupportedProvider: 'Official token counting is not supported for this provider',
+} as const;
 const ANTHROPIC_VERSION = '2023-06-01';
 
 const CHARS_PER_TOKEN = {
@@ -126,7 +132,7 @@ export async function countTokensOfficial(params: TokenCountParams): Promise<{ i
     });
 
     if (!response.ok) {
-      throw new Error(`Anthropic token counting failed: ${await response.text()}`);
+      throw new Error(TOKEN_COUNTING_ERRORS.anthropicFailed);
     }
 
     const data = await response.json() as { input_tokens: number };
@@ -154,7 +160,7 @@ export async function countTokensOfficial(params: TokenCountParams): Promise<{ i
     );
 
     if (!response.ok) {
-      throw new Error(`Gemini token counting failed: ${await response.text()}`);
+      throw new Error(TOKEN_COUNTING_ERRORS.geminiFailed);
     }
 
     const data = await response.json() as { totalTokens?: number };
@@ -164,7 +170,7 @@ export async function countTokensOfficial(params: TokenCountParams): Promise<{ i
     };
   }
 
-  throw new Error(`Official token counting is not supported for provider ${provider}`);
+  throw new Error(TOKEN_COUNTING_ERRORS.unsupportedProvider);
 }
 
 function detectLanguage(text: string): 'chinese' | 'english' | 'mixed' {
@@ -243,7 +249,8 @@ export async function countTokens(
         counterVersion: '2026-03-10',
       };
     } catch (error) {
-      console.warn('Official token counting failed, falling back to estimate:', error);
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      logger.warn('ai', 'token_count_official_fallback_used', { errorName });
       if (!fallbackToEstimate) {
         throw error;
       }

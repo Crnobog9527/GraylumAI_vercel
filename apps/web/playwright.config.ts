@@ -99,7 +99,8 @@ export default defineConfig({
   // Run local dev server before starting the tests
   webServer: shouldUseLocalWebServer
     ? {
-        command: 'pnpm dev',
+        // Webpack dev server is more stable for local middleware redirect checks.
+        command: 'pnpm dev:webpack',
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 120000,

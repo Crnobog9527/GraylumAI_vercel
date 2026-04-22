@@ -9,6 +9,7 @@ import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import { createSafeInternalError } from '../lib/publicError';
 import {
   AIRequestSchema,
   type AIResponse,
@@ -116,7 +117,9 @@ async function saveMessages(
     .single();
 
   if (userError) {
-    console.error('Failed to save user message:', userError);
+    logger.error('ai', 'ai_user_message_save_failed', {
+      code: userError.code,
+    });
   }
 
   // 保存助手消息
@@ -131,7 +134,9 @@ async function saveMessages(
     .single();
 
   if (assistantError) {
-    console.error('Failed to save assistant message:', assistantError);
+    logger.error('ai', 'ai_assistant_message_save_failed', {
+      code: assistantError.code,
+    });
   }
 
   return {
@@ -199,8 +204,10 @@ async function callClaudeAPI(params: {
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Claude API error:', errorText);
+    logger.error('ai', 'ai_provider_request_failed', {
+      provider: 'anthropic',
+      status: response.status,
+    });
 
     if (response.status === 429) {
       throw new TRPCError({
@@ -322,14 +329,14 @@ export const aiRouter = router({
       if (!modelConfig.tokenCountingSupported) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: `模型 ${modelConfig.name} 未配置可验证的 token 计数能力，禁止进入生产计费路径`,
+          message: 'AI 服务暂时不可用，请稍后重试',
         });
       }
 
       if (modelConfig.provider !== 'anthropic') {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: `非流式入口暂仅支持 Anthropic 直连模型，当前模型 ${modelConfig.name} 请改走流式运行时`,
+          message: 'AI 服务暂时不可用，请稍后重试',
         });
       }
 
@@ -466,7 +473,7 @@ export const aiRouter = router({
         const failLatencyMs = Date.now() - startTime;
         logger.ai.callFailed(
           modelConfig.modelId,
-          error instanceof Error ? error.message : 'Unknown error',
+          'AI 调用失败，请查看服务端日志',
           0,
           requestId,
           { userId: ctx.profileId, conversationId: conversation.id }
@@ -481,7 +488,7 @@ export const aiRouter = router({
           conversationId: conversation.id,
           requestId,
           modelUsed: modelConfig.modelId,
-          reason: error instanceof Error ? error.message : 'Unknown error',
+          reason: 'AI 调用失败，请查看服务端日志',
           preDeductId: preDeductResult.preDeductId,
           inputLength: input.message.length,
           latencyMs: failLatencyMs,
@@ -543,11 +550,8 @@ export const aiRouter = router({
           balanceAfter: result.balanceAfter,
         };
       } catch (error) {
-        console.error('Abort request failed:', error);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: error instanceof Error ? error.message : '中断结算失败',
-        });
+        logger.error('ai', 'ai_abort_settle_failed');
+        throw createSafeInternalError(error, '中断结算失败，请稍后重试');
       }
     }),
 
