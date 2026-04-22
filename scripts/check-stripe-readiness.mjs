@@ -20,6 +20,14 @@ if (existsSync(envLocalPath)) {
   loadDotenv({ path: envLocalPath, override: false });
 }
 
+function writeStdout(message = '') {
+  process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message = '') {
+  process.stderr.write(`${message}\n`);
+}
+
 const requiredEnvKeys = [
   'STRIPE_SECRET_KEY',
   'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
@@ -28,8 +36,8 @@ const requiredEnvKeys = [
 ];
 
 function printSection(title) {
-  console.log(`\n${title}`);
-  console.log('-'.repeat(title.length));
+  writeStdout(`\n${title}`);
+  writeStdout('-'.repeat(title.length));
 }
 
 function checkEnv() {
@@ -37,7 +45,7 @@ function checkEnv() {
 
   printSection('Environment');
   for (const key of requiredEnvKeys) {
-    console.log(`- ${key}: ${process.env[key] ? 'set' : 'missing'}`);
+    writeStdout(`- ${key}: ${process.env[key] ? 'set' : 'missing'}`);
   }
 
   return missing;
@@ -81,7 +89,7 @@ async function checkDatabase() {
 
     creditPackages = creditData ?? [];
     membershipPlans = planData ?? [];
-    console.log('- Data source: Supabase service role');
+    writeStdout('- Data source: Supabase service role');
   } else if (databaseUrl) {
     const client = new PgClient({ connectionString: databaseUrl });
     await client.connect();
@@ -104,12 +112,12 @@ async function checkDatabase() {
 
       creditPackages = creditResult.rows;
       membershipPlans = planResult.rows;
-      console.log('- Data source: DATABASE_URL');
+      writeStdout('- Data source: DATABASE_URL');
     } finally {
       await client.end();
     }
   } else {
-    console.log('- Skipped: missing Supabase service-role credentials and DATABASE_URL');
+    writeStdout('- Skipped: missing Supabase service-role credentials and DATABASE_URL');
     return {
       skipped: true,
       missingCreditPackages: [],
@@ -127,26 +135,26 @@ async function checkDatabase() {
     }))
     .filter((plan) => plan.missingMonthly || plan.missingYearly);
 
-  console.log(`- Active credit packages: ${(creditPackages ?? []).length}`);
-  console.log(`- Active paid membership plans: ${(membershipPlans ?? []).filter((plan) => plan.level !== 'free').length}`);
-  console.log(`- Credit packages missing Stripe Price ID: ${missingCreditPackages.length}`);
-  console.log(`- Membership plans missing monthly/yearly Price IDs: ${missingMembershipPlans.length}`);
+  writeStdout(`- Active credit packages: ${(creditPackages ?? []).length}`);
+  writeStdout(`- Active paid membership plans: ${(membershipPlans ?? []).filter((plan) => plan.level !== 'free').length}`);
+  writeStdout(`- Credit packages missing Stripe Price ID: ${missingCreditPackages.length}`);
+  writeStdout(`- Membership plans missing monthly/yearly Price IDs: ${missingMembershipPlans.length}`);
 
   if (missingCreditPackages.length > 0) {
-    console.log('\n  Credit packages missing Stripe Price ID:');
+    writeStdout('\n  Credit packages missing Stripe Price ID:');
     for (const pkg of missingCreditPackages) {
-      console.log(`  - ${pkg.name} (${pkg.id})`);
+      writeStdout(`  - ${pkg.name} (${pkg.id})`);
     }
   }
 
   if (missingMembershipPlans.length > 0) {
-    console.log('\n  Membership plans missing Stripe Price IDs:');
+    writeStdout('\n  Membership plans missing Stripe Price IDs:');
     for (const plan of missingMembershipPlans) {
       const missing = [
         plan.missingMonthly ? 'monthly' : null,
         plan.missingYearly ? 'yearly' : null,
       ].filter(Boolean).join(', ');
-      console.log(`  - ${plan.name} (${plan.id}) missing: ${missing}`);
+      writeStdout(`  - ${plan.name} (${plan.id}) missing: ${missing}`);
     }
   }
 
@@ -158,8 +166,8 @@ async function checkDatabase() {
 }
 
 async function main() {
-  console.log('Stripe readiness check');
-  console.log('======================');
+  writeStdout('Stripe readiness check');
+  writeStdout('======================');
 
   const missingEnv = checkEnv();
   const dbStatus = await checkDatabase();
@@ -172,16 +180,16 @@ async function main() {
 
   printSection('Result');
   if (ready) {
-    console.log('Stripe checkout is ready to enable.');
+    writeStdout('Stripe checkout is ready to enable.');
     process.exit(0);
   }
 
-  console.log('Stripe checkout is NOT ready to enable.');
+  writeStdout('Stripe checkout is NOT ready to enable.');
   process.exit(1);
 }
 
 main().catch((error) => {
-  console.error('\nStripe readiness check failed.');
-  console.error(error instanceof Error ? error.message : String(error));
+  writeStderr('\nStripe readiness check failed.');
+  writeStderr(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

@@ -59,6 +59,25 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 ```
 
+### 1.4 应用层边界风险（新增记录，2026-03-27）
+
+- 风险描述：
+  - 存在“公开 tRPC 路由在服务端检测到 `SUPABASE_SERVICE_ROLE_KEY` 后切换到 `supabaseAdmin`”的实现模式。
+  - 这会让公开接口的读取边界依赖应用代码，而不是稳定地依赖数据库 RLS。
+- 已确认位置：
+  - `packages/api/src/routers/settings.ts`
+  - `packages/api/src/routers/modules.ts`
+  - `packages/api/src/routers/invitation.ts` 的 `validateInvitationCode`
+- 风险等级：`中`
+- 影响：
+  - 未来一旦公开接口查询字段扩张，容易再次引入“本应受 RLS 约束的数据被公开接口带出”的回归。
+  - 服务端是否配置 service role 会改变公开接口行为，增加配置相关的隐性安全差异。
+- 建议：
+  - 公开读接口优先使用匿名/公开客户端。
+  - 需要匿名校验但不适合开放整表读取的场景，改成最小权限 RPC 或更窄的专用 RLS 策略。
+  - 避免在 `publicProcedure` 中基于 service role 是否存在切换到管理员客户端。
+- 状态：`已记录，待专项收敛`
+
 ---
 
 ## 2. 环境变量安全审计
@@ -169,13 +188,14 @@ pnpm audit --prod
 | RLS 覆盖率 | 100% | 所有表已启用 |
 | 环境变量安全 | ✅ 通过 | 无泄露风险 |
 | 硬编码密钥 | ✅ 无 | 代码清洁 |
-| 依赖安全 | ⚠️ 待配置 | 需启用 Dependabot |
+| 依赖安全 | ✅ 通过 | 生产依赖审计已清零 |
 
 ### 5.2 建议操作
 
 1. ✅ RLS - 已完成，无需额外操作
 2. ✅ 环境变量 - 已验证安全
-3. ⏳ 依赖扫描 - 需配置 Dependabot
+3. ✅ 依赖扫描 - `pnpm audit --prod --json` 已清零
+4. ⏳ 应用层 RLS 边界收敛 - 移除公开路由对 `supabaseAdmin` 的依赖
 
 ---
 
