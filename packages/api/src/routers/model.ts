@@ -1,10 +1,11 @@
 import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
 import {
   getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
-  getProviderErrorMessage,
   normalizeOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi as usesOpenAICompatibleProvider,
 } from '../services/providerUtils';
@@ -24,6 +25,26 @@ type ConnectionCheckResult = {
   status: 'connected' | 'configured' | 'error' | 'no_key' | 'not_found';
   message?: string;
   error?: string;
+  internalError?: string;
+};
+
+type AdminModelRow = Omit<PersistedModel, 'config'> & {
+  description?: string | null;
+  max_tokens?: number | null;
+  input_limit?: number | null;
+  enable_web_search?: string | null;
+  input_token_cost?: number | null;
+  output_token_cost?: number | null;
+  input_token_cost_above_200k?: number | null;
+  output_token_cost_above_200k?: number | null;
+  web_search_cost?: number | null;
+  token_counting_supported?: string | null;
+  token_counting_method?: string | null;
+  tokenizer_family?: string | null;
+  is_active: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  config?: Record<string, unknown> | null;
 };
 
 type TokenCountingMetadata = {
@@ -41,6 +62,59 @@ const VERIFIED_OPENAI_TOKENIZER_PREFIXES = [
   'o3',
   'text-embedding-3',
 ];
+
+const GENERIC_CONNECTION_ERROR = 'API 连接失败，请检查配置后重试';
+const GENERIC_CONNECTION_ERROR_DETAIL = '连接测试失败，请查看服务端日志';
+
+function createModelOperationError(operation: string, cause: unknown) {
+  return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function logModelEndpointMetric(
+  endpoint: string,
+  startedAt: number,
+  context: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  logger.info('api', 'model_endpoint_profile', {
+    endpoint,
+    durationMs: Date.now() - startedAt,
+    ...context,
+  });
+}
+
+function buildConnectionStatusFromModels(data: Array<{
+  id: string;
+  name: string;
+  api_key?: string | null;
+  config?: Record<string, unknown> | null;
+  is_active: string;
+}>) {
+  return data.map((model) => {
+    const config = (model.config as Record<string, unknown> | null) ?? {};
+    const hasApiKey = !!model.api_key;
+
+    return {
+      id: model.id,
+      name: model.name,
+      isActive: model.is_active === 'true',
+      hasApiKey,
+      connectionStatus: typeof config.connection_status === 'string'
+        ? config.connection_status
+        : (hasApiKey ? 'untested' : 'no_key'),
+      lastTested: typeof config.last_tested === 'string' ? config.last_tested : null,
+      lastError: typeof config.last_error === 'string' ? config.last_error : null,
+    };
+  });
+}
+
+function stripSensitiveModelFields<T extends { api_key?: string | null }>(model: T): Omit<T, 'api_key'> {
+  const { api_key: _apiKey, ...safeModel } = model;
+  return safeModel;
+}
 
 function inferTokenCountingMetadata(params: {
   provider: PersistedModel['provider'] | NonNullable<PersistedModel['provider']>;
@@ -106,8 +180,10 @@ async function persistConnectionState(
 
   if (result.success) {
     nextConfig.last_error = null;
-  } else if (result.error) {
-    nextConfig.last_error = result.error;
+    nextConfig.last_error_detail = null;
+  } else {
+    nextConfig.last_error = result.error ?? GENERIC_CONNECTION_ERROR;
+    nextConfig.last_error_detail = result.internalError ?? null;
   }
 
   await supabase
@@ -161,11 +237,11 @@ async function verifyAndPersistConnection(
         return result;
       }
 
-      const errorMessage = await getProviderErrorMessage(response);
       const result: ConnectionCheckResult = {
         success: false,
         status: 'error',
-        error: errorMessage,
+        error: GENERIC_CONNECTION_ERROR,
+        internalError: GENERIC_CONNECTION_ERROR_DETAIL,
       };
       await persistConnectionState(supabase, model, result);
       return result;
@@ -206,11 +282,11 @@ async function verifyAndPersistConnection(
       return result;
     }
 
-    const errorMessage = await getProviderErrorMessage(response);
     const result: ConnectionCheckResult = {
       success: false,
       status: 'error',
-      error: errorMessage,
+      error: GENERIC_CONNECTION_ERROR,
+      internalError: GENERIC_CONNECTION_ERROR_DETAIL,
     };
     await persistConnectionState(supabase, model, result);
     return result;
@@ -218,7 +294,8 @@ async function verifyAndPersistConnection(
     const result: ConnectionCheckResult = {
       success: false,
       status: 'error',
-      error: error instanceof Error ? error.message : '连接失败',
+      error: GENERIC_CONNECTION_ERROR,
+      internalError: GENERIC_CONNECTION_ERROR_DETAIL,
     };
     await persistConnectionState(supabase, model, result);
     return result;
@@ -235,7 +312,7 @@ export const modelRouter = router({
       .order('name');
 
     if (error) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      throw createModelOperationError('读取可用模型', error);
     }
     return data;
   }),
@@ -248,9 +325,42 @@ export const modelRouter = router({
       .order('created_at', { ascending: false });
 
     if (error) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      throw createModelOperationError('读取模型列表', error);
     }
     return data;
+  }),
+
+  // Admin only: Get models page bootstrap data
+  getAdminModelsDashboard: adminProcedure.query(async ({ ctx }) => {
+    const startedAt = Date.now();
+    const { data, error } = await ctx.supabase
+      .from('ai_models')
+      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, input_token_cost, output_token_cost, input_token_cost_above_200k, output_token_cost_above_200k, web_search_cost, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw createModelOperationError('读取模型列表', error);
+    }
+
+    const models = (data ?? []) as AdminModelRow[];
+    const connectionSource = models as Array<{
+      id: string;
+      name: string;
+      api_key?: string | null;
+      config?: Record<string, unknown> | null;
+      is_active: string;
+    }>;
+    const result = {
+      models: models.map((model) => stripSensitiveModelFields(model)),
+      connectionStatus: buildConnectionStatusFromModels(connectionSource),
+    };
+
+    logModelEndpointMetric('model.getAdminModelsDashboard', startedAt, {
+      queryCount: 1,
+      modelCount: result.models.length,
+    });
+
+    return result;
   }),
 
   // Admin only: Create a new AI model
@@ -304,7 +414,7 @@ export const modelRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createModelOperationError('创建模型', error);
       }
 
       const connectionCheck = await verifyAndPersistConnection(ctx.supabase, data as PersistedModel);
@@ -386,7 +496,7 @@ export const modelRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createModelOperationError('更新模型', error);
       }
 
       const shouldVerifyConnection =
@@ -417,7 +527,7 @@ export const modelRouter = router({
         .eq('id', input.id);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createModelOperationError('删除模型', error);
       }
       return { success: true };
     }),
@@ -433,7 +543,7 @@ export const modelRouter = router({
         .select();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createModelOperationError('更新模型配置', error);
       }
       return data;
     }),
@@ -464,29 +574,29 @@ export const modelRouter = router({
 
   // Admin only: Get connection status for all models
   getConnectionStatus: adminProcedure.query(async ({ ctx }) => {
+    const startedAt = Date.now();
     const { data, error } = await ctx.supabase
       .from('ai_models')
       .select('id, name, api_key, config, is_active')
       .order('name');
 
     if (error) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      throw createModelOperationError('读取模型连接状态', error);
     }
 
-    return (data || []).map(model => {
-      const config = (model.config as any) || {};
-      // 只检查模型自身的 api_key，不再回退到环境变量
-      const hasApiKey = !!model.api_key;
+    const result = buildConnectionStatusFromModels((data ?? []) as Array<{
+      id: string;
+      name: string;
+      api_key?: string | null;
+      config?: Record<string, unknown> | null;
+      is_active: string;
+    }>);
 
-      return {
-        id: model.id,
-        name: model.name,
-        isActive: model.is_active === 'true',
-        hasApiKey,
-        connectionStatus: config.connection_status || (hasApiKey ? 'untested' : 'no_key'),
-        lastTested: config.last_tested || null,
-        lastError: config.last_error || null,
-      };
+    logModelEndpointMetric('model.getConnectionStatus', startedAt, {
+      queryCount: 1,
+      modelCount: result.length,
     });
+
+    return result;
   }),
 });

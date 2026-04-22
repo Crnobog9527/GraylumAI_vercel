@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, Suspense, useMemo, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Menu, Loader2 } from 'lucide-react';
+import { logClientDevError } from '@/lib/client-log';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -27,43 +28,10 @@ import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard'
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
-import { createClient } from '@/lib/supabase';
-import { isEmailVerified } from '@/lib/auth';
-import { buildAuthHref } from '@/lib/site-config';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { banners } = useBanner();
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  // 检查用户登录状态
-  useEffect(() => {
-    const checkAuth = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(buildAuthHref(`/login?redirect=${encodeURIComponent(redirectTarget)}`));
-        return;
-      }
-
-      if (!isEmailVerified(user)) {
-        const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`)
-        );
-        return;
-      }
-
-      setIsAuthenticated(true);
-      setIsAuthChecking(false);
-    };
-
-    checkAuth();
-  }, [router]);
 
   // 从 URL 参数读取初始 tab
   const getInitialTab = (): ProfileTab => {
@@ -78,28 +46,19 @@ function ProfilePageContent() {
   const [ticketInitialView, setTicketInitialView] = useState<'list' | 'create'>('list');
 
   // tRPC queries for real data (only enabled after auth check)
-  const { data: userProfile, isLoading: isProfileLoading, error: profileError } = trpc.user.getUserProfile.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
-  const { data: creditsBalance, isLoading: isBalanceLoading, error: creditsError } = trpc.credits.getBalance.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
-  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery(
-    { period: 'month' },
-    { enabled: isAuthenticated }
-  );
+  const { data: userProfile, isLoading: isProfileLoading, error: profileError } = trpc.user.getUserProfile.useQuery();
+  const { data: creditsBalance, isLoading: isBalanceLoading, error: creditsError } = trpc.credits.getBalance.useQuery();
+  const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
 
-  const isLoading = isAuthChecking || !isAuthenticated || isProfileLoading || isBalanceLoading || isSummaryLoading;
+  const isLoading = isProfileLoading || isBalanceLoading || isSummaryLoading;
 
   // Log errors for debugging
   useEffect(() => {
     if (profileError) {
-      console.error('Profile query error:', profileError);
+      logClientDevError('Profile query error');
     }
     if (creditsError) {
-      console.error('Credits query error:', creditsError);
+      logClientDevError('Credits query error');
     }
   }, [profileError, creditsError]);
 

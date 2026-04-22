@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
@@ -82,6 +83,49 @@ function summarizeTicketStatuses(tickets: Array<{ status: string | null | undefi
   }
 
   return summary;
+}
+
+function parseNumericSetting(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+function formatRange(values: number[]): { min: number; max: number } | null {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return {
+    min: parseFloat(Math.min(...values).toFixed(2)),
+    max: parseFloat(Math.max(...values).toFixed(2)),
+  };
+}
+
+function convertUsdPer1MToCreditsPer1K(usdPer1M: number): number {
+  return parseFloat(
+    (
+      (usdPer1M * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER) /
+      1000
+    ).toFixed(2),
+  );
+}
+
+function convertUsdPer1KSearchToCreditsPer1KSearch(usdPer1K: number): number {
+  return parseFloat(
+    (
+      usdPer1K * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER
+    ).toFixed(2),
+  );
 }
 
 export const adminRouter = router({
@@ -1968,10 +2012,8 @@ export const adminRouter = router({
         .from('system_settings')
         .select('*')
         .in('key', [
-          'input_credits_per_1k',
-          'output_credits_per_1k',
-          'web_search_credits',
           'new_user_credits',
+          'search_surcharge_credits',
         ]);
 
       // Calculate overall stats
@@ -2137,17 +2179,39 @@ export const adminRouter = router({
         netCreditsFlow: transactionStats.totalAdditions + transactionStats.totalPurchases - transactionStats.totalDeductions,
       };
 
-      // Credits conversion rules from settings
+      // Runtime billing reference derived from active model pricing
       const settingsMap: Record<string, unknown> = {};
       settings?.forEach(s => {
         settingsMap[s.key] = s.value;
       });
 
-      const creditsRules = {
-        inputCreditsPerK: settingsMap['input_credits_per_1k'] ?? 1,
-        outputCreditsPerK: settingsMap['output_credits_per_1k'] ?? 3,
-        webSearchCredits: settingsMap['web_search_credits'] ?? 5,
-        newUserCredits: settingsMap['new_user_credits'] ?? 100,
+      const activeMeteredModels = (models ?? []).filter((model) =>
+        model.is_active === 'true' || model.is_active === true,
+      );
+
+      const inputCreditsPer1KValues = activeMeteredModels
+        .filter((model) => (model.input_token_cost ?? 0) > 0)
+        .map((model) => convertUsdPer1MToCreditsPer1K((model.input_token_cost ?? 0) / 1_000_000));
+
+      const outputCreditsPer1KValues = activeMeteredModels
+        .filter((model) => (model.output_token_cost ?? 0) > 0)
+        .map((model) => convertUsdPer1MToCreditsPer1K((model.output_token_cost ?? 0) / 1_000_000));
+
+      const searchCreditsPer1KValues = activeMeteredModels
+        .filter((model) => (model.web_search_cost ?? 0) > 0)
+        .map((model) =>
+          convertUsdPer1KSearchToCreditsPer1KSearch((model.web_search_cost ?? 0) / 1000),
+        );
+
+      const runtimeBilling = {
+        creditsPerUsd: BILLING_CONSTANTS.CREDITS_PER_USD,
+        tokenPriceMultiplier: BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
+        activeModelCount: activeMeteredModels.length,
+        inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
+        outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
+        searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),
+        searchSurchargeCredits: parseNumericSetting(settingsMap['search_surcharge_credits'], 0),
+        newUserCredits: parseNumericSetting(settingsMap['new_user_credits'], 100),
       };
 
       return {
@@ -2158,7 +2222,7 @@ export const adminRouter = router({
         apiStats,
         modelStats,
         financeOverview,
-        creditsRules,
+        runtimeBilling,
       };
     }),
 

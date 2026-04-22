@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   DollarSign, TrendingUp, Activity, Cpu, Users, Clock,
-  BarChart3, PieChart, RefreshCw, Download, Zap, Database
+  BarChart3, PieChart, RefreshCw, Download, Zap, Database, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsd } from '@/lib/currency';
 import {
@@ -95,6 +94,78 @@ function formatDateTime(dateStr: string): string {
   });
 }
 
+function QueryStatusBadge({
+  hasData,
+  isLoading,
+  isFetching,
+  isError,
+  dataTestId,
+}: {
+  hasData: boolean;
+  isLoading: boolean;
+  isFetching: boolean;
+  isError: boolean;
+  dataTestId: string;
+}) {
+  if (isLoading && !hasData) {
+    return (
+      <Badge
+        data-testid={dataTestId}
+        className="border border-[var(--border-primary)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+      >
+        <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+        加载中
+      </Badge>
+    );
+  }
+
+  if (isFetching) {
+    return (
+      <Badge
+        data-testid={dataTestId}
+        className="bg-blue-500/20 text-blue-400"
+      >
+        <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+        刷新中
+      </Badge>
+    );
+  }
+
+  if (isError && hasData) {
+    return (
+      <Badge
+        data-testid={dataTestId}
+        className="bg-amber-500/20 text-amber-400"
+      >
+        <AlertTriangle className="mr-1 h-3 w-3" />
+        获取失败（保留旧数据）
+      </Badge>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Badge
+        data-testid={dataTestId}
+        className="bg-rose-500/20 text-rose-400"
+      >
+        <AlertTriangle className="mr-1 h-3 w-3" />
+        获取失败
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge
+      data-testid={dataTestId}
+      className="bg-emerald-500/20 text-emerald-400"
+    >
+      <CheckCircle2 className="mr-1 h-3 w-3" />
+      已同步
+    </Badge>
+  );
+}
+
 function StatCard({
   title,
   value,
@@ -139,12 +210,23 @@ function StatCard({
 function CostOverviewTab({ metric }: { metric: CostMetric }) {
   const [days, setDays] = useState<number>(7);
 
-  const { data: overview, isLoading: overviewLoading } = trpc.costs.getOverview.useQuery({ metric });
-  const { data: trend, isLoading: trendLoading } = trpc.costs.getCostTrend.useQuery({ days, metric });
-  const { data: distribution, isLoading: distLoading } = trpc.costs.getModelDistribution.useQuery({ days, metric });
-  const { data: topUsers, isLoading: usersLoading } = trpc.costs.getTopUsers.useQuery({ days, limit: 10, metric });
-  const { data: cacheEfficiency } = trpc.costs.getCacheEfficiency.useQuery({ days, metric });
-  const isInitialLoading = overviewLoading && !overview;
+  const {
+    data: dashboard,
+    isLoading: dashboardLoading,
+    isFetching: dashboardFetching,
+    isError: dashboardIsError,
+    refetch,
+  } = trpc.costs.getDashboard.useQuery({
+    days,
+    limit: 10,
+    metric,
+  });
+  const overview = dashboard?.overview;
+  const trend = dashboard?.trend;
+  const distribution = dashboard?.distribution;
+  const topUsers = dashboard?.topUsers;
+  const cacheEfficiency = dashboard?.cacheEfficiency;
+  const isInitialLoading = dashboardLoading && !dashboard;
   const metricLabel = metric === 'usd' ? '美元成本' : '积分消耗';
   const metricUnit = metric === 'usd' ? 'USD' : '积分';
   const cacheSavingsText = metric === 'usd'
@@ -153,13 +235,15 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
 
   return (
     <div className="space-y-8">
-      {isInitialLoading && (
-        <div className="flex items-center justify-end">
-          <Badge className="border border-[var(--border-primary)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
-            加载成本数据中
-          </Badge>
-        </div>
-      )}
+      <div className="flex items-center justify-end">
+        <QueryStatusBadge
+          dataTestId="admin-costs-overview-status"
+          hasData={Boolean(dashboard)}
+          isLoading={dashboardLoading}
+          isFetching={dashboardFetching}
+          isError={dashboardIsError}
+        />
+      </div>
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
@@ -199,25 +283,31 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
       {/* 时间范围选择 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{metricLabel}趋势</h3>
-        <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
-          <SelectTrigger
-            className="w-32"
-            style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
-            <SelectItem value="7">近 7 天</SelectItem>
-            <SelectItem value="14">近 14 天</SelectItem>
-            <SelectItem value="30">近 30 天</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
+            <SelectTrigger
+              className="w-32"
+              style={{ background: 'var(--bg-tertiary)', borderColor: 'var(--border-primary)' }}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
+              <SelectItem value="7">近 7 天</SelectItem>
+              <SelectItem value="14">近 14 天</SelectItem>
+              <SelectItem value="30">近 30 天</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            刷新
+          </Button>
+        </div>
       </div>
 
       {/* 成本趋势图 */}
       <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
         <CardContent className="p-6">
-          {trendLoading ? (
+          {dashboardLoading && !trend ? (
             <div className="h-64 flex items-center justify-center">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
             </div>
@@ -271,7 +361,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {distLoading ? (
+            {dashboardLoading && !distribution ? (
               <div className="h-48 flex items-center justify-center">
                 <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
               </div>
@@ -320,7 +410,7 @@ function CostOverviewTab({ metric }: { metric: CostMetric }) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {usersLoading ? (
+            {dashboardLoading && !topUsers ? (
               <div className="h-48 flex items-center justify-center">
                 <RefreshCw className="h-6 w-6 animate-spin" style={{ color: 'var(--text-tertiary)' }} />
               </div>
@@ -368,7 +458,13 @@ function UsageLogsTab() {
   const [status, setStatus] = useState<'all' | 'success' | 'failed'>('all');
   const pageSize = 20;
 
-  const { data, isLoading, refetch } = trpc.costs.getUsageLogs.useQuery({
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = trpc.costs.getUsageLogs.useQuery({
     page,
     pageSize,
     status,
@@ -392,10 +488,19 @@ function UsageLogsTab() {
             </SelectContent>
           </Select>
         </div>
-        <Button data-testid="admin-usage-logs-refresh" variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          刷新
-        </Button>
+        <div className="flex items-center gap-3">
+          <QueryStatusBadge
+            dataTestId="admin-costs-usage-status"
+            hasData={Boolean(data)}
+            isLoading={isLoading}
+            isFetching={isFetching}
+            isError={isError}
+          />
+          <Button data-testid="admin-usage-logs-refresh" variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            刷新
+          </Button>
+        </div>
       </div>
 
       {/* 日志表格 */}
@@ -512,7 +617,13 @@ function TokenStatsTab() {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const { data, isLoading, refetch } = trpc.costs.getTokenStats.useQuery({
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = trpc.costs.getTokenStats.useQuery({
     page,
     pageSize,
   });
@@ -521,7 +632,14 @@ function TokenStatsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-3">
+        <QueryStatusBadge
+          dataTestId="admin-costs-token-status"
+          hasData={Boolean(data)}
+          isLoading={isLoading}
+          isFetching={isFetching}
+          isError={isError}
+        />
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-2" />
           刷新

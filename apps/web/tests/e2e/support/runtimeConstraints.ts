@@ -9,7 +9,7 @@ import type { FlowIssue } from './monitoring';
 export const REGION_RESTRICTION_MESSAGE = 'This model is not available in your region';
 
 export function isLocalPlaywrightBaseUrl(baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '') {
-  return baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost');
+  return !baseUrl || baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost');
 }
 
 export function hasRegionRestrictionMessage(text: string) {

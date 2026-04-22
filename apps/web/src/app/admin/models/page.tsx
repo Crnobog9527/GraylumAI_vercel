@@ -48,13 +48,13 @@ import {
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { toast } from '@/components/ui/sonner';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 interface AIModel {
   id: string;
   name: string;
   model_id: string;
   provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin';
-  api_key?: string;
   api_endpoint?: string;
   description?: string;
   max_tokens: number;
@@ -133,8 +133,9 @@ export default function AdminModelsPage() {
 
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
 
-  const { data: models, isLoading, error, refetch } = trpc.model.getAvailableModels.useQuery();
-  const { data: connectionStatus, refetch: refetchStatus } = trpc.model.getConnectionStatus.useQuery();
+  const { data: dashboard, isLoading, error, refetch } = trpc.model.getAdminModelsDashboard.useQuery();
+  const models = dashboard?.models;
+  const connectionStatus = dashboard?.connectionStatus;
 
   const showSaveResultToast = (
     action: '创建' | '更新',
@@ -146,22 +147,21 @@ export default function AdminModelsPage() {
     }
 
     if (connectionCheck.success) {
-      toast.success(connectionCheck.message || `模型${action}成功，API 连接正常`);
+      toast.success(getSafeErrorMessage(connectionCheck.message, `模型${action}成功，API 连接正常`));
       return;
     }
 
-    toast.warning(`模型已${action}，但 API 连接失败: ${connectionCheck.error || '未知错误'}`);
+    toast.warning(getSafeErrorMessage(connectionCheck.error, `模型已${action}，但 API 连接失败`));
   };
 
   const createModel = trpc.model.createModel.useMutation({
     onSuccess: (result) => {
       showSaveResultToast('创建', result.connectionCheck);
       refetch();
-      refetchStatus();
       closeDialog();
     },
     onError: (error) => {
-      toast.error(`创建失败: ${error.message}`);
+      toast.error(getSafeErrorMessage(error, '创建模型失败，请稍后重试'));
     },
   });
 
@@ -169,11 +169,10 @@ export default function AdminModelsPage() {
     onSuccess: (result) => {
       showSaveResultToast('更新', result.connectionCheck);
       refetch();
-      refetchStatus();
       closeDialog();
     },
     onError: (error) => {
-      toast.error(`更新失败: ${error.message}`);
+      toast.error(getSafeErrorMessage(error, '更新模型失败，请稍后重试'));
     },
   });
 
@@ -181,27 +180,26 @@ export default function AdminModelsPage() {
     onSuccess: () => {
       toast.success('模型已删除');
       refetch();
-      refetchStatus();
       setDeleteDialogOpen(false);
       setSelectedModel(null);
     },
     onError: (error) => {
-      toast.error(`删除失败: ${error.message}`);
+      toast.error(getSafeErrorMessage(error, '删除模型失败，请稍后重试'));
     },
   });
 
   const testConnection = trpc.model.testConnection.useMutation({
     onSuccess: (result) => {
       if (result.success) {
-        toast.success(result.message || 'API 连接成功');
+        toast.success(getSafeErrorMessage(result.message, 'API 连接成功'));
       } else {
-        toast.error(result.error || 'API 连接失败');
+        toast.error(getSafeErrorMessage(result.error, 'API 连接失败'));
       }
-      refetchStatus();
+      refetch();
       setTestingModelId(null);
     },
     onError: (error) => {
-      toast.error(`测试失败: ${error.message}`);
+      toast.error(getSafeErrorMessage(error, '测试连接失败，请稍后重试'));
       setTestingModelId(null);
     },
   });
@@ -216,7 +214,7 @@ export default function AdminModelsPage() {
     if (!status) return { label: '未知', color: 'bg-gray-500/20 text-gray-400', icon: HelpCircle };
 
     if (!status.hasApiKey) {
-      return { label: '未配置密钥', color: 'bg-rose-500/20 text-rose-400', icon: X };
+      return { label: '未配置 API Key', color: 'bg-rose-500/20 text-rose-400', icon: X };
     }
 
     switch (status.connectionStatus) {
@@ -272,7 +270,7 @@ export default function AdminModelsPage() {
       name: model.name || '',
       modelId: model.model_id || '',
       provider: model.provider || 'anthropic',
-      apiKey: model.api_key || '',
+      apiKey: '',
       apiEndpoint: model.api_endpoint || '',
       description: model.description || '',
       maxTokens: model.max_tokens || 4096,
@@ -288,13 +286,30 @@ export default function AdminModelsPage() {
   };
 
   const handleSubmit = () => {
+    const payload = {
+      name: formData.name,
+      modelId: formData.modelId,
+      provider: formData.provider,
+      apiEndpoint: formData.apiEndpoint,
+      description: formData.description,
+      maxTokens: formData.maxTokens,
+      inputLimit: formData.inputLimit,
+      enableWebSearch: formData.enableWebSearch,
+      inputTokenCost: formData.inputTokenCost,
+      outputTokenCost: formData.outputTokenCost,
+      inputTokenCostAbove200k: formData.inputTokenCostAbove200k,
+      outputTokenCostAbove200k: formData.outputTokenCostAbove200k,
+      webSearchCost: formData.webSearchCost,
+      ...(formData.apiKey.trim() ? { apiKey: formData.apiKey.trim() } : {}),
+    };
+
     if (selectedModel) {
       updateModel.mutate({
         id: selectedModel.id,
-        ...formData,
+        ...payload,
       });
     } else {
-      createModel.mutate(formData);
+      createModel.mutate(payload);
     }
   };
 
@@ -336,6 +351,9 @@ export default function AdminModelsPage() {
 
   const modelList = (models ?? []) as AIModel[];
   const activeCount = modelList.filter(m => m.is_active === 'true').length;
+  const selectedModelStatus = selectedModel
+    ? connectionStatus?.find((status) => status.id === selectedModel.id)
+    : null;
 
   return (
     <div className="p-8 overflow-auto">
@@ -501,7 +519,10 @@ export default function AdminModelsPage() {
                           const statusInfo = getConnectionStatusInfo(model.id);
                           const StatusIcon = statusInfo.icon;
                           return (
-                            <Badge className={statusInfo.color}>
+                            <Badge
+                              data-testid={`admin-model-connection-status-${model.id}`}
+                              className={statusInfo.color}
+                            >
                               <StatusIcon className="h-3 w-3 mr-1" />
                               {statusInfo.label}
                             </Badge>
@@ -648,9 +669,16 @@ export default function AdminModelsPage() {
                   type="password"
                   value={formData.apiKey}
                   onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  placeholder="sk-..."
+                  placeholder={selectedModel ? '留空则保持当前密钥' : 'sk-...'}
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
+                {selectedModel && (
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                    {selectedModelStatus?.hasApiKey
+                      ? '出于安全原因，已配置的密钥不会回显；留空将保持原值。'
+                      : '该模型当前未配置 API Key；如需启用请在此填入新密钥。'}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

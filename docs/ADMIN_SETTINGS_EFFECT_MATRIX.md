@@ -1,6 +1,6 @@
 # Admin Settings Effect Matrix
 
-Last updated: 2026-03-11
+Last updated: 2026-04-22
 
 ## Status Legend
 
@@ -51,6 +51,7 @@ Last updated: 2026-03-11
 | `input_credits_per_1k` | UI marks this as reference-only; actual per-model billing lives in model config | `retired-reference` |
 | `output_credits_per_1k` | UI marks this as reference-only; actual per-model billing lives in model config | `retired-reference` |
 | `web_search_credits` | Reference display only; runtime uses dedicated routing/search cost path | `retired-reference` |
+| `first_purchase_bonus_percent` | Historical billing field; current purchase/fulfillment runtime does not consume it | `retired-reference` |
 
 ## Completion Rule
 

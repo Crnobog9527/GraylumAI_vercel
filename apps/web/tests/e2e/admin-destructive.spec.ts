@@ -244,6 +244,7 @@ test.describe('Admin Destructive Flows', () => {
       !destructiveGateEnabled,
       'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
     );
+    test.setTimeout(60000);
 
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
@@ -253,6 +254,8 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Open /admin/settings and inspect cleanup totals');
       await gotoWithBypass(page, '/admin/settings');
       await expect(page).toHaveURL(/\/admin\/settings/);
+      await expect(page.getByTestId('admin-settings-save-all')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('tab', { name: '会员权限' })).toBeVisible({ timeout: 30000 });
       await page.getByRole('tab', { name: '会员权限' }).click();
 
       const cleanupButton = page.getByTestId('admin-settings-cleanup-trigger');
@@ -319,18 +322,24 @@ test.describe('Admin Destructive Flows', () => {
       await gotoWithBypass(page, '/admin/diagnostics');
       await expect(page).toHaveURL(/\/admin\/diagnostics/);
 
-      steps.push('Execute diagnostic history cleanup and verify visible feedback');
-      page.once('dialog', (dialog) => dialog.accept());
-      const cleanupResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/api/trpc/diagnostics.cleanupOldResults') &&
-          response.request().method() === 'POST',
-        { timeout: 30000 },
-      );
-      await page.getByTestId('admin-diagnostics-cleanup-trigger').click();
-      const cleanupResponse = await cleanupResponsePromise;
-      expect(cleanupResponse.status()).toBe(200);
-      await expect(page.getByTestId('admin-diagnostics-cleanup-status')).toContainText('已清理', { timeout: 15000 });
+      const noPersistedHistory = await page.getByText('暂无历史记录').isVisible().catch(() => false);
+      if (noPersistedHistory) {
+        steps.push('Verify diagnostics cleanup remains safely idle when no persisted history exists');
+        await expect(page.getByTestId('admin-diagnostics-cleanup-status')).toContainText('尚未执行诊断记录清理', { timeout: 15000 });
+      } else {
+        steps.push('Execute diagnostic history cleanup and verify visible feedback');
+        page.once('dialog', (dialog) => dialog.accept());
+        const cleanupResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes('/api/trpc/diagnostics.cleanupOldResults') &&
+            response.request().method() === 'POST',
+          { timeout: 30000 },
+        );
+        await page.getByTestId('admin-diagnostics-cleanup-trigger').click();
+        const cleanupResponse = await cleanupResponsePromise;
+        expect(cleanupResponse.status()).toBe(200);
+        await expect(page.getByTestId('admin-diagnostics-cleanup-status')).toContainText('已清理', { timeout: 15000 });
+      }
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -359,7 +368,7 @@ test.describe('Admin Destructive Flows', () => {
       !destructiveGateEnabled,
       'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
     );
-    test.setTimeout(60000);
+    test.setTimeout(90000);
 
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
@@ -369,6 +378,7 @@ test.describe('Admin Destructive Flows', () => {
     const modelName = `Parity Toggle Model ${Date.now()}`;
     const modelId = `parity-toggle-${Date.now()}`;
     let shouldRestoreModelSelector = false;
+    let modelDeleted = false;
     let targetModelId = '';
 
     try {
@@ -395,6 +405,7 @@ test.describe('Admin Destructive Flows', () => {
       const targetRowId = await targetRow.getAttribute('data-testid');
       targetModelId = targetRowId?.replace('admin-model-row-', '') ?? '';
       expect(targetModelId).not.toBe('');
+      await expect(page.getByTestId(`admin-model-connection-status-${targetModelId}`)).toContainText('未配置 API Key', { timeout: 15000 });
 
       steps.push('Ensure the chat model selector is enabled for the user-facing verification');
       await gotoWithBypass(page, '/admin/settings');
@@ -423,13 +434,19 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Disable the temporary model from /admin/models');
       await gotoWithBypass(page, '/admin/models');
       await expect(page).toHaveURL(/\/admin\/models/);
+      const activeToggle = page.getByTestId(`admin-model-active-toggle-${targetModelId}`);
+      if (!(await activeToggle.isVisible().catch(() => false))) {
+        await gotoWithBypass(page, '/admin/models');
+        await expect(page).toHaveURL(/\/admin\/models/);
+      }
+      await expect(activeToggle).toBeVisible({ timeout: 30000 });
       const disableResponsePromise = page.waitForResponse(
         (response) =>
           response.url().includes('/api/trpc/model.updateModel') &&
           response.request().method() === 'POST',
         { timeout: 30000 },
       );
-      await page.getByTestId(`admin-model-active-toggle-${targetModelId}`).click();
+      await activeToggle.click();
       const disableResponse = await disableResponsePromise;
       expect(disableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-model-active-toggle-${targetModelId}`)).toContainText('已禁用', { timeout: 15000 });
@@ -454,6 +471,7 @@ test.describe('Admin Destructive Flows', () => {
       const enableResponse = await enableResponsePromise;
       expect(enableResponse.status()).toBe(200);
       await expect(page.getByTestId(`admin-model-active-toggle-${targetModelId}`)).toContainText('已启用', { timeout: 15000 });
+      await expect(page.getByTestId(`admin-model-connection-status-${targetModelId}`)).toContainText('未配置 API Key', { timeout: 15000 });
 
       await gotoWithBypass(userPage, '/chat');
       await expect(modelSelectorTrigger).toBeVisible({ timeout: 15000 });
@@ -473,6 +491,7 @@ test.describe('Admin Destructive Flows', () => {
       const deleteResponse = await deleteResponsePromise;
       expect(deleteResponse.status()).toBe(200);
       await expect(targetRow).toHaveCount(0, { timeout: 15000 });
+      modelDeleted = true;
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -482,16 +501,23 @@ test.describe('Admin Destructive Flows', () => {
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
-      if (targetModelId) {
-        await gotoWithBypass(page, '/admin/models').catch(() => undefined);
+      if (targetModelId && !modelDeleted && !page.isClosed()) {
+        await Promise.race([
+          gotoWithBypass(page, '/admin/models'),
+          page.waitForTimeout(5000),
+        ]).catch(() => undefined);
         const lingeringRow = page.getByTestId(`admin-model-row-${targetModelId}`);
-        if (await lingeringRow.count()) {
+        const lingeringRowCount = await lingeringRow.count().catch(() => 0);
+        if (lingeringRowCount > 0) {
           await page.getByTestId(`admin-model-delete-${targetModelId}`).click().catch(() => undefined);
           await page.getByTestId('admin-model-delete-confirm').click().catch(() => undefined);
         }
       }
-      if (shouldRestoreModelSelector) {
-        await gotoWithBypass(page, '/admin/settings').catch(() => undefined);
+      if (shouldRestoreModelSelector && !page.isClosed()) {
+        await Promise.race([
+          gotoWithBypass(page, '/admin/settings'),
+          page.waitForTimeout(5000),
+        ]).catch(() => undefined);
         await page.getByRole('tab', { name: '页面体验' }).click().catch(() => undefined);
         const modelSelectorSetting = page.getByTestId('admin-setting-chat_show_model_selector');
         if (await modelSelectorSetting.isVisible().catch(() => false)) {

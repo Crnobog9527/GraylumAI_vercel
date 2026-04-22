@@ -23,12 +23,152 @@
 
 ## Current Status
 
-- **Phase:** 阶段 12 遗留问题清理与系统稳定化 ⏳ 规划完成
+- **Phase:** 阶段 12 遗留问题清理与系统稳定化 ⏳ 收尾中
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
-- **Current:** 阶段 12 步骤 1 执行中（P0 批次已完成自动验证，部分阻塞，部分转入修复）
+- **Current:** 阶段 12 全部任务已完成
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-03-06 (P0 验证批次状态已对齐)
+- **更新时间:** 2026-04-22 (阶段 12 收尾项状态、文档与验证证据已对齐)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-04-22 - 完成 12.1.6 独立 API Key 生效验证
+
+**完成内容**:
+- 启动隔离端口 `http://localhost:3101` 的本地 Next dev server，并在进程级显式置空 `OPENROUTER_API_KEY` 与 `ANTHROPIC_API_KEY`
+- 在隔离 server 上使用真实测试用户 Bearer token，直接调用 `/api/ai/stream`
+- 对照验证两类模型：
+  - 有数据库 `api_key` 的 OpenRouter Claude 模型：请求可继续穿过 `api_key` 检查、完成预扣，并真实打到上游 provider；上游返回 `403` 后执行退款回滚
+  - 无数据库 `api_key` 的模型：直接落为 `未配置 API Key`，并执行 `pre_deduct -> refund`
+- 结合 `providerUtils` 单测与隔离运行证据，确认流式端点在无 env 回退键时会使用 `ai_models.api_key`，而不是依赖全局 provider env
+
+**验证方式**:
+- 隔离 server 启动命令：
+  - `OPENROUTER_API_KEY='' ANTHROPIC_API_KEY='' PLAYWRIGHT_BASE_URL='http://localhost:3101' pnpm --dir apps/web exec next dev --port 3101 --turbopack`
+- 真实流式请求验证：
+  - `Claude 4.6 opus`、`Claude 4.5 haiku`、`Claude 4.5 Sonnet` 在隔离端口均进入 provider 调用阶段，并在服务端日志中记录 `ai_stream_openai_compatible_provider_failed status=403`
+  - 同时 `billing_history` 记录对应 `requestId` 的 `pre_deduct -> refund`
+  - `ai_usage_logs` 记录为 `failed`
+- 无 key 对照验证：
+  - `Parity Toggle Model 1776832066252` 在隔离端口上记录 `ai_usage_logs.error_message = 未配置 API Key`
+  - `profiles.credits` 由 `1800 -> 1797 -> 1800`，证明退款回滚完成
+- 静态与单测佐证：
+  - `packages/api/src/services/providerUtils.ts`
+  - `packages/api/src/services/__tests__/providerUtils.test.ts`
+
+**备注**:
+- 本项验证目标是“确认 key 来源是否为数据库模型 key”，该目标现已完成
+- 隔离验证中上游 provider 返回 `403`，说明当前数据库里的模型 key 在该 provider/模型组合上仍可能受供应商策略约束；但这不影响“流式端点未使用全局 env fallback”这一结论
+- 阶段 12 至此不再存在未完成或阻塞项
+
+### 2026-04-22 - 完成阶段 12 剩余 active 项收尾
+
+**完成内容**:
+- 完成 `12.1.5`：为无 API Key 模型补充更直观的后台状态标签 `未配置 API Key`，并为模型连接状态增加稳定测试钩子；补充后端单测，验证 `verifyAndPersistConnection()` 在无 key 时会持久化 `no_key`
+- 完成 `12.2.3`：将 `first_purchase_bonus_percent` 从“有效计费设置”降级为“已退役 / 参考显示”，并在后台与 `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 中统一为历史兼容字段
+- 完成 `12.4.5`：为 `/admin/costs` 的概览、调用日志、Token 统计补充数据获取状态徽标，覆盖 `加载中 / 刷新中 / 获取失败 / 获取失败（保留旧数据） / 已同步`
+- 完成 `12.4.2` 与 `12.4.3`：将个人中心订阅推荐卡样式从蓝紫高亮改为金橙方向，并移除 `年付共 $xx` 文案
+- 为以上改动同步补充 E2E 断言草案：模型无 key 警告、成本页状态徽标、计费设置 retired-reference、订阅卡暖色高亮与年付总价移除
+
+**验证方式**:
+- 运行 `pnpm --filter @repo/api test:run -- src/routers/model.test.ts src/routers/admin.test.ts src/services/__tests__/providerUtils.test.ts`，结果：通过
+- 运行 `pnpm test:api`，结果：`36` 个测试文件、`355` 个测试全部通过
+- 运行 `pnpm --dir apps/web exec tsc --noEmit --pretty false`，结果：前端类型检查通过
+- 运行 `git diff --check`，结果：通过
+
+**备注**:
+- `task.json` 已回写：`12.1.5`、`12.2.3`、`12.4.2`、`12.4.3`、`12.4.5` 均已标记为完成
+- 当前阶段 12 只剩 `12.1.6` 为阻塞项
+- Playwright 浏览器二进制尚未在本机恢复，昨天的浏览器侧回归受环境限制未完整跑通；这被记录为测试环境缺口，而不是代码未完成
+
+### 2026-04-22 - Playwright 浏览器环境恢复并补跑关键 E2E
+
+**完成内容**:
+- 成功安装本机 Playwright Chromium、FFmpeg 与 Headless Shell，恢复浏览器侧回归执行能力
+- 顺序补跑 `auth.spec.ts`、`admin-ops.spec.ts`、`admin-destructive.spec.ts`，避免再次触发本地并发锁冲突
+- 确认本轮新增断言所处的关键路径在真实浏览器中已被执行：
+  - `admin-ops.spec.ts` 中 `/admin/settings` 计费设置 active/reference 分区断言通过
+  - `admin-ops.spec.ts` 中 `/admin/costs` 状态徽标断言通过
+  - `admin-destructive.spec.ts` 中“启用无 key 模型出现 warning toast，且状态仍为未配置 API Key”断言在失败前已执行通过
+
+**验证方式**:
+- 运行 `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`
+  - 结果：`8` 通过，`3` 失败
+  - 失败点：
+    - profile 页既有选择器与实际 UI 不匹配
+    - 公共法务页导航监控捕获 `net::ERR_ABORTED`
+- 运行 `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`
+  - 结果：`5` 通过，`1` 失败
+  - 失败点：既有工单流程使用 `new URL(..., process.env.PLAYWRIGHT_BASE_URL!)`，当前环境变量缺失导致 `Invalid URL`
+- 运行 `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium`
+  - 结果：`5` 通过，`1` 失败，`6` 未运行
+  - 失败点：模型启停验证用例在 `finally` 清理阶段超时，随后页面关闭；失败不在本轮新增的 warning/status 断言位置
+
+**备注**:
+- 浏览器环境问题已经从“缺失浏览器二进制”收敛为“仓库内既有 E2E 用例还有历史失败”
+- 本轮新增阶段 12 断言已至少在 `admin-ops` 的读页巡检和 `admin-destructive` 的模型启停路径中被执行
+
+### 2026-04-21 - 完成 12.3.3 修复积分规则显示不符
+
+**完成内容**:
+- 将财务页“积分规则”从历史参考值改为运行时计费基线，展示来源改为 `ai_models` 活跃模型价格与实际计费常量，而不是已退役的 `system_settings.input_credits_per_1k / output_credits_per_1k / web_search_credits`
+- 更新 `packages/api/src/routers/admin.ts` 的 `getFinanceStats`，返回 `runtimeBilling` 汇总，包括输入/输出成本区间、联网搜索成本区间、搜索附加积分与注册赠送积分
+- 更新 `apps/web/src/app/admin/finance/page.tsx`，把运营侧看到的“积分规则”说明切换为当前真实运行时口径
+- 为管理端财务路由补充测试，覆盖运行时计费区间汇总与旧配置项失效的场景
+
+**验证方式**:
+- 运行 `pnpm --filter @repo/api test:run -- src/routers/admin.test.ts`，结果：`35` 个测试文件、`352` 个测试全部通过
+- 运行 `pnpm --dir apps/web exec tsc --noEmit --pretty false`，结果：前端类型检查通过
+
+**备注**:
+- `12.3.3` 已完成并回写到 `task.json`
+- 阶段 12 剩余 active 项更新为：`12.1.5`、`12.2.3`、`12.4.2`、`12.4.3`、`12.4.5`
+- `12.1.6` 继续保持阻塞
+
+### 2026-04-21 - 阶段 12 状态回写对齐
+
+**完成内容**:
+- 复核 `task.json` 与后续真实证据之间的漂移，确认 `task.json` 停留在 `2026-03-06`，已落后于后续稳定化闭环
+- 以 `docs/STABILIZATION_BACKLOG.md`、`docs/STRICT_SIGNOFF_STATUS.md`、`docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 与 `docs/PHASE4_LOCAL_PERFORMANCE_BASELINE.md` 为依据，回写阶段 12 任务状态
+- 将以下 `15` 项由“未完成/阻塞”改为“已完成”：
+  - `12.1.1`、`12.1.2`、`12.1.7`、`12.1.8`、`12.1.9`、`12.1.10`、`12.1.17`
+  - `12.2.4`、`12.2.5`
+  - `12.3.1`、`12.3.2`、`12.3.4`
+  - `12.4.1`、`12.4.4`
+  - `12.5.6`
+- 保持以下 `6` 项为仍待继续执行：
+  - `12.1.5`
+  - `12.2.3`
+  - `12.4.2`
+  - `12.4.3`
+  - `12.4.5`
+- 保持以下 `1` 项为继续阻塞：
+  - `12.1.6`
+
+**验证方式**:
+- 重新统计 `task.json` 未完成任务，当前结果为：`6` 项未完成，其中 `1` 项 `BLOCKED`、`5` 项可继续执行
+- 交叉核对运行时/验收证据：
+  - Preview 聊天主链、`requestId -> ai_usage_logs -> token_stats -> credit_transactions` 证据链已在 `docs/STABILIZATION_BACKLOG.md` 与 `docs/STRICT_SIGNOFF_STATUS.md` 闭环
+  - 聊天页面设置与智能路由/搜索设置已在 `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 标记为 `verified`
+  - landing 页 hydration mismatch 已在 `docs/PHASE4_LOCAL_PERFORMANCE_BASELINE.md` 收口
+- 保留 `12.1.6` 为阻塞，因为现有链路仍是“模型 key 优先、环境变量回退”，尚未完成“仅保留模型 key”的真实验证
+
+**备注**:
+- 这次回写只对齐计划状态，不篡改更早的历史记录
+- `12.2.3`、`12.4.2`、`12.4.3`、`12.4.5` 仍需后续单独收口
+- 后续若继续推进阶段 12，应优先处理仍待做的 `P1/P2` 项，再决定是否设计 `12.1.6` 的隔离验证方案
+
+**建议执行顺序**:
+1. `12.1.5` 验证启用无 Key 模型警告
+   - 原因：代码路径已存在，属于低成本高确定性验证，完成后可尽快再消掉一个步骤 1 遗留项
+2. `12.2.3` 审计首充赠送百分比
+   - 原因：当前后台仍暴露 `first_purchase_bonus_percent` 配置，但尚未确认真实运行时是否消费该设置，需要尽快决定“接通 / 退役为 reference-only”
+3. `12.4.5` 成本监控-API 状态指示器
+   - 原因：成本页已有 loading/error 基础，但尚缺明确的“获取成功/失败”体验闭环，适合作为步骤 4 的功能性收尾
+4. `12.4.2` 订阅-热门高亮样式
+   - 原因：当前 `SubscriptionCard` 仍是蓝色高亮，与既定金色/橙色方向不一致，属于纯展示层收尾
+5. `12.4.3` 订阅-年付总价移除
+   - 原因：与 `12.4.2` 同文件、同区域，适合在同一轮 UI 调整里一起完成
+6. `12.1.6` 验证独立 API Key 生效（阻塞）
+   - 原因：必须在“移除全局 key、仅保留模型 key”的隔离环境下重跑真实流式请求；建议等前述 6 项收尾后，再单独设计验证窗口与回滚方案
 
 ### 2026-03-06 - 工作流标准化: task.json 成为唯一计划源
 
