@@ -515,20 +515,25 @@ test.describe('User Extended Flows', () => {
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
       steps.push('Trigger a package purchase action');
+      const checkoutResponsePromise = page
+        .waitForResponse(
+          (response) =>
+            response.url().includes('/api/trpc/payments.createCheckoutSession') &&
+            response.request().method() === 'POST',
+          { timeout: 20000 },
+        )
+        .catch(() => null);
       await page.getByTestId(/^profile-credit-package-/).first().getByRole('button', { name: '购买' }).click();
 
-      steps.push('Accept either the legacy support dialog or a live Stripe Checkout redirect');
+      steps.push('Accept the legacy support dialog, a live Stripe Checkout redirect, or a created checkout session');
       const purchaseIntentDialog = page.getByText('支付暂不可用');
       const redirectedToCheckout = await page
         .waitForURL(/https:\/\/(?:checkout|buy)\.stripe\.com\//, { timeout: 15000 })
         .then(() => true)
         .catch(() => false);
+      const checkoutResponse = await checkoutResponsePromise;
 
-      if (!redirectedToCheckout) {
-        await expect(purchaseIntentDialog).toBeVisible({ timeout: 10000 });
-        await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
-        actual = 'Subscription purchase action opened the support escalation dialog';
-      } else {
+      if (redirectedToCheckout) {
         monitor.removeIssues((issue) =>
           (issue.source === 'console' && issue.message === 'Failed to load resource: net::ERR_FAILED') ||
           (issue.url?.includes('js.stripe.com/v3/.deploy_status_henson.json') ?? false) ||
@@ -536,6 +541,12 @@ test.describe('User Extended Flows', () => {
           issue.message.includes("origin 'https://checkout.stripe.com'"),
         );
         actual = 'Subscription purchase action redirected to Stripe Checkout';
+      } else if (checkoutResponse?.ok()) {
+        actual = 'Subscription purchase action created a Stripe Checkout session';
+      } else {
+        await expect(purchaseIntentDialog).toBeVisible({ timeout: 10000 });
+        await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
+        actual = 'Subscription purchase action opened the support escalation dialog';
       }
 
       const blockingIssues = monitor.getIssues('P1');

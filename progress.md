@@ -30,6 +30,31 @@
 - **更新时间:** 2026-04-24 (历史遗留 E2E / 可访问性 / 管理后台稳定化已对齐)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
 
+### 2026-04-24 - Preview 发布前护栏通过
+
+**完成内容**:
+- 将分支 `codex/fix/admin-stat-accuracy` 推送到 `origin`，触发 Vercel Preview 部署
+- 锁定 Preview URL：`https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app`
+- 修复 Preview preflight 暴露出的测试边界问题：
+  - 聊天输入 helper 改为重新定位当前可见 textarea，并使用真实逐字符输入，避免 React 受控输入在远端运行时出现 DOM 值与状态不同步
+  - `chat.spec.ts` 的默认长文本配置断言仅保留在本地运行；Preview 上的长文本设置生效由 `admin-config.spec.ts` 的显式后台设置流覆盖
+  - 订阅购买用例接受“创建 Stripe Checkout session”作为真实下一步，不再只等待旧的“支付暂不可用”fallback
+
+**验证方式**:
+- `pnpm test:api`
+  - 结果：`36` 个测试文件、`356` 个测试通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `pnpm release:preflight:preview -- --preview-url https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app --skip-local-build`
+  - 结果：通过
+  - 证据目录：`.release-output/preflight/20260424-184843/`
+  - 通过模块：`preview-auth`、`preview-ready`、`preview-chat`、`preview-admin`、`preview-admin-config`、`preview-admin-ops`、`preview-security`、`preview-user-extended`、`preview-user-supplemental`
+
+**备注**:
+- `preview-admin-destructive` 本轮未执行，仍需隔离 destructive 窗口后单独开启
+- 本轮不启用 Stripe 专项验收；购买按钮仅验证能进入真实 checkout session 下一步
+- `apps/web/tests/e2e/.auth/*.json` 仍按运行态文件处理，最终交付前恢复到仓库版本
+
 ### 2026-04-24 - 历史遗留清理批次完成
 
 **完成内容**:

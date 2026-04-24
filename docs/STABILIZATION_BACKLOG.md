@@ -39,6 +39,7 @@
   - `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`：`6 passed`
   - `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`：`11 passed`
   - `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium`：`6 passed / 4 skipped`
+  - Preview preflight：`.release-output/preflight/20260424-184843/00-release-preflight-summary.md`，非破坏性模块全部通过
 - 备注：`admin-config` 中 smart routing / smart search preview runtime proof 与 `chat` live preview 用例仍按环境门控跳过；它们不是本轮本地稳定化失败项。
 
 ### P1-1 修复 admin 用户详情消息统计

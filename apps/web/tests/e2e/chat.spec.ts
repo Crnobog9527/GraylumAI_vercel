@@ -15,6 +15,8 @@ import {
   getCreditsForUserEmail,
   getRecentCreditTransactionsForUserEmail,
   ensureCreditsAtLeastForUserEmail,
+  getSystemSettingValue,
+  setSystemSettingValue,
 } from './support/creditFixtures';
 import { safeCloseContext } from './support/contextCleanup';
 import { gotoWithBypass } from './support/deploymentProtection';
@@ -46,18 +48,25 @@ function chatPromptInput(page: Page) {
 }
 
 async function setChatPrompt(page: Page, prompt: string) {
-  const input = chatPromptInput(page);
   const sendButton = page.getByRole('button', { name: '发送' });
-  await expect(input).toBeEditable({ timeout: 20000 });
-
-  await input.fill(prompt);
-  if ((await input.inputValue()) !== prompt || await sendButton.isDisabled()) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const input = chatPromptInput(page);
+    await expect(input).toBeEditable({ timeout: 20000 });
     await input.fill('');
     await input.click();
-    await input.type(prompt);
+    await input.pressSequentially(prompt);
+
+    const valueMatches = await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt)
+      .then(() => true)
+      .catch(() => false);
+    if (valueMatches && await sendButton.isEnabled().catch(() => false)) {
+      return;
+    }
+    await page.waitForTimeout(500);
   }
 
-  await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect.poll(async () => chatPromptInput(page).inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect(sendButton).toBeEnabled({ timeout: 5000 });
 }
 
 type StreamProbeResult = {
@@ -339,22 +348,44 @@ test.describe('AI Chat', () => {
   });
 
   test('should require confirmation before sending oversized long text prompts', async ({ page }, testInfo) => {
+    test.skip(
+      Boolean(process.env.PLAYWRIGHT_BASE_URL) && !isLocalPlaywrightBaseUrl(),
+      'Preview long-text settings are covered by admin-config.spec.ts with explicit admin settings setup.',
+    );
+
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const oversizedPrompt = '测'.repeat(2200);
     let streamRequestCount = 0;
     let actual = 'Long text confirmation gate prevented immediate send';
+    let originalLongTextWarning: unknown;
+    let originalLongTextThreshold: unknown;
 
     try {
+      steps.push('Enable long-text warning settings for this isolated assertion');
+      originalLongTextWarning = await getSystemSettingValue('enable_long_text_warning');
+      originalLongTextThreshold = await getSystemSettingValue('long_text_warning_threshold');
+      await setSystemSettingValue('enable_long_text_warning', 'true');
+      await setSystemSettingValue('long_text_warning_threshold', '10');
+
       steps.push('Open /chat and prepare an oversized long-text prompt');
       await gotoWithBypass(page, '/chat');
+      const input = chatPromptInput(page);
+      const maxLength = Number(await input.getAttribute('maxlength'));
+      const promptLength = Number.isFinite(maxLength) && maxLength > 0
+        ? Math.min(Math.ceil(maxLength * 0.85), 5100)
+        : 2200;
+      const oversizedPrompt = '测'.repeat(promptLength);
       await page.on('request', (request) => {
         if (request.url().includes('/api/ai/stream') && request.method() === 'POST') {
           streamRequestCount += 1;
         }
       });
 
-      await setChatPrompt(page, oversizedPrompt);
+      await input.fill('');
+      await input.click();
+      await input.pressSequentially(oversizedPrompt);
+      await expect.poll(async () => (await input.inputValue()).length, { timeout: 5000 }).toBeGreaterThan(0);
+      await expect(page.getByRole('button', { name: '发送' })).toBeEnabled({ timeout: 10000 });
 
       steps.push('Attempt to send and verify the long-text confirmation dialog appears before any stream request');
       await page.getByRole('button', { name: '发送' }).click();
@@ -372,6 +403,8 @@ test.describe('AI Chat', () => {
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
+      await setSystemSettingValue('enable_long_text_warning', originalLongTextWarning ?? 'true').catch(() => undefined);
+      await setSystemSettingValue('long_text_warning_threshold', originalLongTextThreshold ?? '5000').catch(() => undefined);
       await writeFlowAudit(
         testInfo,
         {

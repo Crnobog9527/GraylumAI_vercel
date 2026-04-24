@@ -1,5 +1,46 @@
 # Findings & Decisions
 
+## 🚦 Preview 发布前护栏已通过，剩余仅 destructive 隔离窗口 (2026-04-24)
+
+> **触发**: 历史遗留稳定化提交推送后，需要确认远端 Preview 与本地测试口径一致
+> **目标**: 完成 PR 前的本地基线、Vercel Preview preflight 与剩余风险归档
+
+### 结论
+
+- 分支 `codex/fix/admin-stat-accuracy` 已推送到 GitHub，并触发 Vercel Preview
+- 锁定 Preview：`https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app`
+- 非破坏性 Preview preflight 已通过：
+  - `preview-auth`
+  - `preview-ready`
+  - `preview-chat`
+  - `preview-admin`
+  - `preview-admin-config`
+  - `preview-admin-ops`
+  - `preview-security`
+  - `preview-user-extended`
+  - `preview-user-supplemental`
+- `preview-admin-destructive` 未执行；原因是本轮没有单独确认隔离 destructive 环境，按既定策略保留为需要隔离窗口的谨慎项
+
+### 关键发现
+
+- Preview 上 React 受控 textarea 对 `fill()` / `insertText()` 的状态同步不如本地稳定；E2E 改为重新定位当前可见 textarea 并使用 `pressSequentially()`，避免“DOM 值变化但 React 状态仍为空”的假失败
+- 默认长文本配置断言不应在共享 Preview 中临时改全局设置；Preview 的长文本设置生效已经由 `admin-config.spec.ts` 的后台设置流覆盖
+- 订阅购买路径已具备 checkout session 能力；测试应接受 `payments.createCheckoutSession` 2xx 作为真实下一步，而不是只等待旧的“支付暂不可用”fallback
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-43` | 分支已推送并触发 Vercel Preview，部署状态为 Ready | `git push -u origin codex/fix/admin-stat-accuracy`, `vercel inspect` | 远端证据 |
+| `E2E-44` | 本地 API 回归通过 | `pnpm test:api` -> `36` files / `356` tests passed | 命令证据 |
+| `E2E-45` | Preview 非破坏性 preflight 通过 | `.release-output/preflight/20260424-184843/00-release-preflight-summary.md` | 命令证据 |
+
+### 决策
+
+- 将 Preview 非破坏性验收视为通过
+- 不在共享 Preview 上执行 destructive；后续只在隔离环境中开启 `preview-admin-destructive`
+- 不把 `.release-output`、Playwright artifacts 或 `.auth` storage state 作为源代码交付内容
+
 ## 🧹 历史遗留 E2E 与管理后台稳定性已完成本轮收口 (2026-04-24)
 
 > **触发**: 阶段 12 完成后，仍有 `admin-config`、`admin-destructive`、`admin-ops`、`auth`、`chat` 等关键 E2E 套件存在历史失败或运行态噪音

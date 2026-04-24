@@ -27,18 +27,25 @@ function chatPromptInput(page: Page) {
 }
 
 async function setChatPrompt(page: Page, prompt: string) {
-  const input = chatPromptInput(page);
   const sendButton = page.getByRole('button', { name: '发送' });
-  await expect(input).toBeEditable({ timeout: 20000 });
-
-  await input.fill(prompt);
-  if ((await input.inputValue()) !== prompt || await sendButton.isDisabled()) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const input = chatPromptInput(page);
+    await expect(input).toBeEditable({ timeout: 20000 });
     await input.fill('');
     await input.click();
-    await input.type(prompt);
+    await input.pressSequentially(prompt);
+
+    const valueMatches = await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt)
+      .then(() => true)
+      .catch(() => false);
+    if (valueMatches && await sendButton.isEnabled().catch(() => false)) {
+      return;
+    }
+    await page.waitForTimeout(500);
   }
 
-  await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect.poll(async () => chatPromptInput(page).inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect(sendButton).toBeEnabled({ timeout: 5000 });
 }
 
 async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number) {
