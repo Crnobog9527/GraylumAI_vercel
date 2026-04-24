@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -133,27 +134,27 @@ export default function AdminPromptsPage() {
   });
 
   const createPrompt = trpc.admin.createPrompt.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      await refetch();
       closeDialog();
     }
   });
 
   const updatePrompt = trpc.admin.updatePrompt.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      await refetch();
       closeDialog();
     }
   });
 
   const deletePrompt = trpc.admin.deletePrompt.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      await refetch();
     }
   });
   const batchUpdatePrompts = trpc.admin.batchUpdatePrompts.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      await refetch();
       setBatchEditOpen(false);
       setSelectedPromptIds([]);
       setBatchForm({
@@ -165,14 +166,14 @@ export default function AdminPromptsPage() {
     }
   });
   const batchSetPromptActive = trpc.admin.batchSetPromptActive.useMutation({
-    onSuccess: () => {
-      refetch();
+    onSuccess: async () => {
+      await refetch();
       setSelectedPromptIds([]);
     }
   });
   const batchDeletePrompts = trpc.admin.batchDeletePrompts.useMutation({
-    onSuccess: (result) => {
-      refetch();
+    onSuccess: async (result) => {
+      await refetch();
       setSelectedPromptIds([]);
       if (result.blockedCount > 0) {
         alert(`已删除 ${result.deletedCount} 个提示词，跳过 ${result.blockedCount} 个系统提示词`);
@@ -704,6 +705,9 @@ export default function AdminPromptsPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {editingPrompt ? '编辑提示词' : '新建提示词'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                编辑提示词的分类、适用模型和运行时内容配置。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
@@ -929,6 +933,9 @@ export default function AdminPromptsPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 批量编辑共享字段
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                为已选中的提示词统一更新共享字段，未选择的字段保持不变。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">

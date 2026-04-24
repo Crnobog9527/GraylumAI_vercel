@@ -21,6 +21,26 @@
 
 ## P1（高优先，已首批锁定）
 
+### P1-0 历史 E2E 稳定化与管理后台运行态清理
+- 目标：收口阶段 12 后遗留的管理后台、登录、聊天与 destructive 回归不稳定问题。
+- 状态：`已完成`。
+- 实施：
+  - `/admin/settings` 首屏查询拆分为轻量 dashboard 与独立 cleanup stats，保存链路改为 `settings.updateSystemSettingsBulk` 批量 upsert。
+  - 管理端套餐、提示词、公告、模型、用户与聊天侧边栏对话框补齐隐藏 `DialogDescription`，消除当前关键 E2E 命中的 Radix description 警告。
+  - 管理端 CRUD mutation 在关闭弹窗或进入下一断言前等待列表 refetch，减少陈旧 UI 与后台状态竞态。
+  - 订阅卡使用 `plan.id` 作为稳定身份，避免同级别多套餐时 React key 与 E2E selector 冲突。
+  - 登录代理保留安全的 `redirect` 目标，修复已登录用户访问 `/login?redirect=...` 时被错误送回首页的问题。
+- 验收标准：
+  - `admin-config.spec.ts`、`admin-destructive.spec.ts`、`admin-ops.spec.ts`、`auth.spec.ts`、`chat.spec.ts` 在本地 Chromium 串行回归中通过。
+  - `.auth` storage state 不作为交付差异保留。
+- 验证：
+  - `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium`：`10 passed / 2 skipped`
+  - `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium`：`12 passed`
+  - `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`：`6 passed`
+  - `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`：`11 passed`
+  - `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium`：`6 passed / 4 skipped`
+- 备注：`admin-config` 中 smart routing / smart search preview runtime proof 与 `chat` live preview 用例仍按环境门控跳过；它们不是本轮本地稳定化失败项。
+
 ### P1-1 修复 admin 用户详情消息统计
 - 目标：修复 `admin.getUserDetails` 统计逻辑错误。
 - 状态：`已完成`。

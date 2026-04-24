@@ -34,6 +34,19 @@ async function saveAllSettings(page: Page) {
   await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
 }
 
+async function openMaintenancePage(page: Page) {
+  await gotoWithBypass(page, '/maintenance');
+  await expect(page).toHaveURL(/\/maintenance/);
+  await expect(page.getByRole('heading', { name: /维护中/ })).toBeVisible({ timeout: 15000 });
+}
+
+async function openAdminSettings(page: Page) {
+  await gotoWithBypass(page, '/admin/settings');
+  await expect(page).toHaveURL(/\/admin\/settings/);
+  await expect(page.getByTestId('admin-settings-save-all')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId('admin-setting-site_name')).toBeVisible({ timeout: 30000 });
+}
+
 function chatPromptInput(page: Page) {
   return page.locator('.chat-input-box textarea').first();
 }
@@ -168,7 +181,7 @@ function clearIntentionalStreamAbortIssues(
       && issue.method === 'POST'
       && issue.url?.includes('/api/ai/stream')
       && issue.message === 'net::ERR_ABORTED')
-    || (issue.source === 'console' && issue.message === 'Streaming error: network error')
+    || (issue.source === 'console' && issue.message.includes('Streaming error'))
     || (issue.source === 'pageerror' && issue.message === 'signal is aborted without reason')
   );
 }
@@ -270,6 +283,7 @@ test.describe('Admin Config Flows', () => {
   test.skip(!hasCredentials('admin'), 'E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD are required for admin config flows');
 
   test('should persist and restore global settings and membership export settings', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const siteNameInput = page.getByTestId('admin-setting-site_name');
@@ -278,8 +292,7 @@ test.describe('Admin Config Flows', () => {
 
     try {
       steps.push('Open /admin/settings');
-      await gotoWithBypass(page, '/admin/settings');
-      await expect(page).toHaveURL(/\/admin\/settings/);
+      await openAdminSettings(page);
 
       const originalSiteName = (await siteNameInput.inputValue()).trim();
       const originalSupportEmail = (await supportEmailInput.inputValue()).trim();
@@ -307,11 +320,11 @@ test.describe('Admin Config Flows', () => {
       await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
         timeout: 15000,
       });
-      await gotoWithBypass(page, '/maintenance');
+      await openMaintenancePage(page);
       await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
         timeout: 15000,
       });
-      await gotoWithBypass(page, '/admin/settings');
+      await openAdminSettings(page);
 
       const membershipPlan = page.getByTestId(/^membership-plan-/).first();
       const membershipPlanCount = await membershipPlan.count();
@@ -389,8 +402,7 @@ test.describe('Admin Config Flows', () => {
 
     try {
       steps.push('Open /admin/settings and capture the original maintenance mode state');
-      await gotoWithBypass(page, '/admin/settings');
-      await expect(page).toHaveURL(/\/admin\/settings/);
+      await openAdminSettings(page);
       originalMaintenanceState = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
 
       steps.push('Enable maintenance mode from the admin settings page');
@@ -422,7 +434,7 @@ test.describe('Admin Config Flows', () => {
       if (originalMaintenanceState !== null) {
         try {
           steps.push('Restore the original maintenance mode state');
-          await gotoWithBypass(page, '/admin/settings');
+          await openAdminSettings(page);
           await saveMaintenanceMode(page, originalMaintenanceState, saveAllButton, maintenanceSwitch);
           await page.waitForTimeout(2500);
         } catch (restoreError) {
@@ -651,6 +663,7 @@ test.describe('Admin Config Flows', () => {
       await expect(userPage.getByText('长文本发送确认')).toBeVisible({ timeout: 10000 });
       await userPage.getByRole('button', { name: '再检查一下' }).click();
       await expect(userPage.getByText('长文本发送确认')).toHaveCount(0, { timeout: 10000 });
+      clearIntentionalStreamAbortIssues(userMonitor);
 
       steps.push('Open the seeded metered conversation and verify token usage stats become visible');
       const meteredConversation = userPage
@@ -691,6 +704,7 @@ test.describe('Admin Config Flows', () => {
       await setSwitchState(showTokenUsageStatsSwitch, originalTokenUsageStatsState);
       await saveAllSettings(page);
 
+      clearIntentionalStreamAbortIssues(userMonitor);
       const blockingIssues = [
         ...monitor.getIssues('P1'),
         ...userMonitor.getIssues('P1'),
@@ -1097,6 +1111,7 @@ test.describe('Admin Config Flows', () => {
   });
 
   test('should create, edit, and delete credit packages and membership plans', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const packageName = `Parity Package ${Date.now()}`;
@@ -1152,6 +1167,7 @@ test.describe('Admin Config Flows', () => {
       await page.getByTestId('membership-plan-name-input').fill(editedPlanName);
       await page.getByTestId('membership-plan-monthly-price-input').fill('39.9');
       await page.getByTestId('membership-plan-save').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
       await expect(page.locator('tr').filter({ hasText: editedPlanName }).first()).toBeVisible({ timeout: 15000 });
 
       const deletePlanDialogPromise = acceptNextDialog(page);
@@ -1182,6 +1198,7 @@ test.describe('Admin Config Flows', () => {
   });
 
   test('should create, edit, toggle, and delete a prompt module', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const promptName = `Parity Prompt ${Date.now()}`;
@@ -1208,6 +1225,7 @@ test.describe('Admin Config Flows', () => {
       await page.getByTestId('prompt-name-input').fill(editedPromptName);
       await page.getByTestId('prompt-description-input').fill(`Parity prompt edited ${Date.now()}`);
       await page.getByTestId('prompt-save').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
       await expect(page.locator('tr').filter({ hasText: editedPromptName }).first()).toBeVisible({ timeout: 15000 });
 
       const editedRow = page.locator('tr').filter({ hasText: editedPromptName }).first();

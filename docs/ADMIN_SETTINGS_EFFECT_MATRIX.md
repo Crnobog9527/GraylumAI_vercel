@@ -1,6 +1,6 @@
 # Admin Settings Effect Matrix
 
-Last updated: 2026-04-22
+Last updated: 2026-04-24
 
 ## Status Legend
 
@@ -72,3 +72,11 @@ All non-payment settings are now either:
 The only intentionally excluded unfinished area is Stripe enablement and the external credentials / `price_xxx` values it still requires.
 
 Preview-only runtime acceptance for `enable_smart_routing` and `enable_smart_search_decision` is now closed on the locked Vercel preview through deployed runtime probes rather than local persistence-only checks.
+
+## Latest Local Regression
+
+The 2026-04-24 historical cleanup pass re-ran the local Chromium admin settings suite after stabilizing `/admin/settings` loading, bulk saves, maintenance-mode redirects, chat runtime assertions, package CRUD, and prompt CRUD.
+
+- `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium`: `10 passed / 2 skipped`
+- The skipped cases remain environment-gated preview runtime proofs for smart routing and smart search, not local settings persistence gaps.
+- `maintenance_mode` is covered by direct `/maintenance` access, public redirect behavior, and admin bypass behavior in `admin-config.spec.ts`.

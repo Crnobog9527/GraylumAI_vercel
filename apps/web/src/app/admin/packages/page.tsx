@@ -22,6 +22,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -119,43 +120,43 @@ export default function AdminPackagesPage() {
 
   // Credit Package Mutations
   const createPackage = trpc.admin.createPackage.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePackageDialog();
     }
   });
 
   const updatePackage = trpc.admin.updatePackage.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePackageDialog();
     }
   });
 
   const deletePackage = trpc.admin.deletePackage.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
     }
   });
 
   // Membership Plan Mutations
   const createMembershipPlan = trpc.admin.createMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePlanDialog();
     }
   });
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePlanDialog();
     }
   });
 
   const deleteMembershipPlan = trpc.admin.deleteMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchDashboard();
+    onSuccess: async () => {
+      await refetchDashboard();
     }
   });
 
@@ -824,6 +825,9 @@ export default function AdminPackagesPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {editingPackage ? '编辑积分包' : '创建积分包'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                设置积分包的价格、积分数量、赠送额度和上架状态。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
@@ -1006,6 +1010,9 @@ export default function AdminPackagesPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {editingPlan ? '编辑会员等级' : '创建会员等级'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                设置会员等级的价格、积分权益、Stripe 价格和展示顺序。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">

@@ -28,6 +28,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -586,6 +587,9 @@ export function ChatSidebar({
         <DialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>重命名对话</DialogTitle>
+            <DialogDescription className="sr-only">
+              修改当前对话的标题，并在保存后立即更新侧边栏列表。
+            </DialogDescription>
           </DialogHeader>
           <Input
             value={renameValue}

@@ -2256,15 +2256,12 @@ export const adminRouter = router({
    */
   getSettingsDashboard: adminProcedure
     .query(async ({ ctx }) => {
-      const service = new ConversationCleanupService({ supabase: ctx.supabase });
-      const [systemSettingsResult, membershipPlansResult, cleanupStatsResult, latestRun] = await Promise.all([
+      const [systemSettingsResult, membershipPlansResult] = await Promise.all([
         ctx.supabase.from('system_settings').select('key, value'),
         ctx.supabase
           .from('membership_plans')
           .select('*')
           .order('sort_order', { ascending: true }),
-        service.getCleanupStats(),
-        getLatestScheduledJobRun(ctx.supabase, SCHEDULED_JOB_KEYS.conversationCleanup),
       ]);
 
       if (systemSettingsResult.error) {
@@ -2280,11 +2277,6 @@ export const adminRouter = router({
           (systemSettingsResult.data ?? []).map((setting) => [setting.key, setting.value]),
         ),
         membershipPlans: membershipPlansResult.data ?? [],
-        cleanupStats: {
-          stats: cleanupStatsResult.stats,
-          totalExpired: cleanupStatsResult.totalExpired,
-          latestRun,
-        },
       };
     }),
 

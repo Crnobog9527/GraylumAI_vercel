@@ -343,13 +343,14 @@ export async function proxy(request: NextRequest) {
     if (isPublicPath(pathname)) {
       // 已登录用户访问登录页时重定向到首页
       if ((pathname === '/login' || pathname === '/register') && user) {
+        const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
         if (!userIsVerified) {
           const verifyUrl = new URL('/verify-email', request.url);
           verifyUrl.searchParams.set('email', user.email ?? '');
-          verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+          verifyUrl.searchParams.set('redirect', requestedRedirect);
           return NextResponse.redirect(verifyUrl);
         }
-        return NextResponse.redirect(new URL('/', request.url));
+        return NextResponse.redirect(new URL(requestedRedirect, request.url));
       }
       return supabaseResponse;
     }
@@ -415,13 +416,14 @@ export async function proxy(request: NextRequest) {
 
     // 已登录用户访问登录页时重定向到首页
     if ((pathname === '/login' || pathname === '/register') && user) {
+      const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
         verifyUrl.searchParams.set('email', user.email ?? '');
-        verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+        verifyUrl.searchParams.set('redirect', requestedRedirect);
         return NextResponse.redirect(verifyUrl);
       }
-      return NextResponse.redirect(new URL('/', request.url));
+      return NextResponse.redirect(new URL(requestedRedirect, request.url));
     }
   }
 

@@ -972,24 +972,10 @@ describe('adminRouter lightweight admin dashboards', () => {
         maintenance_mode: 'false',
       },
       membershipPlans: [{ id: 'plan-1', name: 'Pro', level: 'pro', sort_order: 1 }],
-      cleanupStats: {
-        stats: [
-          { level: 'free', retentionDays: 7, expiredCount: 2 },
-          { level: 'pro', retentionDays: 30, expiredCount: 1 },
-        ],
-        totalExpired: 3,
-        latestRun: {
-          id: 'run-1',
-          status: 'success',
-          started_at: '2026-03-29T10:00:00.000Z',
-          summary: { deletedCount: 3 },
-          error: null,
-        },
-      },
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
-    expect(cleanupState.getCleanupStats).toHaveBeenCalledOnce();
-    expect(cleanupState.getLatestScheduledJobRun).toHaveBeenCalledOnce();
+    expect(cleanupState.getCleanupStats).not.toHaveBeenCalled();
+    expect(cleanupState.getLatestScheduledJobRun).not.toHaveBeenCalled();
   });
 });
 

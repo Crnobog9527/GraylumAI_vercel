@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -588,6 +589,9 @@ export default function AdminUsersPage() {
         <DialogContent className="max-w-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>调整积分</DialogTitle>
+            <DialogDescription className="sr-only">
+              为所选用户调整积分余额，并记录本次调整原因。
+            </DialogDescription>
           </DialogHeader>
 
           {selectedUser && (

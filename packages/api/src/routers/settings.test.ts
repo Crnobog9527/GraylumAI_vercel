@@ -126,4 +126,102 @@ describe('getPublicReadClient', () => {
       message: '读取系统设置失败，请稍后重试',
     });
   });
+
+  it('updates system settings in a single bulk upsert for admins', async () => {
+    const caller = settingsRouter.createCaller({
+      headers: new Headers(),
+      user: {
+        id: 'admin-user',
+        email: 'admin@example.com',
+        app_metadata: { provider: 'email' },
+        user_metadata: { email_verified: true },
+      },
+      isEmailVerified: true,
+      authProvider: 'email',
+      supabase: {
+        from(table: string) {
+          if (table === 'profiles') {
+            return {
+              select() {
+                return this;
+              },
+              eq() {
+                return this;
+              },
+              single() {
+                return Promise.resolve({
+                  data: {
+                    id: 'admin-user',
+                    role: 'admin',
+                    status: 'active',
+                    nickname: 'Admin',
+                    email: 'admin@example.com',
+                  },
+                  error: null,
+                });
+              },
+            };
+          }
+
+          if (table === 'system_settings') {
+            return {
+              upsert(rows: Array<{ key: string; value: unknown }>, options: { onConflict: string }) {
+                expect(options).toEqual({ onConflict: 'key' });
+                expect(rows).toEqual([
+                  { key: 'site_name', value: 'GraylumAI' },
+                  { key: 'support_email', value: 'support@example.com' },
+                ]);
+
+                return {
+                  select() {
+                    return Promise.resolve({
+                      data: rows,
+                      error: null,
+                    });
+                  },
+                };
+              },
+            };
+          }
+
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+      supabasePublic: {},
+      supabaseAdmin: {
+        from(table: string) {
+          expect(table).toBe('system_settings');
+          return {
+            upsert(rows: Array<{ key: string; value: unknown }>, options: { onConflict: string }) {
+              expect(options).toEqual({ onConflict: 'key' });
+              expect(rows).toEqual([
+                { key: 'site_name', value: 'GraylumAI' },
+                { key: 'support_email', value: 'support@example.com' },
+              ]);
+
+              return {
+                select() {
+                  return Promise.resolve({
+                    data: rows,
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        },
+      },
+      hasSupabaseAdminPrivileges: true,
+    } as any);
+
+    await expect(
+      caller.updateSystemSettingsBulk([
+        { key: 'site_name', value: 'GraylumAI' },
+        { key: 'support_email', value: 'support@example.com' },
+      ]),
+    ).resolves.toEqual([
+      { key: 'site_name', value: 'GraylumAI' },
+      { key: 'support_email', value: 'support@example.com' },
+    ]);
+  });
 });

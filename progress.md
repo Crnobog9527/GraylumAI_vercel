@@ -23,12 +23,50 @@
 
 ## Current Status
 
-- **Phase:** 阶段 12 遗留问题清理与系统稳定化 ⏳ 收尾中
+- **Phase:** 历史遗留问题清理与系统稳定化 ✅ 已完成本轮收口
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
 - **Current:** 阶段 12 全部任务已完成
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-04-22 (阶段 12 收尾项状态、文档与验证证据已对齐)
+- **更新时间:** 2026-04-24 (历史遗留 E2E / 可访问性 / 管理后台稳定化已对齐)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-04-24 - 历史遗留清理批次完成
+
+**完成内容**:
+- 修复 `/admin/settings` 首屏与保存链路稳定性：
+  - `admin.getSettingsDashboard` 改为仅返回系统设置与会员方案
+  - `admin.getCleanupStats` 继续独立承担清理统计查询
+  - `settings.updateSystemSettingsBulk` 落地，后台“保存所有设置”不再逐条 mutation 串行阻塞
+- 收口管理端高频 dialog 的可访问性警告，为模型、公告、提示词、积分包、会员方案、用户积分调整与聊天侧边栏重命名弹窗补齐隐藏描述
+- 修复用户订阅卡在“同级别多套餐”场景下的唯一标识问题，订阅卡改用 `plan.id` 作为稳定键，并暴露 `data-plan-id`
+- 修复登录保护路由回跳：
+  - `proxy.ts` 现在会保留 `/login?redirect=...` 中的目标地址
+  - 已登录用户访问登录页时，不再无条件被重定向回 `/`
+- 稳定化以下 E2E 套件中的历史失败：
+  - `admin-config.spec.ts`
+  - `admin-destructive.spec.ts`
+  - `admin-ops.spec.ts`
+  - `auth.spec.ts`
+  - `chat.spec.ts`
+
+**验证方式**:
+- `pnpm --filter @repo/api test:run -- src/routers/settings.test.ts src/routers/admin.test.ts`
+  - 结果：通过，仓库当前 vitest 配置实际执行到 `36` 个测试文件、`356` 个测试
+- `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium`
+  - 结果：`10 passed, 2 skipped`
+- `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium`
+  - 结果：`12 passed`
+- `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`
+  - 结果：`6 passed`
+- `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`
+  - 结果：`11 passed`
+- `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium`
+  - 结果：`6 passed, 4 skipped`
+
+**备注**:
+- `admin-config` 中 `smart routing` 与 `smart search` 两条 preview 依赖用例仍按环境门控跳过，不属于本轮未完成项
+- 本轮交付前会恢复 `apps/web/tests/e2e/.auth/admin.json` 与 `apps/web/tests/e2e/.auth/user.json`，不把运行态 storage state 带入差异
+- 本地 `localhost:3000` 的旧 Next 进程在回归过程中出现 `/profile` 挂起，已重启到新的 `next dev --webpack` 会话后完成剩余回归
 
 ### 2026-04-22 - 完成 12.1.6 独立 API Key 生效验证
 

@@ -1,5 +1,49 @@
 # Findings & Decisions
 
+## 🧹 历史遗留 E2E 与管理后台稳定性已完成本轮收口 (2026-04-24)
+
+> **触发**: 阶段 12 完成后，仍有 `admin-config`、`admin-destructive`、`admin-ops`、`auth`、`chat` 等关键 E2E 套件存在历史失败或运行态噪音
+> **目标**: 把剩余历史遗留问题收敛到代码修复、自动化验证和文档状态一致
+
+### 结论
+
+- 本轮历史遗留清理已经完成：
+  - `admin-config.spec.ts` 整文件通过，结果为 `10 passed / 2 skipped`
+  - `admin-destructive.spec.ts` 在 destructive gate 打开时通过，结果为 `12 passed`
+  - `admin-ops.spec.ts` 通过，结果为 `6 passed`
+  - `auth.spec.ts` 通过，结果为 `11 passed`
+  - `chat.spec.ts` 通过，结果为 `6 passed / 4 skipped`
+- 原先的 `/maintenance`、聊天运行时设置、套餐/提示词 CRUD、用户页、财务/成本页、保护路由登录回跳等失败点已经全部收口
+- 高频 Radix dialog `Description` / `aria-describedby` 警告已在当前关键套件覆盖路径中清理
+- 当前跳过项属于既有环境门控：
+  - `admin-config` 的 smart routing / smart search preview runtime proof
+  - `chat` 的 live stream / preview runtime 相关用例
+
+### 关键发现
+
+- `/admin/settings` 首屏不能再把清理统计和基础设置绑在同一个 dashboard 查询里；清理统计已经拆到 `admin.getCleanupStats`，首屏只保留系统设置与会员方案
+- “保存所有设置”逐条 mutation 会在 E2E 和真实管理操作中放大延迟；现在改为 `settings.updateSystemSettingsBulk`
+- 管理后台的创建/编辑/删除类页面需要等 mutation 后的列表 refetch 完成，再收起或验证 UI，否则长流程会稳定性不足
+- 用户订阅页不能用 `plan.level` 作为唯一 React key 或唯一测试锚点；同一级别可能存在多个方案，现在卡片使用 `plan.id` 作为稳定身份
+- `proxy.ts` 里已登录用户访问 `/login?redirect=...` 时不应无条件回 `/`，否则会丢掉受保护路由的原始目标
+- 真实流式 E2E 不需要等完整回答结束才验证 runtime metadata；读取到 `init` 事件后主动取消流即可减少 destructive 回归耗时
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-38` | `admin-config.spec.ts` 全文件通过，`maintenance`、settings、chat runtime、packages、prompts 均闭环 | `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium` | 命令证据 |
+| `E2E-39` | destructive 管理端高风险回归在 gate 打开后通过 | `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium` | 命令证据 |
+| `E2E-40` | admin ops 读页、用户详情、诊断、工单处理均通过 | `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium` | 命令证据 |
+| `E2E-41` | 登录、公开页、保护路由 redirect、profile 巡检均通过 | `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium` | 命令证据 |
+| `E2E-42` | chat 关键非 live 用例通过，live/preview 用例按环境门控跳过 | `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium` | 命令证据 |
+
+### 决策
+
+- 将这批问题从“历史遗留待治理”更新为“本轮已收口”
+- 保留 smart routing / smart search / live stream 类用例的环境门控，不把跳过误记为失败
+- 最终交付不包含 `.auth` storage state 运行态变化
+
 ## 🔐 隔离运行验证确认 `/api/ai/stream` 使用数据库模型 key，而非全局 env fallback (2026-04-22)
 
 > **触发**: 阶段 12 最后一个阻塞项 `12.1.6` 需要在真实隔离环境中验证

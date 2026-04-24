@@ -505,8 +505,10 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 
           return (
             <div
-              key={plan.level}
+              key={plan.id}
               data-testid={`profile-membership-plan-${plan.level}`}
+              data-plan-id={plan.id}
+              data-plan-level={plan.level}
               data-highlight-tone={isHighlight ? 'warm' : 'default'}
               className="relative rounded-xl p-5 transition-colors duration-200"
               style={{

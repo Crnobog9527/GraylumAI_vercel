@@ -110,11 +110,15 @@ export default function AdminSettingsPage() {
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
   const { data: dashboard, isLoading, refetch: refetchDashboard } = trpc.admin.getSettingsDashboard.useQuery();
+  const {
+    data: cleanupStats,
+    isLoading: cleanupStatsLoading,
+    refetch: refetchCleanupStats,
+  } = trpc.admin.getCleanupStats.useQuery();
   const savedSettings = dashboard?.systemSettings;
   const membershipPlans = dashboard?.membershipPlans;
-  const cleanupStats = dashboard?.cleanupStats;
 
-  const updateSetting = trpc.settings.updateSystemSettings.useMutation();
+  const updateSettingsBulk = trpc.settings.updateSystemSettingsBulk.useMutation();
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
     onSuccess: () => {
@@ -130,7 +134,7 @@ export default function AdminSettingsPage() {
     onSuccess: (result) => {
       setCleanupMessage(result.message);
       toast.success(result.message);
-      refetchDashboard();
+      void refetchCleanupStats();
     },
     onError: () => {
       setCleanupMessage('清理失败，请稍后重试');
@@ -193,12 +197,14 @@ export default function AdminSettingsPage() {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      const promises = Object.entries(settings).map(([key, data]) =>
-        updateSetting.mutateAsync({ key, value: data.value })
+      await updateSettingsBulk.mutateAsync(
+        Object.entries(settings).map(([key, data]) => ({
+          key,
+          value: data.value,
+        })),
       );
-      await Promise.all(promises);
-      await refetchDashboard();
       toast.success('设置保存成功');
+      void refetchDashboard();
     } catch {
       toast.error('保存设置失败');
     } finally {
@@ -705,7 +711,7 @@ export default function AdminSettingsPage() {
                     variant="destructive"
                     data-testid="admin-settings-cleanup-trigger"
                     onClick={handleCleanup}
-                    disabled={cleaningUp || (cleanupStats?.totalExpired === 0)}
+                    disabled={cleaningUp || cleanupStatsLoading || (cleanupStats?.totalExpired === 0)}
                     className="bg-red-600 hover:bg-red-700"
                   >
                     {cleaningUp ? (
@@ -717,12 +723,18 @@ export default function AdminSettingsPage() {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => refetchDashboard()}
+                    onClick={() => void refetchCleanupStats()}
                     className="border-[var(--border-primary)] text-[var(--text-secondary)]"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />
                     刷新统计
                   </Button>
+                  {cleanupStatsLoading && (
+                    <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">正在加载清理统计...</span>
+                    </div>
+                  )}
                   {cleanupStats?.totalExpired === 0 && (
                     <div className="flex items-center gap-2 text-emerald-400">
                       <CheckCircle className="h-4 w-4" />

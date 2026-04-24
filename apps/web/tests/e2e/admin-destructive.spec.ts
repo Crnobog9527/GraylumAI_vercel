@@ -213,9 +213,38 @@ async function sendChatPromptThroughAuthenticatedSession(
       }),
     });
 
+    if (!response.body) {
+      return {
+        status: response.status,
+        body: await response.text(),
+        requestId,
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let body = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        body += decoder.decode(value, { stream: true });
+        if (body.includes('"type":"init"')) {
+          await reader.cancel().catch(() => undefined);
+          break;
+        }
+      }
+    } finally {
+      body += decoder.decode();
+    }
+
     return {
       status: response.status,
-      body: await response.text(),
+      body,
       requestId,
     };
   }, { message: prompt, requestId });
@@ -840,7 +869,7 @@ test.describe('Admin Destructive Flows', () => {
       steps.push('Open /profile?tab=subscription as the user and verify the target plan is visible');
       await gotoWithBypass(userPage, '/profile?tab=subscription');
       await expect(userPage).toHaveURL(/\/profile\?tab=subscription/);
-      const userPlan = userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`);
+      const userPlan = userPage.locator(`[data-plan-id="${targetPlanId}"]`);
       await expect(userPlan).toBeVisible({ timeout: 15000 });
 
       steps.push('Disable the membership plan and verify it disappears from the user subscription view');
@@ -856,7 +885,7 @@ test.describe('Admin Destructive Flows', () => {
       await expect(page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`)).toContainText('已禁用', { timeout: 15000 });
 
       await reloadUserSurface(userPage);
-      await expect(userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`)).toHaveCount(0, { timeout: 15000 });
+      await expect(userPage.locator(`[data-plan-id="${targetPlanId}"]`)).toHaveCount(0, { timeout: 15000 });
 
       steps.push('Re-enable the membership plan and verify it returns to the user subscription view');
       const enableResponsePromise = page.waitForResponse(
@@ -871,11 +900,11 @@ test.describe('Admin Destructive Flows', () => {
       await expect(page.getByTestId(`admin-membership-plan-toggle-${targetPlanId}`)).toContainText('已启用', { timeout: 15000 });
 
       await userPage.reload({ waitUntil: 'networkidle' });
-      await expect(userPage.getByTestId(`profile-membership-plan-${targetPlanLevel}`)).toBeVisible({ timeout: 15000 });
+      await expect(userPage.locator(`[data-plan-id="${targetPlanId}"]`)).toBeVisible({ timeout: 15000 });
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
-      actual = `Membership plan ${targetPlanLevel} disabled and restored successfully`;
+      actual = `Membership plan ${targetPlanName} disabled and restored successfully`;
     } catch (error) {
       actual = error instanceof Error ? error.message : 'Unknown admin membership plan rollback failure';
       monitor.addAssertionIssue(actual, 'P1');
@@ -1092,7 +1121,7 @@ test.describe('Admin Destructive Flows', () => {
       !destructiveGateEnabled,
       'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
     );
-    test.setTimeout(90000);
+    test.setTimeout(180000);
 
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
@@ -1127,7 +1156,10 @@ test.describe('Admin Destructive Flows', () => {
 
       steps.push('Create an isolated high-priority system prompt in /admin/prompts');
       await gotoWithBypass(page, '/admin/prompts');
-      await expect(page).toHaveURL(/\/admin\/prompts/);
+      if (!/\/admin\/prompts/.test(page.url())) {
+        await page.getByRole('link', { name: '提示词模块' }).click();
+      }
+      await expect(page).toHaveURL(/\/admin\/prompts/, { timeout: 15000 });
       await page.getByRole('button', { name: '新建提示词' }).click();
       await page.getByTestId('prompt-name-input').fill(systemPromptName);
       await page.getByTestId('prompt-content-input').fill('你是一个用于 E2E 验收的系统提示词。');

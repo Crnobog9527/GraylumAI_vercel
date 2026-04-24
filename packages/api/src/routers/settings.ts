@@ -160,6 +160,21 @@ export const settingsRouter = router({
       return data;
     }),
 
+  updateSystemSettingsBulk: adminProcedure
+    .input(z.array(z.object({ key: z.string(), value: z.any() })).min(1))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('system_settings')
+        .upsert(input, { onConflict: 'key' })
+        .select();
+
+      if (error) {
+        throw createSafeInternalError(error, '批量更新系统设置失败，请稍后重试');
+      }
+
+      return data;
+    }),
+
   /**
    * 获取积分加油包列表 (公开接口)
    * 返回活跃的积分加油包供用户购买

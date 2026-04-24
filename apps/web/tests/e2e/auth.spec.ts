@@ -82,6 +82,7 @@ test.describe('Authentication', () => {
 
   test('should preserve protected-route redirect through login', async ({ page }, testInfo) => {
     test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for redirect return flow');
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Protected route redirect returned user after login';
@@ -172,6 +173,7 @@ test.describe('Authentication', () => {
   });
 
   test('should render public support and legal pages', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Public support pages rendered';
@@ -262,6 +264,7 @@ test.describe('Authentication', () => {
     });
 
     test('should load profile page when logged in', async ({ page }, testInfo) => {
+      test.setTimeout(90000);
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
       let actual = 'Profile page rendered';

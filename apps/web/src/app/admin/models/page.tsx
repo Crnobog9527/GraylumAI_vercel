@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -613,6 +614,9 @@ export default function AdminModelsPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {selectedModel ? '编辑模型' : '添加模型'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                配置模型的提供商、密钥、计费参数和运行时能力。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
