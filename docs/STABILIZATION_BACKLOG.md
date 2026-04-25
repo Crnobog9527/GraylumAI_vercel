@@ -24,6 +24,7 @@
   - 本地扫描：`rg -n "sk-ant-|eyJhbGciOiJIUzI1Ni|sb_publishable_" .`
   - 运行时扫描：`rg -n "api.anthropic.com|anthropic-version|ANTHROPIC_API_KEY" packages apps .env.example turbo.json`
   - 线上功能：登录和 AI 调用正常。
+  - 2026-04-25 轮换后补充：Preview 数据库中 OpenRouter Claude 模型级 key 已同步为新 OpenRouter key；E2E fixture 已改走 `DATABASE_URL` SQL helper，避免继续依赖 legacy Supabase service-role REST key。
 
 ## P1（高优先，已首批锁定）
 
@@ -46,6 +47,9 @@
   - `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`：`11 passed`
   - `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium`：`6 passed / 4 skipped`
   - Preview preflight：`.release-output/preflight/20260424-184843/00-release-preflight-summary.md`，非破坏性模块全部通过
+  - 2026-04-25 轮换后定向复测：
+    - `chat.spec.ts --grep 'persist chat runtime evidence'` against Preview：`3 passed`
+    - `admin-config.spec.ts --grep 'chat runtime feature settings'` against Preview：`3 passed`
 - 备注：`admin-config` 中 smart routing / smart search preview runtime proof 与 `chat` live preview 用例仍按环境门控跳过；它们不是本轮本地稳定化失败项。
 
 ### P1-1 修复 admin 用户详情消息统计

@@ -27,8 +27,32 @@
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
 - **Current:** 阶段 12 全部任务已完成
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-04-25 (Anthropic 官方 API 退役，Claude 统一改为 OpenRouter 口径)
+- **更新时间:** 2026-04-25 (OpenRouter/Supabase/DB 轮换后 Preview E2E fixture 稳定化)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-04-25 - 密钥轮换后的 Preview E2E fixture 稳定化
+
+**完成内容**:
+- 将 Playwright E2E 的维护模式与积分/聊天证据 fixture 从 Supabase REST service-role client 改为 `DATABASE_URL` 直连 SQL helper
+- `playwright.config.ts` 现在按 root `.env.local` -> `apps/web/.env.local` 顺序加载本地环境，允许 app 层配置覆盖 root 默认值
+- Preview 数据库中 OpenRouter Claude 模型的模型级 key 已同步为轮换后的 OpenRouter key；文档只记录状态，不记录密钥值
+- `.auth` storage state 继续按运行态文件处理，本轮验证后已恢复，不纳入交付差异
+
+**验证方式**:
+- `pnpm test:api`
+  - 结果：`36` 个测试文件、`358` 个测试通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `git diff --check`
+  - 结果：通过
+- `PLAYWRIGHT_BASE_URL=https://graylum-ai-vercel-v1-i0krvwxmp-simons-projects-bfe3e99f.vercel.app pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep 'persist chat runtime evidence'`
+  - 结果：`3 passed`
+- `PLAYWRIGHT_BASE_URL=https://graylum-ai-vercel-v1-i0krvwxmp-simons-projects-bfe3e99f.vercel.app pnpm --dir apps/web exec playwright test tests/e2e/admin-config.spec.ts --project=chromium --grep 'chat runtime feature settings'`
+  - 结果：`3 passed`
+
+**备注**:
+- 旧的 Preview preflight 失败证据来自已废弃的 Supabase legacy service-role REST 调用路径，不能作为本次 SQL fixture 修复后的最终结论
+- 下一步需要提交并推送本轮 fixture 修复，等待新 Vercel Preview 后重新跑完整非破坏性 `release:preflight:preview`
 
 ### 2026-04-25 - Claude via OpenRouter 口径收敛
 

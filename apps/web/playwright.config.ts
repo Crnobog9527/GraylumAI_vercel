@@ -6,6 +6,10 @@ import { defineConfig, devices } from '@playwright/test';
 dotenv.config({
   path: path.resolve(__dirname, '../../.env.local'),
 });
+dotenv.config({
+  path: path.resolve(__dirname, '.env.local'),
+  override: true,
+});
 
 const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const shouldUseLocalWebServer = !process.env.CI && !remoteBaseUrl;

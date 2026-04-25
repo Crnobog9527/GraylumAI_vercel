@@ -7,7 +7,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
+import { getE2ESql } from './e2eDb';
 
 export type E2ERole = 'user' | 'admin';
 
@@ -42,28 +42,12 @@ export async function ensureAuthStateDirectory() {
 }
 
 export async function ensureMaintenanceModeDisabled() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return;
-  }
-
-  const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-
-  const { error } = await adminClient
-    .from('system_settings')
-    .update({ value: false })
-    .eq('key', 'maintenance_mode');
-
-  if (error) {
-    throw new Error(`Failed to disable maintenance mode for E2E setup: ${error.message}`);
-  }
+  const sql = getE2ESql();
+  await sql`
+    insert into system_settings (key, value)
+    values ('maintenance_mode', 'false'::jsonb)
+    on conflict (key) do update set value = excluded.value
+  `;
 }
 
 export async function waitForLoginFormReady(page: Page) {

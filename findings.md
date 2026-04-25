@@ -1,5 +1,42 @@
 # Findings & Decisions
 
+## 🧪 密钥轮换后 E2E fixture 改走 DATABASE_URL，Preview 定向验证恢复 (2026-04-25)
+
+> **触发**: OpenRouter、Supabase service role 与 `DATABASE_URL` 轮换后，Preview preflight 暴露出旧 Supabase REST service-role fixture 不再适配新版 key 策略
+> **目标**: 保持 E2E 可验证能力，同时避免继续依赖 legacy service-role REST key
+
+### 结论
+
+- E2E fixture 不再依赖 `SUPABASE_SERVICE_ROLE_KEY` 通过 Supabase REST 修改测试数据：
+  - 维护模式预处理改为 SQL upsert `system_settings.maintenance_mode=false`
+  - 积分、聊天证据、会话、消息、token stats 与系统设置 fixture 改为 `DATABASE_URL` 直连查询/写入
+  - root `.env.local` 与 `apps/web/.env.local` 会按顺序加载，app 层配置可覆盖 root 默认值
+- Preview 数据库中的 OpenRouter Claude 模型级 key 已同步为轮换后的 OpenRouter key；不在仓库记录任何 key 明文
+- 两个关键 Preview 定向场景已恢复通过：
+  - `chat.spec.ts` live runtime evidence
+  - `admin-config.spec.ts` chat runtime settings flow
+
+### 关键发现
+
+- 旧失败 `Legacy API keys are disabled` 来自 E2E fixture 对 Supabase REST service role 的依赖，不是用户聊天主链本身的业务回归
+- Vercel 的 `env pull` 可拉取变量名，但敏感值为空，不能作为本地自动同步 service role 的可信来源
+- OpenRouter 模型级 key 会优先于环境 fallback；轮换全局 `OPENROUTER_API_KEY` 后，也需要同步数据库 `ai_models.api_key` 中保存的模型级 key
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-46` | API 回归通过 | `pnpm test:api` -> `36` files / `358` tests passed | 命令证据 |
+| `E2E-47` | Web 类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
+| `E2E-48` | Preview 聊天 live evidence 通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/chat.spec.ts --grep 'persist chat runtime evidence'` -> `3 passed` | Preview 证据 |
+| `E2E-49` | Preview 后台聊天运行时设置流通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/admin-config.spec.ts --grep 'chat runtime feature settings'` -> `3 passed` | Preview 证据 |
+
+### 决策
+
+- 后续 E2E fixture 优先使用 `DATABASE_URL` 的 SQL helper，不再把新版 Supabase service-role REST key 作为 Playwright 数据准备的硬依赖
+- `.auth` storage state 仍视为运行态文件，验证后恢复到仓库版本，不纳入提交
+- 完整 Preview preflight 需要在本轮修复提交并触发新 Preview 后重新执行；旧失败日志只作为根因分析资料保留
+
 ## 🔐 Claude 运行时已收敛到 OpenRouter-only，Anthropic 官方 API 退役 (2026-04-25)
 
 > **触发**: 用户确认后续 Claude 模型全部通过 OpenRouter API 调用，不再使用 Anthropic 官方 API
