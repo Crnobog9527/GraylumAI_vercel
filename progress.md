@@ -49,10 +49,15 @@
   - 结果：`3 passed`
 - `PLAYWRIGHT_BASE_URL=https://graylum-ai-vercel-v1-i0krvwxmp-simons-projects-bfe3e99f.vercel.app pnpm --dir apps/web exec playwright test tests/e2e/admin-config.spec.ts --project=chromium --grep 'chat runtime feature settings'`
   - 结果：`3 passed`
+- `pnpm release:preflight:preview -- --preview-url https://graylum-ai-vercel-v1-grpsm08tp-simons-projects-bfe3e99f.vercel.app --skip-local-build`
+  - 结果：通过
+  - 证据目录：`.release-output/preflight/20260425-215454/`
+  - 通过模块：`preview-auth`、`preview-ready`、`preview-chat`、`preview-admin`、`preview-admin-config`、`preview-admin-ops`、`preview-security`、`preview-user-extended`、`preview-user-supplemental`
+  - `preview-admin-destructive`：按策略跳过，需隔离 destructive 环境单独执行
 
 **备注**:
 - 旧的 Preview preflight 失败证据来自已废弃的 Supabase legacy service-role REST 调用路径，不能作为本次 SQL fixture 修复后的最终结论
-- 下一步需要提交并推送本轮 fixture 修复，等待新 Vercel Preview 后重新跑完整非破坏性 `release:preflight:preview`
+- `run-release-preflight.sh` 已兼容未启用 Deployment Protection 的 Preview：无 bypass cookie 时不再提前失败，而是继续执行真实访问验证；若 Preview 实际受保护，后续页面访问仍会失败并暴露配置问题
 
 ### 2026-04-25 - Claude via OpenRouter 口径收敛
 

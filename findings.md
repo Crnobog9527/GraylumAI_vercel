@@ -15,12 +15,14 @@
 - 两个关键 Preview 定向场景已恢复通过：
   - `chat.spec.ts` live runtime evidence
   - `admin-config.spec.ts` chat runtime settings flow
+- 新提交触发的 Preview 已完成完整非破坏性 preflight，所有非 destructive 模块通过；本轮 Preview 未启用 Deployment Protection，因此 preflight 脚本允许空 bypass cookie 并用真实页面访问结果验收
 
 ### 关键发现
 
 - 旧失败 `Legacy API keys are disabled` 来自 E2E fixture 对 Supabase REST service role 的依赖，不是用户聊天主链本身的业务回归
 - Vercel 的 `env pull` 可拉取变量名，但敏感值为空，不能作为本地自动同步 service role 的可信来源
 - OpenRouter 模型级 key 会优先于环境 fallback；轮换全局 `OPENROUTER_API_KEY` 后，也需要同步数据库 `ai_models.api_key` 中保存的模型级 key
+- `run-release-preflight.sh` 之前把“缺少 bypass cookie”直接标为 `preview-config failed`，这会误伤未启用 Deployment Protection 的 Preview；现在改为真实访问阶段决定通过/失败
 
 ### 新证据
 
@@ -30,12 +32,14 @@
 | `E2E-47` | Web 类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
 | `E2E-48` | Preview 聊天 live evidence 通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/chat.spec.ts --grep 'persist chat runtime evidence'` -> `3 passed` | Preview 证据 |
 | `E2E-49` | Preview 后台聊天运行时设置流通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/admin-config.spec.ts --grep 'chat runtime feature settings'` -> `3 passed` | Preview 证据 |
+| `E2E-50` | 新 Preview 完整非破坏性 preflight 通过 | `.release-output/preflight/20260425-215454/00-release-preflight-summary.md` | Preview 证据 |
 
 ### 决策
 
 - 后续 E2E fixture 优先使用 `DATABASE_URL` 的 SQL helper，不再把新版 Supabase service-role REST key 作为 Playwright 数据准备的硬依赖
 - `.auth` storage state 仍视为运行态文件，验证后恢复到仓库版本，不纳入提交
-- 完整 Preview preflight 需要在本轮修复提交并触发新 Preview 后重新执行；旧失败日志只作为根因分析资料保留
+- 无 Deployment Protection 的 Preview 可不提供 bypass cookie；若后续重新启用保护，则仍需提供 `VERCEL_BYPASS_COOKIE` 或 `--bypass-cookie`
+- 完整 Preview preflight 已在新 Preview 上通过；旧失败日志只作为根因分析资料保留
 
 ## 🔐 Claude 运行时已收敛到 OpenRouter-only，Anthropic 官方 API 退役 (2026-04-25)
 

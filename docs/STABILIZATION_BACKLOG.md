@@ -50,7 +50,8 @@
   - 2026-04-25 轮换后定向复测：
     - `chat.spec.ts --grep 'persist chat runtime evidence'` against Preview：`3 passed`
     - `admin-config.spec.ts --grep 'chat runtime feature settings'` against Preview：`3 passed`
-- 备注：`admin-config` 中 smart routing / smart search preview runtime proof 与 `chat` live preview 用例仍按环境门控跳过；它们不是本轮本地稳定化失败项。
+  - 2026-04-25 新 Preview 完整非破坏性 preflight：`.release-output/preflight/20260425-215454/00-release-preflight-summary.md`，全部非 destructive 模块通过；`preview-admin-destructive` 按隔离环境策略跳过。
+- 备注：`admin-config` 中 smart routing / smart search preview runtime proof 与 `chat` live preview 用例已在 2026-04-25 Preview preflight 中通过；destructive 仍需隔离环境单独执行。
 
 ### P1-1 修复 admin 用户详情消息统计
 - 目标：修复 `admin.getUserDetails` 统计逻辑错误。

@@ -159,9 +159,13 @@ fi
 if [[ "$WITH_PREVIEW" -eq 1 ]]; then
   if [[ -z "$PREVIEW_URL" ]]; then
     STEP_RESULTS="${STEP_RESULTS}- preview-config: failed (missing --preview-url or PREVIEW_URL)\n"
-  elif [[ -z "$BYPASS_COOKIE" ]]; then
-    STEP_RESULTS="${STEP_RESULTS}- preview-config: failed (missing --bypass-cookie or VERCEL_BYPASS_COOKIE)\n"
   else
+    if [[ -z "$BYPASS_COOKIE" ]]; then
+      STEP_RESULTS="${STEP_RESULTS}- preview-config: passed (no bypass cookie; assuming unprotected preview)\n"
+    else
+      STEP_RESULTS="${STEP_RESULTS}- preview-config: passed (bypass cookie configured)\n"
+    fi
+
     run_preview_step "preview-auth" pnpm --dir apps/web exec playwright test tests/e2e/auth.spec.ts --project=chromium
     run_preview_normalization "preview-ready"
     run_preview_step "preview-chat" pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium

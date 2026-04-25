@@ -68,6 +68,10 @@ function assertRequired(value, label) {
 }
 
 async function applyBypass(context, previewUrl, bypassCookie) {
+  if (!bypassCookie) {
+    return;
+  }
+
   const hostname = new URL(previewUrl).hostname;
   await context.setExtraHTTPHeaders({
     'x-vercel-protection-bypass': bypassCookie,
@@ -125,7 +129,6 @@ async function verifyPublicLoginAccessible(previewUrl, bypassCookie) {
 async function main() {
   const { previewUrl, bypassCookie, adminStatePath } = parseArgs(process.argv.slice(2));
   assertRequired(previewUrl, '--preview-url');
-  assertRequired(bypassCookie, '--bypass-cookie');
   const resolvedAdminStatePath = resolveAdminStatePath(adminStatePath);
 
   const browser = await chromium.launch({ headless: true });
