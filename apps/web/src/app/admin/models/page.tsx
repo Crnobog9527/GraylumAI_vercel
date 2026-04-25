@@ -112,7 +112,7 @@ interface FormData {
 const initialFormData: FormData = {
   name: '',
   modelId: '',
-  provider: 'anthropic',
+  provider: 'openai',
   apiKey: '',
   apiEndpoint: '',
   description: '',
@@ -236,9 +236,11 @@ export default function AdminModelsPage() {
     if (model.token_counting_supported === 'true') {
       return {
         label: model.token_counting_method === 'anthropic_count_tokens'
-          ? '官方 Anthropic'
+          ? 'Anthropic 估算'
           : model.token_counting_method === 'gemini_count_tokens'
             ? '官方 Gemini'
+            : model.token_counting_method === 'provider_usage'
+              ? 'Provider usage'
             : '可信 tokenizer',
         color: 'bg-emerald-500/20 text-emerald-400',
       };
@@ -628,7 +630,7 @@ export default function AdminModelsPage() {
                     data-testid="admin-model-name-input"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Claude 4.5 Sonnet"
+                    placeholder="Claude Sonnet via OpenRouter"
                     className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                   />
                 </div>
@@ -638,7 +640,7 @@ export default function AdminModelsPage() {
                     data-testid="admin-model-id-input"
                     value={formData.modelId}
                     onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
-                    placeholder="claude-4.5-sonnet"
+                    placeholder="anthropic/claude-sonnet-4.6"
                     className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                   />
                 </div>
@@ -654,8 +656,8 @@ export default function AdminModelsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                    <SelectItem value="openai">OpenAI / OpenRouter (兼容)</SelectItem>
+                    <SelectItem value="openai">OpenRouter / OpenAI 兼容（推荐）</SelectItem>
+                    <SelectItem value="anthropic">Anthropic 官方（已退役）</SelectItem>
                     <SelectItem value="google">Google (Gemini)</SelectItem>
                     <SelectItem value="custom">Custom</SelectItem>
                     <SelectItem value="builtin">内置 (支持联网)</SelectItem>
@@ -691,11 +693,11 @@ export default function AdminModelsPage() {
                   data-testid="admin-model-endpoint-input"
                   value={formData.apiEndpoint}
                   onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
-                  placeholder="Anthropic: https://api.anthropic.com/v1/messages | OpenRouter: https://openrouter.ai/api/v1/chat/completions"
+                  placeholder="https://openrouter.ai/api/v1/chat/completions"
                   className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
                 />
                 <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  使用 OpenRouter 连接 Claude 时，请填写 `https://openrouter.ai/api/v1/chat/completions`。
+                  Claude 模型统一通过 OpenRouter 调用；Anthropic 官方 endpoint 已退役。
                 </p>
               </div>
 

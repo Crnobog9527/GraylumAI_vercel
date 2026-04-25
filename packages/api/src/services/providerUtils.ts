@@ -7,9 +7,9 @@
 /**
  * Provider Runtime Utilities
  *
- * Shared helpers for routing model requests through Anthropic or
- * OpenAI-compatible providers. Both admin connection tests and the
- * production chat runtime use these branches.
+ * Shared helpers for routing model requests through OpenRouter or other
+ * OpenAI-compatible providers. Both admin connection tests and the production
+ * chat runtime use these branches.
  */
 
 export function normalizeOpenAICompatibleEndpoint(endpoint?: string | null) {
@@ -30,9 +30,6 @@ export function getFallbackProviderApiKey() {
   const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
   if (openRouterKey) return openRouterKey;
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (anthropicKey) return anthropicKey;
-
   return null;
 }
 
@@ -44,7 +41,6 @@ export function getConfiguredProviderApiKey(apiKey?: string | null) {
 export function getConfiguredProviderApiKeySource(apiKey?: string | null) {
   if (apiKey?.trim()) return 'database';
   if (process.env.OPENROUTER_API_KEY?.trim()) return 'env:OPENROUTER_API_KEY';
-  if (process.env.ANTHROPIC_API_KEY?.trim()) return 'env:ANTHROPIC_API_KEY';
   return null;
 }
 

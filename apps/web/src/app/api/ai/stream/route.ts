@@ -11,7 +11,6 @@ import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { filterAIOutput, logger } from '@repo/api/src/services';
 import { BillingService, calculateTokenCostWithPricing, getModelPricing } from '@repo/api/src/services/billing';
-import { buildCachedPrompt } from '@repo/api/src/services/promptCacheBuilder';
 import { ContextManager } from '@repo/api/src/services/contextManager';
 import { upsertContextSnapshot } from '@repo/api/src/services/contextSnapshots';
 import {
@@ -265,46 +264,8 @@ async function getRuntimeModelConfig(
     apiEndpoint: null,
     enableWebSearch: options.fallbackEnableWebSearch,
     tokenCountingSupported: true,
-    tokenCountingMethod: 'anthropic_count_tokens',
-    tokenizerFamily: 'anthropic',
-  };
-}
-
-function buildAnthropicPayload(params: {
-  modelId: string;
-  maxTokens: number;
-  messages: ClaudeMessage[];
-  systemPrompt?: string;
-  enablePromptCache: boolean;
-  enableWebSearch?: boolean;
-  maxWebSearchUses?: number;
-}) {
-  const cachedPrompt = buildCachedPrompt({
-    systemPrompt: params.systemPrompt,
-    messages: params.messages,
-    config: { enabled: params.enablePromptCache },
-  });
-
-  return {
-    payload: {
-      model: params.modelId,
-      max_tokens: params.maxTokens,
-      stream: true,
-      messages: cachedPrompt.messages,
-      ...(cachedPrompt.system ? { system: cachedPrompt.system } : {}),
-      ...(params.enableWebSearch
-        ? {
-            tools: [
-              {
-                type: 'web_search_20250305',
-                name: 'web_search',
-                max_uses: params.maxWebSearchUses ?? 1,
-              },
-            ],
-          }
-        : {}),
-    },
-    cachePoints: cachedPrompt.cachePoints,
+    tokenCountingMethod: options.fallbackProvider === 'google' ? 'gemini_count_tokens' : 'provider_usage',
+    tokenizerFamily: options.fallbackProvider === 'google' ? 'gemini' : 'openai',
   };
 }
 
@@ -724,7 +685,7 @@ export async function POST(request: NextRequest) {
       searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
     const webSearchAvailable = webSearchRequested &&
       runtimeModel.enableWebSearch &&
-      ['anthropic', 'google'].includes(runtimeModel.provider);
+      runtimeModel.provider === 'google';
     const apiKey = runtimeModel.provider === 'google'
       ? getGoogleApiKey(runtimeModel.apiKey)
       : getConfiguredProviderApiKey(runtimeModel.apiKey);
@@ -975,91 +936,12 @@ export async function POST(request: NextRequest) {
               }
             }
           } else {
-            const anthropicPayload = buildAnthropicPayload({
+            logAiStreamError('ai_stream_provider_not_openrouter_compatible', {
+              provider: runtimeModel.provider,
               modelId: runtimeModel.modelId,
-              maxTokens: runtimeModel.maxTokens,
-              messages: providerMessages,
-              systemPrompt,
-              enablePromptCache: runtimeSettings.enablePromptCache,
-              enableWebSearch: webSearchAvailable,
-              maxWebSearchUses: searchDecision.estimatedSearchCount,
+              hasEndpoint: Boolean(runtimeModel.apiEndpoint),
             });
-            cachePoints = anthropicPayload.cachePoints;
-
-            const response = await fetch(runtimeModel.apiEndpoint || 'https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-              },
-              body: JSON.stringify(anthropicPayload.payload),
-            });
-
-            if (!response.ok) {
-              logAiStreamError('ai_stream_anthropic_provider_failed', {
-                provider: runtimeModel.provider,
-                modelId: runtimeModel.modelId,
-                status: response.status,
-              });
-              throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
-            }
-
-            webSearchExecuted = webSearchAvailable;
-            actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
-
-            const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            }
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (firstProviderChunkAt === null) {
-                firstProviderChunkAt = Date.now();
-              }
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6);
-                if (!data || data === '[DONE]') continue;
-
-                try {
-                  const event = JSON.parse(data);
-
-                  if (event.type === 'content_block_delta') {
-                    const delta = event.delta?.text || '';
-                    fullContent += delta;
-                  } else if (event.type === 'message_delta') {
-                    if (event.usage) {
-                      usage.outputTokens = event.usage.output_tokens || usage.outputTokens;
-                    }
-                  } else if (event.type === 'message_start') {
-                    if (event.message?.usage) {
-                      usage.inputTokens = event.message.usage.input_tokens || usage.inputTokens;
-                      usage.cacheReadTokens = event.message.usage.cache_read_input_tokens || usage.cacheReadTokens;
-                      usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens || usage.cacheCreationTokens;
-                    }
-                  } else if (event.type === 'content_block_start') {
-                    const blockType = event.content_block?.type;
-                    if (blockType === 'server_tool_use' || blockType === 'web_search_tool_result') {
-                      webSearchExecuted = true;
-                      actualSearchCount = Math.max(actualSearchCount, 1);
-                    }
-                  }
-                } catch {
-                  // Ignore malformed provider frames.
-                }
-              }
-            }
+            throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
           }
           stageTimings.provider_stream = Date.now() - providerStartedAt;
           stageTimings.provider_first_chunk = firstProviderChunkAt === null

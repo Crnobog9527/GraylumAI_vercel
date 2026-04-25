@@ -27,8 +27,32 @@
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
 - **Current:** 阶段 12 全部任务已完成
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-04-24 (历史遗留 E2E / 可访问性 / 管理后台稳定化已对齐)
+- **更新时间:** 2026-04-25 (Anthropic 官方 API 退役，Claude 统一改为 OpenRouter 口径)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-04-25 - Claude via OpenRouter 口径收敛
+
+**完成内容**:
+- 移除 `ANTHROPIC_API_KEY` 作为运行时 fallback，环境校验现在要求 `OPENROUTER_API_KEY`
+- 管理端模型连接测试、流式聊天 route、旧非流式 AI router 与 `StreamHandler` 不再调用 Anthropic 官方 `/v1/messages` 或 `count_tokens`
+- 默认 Claude 模型与新增模型默认 provider 调整为 OpenRouter / OpenAI-compatible 口径，并新增 migration `0022_openrouter_claude_provider_default.sql`
+- `.env.example`、发布/安全文档更新为“Anthropic 官方 key 只 revoke/delete，不再轮换新 key”
+- 删除已跟踪的 `.playwright-cli/*` 旧录制产物并加入 `.gitignore`，避免继续在 HEAD 中保留 E2E 账号运行痕迹
+
+**验证方式**:
+- `pnpm --filter @repo/api test:run -- src/services/__tests__/providerUtils.test.ts src/lib/envValidator.test.ts src/services/__tests__/tokenCounter.test.ts src/routers/model.test.ts src/routers/ai.test.ts`
+  - 结果：当前 vitest 配置实际执行 `36` 个测试文件、`358` 个测试，全部通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `git diff --check`
+  - 结果：通过
+- 本地 env 指纹反查当前已跟踪文件：
+  - 结果：未命中私密 key / 密码值；仅命中公开 `NEXT_PUBLIC_APP_URL`
+
+**备注**:
+- Git 历史中曾出现的 OpenRouter、Supabase service role、数据库连接串、E2E 密码等仍需在外部平台轮换或重置
+- `ANTHROPIC_API_KEY` 不再建议轮换为新 key，处理方式是 revoke/delete 并从 Vercel/本地环境中移除
+- 2026-04-25 更新：OpenRouter key、Supabase service role 与 `DATABASE_URL` / 数据库密码已完成更新；`E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 按用户决策延后到最终上线前删除或重置
 
 ### 2026-04-24 - Preview 发布前护栏通过
 

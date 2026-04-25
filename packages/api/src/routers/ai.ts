@@ -28,7 +28,12 @@ import {
   logger,
 } from '../services';
 import { selectModel, getAvailableModels } from '../services/modelRouter';
-import { getFallbackProviderApiKey } from '../services/providerUtils';
+import {
+  getConfiguredProviderApiKey,
+  getOpenAICompatibleHeaders,
+  normalizeOpenAICompatibleEndpoint,
+  usesOpenAICompatibleApi,
+} from '../services/providerUtils';
 import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
 
 // ============================================
@@ -166,20 +171,22 @@ async function updateConversationTitle(
 }
 
 /**
- * 调用 Claude API
- * 注意: 这是一个简化版本，实际实现将在 Phase 9.3 中完善
+ * 调用 Claude via OpenRouter / OpenAI-compatible API.
+ * Anthropic 官方 API 已退役，不再作为运行时 fallback。
  */
-async function callClaudeAPI(params: {
+async function callClaudeViaOpenRouter(params: {
   model: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   systemPrompt?: string;
   maxTokens?: number;
+  apiKey?: string | null;
+  apiEndpoint?: string | null;
 }): Promise<{
   content: string;
   usage: TokenUsage;
   stopReason: string;
 }> {
-  const apiKey = getFallbackProviderApiKey();
+  const apiKey = getConfiguredProviderApiKey(params.apiKey);
 
   if (!apiKey) {
     throw new TRPCError({
@@ -188,24 +195,36 @@ async function callClaudeAPI(params: {
     });
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const endpoint = usesOpenAICompatibleApi({
+    endpoint: params.apiEndpoint,
+    apiKey,
+  })
+    ? (normalizeOpenAICompatibleEndpoint(params.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions')
+    : null;
+
+  if (!endpoint) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'AI 服务未配置 OpenRouter 兼容 endpoint',
+    });
+  }
+
+  const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: getOpenAICompatibleHeaders(apiKey),
     body: JSON.stringify({
       model: params.model,
       max_tokens: params.maxTokens ?? 4096,
-      system: params.systemPrompt,
-      messages: params.messages,
+      messages: [
+        ...(params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }] : []),
+        ...params.messages,
+      ],
     }),
   });
 
   if (!response.ok) {
     logger.error('ai', 'ai_provider_request_failed', {
-      provider: 'anthropic',
+      provider: 'openrouter',
       status: response.status,
     });
 
@@ -223,30 +242,37 @@ async function callClaudeAPI(params: {
   }
 
   const data = await response.json() as {
-    content: Array<{ type: string; text: string }>;
-    usage: {
-      input_tokens: number;
-      output_tokens: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
+    choices?: Array<{
+      message?: {
+        content?: string | Array<{ type?: string; text?: string }>;
+      };
+      finish_reason?: string | null;
+    }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
     };
-    stop_reason: string;
   };
 
-  const content = data.content
-    .filter((c) => c.type === 'text')
-    .map((c) => c.text)
-    .join('');
+  const messageContent = data.choices?.[0]?.message?.content;
+  const content = Array.isArray(messageContent)
+    ? messageContent.map((part) => part.text ?? '').join('')
+    : (messageContent ?? '');
+  const finishReason = data.choices?.[0]?.finish_reason;
 
   return {
     content,
     usage: {
-      inputTokens: data.usage.input_tokens,
-      outputTokens: data.usage.output_tokens,
-      cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
     },
-    stopReason: data.stop_reason,
+    stopReason: finishReason === 'length'
+      ? 'max_tokens'
+      : finishReason === 'tool_calls'
+        ? 'tool_use'
+        : 'end_turn',
   };
 }
 
@@ -333,23 +359,19 @@ export const aiRouter = router({
         });
       }
 
-      if (modelConfig.provider !== 'anthropic') {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'AI 服务暂时不可用，请稍后重试',
-        });
-      }
-
       // 5. 估算成本
       const countedInput = await countTokens({
         model: modelConfig.modelId,
         provider: getTokenCounterProvider(modelConfig),
+        apiKey: modelConfig.apiKey,
+        apiEndpoint: modelConfig.apiEndpoint,
+        tokenizerFamily: modelConfig.tokenizerFamily,
         messages: [
           ...history,
           { role: 'user', content: input.message },
         ],
       }, {
-        useOfficial: true,
+        useOfficial: modelConfig.tokenCountingMethod !== 'provider_usage',
         fallbackToEstimate: true,
       });
       const estimatedInputTokens = countedInput.inputTokens;
@@ -381,10 +403,12 @@ export const aiRouter = router({
         ];
 
         // 9. 调用 AI
-        const aiResponse = await callClaudeAPI({
+        const aiResponse = await callClaudeViaOpenRouter({
           model: modelConfig.modelId,
           messages,
           maxTokens: modelConfig.maxTokens,
+          apiKey: modelConfig.apiKey,
+          apiEndpoint: modelConfig.apiEndpoint,
         });
 
         // 9.5. 输出安全检查 (P1-4: 应用输出安全过滤)

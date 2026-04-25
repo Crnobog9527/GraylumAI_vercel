@@ -19,6 +19,8 @@ export interface ModelConfig {
   enableWebSearch: boolean;
   inputTokenCost: number;
   outputTokenCost: number;
+  apiKey?: string | null;
+  apiEndpoint?: string | null;
   isActive: boolean;
   tokenCountingSupported?: boolean;
   tokenCountingMethod?: string;
@@ -81,33 +83,37 @@ export interface SystemDefaultModels {
 const DEFAULT_MODELS = {
   primary: {
     id: 'default-sonnet',
-    name: 'Claude Sonnet 4',
-    modelId: 'claude-sonnet-4-20250514',
-    provider: 'anthropic' as const,
+    name: 'Claude Sonnet via OpenRouter',
+    modelId: 'anthropic/claude-sonnet-4.6',
+    provider: 'openai' as const,
     maxTokens: 8192,
     inputLimit: 200000,
-    enableWebSearch: true,
+    enableWebSearch: false,
     inputTokenCost: 3000,
     outputTokenCost: 15000,
+    apiKey: null,
+    apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
     tokenCountingSupported: true,
-    tokenCountingMethod: 'anthropic_count_tokens',
-    tokenizerFamily: 'anthropic',
+    tokenCountingMethod: 'provider_usage',
+    tokenizerFamily: 'openai',
   },
   assistant: {
     id: 'default-haiku',
-    name: 'Claude Haiku 3.5',
-    modelId: 'claude-3-5-haiku-20241022',
-    provider: 'anthropic' as const,
+    name: 'Claude Haiku via OpenRouter',
+    modelId: 'anthropic/claude-haiku-4.5',
+    provider: 'openai' as const,
     maxTokens: 8192,
     inputLimit: 200000,
-    enableWebSearch: true,
+    enableWebSearch: false,
     inputTokenCost: 800,
     outputTokenCost: 4000,
+    apiKey: null,
+    apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
     tokenCountingSupported: true,
-    tokenCountingMethod: 'anthropic_count_tokens',
-    tokenizerFamily: 'anthropic',
+    tokenCountingMethod: 'provider_usage',
+    tokenizerFamily: 'openai',
   },
 };
 
@@ -310,6 +316,8 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
     enableWebSearch: data.enable_web_search === 'true',
     inputTokenCost: data.input_token_cost,
     outputTokenCost: data.output_token_cost,
+    apiKey: data.api_key ?? null,
+    apiEndpoint: data.api_endpoint ?? null,
     isActive: data.is_active === 'true',
     tokenCountingSupported: data.token_counting_supported === 'true',
     tokenCountingMethod: data.token_counting_method,
@@ -337,6 +345,8 @@ async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelCon
     enableWebSearch: model.enable_web_search === 'true',
     inputTokenCost: model.input_token_cost,
     outputTokenCost: model.output_token_cost,
+    apiKey: model.api_key ?? null,
+    apiEndpoint: model.api_endpoint ?? null,
     isActive: model.is_active === 'true',
     tokenCountingSupported: model.token_counting_supported === 'true',
     tokenCountingMethod: model.token_counting_method,

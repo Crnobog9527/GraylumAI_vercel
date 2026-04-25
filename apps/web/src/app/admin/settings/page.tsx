@@ -52,7 +52,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
   search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
   search_surcharge_credits: { value: '0', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的站内积分成本' },
-  enable_prompt_cache: { value: 'true', type: 'boolean', label: '启用 API 缓存', description: '为 Anthropic 请求构造可缓存提示词，以便记录和利用 prompt caching 命中数据' },
+  enable_prompt_cache: { value: 'false', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
 
   // Checkin (6项)
   checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },

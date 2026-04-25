@@ -10,6 +10,7 @@ node_modules/
 .sentry-cli/
 
 # Playwright
+.playwright-cli/
 playwright-report/
 playwright/.cache/
 test-results/

@@ -124,6 +124,17 @@ function inferTokenCountingMetadata(params: {
   const provider = params.provider ?? 'custom';
   const modelId = params.modelId.toLowerCase();
   const endpoint = params.apiEndpoint?.toLowerCase() ?? '';
+  const openAICompatibleProvider = provider === 'openai' ||
+    endpoint.includes('openrouter') ||
+    endpoint.includes('chat/completions');
+
+  if (openAICompatibleProvider && (modelId.includes('claude') || modelId.startsWith('anthropic/'))) {
+    return {
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
+      tokenizer_family: 'openai',
+    };
+  }
 
   if (provider === 'anthropic') {
     return {
@@ -142,7 +153,6 @@ function inferTokenCountingMetadata(params: {
   }
 
   const openAITokenizerVerified = VERIFIED_OPENAI_TOKENIZER_PREFIXES.some((prefix) => modelId.startsWith(prefix));
-  const openAICompatibleProvider = provider === 'openai' || endpoint.includes('openrouter') || endpoint.includes('chat/completions');
 
   if (openAICompatibleProvider && openAITokenizerVerified) {
     return {
@@ -157,13 +167,6 @@ function inferTokenCountingMetadata(params: {
     token_counting_method: 'unsupported',
     tokenizer_family: openAICompatibleProvider ? 'openai' : null,
   };
-}
-
-function usesOpenAICompatibleApi(model: PersistedModel) {
-  return usesOpenAICompatibleProvider({
-    endpoint: model.api_endpoint,
-    apiKey: model.api_key,
-  });
 }
 
 async function persistConnectionState(
@@ -211,7 +214,10 @@ async function verifyAndPersistConnection(
   }
 
   try {
-    const openAICompatibleEndpoint = usesOpenAICompatibleApi(model)
+    const openAICompatibleEndpoint = usesOpenAICompatibleProvider({
+      endpoint: model.api_endpoint,
+      apiKey,
+    })
       ? (normalizeOpenAICompatibleEndpoint(model.api_endpoint) || 'https://openrouter.ai/api/v1/chat/completions')
       : null;
 
@@ -257,36 +263,11 @@ async function verifyAndPersistConnection(
       return result;
     }
 
-    const endpoint = model.api_endpoint || 'https://api.anthropic.com/v1/messages';
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: model.model_id,
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'Hi' }],
-      }),
-    });
-
-    if (response.ok) {
-      const result: ConnectionCheckResult = {
-        success: true,
-        status: 'connected',
-        message: 'API 连接正常',
-      };
-      await persistConnectionState(supabase, model, result);
-      return result;
-    }
-
     const result: ConnectionCheckResult = {
       success: false,
       status: 'error',
-      error: GENERIC_CONNECTION_ERROR,
-      internalError: GENERIC_CONNECTION_ERROR_DETAIL,
+      error: 'Anthropic 官方 API 已退役，请改用 OpenRouter endpoint 与 sk-or- 密钥',
+      internalError: 'anthropic_official_api_retired',
     };
     await persistConnectionState(supabase, model, result);
     return result;
@@ -368,7 +349,7 @@ export const modelRouter = router({
     .input(z.object({
       name: z.string().min(1).max(100),
       modelId: z.string().min(1).max(100),
-      provider: z.enum(['anthropic', 'openai', 'google', 'custom', 'builtin']).default('anthropic'),
+      provider: z.enum(['anthropic', 'openai', 'google', 'custom', 'builtin']).default('openai'),
       apiKey: z.string().optional(),
       apiEndpoint: z.string().optional(),
       description: z.string().optional(),

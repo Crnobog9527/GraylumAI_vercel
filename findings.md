@@ -1,5 +1,44 @@
 # Findings & Decisions
 
+## 🔐 Claude 运行时已收敛到 OpenRouter-only，Anthropic 官方 API 退役 (2026-04-25)
+
+> **触发**: 用户确认后续 Claude 模型全部通过 OpenRouter API 调用，不再使用 Anthropic 官方 API
+> **目标**: 消除 `ANTHROPIC_API_KEY` 运行时 fallback、官方 Anthropic endpoint 调用和后台配置误导
+
+### 结论
+
+- `ANTHROPIC_API_KEY` 不再作为有效运行时凭证：
+  - 环境校验要求 `OPENROUTER_API_KEY`
+  - provider fallback 只读取 `OPENROUTER_API_KEY`
+  - 安全/发布文档改为“旧 Anthropic key revoke/delete，而不是轮换”
+- Claude 模型默认使用 OpenRouter / OpenAI-compatible 路由：
+  - 默认模型 ID 改为 `anthropic/...` OpenRouter 形态
+  - 新增模型默认 provider 改为 `openai`
+  - migration `0022_openrouter_claude_provider_default.sql` 会把 OpenRouter Claude 形态的旧 `anthropic` provider 记录迁移为 `openai` + `provider_usage`
+- 当前 HEAD 不再保留 `.playwright-cli/*` 旧录制产物，减少 E2E 账号密码继续暴露在当前树中的风险
+
+### 关键发现
+
+- 本地密钥指纹反查显示：当前跟踪文件已不再匹配私密 key / E2E 密码值，仅剩公开 `NEXT_PUBLIC_APP_URL`
+- Git 历史中仍有历史命中，代码删除不能让旧提交里的值失效；需要在供应商后台完成轮换或 revoke
+- OpenRouter 不支持 Anthropic 官方 `count_tokens` 协议；Claude 预估改走本地估算，实际计费用 provider usage metadata 收敛
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `SEC-10` | 运行时代码中不再存在 Anthropic 官方 endpoint/header/fallback 命中 | `rg -n "api\\.anthropic\\.com|anthropic-version|x-api-key|OPENROUTER_API_KEY / ANTHROPIC" packages apps .env.example turbo.json` | 命令证据 |
+| `SEC-11` | API 回归通过 | `pnpm --filter @repo/api test:run -- src/services/__tests__/providerUtils.test.ts src/lib/envValidator.test.ts src/services/__tests__/tokenCounter.test.ts src/routers/model.test.ts src/routers/ai.test.ts` -> `36` files / `358` tests passed | 命令证据 |
+| `SEC-12` | Web 类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
+| `SEC-13` | 当前跟踪文件未命中私密 env 值；仅公开 app URL 命中 | 本地 env 指纹反查脚本 | 命令证据 |
+
+### 决策
+
+- 不再为 Anthropic 官方 API 申请或轮换新 key；旧 key 只做 revoke/delete
+- 优先轮换 OpenRouter、Supabase service role、数据库连接串和 E2E 账号密码
+- 2026-04-25 更新：OpenRouter key、Supabase service role 与 `DATABASE_URL` / 数据库密码已完成更新；`E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 按用户决策延后到最终上线前删除或重置
+- 不在共享 Preview 上重新启用 Anthropic 官方 prompt cache / web search 工具；后续如需要搜索能力，应按 OpenRouter 支持的能力单独设计
+
 ## 🚦 Preview 发布前护栏已通过，剩余仅 destructive 隔离窗口 (2026-04-24)
 
 > **触发**: 历史遗留稳定化提交推送后，需要确认远端 Preview 与本地测试口径一致

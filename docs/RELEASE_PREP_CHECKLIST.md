@@ -30,7 +30,11 @@
 - `NEXT_PUBLIC_SITE_NAME`
 - `NEXT_PUBLIC_SUPPORT_EMAIL`
 - `NEXT_PUBLIC_SENTRY_DSN`
-- AI provider keys
+- `OPENROUTER_API_KEY`（Claude 与 OpenAI-compatible 模型统一入口）
+
+不再配置：
+
+- `ANTHROPIC_API_KEY`（官方 Anthropic API 已退役；旧 key 只做 revoke/delete）
 
 需要预留但暂不启用：
 
@@ -47,6 +51,7 @@
 - Vercel preview / production base URL
 - Deployment Protection bypass 流程
 - Sentry 项目、DSN、告警入口
+- 最终上线前删除或重置 `E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 对应测试账号，并从生产环境变量中移除不再需要的 E2E 凭证
 
 ### 本地基线
 

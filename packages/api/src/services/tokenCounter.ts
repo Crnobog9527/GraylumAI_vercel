@@ -1,27 +1,23 @@
 /**
  * Token Counter Service
  *
- * Provider-aware token counting with official Anthropic/Gemini support and
- * safe fallbacks for providers that only expose authoritative post-response
- * usage metadata.
+ * Provider-aware token counting with official Gemini support and safe
+ * fallbacks for providers that only expose authoritative post-response usage
+ * metadata.
  */
 
 import type { AIMessage } from '../types/ai';
 import { logger } from '../lib/logger';
 import {
-  getConfiguredProviderApiKey,
   getFallbackProviderApiKey,
-  looksLikeOpenRouterKey,
 } from './providerUtils';
 
-const ANTHROPIC_COUNT_TOKENS_URL = 'https://api.anthropic.com/v1/messages/count_tokens';
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const TOKEN_COUNTING_ERRORS = {
-  anthropicFailed: 'Anthropic token counting failed',
+  anthropicRetired: 'Anthropic official token counting is retired; use OpenRouter usage metadata or estimates',
   geminiFailed: 'Gemini token counting failed',
   unsupportedProvider: 'Official token counting is not supported for this provider',
 } as const;
-const ANTHROPIC_VERSION = '2023-06-01';
 
 const CHARS_PER_TOKEN = {
   chinese: 1.5,
@@ -112,31 +108,7 @@ export async function countTokensOfficial(params: TokenCountParams): Promise<{ i
   }
 
   if (provider === 'anthropic') {
-    if (looksLikeOpenRouterKey(apiKey)) {
-      throw new Error('OpenRouter keys do not support Anthropic official count_tokens');
-    }
-
-    const response = await fetch(ANTHROPIC_COUNT_TOKENS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: params.model,
-        messages: params.messages,
-        system: params.system,
-        tools: params.tools,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(TOKEN_COUNTING_ERRORS.anthropicFailed);
-    }
-
-    const data = await response.json() as { input_tokens: number };
-    return { inputTokens: data.input_tokens, countSource: 'anthropic_count_tokens' };
+    throw new Error(TOKEN_COUNTING_ERRORS.anthropicRetired);
   }
 
   if (provider === 'google') {

@@ -11,12 +11,18 @@
 - 目标：处理 `.env.example` 中真实密钥样式值，并完成密钥轮换。
 - 状态：
   - 代码仓库：`已完成`（`.env.example` 已替换为安全占位符）。
-  - 外部系统轮换：`待执行`（Supabase/Anthropic/Vercel 环境变量）。
+  - Anthropic 官方 API：`已退役`（不再更换新 key，旧 key 需在 Anthropic 后台 revoke/delete）。
+  - 外部系统轮换：`部分完成`（OpenRouter key、Supabase service role、数据库连接串已完成；E2E 账号密码按用户决策延后到最终上线前删除/重置；Vercel/Sentry/Stripe 按供应商后台扫描结果决定）。
 - 验收标准：
   - 仓库中不存在真实密钥样式值。
-  - 新密钥已在平台生效，旧密钥已失效。
+  - OpenRouter 新密钥已在平台生效，旧密钥已失效。`2026-04-25 已完成`
+  - Supabase service role 新密钥已在平台生效，旧密钥已失效。`2026-04-25 已完成`
+  - `DATABASE_URL` / direct DB connection string 已使用重置后的数据库密码更新到本地和 Vercel。
+  - `E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 最终上线前删除或重置，并同步移除不再需要的 E2E 账号。
+  - Anthropic 旧密钥已 revoke/delete，生产与 preview 不再配置 `ANTHROPIC_API_KEY`。
 - 验证：
   - 本地扫描：`rg -n "sk-ant-|eyJhbGciOiJIUzI1Ni|sb_publishable_" .`
+  - 运行时扫描：`rg -n "api.anthropic.com|anthropic-version|ANTHROPIC_API_KEY" packages apps .env.example turbo.json`
   - 线上功能：登录和 AI 调用正常。
 
 ## P1（高优先，已首批锁定）

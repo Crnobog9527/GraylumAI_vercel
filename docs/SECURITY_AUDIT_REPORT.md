@@ -90,7 +90,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | 公开 | 客户端 | ✅ 安全 |
 | `SUPABASE_SERVICE_ROLE_KEY` | 私密 | 服务端 | 🔒 需保护 |
 | `DATABASE_URL` | 私密 | 服务端 | 🔒 需保护 |
-| `ANTHROPIC_API_KEY` | 私密 | 服务端 | 🔒 需保护 |
+| `OPENROUTER_API_KEY` | 私密 | 服务端 | 🔒 需保护 |
+
+> 2026-04-25 更新：Anthropic 官方 API 已退役，Claude 模型统一通过 OpenRouter 调用；若环境中仍存在 `ANTHROPIC_API_KEY`，应在 Anthropic 后台 revoke/delete，而不是轮换为新 key。
 
 ### 2.2 可选变量
 

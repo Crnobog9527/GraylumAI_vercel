@@ -32,7 +32,7 @@
 - `NEXT_PUBLIC_SITE_NAME`
 - `NEXT_PUBLIC_SUPPORT_EMAIL`
 - `NEXT_PUBLIC_SENTRY_DSN`
-- AI provider keys
+- `OPENROUTER_API_KEY`（Claude 与 OpenAI-compatible 模型统一入口）
 
 ### Stripe 阶段
 
@@ -48,6 +48,8 @@
 - Deployment Protection bypass cookie
 - Stripe Checkout return URLs
 - Stripe webhook endpoint
+
+> Anthropic 官方 API 已退役。Preview / Production 不应再配置 `ANTHROPIC_API_KEY`；如历史环境仍存在旧 key，应在 Anthropic 后台 revoke/delete。
 
 ## 推荐命令
 
