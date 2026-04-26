@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { logServerError } from '@/lib/server-log';
 
 const TICKET_ATTACHMENT_BUCKET = 'ticket-attachments';
 
@@ -11,7 +12,9 @@ async function isMaintenanceModeEnabled(supabaseAdmin: any) {
     .maybeSingle();
 
   if (error) {
-    console.error('[Upload API] Failed to read maintenance mode:', error);
+    logServerError('system', 'upload_maintenance_mode_read_failed', {
+      code: error.code,
+    });
     return true;
   }
 
@@ -31,7 +34,10 @@ export async function POST(request: NextRequest) {
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseServiceRoleKey) {
+      return NextResponse.json({ error: 'Upload service is not configured' }, { status: 503 });
+    }
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
@@ -95,7 +101,9 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Upload error:', uploadError);
+      logServerError('api', 'upload_storage_failed', {
+        errorName: uploadError.name,
+      });
       // If bucket doesn't exist, try to create it (first time setup)
       if (uploadError.message?.includes('not found') || uploadError.message?.includes('does not exist')) {
         // Try creating the bucket
@@ -106,7 +114,9 @@ export async function POST(request: NextRequest) {
         });
 
         if (createBucketError && !createBucketError.message?.includes('already exists')) {
-          console.error('Create bucket error:', createBucketError);
+          logServerError('api', 'upload_bucket_create_failed', {
+            errorName: createBucketError.name,
+          });
           return NextResponse.json({ error: 'Storage not configured. Please contact support.' }, { status: 500 });
         }
 
@@ -119,7 +129,9 @@ export async function POST(request: NextRequest) {
           });
 
         if (retryError) {
-          console.error('Retry upload error:', retryError);
+          logServerError('api', 'upload_retry_failed', {
+            errorName: retryError.name,
+          });
           return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
         }
 
@@ -130,8 +142,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ path: uploadData.path });
-  } catch (error) {
-    console.error('Upload handler error:', error);
+  } catch {
+    logServerError('api', 'upload_handler_failed');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

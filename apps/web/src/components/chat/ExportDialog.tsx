@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { logClientDevError } from '@/lib/client-log';
 import { Download, FileText, FileJson, File, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,8 +78,8 @@ export default function ExportDialog({
 
       downloadFile(result.content, result.filename, result.mimeType);
       closeWithSuccess();
-    } catch (error) {
-      console.error('Export failed:', error);
+    } catch {
+      logClientDevError('Export failed');
       alert('导出失败，请稍后重试');
     } finally {
       setIsExporting(false);
@@ -97,8 +98,8 @@ export default function ExportDialog({
 
       downloadFile(result.content, result.filename, result.mimeType);
       closeWithSuccess();
-    } catch (error) {
-      console.error('Batch export failed:', error);
+    } catch {
+      logClientDevError('Batch export failed');
       alert('批量导出失败，请稍后重试');
     } finally {
       setIsExporting(false);

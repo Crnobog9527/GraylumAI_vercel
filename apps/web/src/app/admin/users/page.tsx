@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -47,6 +48,7 @@ import AdminErrorState from '@/components/admin/AdminErrorState';
 import { RoleBadge } from '@/components/ui/status-badge';
 import { TableEmptyState } from '@/components/ui/empty-state';
 import { toast } from '@/components/ui/sonner';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 type UserStatus = 'active' | 'disabled' | 'banned';
 type MembershipLevel = 'free' | 'pro' | 'gold';
@@ -159,7 +161,7 @@ export default function AdminUsersPage() {
       utils.admin.getUserDetails.invalidate();
     },
     onError: (error) => {
-      toast.error(error.message || '会员等级更新失败');
+      toast.error(getSafeErrorMessage(error, '会员等级更新失败，请稍后重试'));
     },
   });
 
@@ -587,6 +589,9 @@ export default function AdminUsersPage() {
         <DialogContent className="max-w-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>调整积分</DialogTitle>
+            <DialogDescription className="sr-only">
+              为所选用户调整积分余额，并记录本次调整原因。
+            </DialogDescription>
           </DialogHeader>
 
           {selectedUser && (

@@ -1,6 +1,75 @@
 import { router, publicProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+// Preview deployments can temporarily lag schema migrations. Selecting `*`
+// keeps the public marketplace resilient across older DB shapes while we
+// still map only the safe fields we expose to the client.
+const PUBLIC_MODULE_SELECT = '*';
+
+export type PublicModule = {
+  id: any;
+  title: any;
+  description: any;
+  full_description: any;
+  icon: any;
+  category: any;
+  platform: any;
+  features: any;
+  examples: any;
+  preparation_questions: any;
+  usage_count: any;
+  credits_multiplier: any;
+  sort_order: any;
+  is_featured: any;
+  active: any;
+  created_at: any;
+  updated_at: any;
+  image_url?: any;
+  badge_type?: any;
+  badge_text?: any;
+  credits_display?: any;
+  link_url?: any;
+  link_module_id?: any;
+};
+
+export function toPublicModule(module: any): PublicModule {
+  return {
+    id: module.id,
+    title: module.title,
+    description: module.description,
+    full_description: module.full_description,
+    icon: module.icon,
+    category: module.category,
+    platform: module.platform,
+    features: module.features,
+    examples: module.examples,
+    preparation_questions: module.preparation_questions,
+    usage_count: module.usage_count,
+    credits_multiplier: module.credits_multiplier,
+    sort_order: module.sort_order,
+    is_featured: module.is_featured,
+    active: module.active,
+    created_at: module.created_at,
+    updated_at: module.updated_at,
+    image_url: module.image_url,
+    badge_type: module.badge_type,
+    badge_text: module.badge_text,
+    credits_display: module.credits_display,
+    link_url: module.link_url,
+    link_module_id: module.link_module_id,
+  };
+}
+
+export function getPublicReadClient(ctx: {
+  supabase: SupabaseClient<any, 'public', any>;
+  supabasePublic: SupabaseClient<any, 'public', any>;
+  supabaseAdmin: SupabaseClient<any, 'public', any>;
+  hasSupabaseAdminPrivileges: boolean;
+}) {
+  return ctx.supabasePublic ?? ctx.supabase;
+}
 
 export const modulesRouter = router({
   /**
@@ -15,10 +84,11 @@ export const modulesRouter = router({
     }).optional())
     .query(async ({ ctx, input }) => {
       const { category, limit = 50, offset = 0, sortBy = 'newest' } = input ?? {};
+      const readClient = getPublicReadClient(ctx);
 
-      let query = ctx.supabase
+      let query = readClient
         .from('modules')
-        .select('*', { count: 'exact' })
+        .select(PUBLIC_MODULE_SELECT, { count: 'exact' })
         .eq('active', 'true');
 
       // Apply category filter
@@ -51,7 +121,7 @@ export const modulesRouter = router({
       }
 
       return {
-        modules: modules ?? [],
+        modules: (modules ?? []).map((module) => toPublicModule(module)),
         total: count ?? 0,
         hasMore: (count ?? 0) > offset + limit,
       };
@@ -66,10 +136,11 @@ export const modulesRouter = router({
     }).optional())
     .query(async ({ ctx, input }) => {
       const { limit = 4 } = input ?? {};
+      const readClient = getPublicReadClient(ctx);
 
-      const { data: modules, error } = await ctx.supabase
+      const { data: modules, error } = await readClient
         .from('modules')
-        .select('*')
+        .select(PUBLIC_MODULE_SELECT)
         .eq('active', 'true')
         .eq('is_featured', 'true')
         .order('sort_order', { ascending: true })
@@ -83,7 +154,7 @@ export const modulesRouter = router({
         });
       }
 
-      return modules ?? [];
+      return (modules ?? []).map((module) => toPublicModule(module));
     }),
 
   /**
@@ -92,9 +163,10 @@ export const modulesRouter = router({
   getModuleById: publicProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const { data: module, error } = await ctx.supabase
+      const readClient = getPublicReadClient(ctx);
+      const { data: module, error } = await readClient
         .from('modules')
-        .select('*')
+        .select(PUBLIC_MODULE_SELECT)
         .eq('id', input.id)
         .eq('active', 'true')
         .single();
@@ -106,7 +178,7 @@ export const modulesRouter = router({
         });
       }
 
-      return module;
+      return toPublicModule(module);
     }),
 
   /**

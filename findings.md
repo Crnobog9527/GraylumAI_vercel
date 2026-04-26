@@ -1,5 +1,321 @@
 # Findings & Decisions
 
+## 🧪 密钥轮换后 E2E fixture 改走 DATABASE_URL，Preview 定向验证恢复 (2026-04-25)
+
+> **触发**: OpenRouter、Supabase service role 与 `DATABASE_URL` 轮换后，Preview preflight 暴露出旧 Supabase REST service-role fixture 不再适配新版 key 策略
+> **目标**: 保持 E2E 可验证能力，同时避免继续依赖 legacy service-role REST key
+
+### 结论
+
+- E2E fixture 不再依赖 `SUPABASE_SERVICE_ROLE_KEY` 通过 Supabase REST 修改测试数据：
+  - 维护模式预处理改为 SQL upsert `system_settings.maintenance_mode=false`
+  - 积分、聊天证据、会话、消息、token stats 与系统设置 fixture 改为 `DATABASE_URL` 直连查询/写入
+  - root `.env.local` 与 `apps/web/.env.local` 会按顺序加载，app 层配置可覆盖 root 默认值
+- Preview 数据库中的 OpenRouter Claude 模型级 key 已同步为轮换后的 OpenRouter key；不在仓库记录任何 key 明文
+- 两个关键 Preview 定向场景已恢复通过：
+  - `chat.spec.ts` live runtime evidence
+  - `admin-config.spec.ts` chat runtime settings flow
+- 新提交触发的 Preview 已完成完整非破坏性 preflight，所有非 destructive 模块通过；本轮 Preview 未启用 Deployment Protection，因此 preflight 脚本允许空 bypass cookie 并用真实页面访问结果验收
+
+### 关键发现
+
+- 旧失败 `Legacy API keys are disabled` 来自 E2E fixture 对 Supabase REST service role 的依赖，不是用户聊天主链本身的业务回归
+- Vercel 的 `env pull` 可拉取变量名，但敏感值为空，不能作为本地自动同步 service role 的可信来源
+- OpenRouter 模型级 key 会优先于环境 fallback；轮换全局 `OPENROUTER_API_KEY` 后，也需要同步数据库 `ai_models.api_key` 中保存的模型级 key
+- `run-release-preflight.sh` 之前把“缺少 bypass cookie”直接标为 `preview-config failed`，这会误伤未启用 Deployment Protection 的 Preview；现在改为真实访问阶段决定通过/失败
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-46` | API 回归通过 | `pnpm test:api` -> `36` files / `358` tests passed | 命令证据 |
+| `E2E-47` | Web 类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
+| `E2E-48` | Preview 聊天 live evidence 通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/chat.spec.ts --grep 'persist chat runtime evidence'` -> `3 passed` | Preview 证据 |
+| `E2E-49` | Preview 后台聊天运行时设置流通过 | `PLAYWRIGHT_BASE_URL=... playwright test tests/e2e/admin-config.spec.ts --grep 'chat runtime feature settings'` -> `3 passed` | Preview 证据 |
+| `E2E-50` | 新 Preview 完整非破坏性 preflight 通过 | `.release-output/preflight/20260425-215454/00-release-preflight-summary.md` | Preview 证据 |
+
+### 决策
+
+- 后续 E2E fixture 优先使用 `DATABASE_URL` 的 SQL helper，不再把新版 Supabase service-role REST key 作为 Playwright 数据准备的硬依赖
+- `.auth` storage state 仍视为运行态文件，验证后恢复到仓库版本，不纳入提交
+- 无 Deployment Protection 的 Preview 可不提供 bypass cookie；若后续重新启用保护，则仍需提供 `VERCEL_BYPASS_COOKIE` 或 `--bypass-cookie`
+- 完整 Preview preflight 已在新 Preview 上通过；旧失败日志只作为根因分析资料保留
+
+## 🔐 Claude 运行时已收敛到 OpenRouter-only，Anthropic 官方 API 退役 (2026-04-25)
+
+> **触发**: 用户确认后续 Claude 模型全部通过 OpenRouter API 调用，不再使用 Anthropic 官方 API
+> **目标**: 消除 `ANTHROPIC_API_KEY` 运行时 fallback、官方 Anthropic endpoint 调用和后台配置误导
+
+### 结论
+
+- `ANTHROPIC_API_KEY` 不再作为有效运行时凭证：
+  - 环境校验要求 `OPENROUTER_API_KEY`
+  - provider fallback 只读取 `OPENROUTER_API_KEY`
+  - 安全/发布文档改为“旧 Anthropic key revoke/delete，而不是轮换”
+- Claude 模型默认使用 OpenRouter / OpenAI-compatible 路由：
+  - 默认模型 ID 改为 `anthropic/...` OpenRouter 形态
+  - 新增模型默认 provider 改为 `openai`
+  - migration `0022_openrouter_claude_provider_default.sql` 会把 OpenRouter Claude 形态的旧 `anthropic` provider 记录迁移为 `openai` + `provider_usage`
+- 当前 HEAD 不再保留 `.playwright-cli/*` 旧录制产物，减少 E2E 账号密码继续暴露在当前树中的风险
+
+### 关键发现
+
+- 本地密钥指纹反查显示：当前跟踪文件已不再匹配私密 key / E2E 密码值，仅剩公开 `NEXT_PUBLIC_APP_URL`
+- Git 历史中仍有历史命中，代码删除不能让旧提交里的值失效；需要在供应商后台完成轮换或 revoke
+- OpenRouter 不支持 Anthropic 官方 `count_tokens` 协议；Claude 预估改走本地估算，实际计费用 provider usage metadata 收敛
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `SEC-10` | 运行时代码中不再存在 Anthropic 官方 endpoint/header/fallback 命中 | `rg -n "api\\.anthropic\\.com|anthropic-version|x-api-key|OPENROUTER_API_KEY / ANTHROPIC" packages apps .env.example turbo.json` | 命令证据 |
+| `SEC-11` | API 回归通过 | `pnpm --filter @repo/api test:run -- src/services/__tests__/providerUtils.test.ts src/lib/envValidator.test.ts src/services/__tests__/tokenCounter.test.ts src/routers/model.test.ts src/routers/ai.test.ts` -> `36` files / `358` tests passed | 命令证据 |
+| `SEC-12` | Web 类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
+| `SEC-13` | 当前跟踪文件未命中私密 env 值；仅公开 app URL 命中 | 本地 env 指纹反查脚本 | 命令证据 |
+
+### 决策
+
+- 不再为 Anthropic 官方 API 申请或轮换新 key；旧 key 只做 revoke/delete
+- 优先轮换 OpenRouter、Supabase service role、数据库连接串和 E2E 账号密码
+- 2026-04-25 更新：OpenRouter key、Supabase service role 与 `DATABASE_URL` / 数据库密码已完成更新；`E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 按用户决策延后到最终上线前删除或重置
+- 不在共享 Preview 上重新启用 Anthropic 官方 prompt cache / web search 工具；后续如需要搜索能力，应按 OpenRouter 支持的能力单独设计
+
+## 🚦 Preview 发布前护栏已通过，剩余仅 destructive 隔离窗口 (2026-04-24)
+
+> **触发**: 历史遗留稳定化提交推送后，需要确认远端 Preview 与本地测试口径一致
+> **目标**: 完成 PR 前的本地基线、Vercel Preview preflight 与剩余风险归档
+
+### 结论
+
+- 分支 `codex/fix/admin-stat-accuracy` 已推送到 GitHub，并触发 Vercel Preview
+- 锁定 Preview：`https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app`
+- 非破坏性 Preview preflight 已通过：
+  - `preview-auth`
+  - `preview-ready`
+  - `preview-chat`
+  - `preview-admin`
+  - `preview-admin-config`
+  - `preview-admin-ops`
+  - `preview-security`
+  - `preview-user-extended`
+  - `preview-user-supplemental`
+- `preview-admin-destructive` 未执行；原因是本轮没有单独确认隔离 destructive 环境，按既定策略保留为需要隔离窗口的谨慎项
+
+### 关键发现
+
+- Preview 上 React 受控 textarea 对 `fill()` / `insertText()` 的状态同步不如本地稳定；E2E 改为重新定位当前可见 textarea 并使用 `pressSequentially()`，避免“DOM 值变化但 React 状态仍为空”的假失败
+- 默认长文本配置断言不应在共享 Preview 中临时改全局设置；Preview 的长文本设置生效已经由 `admin-config.spec.ts` 的后台设置流覆盖
+- 订阅购买路径已具备 checkout session 能力；测试应接受 `payments.createCheckoutSession` 2xx 作为真实下一步，而不是只等待旧的“支付暂不可用”fallback
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-43` | 分支已推送并触发 Vercel Preview，部署状态为 Ready | `git push -u origin codex/fix/admin-stat-accuracy`, `vercel inspect` | 远端证据 |
+| `E2E-44` | 本地 API 回归通过 | `pnpm test:api` -> `36` files / `356` tests passed | 命令证据 |
+| `E2E-45` | Preview 非破坏性 preflight 通过 | `.release-output/preflight/20260424-184843/00-release-preflight-summary.md` | 命令证据 |
+
+### 决策
+
+- 将 Preview 非破坏性验收视为通过
+- 不在共享 Preview 上执行 destructive；后续只在隔离环境中开启 `preview-admin-destructive`
+- 不把 `.release-output`、Playwright artifacts 或 `.auth` storage state 作为源代码交付内容
+
+## 🧹 历史遗留 E2E 与管理后台稳定性已完成本轮收口 (2026-04-24)
+
+> **触发**: 阶段 12 完成后，仍有 `admin-config`、`admin-destructive`、`admin-ops`、`auth`、`chat` 等关键 E2E 套件存在历史失败或运行态噪音
+> **目标**: 把剩余历史遗留问题收敛到代码修复、自动化验证和文档状态一致
+
+### 结论
+
+- 本轮历史遗留清理已经完成：
+  - `admin-config.spec.ts` 整文件通过，结果为 `10 passed / 2 skipped`
+  - `admin-destructive.spec.ts` 在 destructive gate 打开时通过，结果为 `12 passed`
+  - `admin-ops.spec.ts` 通过，结果为 `6 passed`
+  - `auth.spec.ts` 通过，结果为 `11 passed`
+  - `chat.spec.ts` 通过，结果为 `6 passed / 4 skipped`
+- 原先的 `/maintenance`、聊天运行时设置、套餐/提示词 CRUD、用户页、财务/成本页、保护路由登录回跳等失败点已经全部收口
+- 高频 Radix dialog `Description` / `aria-describedby` 警告已在当前关键套件覆盖路径中清理
+- 当前跳过项属于既有环境门控：
+  - `admin-config` 的 smart routing / smart search preview runtime proof
+  - `chat` 的 live stream / preview runtime 相关用例
+
+### 关键发现
+
+- `/admin/settings` 首屏不能再把清理统计和基础设置绑在同一个 dashboard 查询里；清理统计已经拆到 `admin.getCleanupStats`，首屏只保留系统设置与会员方案
+- “保存所有设置”逐条 mutation 会在 E2E 和真实管理操作中放大延迟；现在改为 `settings.updateSystemSettingsBulk`
+- 管理后台的创建/编辑/删除类页面需要等 mutation 后的列表 refetch 完成，再收起或验证 UI，否则长流程会稳定性不足
+- 用户订阅页不能用 `plan.level` 作为唯一 React key 或唯一测试锚点；同一级别可能存在多个方案，现在卡片使用 `plan.id` 作为稳定身份
+- `proxy.ts` 里已登录用户访问 `/login?redirect=...` 时不应无条件回 `/`，否则会丢掉受保护路由的原始目标
+- 真实流式 E2E 不需要等完整回答结束才验证 runtime metadata；读取到 `init` 事件后主动取消流即可减少 destructive 回归耗时
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-38` | `admin-config.spec.ts` 全文件通过，`maintenance`、settings、chat runtime、packages、prompts 均闭环 | `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium` | 命令证据 |
+| `E2E-39` | destructive 管理端高风险回归在 gate 打开后通过 | `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium` | 命令证据 |
+| `E2E-40` | admin ops 读页、用户详情、诊断、工单处理均通过 | `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium` | 命令证据 |
+| `E2E-41` | 登录、公开页、保护路由 redirect、profile 巡检均通过 | `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium` | 命令证据 |
+| `E2E-42` | chat 关键非 live 用例通过，live/preview 用例按环境门控跳过 | `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium` | 命令证据 |
+
+### 决策
+
+- 将这批问题从“历史遗留待治理”更新为“本轮已收口”
+- 保留 smart routing / smart search / live stream 类用例的环境门控，不把跳过误记为失败
+- 最终交付不包含 `.auth` storage state 运行态变化
+
+## 🔐 隔离运行验证确认 `/api/ai/stream` 使用数据库模型 key，而非全局 env fallback (2026-04-22)
+
+> **触发**: 阶段 12 最后一个阻塞项 `12.1.6` 需要在真实隔离环境中验证
+> **目标**: 在不依赖 `OPENROUTER_API_KEY / ANTHROPIC_API_KEY` 的前提下，确认流式端点是否仍能基于 `ai_models.api_key` 继续执行
+
+### 结论
+
+- `/api/ai/stream` 已被真实验证为“模型 key 优先”，并且在没有全局 env fallback 的隔离运行窗口里，仍会读取 `ai_models.api_key`
+- 该结论来自两组对照实验：
+  - 有数据库 `api_key` 的模型：请求穿过 `api_key` 检查，进入真实 provider 调用阶段
+  - 无数据库 `api_key` 的模型：请求直接落为 `未配置 API Key`
+- 因此 `12.1.6` 可以关闭
+- 隔离验证中有 key 模型最终收到的是上游 `403`，这说明当前数据库 key 在 provider 侧仍可能受模型/地区/账号策略限制，但这已经是“外部 provider 可用性”问题，不再是“应用是否偷用 env key”问题
+
+### 关键发现
+
+- 隔离窗口通过单独启动 `http://localhost:3101` 的 Next dev server 建立：
+  - `OPENROUTER_API_KEY=''`
+  - `ANTHROPIC_API_KEY=''`
+- 在这个隔离窗口中：
+  - `Claude 4.6 opus`
+  - `Claude 4.5 haiku`
+  - `Claude 4.5 Sonnet`
+  都能继续走到 `ai_stream_openai_compatible_provider_failed status=403`
+- 这意味着流式路由已经拿到了某个非 env 的有效候选 key，并成功把请求发到了 OpenAI-compatible provider
+- 同时，所有这些请求都留下了完整失败链路：
+  - `billing_history` 出现 `pre_deduct`
+  - 随后出现 `refund`
+  - `ai_usage_logs` 记录为 `failed`
+- 对照组 `Parity Toggle Model 1776832066252` 没有数据库 key：
+  - 同一隔离窗口下，它不会进入 provider 调用
+  - `ai_usage_logs.error_message = 未配置 API Key`
+  - 用户积分从 `1800 -> 1797 -> 1800`，说明预扣后立即退款
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-33` | 隔离 server 已在 `http://localhost:3101` 启动，且进程级将 `OPENROUTER_API_KEY / ANTHROPIC_API_KEY` 置空 | `OPENROUTER_API_KEY='' ANTHROPIC_API_KEY='' pnpm --dir apps/web exec next dev --port 3101 --turbopack` | 命令证据 |
+| `E2E-34` | `Claude 4.6 opus` 在隔离窗口上进入 provider 调用，随后 `billing_history` 记录 `pre_deduct -> refund`，`ai_usage_logs` 记录 `failed` | 真实 `/api/ai/stream` 调用 + Supabase 查询 | 运行时证据 |
+| `E2E-35` | `Claude 4.5 haiku` 与 `Claude 4.5 Sonnet` 在隔离窗口上重复得到相同结果：到达 provider，随后 `403` 与退款回滚 | 真实 `/api/ai/stream` 调用 + 服务端日志 + Supabase 查询 | 运行时证据 |
+| `E2E-36` | 无数据库 key 的 `Parity Toggle Model 1776832066252` 在隔离窗口上记录 `未配置 API Key`，证明没有 env fallback 可用 | 真实 `/api/ai/stream` 调用 + `ai_usage_logs` 查询 | 运行时证据 |
+| `E2E-37` | 无 key 对照请求的余额从 `1800 -> 1797 -> 1800`，退款回滚完整 | `profiles` + `billing_history` 查询 | 数据证据 |
+
+### 决策
+
+- 将 `12.1.6` 标记为完成
+- 将“数据库 key 是否独立生效”和“provider 是否允许当前模型请求”正式拆开：
+  - 应用层验证：已完成
+  - provider 可用性：仍受外部 `403` 约束，但不再属于本项阻塞
+- 阶段 12 所有任务现已完成
+
+## 🧪 Playwright 浏览器环境已恢复，但现有 E2E 套件仍存在历史失败 (2026-04-22)
+
+> **触发**: 需要把昨天因浏览器二进制缺失而中断的 E2E 回归继续跑完
+> **目标**: 区分“本轮新增断言是否能在浏览器里命中”和“仓库中原本就存在的 E2E 历史失败”
+
+### 结论
+
+- Playwright 浏览器环境已经恢复，昨天的“缺少 Chromium 二进制”问题已消除
+- 本轮阶段 12 新增断言已经在真实浏览器里命中关键路径
+- 但仓库现有 E2E 套件仍有与本轮改动无关的历史失败，因此当前不能声称“整套前端回归全绿”
+
+### 关键发现
+
+- `auth.spec.ts` 的失败集中在既有认证/资料页巡检，不是本轮阶段 12 改动面：
+  - 一个失败来自 `profile?tab=security` 页面期待 `账户安全` heading，但实际未命中
+  - 一个失败来自公共法务页跳转过程中监控捕获 `net::ERR_ABORTED`
+  - 一个失败来自 `/profile` 既有侧栏按钮选择器未命中
+- `admin-ops.spec.ts` 中，本轮新增的读页巡检路径已通过：
+  - `/admin/settings` 的 active/reference 计费设置分区断言通过
+  - `/admin/costs` 的 overview / usage / token 状态徽标断言通过
+  - 套件最终失败在另一个既有 ticket flow：`process.env.PLAYWRIGHT_BASE_URL` 缺失导致 `Invalid URL`
+- `admin-destructive.spec.ts` 中，本轮新增的无 key warning 路径已经走到：
+  - 模型状态先显示 `未配置 API Key`
+  - 启用时出现 warning toast
+  - 启用后状态仍保持 `未配置 API Key`
+  - 套件最终失败发生在 `finally` 清理阶段的超时与页面关闭，而不是新增断言本身
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-29` | Playwright Chromium 浏览器二进制已成功安装到本机缓存目录 | `pnpm --dir apps/web exec playwright install chromium` | 命令证据 |
+| `E2E-30` | `auth.spec.ts` 现状为 `8 passed / 3 failed`，失败点集中在既有 profile / public support flows | `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium` | 命令证据 |
+| `E2E-31` | `admin-ops.spec.ts` 中包含本轮新增 admin settings / costs 断言的读页用例通过；整文件最终因既有 `PLAYWRIGHT_BASE_URL` 问题失败 | `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium` | 命令证据 |
+| `E2E-32` | `admin-destructive.spec.ts` 的无 key 模型 warning 关键路径已执行到新增断言后，最终失败发生在 `finally` 清理阶段 | `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium` + `admin-destructive.spec.ts:398-459, 487-494` | 命令 + 静态代码证据 |
+
+### 决策
+
+- 不再把“浏览器二进制缺失”列为当前阻塞
+- 将浏览器侧验证状态更新为：
+  - 本轮新增断言已在浏览器中执行
+  - 整套 E2E 仍存在仓库级历史失败，需要后续单独治理
+- 保持阶段 12 的唯一阻塞项仍为 `12.1.6`，而不是把这些既有 E2E 失败错误地并入阶段 12 功能阻塞
+
+## 🧾 阶段 12 剩余 active 项已收口，独立模型 key 验证仍需隔离窗口 (2026-04-22)
+
+> **触发**: 需要将阶段 12 最后一批 active 项一次性收口，并明确只保留真正无法绕开的阻塞
+> **目标**: 把“代码已完成”“自动化已补齐”“浏览器环境缺口”“真实隔离验证未完成”这四件事彻底拆清楚
+
+### 结论
+
+- 阶段 12 剩余 `5` 个 active 项已经完成代码收尾，并回写到 `task.json`
+- `12.1.6` 继续保留为唯一阻塞项
+- 当前不应把 `12.1.6` 的未完成归因到代码不支持，而应归因到运行环境仍提供全局 provider key 回退
+- Playwright 浏览器环境昨天未恢复成功，因此浏览器侧回归目前属于环境缺口，而不是本轮代码功能未落地
+
+### 关键发现
+
+- `12.1.5` 不再只是人工观察：
+  - 后端单测已覆盖无 key 时 `connection_status = no_key`
+  - 管理后台模型状态徽标已能稳定显示 `未配置 API Key`
+  - E2E 已补充“启用无 key 模型时出现 warning toast”的断言
+- `12.2.3` 已完成口径统一：
+  - `first_purchase_bonus_percent` 仅在后台历史兼容口径中保留
+  - 当前运行时购买/到账链路不消费该字段
+- `12.4.5` 已从“仅 loading / error 粗粒度状态”升级为多态状态表达：
+  - `加载中`
+  - `刷新中`
+  - `获取失败`
+  - `获取失败（保留旧数据）`
+  - `已同步`
+- `12.4.2` 与 `12.4.3` 已在同一组件一并收口：
+  - 推荐卡改为金橙高亮
+  - `年付共 $xx` 文案已移除
+- `12.1.6` 的核心阻塞仍在环境层：
+  - `.env.local` 当前同时存在 `OPENROUTER_API_KEY` 与 `ANTHROPIC_API_KEY`
+  - `apps/web/.env.local` 当前存在 `ANTHROPIC_API_KEY`
+  - 新增单测只证明“优先级逻辑存在”，并不能替代真实隔离运行验证
+
+### 新证据
+
+| Evidence ID | 结论 | 来源 | 类型 |
+|-------------|------|------|------|
+| `E2E-21` | 后端 `model.testConnection` 在无 key 时会持久化 `connection_status=no_key` 与脱敏错误信息 | `packages/api/src/routers/model.test.ts` | 自动化测试证据 |
+| `E2E-22` | 后台模型列表已为连接状态提供稳定测试钩子，且无 key 文案统一为 `未配置 API Key` | `apps/web/src/app/admin/models/page.tsx` | 静态代码证据 |
+| `E2E-23` | `first_purchase_bonus_percent` 已被降级为 retired-reference，不再作为 active billing setting | `apps/web/src/app/admin/settings/page.tsx`, `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` | 静态代码证据 |
+| `E2E-24` | `/admin/costs` 已为概览、日志、Token 统计提供 fetch-state badge 与测试钩子 | `apps/web/src/app/admin/costs/page.tsx` | 静态代码证据 |
+| `E2E-25` | 订阅推荐卡已改为暖色高亮，且年付总价文案已移除 | `apps/web/src/components/profile/SubscriptionCard.tsx` | 静态代码证据 |
+| `E2E-26` | API 全量测试通过，结果为 `36` 个测试文件、`355` 个测试全部通过 | `pnpm test:api` | 命令证据 |
+| `E2E-27` | 前端类型检查通过 | `pnpm --dir apps/web exec tsc --noEmit --pretty false` | 命令证据 |
+| `E2E-28` | 当前运行环境仍存在 provider 全局回退键，无法声称已完成“仅模型 key”真实验证 | `rg -n "OPENROUTER_API_KEY|ANTHROPIC_API_KEY" .env.local apps/web/.env.local` | 命令证据 |
+
+### 决策
+
+- 将 `12.1.5`、`12.2.3`、`12.4.2`、`12.4.3`、`12.4.5` 标记为完成
+- 将 `12.1.6` 继续标记为阻塞，并把阻塞理由精确收敛到“隔离运行窗口缺失”
+- 不为 `12.1.6` 发明替代性“伪验证”；必须在移除全局 env key 的真实窗口里完成一次真实流式请求验证
+- 在浏览器二进制缺失前，不把未跑完的 Playwright 回归包装成已验证；它们只作为已补好的回归规范存在
+
 ## ☁️ Vercel Preview 证明 Claude/OpenRouter 在部署环境中存在差异 (2026-03-06)
 
 > **触发**: 用户要求把当前代码推到 Vercel Preview 后，再验证 Claude via OpenRouter 是否仍会因为地区策略被拦截

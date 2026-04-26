@@ -12,6 +12,9 @@ on:
     # 每周一 9:00 UTC 运行
     - cron: '0 9 * * 1'
 
+permissions:
+  contents: read
+
 jobs:
   # 依赖安全审计
   audit:
@@ -20,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -43,10 +48,10 @@ jobs:
           AUDIT_OUTPUT=$(pnpm audit --json 2>/dev/null || true)
 
           # 统计漏洞数量
-          CRITICAL=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.critical // 0')
-          HIGH=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.high // 0')
-          MODERATE=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.moderate // 0')
-          LOW=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.low // 0')
+          CRITICAL=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.critical // 0')
+          HIGH=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.high // 0')
+          MODERATE=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.moderate // 0')
+          LOW=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.low // 0')
 
           echo "| 严重程度 | 数量 |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
@@ -73,6 +78,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Check for hardcoded secrets
         run: |
@@ -113,6 +120,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -128,7 +137,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run TypeScript check
-        run: pnpm turbo typecheck || true
+        run: pnpm --filter web exec tsc --noEmit
 
   # 安全单元测试
   security-unit-tests:
@@ -137,6 +146,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -155,8 +166,10 @@ jobs:
           echo "## 安全单元测试报告" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+          set -o pipefail
           cd packages/api
-          pnpm test -- --run --reporter=verbose 2>&1 | tee test-output.txt || true
+          pnpm test -- --run --reporter=verbose 2>&1 | tee test-output.txt
+          TEST_EXIT=${PIPESTATUS[0]}
 
           # Extract test summary
           if grep -q "Tests:" test-output.txt; then
@@ -165,10 +178,9 @@ jobs:
             echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Check for failures in security-related tests
-          if grep -q "FAIL.*security" test-output.txt; then
+          if [ "$TEST_EXIT" -ne 0 ]; then
             echo "❌ 安全测试失败" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            exit "$TEST_EXIT"
           fi
 
           echo "✅ 安全单元测试通过" >> $GITHUB_STEP_SUMMARY
@@ -178,9 +190,17 @@ jobs:
     name: Security E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key-for-security-e2e-local-runtime-only-000000000000000000000000000000000000000000000000000000000000' }}
+      NEXT_PUBLIC_APP_URL: https://ci.graylum.example
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'sk-or-security-e2e-placeholder-local-runtime-only' }}
+      SECURITY_E2E_LOCAL_ONLY: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -199,10 +219,6 @@ jobs:
 
       - name: Build application
         run: pnpm turbo build
-        env:
-          # Provide minimal env vars for build
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
 
       - name: Start application
         run: |

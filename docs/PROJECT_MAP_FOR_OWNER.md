@@ -40,10 +40,10 @@
 - 对话与消息落库
 - Token 统计与积分更新
 
-## 4) 已标记的旧链路（不要再用）
-以下属于旧非流式路径，已标记 deprecated，且后端旧入口已下线：
+## 4) 已移除的旧链路（不要恢复）
+以下旧非流式路径已经从前端仓库移除，后端旧入口也已下线：
 - `apps/web/src/hooks/useAIChat.ts`
-- `apps/web/src/components/ai/ChatInterface.tsx`
+- `apps/web/src/components/ai/*`
 - `apps/web/src/components/chat/ChatInterface.tsx`
 - `packages/api/src/routers/chat.ts` 的 `chat.sendMessage`（已改为直接报错，防误用）
 

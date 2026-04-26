@@ -1,6 +1,8 @@
 import { createTRPCContext, router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
 
 type ExportFormat = 'json' | 'markdown' | 'txt';
 type BaseContext = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -20,6 +22,115 @@ interface ExportMessageRecord {
   role: string;
   content: string;
   created_at: string;
+}
+
+interface ConversationStatsSource {
+  id: string;
+}
+
+interface ConversationMessageCountRow {
+  conversation_id: string | null;
+}
+
+interface ConversationCreditsRow {
+  conversation_id: string | null;
+  total_credits: number | null;
+}
+
+export function buildConversationStats<T extends ConversationStatsSource>(
+  conversations: T[],
+  messageRows: ConversationMessageCountRow[],
+  creditRows: ConversationCreditsRow[],
+) {
+  const messageCountByConversation = new Map<string, number>();
+  for (const row of messageRows) {
+    if (!row.conversation_id) {
+      continue;
+    }
+    messageCountByConversation.set(
+      row.conversation_id,
+      (messageCountByConversation.get(row.conversation_id) ?? 0) + 1,
+    );
+  }
+
+  const creditsByConversation = new Map<string, number>();
+  for (const row of creditRows) {
+    if (!row.conversation_id) {
+      continue;
+    }
+    creditsByConversation.set(
+      row.conversation_id,
+      (creditsByConversation.get(row.conversation_id) ?? 0) + (row.total_credits ?? 0),
+    );
+  }
+
+  return conversations.map((conversation) => ({
+    ...conversation,
+    message_count: messageCountByConversation.get(conversation.id) ?? 0,
+    credits_used: creditsByConversation.get(conversation.id) ?? 0,
+  }));
+}
+
+export async function getConversationsWithStats(
+  ctx: Pick<ProtectedContext, 'supabase' | 'profileId'>,
+) {
+  const { data: conversations, error } = await ctx.supabase
+    .from('conversations')
+    .select('*')
+    .eq('user_id', ctx.profileId)
+    .eq('is_deleted', 'false')
+    .order('created_at', { ascending: false });
+
+  if (error || !conversations) {
+    if (error) {
+      logger.error('ai', 'chat_conversations_fetch_failed', {
+        code: error.code,
+      });
+    }
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '获取对话列表失败，请稍后重试',
+    });
+  }
+
+  if (conversations.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const conversationIds = conversations.map((conversation) => conversation.id);
+  const [{ data: messageRows, error: messageError }, { data: creditRows, error: creditsError }] =
+    await Promise.all([
+      ctx.supabase
+        .from('messages')
+        .select('conversation_id')
+        .in('conversation_id', conversationIds)
+        .eq('is_deleted', 'false'),
+      ctx.supabase
+        .from('token_stats')
+        .select('conversation_id, total_credits')
+        .eq('user_id', ctx.profileId)
+        .in('conversation_id', conversationIds),
+    ]);
+
+  if (messageError || creditsError) {
+    logger.error('ai', 'chat_conversation_stats_aggregate_failed', {
+      messageErrorCode: messageError?.code,
+      creditsErrorCode: creditsError?.code,
+    });
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '获取对话统计失败，请稍后重试',
+    });
+  }
+
+  return {
+    data: buildConversationStats(
+      conversations,
+      (messageRows ?? []) as ConversationMessageCountRow[],
+      (creditRows ?? []) as ConversationCreditsRow[],
+    ),
+    error: null,
+  };
 }
 
 async function assertExportPermission(ctx: ProtectedContext) {
@@ -51,23 +162,43 @@ async function loadConversationExportData(
   ctx: ProtectedContext,
   conversations: ExportConversationRecord[]
 ) {
-  return Promise.all(
-    conversations.map(async (conversation) => {
-      const { data: messages } = await ctx.supabase
-        .from('messages')
-        .select('role, content, created_at')
-        .eq('conversation_id', conversation.id)
-        .eq('is_deleted', 'false')
-        .order('created_at', { ascending: true });
+  if (conversations.length === 0) {
+    return [];
+  }
 
-      return {
-        id: conversation.id,
-        title: conversation.title,
-        createdAt: conversation.created_at,
-        messages: (messages ?? []) as ExportMessageRecord[],
-      };
-    })
-  );
+  const conversationIds = conversations.map((conversation) => conversation.id);
+  const { data: messages, error } = await ctx.supabase
+    .from('messages')
+    .select('conversation_id, role, content, created_at')
+    .in('conversation_id', conversationIds)
+    .eq('is_deleted', 'false')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw createSafeInternalError(error, '导出对话失败，请稍后重试');
+  }
+
+  const messagesByConversationId = new Map<string, ExportMessageRecord[]>();
+  for (const message of (messages ?? []) as Array<ExportMessageRecord & { conversation_id: string | null }>) {
+    if (!message.conversation_id) {
+      continue;
+    }
+
+    const existingMessages = messagesByConversationId.get(message.conversation_id) ?? [];
+    existingMessages.push({
+      role: message.role,
+      content: message.content,
+      created_at: message.created_at,
+    });
+    messagesByConversationId.set(message.conversation_id, existingMessages);
+  }
+
+  return conversations.map((conversation) => ({
+    id: conversation.id,
+    title: conversation.title,
+    createdAt: conversation.created_at,
+    messages: messagesByConversationId.get(conversation.id) ?? [],
+  }));
 }
 
 function buildConversationExportPayload(
@@ -182,48 +313,7 @@ function buildConversationExportPayload(
 }
 
 export const chatRouter = router({
-  getConversations: protectedProcedure.query(async ({ ctx }) => {
-    // 获取对话列表（排除已删除的）
-    const { data: conversations, error } = await ctx.supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', ctx.profileId)
-      .eq('is_deleted', 'false')
-      .order('created_at', { ascending: false });
-
-    if (error || !conversations) {
-      return { data: [], error };
-    }
-
-    // 为每个对话获取消息数量
-    const conversationsWithStats = await Promise.all(
-      conversations.map(async (conv) => {
-        // 获取消息数量（排除已删除的）
-        const { count: messageCount } = await ctx.supabase
-          .from('messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('conversation_id', conv.id)
-          .eq('is_deleted', 'false');
-
-        // 获取该对话消耗的积分（从 token_stats 统计实际结算积分）
-        const { data: usageLogs } = await ctx.supabase
-          .from('token_stats')
-          .select('total_credits')
-          .eq('user_id', ctx.profileId)
-          .eq('conversation_id', conv.id);
-
-        const creditsUsed = (usageLogs || []).reduce((sum: number, log: any) => sum + (log.total_credits || 0), 0);
-
-        return {
-          ...conv,
-          message_count: messageCount ?? 0,
-          credits_used: creditsUsed,
-        };
-      })
-    );
-
-    return { data: conversationsWithStats, error: null };
-  }),
+  getConversations: protectedProcedure.query(async ({ ctx }) => getConversationsWithStats(ctx)),
 
   createConversation: protectedProcedure
     .input(z.object({ title: z.string().optional() }))
@@ -237,7 +327,7 @@ export const chatRouter = router({
         .select()
         .single();
 
-      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      if (error) throw createSafeInternalError(error, '创建对话失败，请稍后重试');
       return data;
     }),
 
@@ -252,7 +342,7 @@ export const chatRouter = router({
         .select()
         .single();
 
-      if (error) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+      if (error) throw createSafeInternalError(error, '更新对话标题失败，请稍后重试');
       return data;
     }),
 
@@ -265,7 +355,7 @@ export const chatRouter = router({
       });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createSafeInternalError(error, '删除对话失败，请稍后重试');
       }
 
       if (!data) {
@@ -286,7 +376,7 @@ export const chatRouter = router({
         .eq('is_deleted', 'false');
 
       if (ownedError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ownedError.message });
+        throw createSafeInternalError(ownedError, '批量删除对话失败，请稍后重试');
       }
 
       const ownedConversationIds = (ownedConversations ?? []).map((conversation) => conversation.id);
@@ -301,7 +391,7 @@ export const chatRouter = router({
         });
 
         if (error) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+          throw createSafeInternalError(error, '批量删除对话失败，请稍后重试');
         }
 
         if (!data) {
@@ -357,7 +447,7 @@ export const chatRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createSafeInternalError(error, '获取对话统计失败，请稍后重试');
       }
 
       const last = stats?.[0];
@@ -442,7 +532,7 @@ export const chatRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createSafeInternalError(error, '导出对话失败，请稍后重试');
       }
 
       if (!conversations || conversations.length === 0) {

@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -534,6 +535,9 @@ export default function AdminAnnouncementsPage() {
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
               {editingAnnouncement ? '编辑公告' : `发布${formData.announcementType === 'banner' ? '横幅' : '首页'}公告`}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              配置公告的标题、内容、展示类型、样式和生效时间。
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">

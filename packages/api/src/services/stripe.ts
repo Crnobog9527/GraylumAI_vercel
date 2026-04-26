@@ -73,6 +73,23 @@ function normalizeAppUrl(appUrl: string): string {
   return appUrl.replace(/\/$/, '');
 }
 
+function isTrustedHeaderAppUrl(headerAppUrl: string, configuredAppUrl: string | null): boolean {
+  if (configuredAppUrl && headerAppUrl === configuredAppUrl) {
+    return true;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+
+  try {
+    const parsedUrl = new URL(headerAppUrl);
+    return parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 function deriveAppUrlFromHeaders(headers?: Headers): string | null {
   if (!headers) {
     return null;
@@ -96,18 +113,21 @@ function deriveAppUrlFromHeaders(headers?: Headers): string | null {
 
 export function getStripeAppUrl(headers?: Headers): string {
   ensureWorkspaceServerEnv();
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL
+    ? normalizeAppUrl(process.env.NEXT_PUBLIC_APP_URL)
+    : null;
   const headerAppUrl = deriveAppUrlFromHeaders(headers);
-  if (headerAppUrl) {
+  if (headerAppUrl && isTrustedHeaderAppUrl(headerAppUrl, configuredAppUrl)) {
     return headerAppUrl;
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const appUrl = configuredAppUrl;
 
   if (!appUrl) {
     throw new Error('NEXT_PUBLIC_APP_URL is not configured');
   }
 
-  return normalizeAppUrl(appUrl);
+  return appUrl;
 }
 
 export function createServiceRoleSupabaseClient() {

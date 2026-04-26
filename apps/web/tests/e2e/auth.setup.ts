@@ -2,9 +2,11 @@ import { test as setup, expect, type Page } from '@playwright/test';
 import {
   authStatePaths,
   ensureAuthStateDirectory,
+  ensureMaintenanceModeDisabled,
   getCredentials,
   hasCredentials,
   type E2ERole,
+  waitForLoginFormReady,
 } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 
@@ -80,16 +82,25 @@ async function authenticateRole(page: Page, role: E2ERole) {
   }
 
   await gotoWithBypass(page, '/login');
+  await waitForLoginFormReady(page);
 
-  await page.fill('#email, input[type="email"], input[name="email"]', credentials.email);
-  await page.fill('#password, input[type="password"], input[name="password"]', credentials.password);
+  const emailInput = page.locator('#email, input[type="email"], input[name="email"]');
+  const passwordInput = page.locator('#password, input[type="password"], input[name="password"]');
+
+  await emailInput.fill(credentials.email);
+  await passwordInput.fill(credentials.password);
+  await expect(emailInput).toHaveValue(credentials.email);
+  await expect(passwordInput).toHaveValue(credentials.password);
   await submitCredentials(page);
 
   let authenticated = await waitForAuthenticatedNavigation(page, role);
   if (!authenticated) {
     await gotoWithBypass(page, '/login');
-    await page.fill('#email, input[type="email"], input[name="email"]', credentials.email);
-    await page.fill('#password, input[type="password"], input[name="password"]', credentials.password);
+    await waitForLoginFormReady(page);
+    await emailInput.fill(credentials.email);
+    await passwordInput.fill(credentials.password);
+    await expect(emailInput).toHaveValue(credentials.email);
+    await expect(passwordInput).toHaveValue(credentials.password);
     await submitCredentials(page);
     authenticated = await waitForAuthenticatedNavigation(page, role);
   }
@@ -121,6 +132,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
 
 setup('authenticate user', async ({ page }) => {
   await ensureAuthStateDirectory();
+  await ensureMaintenanceModeDisabled();
   if (!hasCredentials('user')) {
     await saveEmptyState(page, authStatePaths.user);
     return;
@@ -130,6 +142,7 @@ setup('authenticate user', async ({ page }) => {
 
 setup('authenticate admin', async ({ page }) => {
   await ensureAuthStateDirectory();
+  await ensureMaintenanceModeDisabled();
   if (!hasCredentials('admin')) {
     await saveEmptyState(page, authStatePaths.admin);
     return;

@@ -11,6 +11,14 @@ import path from 'node:path';
 const require = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { chromium } = require('@playwright/test');
 
+function writeStdout(message) {
+  process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message) {
+  process.stderr.write(`${message}\n`);
+}
+
 function parseArgs(argv) {
   const parsed = {
     previewUrl: '',
@@ -60,6 +68,10 @@ function assertRequired(value, label) {
 }
 
 async function applyBypass(context, previewUrl, bypassCookie) {
+  if (!bypassCookie) {
+    return;
+  }
+
   const hostname = new URL(previewUrl).hostname;
   await context.setExtraHTTPHeaders({
     'x-vercel-protection-bypass': bypassCookie,
@@ -86,11 +98,11 @@ async function ensureMaintenanceDisabled(page) {
   const enabled = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
 
   if (!enabled) {
-    console.log('maintenance_mode already disabled');
+    writeStdout('maintenance_mode already disabled');
     return;
   }
 
-  console.log('maintenance_mode enabled; restoring to false');
+  writeStdout('maintenance_mode enabled; restoring to false');
   await maintenanceSwitch.click();
   await saveAllButton.click();
   await saveAllButton.waitFor({ state: 'visible', timeout: 15000 });
@@ -107,7 +119,7 @@ async function verifyPublicLoginAccessible(previewUrl, bypassCookie) {
     if (page.url().includes('/maintenance')) {
       throw new Error(`Preview still redirects public login to maintenance: ${page.url()}`);
     }
-    console.log(`public login remains accessible at ${page.url()}`);
+    writeStdout(`public login remains accessible at ${page.url()}`);
   } finally {
     await context.close();
     await browser.close();
@@ -117,7 +129,6 @@ async function verifyPublicLoginAccessible(previewUrl, bypassCookie) {
 async function main() {
   const { previewUrl, bypassCookie, adminStatePath } = parseArgs(process.argv.slice(2));
   assertRequired(previewUrl, '--preview-url');
-  assertRequired(bypassCookie, '--bypass-cookie');
   const resolvedAdminStatePath = resolveAdminStatePath(adminStatePath);
 
   const browser = await chromium.launch({ headless: true });
@@ -149,6 +160,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  writeStderr(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

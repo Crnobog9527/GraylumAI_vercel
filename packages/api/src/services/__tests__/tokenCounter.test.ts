@@ -346,12 +346,9 @@ describe('countTokens', () => {
   });
 
   it('should fall back to estimate when official API fails', async () => {
-    // Mock fetch to fail
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-
     const result = await countTokens({
       model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
       messages: [{ role: 'user', content: 'Hello' }],
     });
 
@@ -394,13 +391,11 @@ describe('countTokens', () => {
   });
 
   it('should throw when official fails and fallback disabled', async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-
     await expect(
       countTokens(
         {
           model: 'claude-sonnet-4-20250514',
+          provider: 'anthropic',
           messages: [{ role: 'user', content: 'Hello' }],
         },
         { useOfficial: true, fallbackToEstimate: false }

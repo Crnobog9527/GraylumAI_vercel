@@ -68,6 +68,20 @@ export async function gotoWithBypass(
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
+      const isNavigationTimeout =
+        message.includes('page.goto: Test timeout') || message.includes('page.goto: Timeout');
+
+      if (isNavigationTimeout) {
+        try {
+          await page.locator('body').first().waitFor({ state: 'attached', timeout: 2_000 });
+          if (page.url() !== 'about:blank') {
+            return null;
+          }
+        } catch {
+          // Keep retrying until navigation either settles or exhausts the retry budget.
+        }
+      }
+
       const isTransient = transientNavigationErrors.some((fragment) => message.includes(fragment));
       if (!isTransient || attempt === 4) {
         throw error;

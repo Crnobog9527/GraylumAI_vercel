@@ -8,11 +8,20 @@ import {
 function createMockSupabase(options: {
   tickets?: Array<{ id: string; title: string; status: 'open' | 'in_progress' | 'closed' }>;
   replies?: Array<{ ticket_id: string; is_admin: string; created_at: string }>;
+  ticketsError?: { message: string } | null;
+  repliesError?: { message: string } | null;
+  updateError?: { message: string } | null;
+  insertError?: { message: string } | null;
 }) {
   const tickets = options.tickets ?? [];
   const replies = options.replies ?? [];
-  const updates: Array<{ table: string; values: Record<string, unknown>; eq: Array<[string, unknown]> }> = [];
-  const inserts: Array<{ table: string; values: Record<string, unknown> }> = [];
+  const updates: Array<{
+    table: string;
+    values: Record<string, unknown>;
+    eq: Array<[string, unknown]>;
+    in: Array<[string, unknown[]]>;
+  }> = [];
+  const inserts: Array<{ table: string; values: Record<string, unknown> | Record<string, unknown>[] }> = [];
 
   return {
     updates,
@@ -33,31 +42,35 @@ function createMockSupabase(options: {
           },
           eq(column: string, value: unknown) {
             state.eqFilters.push([column, value]);
-
+            return this;
+          },
+          in(column: string, values: unknown[]) {
             if (state.updateValues) {
-              updates.push({ table, values: state.updateValues, eq: [...state.eqFilters] });
-              return Promise.resolve({ data: null, error: null });
+              updates.push({
+                table,
+                values: state.updateValues,
+                eq: [...state.eqFilters],
+                in: [[column, values]],
+              });
+              return Promise.resolve({ data: null, error: options.updateError ?? null });
             }
 
             return this;
           },
-          in() {
-            return this;
-          },
           order() {
-            return Promise.resolve({ data: replies, error: null });
+            return Promise.resolve({ data: replies, error: options.repliesError ?? null });
           },
           update(values: Record<string, unknown>) {
             state.updateValues = values;
             return this;
           },
-          insert(values: Record<string, unknown>) {
+          insert(values: Record<string, unknown> | Record<string, unknown>[]) {
             inserts.push({ table, values });
-            return Promise.resolve({ data: values, error: null });
+            return Promise.resolve({ data: values, error: options.insertError ?? null });
           },
           then(onFulfilled: (value: { data: unknown; error: null }) => unknown) {
             if (table === 'tickets' && state.selectFields.includes('status')) {
-              return Promise.resolve(onFulfilled({ data: tickets, error: null }));
+              return Promise.resolve(onFulfilled({ data: tickets, error: options.ticketsError ?? null }));
             }
 
             return Promise.resolve(onFulfilled({ data: null, error: null }));
@@ -140,19 +153,34 @@ describe('TicketAutoCloseService', () => {
           status: 'closed',
           updated_at: '2026-03-09T12:00:00.000Z',
         }),
-        eq: [['id', 'ticket-1']],
+        eq: [],
+        in: [['id', ['ticket-1']]],
       },
     ]);
     expect(mock.inserts).toEqual([
       {
         table: 'ticket_replies',
-        values: {
+        values: [{
           ticket_id: 'ticket-1',
           user_id: null,
           content: TICKET_AUTO_CLOSE_SYSTEM_MESSAGE,
           is_admin: 'true',
-        },
+        }],
       },
     ]);
+  });
+
+  it('sanitizes reply query failures', async () => {
+    const mock = createMockSupabase({
+      tickets: [{ id: 'ticket-1', title: 'Auto close me', status: 'open' }],
+      repliesError: { message: 'permission denied for table ticket_replies' },
+    });
+
+    const service = new TicketAutoCloseService({
+      supabase: mock.client as never,
+      now: new Date('2026-03-09T12:00:00.000Z'),
+    });
+
+    await expect(service.run()).rejects.toThrow('Failed to load ticket replies for auto-close');
   });
 });

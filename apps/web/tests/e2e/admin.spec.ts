@@ -6,6 +6,7 @@
 
 import { test, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { ensureCreditsAtLeastForUserEmail } from './support/creditFixtures';
 import { safeCloseContext } from './support/contextCleanup';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
@@ -21,8 +22,50 @@ async function readCreditsFromRow(row: Locator) {
   return Number((rawText ?? '').replace(/[^\d-]/g, ''));
 }
 
+function chatPromptInput(page: Page) {
+  return page.locator('textarea:visible').first();
+}
+
+async function setChatPrompt(page: Page, prompt: string) {
+  const sendButton = page.getByRole('button', { name: '发送' });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const input = chatPromptInput(page);
+    await expect(input).toBeEditable({ timeout: 20000 });
+    await input.fill('');
+    await input.click();
+    await input.pressSequentially(prompt);
+
+    const valueMatches = await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt)
+      .then(() => true)
+      .catch(() => false);
+    if (valueMatches && await sendButton.isEnabled().catch(() => false)) {
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  await expect.poll(async () => chatPromptInput(page).inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect(sendButton).toBeEnabled({ timeout: 5000 });
+}
+
 async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number) {
-  if (!hasCredentials('admin') || !hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+  if (!hasCredentials('user') || !process.env.PLAYWRIGHT_BASE_URL) {
+    return;
+  }
+
+  const targetEmail = getCredentials('user').email;
+  try {
+    await ensureCreditsAtLeastForUserEmail(
+      targetEmail,
+      minimumCredits,
+      `Admin diagnostics runtime proof top-up ${Date.now()}`,
+    );
+    return;
+  } catch {
+    // Fall back to the admin UI path when direct fixture writes are unavailable.
+  }
+
+  if (!hasCredentials('admin')) {
     return;
   }
 
@@ -33,7 +76,6 @@ async function ensureUserCreditsAtLeast(browser: Browser, minimumCredits: number
     await gotoWithBypass(page, '/admin/users');
     await expect(page).toHaveURL(/\/admin\/users/);
 
-    const targetEmail = getCredentials('user').email;
     await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
     const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
@@ -212,10 +254,10 @@ test.describe('Admin Dashboard', () => {
 
       steps.push('Open /chat as the E2E user');
       await gotoWithBypass(userPage, '/chat');
+      await expect(userPage).toHaveURL(/\/chat/);
 
       steps.push('Send a real chat prompt and wait for /api/ai/stream');
-      const input = userPage.locator('textarea[placeholder="请输入您的问题..."]');
-      await input.fill(prompt);
+      await setChatPrompt(userPage, prompt);
       const streamResponsePromise = userPage.waitForResponse(
         (response) =>
           response.url().includes('/api/ai/stream') &&

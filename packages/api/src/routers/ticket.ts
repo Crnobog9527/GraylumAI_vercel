@@ -1,7 +1,13 @@
 import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { issueSignedAttachmentUrls } from '../lib/ticketAttachments';
+import { logger } from '../lib/logger';
+import { createSafeInternalError } from '../lib/publicError';
+import {
+  filterOwnedTicketAttachmentPaths,
+  issueSignedAttachmentUrls,
+  issueSignedAttachmentUrlsByBatch,
+} from '../lib/ticketAttachments';
 
 // 前端分类到数据库分类的映射
 const categoryToDbMap: Record<string, string> = {
@@ -38,6 +44,73 @@ const generateTicketNumber = (id: string): string => {
   return `TK-${dateStr}-${shortId}`;
 };
 
+async function serializeTicketsWithSignedAttachments(
+  supabaseAdmin: any,
+  tickets: any[],
+  fallbackOwnerId: string,
+) {
+  const attachmentBatches = tickets.flatMap((ticket) => [
+    {
+      key: `ticket:${ticket.id}`,
+      value: ticket.attachments,
+      ownerIds: [ticket.user_id ?? fallbackOwnerId],
+    },
+    ...((ticket.ticket_replies || []).map((reply: any) => ({
+      key: `reply:${reply.id}`,
+      value: reply.attachments,
+      ownerIds: [ticket.user_id ?? fallbackOwnerId, reply.user_id],
+    }))),
+  ]);
+
+  const signedAttachments = await issueSignedAttachmentUrlsByBatch(supabaseAdmin, attachmentBatches);
+
+  return tickets.map((ticket) => ({
+    id: ticket.id,
+    ticket_number: generateTicketNumber(ticket.id),
+    title: ticket.title,
+    description: ticket.description || '',
+    category: dbToCategoryMap[ticket.category] || 'other',
+    status: dbToStatusMap[ticket.status] || 'pending',
+    priority: ticket.priority || 'medium',
+    attachments: signedAttachments.get(`ticket:${ticket.id}`) ?? [],
+    created_at: ticket.created_at,
+    updated_at: ticket.updated_at,
+    replies: (ticket.ticket_replies || []).map((reply: any) => ({
+      id: reply.id,
+      message: reply.content,
+      is_admin_reply: reply.is_admin === 'true',
+      attachments: signedAttachments.get(`reply:${reply.id}`) ?? [],
+      created_at: reply.created_at,
+    })),
+  }));
+}
+
+export async function getTicketsForProfile(ctx: {
+  profileId: string;
+  supabase: any;
+  supabaseAdmin: any;
+}) {
+  const { data, error } = await ctx.supabase
+    .from('tickets')
+    .select('*, ticket_replies(*)')
+    .eq('user_id', ctx.profileId)
+    .eq('is_deleted', 'false')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('api', 'ticket_list_fetch_failed', {
+      code: error.code,
+    });
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '获取工单列表失败，请稍后重试',
+      cause: error,
+    });
+  }
+
+  return serializeTicketsWithSignedAttachments(ctx.supabaseAdmin, data || [], ctx.profileId);
+}
+
 export const ticketRouter = router({
   createTicket: protectedProcedure
     .input(z.object({
@@ -47,6 +120,14 @@ export const ticketRouter = router({
       attachments: z.array(z.string()).optional().default([]),
     }))
     .mutation(async ({ ctx, input }) => {
+      const ownedAttachments = filterOwnedTicketAttachmentPaths(input.attachments, [ctx.profileId]);
+      if (ownedAttachments.length !== input.attachments.length) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '附件路径无效，请重新上传后再提交工单。',
+        });
+      }
+
       // 映射前端分类到数据库分类
       const dbCategory = categoryToDbMap[input.category] || 'other';
 
@@ -58,53 +139,25 @@ export const ticketRouter = router({
           description: input.description,
           category: dbCategory,
           status: 'open',
-          attachments: input.attachments,
+          attachments: ownedAttachments,
         })
         .select()
         .single();
 
       if (ticketError || !newTicket) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ticketError?.message || 'Failed to create ticket.' });
+        throw createSafeInternalError(ticketError, '创建工单失败，请稍后重试');
       }
 
       return newTicket;
     }),
 
-  getTickets: protectedProcedure.query(async ({ ctx }) => {
-    const { data, error } = await ctx.supabase
-      .from('tickets')
-      .select('*, ticket_replies(*)')
-      .eq('user_id', ctx.profileId)
-      .eq('is_deleted', 'false')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      // 返回空数组而不是抛出错误，更好的用户体验
-      console.error('getTickets error:', error.message);
-      return [];
-    }
-
-    // 转换数据格式以匹配前端组件期望的格式
-    return Promise.all((data || []).map(async (ticket: any) => ({
-      id: ticket.id,
-      ticket_number: generateTicketNumber(ticket.id),
-      title: ticket.title,
-      description: ticket.description || '',
-      category: dbToCategoryMap[ticket.category] || 'other',
-      status: dbToStatusMap[ticket.status] || 'pending',
-      priority: ticket.priority || 'medium',
-      attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
-      created_at: ticket.created_at,
-      updated_at: ticket.updated_at,
-      replies: await Promise.all((ticket.ticket_replies || []).map(async (reply: any) => ({
-        id: reply.id,
-        message: reply.content,
-        is_admin_reply: reply.is_admin === 'true',
-        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
-        created_at: reply.created_at,
-      }))),
-    })));
-  }),
+  getTickets: protectedProcedure.query(async ({ ctx }) =>
+    getTicketsForProfile({
+      profileId: ctx.profileId,
+      supabase: ctx.supabase,
+      supabaseAdmin: ctx.supabaseAdmin,
+    })
+  ),
 
   getTicketById: protectedProcedure
     .input(z.object({ ticketId: z.string().uuid() }))
@@ -120,26 +173,13 @@ export const ticketRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Ticket not found.' });
       }
 
-      // 转换数据格式
-      return {
-        id: ticket.id,
-        ticket_number: generateTicketNumber(ticket.id),
-        title: ticket.title,
-        description: ticket.description || '',
-        category: dbToCategoryMap[ticket.category] || 'other',
-        status: dbToStatusMap[ticket.status] || 'pending',
-        priority: ticket.priority || 'medium',
-        attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, ticket.attachments),
-        created_at: ticket.created_at,
-        updated_at: ticket.updated_at,
-        replies: await Promise.all((ticket.ticket_replies || []).map(async (reply: any) => ({
-          id: reply.id,
-          message: reply.content,
-          is_admin_reply: reply.is_admin === 'true',
-          attachments: await issueSignedAttachmentUrls(ctx.supabaseAdmin, reply.attachments),
-          created_at: reply.created_at,
-        }))),
-      };
+      const [serializedTicket] = await serializeTicketsWithSignedAttachments(
+        ctx.supabaseAdmin,
+        [ticket],
+        ctx.profileId,
+      );
+
+      return serializedTicket;
     }),
 
   replyToTicket: protectedProcedure
@@ -168,7 +208,7 @@ export const ticketRouter = router({
         .single();
 
       if (replyError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: replyError.message });
+        throw createSafeInternalError(replyError, '回复工单失败，请稍后重试');
       }
 
       return {
@@ -190,7 +230,7 @@ export const ticketRouter = router({
         .eq('user_id', ctx.profileId);
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createSafeInternalError(error, '关闭工单失败，请稍后重试');
       }
 
       return { success: true };

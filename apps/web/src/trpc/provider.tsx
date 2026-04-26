@@ -2,42 +2,82 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({}));
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 30_000,
+            gcTime: 5 * 60_000,
+            refetchOnWindowFocus: false,
+            retry: 1,
+          },
+        },
+      }),
+  );
+  const [supabase] = useState(() => createClient());
+  const accessTokenRef = useRef<string | null>(null);
+  const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  if (!sessionPromiseRef.current) {
+    sessionPromiseRef.current = supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        accessTokenRef.current = session?.access_token ?? null;
+        return accessTokenRef.current;
+      })
+      .catch(() => null);
+  }
 
   // Listen for auth state changes and invalidate queries
   useEffect(() => {
-    const supabase = createClient();
+    let isMounted = true;
+
+    sessionPromiseRef.current
+      ?.then((token) => {
+        if (isMounted) {
+          accessTokenRef.current = token;
+        }
+      })
+      .catch(() => undefined);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event) => {
-        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-          queryClient.invalidateQueries();
+      (event, session) => {
+        accessTokenRef.current = session?.access_token ?? null;
+        sessionPromiseRef.current = Promise.resolve(accessTokenRef.current);
+
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+          queryClient.invalidateQueries({ refetchType: 'active' });
         }
       }
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
-  }, [queryClient]);
+  }, [queryClient, supabase]);
 
   // Create tRPC client with Authorization header
-  // headers() is called on EVERY request, so we get fresh token each time
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [
         httpBatchLink({
           url: '/api/trpc',
           async headers() {
-            const supabase = createClient();
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.access_token) {
+            const token =
+              accessTokenRef.current ??
+              (await sessionPromiseRef.current?.catch(() => null)) ??
+              null;
+
+            if (token) {
               return {
-                Authorization: `Bearer ${session.access_token}`,
+                Authorization: `Bearer ${token}`,
               };
             }
             return {};

@@ -5,10 +5,18 @@
  */
 
 import type { Metadata } from 'next';
-import { unstable_noStore as noStore } from 'next/cache';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
+
+export type PublicSiteSettings = {
+  siteName: string;
+  supportEmail: string;
+  showOnboarding: boolean;
+  showFeaturedModules: boolean;
+  membershipPlans: any[];
+  featuredModules: any[];
+};
 
 function parseBooleanSetting(value: unknown, fallback: boolean) {
   if (value === true || value === 'true') {
@@ -22,17 +30,20 @@ function parseBooleanSetting(value: unknown, fallback: boolean) {
   return fallback;
 }
 
-export async function getPublicSiteSettings() {
-  noStore();
-
+async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
   try {
     const ctx = await createTRPCContext({ headers: new Headers() });
     const caller = appRouter.createCaller(ctx);
-    const [settings, membershipPlans, featuredModules] = await Promise.all([
-      caller.settings.getSystemSettings(),
+    const settings = await caller.settings.getSystemSettings();
+    const [membershipPlansResult, featuredModulesResult] = await Promise.allSettled([
       caller.settings.getMembershipPlans(),
       caller.modules.getFeaturedModules({ limit: 4 }),
     ]);
+
+    const membershipPlans =
+      membershipPlansResult.status === 'fulfilled' ? membershipPlansResult.value : [];
+    const featuredModules =
+      featuredModulesResult.status === 'fulfilled' ? featuredModulesResult.value : [];
 
     return {
       siteName:
@@ -58,6 +69,10 @@ export async function getPublicSiteSettings() {
       featuredModules: [],
     };
   }
+}
+
+export async function getPublicSiteSettings(): Promise<PublicSiteSettings> {
+  return loadPublicSiteSettingsUncached();
 }
 
 export async function buildPublicPageMetadata(

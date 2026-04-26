@@ -7,6 +7,13 @@
 import type Stripe from 'stripe';
 
 type SupabaseLikeClient = any;
+const STRIPE_FULFILLMENT_ERRORS = {
+  backfillCheckoutOrder: 'Failed to backfill checkout order fulfillment',
+  fulfillCreditPackage: 'Failed to fulfill credit package order',
+  missingCreditFulfilledAt: 'Atomic credit fulfillment returned no fulfilled_at',
+  fulfillMembershipInvoice: 'Failed to fulfill membership invoice',
+  missingMembershipFulfilledAt: 'Atomic membership fulfillment returned no fulfilled_at',
+} as const;
 
 function getFirstRpcRow<T>(data: T[] | null | undefined): T | null {
   return Array.isArray(data) && data.length > 0 ? data[0] : null;
@@ -39,7 +46,7 @@ async function backfillCheckoutOrderFulfillment(
     .is('stripe_invoice_id', null);
 
   if (result.error) {
-    throw new Error(result.error.message);
+    throw new Error(STRIPE_FULFILLMENT_ERRORS.backfillCheckoutOrder);
   }
 }
 
@@ -115,12 +122,12 @@ export async function fulfillCreditPackageOrder(
   });
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(STRIPE_FULFILLMENT_ERRORS.fulfillCreditPackage);
   }
 
   const result = getFirstRpcRow<{ fulfilled_at?: string | null }>(data);
   if (!result?.fulfilled_at) {
-    throw new Error(`Atomic credit fulfillment returned no fulfilled_at for checkout session ${session.id}`);
+    throw new Error(STRIPE_FULFILLMENT_ERRORS.missingCreditFulfilledAt);
   }
 }
 
@@ -163,12 +170,12 @@ export async function fulfillMembershipInvoice(
   });
 
   if (error) {
-    throw new Error(error.message);
+    throw new Error(STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice);
   }
 
   const result = getFirstRpcRow<{ fulfilled_at?: string | null }>(data);
   if (!result?.fulfilled_at) {
-    throw new Error(`Atomic membership fulfillment returned no fulfilled_at for invoice ${invoiceId}`);
+    throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
   }
 
   await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilled_at);

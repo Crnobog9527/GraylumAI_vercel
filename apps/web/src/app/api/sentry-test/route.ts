@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
+import { logServerError } from '@/lib/server-log';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 /**
@@ -38,9 +39,14 @@ async function isPreviewAdminRequest(request: NextRequest): Promise<boolean> {
     return false;
   }
 
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    logServerError('system', 'sentry_test_service_role_key_missing');
+    return false;
+  }
+
   const adminClient = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
   const { data: profile } = await adminClient

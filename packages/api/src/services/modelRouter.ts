@@ -7,7 +7,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getChatRuntimeSettings } from './chatRuntime';
+import { getChatRuntimeSettings, type ChatRuntimeSettings } from './chatRuntime';
 
 export interface ModelConfig {
   id: string;
@@ -19,6 +19,8 @@ export interface ModelConfig {
   enableWebSearch: boolean;
   inputTokenCost: number;
   outputTokenCost: number;
+  apiKey?: string | null;
+  apiEndpoint?: string | null;
   isActive: boolean;
   tokenCountingSupported?: boolean;
   tokenCountingMethod?: string;
@@ -43,6 +45,8 @@ export interface RoutingContext {
   message: string;
   conversationTurns: number;
   userPreferredModel?: string;
+  runtimeSettings?: ChatRuntimeSettings;
+  defaultModels?: SystemDefaultModels;
 }
 
 export interface RoutingDecision {
@@ -71,36 +75,45 @@ export interface AssistantUpgradeDecision {
   reasonCodes: string[];
 }
 
+export interface SystemDefaultModels {
+  primary: ModelConfig;
+  assistant: ModelConfig;
+}
+
 const DEFAULT_MODELS = {
   primary: {
     id: 'default-sonnet',
-    name: 'Claude Sonnet 4',
-    modelId: 'claude-sonnet-4-20250514',
-    provider: 'anthropic' as const,
+    name: 'Claude Sonnet via OpenRouter',
+    modelId: 'anthropic/claude-sonnet-4.6',
+    provider: 'openai' as const,
     maxTokens: 8192,
     inputLimit: 200000,
-    enableWebSearch: true,
+    enableWebSearch: false,
     inputTokenCost: 3000,
     outputTokenCost: 15000,
+    apiKey: null,
+    apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
     tokenCountingSupported: true,
-    tokenCountingMethod: 'anthropic_count_tokens',
-    tokenizerFamily: 'anthropic',
+    tokenCountingMethod: 'provider_usage',
+    tokenizerFamily: 'openai',
   },
   assistant: {
     id: 'default-haiku',
-    name: 'Claude Haiku 3.5',
-    modelId: 'claude-3-5-haiku-20241022',
-    provider: 'anthropic' as const,
+    name: 'Claude Haiku via OpenRouter',
+    modelId: 'anthropic/claude-haiku-4.5',
+    provider: 'openai' as const,
     maxTokens: 8192,
     inputLimit: 200000,
-    enableWebSearch: true,
+    enableWebSearch: false,
     inputTokenCost: 800,
     outputTokenCost: 4000,
+    apiKey: null,
+    apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
     tokenCountingSupported: true,
-    tokenCountingMethod: 'anthropic_count_tokens',
-    tokenizerFamily: 'anthropic',
+    tokenCountingMethod: 'provider_usage',
+    tokenizerFamily: 'openai',
   },
 };
 
@@ -303,6 +316,8 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
     enableWebSearch: data.enable_web_search === 'true',
     inputTokenCost: data.input_token_cost,
     outputTokenCost: data.output_token_cost,
+    apiKey: data.api_key ?? null,
+    apiEndpoint: data.api_endpoint ?? null,
     isActive: data.is_active === 'true',
     tokenCountingSupported: data.token_counting_supported === 'true',
     tokenCountingMethod: data.token_counting_method,
@@ -330,6 +345,8 @@ async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelCon
     enableWebSearch: model.enable_web_search === 'true',
     inputTokenCost: model.input_token_cost,
     outputTokenCost: model.output_token_cost,
+    apiKey: model.api_key ?? null,
+    apiEndpoint: model.api_endpoint ?? null,
     isActive: model.is_active === 'true',
     tokenCountingSupported: model.token_counting_supported === 'true',
     tokenCountingMethod: model.token_counting_method,
@@ -363,21 +380,23 @@ function pickBestModelFamilyCandidate(models: ModelConfig[], family: 'primary' |
   })[0];
 }
 
-async function getSystemDefaultModels(supabase: SupabaseClient): Promise<{
-  primary: ModelConfig;
-  assistant: ModelConfig;
-}> {
-  const runtimeSettings = await getChatRuntimeSettings(supabase);
-  const activeModels = await getActiveModelConfigs(supabase);
+export async function getSystemDefaultModels(
+  supabase: SupabaseClient,
+  options: {
+    runtimeSettings?: ChatRuntimeSettings;
+    activeModels?: ModelConfig[];
+  } = {},
+): Promise<SystemDefaultModels> {
+  const runtimeSettings = options.runtimeSettings ?? await getChatRuntimeSettings(supabase);
+  const primaryModelId =
+    runtimeSettings.primaryModelId ?? runtimeSettings.sonnetModelId ?? runtimeSettings.defaultModelId;
+  const assistantModelId = runtimeSettings.assistantModelId ?? runtimeSettings.haikuModelId;
 
-  const explicitPrimary = await getModelConfigFromDb(
-    supabase,
-    runtimeSettings.primaryModelId ?? runtimeSettings.sonnetModelId ?? runtimeSettings.defaultModelId,
-  );
-  const explicitAssistant = await getModelConfigFromDb(
-    supabase,
-    runtimeSettings.assistantModelId ?? runtimeSettings.haikuModelId,
-  );
+  const [activeModels, explicitPrimary, explicitAssistant] = await Promise.all([
+    options.activeModels ? Promise.resolve(options.activeModels) : getActiveModelConfigs(supabase),
+    getModelConfigFromDb(supabase, primaryModelId),
+    getModelConfigFromDb(supabase, assistantModelId),
+  ]);
 
   return {
     primary: explicitPrimary ?? pickBestModelFamilyCandidate(activeModels, 'primary') ?? DEFAULT_MODELS.primary,
@@ -395,7 +414,7 @@ export async function getSystemDefaultModelForRole(
 
 export async function selectModel(ctx: RoutingContext): Promise<RoutingResult> {
   const { supabase, message, conversationTurns, userPreferredModel } = ctx;
-  const runtimeSettings = await getChatRuntimeSettings(supabase);
+  const runtimeSettings = ctx.runtimeSettings ?? await getChatRuntimeSettings(supabase);
 
   if (userPreferredModel) {
     const preferredModel = await getModelConfigFromDb(supabase, userPreferredModel);
@@ -414,7 +433,7 @@ export async function selectModel(ctx: RoutingContext): Promise<RoutingResult> {
     }
   }
 
-  const defaults = await getSystemDefaultModels(supabase);
+  const defaults = ctx.defaultModels ?? await getSystemDefaultModels(supabase, { runtimeSettings });
   const inferred = inferTaskType(message, conversationTurns);
   const assistantEligible = runtimeSettings.enableSmartRouting &&
     ['greeting', 'chitchat', 'lightweight_transform', 'compression', 'search_synthesis', 'simple_qa'].includes(inferred.taskType) &&

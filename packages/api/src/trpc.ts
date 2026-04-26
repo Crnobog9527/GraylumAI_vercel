@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { getAuthProvider, isEmailVerified } from './lib/auth';
 import { ensureWorkspaceServerEnv } from './lib/serverEnv';
+import { logger } from './lib/logger';
 
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 
@@ -37,6 +38,7 @@ export const createTRPCContext = async (opts: {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const hasSupabaseAdminPrivileges = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabasePublic = createClient(supabaseUrl, supabaseAnonKey);
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
@@ -73,7 +75,8 @@ export const createTRPCContext = async (opts: {
 
   return {
     ...opts,
-    supabase: supabaseAdmin,
+    supabase: supabaseAuth ?? supabasePublic,
+    supabasePublic,
     supabaseAdmin,
     supabaseAuth,
     hasSupabaseAdminPrivileges,
@@ -107,7 +110,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   let profileId = ctx.user.id;
   let userRole: 'user' | 'admin' = 'user';
   let userStatus: 'active' | 'disabled' | 'banned' = 'active';
-  const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabaseAdmin;
+  const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabase;
   const derivedNickname = deriveProfileNickname(ctx.user);
   const normalizedEmail = ctx.user.email ?? null;
 
@@ -124,7 +127,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 
     if (isNotFound) {
       // Profile doesn't exist, try to create one
-      const { data: newProfile, error: createError } = await ctx.supabaseAdmin
+      const { data: newProfile, error: createError } = await userScopedSupabase
         .from('profiles')
         .insert({
           id: ctx.user.id,
@@ -137,7 +140,10 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
         .single();
 
       if (createError) {
-        console.error('Failed to create profile:', createError.message, createError.code);
+        logger.error('auth', 'profile_create_failed', {
+          code: createError.code,
+          conflict: createError.code === '23505',
+        });
 
         // If insert failed due to conflict (profile already exists), try to fetch again
         if (createError.code === '23505') {
@@ -170,7 +176,9 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
       }
     } else {
       // Other database error
-      console.error('Profile query error:', profileError?.message, profileError?.code);
+      logger.error('auth', 'profile_query_failed', {
+        code: profileError?.code ?? null,
+      });
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: '获取用户资料失败，请稍后重试',
@@ -185,7 +193,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
 
     if (shouldBackfillNickname || shouldSyncEmail) {
-      await ctx.supabaseAdmin
+      await userScopedSupabase
         .from('profiles')
         .update({
           ...(shouldBackfillNickname ? { nickname: derivedNickname } : {}),
@@ -230,6 +238,13 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: 'You do not have permission to access this resource. Admin role required.',
+    });
+  }
+
+  if (!ctx.hasSupabaseAdminPrivileges) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Supabase service role credentials are not configured.',
     });
   }
 

@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type ContextSnapshotType = 'rolling_summary' | 'search_digest' | 'compression_checkpoint';
+const CONTEXT_SNAPSHOT_UPSERT_ERROR = 'Failed to upsert context snapshot';
 
 export async function upsertContextSnapshot(
   supabase: SupabaseClient,
@@ -37,6 +38,6 @@ export async function upsertContextSnapshot(
     });
 
   if (error) {
-    throw new Error(`Failed to upsert context snapshot: ${error.message}`);
+    throw new Error(CONTEXT_SNAPSHOT_UPSERT_ERROR);
   }
 }

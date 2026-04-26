@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,7 +74,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
       if (error) {
         setStatusTone('error');
-        setStatusMessage(error.message);
+        setStatusMessage(getSafeErrorMessage(error, '验证邮件发送失败，请稍后重试。'));
         return;
       }
 

@@ -63,23 +63,20 @@ export default function AdminInvitationsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
 
-  // Queries
-  const { data: statsData, isLoading: statsLoading, refetch: refetchStats } = trpc.invitation.getInvitationStats.useQuery();
-  const { data: records, isLoading: recordsLoading, refetch: refetchRecords } = trpc.invitation.getAllInvitationRecords.useQuery({
+  const { data: dashboard, isLoading, refetch } = trpc.invitation.getAdminInvitationsDashboard.useQuery({
     status: filterStatus as 'all' | 'pending' | 'registered' | 'rewarded' | 'rejected',
     search: searchTerm || undefined,
   });
 
   const handleRefresh = () => {
-    refetchStats();
-    refetchRecords();
+    refetch();
   };
 
-  const stats = statsData?.stats ?? { total: 0, rewarded: 0, rejected: 0, pending: 0, highRisk: 0, totalRewards: 0 };
-  const trend = statsData?.trend ?? [];
-  const riskDistribution = statsData?.riskDistribution ?? [];
-  const recordList = (records ?? []) as InvitationRecord[];
-  const isInitialLoading = statsLoading && !statsData;
+  const stats = dashboard?.stats ?? { total: 0, rewarded: 0, rejected: 0, pending: 0, highRisk: 0, totalRewards: 0 };
+  const trend = dashboard?.trend ?? [];
+  const riskDistribution = dashboard?.riskDistribution ?? [];
+  const recordList = (dashboard?.records ?? []) as InvitationRecord[];
+  const isInitialLoading = isLoading && !dashboard;
 
   return (
     <div className="p-8 overflow-auto">
@@ -291,7 +288,7 @@ export default function AdminInvitationsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {recordsLoading ? (
+            {isLoading ? (
               <div className="text-center py-12">
                 <RefreshCw className="h-8 w-8 animate-spin mx-auto" style={{ color: 'var(--text-tertiary)' }} />
               </div>

@@ -9,6 +9,7 @@ import { router, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import { createSafeInternalError } from '../lib/publicError';
 import {
   AIRequestSchema,
   type AIResponse,
@@ -27,7 +28,12 @@ import {
   logger,
 } from '../services';
 import { selectModel, getAvailableModels } from '../services/modelRouter';
-import { getFallbackProviderApiKey } from '../services/providerUtils';
+import {
+  getConfiguredProviderApiKey,
+  getOpenAICompatibleHeaders,
+  normalizeOpenAICompatibleEndpoint,
+  usesOpenAICompatibleApi,
+} from '../services/providerUtils';
 import { countTokens, estimateTokensFromString } from '../services/tokenCounter';
 
 // ============================================
@@ -116,7 +122,9 @@ async function saveMessages(
     .single();
 
   if (userError) {
-    console.error('Failed to save user message:', userError);
+    logger.error('ai', 'ai_user_message_save_failed', {
+      code: userError.code,
+    });
   }
 
   // 保存助手消息
@@ -131,7 +139,9 @@ async function saveMessages(
     .single();
 
   if (assistantError) {
-    console.error('Failed to save assistant message:', assistantError);
+    logger.error('ai', 'ai_assistant_message_save_failed', {
+      code: assistantError.code,
+    });
   }
 
   return {
@@ -161,20 +171,22 @@ async function updateConversationTitle(
 }
 
 /**
- * 调用 Claude API
- * 注意: 这是一个简化版本，实际实现将在 Phase 9.3 中完善
+ * 调用 Claude via OpenRouter / OpenAI-compatible API.
+ * Anthropic 官方 API 已退役，不再作为运行时 fallback。
  */
-async function callClaudeAPI(params: {
+async function callClaudeViaOpenRouter(params: {
   model: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   systemPrompt?: string;
   maxTokens?: number;
+  apiKey?: string | null;
+  apiEndpoint?: string | null;
 }): Promise<{
   content: string;
   usage: TokenUsage;
   stopReason: string;
 }> {
-  const apiKey = getFallbackProviderApiKey();
+  const apiKey = getConfiguredProviderApiKey(params.apiKey);
 
   if (!apiKey) {
     throw new TRPCError({
@@ -183,24 +195,38 @@ async function callClaudeAPI(params: {
     });
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const endpoint = usesOpenAICompatibleApi({
+    endpoint: params.apiEndpoint,
+    apiKey,
+  })
+    ? (normalizeOpenAICompatibleEndpoint(params.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions')
+    : null;
+
+  if (!endpoint) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'AI 服务未配置 OpenRouter 兼容 endpoint',
+    });
+  }
+
+  const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: getOpenAICompatibleHeaders(apiKey),
     body: JSON.stringify({
       model: params.model,
       max_tokens: params.maxTokens ?? 4096,
-      system: params.systemPrompt,
-      messages: params.messages,
+      messages: [
+        ...(params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }] : []),
+        ...params.messages,
+      ],
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Claude API error:', errorText);
+    logger.error('ai', 'ai_provider_request_failed', {
+      provider: 'openrouter',
+      status: response.status,
+    });
 
     if (response.status === 429) {
       throw new TRPCError({
@@ -216,30 +242,37 @@ async function callClaudeAPI(params: {
   }
 
   const data = await response.json() as {
-    content: Array<{ type: string; text: string }>;
-    usage: {
-      input_tokens: number;
-      output_tokens: number;
-      cache_creation_input_tokens?: number;
-      cache_read_input_tokens?: number;
+    choices?: Array<{
+      message?: {
+        content?: string | Array<{ type?: string; text?: string }>;
+      };
+      finish_reason?: string | null;
+    }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
     };
-    stop_reason: string;
   };
 
-  const content = data.content
-    .filter((c) => c.type === 'text')
-    .map((c) => c.text)
-    .join('');
+  const messageContent = data.choices?.[0]?.message?.content;
+  const content = Array.isArray(messageContent)
+    ? messageContent.map((part) => part.text ?? '').join('')
+    : (messageContent ?? '');
+  const finishReason = data.choices?.[0]?.finish_reason;
 
   return {
     content,
     usage: {
-      inputTokens: data.usage.input_tokens,
-      outputTokens: data.usage.output_tokens,
-      cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
     },
-    stopReason: data.stop_reason,
+    stopReason: finishReason === 'length'
+      ? 'max_tokens'
+      : finishReason === 'tool_calls'
+        ? 'tool_use'
+        : 'end_turn',
   };
 }
 
@@ -322,14 +355,7 @@ export const aiRouter = router({
       if (!modelConfig.tokenCountingSupported) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: `模型 ${modelConfig.name} 未配置可验证的 token 计数能力，禁止进入生产计费路径`,
-        });
-      }
-
-      if (modelConfig.provider !== 'anthropic') {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `非流式入口暂仅支持 Anthropic 直连模型，当前模型 ${modelConfig.name} 请改走流式运行时`,
+          message: 'AI 服务暂时不可用，请稍后重试',
         });
       }
 
@@ -337,12 +363,15 @@ export const aiRouter = router({
       const countedInput = await countTokens({
         model: modelConfig.modelId,
         provider: getTokenCounterProvider(modelConfig),
+        apiKey: modelConfig.apiKey,
+        apiEndpoint: modelConfig.apiEndpoint,
+        tokenizerFamily: modelConfig.tokenizerFamily,
         messages: [
           ...history,
           { role: 'user', content: input.message },
         ],
       }, {
-        useOfficial: true,
+        useOfficial: modelConfig.tokenCountingMethod !== 'provider_usage',
         fallbackToEstimate: true,
       });
       const estimatedInputTokens = countedInput.inputTokens;
@@ -374,10 +403,12 @@ export const aiRouter = router({
         ];
 
         // 9. 调用 AI
-        const aiResponse = await callClaudeAPI({
+        const aiResponse = await callClaudeViaOpenRouter({
           model: modelConfig.modelId,
           messages,
           maxTokens: modelConfig.maxTokens,
+          apiKey: modelConfig.apiKey,
+          apiEndpoint: modelConfig.apiEndpoint,
         });
 
         // 9.5. 输出安全检查 (P1-4: 应用输出安全过滤)
@@ -466,7 +497,7 @@ export const aiRouter = router({
         const failLatencyMs = Date.now() - startTime;
         logger.ai.callFailed(
           modelConfig.modelId,
-          error instanceof Error ? error.message : 'Unknown error',
+          'AI 调用失败，请查看服务端日志',
           0,
           requestId,
           { userId: ctx.profileId, conversationId: conversation.id }
@@ -481,7 +512,7 @@ export const aiRouter = router({
           conversationId: conversation.id,
           requestId,
           modelUsed: modelConfig.modelId,
-          reason: error instanceof Error ? error.message : 'Unknown error',
+          reason: 'AI 调用失败，请查看服务端日志',
           preDeductId: preDeductResult.preDeductId,
           inputLength: input.message.length,
           latencyMs: failLatencyMs,
@@ -543,11 +574,8 @@ export const aiRouter = router({
           balanceAfter: result.balanceAfter,
         };
       } catch (error) {
-        console.error('Abort request failed:', error);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: error instanceof Error ? error.message : '中断结算失败',
-        });
+        logger.error('ai', 'ai_abort_settle_failed');
+        throw createSafeInternalError(error, '中断结算失败，请稍后重试');
       }
     }),
 

@@ -129,6 +129,22 @@ const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function isNonAtomicBillingFallbackAllowed(): boolean {
+  return process.env.NODE_ENV === 'test' || process.env.ALLOW_NON_ATOMIC_BILLING_FALLBACK === 'true';
+}
+
+function ensureAtomicBillingAvailable(operation: string, detail: string): void {
+  if (isNonAtomicBillingFallbackAllowed()) {
+    logger.warn('billing', 'billing_non_atomic_fallback_used', {
+      operation,
+      hasDetail: Boolean(detail),
+    });
+    return;
+  }
+
+  throw new Error(`Atomic billing RPC required for ${operation}`);
+}
+
 function normalizeRequestId(requestId?: string | null): string | undefined {
   const trimmed = requestId?.trim();
   if (!trimmed) {
@@ -171,7 +187,9 @@ export async function getModelPricing(
 
   if (error || !model) {
     // 数据库查询失败，使用硬编码后备
-    console.warn(`[Billing] Model ${modelId} not found in database, using fallback pricing`);
+    logger.warn('billing', 'billing_pricing_fallback_model_missing', {
+      code: error?.code ?? null,
+    });
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
@@ -189,7 +207,7 @@ export async function getModelPricing(
 
   // 4. 如果数据库定价为0，使用硬编码后备
   if (pricing.inputPer1M === 0 || pricing.outputPer1M === 0) {
-    console.warn(`[Billing] Model ${modelId} has zero pricing, using fallback`);
+    logger.warn('billing', 'billing_pricing_fallback_zero_pricing');
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
@@ -305,7 +323,7 @@ export class BillingService {
         preDeductId,
       });
     } catch (error) {
-      console.error('[Billing] Failed to apply invitation rebate:', error);
+      logger.error('billing', 'billing_invitation_rebate_failed');
     }
   }
 
@@ -327,7 +345,7 @@ export class BillingService {
       .select('id, role');
 
     if (error) {
-      throw new Error(`Failed to persist AI messages: ${error.message}`);
+      throw new Error('Failed to persist AI messages');
     }
 
     return {
@@ -357,21 +375,19 @@ export class BillingService {
 
     // 如果 tokens 不为 0，积分也不应该为 0 (除非 tokens 极少)
     if (totalTokens > 100 && actualCredits === 0) {
-      console.warn('[Billing] Warning: Tokens used but credits is 0', {
+      logger.warn('billing', 'billing_zero_credit_usage_detected', {
         totalTokens,
         actualCredits,
-        usage,
       });
     }
 
     // 如果积分异常高 (超过 tokens 的合理比例)，发出警告
     // 假设最高定价: 1 积分 ≈ 10 tokens，如果比例超过 1:1 则异常
     if (totalTokens > 0 && actualCredits > totalTokens) {
-      console.warn('[Billing] Warning: Unusual credits/tokens ratio', {
+      logger.warn('billing', 'billing_unusual_credit_token_ratio', {
         ratio: actualCredits / totalTokens,
         actualCredits,
         totalTokens,
-        usage,
       });
     }
 
@@ -494,7 +510,9 @@ export class BillingService {
 
     // RPC 函数不存在或失败，回退到原有逻辑
     if (rpcError) {
-      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+      ensureAtomicBillingAvailable('preDeduct', rpcError.message);
+    } else {
+      ensureAtomicBillingAvailable('preDeduct', 'RPC returned no result');
     }
 
     // 0. 幂等性检查 (如果提供了 requestId)
@@ -577,7 +595,9 @@ export class BillingService {
 
     if (billingError || !billingRecord) {
       // 预扣成功但记录失败，需要告警
-      console.error('Failed to record pre-deduct:', billingError);
+      logger.error('billing', 'billing_prededuct_record_failed', {
+        code: billingError?.code ?? null,
+      });
       throw new Error('计费记录失败');
     }
 
@@ -645,7 +665,9 @@ export class BillingService {
 
     // RPC 函数不存在或失败，回退到原有逻辑
     if (rpcError) {
-      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+      ensureAtomicBillingAvailable('settle', rpcError.message);
+    } else {
+      ensureAtomicBillingAvailable('settle', 'RPC returned no result');
     }
 
     // 1. 获取预扣记录
@@ -726,7 +748,9 @@ export class BillingService {
       });
 
     if (settleError) {
-      console.error('Failed to record settle:', settleError);
+      logger.error('billing', 'billing_settle_record_failed', {
+        code: settleError.code,
+      });
     }
 
     // 4. 获取最新余额
@@ -789,7 +813,9 @@ export class BillingService {
 
     // RPC 函数不存在或失败，回退到原有逻辑
     if (rpcError) {
-      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+      ensureAtomicBillingAvailable('refund', rpcError.message);
+    } else {
+      ensureAtomicBillingAvailable('refund', 'RPC returned no result');
     }
 
     // 1. 获取预扣记录
@@ -864,7 +890,9 @@ export class BillingService {
       });
 
     if (refundError) {
-      console.error('Failed to record refund:', refundError);
+      logger.error('billing', 'billing_refund_record_failed', {
+        code: refundError.code,
+      });
     }
 
     // 记录日志
@@ -937,7 +965,9 @@ export class BillingService {
 
     // RPC 函数不存在或失败，回退到原有逻辑
     if (rpcError) {
-      console.warn('[Billing] RPC not available, falling back to optimistic lock:', rpcError.message);
+      ensureAtomicBillingAvailable('settleAbort', rpcError.message);
+    } else {
+      ensureAtomicBillingAvailable('settleAbort', 'RPC returned no result');
     }
 
     // 1. 获取预扣记录
@@ -1019,7 +1049,9 @@ export class BillingService {
       });
 
     if (abortError) {
-      console.error('Failed to record abort settle:', abortError);
+      logger.error('billing', 'billing_abort_settle_record_failed', {
+        code: abortError.code,
+      });
     }
 
     // 5. 获取最新余额
@@ -1079,8 +1111,12 @@ export class BillingService {
       }
 
       if (rpcResponse.error) {
-        console.warn('[Billing] atomic_finalize_ai_success unavailable, falling back:', rpcResponse.error.message);
+        ensureAtomicBillingAvailable('finalizeAISuccess', 'RPC failed');
+      } else {
+        ensureAtomicBillingAvailable('finalizeAISuccess', 'RPC returned no result');
       }
+    } else {
+      ensureAtomicBillingAvailable('finalizeAISuccess', 'RPC function missing on supabase client');
     }
 
     const messageIds = await this.persistMessages(
@@ -1168,8 +1204,12 @@ export class BillingService {
       }
 
       if (rpcResponse.error) {
-        console.warn('[Billing] atomic_finalize_ai_failure unavailable, falling back:', rpcResponse.error.message);
+        ensureAtomicBillingAvailable('finalizeAIFailure', 'RPC failed');
+      } else {
+        ensureAtomicBillingAvailable('finalizeAIFailure', 'RPC returned no result');
       }
+    } else {
+      ensureAtomicBillingAvailable('finalizeAIFailure', 'RPC function missing on supabase client');
     }
 
     let refundResult: RefundResult = { refundAmount: 0, balanceAfter: await this.getBalance() };
@@ -1224,7 +1264,9 @@ export class BillingService {
       });
 
     if (error) {
-      console.error('Failed to record token stats:', error);
+      logger.error('billing', 'billing_token_stats_record_failed', {
+        code: error.code,
+      });
     }
   }
 
@@ -1260,7 +1302,9 @@ export class BillingService {
       });
 
     if (error) {
-      console.error('Failed to record usage log:', error);
+      logger.error('billing', 'billing_usage_log_record_failed', {
+        code: error.code,
+      });
     }
   }
 }

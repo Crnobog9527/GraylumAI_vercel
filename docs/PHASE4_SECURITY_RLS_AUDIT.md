@@ -75,7 +75,7 @@ and locks `search_path` on the legacy hosted functions `deduct_credits_atomic()`
 - Core tables do have RLS policies, and the server-side tRPC layer now separates user-scoped access from privileged admin/maintenance/webhook access.
 - One real XSS risk was present in streamed message rendering and is now fixed.
 - Ticket attachment delivery is now private-path based and authorized readers receive short-lived signed URLs.
-- Representative local security regressions now exist for non-admin admin writes, self-only user access, and streamed markdown sanitization.
+- Representative local security regressions now exist for non-admin admin writes and self-only user access; the historical streamed markdown renderer has since been removed from the active chat path.
 - The Next.js tRPC route now forwards the cookie-scoped Supabase auth client into `createTRPCContext`, closing the fallback where ordinary user requests could arrive with a known `user` but still lose `supabaseAuth`.
 - The non-tRPC AI streaming route now follows the same split-client model: ordinary user-owned reads and writes run through `supabaseAuth`, while billing finalization and controlled system reads remain on `supabaseAdmin`.
 
@@ -266,4 +266,4 @@ This audit can be considered closed when:
    - app-layer primary + RLS secondary, or
    - migrated toward user-token-enforced queries for sensitive reads
 2. Ticket attachments are no longer publicly retrievable by stable URL alone.
-3. The `MessageStream` XSS fix remains covered by regression checks.
+3. No active chat renderer reintroduces unescaped streamed HTML rendering.

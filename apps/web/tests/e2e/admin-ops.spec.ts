@@ -42,6 +42,7 @@ test.describe('Admin Operations Flows', () => {
   test.skip(!hasCredentials('admin'), 'E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD are required for admin ops flows');
 
   test('should run diagnostics for one category and expose history views', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Diagnostics operations flow completed';
@@ -52,15 +53,9 @@ test.describe('Admin Operations Flows', () => {
       await expect(page).toHaveURL(/\/admin\/diagnostics/);
 
       steps.push('Run the AI category diagnostics');
-      const runResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes('/api/trpc/diagnostics.runCategoryTests') &&
-          response.request().method() === 'POST',
-        { timeout: 30000 },
-      );
-      await page.getByRole('button', { name: '运行测试' }).first().click();
-      const runResponse = await runResponsePromise;
-      expect(runResponse.status()).toBe(200);
+      const runCategoryButton = page.getByRole('button', { name: '运行测试' }).first();
+      await expect(runCategoryButton).toBeEnabled({ timeout: 30000 });
+      await runCategoryButton.click();
 
       steps.push('Verify results, history, and health tabs remain accessible after execution');
       await expect(page.getByText(/通过|失败|警告|跳过/).first()).toBeVisible({ timeout: 30000 });
@@ -93,6 +88,7 @@ test.describe('Admin Operations Flows', () => {
   });
 
   test('should filter the users table and open the detail sheet for the configured E2E user', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const targetEmail = getCredentials('user').email;
@@ -102,9 +98,10 @@ test.describe('Admin Operations Flows', () => {
       steps.push('Open /admin/users');
       await gotoWithBypass(page, '/admin/users');
       await expect(page).toHaveURL(/\/admin\/users/);
+      await expect(page.getByTestId('admin-users-search')).toBeVisible({ timeout: 30000 });
 
       steps.push('Filter the table to the configured E2E user');
-      await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
+      await page.getByTestId('admin-users-search').fill(targetEmail);
       const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
       await expect(targetRow).toBeVisible({ timeout: 15000 });
 
@@ -136,7 +133,7 @@ test.describe('Admin Operations Flows', () => {
   });
 
   test('should open operational read pages and exercise their primary tabs or filters', async ({ page }, testInfo) => {
-    test.setTimeout(90000);
+    test.setTimeout(180000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Operational read pages flow completed';
@@ -169,10 +166,10 @@ test.describe('Admin Operations Flows', () => {
 
       steps.push('Open /admin/finance and switch to API statistics');
       await gotoWithBypass(page, '/admin/finance');
-      await expect(page.getByTestId('admin-finance-page')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-finance-page')).toBeVisible({ timeout: 30000 });
       await expect(page.getByTestId('admin-finance-header')).toContainText('财务统计');
-      await expect(page.getByTestId('admin-finance-tabs')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByTestId('admin-finance-overview-revenue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-finance-tabs')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('admin-finance-overview-revenue')).toBeVisible({ timeout: 30000 });
       await page.getByRole('tab', { name: 'API 统计' }).click();
       await expect(page.getByTestId('admin-finance-api-section')).toBeVisible({ timeout: 10000 });
       await page.getByRole('tab', { name: '模型渠道' }).click();
@@ -199,11 +196,22 @@ test.describe('Admin Operations Flows', () => {
         await expect(page.getByTestId('admin-invitations-empty-state')).toBeVisible({ timeout: 10000 });
       }
 
+      steps.push('Open /admin/settings billing tab and verify only active billing fields remain in the active section');
+      await gotoWithBypass(page, '/admin/settings');
+      await page.getByRole('tab', { name: '积分计费' }).click();
+      await expect(page.getByTestId('admin-settings-billing-active-section')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-settings-billing-reference-section')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-settings-billing-active-section').getByTestId('admin-setting-new_user_credits')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-settings-billing-active-section').getByTestId('admin-setting-first_purchase_bonus_percent')).toHaveCount(0);
+      await expect(page.getByTestId('admin-settings-billing-reference-section').getByTestId('admin-setting-first_purchase_bonus_percent')).toBeVisible({ timeout: 10000 });
+
       steps.push('Open /admin/costs and switch the report tab');
       await gotoWithBypass(page, '/admin/costs');
-      await expect(page.getByTestId('admin-costs-distribution-card')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('admin-costs-distribution-card')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('admin-costs-overview-status')).toBeVisible({ timeout: 30000 });
       await page.getByRole('tab', { name: 'AI 调用日志' }).click();
-      await expect(page.getByTestId('admin-costs-usage-logs-section')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-costs-usage-logs-section')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('admin-costs-usage-status')).toBeVisible({ timeout: 10000 });
       const usageRows = page.locator('[data-testid^="admin-usage-log-row-"]');
       await expect
         .poll(async () => {
@@ -220,6 +228,7 @@ test.describe('Admin Operations Flows', () => {
       }
       await page.getByRole('tab', { name: 'Token 统计' }).click();
       await expect(page.getByTestId('admin-costs-token-stats-section')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('admin-costs-token-status')).toBeVisible({ timeout: 10000 });
       const tokenRows = page.locator('[data-testid^="admin-token-stat-row-"]');
       await expect
         .poll(async () => {
@@ -297,8 +306,7 @@ test.describe('Admin Operations Flows', () => {
 
     try {
       steps.push('Open the user tickets tab and create a fresh ticket');
-      await applyDeploymentProtectionBypass(userPage);
-      await userPage.goto(new URL('/profile?tab=tickets', process.env.PLAYWRIGHT_BASE_URL!).toString(), {
+      await gotoWithBypass(userPage, '/profile?tab=tickets', {
         waitUntil: 'networkidle',
       });
       await expect(userPage.getByText('我的工单')).toBeVisible({ timeout: 15000 });

@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { logServerError } from '@/lib/server-log';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 // 公开路径 - 不需要认证
@@ -90,6 +91,38 @@ function getClientIP(request: NextRequest): string {
 let rateLimiter: Ratelimit | null = null;
 let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
 
+function shouldFailClosedRateLimit(): boolean {
+  if (process.env.VERCEL_ENV) {
+    return process.env.VERCEL_ENV === 'production';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
+
+function shouldFailClosedMaintenance(): boolean {
+  if (process.env.VERCEL_ENV) {
+    return process.env.VERCEL_ENV === 'production';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
+
+function createRateLimitUnavailableResponse(): NextResponse {
+  return new NextResponse(
+    JSON.stringify({
+      error: 'Service Unavailable',
+      message: '速率限制服务暂时不可用，请稍后再试',
+    }),
+    {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '60',
+      },
+    }
+  );
+}
+
 async function isMaintenanceModeEnabled(
   _request: NextRequest
 ): Promise<boolean> {
@@ -97,10 +130,17 @@ async function isMaintenanceModeEnabled(
     return maintenanceCache.enabled;
   }
 
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    logServerError('system', 'proxy_service_role_key_missing');
+    const enabled = shouldFailClosedMaintenance();
+    maintenanceCache = { enabled, expiresAt: Date.now() + 1_000 };
+    return enabled;
+  }
+
   try {
     const maintenanceClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
     );
 
     const { data, error } = await maintenanceClient
@@ -110,18 +150,22 @@ async function isMaintenanceModeEnabled(
       .maybeSingle();
 
     if (error) {
-      console.error('[Middleware] Failed to read maintenance mode:', error);
-      maintenanceCache = { enabled: true, expiresAt: Date.now() + 1_000 };
-      return true;
+      logServerError('system', 'proxy_maintenance_mode_read_failed', {
+        code: error.code,
+      });
+      const enabled = shouldFailClosedMaintenance();
+      maintenanceCache = { enabled, expiresAt: Date.now() + 1_000 };
+      return enabled;
     }
 
     const enabled = data?.value === true || data?.value === 'true';
     maintenanceCache = { enabled, expiresAt: Date.now() + 2_000 };
     return enabled;
-  } catch (error) {
-    console.error('[Middleware] Unexpected maintenance mode error:', error);
-    maintenanceCache = { enabled: true, expiresAt: Date.now() + 1_000 };
-    return true;
+  } catch {
+    logServerError('system', 'proxy_maintenance_mode_unexpected_error');
+    const enabled = shouldFailClosedMaintenance();
+    maintenanceCache = { enabled, expiresAt: Date.now() + 1_000 };
+    return enabled;
   }
 }
 
@@ -150,9 +194,9 @@ function getRateLimiter(): Ratelimit | null {
   }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hostname = request.headers.get('host') || '';
+  const hostname = request.nextUrl.hostname || request.headers.get('host') || '';
   const normalizedHostname = hostname.split(':')[0].toLowerCase();
 
   // ========================================
@@ -160,6 +204,10 @@ export async function middleware(request: NextRequest) {
   // ========================================
   if (needsRateLimit(pathname)) {
     const limiter = getRateLimiter();
+    if (!limiter && shouldFailClosedRateLimit()) {
+      return createRateLimitUnavailableResponse();
+    }
+
     if (limiter) {
       const ip = getClientIP(request);
       const identifier = ip;
@@ -187,9 +235,13 @@ export async function middleware(request: NextRequest) {
             }
           );
         }
-      } catch (error) {
-        // Redis 错误时允许请求通过 (fail-open)
-        console.error('[Middleware] Rate limit check failed:', error);
+      } catch {
+        if (shouldFailClosedRateLimit()) {
+          logServerError('security', 'proxy_rate_limit_check_failed_denying_request');
+          return createRateLimitUnavailableResponse();
+        }
+
+        logServerError('security', 'proxy_rate_limit_check_failed_allowing_request');
       }
     }
   }
@@ -200,6 +252,7 @@ export async function middleware(request: NextRequest) {
     normalizedHostname === 'graylum.com' ||
     normalizedHostname === 'www.graylum.com' ||
     normalizedHostname.startsWith('www.');
+  const isPreviewDeployment = normalizedHostname.endsWith('.vercel.app');
   const isLocalhost = normalizedHostname.includes('localhost') || normalizedHostname.includes('127.0.0.1');
   const isDevEnvironment =
     isLocalhost ||
@@ -285,18 +338,19 @@ export async function middleware(request: NextRequest) {
   }
 
   // app 域名: 应用后台 (需要认证)
-  if (isAppDomain) {
+  if (isAppDomain || isPreviewDeployment) {
     // 公开路径允许访问
     if (isPublicPath(pathname)) {
       // 已登录用户访问登录页时重定向到首页
       if ((pathname === '/login' || pathname === '/register') && user) {
+        const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
         if (!userIsVerified) {
           const verifyUrl = new URL('/verify-email', request.url);
           verifyUrl.searchParams.set('email', user.email ?? '');
-          verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+          verifyUrl.searchParams.set('redirect', requestedRedirect);
           return NextResponse.redirect(verifyUrl);
         }
-        return NextResponse.redirect(new URL('/', request.url));
+        return NextResponse.redirect(new URL(requestedRedirect, request.url));
       }
       return supabaseResponse;
     }
@@ -362,13 +416,14 @@ export async function middleware(request: NextRequest) {
 
     // 已登录用户访问登录页时重定向到首页
     if ((pathname === '/login' || pathname === '/register') && user) {
+      const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
         verifyUrl.searchParams.set('email', user.email ?? '');
-        verifyUrl.searchParams.set('redirect', sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect')));
+        verifyUrl.searchParams.set('redirect', requestedRedirect);
         return NextResponse.redirect(verifyUrl);
       }
-      return NextResponse.redirect(new URL('/', request.url));
+      return NextResponse.redirect(new URL(requestedRedirect, request.url));
     }
   }
 

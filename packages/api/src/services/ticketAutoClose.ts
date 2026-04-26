@@ -28,6 +28,12 @@ export interface TicketAutoCloseResult {
 
 export const TICKET_AUTO_CLOSE_TIMEOUT_HOURS = 48;
 export const TICKET_AUTO_CLOSE_SYSTEM_MESSAGE = `此工单因超过 ${TICKET_AUTO_CLOSE_TIMEOUT_HOURS} 小时无用户回复，已被系统自动关闭。如需继续咨询，请创建新工单。`;
+const TICKET_AUTO_CLOSE_ERRORS = {
+  loadTickets: 'Failed to load tickets for auto-close',
+  loadReplies: 'Failed to load ticket replies for auto-close',
+  closeTickets: 'Failed to close eligible tickets',
+  createReplies: 'Failed to write auto-close replies',
+} as const;
 
 export function determineTicketAutoCloseDecisions(input: {
   tickets: TicketAutoCloseTicketRecord[];
@@ -106,7 +112,7 @@ export class TicketAutoCloseService {
       .in('status', ['open', 'in_progress']);
 
     if (ticketsError) {
-      throw new Error(`Failed to load tickets: ${ticketsError.message}`);
+      throw new Error(TICKET_AUTO_CLOSE_ERRORS.loadTickets);
     }
 
     const activeTickets = (tickets ?? []) as TicketAutoCloseTicketRecord[];
@@ -128,7 +134,7 @@ export class TicketAutoCloseService {
       .order('created_at', { ascending: true });
 
     if (repliesError) {
-      throw new Error(`Failed to load ticket replies: ${repliesError.message}`);
+      throw new Error(TICKET_AUTO_CLOSE_ERRORS.loadReplies);
     }
 
     const decisions = determineTicketAutoCloseDecisions({
@@ -138,30 +144,33 @@ export class TicketAutoCloseService {
       timeoutHours,
     });
 
-    for (const decision of decisions) {
+    if (decisions.length > 0) {
+      const decisionIds = decisions.map((decision) => decision.ticketId);
       const { error: updateError } = await this.options.supabase
         .from('tickets')
         .update({
           status: 'closed',
           updated_at: now.toISOString(),
         })
-        .eq('id', decision.ticketId);
+        .in('id', decisionIds);
 
       if (updateError) {
-        throw new Error(`Failed to close ticket ${decision.ticketId}: ${updateError.message}`);
+        throw new Error(TICKET_AUTO_CLOSE_ERRORS.closeTickets);
       }
 
       const { error: insertError } = await this.options.supabase
         .from('ticket_replies')
-        .insert({
-          ticket_id: decision.ticketId,
-          user_id: null,
-          content: decision.closeReason,
-          is_admin: 'true',
-        });
+        .insert(
+          decisions.map((decision) => ({
+            ticket_id: decision.ticketId,
+            user_id: null,
+            content: decision.closeReason,
+            is_admin: 'true',
+          }))
+        );
 
       if (insertError) {
-        throw new Error(`Failed to write auto-close reply for ${decision.ticketId}: ${insertError.message}`);
+        throw new Error(TICKET_AUTO_CLOSE_ERRORS.createReplies);
       }
     }
 

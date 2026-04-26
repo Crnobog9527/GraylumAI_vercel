@@ -68,14 +68,9 @@ const envSchema = z.object({
     )
     .optional(),
 
-  // AI Provider API (OpenRouter / Anthropic)
+  // AI Provider API (OpenRouter)
   OPENROUTER_API_KEY: apiKeySchema
     .regex(/^sk-or-/, 'OPENROUTER_API_KEY 必须以 sk-or- 开头')
-    .optional(),
-
-  ANTHROPIC_API_KEY: z
-    .string()
-    .regex(/^sk-ant-/, 'ANTHROPIC_API_KEY 必须以 sk-ant- 开头')
     .optional(),
 
   // Sentry (可选但推荐)
@@ -147,16 +142,20 @@ export function validateEnv(): ValidationResult {
 
   const env = result.success ? result.data : null;
   const nodeEnv = env?.NODE_ENV ?? process.env.NODE_ENV ?? 'development';
-  const hasAnyAiKey = Boolean(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY);
+  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
 
-  if (!hasAnyAiKey) {
-    errors.push('必须配置 OPENROUTER_API_KEY 或 ANTHROPIC_API_KEY');
+  if (!hasOpenRouterKey) {
+    errors.push('必须配置 OPENROUTER_API_KEY');
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    warnings.push('ANTHROPIC_API_KEY 已退役；Claude 模型请通过 OPENROUTER_API_KEY 调用');
   }
 
   // 2. 生产环境特殊检查
   if (nodeEnv === 'production') {
     // 检查是否使用测试密钥
-    if (process.env.OPENROUTER_API_KEY?.includes('test') || process.env.ANTHROPIC_API_KEY?.includes('test')) {
+    if (process.env.OPENROUTER_API_KEY?.includes('test')) {
       errors.push('生产环境不能使用测试 API 密钥');
     }
 
@@ -286,7 +285,7 @@ export function getSafeEnvSummary(): Record<string, string> {
     SUPPORT_EMAIL_SET: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ? '✓' : '✗',
     SUPABASE_SERVICE_KEY_SET: process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓' : '✗',
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
-    ANTHROPIC_KEY_SET: process.env.ANTHROPIC_API_KEY ? '✓' : '✗',
+    ANTHROPIC_KEY_RETIRED_SET: process.env.ANTHROPIC_API_KEY ? '⚠' : '✗',
     OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
     STRIPE_SECRET_KEY_SET: process.env.STRIPE_SECRET_KEY ? '✓' : '✗',
     STRIPE_PUBLISHABLE_KEY_SET: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ? '✓' : '✗',

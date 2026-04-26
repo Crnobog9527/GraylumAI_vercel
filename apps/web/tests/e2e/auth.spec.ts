@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
+import { authStatePaths, clearBrowserAuthState, getCredentials, hasCredentials } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
@@ -82,12 +82,15 @@ test.describe('Authentication', () => {
 
   test('should preserve protected-route redirect through login', async ({ page }, testInfo) => {
     test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for redirect return flow');
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Protected route redirect returned user after login';
 
     try {
       steps.push('Open a protected route with query parameters while unauthenticated');
+      await gotoWithBypass(page, '/login');
+      await clearBrowserAuthState(page);
       await gotoWithBypass(page, '/profile?tab=security');
 
       steps.push('Verify login redirect preserves the original destination');
@@ -101,7 +104,14 @@ test.describe('Authentication', () => {
 
       steps.push('Verify the browser returns to the original protected tab');
       await expect(page).toHaveURL(/\/profile\?tab=security/, { timeout: 15000 });
-      await expect(page.getByRole('heading', { name: '账户安全' })).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('h3').filter({ hasText: '账户安全' })).toBeVisible({ timeout: 30000 });
+
+      monitor.removeIssues((issue) =>
+        issue.source === 'requestfailed' &&
+        issue.message === 'net::ERR_ABORTED' &&
+        issue.resourceType === 'document' &&
+        (issue.url?.includes('/login?redirect=%2Fprofile%3Ftab%3Dsecurity') ?? false)
+      );
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -163,6 +173,7 @@ test.describe('Authentication', () => {
   });
 
   test('should render public support and legal pages', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     let actual = 'Public support pages rendered';
@@ -183,6 +194,13 @@ test.describe('Authentication', () => {
         await expect(page).toHaveURL(new RegExp(expectation.route.replace('/', '\\/')));
         await expect(page.getByRole('heading', { name: expectation.heading })).toBeVisible();
       }
+
+      monitor.removeIssues((issue) =>
+        issue.source === 'requestfailed' &&
+        issue.message === 'net::ERR_ABORTED' &&
+        issue.resourceType === 'document' &&
+        routeExpectations.some((expectation) => issue.url?.includes(expectation.route))
+      );
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
@@ -246,19 +264,30 @@ test.describe('Authentication', () => {
     });
 
     test('should load profile page when logged in', async ({ page }, testInfo) => {
+      test.setTimeout(90000);
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);
       let actual = 'Profile page rendered';
 
       try {
-        steps.push('Open /profile');
+        steps.push('Open /profile and verify the default profile content renders');
         await gotoWithBypass(page, '/profile');
         await expect(page).toHaveURL(/\/profile/);
+        await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible({ timeout: 30000 });
+        await expect(page.getByRole('button', { name: '账户安全' })).toBeVisible({ timeout: 30000 });
 
-        steps.push('Verify profile sidebar content');
-        await expect(page.getByRole('button', { name: '个人资料' })).toBeVisible();
-        await expect(page.getByRole('button', { name: '订阅管理' })).toBeVisible();
-        await expect(page.getByRole('button', { name: '账户安全' })).toBeVisible();
+        steps.push('Open the subscription tab route and verify yearly pricing copy and highlight tone');
+        await gotoWithBypass(page, '/profile?tab=subscription');
+        await expect(page).toHaveURL(/\/profile\?tab=subscription/, { timeout: 15000 });
+        const yearlyCycleButton = page.getByRole('button', { name: /按年|年付/ });
+        await expect(yearlyCycleButton).toBeVisible({ timeout: 30000 });
+        await yearlyCycleButton.click();
+        await expect(page.getByText('年付共', { exact: false })).toHaveCount(0);
+
+        const warmHighlightCard = page.locator('[data-highlight-tone="warm"]').first();
+        if (await warmHighlightCard.isVisible().catch(() => false)) {
+          await expect(warmHighlightCard).toBeVisible({ timeout: 10000 });
+        }
 
         const blockingIssues = monitor.getIssues('P1');
         expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);

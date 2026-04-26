@@ -11,6 +11,10 @@ function isBenignArtifactCloseError(error: unknown) {
     return false;
   }
 
+  if (error.message.includes('Target page, context or browser has been closed')) {
+    return true;
+  }
+
   return (
     error.message.includes('ENOENT') &&
     error.message.includes('.playwright-artifacts-') &&

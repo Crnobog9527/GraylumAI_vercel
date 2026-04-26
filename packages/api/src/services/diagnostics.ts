@@ -18,6 +18,7 @@ import { runDailyBillingReconciliation } from './billingReconciliation';
 import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
 import { getConfiguredProviderApiKeySource } from './providerUtils';
+import { logger } from '../lib/logger';
 import type { TokenUsage } from '../types/ai';
 
 // ============================================
@@ -117,6 +118,10 @@ function generateBatchId(): string {
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
+}
+
+function createDiagnosticFailureMessage(label = '测试执行异常'): string {
+  return `${label}，请稍后重试`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -423,7 +428,7 @@ async function testAIRouting(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -490,7 +495,7 @@ async function testTokenCalculation(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -544,7 +549,7 @@ async function testPromptCache(ctx: DiagnosticContext): Promise<DiagnosticTestRe
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -589,7 +594,7 @@ async function testContextCompression(ctx: DiagnosticContext): Promise<Diagnosti
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -651,7 +656,7 @@ async function testRealtimeKeywords(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -720,7 +725,7 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
       testName,
       category,
       status: 'error',
-      message: `模型检查异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage('模型检查异常'),
       latencyMs: 0,
     };
   }
@@ -749,7 +754,7 @@ async function testAILiveRuntimeProof(ctx: DiagnosticContext): Promise<Diagnosti
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -825,7 +830,7 @@ async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: 'failed',
-      message: `RPC 预扣失败: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage('RPC 预扣失败'),
       latencyMs: 0,
     };
   }
@@ -878,7 +883,7 @@ async function testBillingIdempotency(ctx: DiagnosticContext): Promise<Diagnosti
       category,
       status: 'warning',
       message: 'RPC 检查异常，使用乐观锁回退',
-      details: { error: error instanceof Error ? error.message : String(error) },
+      details: { hint: '请查看服务端日志' },
       latencyMs: 0,
     };
   }
@@ -921,7 +926,7 @@ async function testBillingReconcile(ctx: DiagnosticContext): Promise<DiagnosticT
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -970,7 +975,7 @@ async function testRateLimit(ctx: DiagnosticContext): Promise<DiagnosticTestResu
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -1024,7 +1029,7 @@ async function testCircuitBreaker(ctx: DiagnosticContext): Promise<DiagnosticTes
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -1093,7 +1098,7 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
       testName,
       category,
       status: 'error',
-      message: `测试异常: ${error instanceof Error ? error.message : String(error)}`,
+      message: createDiagnosticFailureMessage(),
       latencyMs: 0,
     };
   }
@@ -1149,9 +1154,9 @@ export class DiagnosticsService {
       try {
         const result = await testFn(ctx);
         results.push(result);
-      } catch (error) {
+      } catch {
         // 单个测试失败不影响其他测试
-        console.error(`Test failed:`, error);
+        logger.error('system', 'diagnostics_full_run_test_failed');
       }
     }
 
@@ -1200,8 +1205,10 @@ export class DiagnosticsService {
       try {
         const result = await testFn(ctx);
         results.push(result);
-      } catch (error) {
-        console.error(`Test failed:`, error);
+      } catch {
+        logger.error('system', 'diagnostics_category_run_test_failed', {
+          category,
+        });
       }
     }
 
@@ -1250,8 +1257,8 @@ export class DiagnosticsService {
       const result = await testFn(ctx);
       await this.saveSingleResult(result);
       return result;
-    } catch (error) {
-      console.error(`Test ${testId} failed:`, error);
+    } catch {
+      logger.error('system', 'diagnostics_single_run_test_failed');
       return null;
     }
   }
@@ -1372,8 +1379,10 @@ export class DiagnosticsService {
     const { error } = await this.supabase.from('diagnostic_results').insert(records);
 
     if (error) {
-      console.error('[Diagnostics] Failed to save diagnostic results:', error.message, error.code, error.details);
-      return { saved: false, error: `${error.message} (${error.code})` };
+      logger.error('system', 'diagnostics_results_save_failed', {
+        code: error.code,
+      });
+      return { saved: false, error: '诊断结果保存失败，请稍后重试' };
     }
     return { saved: true };
   }
@@ -1392,7 +1401,9 @@ export class DiagnosticsService {
     });
 
     if (error) {
-      console.error('Failed to save diagnostic result:', error);
+      logger.error('system', 'diagnostics_result_save_failed', {
+        code: error.code,
+      });
     }
   }
 }

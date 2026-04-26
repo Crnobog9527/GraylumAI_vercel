@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -23,12 +24,12 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   support_email: { value: DEFAULT_SUPPORT_EMAIL, type: 'string', label: '客服邮箱', description: '用户支持咨询邮箱' },
   maintenance_mode: { value: 'false', type: 'boolean', label: '维护模式', description: '开启后向用户显示维护信息' },
 
-  // Credits & Billing (5项)
+  // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
   input_credits_per_1k: { value: '1', type: 'number', label: '输入Token积分单价', description: '每1000个输入Token消耗的积分数' },
   output_credits_per_1k: { value: '5', type: 'number', label: '输出Token积分单价', description: '每1000个输出Token消耗的积分数' },
   web_search_credits: { value: '5', type: 'number', label: '联网搜索积分', description: '每次启用联网搜索额外消耗的积分数' },
-  first_purchase_bonus_percent: { value: '20', type: 'number', label: '首充赠送%', description: '首次购买额外赠送积分百分比' },
+  first_purchase_bonus_percent: { value: '20', type: 'number', label: '首充赠送%', description: '历史兼容字段，当前运行时未消费该配置' },
 
   // Features (11项)
   max_messages_per_conversation: { value: '100', type: 'number', label: '单对话最大消息数', description: '每个对话允许的最大消息数' },
@@ -51,7 +52,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
   search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
   search_surcharge_credits: { value: '0', type: 'number', label: '联网附加积分', description: '每次真实联网搜索额外增加的站内积分成本' },
-  enable_prompt_cache: { value: 'true', type: 'boolean', label: '启用 API 缓存', description: '为 Anthropic 请求构造可缓存提示词，以便记录和利用 prompt caching 命中数据' },
+  enable_prompt_cache: { value: 'false', type: 'boolean', label: 'Prompt Cache（官方 Anthropic 已退役）', description: 'Claude 当前统一经 OpenRouter 调用；该项仅作为历史兼容设置保留，不再作为运行时依赖' },
 
   // Checkin (6项)
   checkin_day1: { value: '5', type: 'number', label: '签到第1天', description: '第1天签到奖励积分' },
@@ -77,7 +78,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 // 设置分组
 const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
-  billing: ['new_user_credits', 'input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits', 'first_purchase_bonus_percent'],
+  billing: ['new_user_credits'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
   experience: ['chat_show_model_selector', 'chat_prompt_text', 'chat_welcome_message', 'chat_billing_hint', 'home_show_onboarding', 'home_show_featured_modules'],
@@ -108,19 +109,20 @@ export default function AdminSettingsPage() {
   const [cleanupMessage, setCleanupMessage] = useState('');
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
-  const { data: savedSettings, isLoading, refetch } = trpc.settings.getAdminSystemSettings.useQuery();
-  const { data: membershipPlans, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
-  const { data: cleanupStats, refetch: refetchStats } = trpc.admin.getCleanupStats.useQuery();
+  const { data: dashboard, isLoading, refetch: refetchDashboard } = trpc.admin.getSettingsDashboard.useQuery();
+  const {
+    data: cleanupStats,
+    isLoading: cleanupStatsLoading,
+    refetch: refetchCleanupStats,
+  } = trpc.admin.getCleanupStats.useQuery();
+  const savedSettings = dashboard?.systemSettings;
+  const membershipPlans = dashboard?.membershipPlans;
 
-  const updateSetting = trpc.settings.updateSystemSettings.useMutation({
-    onSuccess: () => {
-      refetch();
-    },
-  });
+  const updateSettingsBulk = trpc.settings.updateSystemSettingsBulk.useMutation();
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
     onSuccess: () => {
-      refetchPlans();
+      refetchDashboard();
       toast.success('会员权限更新成功');
     },
     onError: () => {
@@ -132,7 +134,7 @@ export default function AdminSettingsPage() {
     onSuccess: (result) => {
       setCleanupMessage(result.message);
       toast.success(result.message);
-      refetchStats();
+      void refetchCleanupStats();
     },
     onError: () => {
       setCleanupMessage('清理失败，请稍后重试');
@@ -195,11 +197,14 @@ export default function AdminSettingsPage() {
   const handleSaveAll = async () => {
     setSaving(true);
     try {
-      const promises = Object.entries(settings).map(([key, data]) =>
-        updateSetting.mutateAsync({ key, value: data.value })
+      await updateSettingsBulk.mutateAsync(
+        Object.entries(settings).map(([key, data]) => ({
+          key,
+          value: data.value,
+        })),
       );
-      await Promise.all(promises);
       toast.success('设置保存成功');
+      void refetchDashboard();
     } catch {
       toast.error('保存设置失败');
     } finally {
@@ -360,7 +365,7 @@ export default function AdminSettingsPage() {
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>积分计费设置</CardTitle>
               <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                新用户赠送积分和首充奖励配置
+                新用户赠送积分与历史兼容计费配置
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -390,23 +395,26 @@ export default function AdminSettingsPage() {
                 </div>
               </div>
 
-              {/* Active settings: new_user_credits and first_purchase_bonus_percent */}
-              <div className="mb-6">
+              {/* Active settings */}
+              <div className="mb-6" data-testid="admin-settings-billing-active-section">
                 <h4 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
                   有效设置
                 </h4>
-                {renderSettingGroup(['new_user_credits', 'first_purchase_bonus_percent'])}
+                {renderSettingGroup(['new_user_credits'])}
               </div>
 
               {/* Deprecated settings with visual distinction */}
-              <div className="opacity-60">
+              <div className="opacity-60" data-testid="admin-settings-billing-reference-section">
                 <h4 className="text-sm font-medium mb-3 flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-                  <span>参考显示（实际以模型配置为准）</span>
+                  <span>已退役 / 参考显示（不作为生产计费真相）</span>
                   <Badge variant="outline" className="text-xs" style={{ borderColor: 'var(--border-primary)', color: 'var(--text-disabled)' }}>
-                    仅供参考
+                    retired-reference
                   </Badge>
                 </h4>
-                {renderSettingGroup(['input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits'])}
+                <p className="text-xs mb-3" style={{ color: 'var(--text-disabled)' }}>
+                  以下字段仍保留在后台，目的是兼容历史数据和帮助排查旧口径；当前运行时不会消费它们。
+                </p>
+                {renderSettingGroup(['input_credits_per_1k', 'output_credits_per_1k', 'web_search_credits', 'first_purchase_bonus_percent'])}
               </div>
             </CardContent>
           </Card>
@@ -703,7 +711,7 @@ export default function AdminSettingsPage() {
                     variant="destructive"
                     data-testid="admin-settings-cleanup-trigger"
                     onClick={handleCleanup}
-                    disabled={cleaningUp || (cleanupStats?.totalExpired === 0)}
+                    disabled={cleaningUp || cleanupStatsLoading || (cleanupStats?.totalExpired === 0)}
                     className="bg-red-600 hover:bg-red-700"
                   >
                     {cleaningUp ? (
@@ -715,12 +723,18 @@ export default function AdminSettingsPage() {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => refetchStats()}
+                    onClick={() => void refetchCleanupStats()}
                     className="border-[var(--border-primary)] text-[var(--text-secondary)]"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />
                     刷新统计
                   </Button>
+                  {cleanupStatsLoading && (
+                    <div className="flex items-center gap-2 text-[var(--text-tertiary)]">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">正在加载清理统计...</span>
+                    </div>
+                  )}
                   {cleanupStats?.totalExpired === 0 && (
                     <div className="flex items-center gap-2 text-emerald-400">
                       <CheckCircle className="h-4 w-4" />
@@ -752,7 +766,7 @@ export default function AdminSettingsPage() {
                     )}
                     {cleanupStats.latestRun.error && (
                       <div className="mt-1 text-red-400">
-                        {cleanupStats.latestRun.error}
+                        {getSafeErrorMessage(cleanupStats.latestRun.error, '自动清理失败，请稍后重试。')}
                       </div>
                     )}
                   </div>

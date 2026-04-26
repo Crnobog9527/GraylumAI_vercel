@@ -2,11 +2,16 @@
  * Stream Handler
  *
  * SSE (Server-Sent Events) 流式响应处理器
- * 处理 Claude API 流式响应并转换为前端友好格式
+ * 处理 OpenRouter / OpenAI-compatible 流式响应并转换为前端友好格式
  */
 
-import type { ClaudeMessage, ClaudeStreamEvent, TokenUsage, StreamEvent } from '../types/ai';
-import { getConfiguredProviderApiKey } from './providerUtils';
+import type { ClaudeMessage, TokenUsage, StreamEvent } from '../types/ai';
+import {
+  getConfiguredProviderApiKey,
+  getOpenAICompatibleHeaders,
+  normalizeOpenAICompatibleEndpoint,
+  usesOpenAICompatibleApi,
+} from './providerUtils';
 
 type MessageEndEvent = Extract<StreamEvent, { type: 'message_end' }>;
 
@@ -14,8 +19,10 @@ type MessageEndEvent = Extract<StreamEvent, { type: 'message_end' }>;
 // 常量
 // ============================================
 
-const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const STREAM_HANDLER_PUBLIC_ERROR_MESSAGE = 'AI 响应生成失败，请稍后重试';
+const STREAM_HANDLER_PROVIDER_FAILURE_MESSAGE = '上游 AI 服务请求失败';
+const STREAM_HANDLER_EMPTY_RESPONSE_MESSAGE = '上游 AI 服务未返回响应体';
 
 /**
  * SSE 事件类型
@@ -37,6 +44,7 @@ export interface StreamRequestParams {
   model: string;
   messages: ClaudeMessage[];
   system?: string;
+  apiEndpoint?: string | null;
   maxTokens?: number;
   temperature?: number;
   tools?: Array<{
@@ -84,18 +92,6 @@ function parseSSELine(line: string): { event?: string; data?: string } | null {
   return null;
 }
 
-/**
- * 解析 Claude 流事件
- */
-function parseClaudeEvent(eventType: string, data: string): ClaudeStreamEvent | null {
-  try {
-    const parsed = JSON.parse(data);
-    return { type: eventType, ...parsed } as ClaudeStreamEvent;
-  } catch {
-    return null;
-  }
-}
-
 // ============================================
 // Stream Handler 类
 // ============================================
@@ -107,7 +103,7 @@ export class StreamHandler {
   constructor(apiKey?: string) {
     this.apiKey = getConfiguredProviderApiKey(apiKey) ?? '';
     if (!this.apiKey) {
-      throw new Error('OPENROUTER_API_KEY / ANTHROPIC_API_KEY not configured');
+      throw new Error('OPENROUTER_API_KEY not configured');
     }
   }
 
@@ -132,39 +128,44 @@ export class StreamHandler {
     };
 
     try {
-      const response = await fetch(CLAUDE_API_URL, {
+      const endpoint = usesOpenAICompatibleApi({
+        endpoint: params.apiEndpoint,
+        apiKey: this.apiKey,
+      })
+        ? (normalizeOpenAICompatibleEndpoint(params.apiEndpoint) || OPENROUTER_API_URL)
+        : OPENROUTER_API_URL;
+
+      callbacks.onStart?.(`openrouter-${Date.now()}`, params.model);
+
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-        },
+        headers: getOpenAICompatibleHeaders(this.apiKey),
         body: JSON.stringify({
           model: params.model,
           max_tokens: params.maxTokens ?? 4096,
           stream: true,
-          system: params.system,
-          messages: params.messages,
+          stream_options: { include_usage: true },
+          messages: [
+            ...(params.system ? [{ role: 'system', content: params.system }] : []),
+            ...params.messages,
+          ],
           temperature: params.temperature,
-          tools: params.tools,
         }),
         signal: this.abortController.signal,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Claude API error: ${response.status} - ${errorText}`);
+        throw new Error(STREAM_HANDLER_PROVIDER_FAILURE_MESSAGE);
       }
 
       if (!response.body) {
-        throw new Error('No response body');
+        throw new Error(STREAM_HANDLER_EMPTY_RESPONSE_MESSAGE);
       }
 
       // 处理流式响应
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let currentEvent = '';
       let deltaIndex = 0;
 
       while (true) {
@@ -183,77 +184,54 @@ export class StreamHandler {
 
           if (!parsed) continue;
 
-          if (parsed.event) {
-            currentEvent = parsed.event;
-          }
+          if (parsed.data && parsed.data !== '[DONE]') {
+            try {
+              const event = JSON.parse(parsed.data) as {
+                choices?: Array<{
+                  delta?: { content?: string };
+                  finish_reason?: string | null;
+                }>;
+                usage?: {
+                  prompt_tokens?: number;
+                  completion_tokens?: number;
+                };
+              };
+              const delta = event.choices?.[0]?.delta?.content ?? '';
 
-          if (parsed.data && currentEvent) {
-            const event = parseClaudeEvent(currentEvent, parsed.data);
-
-            if (event) {
-              this.handleEvent(event, result, callbacks, deltaIndex);
-
-              if (event.type === 'content_block_delta') {
+              if (delta) {
+                result.content += delta;
+                callbacks.onDelta?.(delta, deltaIndex);
                 deltaIndex++;
               }
+
+              if (event.usage) {
+                result.usage.inputTokens = event.usage.prompt_tokens ?? result.usage.inputTokens;
+                result.usage.outputTokens = event.usage.completion_tokens ?? result.usage.outputTokens;
+                callbacks.onUsage?.(result.usage);
+              }
+
+              const finishReason = event.choices?.[0]?.finish_reason;
+              if (finishReason) {
+                result.stopReason = finishReason === 'length'
+                  ? 'max_tokens'
+                  : finishReason === 'tool_calls'
+                    ? 'tool_use'
+                    : 'end_turn';
+              }
+            } catch {
+              // Ignore malformed provider keepalive frames.
             }
           }
         }
       }
 
+      callbacks.onEnd?.(result.stopReason);
       return result;
     } catch (error) {
       if (error instanceof Error) {
         callbacks.onError?.(error);
       }
       throw error;
-    }
-  }
-
-  /**
-   * 处理单个流事件
-   */
-  private handleEvent(
-    event: ClaudeStreamEvent,
-    result: StreamResult,
-    callbacks: StreamCallbacks,
-    deltaIndex: number
-  ): void {
-    switch (event.type) {
-      case 'message_start':
-        if (event.message) {
-          result.messageId = event.message.id;
-          callbacks.onStart?.(event.message.id, event.message.model);
-
-          // 初始 usage (输入 tokens)
-          if (event.message.usage) {
-            result.usage.inputTokens = event.message.usage.input_tokens ?? 0;
-            result.usage.cacheReadTokens = event.message.usage.cache_read_input_tokens ?? 0;
-            result.usage.cacheCreationTokens = event.message.usage.cache_creation_input_tokens ?? 0;
-          }
-        }
-        break;
-
-      case 'content_block_delta':
-        if (event.delta?.text) {
-          result.content += event.delta.text;
-          callbacks.onDelta?.(event.delta.text, deltaIndex);
-        }
-        break;
-
-      case 'message_delta':
-        if (event.delta?.stop_reason) {
-          result.stopReason = event.delta.stop_reason;
-        }
-        if (event.usage) {
-          result.usage.outputTokens = event.usage.output_tokens ?? 0;
-          callbacks.onUsage?.(result.usage);
-        }
-        break;
-
-      case 'message_stop':
-        callbacks.onEnd?.(result.stopReason);
-        break;
     }
   }
 
@@ -322,7 +300,7 @@ export function createSSEStream(
             const errorEvent: StreamEvent = {
               type: 'error',
               code: 'STREAM_ERROR',
-              message: error.message,
+              message: STREAM_HANDLER_PUBLIC_ERROR_MESSAGE,
               retryable: true,
             };
             controller.enqueue(encoder.encode(formatSSEEvent(errorEvent)));
@@ -363,7 +341,7 @@ export function createSSEStream(
         const errorEvent: StreamEvent = {
           type: 'error',
           code: 'STREAM_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: STREAM_HANDLER_PUBLIC_ERROR_MESSAGE,
           retryable: false,
         };
         controller.enqueue(encoder.encode(formatSSEEvent(errorEvent)));

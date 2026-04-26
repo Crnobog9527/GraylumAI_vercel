@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -301,7 +302,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
         syncedCheckoutSessionRef.current = null;
         setCheckoutNotice({
           tone: 'error',
-          message: error instanceof Error ? error.message : '订单同步失败，请稍后重试或提交工单。',
+          message: getSafeErrorMessage(error, '订单同步失败，请稍后重试或提交工单。'),
         });
       });
   }, [checkoutSessionId, checkoutState, router, syncCheckoutSessionMutation, utils]);
@@ -385,11 +386,10 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
       });
       window.location.assign(result.checkoutUrl);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '创建支付会话失败，请稍后重试';
       setPurchaseIntent({
         kind: 'plan',
         title: plan.name,
-        summary: message,
+        summary: getSafeErrorMessage(error, '创建支付会话失败，请稍后重试。'),
       });
     } finally {
       setPendingCheckoutKey(null);
@@ -498,26 +498,34 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
           const isCurrentPlan = plan.level === subscriptionTier || (plan.level === 'free' && subscriptionTier === 'free');
           const isHighlight = plan.recommended || plan.highlight;
           const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
+          const warmHighlightBackground = 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(249, 115, 22, 0.14) 100%)';
+          const warmHighlightBorder = '2px solid rgba(245, 158, 11, 0.45)';
+          const warmHighlightShadow = '0 0 30px rgba(249, 115, 22, 0.16)';
+          const warmHighlightText = 'linear-gradient(135deg, #FBBF24 0%, #FB923C 100%)';
 
           return (
             <div
-              key={plan.level}
+              key={plan.id}
               data-testid={`profile-membership-plan-${plan.level}`}
+              data-plan-id={plan.id}
+              data-plan-level={plan.level}
+              data-highlight-tone={isHighlight ? 'warm' : 'default'}
               className="relative rounded-xl p-5 transition-colors duration-200"
               style={{
-                background: isHighlight ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%)' : 'var(--bg-primary)',
-                border: isHighlight ? '2px solid rgba(139, 92, 246, 0.5)' : '1px solid var(--border-primary)',
-                boxShadow: isHighlight ? '0 0 30px rgba(139, 92, 246, 0.2)' : 'none'
+                background: isHighlight ? warmHighlightBackground : 'var(--bg-primary)',
+                border: isHighlight ? warmHighlightBorder : '1px solid var(--border-primary)',
+                boxShadow: isHighlight ? warmHighlightShadow : 'none'
               }}
             >
               {/* Recommended Badge */}
               {plan.recommended && (
                 <div
+                  data-testid={`profile-membership-plan-recommended-${plan.level}`}
                   className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
                   style={{
-                    background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.3) 0%, rgba(99, 102, 241, 0.3) 100%)',
-                    color: '#A78BFA',
-                    border: '1px solid rgba(139, 92, 246, 0.4)'
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.24) 0%, rgba(249, 115, 22, 0.24) 100%)',
+                    color: '#FBBF24',
+                    border: '1px solid rgba(245, 158, 11, 0.4)'
                   }}
                 >
                   推荐
@@ -554,7 +562,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
                         className="text-3xl font-bold"
                         style={{
                           background: isHighlight
-                            ? 'linear-gradient(135deg, #A78BFA 0%, #818CF8 100%)'
+                            ? warmHighlightText
                             : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
                           WebkitBackgroundClip: 'text',
                           WebkitTextFillColor: 'transparent'
@@ -564,9 +572,6 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
                       </span>
                       <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>/月</span>
                     </div>
-                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      年付共 ${price.toFixed(1)}
-                    </span>
                   </div>
                 ) : (
                   <div className="flex items-baseline justify-center gap-1">
@@ -575,7 +580,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
                       className="text-3xl font-bold"
                       style={{
                         background: isHighlight
-                          ? 'linear-gradient(135deg, #A78BFA 0%, #818CF8 100%)'
+                          ? warmHighlightText
                           : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent'
@@ -665,11 +670,10 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
       window.location.assign(result.checkoutUrl);
       return;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '创建支付会话失败，请稍后重试';
       setPurchaseIntent({
         kind: 'package',
         title: pkg.name || `${pkg.credits.toLocaleString()} 积分包`,
-        summary: message,
+        summary: getSafeErrorMessage(error, '创建支付会话失败，请稍后重试。'),
       });
     } finally {
       setPendingCheckoutPackageId(null);

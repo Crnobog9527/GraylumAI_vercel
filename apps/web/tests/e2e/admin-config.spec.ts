@@ -11,6 +11,8 @@ import {
   getAiUsageLogByRequestId,
   createConversationFixtureForUserEmail,
   createTokenStatsFixture,
+  getCreditsForUserEmail,
+  setCreditsForUserEmail,
   softDeleteConversationFixture,
 } from './support/creditFixtures';
 import { applyDeploymentProtectionBypass, gotoWithBypass } from './support/deploymentProtection';
@@ -30,6 +32,45 @@ async function saveAllSettings(page: Page) {
   const saveAllButton = page.getByTestId('admin-settings-save-all');
   await saveAllButton.click();
   await expect(saveAllButton).toBeEnabled({ timeout: 60000 });
+}
+
+async function openMaintenancePage(page: Page) {
+  await gotoWithBypass(page, '/maintenance');
+  await expect(page).toHaveURL(/\/maintenance/);
+  await expect(page.getByRole('heading', { name: /维护中/ })).toBeVisible({ timeout: 15000 });
+}
+
+async function openAdminSettings(page: Page) {
+  await gotoWithBypass(page, '/admin/settings');
+  await expect(page).toHaveURL(/\/admin\/settings/);
+  await expect(page.getByTestId('admin-settings-save-all')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId('admin-setting-site_name')).toBeVisible({ timeout: 30000 });
+}
+
+function chatPromptInput(page: Page) {
+  return page.locator('.chat-input-box textarea:visible').first();
+}
+
+async function setChatPrompt(page: Page, prompt: string) {
+  const sendButton = page.getByRole('button', { name: '发送' });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const input = chatPromptInput(page);
+    await expect(input).toBeEditable({ timeout: 20000 });
+    await input.fill('');
+    await input.click();
+    await input.pressSequentially(prompt);
+
+    const valueMatches = await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt)
+      .then(() => true)
+      .catch(() => false);
+    if (valueMatches && await sendButton.isEnabled().catch(() => false)) {
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  await expect.poll(async () => chatPromptInput(page).inputValue(), { timeout: 5000 }).toBe(prompt);
+  await expect(sendButton).toBeEnabled({ timeout: 5000 });
 }
 
 async function setSwitchState(toggle: Locator, enabled: boolean) {
@@ -139,7 +180,7 @@ function clearIntentionalStreamAbortIssues(
       && issue.method === 'POST'
       && issue.url?.includes('/api/ai/stream')
       && issue.message === 'net::ERR_ABORTED')
-    || (issue.source === 'console' && issue.message === 'Streaming error: network error')
+    || (issue.source === 'console' && issue.message.includes('Streaming error'))
     || (issue.source === 'pageerror' && issue.message === 'signal is aborted without reason')
   );
 }
@@ -171,6 +212,15 @@ async function setUserCredits(browser: Browser, targetCredits: number, reason: s
     throw new Error('E2E admin and user credentials are required for credit adjustment.');
   }
 
+  const targetEmail = getCredentials('user').email;
+  try {
+    const snapshot = await getCreditsForUserEmail(targetEmail);
+    await setCreditsForUserEmail(targetEmail, targetCredits, reason);
+    return snapshot.credits;
+  } catch {
+    // Fall back to the admin UI path when direct fixture writes are unavailable.
+  }
+
   const context = await browser.newContext({ storageState: authStatePaths.admin });
   const page = await context.newPage();
 
@@ -178,7 +228,6 @@ async function setUserCredits(browser: Browser, targetCredits: number, reason: s
     await gotoWithBypass(page, '/admin/users');
     await expect(page).toHaveURL(/\/admin\/users/);
 
-    const targetEmail = getCredentials('user').email;
     await page.locator('input[placeholder="邮箱或昵称..."]').fill(targetEmail);
     const targetRow = page.locator('tbody tr').filter({ hasText: targetEmail }).first();
     await expect(targetRow).toBeVisible({ timeout: 15000 });
@@ -233,6 +282,7 @@ test.describe('Admin Config Flows', () => {
   test.skip(!hasCredentials('admin'), 'E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD are required for admin config flows');
 
   test('should persist and restore global settings and membership export settings', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const siteNameInput = page.getByTestId('admin-setting-site_name');
@@ -241,8 +291,7 @@ test.describe('Admin Config Flows', () => {
 
     try {
       steps.push('Open /admin/settings');
-      await gotoWithBypass(page, '/admin/settings');
-      await expect(page).toHaveURL(/\/admin\/settings/);
+      await openAdminSettings(page);
 
       const originalSiteName = (await siteNameInput.inputValue()).trim();
       const originalSupportEmail = (await supportEmailInput.inputValue()).trim();
@@ -270,11 +319,11 @@ test.describe('Admin Config Flows', () => {
       await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
         timeout: 15000,
       });
-      await gotoWithBypass(page, '/maintenance');
+      await openMaintenancePage(page);
       await expect(page.getByText(updatedSupportEmail, { exact: true }).first()).toBeVisible({
         timeout: 15000,
       });
-      await gotoWithBypass(page, '/admin/settings');
+      await openAdminSettings(page);
 
       const membershipPlan = page.getByTestId(/^membership-plan-/).first();
       const membershipPlanCount = await membershipPlan.count();
@@ -352,8 +401,7 @@ test.describe('Admin Config Flows', () => {
 
     try {
       steps.push('Open /admin/settings and capture the original maintenance mode state');
-      await gotoWithBypass(page, '/admin/settings');
-      await expect(page).toHaveURL(/\/admin\/settings/);
+      await openAdminSettings(page);
       originalMaintenanceState = (await maintenanceSwitch.getAttribute('data-state')) === 'checked';
 
       steps.push('Enable maintenance mode from the admin settings page');
@@ -385,7 +433,7 @@ test.describe('Admin Config Flows', () => {
       if (originalMaintenanceState !== null) {
         try {
           steps.push('Restore the original maintenance mode state');
-          await gotoWithBypass(page, '/admin/settings');
+          await openAdminSettings(page);
           await saveMaintenanceMode(page, originalMaintenanceState, saveAllButton, maintenanceSwitch);
           await page.waitForTimeout(2500);
         } catch (restoreError) {
@@ -614,6 +662,7 @@ test.describe('Admin Config Flows', () => {
       await expect(userPage.getByText('长文本发送确认')).toBeVisible({ timeout: 10000 });
       await userPage.getByRole('button', { name: '再检查一下' }).click();
       await expect(userPage.getByText('长文本发送确认')).toHaveCount(0, { timeout: 10000 });
+      clearIntentionalStreamAbortIssues(userMonitor);
 
       steps.push('Open the seeded metered conversation and verify token usage stats become visible');
       const meteredConversation = userPage
@@ -654,6 +703,7 @@ test.describe('Admin Config Flows', () => {
       await setSwitchState(showTokenUsageStatsSwitch, originalTokenUsageStatsState);
       await saveAllSettings(page);
 
+      clearIntentionalStreamAbortIssues(userMonitor);
       const blockingIssues = [
         ...monitor.getIssues('P1'),
         ...userMonitor.getIssues('P1'),
@@ -719,7 +769,7 @@ test.describe('Admin Config Flows', () => {
           streamRequestCount += 1;
         }
       });
-      await userPage.locator('textarea[placeholder]').fill(`Parity free tier request ${Date.now()}`);
+      await setChatPrompt(userPage, `Parity free tier request ${Date.now()}`);
       await userPage.getByRole('button', { name: '发送' }).click();
       await expect.poll(() => streamRequestCount, { timeout: 15000 }).toBeGreaterThan(0);
       await expect(userPage.getByRole('alertdialog')).toHaveCount(0);
@@ -738,7 +788,7 @@ test.describe('Admin Config Flows', () => {
 
       await gotoWithBypass(userPage, '/chat');
       const blockedRequestBaseline = streamRequestCount;
-      await userPage.locator('textarea[placeholder]').fill(`Parity blocked free tier request ${Date.now()}`);
+      await setChatPrompt(userPage, `Parity blocked free tier request ${Date.now()}`);
       await userPage.getByRole('button', { name: '发送' }).click();
       await expect(userPage.getByRole('heading', { name: '积分已用完' })).toBeVisible({ timeout: 10000 });
       await userPage.waitForTimeout(1500);
@@ -1060,6 +1110,7 @@ test.describe('Admin Config Flows', () => {
   });
 
   test('should create, edit, and delete credit packages and membership plans', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const packageName = `Parity Package ${Date.now()}`;
@@ -1115,6 +1166,7 @@ test.describe('Admin Config Flows', () => {
       await page.getByTestId('membership-plan-name-input').fill(editedPlanName);
       await page.getByTestId('membership-plan-monthly-price-input').fill('39.9');
       await page.getByTestId('membership-plan-save').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
       await expect(page.locator('tr').filter({ hasText: editedPlanName }).first()).toBeVisible({ timeout: 15000 });
 
       const deletePlanDialogPromise = acceptNextDialog(page);
@@ -1145,6 +1197,7 @@ test.describe('Admin Config Flows', () => {
   });
 
   test('should create, edit, toggle, and delete a prompt module', async ({ page }, testInfo) => {
+    test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
     const promptName = `Parity Prompt ${Date.now()}`;
@@ -1171,6 +1224,7 @@ test.describe('Admin Config Flows', () => {
       await page.getByTestId('prompt-name-input').fill(editedPromptName);
       await page.getByTestId('prompt-description-input').fill(`Parity prompt edited ${Date.now()}`);
       await page.getByTestId('prompt-save').click();
+      await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
       await expect(page.locator('tr').filter({ hasText: editedPromptName }).first()).toBeVisible({ timeout: 15000 });
 
       const editedRow = page.locator('tr').filter({ hasText: editedPromptName }).first();

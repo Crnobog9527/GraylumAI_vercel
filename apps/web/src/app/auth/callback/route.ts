@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
+import { logServerError } from '@/lib/server-log';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 export async function GET(request: NextRequest) {
@@ -35,8 +36,9 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
+      logServerError('auth', 'auth_callback_session_exchange_failed');
       const loginUrl = new URL('/login', resolveAuthAppUrl());
-      loginUrl.searchParams.set('error', error.message);
+      loginUrl.searchParams.set('error', '登录验证失败，请稍后重试');
       return NextResponse.redirect(loginUrl);
     }
   }
@@ -64,8 +66,8 @@ export async function GET(request: NextRequest) {
       });
       const caller = appRouter.createCaller(ctx);
       await caller.invitation.claimInvitationCode({ code: pendingInviteCode });
-    } catch (error) {
-      console.error('[Auth Callback] Invitation claim failed:', error);
+    } catch {
+      logServerError('auth', 'auth_callback_invitation_claim_failed');
     }
   }
 

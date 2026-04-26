@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { logClientDevError } from '@/lib/client-log';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
 import { ChatSidebar } from '@/components/chat/ChatSidebar';
@@ -28,9 +28,6 @@ import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
 import { useCreditsBalance, CREDIT_THRESHOLDS, getWarningLevel } from '@/hooks/use-credits';
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
-import { createClient } from '@/lib/supabase';
-import { isEmailVerified } from '@/lib/auth';
-import { buildAuthHref } from '@/lib/site-config';
 
 interface Message {
   id: string;
@@ -47,10 +44,7 @@ function estimateTokens(text: string) {
 }
 
 export default function ChatPage() {
-  const router = useRouter();
   const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
@@ -61,33 +55,7 @@ export default function ChatPage() {
   const [pendingLongTextMessage, setPendingLongTextMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { banners } = useBanner({ enabled: isAuthenticated });
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(buildAuthHref(`/login?redirect=${encodeURIComponent(redirectTarget)}`));
-        return;
-      }
-
-      if (!isEmailVerified(user)) {
-        const redirectTarget = `${window.location.pathname}${window.location.search}`;
-        router.replace(
-          buildAuthHref(`/verify-email?email=${encodeURIComponent(user.email ?? '')}&redirect=${encodeURIComponent(redirectTarget)}`)
-        );
-        return;
-      }
-
-      setIsAuthenticated(true);
-      setIsAuthChecking(false);
-    };
-
-    checkAuth();
-  }, [router]);
+  const { banners } = useBanner();
 
   const utils = trpc.useUtils();
 
@@ -96,12 +64,10 @@ export default function ChatPage() {
     credits,
     warningLevel,
     refetch: refetchCreditsBalance,
-  } = useCreditsBalance({ enabled: isAuthenticated });
+  } = useCreditsBalance();
 
   // Fetch system settings for chat page configuration
-  const { data: systemSettings, refetch: refetchSystemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
+  const { data: systemSettings, refetch: refetchSystemSettings } = trpc.settings.getSystemSettings.useQuery();
   const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
   const maxInputCharacters = Number(systemSettings?.max_input_characters ?? 2500) || 2500;
   const enableFreeTier = systemSettings?.enable_free_tier === true || systemSettings?.enable_free_tier === 'true';
@@ -131,16 +97,12 @@ export default function ChatPage() {
   const outputCreditsPer1k = Number(systemSettings?.output_credits_per_1k ?? 5) || 5;
 
   // Fetch export permissions (based on membership level)
-  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
   const canExport = exportPermissions?.allowExport ?? false;
   const canBatchExport = exportPermissions?.allowBatchExport ?? false;
 
   // Fetch active AI models for model selector
-  const { data: modelsData } = trpc.model.getActiveModels.useQuery(undefined, {
-    enabled: isAuthenticated,
-  });
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
   const activeModels = (modelsData ?? []).map((m) => ({
     id: m.id,
     name: m.name,
@@ -158,10 +120,7 @@ export default function ChatPage() {
   }, [activeModels, selectedModelId]);
 
   // Fetch conversations
-  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery(
-    undefined,
-    { enabled: isAuthenticated }
-  );
+  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery();
   const conversations = conversationsData?.data || [];
 
   // Get current conversation
@@ -191,8 +150,8 @@ export default function ChatPage() {
       // 新对话创建后同步到 store，使侧边栏正确高亮
       setActiveConversation(newConversationId);
     },
-    onError: (error) => {
-      console.error('Streaming error:', error);
+    onError: () => {
+      logClientDevError('Streaming error');
     },
     onBalanceChange: () => {
       // 积分变化时刷新积分显示
@@ -232,7 +191,7 @@ export default function ChatPage() {
   // Fetch messages for active conversation (用于切换对话时加载历史)
   const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
     { conversationId: activeConversationId! },
-    { enabled: isAuthenticated && !!activeConversationId && streamingMessages.length === 0 }
+    { enabled: !!activeConversationId && streamingMessages.length === 0 }
   );
 
   // 合并历史消息和流式消息
@@ -249,7 +208,7 @@ export default function ChatPage() {
   const { data: conversationTokenStats } = trpc.chat.getConversationTokenStats.useQuery(
     { conversationId: activeConversationId! },
     {
-      enabled: isAuthenticated && showTokenUsageStats && !!activeConversationId,
+      enabled: showTokenUsageStats && !!activeConversationId,
     }
   );
   const latestAssistantUsage = [...streamingMessages]
@@ -412,14 +371,6 @@ export default function ChatPage() {
       setEditingTitleValue(currentConversation.title || '');
     }
   }, [isEditingTitle, currentConversation]);
-
-  if (isAuthChecking || !isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg-primary)' }}>

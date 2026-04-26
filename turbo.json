@@ -1,7 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
-    "ANTHROPIC_API_KEY",
     "CRON_SECRET",
     "DATABASE_URL",
     "ENABLE_SENTRY_BUILD_UPLOAD",

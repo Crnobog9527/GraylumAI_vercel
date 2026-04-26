@@ -15,7 +15,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
+import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
 
 // Mock user type
 export interface MockUser {
@@ -104,10 +106,10 @@ export const UserProfileHeader = memo(function UserProfileHeader({
       });
       setProfileMessage({ tone: 'success', text: '头像已更新。' });
     } catch (error) {
-      console.error('Failed to upload avatar:', error);
+      logClientDevError('Failed to upload avatar');
       setProfileMessage({
         tone: 'error',
-        text: error instanceof Error ? error.message : '头像上传失败，请稍后重试。',
+        text: getSafeErrorMessage(error, '头像上传失败，请稍后重试。'),
       });
     } finally {
       setUploading(false);
@@ -132,10 +134,10 @@ export const UserProfileHeader = memo(function UserProfileHeader({
       setProfileMessage({ tone: 'success', text: '昵称已更新。' });
       setEditingNickname(false);
     } catch (error) {
-      console.error('Failed to save nickname:', error);
+      logClientDevError('Failed to save nickname');
       setProfileMessage({
         tone: 'error',
-        text: error instanceof Error ? error.message : '昵称保存失败，请稍后重试。',
+        text: getSafeErrorMessage(error, '昵称保存失败，请稍后重试。'),
       });
     } finally {
       setSavingNickname(false);
@@ -545,7 +547,7 @@ export const QuickActionsCard = memo(function QuickActionsCard({
     } catch (error) {
       setCheckinFeedback({
         tone: 'error',
-        text: error instanceof Error ? error.message : '签到失败，请稍后重试。',
+        text: getSafeErrorMessage(error, '签到失败，请稍后重试。'),
       });
     }
   };

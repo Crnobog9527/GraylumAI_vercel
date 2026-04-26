@@ -6,9 +6,14 @@ import { defineConfig, devices } from '@playwright/test';
 dotenv.config({
   path: path.resolve(__dirname, '../../.env.local'),
 });
+dotenv.config({
+  path: path.resolve(__dirname, '.env.local'),
+  override: true,
+});
 
 const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const shouldUseLocalWebServer = !process.env.CI && !remoteBaseUrl;
+const shouldSkipAuthSetup = process.env.SECURITY_E2E_LOCAL_ONLY === 'true';
 
 /**
  * Playwright E2E Test Configuration
@@ -74,7 +79,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
       },
-      dependencies: ['setup'],
+      dependencies: shouldSkipAuthSetup ? [] : ['setup'],
     },
 
     // Desktop Firefox (optional, uncomment if needed)
@@ -92,14 +97,15 @@ export default defineConfig({
       use: {
         ...devices['Pixel 5'],
       },
-      dependencies: ['setup'],
+      dependencies: shouldSkipAuthSetup ? [] : ['setup'],
     },
   ],
 
   // Run local dev server before starting the tests
   webServer: shouldUseLocalWebServer
     ? {
-        command: 'pnpm dev',
+        // Webpack dev server is more stable for local middleware redirect checks.
+        command: 'pnpm dev:webpack',
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 120000,

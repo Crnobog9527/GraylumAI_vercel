@@ -88,6 +88,17 @@ describe('validateEnv', () => {
     expect(result.errors).toContain('启用 Stripe 时必须配置 NEXT_PUBLIC_APP_URL');
   });
 
+  it('requires OpenRouter as the only AI provider environment key', () => {
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.ANTHROPIC_API_KEY = `sk-ant-${'a'.repeat(40)}`;
+
+    const result = validateEnv();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('必须配置 OPENROUTER_API_KEY');
+    expect(result.warnings).toContain('ANTHROPIC_API_KEY 已退役；Claude 模型请通过 OPENROUTER_API_KEY 调用');
+  });
+
   it('requires SUPABASE_SERVICE_ROLE_KEY when Stripe is enabled', () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     process.env.STRIPE_SECRET_KEY = 'sk_test_1234567890';

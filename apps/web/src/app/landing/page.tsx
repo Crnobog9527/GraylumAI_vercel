@@ -7,6 +7,8 @@ import LandingFooter from '@/components/landing/LandingFooter';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import { getPublicSiteSettings } from '@/lib/public-site';
 
+export const dynamic = 'force-dynamic';
+
 export default async function LandingPage() {
   const {
     siteName,

@@ -61,7 +61,7 @@ export const aiModels = pgTable('ai_models', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   modelId: text('model_id').notNull(),
-  provider: text('provider', { enum: ['anthropic', 'openai', 'google', 'custom', 'builtin'] }).default('anthropic').notNull(),
+  provider: text('provider', { enum: ['anthropic', 'openai', 'google', 'custom', 'builtin'] }).default('openai').notNull(),
   apiKey: text('api_key'),
   apiEndpoint: text('api_endpoint'),
   description: text('description'),

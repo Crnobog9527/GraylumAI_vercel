@@ -7,6 +7,7 @@
 
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+import { logServerError } from '@/lib/server-log';
 
 // ============================================
 // 类型定义
@@ -18,6 +19,7 @@ export interface RateLimitResult {
   remaining: number;
   reset: number;
   retryAfter?: number;
+  reason?: 'rate_limited' | 'unavailable';
 }
 
 export type RateLimitType =
@@ -32,6 +34,14 @@ export type RateLimitType =
 // ============================================
 
 let redis: Redis | null = null;
+
+function shouldFailClosedRateLimit(): boolean {
+  if (process.env.VERCEL_ENV) {
+    return process.env.VERCEL_ENV === 'production';
+  }
+
+  return process.env.NODE_ENV === 'production';
+}
 
 function getRedis(): Redis | null {
   if (redis) return redis;
@@ -134,7 +144,17 @@ export async function checkRateLimit(
     const limiter = getRateLimiter(type);
 
     if (!limiter) {
-      // Redis 未配置，允许请求通过
+      if (shouldFailClosedRateLimit()) {
+        return {
+          success: false,
+          limit: 0,
+          remaining: 0,
+          reset: Date.now() + 60_000,
+          retryAfter: 60,
+          reason: 'unavailable',
+        };
+      }
+
       return {
         success: true,
         limit: 0,
@@ -151,10 +171,22 @@ export async function checkRateLimit(
       remaining: result.remaining,
       reset: result.reset,
       retryAfter: result.success ? undefined : Math.ceil((result.reset - Date.now()) / 1000),
+      reason: result.success ? undefined : 'rate_limited',
     };
-  } catch (error) {
-    // Redis 连接失败时，允许请求通过 (fail-open)
-    console.error('[RateLimit] Redis error, allowing request:', error);
+  } catch {
+    if (shouldFailClosedRateLimit()) {
+      logServerError('security', 'web_rate_limit_backend_unavailable_denying_request');
+      return {
+        success: false,
+        limit: 0,
+        remaining: 0,
+        reset: Date.now() + 60_000,
+        retryAfter: 60,
+        reason: 'unavailable',
+      };
+    }
+
+    logServerError('security', 'web_rate_limit_backend_unavailable_allowing_request');
     return {
       success: true,
       limit: 0,

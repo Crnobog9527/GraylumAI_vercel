@@ -2,7 +2,7 @@
     "project": "GraylumAI",
     "phase": 12,
     "description": "遗留问题清理与系统稳定化",
-    "updated_at": "2026-03-06",
+    "updated_at": "2026-04-22",
     "tasks": [
         {
             "id": "12.1.1",
@@ -15,9 +15,9 @@
                 "apps/web/src/app/chat/page.tsx",
                 "apps/web/src/app/api/ai/stream/route.ts"
             ],
-            "passes": false,
-            "blocked": true,
-            "block_reason": "缺少登录态与真实模型密钥，无法完成端到端 AI 回答实测"
+            "passes": true,
+            "blocked": false,
+            "block_reason": null
         },
         {
             "id": "12.1.2",
@@ -29,9 +29,9 @@
             "files": [
                 "apps/web/src/hooks/useStreamingChat.ts"
             ],
-            "passes": false,
-            "blocked": true,
-            "block_reason": "缺少登录态，无法完成打字机与中断真实交互验证"
+            "passes": true,
+            "blocked": false,
+            "block_reason": null
         },
         {
             "id": "12.1.3",
@@ -70,9 +70,11 @@
             "priority": "P1",
             "type": "verify",
             "files": [
-                "apps/web/src/app/admin/models/page.tsx"
+                "apps/web/src/app/admin/models/page.tsx",
+                "packages/api/src/routers/model.test.ts",
+                "apps/web/tests/e2e/admin-destructive.spec.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -84,11 +86,13 @@
             "priority": "P0",
             "type": "verify",
             "files": [
-                "apps/web/src/app/api/ai/stream/route.ts"
+                "apps/web/src/app/api/ai/stream/route.ts",
+                "packages/api/src/services/providerUtils.ts",
+                "packages/api/src/services/__tests__/providerUtils.test.ts"
             ],
-            "passes": false,
-            "blocked": true,
-            "block_reason": "需在移除全局 key 且保留模型 key 的条件下做真实流式请求验证"
+            "passes": true,
+            "blocked": false,
+            "block_reason": null
         },
         {
             "id": "12.1.7",
@@ -100,7 +104,7 @@
             "files": [
                 "apps/web/src/app/api/ai/stream/route.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -114,9 +118,9 @@
             "files": [
                 "packages/api/src/services/billing.ts"
             ],
-            "passes": false,
-            "blocked": true,
-            "block_reason": "需真实会话验证积分前后变化与落库一致"
+            "passes": true,
+            "blocked": false,
+            "block_reason": null
         },
         {
             "id": "12.1.9",
@@ -128,7 +132,7 @@
             "files": [
                 "apps/web/src/app/chat/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -142,7 +146,7 @@
             "files": [
                 "apps/web/src/app/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -252,9 +256,9 @@
                 "apps/web/src/app/api/ai/stream/route.ts",
                 "turbo.json"
             ],
-            "passes": false,
-            "blocked": true,
-            "block_reason": "Preview 后台测试连接已验证成功，但受 Vercel Preview 部署保护和 CLI Bearer header 传递干扰，/api/ai/stream 的端到端验证仍需在已登录浏览器中继续确认或提供 bypass 方案"
+            "passes": true,
+            "blocked": false,
+            "block_reason": null
         },
         {
             "id": "12.2.1",
@@ -293,9 +297,10 @@
             "priority": "P2",
             "type": "audit",
             "files": [
-                "packages/api/src/services/billing.ts"
+                "apps/web/src/app/admin/settings/page.tsx",
+                "docs/ADMIN_SETTINGS_EFFECT_MATRIX.md"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -309,7 +314,7 @@
             "files": [
                 "packages/api/src/services/modelRouter.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -324,7 +329,7 @@
                 "apps/web/src/app/chat/page.tsx",
                 "apps/web/src/app/api/ai/stream/route.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -338,7 +343,7 @@
             "files": [
                 "apps/web/src/app/admin/users/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -350,9 +355,11 @@
             "priority": "P2",
             "type": "fix",
             "files": [
+                "packages/api/src/routers/admin.ts",
+                "packages/api/src/routers/admin.test.ts",
                 "apps/web/src/app/admin/finance/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -366,7 +373,7 @@
             "files": [
                 "apps/web/src/app/admin/finance/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -381,7 +388,7 @@
                 "apps/web/src/app/admin/finance/page.tsx",
                 "packages/api/src/routers/admin.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -423,7 +430,7 @@
             "files": [
                 "apps/web/src/components/profile/SubscriptionCard.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -435,9 +442,10 @@
             "priority": "P3",
             "type": "fix",
             "files": [
-                "apps/web/src/components/profile/SubscriptionCard.tsx"
+                "apps/web/src/components/profile/SubscriptionCard.tsx",
+                "apps/web/tests/e2e/auth.spec.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -449,9 +457,10 @@
             "priority": "P3",
             "type": "fix",
             "files": [
-                "apps/web/src/components/profile/SubscriptionCard.tsx"
+                "apps/web/src/components/profile/SubscriptionCard.tsx",
+                "apps/web/tests/e2e/auth.spec.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -465,7 +474,7 @@
             "files": [
                 "apps/web/src/app/admin/costs/page.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -477,9 +486,10 @@
             "priority": "P3",
             "type": "fix",
             "files": [
-                "apps/web/src/app/admin/costs/page.tsx"
+                "apps/web/src/app/admin/costs/page.tsx",
+                "apps/web/tests/e2e/admin-ops.spec.ts"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         },
@@ -570,7 +580,7 @@
             "files": [
                 "apps/web/src/components/landing/CTASection.tsx"
             ],
-            "passes": false,
+            "passes": true,
             "blocked": false,
             "block_reason": null
         }

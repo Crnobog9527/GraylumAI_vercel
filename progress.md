@@ -23,12 +23,268 @@
 
 ## Current Status
 
-- **Phase:** 阶段 12 遗留问题清理与系统稳定化 ⏳ 规划完成
+- **Phase:** 历史遗留问题清理与系统稳定化 ✅ 已完成本轮收口
 - **Previous:** 阶段 11 移除会员上下文限制 ✅ 已完成
-- **Current:** 阶段 12 步骤 1 执行中（P0 批次已完成自动验证，部分阻塞，部分转入修复）
+- **Current:** 阶段 12 全部任务已完成
 - **开始时间:** 2026-03-06
-- **更新时间:** 2026-03-06 (P0 验证批次状态已对齐)
+- **更新时间:** 2026-04-25 (OpenRouter/Supabase/DB 轮换后 Preview E2E fixture 稳定化)
 - **参考文档:** `task.json` - 当前任务源, `findings.md` - 阶段 12 决策
+
+### 2026-04-25 - 密钥轮换后的 Preview E2E fixture 稳定化
+
+**完成内容**:
+- 将 Playwright E2E 的维护模式与积分/聊天证据 fixture 从 Supabase REST service-role client 改为 `DATABASE_URL` 直连 SQL helper
+- `playwright.config.ts` 现在按 root `.env.local` -> `apps/web/.env.local` 顺序加载本地环境，允许 app 层配置覆盖 root 默认值
+- Preview 数据库中 OpenRouter Claude 模型的模型级 key 已同步为轮换后的 OpenRouter key；文档只记录状态，不记录密钥值
+- `.auth` storage state 继续按运行态文件处理，本轮验证后已恢复，不纳入交付差异
+
+**验证方式**:
+- `pnpm test:api`
+  - 结果：`36` 个测试文件、`358` 个测试通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `git diff --check`
+  - 结果：通过
+- `PLAYWRIGHT_BASE_URL=https://graylum-ai-vercel-v1-i0krvwxmp-simons-projects-bfe3e99f.vercel.app pnpm --dir apps/web exec playwright test tests/e2e/chat.spec.ts --project=chromium --grep 'persist chat runtime evidence'`
+  - 结果：`3 passed`
+- `PLAYWRIGHT_BASE_URL=https://graylum-ai-vercel-v1-i0krvwxmp-simons-projects-bfe3e99f.vercel.app pnpm --dir apps/web exec playwright test tests/e2e/admin-config.spec.ts --project=chromium --grep 'chat runtime feature settings'`
+  - 结果：`3 passed`
+- `pnpm release:preflight:preview -- --preview-url https://graylum-ai-vercel-v1-grpsm08tp-simons-projects-bfe3e99f.vercel.app --skip-local-build`
+  - 结果：通过
+  - 证据目录：`.release-output/preflight/20260425-215454/`
+  - 通过模块：`preview-auth`、`preview-ready`、`preview-chat`、`preview-admin`、`preview-admin-config`、`preview-admin-ops`、`preview-security`、`preview-user-extended`、`preview-user-supplemental`
+  - `preview-admin-destructive`：按策略跳过，需隔离 destructive 环境单独执行
+
+**备注**:
+- 旧的 Preview preflight 失败证据来自已废弃的 Supabase legacy service-role REST 调用路径，不能作为本次 SQL fixture 修复后的最终结论
+- `run-release-preflight.sh` 已兼容未启用 Deployment Protection 的 Preview：无 bypass cookie 时不再提前失败，而是继续执行真实访问验证；若 Preview 实际受保护，后续页面访问仍会失败并暴露配置问题
+
+### 2026-04-25 - Claude via OpenRouter 口径收敛
+
+**完成内容**:
+- 移除 `ANTHROPIC_API_KEY` 作为运行时 fallback，环境校验现在要求 `OPENROUTER_API_KEY`
+- 管理端模型连接测试、流式聊天 route、旧非流式 AI router 与 `StreamHandler` 不再调用 Anthropic 官方 `/v1/messages` 或 `count_tokens`
+- 默认 Claude 模型与新增模型默认 provider 调整为 OpenRouter / OpenAI-compatible 口径，并新增 migration `0022_openrouter_claude_provider_default.sql`
+- `.env.example`、发布/安全文档更新为“Anthropic 官方 key 只 revoke/delete，不再轮换新 key”
+- 删除已跟踪的 `.playwright-cli/*` 旧录制产物并加入 `.gitignore`，避免继续在 HEAD 中保留 E2E 账号运行痕迹
+
+**验证方式**:
+- `pnpm --filter @repo/api test:run -- src/services/__tests__/providerUtils.test.ts src/lib/envValidator.test.ts src/services/__tests__/tokenCounter.test.ts src/routers/model.test.ts src/routers/ai.test.ts`
+  - 结果：当前 vitest 配置实际执行 `36` 个测试文件、`358` 个测试，全部通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `git diff --check`
+  - 结果：通过
+- 本地 env 指纹反查当前已跟踪文件：
+  - 结果：未命中私密 key / 密码值；仅命中公开 `NEXT_PUBLIC_APP_URL`
+
+**备注**:
+- Git 历史中曾出现的 OpenRouter、Supabase service role、数据库连接串、E2E 密码等仍需在外部平台轮换或重置
+- `ANTHROPIC_API_KEY` 不再建议轮换为新 key，处理方式是 revoke/delete 并从 Vercel/本地环境中移除
+- 2026-04-25 更新：OpenRouter key、Supabase service role 与 `DATABASE_URL` / 数据库密码已完成更新；`E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 按用户决策延后到最终上线前删除或重置
+
+### 2026-04-24 - Preview 发布前护栏通过
+
+**完成内容**:
+- 将分支 `codex/fix/admin-stat-accuracy` 推送到 `origin`，触发 Vercel Preview 部署
+- 锁定 Preview URL：`https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app`
+- 修复 Preview preflight 暴露出的测试边界问题：
+  - 聊天输入 helper 改为重新定位当前可见 textarea，并使用真实逐字符输入，避免 React 受控输入在远端运行时出现 DOM 值与状态不同步
+  - `chat.spec.ts` 的默认长文本配置断言仅保留在本地运行；Preview 上的长文本设置生效由 `admin-config.spec.ts` 的显式后台设置流覆盖
+  - 订阅购买用例接受“创建 Stripe Checkout session”作为真实下一步，不再只等待旧的“支付暂不可用”fallback
+
+**验证方式**:
+- `pnpm test:api`
+  - 结果：`36` 个测试文件、`356` 个测试通过
+- `pnpm --dir apps/web exec tsc --noEmit --pretty false`
+  - 结果：通过
+- `pnpm release:preflight:preview -- --preview-url https://graylum-ai-vercel-v1-d0e6q4uz5-simons-projects-bfe3e99f.vercel.app --skip-local-build`
+  - 结果：通过
+  - 证据目录：`.release-output/preflight/20260424-184843/`
+  - 通过模块：`preview-auth`、`preview-ready`、`preview-chat`、`preview-admin`、`preview-admin-config`、`preview-admin-ops`、`preview-security`、`preview-user-extended`、`preview-user-supplemental`
+
+**备注**:
+- `preview-admin-destructive` 本轮未执行，仍需隔离 destructive 窗口后单独开启
+- 本轮不启用 Stripe 专项验收；购买按钮仅验证能进入真实 checkout session 下一步
+- `apps/web/tests/e2e/.auth/*.json` 仍按运行态文件处理，最终交付前恢复到仓库版本
+
+### 2026-04-24 - 历史遗留清理批次完成
+
+**完成内容**:
+- 修复 `/admin/settings` 首屏与保存链路稳定性：
+  - `admin.getSettingsDashboard` 改为仅返回系统设置与会员方案
+  - `admin.getCleanupStats` 继续独立承担清理统计查询
+  - `settings.updateSystemSettingsBulk` 落地，后台“保存所有设置”不再逐条 mutation 串行阻塞
+- 收口管理端高频 dialog 的可访问性警告，为模型、公告、提示词、积分包、会员方案、用户积分调整与聊天侧边栏重命名弹窗补齐隐藏描述
+- 修复用户订阅卡在“同级别多套餐”场景下的唯一标识问题，订阅卡改用 `plan.id` 作为稳定键，并暴露 `data-plan-id`
+- 修复登录保护路由回跳：
+  - `proxy.ts` 现在会保留 `/login?redirect=...` 中的目标地址
+  - 已登录用户访问登录页时，不再无条件被重定向回 `/`
+- 稳定化以下 E2E 套件中的历史失败：
+  - `admin-config.spec.ts`
+  - `admin-destructive.spec.ts`
+  - `admin-ops.spec.ts`
+  - `auth.spec.ts`
+  - `chat.spec.ts`
+
+**验证方式**:
+- `pnpm --filter @repo/api test:run -- src/routers/settings.test.ts src/routers/admin.test.ts`
+  - 结果：通过，仓库当前 vitest 配置实际执行到 `36` 个测试文件、`356` 个测试
+- `pnpm --dir apps/web test:e2e admin-config.spec.ts --project=chromium`
+  - 结果：`10 passed, 2 skipped`
+- `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium`
+  - 结果：`12 passed`
+- `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`
+  - 结果：`6 passed`
+- `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`
+  - 结果：`11 passed`
+- `pnpm --dir apps/web test:e2e chat.spec.ts --project=chromium`
+  - 结果：`6 passed, 4 skipped`
+
+**备注**:
+- `admin-config` 中 `smart routing` 与 `smart search` 两条 preview 依赖用例仍按环境门控跳过，不属于本轮未完成项
+- 本轮交付前会恢复 `apps/web/tests/e2e/.auth/admin.json` 与 `apps/web/tests/e2e/.auth/user.json`，不把运行态 storage state 带入差异
+- 本地 `localhost:3000` 的旧 Next 进程在回归过程中出现 `/profile` 挂起，已重启到新的 `next dev --webpack` 会话后完成剩余回归
+
+### 2026-04-22 - 完成 12.1.6 独立 API Key 生效验证
+
+**完成内容**:
+- 启动隔离端口 `http://localhost:3101` 的本地 Next dev server，并在进程级显式置空 `OPENROUTER_API_KEY` 与 `ANTHROPIC_API_KEY`
+- 在隔离 server 上使用真实测试用户 Bearer token，直接调用 `/api/ai/stream`
+- 对照验证两类模型：
+  - 有数据库 `api_key` 的 OpenRouter Claude 模型：请求可继续穿过 `api_key` 检查、完成预扣，并真实打到上游 provider；上游返回 `403` 后执行退款回滚
+  - 无数据库 `api_key` 的模型：直接落为 `未配置 API Key`，并执行 `pre_deduct -> refund`
+- 结合 `providerUtils` 单测与隔离运行证据，确认流式端点在无 env 回退键时会使用 `ai_models.api_key`，而不是依赖全局 provider env
+
+**验证方式**:
+- 隔离 server 启动命令：
+  - `OPENROUTER_API_KEY='' ANTHROPIC_API_KEY='' PLAYWRIGHT_BASE_URL='http://localhost:3101' pnpm --dir apps/web exec next dev --port 3101 --turbopack`
+- 真实流式请求验证：
+  - `Claude 4.6 opus`、`Claude 4.5 haiku`、`Claude 4.5 Sonnet` 在隔离端口均进入 provider 调用阶段，并在服务端日志中记录 `ai_stream_openai_compatible_provider_failed status=403`
+  - 同时 `billing_history` 记录对应 `requestId` 的 `pre_deduct -> refund`
+  - `ai_usage_logs` 记录为 `failed`
+- 无 key 对照验证：
+  - `Parity Toggle Model 1776832066252` 在隔离端口上记录 `ai_usage_logs.error_message = 未配置 API Key`
+  - `profiles.credits` 由 `1800 -> 1797 -> 1800`，证明退款回滚完成
+- 静态与单测佐证：
+  - `packages/api/src/services/providerUtils.ts`
+  - `packages/api/src/services/__tests__/providerUtils.test.ts`
+
+**备注**:
+- 本项验证目标是“确认 key 来源是否为数据库模型 key”，该目标现已完成
+- 隔离验证中上游 provider 返回 `403`，说明当前数据库里的模型 key 在该 provider/模型组合上仍可能受供应商策略约束；但这不影响“流式端点未使用全局 env fallback”这一结论
+- 阶段 12 至此不再存在未完成或阻塞项
+
+### 2026-04-22 - 完成阶段 12 剩余 active 项收尾
+
+**完成内容**:
+- 完成 `12.1.5`：为无 API Key 模型补充更直观的后台状态标签 `未配置 API Key`，并为模型连接状态增加稳定测试钩子；补充后端单测，验证 `verifyAndPersistConnection()` 在无 key 时会持久化 `no_key`
+- 完成 `12.2.3`：将 `first_purchase_bonus_percent` 从“有效计费设置”降级为“已退役 / 参考显示”，并在后台与 `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 中统一为历史兼容字段
+- 完成 `12.4.5`：为 `/admin/costs` 的概览、调用日志、Token 统计补充数据获取状态徽标，覆盖 `加载中 / 刷新中 / 获取失败 / 获取失败（保留旧数据） / 已同步`
+- 完成 `12.4.2` 与 `12.4.3`：将个人中心订阅推荐卡样式从蓝紫高亮改为金橙方向，并移除 `年付共 $xx` 文案
+- 为以上改动同步补充 E2E 断言草案：模型无 key 警告、成本页状态徽标、计费设置 retired-reference、订阅卡暖色高亮与年付总价移除
+
+**验证方式**:
+- 运行 `pnpm --filter @repo/api test:run -- src/routers/model.test.ts src/routers/admin.test.ts src/services/__tests__/providerUtils.test.ts`，结果：通过
+- 运行 `pnpm test:api`，结果：`36` 个测试文件、`355` 个测试全部通过
+- 运行 `pnpm --dir apps/web exec tsc --noEmit --pretty false`，结果：前端类型检查通过
+- 运行 `git diff --check`，结果：通过
+
+**备注**:
+- `task.json` 已回写：`12.1.5`、`12.2.3`、`12.4.2`、`12.4.3`、`12.4.5` 均已标记为完成
+- 当前阶段 12 只剩 `12.1.6` 为阻塞项
+- Playwright 浏览器二进制尚未在本机恢复，昨天的浏览器侧回归受环境限制未完整跑通；这被记录为测试环境缺口，而不是代码未完成
+
+### 2026-04-22 - Playwright 浏览器环境恢复并补跑关键 E2E
+
+**完成内容**:
+- 成功安装本机 Playwright Chromium、FFmpeg 与 Headless Shell，恢复浏览器侧回归执行能力
+- 顺序补跑 `auth.spec.ts`、`admin-ops.spec.ts`、`admin-destructive.spec.ts`，避免再次触发本地并发锁冲突
+- 确认本轮新增断言所处的关键路径在真实浏览器中已被执行：
+  - `admin-ops.spec.ts` 中 `/admin/settings` 计费设置 active/reference 分区断言通过
+  - `admin-ops.spec.ts` 中 `/admin/costs` 状态徽标断言通过
+  - `admin-destructive.spec.ts` 中“启用无 key 模型出现 warning toast，且状态仍为未配置 API Key”断言在失败前已执行通过
+
+**验证方式**:
+- 运行 `pnpm --dir apps/web test:e2e auth.spec.ts --project=chromium`
+  - 结果：`8` 通过，`3` 失败
+  - 失败点：
+    - profile 页既有选择器与实际 UI 不匹配
+    - 公共法务页导航监控捕获 `net::ERR_ABORTED`
+- 运行 `pnpm --dir apps/web test:e2e admin-ops.spec.ts --project=chromium`
+  - 结果：`5` 通过，`1` 失败
+  - 失败点：既有工单流程使用 `new URL(..., process.env.PLAYWRIGHT_BASE_URL!)`，当前环境变量缺失导致 `Invalid URL`
+- 运行 `ENABLE_PARITY_DESTRUCTIVE_E2E=true pnpm --dir apps/web test:e2e admin-destructive.spec.ts --project=chromium`
+  - 结果：`5` 通过，`1` 失败，`6` 未运行
+  - 失败点：模型启停验证用例在 `finally` 清理阶段超时，随后页面关闭；失败不在本轮新增的 warning/status 断言位置
+
+**备注**:
+- 浏览器环境问题已经从“缺失浏览器二进制”收敛为“仓库内既有 E2E 用例还有历史失败”
+- 本轮新增阶段 12 断言已至少在 `admin-ops` 的读页巡检和 `admin-destructive` 的模型启停路径中被执行
+
+### 2026-04-21 - 完成 12.3.3 修复积分规则显示不符
+
+**完成内容**:
+- 将财务页“积分规则”从历史参考值改为运行时计费基线，展示来源改为 `ai_models` 活跃模型价格与实际计费常量，而不是已退役的 `system_settings.input_credits_per_1k / output_credits_per_1k / web_search_credits`
+- 更新 `packages/api/src/routers/admin.ts` 的 `getFinanceStats`，返回 `runtimeBilling` 汇总，包括输入/输出成本区间、联网搜索成本区间、搜索附加积分与注册赠送积分
+- 更新 `apps/web/src/app/admin/finance/page.tsx`，把运营侧看到的“积分规则”说明切换为当前真实运行时口径
+- 为管理端财务路由补充测试，覆盖运行时计费区间汇总与旧配置项失效的场景
+
+**验证方式**:
+- 运行 `pnpm --filter @repo/api test:run -- src/routers/admin.test.ts`，结果：`35` 个测试文件、`352` 个测试全部通过
+- 运行 `pnpm --dir apps/web exec tsc --noEmit --pretty false`，结果：前端类型检查通过
+
+**备注**:
+- `12.3.3` 已完成并回写到 `task.json`
+- 阶段 12 剩余 active 项更新为：`12.1.5`、`12.2.3`、`12.4.2`、`12.4.3`、`12.4.5`
+- `12.1.6` 继续保持阻塞
+
+### 2026-04-21 - 阶段 12 状态回写对齐
+
+**完成内容**:
+- 复核 `task.json` 与后续真实证据之间的漂移，确认 `task.json` 停留在 `2026-03-06`，已落后于后续稳定化闭环
+- 以 `docs/STABILIZATION_BACKLOG.md`、`docs/STRICT_SIGNOFF_STATUS.md`、`docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 与 `docs/PHASE4_LOCAL_PERFORMANCE_BASELINE.md` 为依据，回写阶段 12 任务状态
+- 将以下 `15` 项由“未完成/阻塞”改为“已完成”：
+  - `12.1.1`、`12.1.2`、`12.1.7`、`12.1.8`、`12.1.9`、`12.1.10`、`12.1.17`
+  - `12.2.4`、`12.2.5`
+  - `12.3.1`、`12.3.2`、`12.3.4`
+  - `12.4.1`、`12.4.4`
+  - `12.5.6`
+- 保持以下 `6` 项为仍待继续执行：
+  - `12.1.5`
+  - `12.2.3`
+  - `12.4.2`
+  - `12.4.3`
+  - `12.4.5`
+- 保持以下 `1` 项为继续阻塞：
+  - `12.1.6`
+
+**验证方式**:
+- 重新统计 `task.json` 未完成任务，当前结果为：`6` 项未完成，其中 `1` 项 `BLOCKED`、`5` 项可继续执行
+- 交叉核对运行时/验收证据：
+  - Preview 聊天主链、`requestId -> ai_usage_logs -> token_stats -> credit_transactions` 证据链已在 `docs/STABILIZATION_BACKLOG.md` 与 `docs/STRICT_SIGNOFF_STATUS.md` 闭环
+  - 聊天页面设置与智能路由/搜索设置已在 `docs/ADMIN_SETTINGS_EFFECT_MATRIX.md` 标记为 `verified`
+  - landing 页 hydration mismatch 已在 `docs/PHASE4_LOCAL_PERFORMANCE_BASELINE.md` 收口
+- 保留 `12.1.6` 为阻塞，因为现有链路仍是“模型 key 优先、环境变量回退”，尚未完成“仅保留模型 key”的真实验证
+
+**备注**:
+- 这次回写只对齐计划状态，不篡改更早的历史记录
+- `12.2.3`、`12.4.2`、`12.4.3`、`12.4.5` 仍需后续单独收口
+- 后续若继续推进阶段 12，应优先处理仍待做的 `P1/P2` 项，再决定是否设计 `12.1.6` 的隔离验证方案
+
+**建议执行顺序**:
+1. `12.1.5` 验证启用无 Key 模型警告
+   - 原因：代码路径已存在，属于低成本高确定性验证，完成后可尽快再消掉一个步骤 1 遗留项
+2. `12.2.3` 审计首充赠送百分比
+   - 原因：当前后台仍暴露 `first_purchase_bonus_percent` 配置，但尚未确认真实运行时是否消费该设置，需要尽快决定“接通 / 退役为 reference-only”
+3. `12.4.5` 成本监控-API 状态指示器
+   - 原因：成本页已有 loading/error 基础，但尚缺明确的“获取成功/失败”体验闭环，适合作为步骤 4 的功能性收尾
+4. `12.4.2` 订阅-热门高亮样式
+   - 原因：当前 `SubscriptionCard` 仍是蓝色高亮，与既定金色/橙色方向不一致，属于纯展示层收尾
+5. `12.4.3` 订阅-年付总价移除
+   - 原因：与 `12.4.2` 同文件、同区域，适合在同一轮 UI 调整里一起完成
+6. `12.1.6` 验证独立 API Key 生效（阻塞）
+   - 原因：必须在“移除全局 key、仅保留模型 key”的隔离环境下重跑真实流式请求；建议等前述 6 项收尾后，再单独设计验证窗口与回滚方案
 
 ### 2026-03-06 - 工作流标准化: task.json 成为唯一计划源
 

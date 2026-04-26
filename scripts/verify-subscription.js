@@ -9,13 +9,21 @@ const { Client } = require('pg');
 const sessionId = process.argv[2];
 const email = process.argv[3];
 
+function writeStdout(message) {
+  process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message) {
+  process.stderr.write(`${message}\n`);
+}
+
 if (!sessionId || !email) {
-  console.error('Usage: node scripts/verify-subscription.js <checkout_session_id> <email>');
+  writeStderr('Usage: node scripts/verify-subscription.js <checkout_session_id> <email>');
   process.exit(1);
 }
 
 if (!process.env.DATABASE_URL) {
-  console.error('DATABASE_URL is required');
+  writeStderr('DATABASE_URL is required');
   process.exit(1);
 }
 
@@ -90,7 +98,7 @@ async function main() {
     ),
   ]);
 
-  console.log(
+  writeStdout(
     JSON.stringify(
       {
         order: order.rows,
@@ -100,13 +108,13 @@ async function main() {
       },
       null,
       2,
-    ),
+    )
   );
 
   await client.end();
 }
 
 main().catch((error) => {
-  console.error(error);
+  writeStderr(error instanceof Error ? error.stack ?? error.message : String(error));
   process.exit(1);
 });

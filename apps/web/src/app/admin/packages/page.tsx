@@ -22,6 +22,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -113,48 +114,49 @@ export default function AdminPackagesPage() {
   });
 
   // Queries
-  const { data: packages, isLoading: packagesLoading, error: packagesError, refetch: refetchPackages } = trpc.admin.getAllPackages.useQuery();
-  const { data: membershipPlans, isLoading: plansLoading, error: plansError, refetch: refetchPlans } = trpc.admin.getAllMembershipPlans.useQuery();
+  const { data: dashboard, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = trpc.admin.getPackagesDashboard.useQuery();
+  const packages = dashboard?.packages;
+  const membershipPlans = dashboard?.membershipPlans;
 
   // Credit Package Mutations
   const createPackage = trpc.admin.createPackage.useMutation({
-    onSuccess: () => {
-      refetchPackages();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePackageDialog();
     }
   });
 
   const updatePackage = trpc.admin.updatePackage.useMutation({
-    onSuccess: () => {
-      refetchPackages();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePackageDialog();
     }
   });
 
   const deletePackage = trpc.admin.deletePackage.useMutation({
-    onSuccess: () => {
-      refetchPackages();
+    onSuccess: async () => {
+      await refetchDashboard();
     }
   });
 
   // Membership Plan Mutations
   const createMembershipPlan = trpc.admin.createMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchPlans();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePlanDialog();
     }
   });
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchPlans();
+    onSuccess: async () => {
+      await refetchDashboard();
       closePlanDialog();
     }
   });
 
   const deleteMembershipPlan = trpc.admin.deleteMembershipPlan.useMutation({
-    onSuccess: () => {
-      refetchPlans();
+    onSuccess: async () => {
+      await refetchDashboard();
     }
   });
 
@@ -336,14 +338,14 @@ export default function AdminPackagesPage() {
   };
 
   // Loading state
-  if (packagesLoading || plansLoading) {
+  if (dashboardLoading) {
     return <AdminLoadingState />;
   }
 
   // Error state
-  const error = packagesError || plansError;
+  const error = dashboardError;
   if (error) {
-    return <AdminErrorState error={error} onRetry={() => { refetchPackages(); refetchPlans(); }} />;
+    return <AdminErrorState error={error} onRetry={() => { refetchDashboard(); }} />;
   }
 
   const packageList = packages ?? [];
@@ -823,6 +825,9 @@ export default function AdminPackagesPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {editingPackage ? '编辑积分包' : '创建积分包'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                设置积分包的价格、积分数量、赠送额度和上架状态。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
@@ -1005,6 +1010,9 @@ export default function AdminPackagesPage() {
               <DialogTitle style={{ color: 'var(--text-primary)' }}>
                 {editingPlan ? '编辑会员等级' : '创建会员等级'}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                设置会员等级的价格、积分权益、Stripe 价格和展示顺序。
+              </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">

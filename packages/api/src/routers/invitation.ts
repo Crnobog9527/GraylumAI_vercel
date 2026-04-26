@@ -1,6 +1,9 @@
 import { router, publicProcedure, protectedProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createSafeInternalError } from '../lib/publicError';
+import { logger } from '../lib/logger';
 import {
   evaluateInvitationClaimDecision,
   getChinaDayStartIso,
@@ -9,6 +12,69 @@ import {
   getOneHourAgoIso,
   loadInvitationRuntimeSettings,
 } from '../services/invitationRuntime';
+
+function createInvitationOperationError(operation: string, cause: unknown) {
+  return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function logInvitationEndpointMetric(
+  endpoint: string,
+  startedAt: number,
+  context: Record<string, unknown> = {},
+) {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  logger.info('api', 'invitation_endpoint_profile', {
+    endpoint,
+    durationMs: Date.now() - startedAt,
+    ...context,
+  });
+}
+
+function buildInvitationStats(records: Array<{
+  status: string;
+  risk_level: string;
+  inviter_reward: number | null;
+  created_at: string | null;
+}>) {
+  const stats = {
+    total: records.length,
+    rewarded: records.filter((record) => record.status === 'rewarded').length,
+    rejected: records.filter((record) => record.status === 'rejected').length,
+    pending: records.filter((record) => record.status === 'pending' || record.status === 'registered').length,
+    highRisk: records.filter((record) => record.risk_level === 'high').length,
+    totalRewards: records.reduce((sum, record) => sum + (record.inviter_reward || 0), 0),
+  };
+
+  const now = new Date();
+  const trend = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now);
+    date.setDate(date.getDate() - (6 - index));
+    const dateStr = date.toISOString().split('T')[0];
+    const dayRecords = records.filter((record) => record.created_at?.split('T')[0] === dateStr);
+
+    return {
+      date: `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`,
+      count: dayRecords.length,
+      rewarded: dayRecords.filter((record) => record.status === 'rewarded').length,
+      rejected: dayRecords.filter((record) => record.status === 'rejected').length,
+    };
+  });
+
+  const riskDistribution = [
+    { name: '低风险', value: records.filter((record) => record.risk_level === 'low').length, color: '#10b981' },
+    { name: '中风险', value: records.filter((record) => record.risk_level === 'medium').length, color: '#f59e0b' },
+    { name: '高风险', value: records.filter((record) => record.risk_level === 'high').length, color: '#ef4444' },
+  ];
+
+  return {
+    stats,
+    trend,
+    riskDistribution,
+  };
+}
 
 // Simple ID generator (alternative to nanoid)
 function generateInviteCode(length = 10): string {
@@ -20,6 +86,29 @@ function generateInviteCode(length = 10): string {
     result += chars[randomValues[i] % chars.length];
   }
   return result;
+}
+
+export async function validateInvitationCodeExists(
+  supabasePublic: Pick<SupabaseClient<any, 'public', any>, 'rpc'>,
+  code: string,
+) {
+  const { data, error } = await supabasePublic.rpc('validate_invitation_code', {
+    input_code: code,
+  });
+
+  if (error) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '邀请码校验失败，请稍后重试',
+      cause: error,
+    });
+  }
+
+  if (!data) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Invalid or used invitation code.' });
+  }
+
+  return { valid: true as const };
 }
 
 export const invitationRouter = router({
@@ -42,7 +131,7 @@ export const invitationRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('生成邀请码', error);
       }
       return data;
     }),
@@ -51,17 +140,7 @@ export const invitationRouter = router({
   validateInvitationCode: publicProcedure
     .input(z.object({ code: z.string() }))
     .query(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
-        .from('invitations')
-        .select('code')
-        .eq('code', input.code)
-        .eq('status', 'active')
-        .single();
-
-      if (error || !data) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Invalid or used invitation code.' });
-      }
-      return { valid: true as const };
+      return validateInvitationCodeExists(ctx.supabasePublic, input.code);
     }),
 
   // Protected: Claim an invitation code for the authenticated user
@@ -86,7 +165,7 @@ export const invitationRouter = router({
         .maybeSingle();
 
       if (invitationError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: invitationError.message });
+        throw createInvitationOperationError('读取邀请码', invitationError);
       }
 
       if (!invitation) {
@@ -105,7 +184,7 @@ export const invitationRouter = router({
         .maybeSingle();
 
       if (existingRecordError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: existingRecordError.message });
+        throw createInvitationOperationError('读取邀请记录', existingRecordError);
       }
 
       if (existingRecord) {
@@ -173,23 +252,22 @@ export const invitationRouter = router({
       ]);
 
       if (inviterProfileResult.error || !inviterProfileResult.data) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: inviterProfileResult.error?.message || '邀请人资料不存在。',
-        });
+        throw createInvitationOperationError(
+          '读取邀请人资料',
+          inviterProfileResult.error ?? new Error('邀请人资料不存在'),
+        );
       }
 
       if (dailyRewardResult.error || totalRewardResult.error || monthlyCountResult.error || sameIpHourResult.error || sameIpDayResult.error) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message:
-            dailyRewardResult.error?.message
-            || totalRewardResult.error?.message
-            || monthlyCountResult.error?.message
-            || sameIpHourResult.error?.message
-            || sameIpDayResult.error?.message
-            || '读取邀请限制失败。',
-        });
+        throw createInvitationOperationError(
+          '读取邀请限制',
+          dailyRewardResult.error
+            || totalRewardResult.error
+            || monthlyCountResult.error
+            || sameIpHourResult.error
+            || sameIpDayResult.error
+            || new Error('读取邀请限制失败'),
+        );
       }
 
       const inviterProfile = inviterProfileResult.data;
@@ -231,7 +309,7 @@ export const invitationRouter = router({
             .eq('id', inviteeId);
 
           if (updateInviteeError) {
-            throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: updateInviteeError.message });
+            throw createInvitationOperationError('更新被邀请人奖励', updateInviteeError);
           }
         }
       } else {
@@ -245,7 +323,7 @@ export const invitationRouter = router({
           });
 
         if (createInviteeProfileError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: createInviteeProfileError.message });
+          throw createInvitationOperationError('创建被邀请人资料', createInviteeProfileError);
         }
       }
 
@@ -258,7 +336,7 @@ export const invitationRouter = router({
           .eq('id', inviterProfile.id);
 
         if (updateInviterError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: updateInviterError.message });
+          throw createInvitationOperationError('更新邀请人奖励', updateInviterError);
         }
       }
 
@@ -281,7 +359,7 @@ export const invitationRouter = router({
         });
 
       if (recordError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: recordError.message });
+        throw createInvitationOperationError('记录邀请关系', recordError);
       }
 
       const { error: invitationUpdateError } = await ctx.supabase
@@ -293,7 +371,7 @@ export const invitationRouter = router({
           .eq('code', normalizedCode);
 
       if (invitationUpdateError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: invitationUpdateError.message });
+        throw createInvitationOperationError('更新邀请码状态', invitationUpdateError);
       }
 
       const creditTransactions = [
@@ -321,7 +399,7 @@ export const invitationRouter = router({
           .insert(creditTransactions);
 
         if (transactionError) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: transactionError.message });
+          throw createInvitationOperationError('记录积分变动', transactionError);
         }
       }
 
@@ -352,7 +430,7 @@ export const invitationRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('读取邀请码历史', error);
       }
       return data;
     }),
@@ -391,7 +469,7 @@ export const invitationRouter = router({
       const { data, error } = await query;
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('读取邀请记录', error);
       }
       return data ?? [];
     }),
@@ -399,56 +477,73 @@ export const invitationRouter = router({
   // Admin only: Get invitation statistics
   getInvitationStats: adminProcedure
     .query(async ({ ctx }) => {
-      // Get all records for statistics
       const { data: allRecords, error } = await ctx.supabase
         .from('invitation_records')
         .select('status, risk_level, inviter_reward, created_at');
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('读取邀请统计', error);
       }
 
-      const records = allRecords ?? [];
+      return buildInvitationStats(allRecords ?? []);
+    }),
 
-      // Calculate statistics
-      const stats = {
-        total: records.length,
-        rewarded: records.filter(r => r.status === 'rewarded').length,
-        rejected: records.filter(r => r.status === 'rejected').length,
-        pending: records.filter(r => r.status === 'pending' || r.status === 'registered').length,
-        highRisk: records.filter(r => r.risk_level === 'high').length,
-        totalRewards: records.reduce((sum, r) => sum + (r.inviter_reward || 0), 0),
+  // Admin only: Get invitation page bootstrap data
+  getAdminInvitationsDashboard: adminProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(500).default(500),
+      status: z.enum(['all', 'pending', 'registered', 'rewarded', 'rejected']).default('all'),
+      riskLevel: z.enum(['all', 'low', 'medium', 'high']).default('all'),
+      search: z.string().optional(),
+    }).optional())
+    .query(async ({ ctx, input }) => {
+      const startedAt = Date.now();
+      const { limit = 500, status = 'all', riskLevel = 'all', search } = input || {};
+
+      let recordsQuery = ctx.supabase
+        .from('invitation_records')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (status !== 'all') {
+        recordsQuery = recordsQuery.eq('status', status);
+      }
+      if (riskLevel !== 'all') {
+        recordsQuery = recordsQuery.eq('risk_level', riskLevel);
+      }
+      if (search) {
+        recordsQuery = recordsQuery.or(`inviter_email.ilike.%${search}%,invitee_email.ilike.%${search}%,invite_code.ilike.%${search}%`);
+      }
+
+      const [statsResult, recordsResult] = await Promise.all([
+        ctx.supabase
+          .from('invitation_records')
+          .select('status, risk_level, inviter_reward, created_at'),
+        recordsQuery,
+      ]);
+
+      if (statsResult.error) {
+        throw createInvitationOperationError('读取邀请统计', statsResult.error);
+      }
+
+      if (recordsResult.error) {
+        throw createInvitationOperationError('读取邀请记录', recordsResult.error);
+      }
+
+      const result = {
+        ...buildInvitationStats(statsResult.data ?? []),
+        records: recordsResult.data ?? [],
       };
 
-      // Calculate last 7 days trend
-      const now = new Date();
-      const last7Days = Array.from({ length: 7 }, (_, i) => {
-        const date = new Date(now);
-        date.setDate(date.getDate() - (6 - i));
-        const dateStr = date.toISOString().split('T')[0];
-        const dayRecords = records.filter(r =>
-          r.created_at?.split('T')[0] === dateStr
-        );
-        return {
-          date: `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`,
-          count: dayRecords.length,
-          rewarded: dayRecords.filter(r => r.status === 'rewarded').length,
-          rejected: dayRecords.filter(r => r.status === 'rejected').length,
-        };
+      logInvitationEndpointMetric('invitation.getAdminInvitationsDashboard', startedAt, {
+        queryCount: 2,
+        recordCount: result.records.length,
+        filteredStatus: status,
+        filteredRiskLevel: riskLevel,
       });
 
-      // Calculate risk distribution
-      const riskDistribution = [
-        { name: '低风险', value: records.filter(r => r.risk_level === 'low').length, color: '#10b981' },
-        { name: '中风险', value: records.filter(r => r.risk_level === 'medium').length, color: '#f59e0b' },
-        { name: '高风险', value: records.filter(r => r.risk_level === 'high').length, color: '#ef4444' },
-      ];
-
-      return {
-        stats,
-        trend: last7Days,
-        riskDistribution,
-      };
+      return result;
     }),
 
   // Admin only: Update invitation record status
@@ -479,7 +574,7 @@ export const invitationRouter = router({
         .single();
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('更新邀请记录', error);
       }
       return data;
     }),
@@ -494,7 +589,7 @@ export const invitationRouter = router({
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: error.message });
+        throw createInvitationOperationError('读取我的邀请记录', error);
       }
       return data ?? [];
     }),
@@ -511,7 +606,7 @@ export const invitationRouter = router({
         .maybeSingle();
 
       if (existingInvitationError) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: existingInvitationError.message });
+        throw createInvitationOperationError('读取邀请码面板', existingInvitationError);
       }
 
       let invitationCode = existingInvitation?.code;
@@ -529,10 +624,10 @@ export const invitationRouter = router({
           .single();
 
         if (createInvitationError || !newInvitation) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: createInvitationError?.message || '生成邀请码失败。',
-          });
+          throw createInvitationOperationError(
+            '生成邀请码',
+            createInvitationError ?? new Error('生成邀请码失败'),
+          );
         }
 
         invitationCode = newInvitation.code;
@@ -552,11 +647,11 @@ export const invitationRouter = router({
       ]);
 
       if (recordsResult.error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: recordsResult.error.message });
+        throw createInvitationOperationError('读取邀请码面板', recordsResult.error);
       }
 
       if (settingsResult.error) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: settingsResult.error.message });
+        throw createInvitationOperationError('读取邀请码面板', settingsResult.error);
       }
 
       const records = recordsResult.data ?? [];
