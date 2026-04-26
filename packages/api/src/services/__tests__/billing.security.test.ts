@@ -702,6 +702,29 @@ describe('Idempotency', () => {
       }),
     );
   });
+
+  it('should ignore non-UUID request IDs before atomic AI failure finalize', async () => {
+    const mockSupabase = createMockSupabase({ credits: 1000 }) as BillingContext['supabase'] & {
+      rpc: ReturnType<typeof vi.fn>;
+    };
+    const service = new BillingService({
+      supabase: mockSupabase,
+      userId: 'test-user',
+    });
+
+    await service.finalizeAIFailure({
+      modelUsed: 'claude-sonnet-4-20250514',
+      reason: 'test failure',
+      requestId: 'still-not-a-uuid',
+    });
+
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      'atomic_finalize_ai_failure',
+      expect.objectContaining({
+        p_request_id: null,
+      }),
+    );
+  });
 });
 
 // ============================================

@@ -249,6 +249,155 @@ describe('modelRouter error sanitization', () => {
     });
   });
 
+  it('does not expose api_key values in admin model payloads', async () => {
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'ai_models') {
+          return {
+            select() {
+              return this;
+            },
+            order() {
+              return Promise.resolve({
+                data: [
+                  {
+                    id: 'model-1',
+                    name: 'Model 1',
+                    model_id: 'gpt-4o',
+                    provider: 'openai',
+                    api_key: 'sk-test',
+                    api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+                    description: '',
+                    max_tokens: 4096,
+                    input_limit: 180000,
+                    enable_web_search: 'false',
+                    input_token_cost: 100,
+                    output_token_cost: 400,
+                    input_token_cost_above_200k: 100,
+                    output_token_cost_above_200k: 400,
+                    web_search_cost: 0,
+                    token_counting_supported: 'true',
+                    token_counting_method: 'verified_openai_tokenizer',
+                    tokenizer_family: 'openai',
+                    is_active: 'true',
+                    config: {},
+                    created_at: '2026-04-06T00:00:00.000Z',
+                    updated_at: '2026-04-06T00:00:00.000Z',
+                  },
+                ],
+                error: null,
+              });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({ role: 'admin', supabase });
+    const result = await caller.getAvailableModels();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty('api_key');
+  });
+
+  it('marks OpenRouter-compatible models as provider usage billing', async () => {
+    const inserted: Array<Record<string, unknown>> = [];
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'ai_models') {
+          return {
+            insert(payload: Record<string, unknown>) {
+              inserted.push(payload);
+              return {
+                select() {
+                  return {
+                    single() {
+                      return Promise.resolve({
+                        data: {
+                          id: 'model-2',
+                          ...payload,
+                          config: null,
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+            update() {
+              return {
+                eq() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    const caller = createProtectedCaller({ role: 'admin', supabase });
+    await caller.createModel({
+      name: 'Claude 4.6 Opus',
+      modelId: 'anthropic/claude-opus-4.6',
+      provider: 'openai',
+      apiKey: 'sk-or-test',
+      apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    });
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
+      tokenizer_family: 'openai',
+    });
+  });
+
   it('aggregates admin models dashboard from one ai_models query', async () => {
     const supabase = {
       from(table: string) {
