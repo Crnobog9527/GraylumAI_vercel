@@ -48,10 +48,10 @@ jobs:
           AUDIT_OUTPUT=$(pnpm audit --json 2>/dev/null || true)
 
           # 统计漏洞数量
-          CRITICAL=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.critical // 0')
-          HIGH=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.high // 0')
-          MODERATE=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.moderate // 0')
-          LOW=$(echo "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.low // 0')
+          CRITICAL=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.critical // 0')
+          HIGH=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.high // 0')
+          MODERATE=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.moderate // 0')
+          LOW=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.low // 0')
 
           echo "| 严重程度 | 数量 |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
@@ -190,6 +190,11 @@ jobs:
     name: Security E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key-for-security-e2e-local-runtime-only-000000000000000000000000000000000000000000000000000000000000' }}
+      NEXT_PUBLIC_APP_URL: https://ci.graylum.example
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'sk-or-security-e2e-placeholder-local-runtime-only' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -213,10 +218,6 @@ jobs:
 
       - name: Build application
         run: pnpm turbo build
-        env:
-          # Provide minimal env vars for build
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
 
       - name: Start application
         run: |
