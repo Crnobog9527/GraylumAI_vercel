@@ -13,6 +13,7 @@ dotenv.config({
 
 const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const shouldUseLocalWebServer = !process.env.CI && !remoteBaseUrl;
+const shouldSkipAuthSetup = process.env.SECURITY_E2E_LOCAL_ONLY === 'true';
 
 /**
  * Playwright E2E Test Configuration
@@ -78,7 +79,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
       },
-      dependencies: ['setup'],
+      dependencies: shouldSkipAuthSetup ? [] : ['setup'],
     },
 
     // Desktop Firefox (optional, uncomment if needed)
@@ -96,7 +97,7 @@ export default defineConfig({
       use: {
         ...devices['Pixel 5'],
       },
-      dependencies: ['setup'],
+      dependencies: shouldSkipAuthSetup ? [] : ['setup'],
     },
   ],
 

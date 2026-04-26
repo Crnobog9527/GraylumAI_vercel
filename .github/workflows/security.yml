@@ -195,6 +195,7 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key-for-security-e2e-local-runtime-only-000000000000000000000000000000000000000000000000000000000000' }}
       NEXT_PUBLIC_APP_URL: https://ci.graylum.example
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'sk-or-security-e2e-placeholder-local-runtime-only' }}
+      SECURITY_E2E_LOCAL_ONLY: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

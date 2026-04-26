@@ -11,6 +11,10 @@ function getBaseUrl() {
 }
 
 function hasLiveSupabaseRuntime() {
+  if (process.env.SECURITY_E2E_LOCAL_ONLY === 'true') {
+    return false;
+  }
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -18,7 +22,7 @@ function hasLiveSupabaseRuntime() {
     return false;
   }
 
-  return !supabaseUrl.includes('placeholder') && supabaseAnonKey !== 'placeholder-key';
+  return !supabaseUrl.includes('placeholder') && !supabaseAnonKey.includes('placeholder');
 }
 
 const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
