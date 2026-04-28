@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   calculateTokenCost,
+  calculateTokenCostWithPricing,
   estimateRequestCost,
   getModelPricing,
   BillingService,
@@ -218,6 +219,72 @@ describe('getModelPricing', () => {
     expect(pricing.inputPer1M).toBe(3);
     expect(pricing.outputPer1M).toBe(15);
     expect(pricing.searchPer1K).toBe(10);
+  });
+
+  it('reads fresh ai_models pricing on each call instead of returning stale cached values', async () => {
+    const rows = [
+      {
+        input_token_cost: 100,
+        output_token_cost: 500,
+        web_search_cost: 0,
+      },
+      {
+        input_token_cost: 1_000_000,
+        output_token_cost: 5_000_000,
+        web_search_cost: 10_000_000,
+      },
+    ];
+
+    let callCount = 0;
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            const data = rows[callCount] ?? rows[rows.length - 1];
+            callCount += 1;
+            return Promise.resolve({ data, error: null });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    const first = await getModelPricing(supabase, 'anthropic/claude-haiku-4.5');
+    const second = await getModelPricing(supabase, 'anthropic/claude-haiku-4.5');
+
+    expect(first.inputPer1M).toBe(0.0001);
+    expect(first.outputPer1M).toBe(0.0005);
+    expect(second.inputPer1M).toBe(1);
+    expect(second.outputPer1M).toBe(5);
+    expect(second.searchPer1K).toBe(10);
+    expect(callCount).toBe(2);
+  });
+});
+
+describe('calculateTokenCostWithPricing', () => {
+  it('charges 3 credits for 50 input and 291 output tokens at $1/$5 per 1M', () => {
+    const result = calculateTokenCostWithPricing(
+      {
+        inputTokens: 50,
+        outputTokens: 291,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      {
+        inputPer1M: 1,
+        outputPer1M: 5,
+        searchPer1K: 10,
+      },
+    );
+
+    expect(result.costUsd).toBeCloseTo(0.001505, 12);
+    expect(result.credits).toBe(3);
   });
 });
 

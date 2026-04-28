@@ -123,9 +123,6 @@ export interface ModelPricingInfo {
   searchPer1K?: number;     // 每千次搜索成本
 }
 
-/** 定价缓存 (避免每次请求都查询数据库) */
-const pricingCache = new Map<string, { pricing: ModelPricingInfo; expiry: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
 const MICRO_DOLLARS_PER_USD = 1_000_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -172,13 +169,8 @@ export async function getModelPricing(
   supabase: SupabaseClient,
   modelId: string
 ): Promise<ModelPricingInfo> {
-  // 1. 检查缓存
-  const cached = pricingCache.get(modelId);
-  if (cached && cached.expiry > Date.now()) {
-    return cached.pricing;
-  }
-
-  // 2. 从数据库查询
+  // Production billing must read the latest admin/model pricing on every request.
+  // Stale process-local caches can undercharge after SQL data corrections or admin edits.
   const { data: model, error } = await supabase
     .from('ai_models')
     .select('input_token_cost, output_token_cost, web_search_cost')
@@ -213,9 +205,6 @@ export async function getModelPricing(
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
-
-  // 5. 缓存结果
-  pricingCache.set(modelId, { pricing, expiry: Date.now() + CACHE_TTL });
 
   return pricing;
 }
