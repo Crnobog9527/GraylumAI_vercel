@@ -163,13 +163,25 @@ function normalizeRequestId(requestId?: string | null): string | undefined {
 function extractPricingMetadata(params: {
   tokenMetadata?: Record<string, unknown>;
   usageMetadata?: Record<string, unknown>;
-}): unknown {
-  return params.usageMetadata?.pricing ?? params.tokenMetadata?.pricing;
+}): Record<string, unknown> | undefined {
+  const pricing = params.usageMetadata?.pricing ?? params.tokenMetadata?.pricing;
+  if (!pricing || typeof pricing !== 'object') {
+    return undefined;
+  }
+
+  const value = pricing as Record<string, unknown>;
+  return {
+    modelId: value.modelId,
+    inputPer1M: value.inputPer1M,
+    outputPer1M: value.outputPer1M,
+    searchPer1K: value.searchPer1K ?? 0,
+    pricingSource: value.pricingSource ?? 'ai_models',
+  };
 }
 
 function withTopLevelPricingMetadata(
   metadata: Record<string, unknown> | undefined,
-  pricing: unknown,
+  pricing: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   if (!pricing || metadata?.pricing) {
     return metadata ?? {};

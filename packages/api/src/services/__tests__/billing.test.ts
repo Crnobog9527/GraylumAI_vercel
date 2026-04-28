@@ -403,10 +403,22 @@ describe('BillingService', () => {
         p_total_cost_usd: '0.001505',
         p_total_credits: 3,
         p_token_metadata: expect.objectContaining({
-          pricing,
+          pricing: expect.objectContaining({
+            inputPer1M: 1,
+            outputPer1M: 5,
+            searchPer1K: 10,
+            modelId: 'anthropic/claude-haiku-4.5',
+            pricingSource: 'ai_models',
+          }),
         }),
         p_usage_metadata: expect.objectContaining({
-          pricing,
+          pricing: expect.objectContaining({
+            inputPer1M: 1,
+            outputPer1M: 5,
+            searchPer1K: 10,
+            modelId: 'anthropic/claude-haiku-4.5',
+            pricingSource: 'ai_models',
+          }),
         }),
       }));
       expect(updatePayloads).toHaveLength(1);
