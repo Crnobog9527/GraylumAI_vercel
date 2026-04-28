@@ -1,6 +1,6 @@
 # Admin Settings Effect Matrix
 
-Last updated: 2026-04-24
+Last updated: 2026-04-28
 
 ## Status Legend
 
@@ -29,6 +29,12 @@ Last updated: 2026-04-24
 | `long_text_warning_threshold` | `/admin/settings` | `/chat` | Confirmation threshold changes | `admin-config.spec.ts` | `verified` |
 | `show_token_usage_stats` | `/admin/settings` | `/chat` | Token usage panel show/hide | `admin-config.spec.ts` | `verified` |
 | `chat_billing_hint` | `/admin/settings` | `/chat` | Billing hint copy updates | `admin-config.spec.ts` | `verified` |
+| `billing_credits_per_usd` | `/admin/settings` | AI chat billing runtime | Converts provider USD cost into credits for pre-deduct and settlement | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_token_price_multiplier` | `/admin/settings` | AI chat billing runtime | Applies runtime multiplier to token/search cost for pre-deduct and settlement | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_min_pre_deduct` | `/admin/settings` | AI chat billing runtime | Sets the minimum AI request pre-deduct amount | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_max_pre_deduct` | `/admin/settings` | AI chat billing runtime | Caps the maximum AI request pre-deduct amount | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_safety_margin` | `/admin/settings` | AI chat billing runtime | Adds a safety margin to estimated AI request pre-deducts | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_require_model_pricing` | `/admin/settings` | AI chat billing runtime | Rejects AI requests before pre-deduct when model pricing is missing or input/output price is zero | `billing.test.ts`, `ai.test.ts` | `verified` |
 | `enable_smart_routing` | `/admin/settings` | AI runtime, diagnostics | Routing can be enabled/disabled | `admin.spec.ts`, `chat.spec.ts`, `admin-config.spec.ts` preview effect proof | `verified` |
 | `enable_smart_search_decision` | `/admin/settings` | AI runtime | Automatic search decision can be enabled/disabled | `admin-config.spec.ts` preview effect proof via deployed `ai_usage_logs.metadata.webSearchRequested` | `verified` |
 | `checkin_day1-5` | `/admin/settings` | profile check-in dialog, claim result | Reward ladder changes | `admin-config.spec.ts`, `user-extended.spec.ts` | `verified` |
@@ -52,6 +58,23 @@ Last updated: 2026-04-24
 | `output_credits_per_1k` | UI marks this as reference-only; actual per-model billing lives in model config | `retired-reference` |
 | `web_search_credits` | Reference display only; runtime uses dedicated routing/search cost path | `retired-reference` |
 | `first_purchase_bonus_percent` | Historical billing field; current purchase/fulfillment runtime does not consume it | `retired-reference` |
+
+## Billing Runtime Defaults
+
+The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. Missing or invalid values fall back to safe defaults:
+
+| Setting key | Safe default |
+| --- | --- |
+| `billing_credits_per_usd` | `1000` |
+| `billing_token_price_multiplier` | `1.5` |
+| `billing_min_pre_deduct` | `10` |
+| `billing_max_pre_deduct` | `10000` |
+| `billing_safety_margin` | `0.2` |
+| `billing_require_model_pricing` | `true` |
+
+When `billing_require_model_pricing=true`, missing model pricing or zero input/output model pricing rejects the AI request before pre-deduct, so no credits are charged. `MODEL_PRICING` remains in code for explicit fallback and legacy/test paths, but the production chat main path no longer silently falls back to it by default.
+
+Known follow-up debt remains outside PR 2A: `settleAbort` still uses the legacy hardcoded pricing helper, and `costCalculator.ts` still contains its older extended pricing table.
 
 ## Completion Rule
 

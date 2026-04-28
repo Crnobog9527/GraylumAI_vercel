@@ -123,6 +123,37 @@ export interface ModelPricingInfo {
   searchPer1K?: number;     // 每千次搜索成本
 }
 
+export interface BillingRuntimeSettings {
+  creditsPerUsd: number;
+  tokenPriceMultiplier: number;
+  minPreDeduct: number;
+  maxPreDeduct: number;
+  safetyMargin: number;
+  requireModelPricing: boolean;
+}
+
+export const DEFAULT_BILLING_RUNTIME_SETTINGS: BillingRuntimeSettings = {
+  creditsPerUsd: BILLING_CONSTANTS.CREDITS_PER_USD,
+  tokenPriceMultiplier: BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
+  // Preserve the existing production guardrail until admins configure otherwise.
+  minPreDeduct: BILLING_CONSTANTS.MIN_PRE_DEDUCT,
+  maxPreDeduct: BILLING_CONSTANTS.MAX_PRE_DEDUCT,
+  safetyMargin: BILLING_CONSTANTS.SAFETY_MARGIN,
+  requireModelPricing: true,
+};
+
+export class ModelPricingUnavailableError extends Error {
+  constructor(
+    public readonly modelId: string,
+    public readonly reason: 'missing' | 'zero_pricing',
+  ) {
+    super(reason === 'missing'
+      ? `模型价格未配置: ${modelId}`
+      : `模型输入/输出价格不能为 0: ${modelId}`);
+    this.name = 'ModelPricingUnavailableError';
+  }
+}
+
 const MICRO_DOLLARS_PER_USD = 1_000_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -141,6 +172,93 @@ function ensureAtomicBillingAvailable(operation: string, detail: string): void {
   }
 
   throw new Error(`Atomic billing RPC required for ${operation}`);
+}
+
+function parsePositiveNumberSetting(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseNonNegativeNumberSetting(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function parseBooleanSetting(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+  }
+  return fallback;
+}
+
+export async function getBillingRuntimeSettings(
+  supabase: SupabaseClient,
+): Promise<BillingRuntimeSettings> {
+  const { data, error } = await supabase
+    .from('system_settings')
+    .select('key, value')
+    .in('key', [
+      'billing_credits_per_usd',
+      'billing_token_price_multiplier',
+      'billing_min_pre_deduct',
+      'billing_max_pre_deduct',
+      'billing_safety_margin',
+      'billing_require_model_pricing',
+    ]);
+
+  if (error) {
+    logger.warn('billing', 'billing_runtime_settings_read_failed', {
+      code: error.code,
+    });
+  }
+
+  const settings = new Map<string, unknown>();
+  for (const row of data ?? []) {
+    settings.set(row.key, row.value);
+  }
+
+  const minPreDeduct = parsePositiveNumberSetting(
+    settings.get('billing_min_pre_deduct'),
+    DEFAULT_BILLING_RUNTIME_SETTINGS.minPreDeduct,
+  );
+  const maxPreDeduct = Math.max(
+    minPreDeduct,
+    parsePositiveNumberSetting(
+      settings.get('billing_max_pre_deduct'),
+      DEFAULT_BILLING_RUNTIME_SETTINGS.maxPreDeduct,
+    ),
+  );
+
+  return {
+    creditsPerUsd: parsePositiveNumberSetting(
+      settings.get('billing_credits_per_usd'),
+      DEFAULT_BILLING_RUNTIME_SETTINGS.creditsPerUsd,
+    ),
+    tokenPriceMultiplier: parsePositiveNumberSetting(
+      settings.get('billing_token_price_multiplier'),
+      DEFAULT_BILLING_RUNTIME_SETTINGS.tokenPriceMultiplier,
+    ),
+    minPreDeduct,
+    maxPreDeduct,
+    safetyMargin: parseNonNegativeNumberSetting(
+      settings.get('billing_safety_margin'),
+      DEFAULT_BILLING_RUNTIME_SETTINGS.safetyMargin,
+    ),
+    requireModelPricing: parseBooleanSetting(
+      settings.get('billing_require_model_pricing'),
+      DEFAULT_BILLING_RUNTIME_SETTINGS.requireModelPricing,
+    ),
+  };
 }
 
 function normalizeRequestId(requestId?: string | null): string | undefined {
@@ -200,8 +318,10 @@ function withTopLevelPricingMetadata(
  */
 export async function getModelPricing(
   supabase: SupabaseClient,
-  modelId: string
+  modelId: string,
+  options: { requireModelPricing?: boolean } = {},
 ): Promise<ModelPricingInfo> {
+  const requireModelPricing = options.requireModelPricing ?? true;
   // Production billing must read the latest admin/model pricing on every request.
   // Stale process-local caches can undercharge after SQL data corrections or admin edits.
   const { data: model, error } = await supabase
@@ -212,10 +332,14 @@ export async function getModelPricing(
     .single();
 
   if (error || !model) {
-    // 数据库查询失败，使用硬编码后备
     logger.warn('billing', 'billing_pricing_fallback_model_missing', {
       code: error?.code ?? null,
+      modelId,
+      requireModelPricing,
     });
+    if (requireModelPricing) {
+      throw new ModelPricingUnavailableError(modelId, 'missing');
+    }
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
@@ -232,9 +356,15 @@ export async function getModelPricing(
     searchPer1K: (model.web_search_cost ?? 0) / MICRO_DOLLARS_PER_USD,
   };
 
-  // 4. 如果数据库定价为0，使用硬编码后备
+  // 4. 如果数据库定价为0，生产主链路拒绝请求；仅显式 fallback 可使用硬编码后备。
   if (pricing.inputPer1M === 0 || pricing.outputPer1M === 0) {
-    logger.warn('billing', 'billing_pricing_fallback_zero_pricing');
+    logger.warn('billing', 'billing_pricing_zero_pricing_rejected', {
+      modelId,
+      requireModelPricing,
+    });
+    if (requireModelPricing) {
+      throw new ModelPricingUnavailableError(modelId, 'zero_pricing');
+    }
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
@@ -265,7 +395,8 @@ export function calculateTokenCost(
 export function calculateTokenCostWithPricing(
   usage: TokenUsage,
   pricing: ModelPricingInfo,
-  options: { searchCount?: number } = {}
+  options: { searchCount?: number } = {},
+  billingSettings: Pick<BillingRuntimeSettings, 'creditsPerUsd' | 'tokenPriceMultiplier'> = DEFAULT_BILLING_RUNTIME_SETTINGS,
 ): { credits: number; costUsd: number; breakdown: CostBreakdown } {
   // 计算各项成本 (美元)
   const inputCostUsd = (usage.inputTokens / 1_000_000) * pricing.inputPer1M;
@@ -278,16 +409,16 @@ export function calculateTokenCostWithPricing(
 
   // 转换为积分 (应用价格倍率)
   const totalCredits = Math.ceil(
-    totalCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER
+    totalCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier
   );
 
   // 成本明细 (积分)
   const breakdown: CostBreakdown = {
-    input: Math.ceil(inputCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
-    output: Math.ceil(outputCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
-    cacheWrite: Math.ceil(cacheWriteCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
-    cacheRead: Math.ceil(cacheReadCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
-    search: Math.ceil(searchCostUsd * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
+    input: Math.ceil(inputCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier),
+    output: Math.ceil(outputCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier),
+    cacheWrite: Math.ceil(cacheWriteCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier),
+    cacheRead: Math.ceil(cacheReadCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier),
+    search: Math.ceil(searchCostUsd * billingSettings.creditsPerUsd * billingSettings.tokenPriceMultiplier),
     total: totalCredits,
   };
 
@@ -296,6 +427,17 @@ export function calculateTokenCostWithPricing(
     costUsd: totalCostUsd,
     breakdown,
   };
+}
+
+export function estimatePreDeductCredits(
+  credits: number,
+  billingSettings: Pick<BillingRuntimeSettings, 'minPreDeduct' | 'maxPreDeduct' | 'safetyMargin'> = DEFAULT_BILLING_RUNTIME_SETTINGS,
+): number {
+  const withMargin = Math.ceil(credits * (1 + billingSettings.safetyMargin));
+  return Math.max(
+    billingSettings.minPreDeduct,
+    Math.min(billingSettings.maxPreDeduct, withMargin),
+  );
 }
 
 /**
@@ -316,13 +458,7 @@ export function estimateRequestCost(
   const { credits } = calculateTokenCost(modelId, usage);
 
   // 添加安全边际
-  const withMargin = Math.ceil(credits * (1 + BILLING_CONSTANTS.SAFETY_MARGIN));
-
-  // 确保在最小和最大预扣范围内
-  return Math.max(
-    BILLING_CONSTANTS.MIN_PRE_DEDUCT,
-    Math.min(BILLING_CONSTANTS.MAX_PRE_DEDUCT, withMargin)
-  );
+  return estimatePreDeductCredits(credits);
 }
 
 // ============================================

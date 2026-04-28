@@ -26,6 +26,12 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
+  billing_credits_per_usd: { value: '1000', type: 'number', label: '每美元积分数', description: 'AI 成本换算为站内积分的基准比例' },
+  billing_token_price_multiplier: { value: '1.5', type: 'number', label: 'Token 成本倍率', description: '用户计费 = 供应商成本 × 每美元积分数 × 该倍率' },
+  billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
+  billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
+  billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
+  billing_require_model_pricing: { value: 'true', type: 'boolean', label: '要求模型价格', description: '开启后模型价格缺失或为 0 时拒绝 AI 请求，不使用硬编码后备价格' },
   input_credits_per_1k: { value: '1', type: 'number', label: '输入Token积分单价', description: '每1000个输入Token消耗的积分数' },
   output_credits_per_1k: { value: '5', type: 'number', label: '输出Token积分单价', description: '每1000个输出Token消耗的积分数' },
   web_search_credits: { value: '5', type: 'number', label: '联网搜索积分', description: '每次启用联网搜索额外消耗的积分数' },
@@ -78,7 +84,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 // 设置分组
 const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
-  billing: ['new_user_credits'],
+  billing: ['new_user_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier', 'billing_min_pre_deduct', 'billing_max_pre_deduct', 'billing_safety_margin', 'billing_require_model_pricing'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
   experience: ['chat_show_model_selector', 'chat_prompt_text', 'chat_welcome_message', 'chat_billing_hint', 'home_show_onboarding', 'home_show_featured_modules'],

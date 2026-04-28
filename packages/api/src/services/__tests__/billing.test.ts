@@ -9,9 +9,12 @@ import { readFileSync } from 'node:fs';
 import {
   calculateTokenCost,
   calculateTokenCostWithPricing,
+  estimatePreDeductCredits,
   estimateRequestCost,
+  getBillingRuntimeSettings,
   getModelPricing,
   BillingService,
+  ModelPricingUnavailableError,
   type BillingContext,
 } from '../billing';
 import { BILLING_CONSTANTS } from '../../types/billing';
@@ -266,6 +269,85 @@ describe('getModelPricing', () => {
     expect(second.searchPer1K).toBe(10);
     expect(callCount).toBe(2);
   });
+
+  it('rejects missing model pricing when runtime requires configured model pricing', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            return Promise.resolve({ data: null, error: { code: 'PGRST116' } });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    await expect(getModelPricing(supabase, 'missing-model')).rejects.toBeInstanceOf(
+      ModelPricingUnavailableError,
+    );
+  });
+
+  it('rejects zero input or output pricing when runtime requires configured model pricing', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            return Promise.resolve({
+              data: {
+                input_token_cost: 0,
+                output_token_cost: 5_000_000,
+                web_search_cost: 0,
+              },
+              error: null,
+            });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    await expect(getModelPricing(supabase, 'zero-price-model')).rejects.toMatchObject({
+      reason: 'zero_pricing',
+    });
+  });
+
+  it('only uses MODEL_PRICING fallback when explicitly allowed', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            return Promise.resolve({ data: null, error: { code: 'PGRST116' } });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    const pricing = await getModelPricing(supabase, 'claude-sonnet-4-20250514', {
+      requireModelPricing: false,
+    });
+
+    expect(pricing.inputPer1M).toBe(3);
+    expect(pricing.outputPer1M).toBe(15);
+  });
 });
 
 describe('calculateTokenCostWithPricing', () => {
@@ -286,6 +368,126 @@ describe('calculateTokenCostWithPricing', () => {
 
     expect(result.costUsd).toBeCloseTo(0.001505, 12);
     expect(result.credits).toBe(3);
+  });
+
+  it('uses configured creditsPerUsd and tokenPriceMultiplier when provided', () => {
+    const result = calculateTokenCostWithPricing(
+      {
+        inputTokens: 1000,
+        outputTokens: 500,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      {
+        inputPer1M: 5,
+        outputPer1M: 25,
+      },
+      {},
+      {
+        creditsPerUsd: 100,
+        tokenPriceMultiplier: 2,
+      },
+    );
+
+    expect(result.costUsd).toBeCloseTo(0.0175, 12);
+    expect(result.credits).toBe(4);
+  });
+});
+
+describe('getBillingRuntimeSettings', () => {
+  it('returns safe defaults when settings are missing', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('system_settings');
+        return {
+          select() {
+            return this;
+          },
+          in() {
+            return Promise.resolve({ data: [], error: null });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    await expect(getBillingRuntimeSettings(supabase)).resolves.toMatchObject({
+      creditsPerUsd: 1000,
+      tokenPriceMultiplier: 1.5,
+      minPreDeduct: 10,
+      maxPreDeduct: 10000,
+      safetyMargin: 0.2,
+      requireModelPricing: true,
+    });
+  });
+
+  it('falls back invalid values while preserving valid settings', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('system_settings');
+        return {
+          select() {
+            return this;
+          },
+          in() {
+            return Promise.resolve({
+              data: [
+                { key: 'billing_credits_per_usd', value: '200' },
+                { key: 'billing_token_price_multiplier', value: '-1' },
+                { key: 'billing_min_pre_deduct', value: '3' },
+                { key: 'billing_max_pre_deduct', value: '2' },
+                { key: 'billing_safety_margin', value: 'bad' },
+                { key: 'billing_require_model_pricing', value: 'false' },
+              ],
+              error: null,
+            });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    await expect(getBillingRuntimeSettings(supabase)).resolves.toMatchObject({
+      creditsPerUsd: 200,
+      tokenPriceMultiplier: 1.5,
+      minPreDeduct: 3,
+      maxPreDeduct: 3,
+      safetyMargin: 0.2,
+      requireModelPricing: false,
+    });
+  });
+});
+
+describe('estimatePreDeductCredits', () => {
+  it('applies configured safety margin and min/max bounds', () => {
+    expect(estimatePreDeductCredits(10, {
+      minPreDeduct: 5,
+      maxPreDeduct: 20,
+      safetyMargin: 0.5,
+    })).toBe(15);
+    expect(estimatePreDeductCredits(1, {
+      minPreDeduct: 5,
+      maxPreDeduct: 20,
+      safetyMargin: 0.5,
+    })).toBe(5);
+    expect(estimatePreDeductCredits(100, {
+      minPreDeduct: 5,
+      maxPreDeduct: 20,
+      safetyMargin: 0.5,
+    })).toBe(20);
+  });
+});
+
+describe('production stream billing wiring', () => {
+  it('passes billing runtime settings into stream pre-deduct and settle calculations', () => {
+    const source = readFileSync(
+      new URL('../../../../../apps/web/src/app/api/ai/stream/route.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('getBillingRuntimeSettings');
+    expect(source).toContain('estimatePreDeductCredits');
+    expect(source.match(/calculateTokenCostWithPricing\([\s\S]*?billingRuntimeSettings\)/g)?.length)
+      .toBeGreaterThanOrEqual(2);
+    expect(source).toContain('billingSettingsSnapshot');
   });
 });
 

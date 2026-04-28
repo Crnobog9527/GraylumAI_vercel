@@ -10,7 +10,14 @@ import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { filterAIOutput, logger } from '@repo/api/src/services';
-import { BillingService, calculateTokenCostWithPricing, getModelPricing } from '@repo/api/src/services/billing';
+import {
+  BillingService,
+  ModelPricingUnavailableError,
+  calculateTokenCostWithPricing,
+  estimatePreDeductCredits,
+  getBillingRuntimeSettings,
+  getModelPricing,
+} from '@repo/api/src/services/billing';
 import { ContextManager } from '@repo/api/src/services/contextManager';
 import { upsertContextSnapshot } from '@repo/api/src/services/contextSnapshots';
 import {
@@ -70,6 +77,7 @@ type TokenCounterProvider = 'anthropic' | 'openai' | 'google' | 'custom' | 'buil
 const STREAM_AUTH_FAILURE_MESSAGE = '身份验证失败，请重新登录';
 const STREAM_RUNTIME_FAILURE_MESSAGE = 'AI 响应生成失败，请稍后重试';
 const STREAM_SERVICE_UNAVAILABLE_MESSAGE = 'AI 对话服务暂时不可用，请稍后重试';
+const STREAM_PRICING_UNAVAILABLE_MESSAGE = '模型计费价格未配置，请联系管理员';
 const STREAM_PROVIDER_FAILURE_MESSAGE = '上游 AI 服务请求失败';
 const STREAM_PROVIDER_EMPTY_BODY_MESSAGE = '上游 AI 服务未返回响应体';
 const UUID_PATTERN =
@@ -378,14 +386,17 @@ export async function POST(request: NextRequest) {
     const profileStartedAt = Date.now();
     const maintenanceStartedAt = Date.now();
     const runtimeSettingsStartedAt = Date.now();
-    const [userSecurityProfile, maintenanceModeEnabled, runtimeSettings] = await Promise.all([
+    const billingSettingsStartedAt = Date.now();
+    const [userSecurityProfile, maintenanceModeEnabled, runtimeSettings, billingRuntimeSettings] = await Promise.all([
       getUserSecurityProfile(supabaseAuth, userId),
       isMaintenanceModeEnabled(supabaseAdmin),
       getChatRuntimeSettings(supabaseAdmin),
+      getBillingRuntimeSettings(supabaseAdmin),
     ]);
     recordStageTiming(stageTimings, 'profile', profileStartedAt);
     recordStageTiming(stageTimings, 'maintenance', maintenanceStartedAt);
     recordStageTiming(stageTimings, 'runtime_settings', runtimeSettingsStartedAt);
+    recordStageTiming(stageTimings, 'billing_settings', billingSettingsStartedAt);
 
     if (userSecurityProfile.status === 'disabled') {
       return new Response(
@@ -582,7 +593,12 @@ export async function POST(request: NextRequest) {
               : 'custom';
 
     const pricingStartedAt = Date.now();
-    const pricingPromise = getModelPricing(supabaseAdmin, runtimeModel.modelId);
+    const pricingPromise = getModelPricing(supabaseAdmin, runtimeModel.modelId, {
+      requireModelPricing: billingRuntimeSettings.requireModelPricing,
+    }).then(
+      (pricing) => ({ pricing }),
+      (error) => ({ error }),
+    );
     const tokenCountStartedAt = Date.now();
     const countedInput = await countTokens({
       model: runtimeModel.modelId,
@@ -621,13 +637,49 @@ export async function POST(request: NextRequest) {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     };
-    const pricing = await pricingPromise;
+    let pricing: Awaited<ReturnType<typeof getModelPricing>>;
+    const pricingResult = await pricingPromise;
+    if ('error' in pricingResult) {
+      const { error } = pricingResult;
+      if (error instanceof ModelPricingUnavailableError) {
+        logger.warn('billing', 'ai_stream_model_pricing_unavailable', {
+          modelId: runtimeModel.modelId,
+          reason: error.reason,
+        });
+        await billingService.recordUsageLog({
+          conversationId: conversation.id,
+          requestId,
+          modelId: runtimeModel.modelId,
+          status: 'failed',
+          errorMessage: 'model_pricing_unavailable',
+          inputLength: message.length,
+          ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+          userAgent: request.headers.get('user-agent') ?? undefined,
+          metadata: {
+            routingReason,
+            routingDecision,
+            selectedModelRecordId: modelConfig.id,
+            pricingFailureReason: error.reason,
+          },
+        });
+
+        return new Response(
+          JSON.stringify({ error: STREAM_PRICING_UNAVAILABLE_MESSAGE }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      throw error;
+    }
+    pricing = pricingResult.pricing;
     recordStageTiming(stageTimings, 'pricing_lookup', pricingStartedAt);
     const estimatedCost = calculateTokenCostWithPricing(estimatedUsage, pricing, {
       searchCount: searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0,
-    });
-    const estimatedCredits = estimatedCost.credits +
-      ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits);
+    }, billingRuntimeSettings);
+    const estimatedCredits = estimatePreDeductCredits(
+      estimatedCost.credits +
+        ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits),
+      billingRuntimeSettings,
+    );
 
     const balanceStartedAt = Date.now();
     const freeTierStartedAt = Date.now();
@@ -987,7 +1039,7 @@ export async function POST(request: NextRequest) {
 
           const calculatedCost = calculateTokenCostWithPricing(usage, pricing, {
             searchCount: actualSearchCount,
-          });
+          }, billingRuntimeSettings);
           const actualCredits = canUseFreeTier
             ? 0
             : calculatedCost.credits + (actualSearchCount * runtimeSettings.searchSurchargeCredits);
@@ -1035,11 +1087,25 @@ export async function POST(request: NextRequest) {
               counter_version: countedInput.counterVersion,
               routing_decision: routingDecision,
               pricing: pricingMetadata,
+              billingSettingsSnapshot: {
+                creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
+                tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
+                minPreDeduct: billingRuntimeSettings.minPreDeduct,
+                maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
+                safetyMargin: billingRuntimeSettings.safetyMargin,
+              },
             },
             usageMetadata: {
               routingReason,
               routingDecision,
               pricing: pricingMetadata,
+              billingSettingsSnapshot: {
+                creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
+                tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
+                minPreDeduct: billingRuntimeSettings.minPreDeduct,
+                maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
+                safetyMargin: billingRuntimeSettings.safetyMargin,
+              },
               promptId: activePrompt?.id ?? null,
               promptName: activePrompt?.name ?? null,
               promptCacheEnabled: runtimeSettings.enablePromptCache,
