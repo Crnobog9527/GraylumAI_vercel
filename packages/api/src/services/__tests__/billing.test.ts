@@ -294,7 +294,8 @@ describe('calculateTokenCostWithPricing', () => {
 
 describe('BillingService', () => {
   describe('finalizeAISuccess', () => {
-    it('passes pricing metadata to atomic settle metadata inputs', async () => {
+    it('persists top-level pricing metadata on the settle record', async () => {
+      const updatePayloads: Array<Record<string, unknown>> = [];
       const rpc = vi.fn().mockResolvedValue({
         data: [{
           user_message_id: 'user-message-1',
@@ -306,6 +307,63 @@ describe('BillingService', () => {
         }],
         error: null,
       });
+      const from = vi.fn((table: string) => {
+        const builder = {
+          select() {
+            return builder;
+          },
+          eq() {
+            return builder;
+          },
+          contains() {
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          gte() {
+            return builder;
+          },
+          ilike() {
+            return builder;
+          },
+          order() {
+            return builder;
+          },
+          limit() {
+            return builder;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: null, error: null });
+          },
+          single() {
+            if (table === 'billing_history') {
+              return Promise.resolve({
+                data: {
+                  id: 'settle-1',
+                  metadata: {
+                    actualCredits: 3,
+                  },
+                },
+                error: null,
+              });
+            }
+            return Promise.resolve({ data: null, error: null });
+          },
+          update(payload: Record<string, unknown>) {
+            if (table === 'billing_history') {
+              updatePayloads.push(payload);
+            }
+            return {
+              eq() {
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          },
+        };
+
+        return builder;
+      });
       const pricing = {
         inputPer1M: 1,
         outputPer1M: 5,
@@ -314,7 +372,7 @@ describe('BillingService', () => {
         modelId: 'anthropic/claude-haiku-4.5',
       };
       const service = new BillingService({
-        supabase: { rpc } as unknown as BillingContext['supabase'],
+        supabase: { rpc, from } as unknown as BillingContext['supabase'],
         userId: 'test-user',
       });
 
@@ -351,6 +409,17 @@ describe('BillingService', () => {
           pricing,
         }),
       }));
+      expect(updatePayloads).toHaveLength(1);
+      expect(updatePayloads[0].metadata).toMatchObject({
+        actualCredits: 3,
+        pricing: {
+          inputPer1M: 1,
+          outputPer1M: 5,
+          searchPer1K: 10,
+          pricingSource: 'ai_models',
+          modelId: 'anthropic/claude-haiku-4.5',
+        },
+      });
     });
   });
 

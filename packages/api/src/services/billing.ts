@@ -339,6 +339,63 @@ export class BillingService {
     }
   }
 
+  private async ensureSettlePricingMetadata(params: {
+    settleId?: string | null;
+    preDeductId?: string | null;
+    pricing: unknown;
+  }): Promise<void> {
+    if (!params.pricing || (!params.settleId && !params.preDeductId)) {
+      return;
+    }
+
+    try {
+      let query = this.supabase
+        .from('billing_history')
+        .select('id, metadata')
+        .eq('user_id', this.userId)
+        .eq('operation_type', 'settle') as any;
+
+      query = params.settleId
+        ? query.eq('id', params.settleId)
+        : query.contains('metadata', { preDeductId: params.preDeductId });
+
+      const { data: settle, error } = await query.single();
+      if (error || !settle) {
+        logger.warn('billing', 'billing_settle_pricing_metadata_lookup_failed', {
+          hasSettleId: Boolean(params.settleId),
+          hasPreDeductId: Boolean(params.preDeductId),
+        });
+        return;
+      }
+
+      const metadata = (settle.metadata as Record<string, unknown> | null) ?? {};
+      if (metadata.pricing) {
+        return;
+      }
+
+      const { error: updateError } = await this.supabase
+        .from('billing_history')
+        .update({
+          metadata: {
+            ...metadata,
+            pricing: params.pricing,
+          },
+        })
+        .eq('id', settle.id);
+
+      if (updateError) {
+        logger.warn('billing', 'billing_settle_pricing_metadata_update_failed', {
+          hasSettleId: Boolean(params.settleId),
+        });
+      }
+    } catch {
+      logger.warn('billing', 'billing_settle_pricing_metadata_persist_failed', {
+        hasSettleId: Boolean(params.settleId),
+        hasPreDeductId: Boolean(params.preDeductId),
+      });
+    }
+  }
+
   private async persistMessages(conversationId: string, userMessage: string, assistantMessage: string) {
     const { data, error } = await this.supabase
       .from('messages')
@@ -1114,6 +1171,11 @@ export class BillingService {
         if (params.preDeductId && params.credits > 0) {
           await this.applyInvitationRebate(params.credits, params.preDeductId);
         }
+        await this.ensureSettlePricingMetadata({
+          settleId: result.settle_id ?? null,
+          preDeductId: params.preDeductId ?? null,
+          pricing: pricingMetadata,
+        });
 
         return {
           userMessageId: result.user_message_id ?? null,
@@ -1158,6 +1220,10 @@ export class BillingService {
       );
       refundedCredits = Math.max(0, settleResult.difference);
       balanceAfter = settleResult.balanceAfter;
+      await this.ensureSettlePricingMetadata({
+        preDeductId: params.preDeductId,
+        pricing: pricingMetadata,
+      });
     }
 
     await this.recordTokenStats({
