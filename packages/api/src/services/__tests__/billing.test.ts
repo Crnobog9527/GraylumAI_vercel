@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   calculateTokenCost,
   estimateRequestCost,
+  getModelPricing,
   BillingService,
   type BillingContext,
 } from '../billing';
@@ -183,6 +184,40 @@ describe('estimateRequestCost', () => {
     const result2 = estimateRequestCost('claude-sonnet-4-20250514', 1000, 4096);
 
     expect(result1).toBe(result2);
+  });
+});
+
+describe('getModelPricing', () => {
+  it('reads ai_models pricing fields as micro-dollars', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            return Promise.resolve({
+              data: {
+                input_token_cost: 3_000_000,
+                output_token_cost: 15_000_000,
+                web_search_cost: 10_000_000,
+              },
+              error: null,
+            });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    const pricing = await getModelPricing(supabase, 'unit-test-micro-dollar-model');
+
+    expect(pricing.inputPer1M).toBe(3);
+    expect(pricing.outputPer1M).toBe(15);
+    expect(pricing.searchPer1K).toBe(10);
   });
 });
 

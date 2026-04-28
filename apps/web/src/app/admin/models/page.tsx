@@ -125,6 +125,7 @@ const initialFormData: FormData = {
   outputTokenCostAbove200k: 0,
   webSearchCost: 0,
 };
+const MICRO_DOLLARS_PER_USD = 1_000_000;
 
 export default function AdminModelsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -279,11 +280,11 @@ export default function AdminModelsPage() {
       maxTokens: model.max_tokens || 4096,
       inputLimit: model.input_limit || 180000,
       enableWebSearch: model.enable_web_search === 'true',
-      inputTokenCost: (model.input_token_cost || 0) / 100,
-      outputTokenCost: (model.output_token_cost || 0) / 100,
-      inputTokenCostAbove200k: (model.input_token_cost_above_200k || 0) / 100,
-      outputTokenCostAbove200k: (model.output_token_cost_above_200k || 0) / 100,
-      webSearchCost: (model.web_search_cost || 0) / 100,
+      inputTokenCost: (model.input_token_cost || 0) / MICRO_DOLLARS_PER_USD,
+      outputTokenCost: (model.output_token_cost || 0) / MICRO_DOLLARS_PER_USD,
+      inputTokenCostAbove200k: (model.input_token_cost_above_200k || 0) / MICRO_DOLLARS_PER_USD,
+      outputTokenCostAbove200k: (model.output_token_cost_above_200k || 0) / MICRO_DOLLARS_PER_USD,
+      webSearchCost: (model.web_search_cost || 0) / MICRO_DOLLARS_PER_USD,
     });
     setDialogOpen(true);
   };
@@ -760,6 +761,9 @@ export default function AdminModelsPage() {
                 style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)' }}
               >
                 <Label className="text-amber-400 font-medium">Token 成本设置</Label>
+                <p className="text-xs leading-relaxed text-amber-200/80">
+                  填写供应商美元成本；输入/输出为 $/1M tokens，联网搜索为 $/1K 次。
+                </p>
 
                 {/* ≤200K tokens */}
                 <div className="space-y-2">

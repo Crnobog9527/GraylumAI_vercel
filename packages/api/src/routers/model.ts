@@ -70,6 +70,7 @@ const VERIFIED_OPENAI_TOKENIZER_PREFIXES = [
 
 const GENERIC_CONNECTION_ERROR = 'API 连接失败，请检查配置后重试';
 const GENERIC_CONNECTION_ERROR_DETAIL = '连接测试失败，请查看服务端日志';
+const MICRO_DOLLARS_PER_USD = 1_000_000;
 
 function createModelOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
@@ -389,11 +390,11 @@ export const modelRouter = router({
           max_tokens: input.maxTokens,
           input_limit: input.inputLimit,
           enable_web_search: input.enableWebSearch ? 'true' : 'false',
-          input_token_cost: Math.round(input.inputTokenCost * 100), // Store as cents
-          output_token_cost: Math.round(input.outputTokenCost * 100),
-          input_token_cost_above_200k: Math.round(input.inputTokenCostAbove200k * 100),
-          output_token_cost_above_200k: Math.round(input.outputTokenCostAbove200k * 100),
-          web_search_cost: Math.round(input.webSearchCost * 100),
+          input_token_cost: Math.round(input.inputTokenCost * MICRO_DOLLARS_PER_USD),
+          output_token_cost: Math.round(input.outputTokenCost * MICRO_DOLLARS_PER_USD),
+          input_token_cost_above_200k: Math.round(input.inputTokenCostAbove200k * MICRO_DOLLARS_PER_USD),
+          output_token_cost_above_200k: Math.round(input.outputTokenCostAbove200k * MICRO_DOLLARS_PER_USD),
+          web_search_cost: Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD),
           token_counting_supported: tokenCountingMetadata.token_counting_supported,
           token_counting_method: tokenCountingMetadata.token_counting_method,
           tokenizer_family: tokenCountingMetadata.tokenizer_family,
@@ -454,11 +455,11 @@ export const modelRouter = router({
       if (input.maxTokens !== undefined) updateData.max_tokens = input.maxTokens;
       if (input.inputLimit !== undefined) updateData.input_limit = input.inputLimit;
       if (input.enableWebSearch !== undefined) updateData.enable_web_search = input.enableWebSearch ? 'true' : 'false';
-      if (input.inputTokenCost !== undefined) updateData.input_token_cost = Math.round(input.inputTokenCost * 100);
-      if (input.outputTokenCost !== undefined) updateData.output_token_cost = Math.round(input.outputTokenCost * 100);
-      if (input.inputTokenCostAbove200k !== undefined) updateData.input_token_cost_above_200k = Math.round(input.inputTokenCostAbove200k * 100);
-      if (input.outputTokenCostAbove200k !== undefined) updateData.output_token_cost_above_200k = Math.round(input.outputTokenCostAbove200k * 100);
-      if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * 100);
+      if (input.inputTokenCost !== undefined) updateData.input_token_cost = Math.round(input.inputTokenCost * MICRO_DOLLARS_PER_USD);
+      if (input.outputTokenCost !== undefined) updateData.output_token_cost = Math.round(input.outputTokenCost * MICRO_DOLLARS_PER_USD);
+      if (input.inputTokenCostAbove200k !== undefined) updateData.input_token_cost_above_200k = Math.round(input.inputTokenCostAbove200k * MICRO_DOLLARS_PER_USD);
+      if (input.outputTokenCostAbove200k !== undefined) updateData.output_token_cost_above_200k = Math.round(input.outputTokenCostAbove200k * MICRO_DOLLARS_PER_USD);
+      if (input.webSearchCost !== undefined) updateData.web_search_cost = Math.round(input.webSearchCost * MICRO_DOLLARS_PER_USD);
       if (input.isActive !== undefined) updateData.is_active = input.isActive ? 'true' : 'false';
       if (input.config !== undefined) updateData.config = input.config;
 

@@ -89,8 +89,8 @@ const DEFAULT_MODELS = {
     maxTokens: 8192,
     inputLimit: 200000,
     enableWebSearch: false,
-    inputTokenCost: 3000,
-    outputTokenCost: 15000,
+    inputTokenCost: 3_000_000,
+    outputTokenCost: 15_000_000,
     apiKey: null,
     apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
@@ -106,8 +106,8 @@ const DEFAULT_MODELS = {
     maxTokens: 8192,
     inputLimit: 200000,
     enableWebSearch: false,
-    inputTokenCost: 800,
-    outputTokenCost: 4000,
+    inputTokenCost: 800_000,
+    outputTokenCost: 4_000_000,
     apiKey: null,
     apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     isActive: true,
@@ -361,10 +361,10 @@ function scoreModelFamilyCandidate(model: ModelConfig, family: 'primary' | 'assi
 
   if (family === 'primary') {
     if (haystack.includes('sonnet') || haystack.includes('opus') || haystack.includes('pro')) score += 12;
-    score += Math.round(model.outputTokenCost / 1000);
+    score += Math.round(model.outputTokenCost / 1_000_000);
   } else {
     if (haystack.includes('haiku') || haystack.includes('flash') || haystack.includes('mini')) score += 12;
-    score += Math.max(0, 10 - Math.round(model.outputTokenCost / 1000));
+    score += Math.max(0, 10 - Math.round(model.outputTokenCost / 1_000_000));
   }
 
   if (model.tokenCountingSupported) score += 2;

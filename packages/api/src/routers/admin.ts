@@ -2200,7 +2200,7 @@ export const adminRouter = router({
       const searchCreditsPer1KValues = activeMeteredModels
         .filter((model) => (model.web_search_cost ?? 0) > 0)
         .map((model) =>
-          convertUsdPer1KSearchToCreditsPer1KSearch((model.web_search_cost ?? 0) / 1000),
+          convertUsdPer1KSearchToCreditsPer1KSearch((model.web_search_cost ?? 0) / 1_000_000),
         );
 
       const runtimeBilling = {
@@ -2771,7 +2771,7 @@ export const adminRouter = router({
       const cacheSavings = tokenStatsInRange.reduce((sum, stat) => {
         const model = models.find((item) => item.model_id === stat.model_used);
         if (!model) return sum;
-        return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1000000000);
+        return sum + (((stat.cached_tokens ?? 0) * (model.input_token_cost ?? 0) * 0.9) / 1_000_000_000_000);
       }, 0);
 
       const successLogs = usageLogs.filter((log) => log.status === 'success');

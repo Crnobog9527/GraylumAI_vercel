@@ -153,6 +153,168 @@ describe('modelRouter error sanitization', () => {
     });
   });
 
+  it('stores createModel pricing fields as micro-dollars', async () => {
+    const inserted: Array<Record<string, unknown>> = [];
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'ai_models') {
+          return {
+            insert(payload: Record<string, unknown>) {
+              inserted.push(payload);
+              return {
+                select() {
+                  return {
+                    single() {
+                      return Promise.resolve({
+                        data: {
+                          id: 'model-1',
+                          ...payload,
+                          config: null,
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+            update() {
+              return {
+                eq() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({ role: 'admin', supabase });
+    await caller.createModel({
+      name: 'Claude Sonnet',
+      modelId: 'anthropic/claude-sonnet-4.6',
+      provider: 'openai',
+      inputTokenCost: 3,
+      outputTokenCost: 15,
+      inputTokenCostAbove200k: 6,
+      outputTokenCostAbove200k: 22.5,
+      webSearchCost: 10,
+    });
+
+    expect(inserted[0]).toMatchObject({
+      input_token_cost: 3_000_000,
+      output_token_cost: 15_000_000,
+      input_token_cost_above_200k: 6_000_000,
+      output_token_cost_above_200k: 22_500_000,
+      web_search_cost: 10_000_000,
+    });
+  });
+
+  it('stores updateModel pricing fields as micro-dollars', async () => {
+    const updated: Array<Record<string, unknown>> = [];
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'ai_models') {
+          return {
+            select() {
+              return {
+                eq() {
+                  return {
+                    single() {
+                      return Promise.resolve({
+                        data: {
+                          provider: 'openai',
+                          model_id: 'anthropic/claude-sonnet-4.6',
+                          api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+                        },
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+            update(payload: Record<string, unknown>) {
+              updated.push(payload);
+              return {
+                eq() {
+                  return {
+                    select() {
+                      return {
+                        single() {
+                          return Promise.resolve({
+                            data: {
+                              id: '11111111-1111-4111-8111-111111111111',
+                              ...payload,
+                            },
+                            error: null,
+                          });
+                        },
+                      };
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({ role: 'admin', supabase });
+    await caller.updateModel({
+      id: '11111111-1111-4111-8111-111111111111',
+      inputTokenCost: 3,
+      outputTokenCost: 15,
+      inputTokenCostAbove200k: 6,
+      outputTokenCostAbove200k: 22.5,
+      webSearchCost: 10,
+    });
+
+    expect(updated[0]).toMatchObject({
+      input_token_cost: 3_000_000,
+      output_token_cost: 15_000_000,
+      input_token_cost_above_200k: 6_000_000,
+      output_token_cost_above_200k: 22_500_000,
+      web_search_cost: 10_000_000,
+    });
+  });
+
   it('returns a safe connection error while keeping persisted diagnostics sanitized', async () => {
     const updatePayloads: Array<Record<string, unknown>> = [];
     const createdModel = {
@@ -286,10 +448,10 @@ describe('modelRouter error sanitization', () => {
                     max_tokens: 4096,
                     input_limit: 180000,
                     enable_web_search: 'false',
-                    input_token_cost: 100,
-                    output_token_cost: 400,
-                    input_token_cost_above_200k: 100,
-                    output_token_cost_above_200k: 400,
+                    input_token_cost: 1_000_000,
+                    output_token_cost: 4_000_000,
+                    input_token_cost_above_200k: 1_000_000,
+                    output_token_cost_above_200k: 4_000_000,
                     web_search_cost: 0,
                     token_counting_supported: 'true',
                     token_counting_method: 'verified_openai_tokenizer',

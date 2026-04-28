@@ -575,7 +575,7 @@ export default function AdminFinancePage() {
                       </TableCell>
                       <TableCell>
                         <span style={{ color: 'var(--text-primary)' }}>
-                          {model.webSearchCost > 0 ? `$${(model.webSearchCost / 1000).toFixed(3)}/1K` : '-'}
+                          {model.webSearchCost > 0 ? `$${(model.webSearchCost / 1_000_000).toFixed(3)}/1K` : '-'}
                         </span>
                       </TableCell>
                       <TableCell>

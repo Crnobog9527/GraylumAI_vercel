@@ -668,7 +668,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
                     output_token_cost: 15000000,
                     input_token_cost_above_200k: 0,
                     output_token_cost_above_200k: 0,
-                    web_search_cost: 200,
+                    web_search_cost: 200000,
                     max_tokens: 8192,
                   },
                   {
@@ -694,7 +694,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
                     output_token_cost: 18000000,
                     input_token_cost_above_200k: 0,
                     output_token_cost_above_200k: 0,
-                    web_search_cost: 500,
+                    web_search_cost: 500000,
                     max_tokens: 8192,
                   },
                 ],
