@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   calculateTokenCost,
   calculateTokenCostWithPricing,
@@ -432,6 +433,22 @@ describe('BillingService', () => {
           modelId: 'anthropic/claude-haiku-4.5',
         },
       });
+    });
+  });
+
+  describe('atomic_finalize_ai_success migration', () => {
+    it('forces settle metadata to include top-level pricing from RPC metadata', () => {
+      const migrationSql = readFileSync(
+        new URL('../../../../db/migrations/0023_ai_settle_pricing_metadata.sql', import.meta.url),
+        'utf8',
+      );
+
+      expect(migrationSql).toContain("p_usage_metadata->'pricing'");
+      expect(migrationSql).toContain("p_token_metadata->'pricing'");
+      expect(migrationSql).toContain("jsonb_build_object('pricing', v_pricing_metadata)");
+      expect(migrationSql).toContain('input_token_cost::NUMERIC / 1000000');
+      expect(migrationSql).toContain('output_token_cost::NUMERIC / 1000000');
+      expect(migrationSql).toContain('web_search_cost::NUMERIC / 1000000');
     });
   });
 
