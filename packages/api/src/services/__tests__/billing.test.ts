@@ -5,8 +5,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   calculateTokenCost,
+  calculateTokenCostWithPricing,
   estimateRequestCost,
   getModelPricing,
   BillingService,
@@ -219,6 +221,72 @@ describe('getModelPricing', () => {
     expect(pricing.outputPer1M).toBe(15);
     expect(pricing.searchPer1K).toBe(10);
   });
+
+  it('reads fresh ai_models pricing on each call instead of returning stale cached values', async () => {
+    const rows = [
+      {
+        input_token_cost: 100,
+        output_token_cost: 500,
+        web_search_cost: 0,
+      },
+      {
+        input_token_cost: 1_000_000,
+        output_token_cost: 5_000_000,
+        web_search_cost: 10_000_000,
+      },
+    ];
+
+    let callCount = 0;
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('ai_models');
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          single() {
+            const data = rows[callCount] ?? rows[rows.length - 1];
+            callCount += 1;
+            return Promise.resolve({ data, error: null });
+          },
+        };
+      },
+    } as unknown as BillingContext['supabase'];
+
+    const first = await getModelPricing(supabase, 'anthropic/claude-haiku-4.5');
+    const second = await getModelPricing(supabase, 'anthropic/claude-haiku-4.5');
+
+    expect(first.inputPer1M).toBe(0.0001);
+    expect(first.outputPer1M).toBe(0.0005);
+    expect(second.inputPer1M).toBe(1);
+    expect(second.outputPer1M).toBe(5);
+    expect(second.searchPer1K).toBe(10);
+    expect(callCount).toBe(2);
+  });
+});
+
+describe('calculateTokenCostWithPricing', () => {
+  it('charges 3 credits for 50 input and 291 output tokens at $1/$5 per 1M', () => {
+    const result = calculateTokenCostWithPricing(
+      {
+        inputTokens: 50,
+        outputTokens: 291,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      {
+        inputPer1M: 1,
+        outputPer1M: 5,
+        searchPer1K: 10,
+      },
+    );
+
+    expect(result.costUsd).toBeCloseTo(0.001505, 12);
+    expect(result.credits).toBe(3);
+  });
 });
 
 // ============================================
@@ -226,6 +294,164 @@ describe('getModelPricing', () => {
 // ============================================
 
 describe('BillingService', () => {
+  describe('finalizeAISuccess', () => {
+    it('persists top-level pricing metadata on the settle record', async () => {
+      const updatePayloads: Array<Record<string, unknown>> = [];
+      const rpc = vi.fn().mockResolvedValue({
+        data: [{
+          user_message_id: 'user-message-1',
+          assistant_message_id: 'assistant-message-1',
+          transaction_id: 'transaction-1',
+          settle_id: 'settle-1',
+          balance_after: 997,
+          refunded_credits: 3,
+        }],
+        error: null,
+      });
+      const from = vi.fn((table: string) => {
+        const builder = {
+          select() {
+            return builder;
+          },
+          eq() {
+            return builder;
+          },
+          contains() {
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          gte() {
+            return builder;
+          },
+          ilike() {
+            return builder;
+          },
+          order() {
+            return builder;
+          },
+          limit() {
+            return builder;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: null, error: null });
+          },
+          single() {
+            if (table === 'billing_history') {
+              return Promise.resolve({
+                data: {
+                  id: 'settle-1',
+                  metadata: {
+                    actualCredits: 3,
+                  },
+                },
+                error: null,
+              });
+            }
+            return Promise.resolve({ data: null, error: null });
+          },
+          update(payload: Record<string, unknown>) {
+            if (table === 'billing_history') {
+              updatePayloads.push(payload);
+            }
+            return {
+              eq() {
+                return Promise.resolve({ data: null, error: null });
+              },
+            };
+          },
+        };
+
+        return builder;
+      });
+      const pricing = {
+        inputPer1M: 1,
+        outputPer1M: 5,
+        searchPer1K: 10,
+        pricingSource: 'ai_models',
+        modelId: 'anthropic/claude-haiku-4.5',
+      };
+      const service = new BillingService({
+        supabase: { rpc, from } as unknown as BillingContext['supabase'],
+        userId: 'test-user',
+      });
+
+      await service.finalizeAISuccess({
+        conversationId: 'conversation-1',
+        userMessage: 'hello',
+        assistantMessage: 'hi',
+        modelUsed: 'anthropic/claude-haiku-4.5',
+        usage: {
+          inputTokens: 50,
+          outputTokens: 291,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        costUsd: 0.001505,
+        credits: 3,
+        preDeductId: '11111111-1111-4111-8111-111111111111',
+        tokenMetadata: {
+          count_method: 'provider_usage',
+        },
+        usageMetadata: {
+          routingReason: 'test',
+          pricing,
+        },
+      });
+
+      expect(rpc).toHaveBeenCalledWith('atomic_finalize_ai_success', expect.objectContaining({
+        p_total_cost_usd: '0.001505',
+        p_total_credits: 3,
+        p_token_metadata: expect.objectContaining({
+          pricing: expect.objectContaining({
+            inputPer1M: 1,
+            outputPer1M: 5,
+            searchPer1K: 10,
+            modelId: 'anthropic/claude-haiku-4.5',
+            pricingSource: 'ai_models',
+          }),
+        }),
+        p_usage_metadata: expect.objectContaining({
+          pricing: expect.objectContaining({
+            inputPer1M: 1,
+            outputPer1M: 5,
+            searchPer1K: 10,
+            modelId: 'anthropic/claude-haiku-4.5',
+            pricingSource: 'ai_models',
+          }),
+        }),
+      }));
+      expect(updatePayloads).toHaveLength(1);
+      expect(updatePayloads[0].metadata).toMatchObject({
+        actualCredits: 3,
+        pricing: {
+          inputPer1M: 1,
+          outputPer1M: 5,
+          searchPer1K: 10,
+          pricingSource: 'ai_models',
+          modelId: 'anthropic/claude-haiku-4.5',
+        },
+      });
+    });
+  });
+
+  describe('atomic_finalize_ai_success migration', () => {
+    it('forces settle metadata to include top-level pricing from RPC metadata', () => {
+      const migrationSql = readFileSync(
+        new URL('../../../../db/migrations/0023_ai_settle_pricing_metadata.sql', import.meta.url),
+        'utf8',
+      );
+
+      expect(migrationSql).toContain("p_usage_metadata->'pricing'");
+      expect(migrationSql).toContain("p_token_metadata->'pricing'");
+      expect(migrationSql).toContain("jsonb_build_object('pricing', v_pricing_metadata)");
+      expect(migrationSql).toContain('input_token_cost::NUMERIC / 1000000');
+      expect(migrationSql).toContain('output_token_cost::NUMERIC / 1000000');
+      expect(migrationSql).toContain('web_search_cost::NUMERIC / 1000000');
+    });
+  });
+
   describe('getBalance', () => {
     it('should return user credits', async () => {
       const mockSupabase = createMockSupabase({ credits: 5000 });

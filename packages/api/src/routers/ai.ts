@@ -428,6 +428,13 @@ export const aiRouter = router({
           aiResponse.usage,
           pricing
         );
+        const pricingMetadata = {
+          inputPer1M: pricing.inputPer1M,
+          outputPer1M: pricing.outputPer1M,
+          searchPer1K: pricing.searchPer1K ?? 0,
+          pricingSource: 'ai_models',
+          modelId: modelConfig.modelId,
+        };
 
         // 11. 原子化写消息、记账和统计
         const latencyMs = Date.now() - startTime;
@@ -453,8 +460,9 @@ export const aiRouter = router({
             count_method: modelConfig.tokenCountingMethod ?? countedInput.method,
             count_source: countedInput.countSource,
             counter_version: countedInput.counterVersion,
+            pricing: pricingMetadata,
           },
-          usageMetadata: { routingReason },
+          usageMetadata: { routingReason, pricing: pricingMetadata },
         });
 
         // 12. 如果是新对话，更新标题

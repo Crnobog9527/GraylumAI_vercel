@@ -123,9 +123,6 @@ export interface ModelPricingInfo {
   searchPer1K?: number;     // 每千次搜索成本
 }
 
-/** 定价缓存 (避免每次请求都查询数据库) */
-const pricingCache = new Map<string, { pricing: ModelPricingInfo; expiry: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
 const MICRO_DOLLARS_PER_USD = 1_000_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -163,6 +160,39 @@ function normalizeRequestId(requestId?: string | null): string | undefined {
   return undefined;
 }
 
+function extractPricingMetadata(params: {
+  tokenMetadata?: Record<string, unknown>;
+  usageMetadata?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const pricing = params.usageMetadata?.pricing ?? params.tokenMetadata?.pricing;
+  if (!pricing || typeof pricing !== 'object') {
+    return undefined;
+  }
+
+  const value = pricing as Record<string, unknown>;
+  return {
+    modelId: value.modelId,
+    inputPer1M: value.inputPer1M,
+    outputPer1M: value.outputPer1M,
+    searchPer1K: value.searchPer1K ?? 0,
+    pricingSource: value.pricingSource ?? 'ai_models',
+  };
+}
+
+function withTopLevelPricingMetadata(
+  metadata: Record<string, unknown> | undefined,
+  pricing: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!pricing || metadata?.pricing) {
+    return metadata ?? {};
+  }
+
+  return {
+    ...(metadata ?? {}),
+    pricing,
+  };
+}
+
 /**
  * 从数据库获取模型定价
  * @param supabase - Supabase 客户端
@@ -172,13 +202,8 @@ export async function getModelPricing(
   supabase: SupabaseClient,
   modelId: string
 ): Promise<ModelPricingInfo> {
-  // 1. 检查缓存
-  const cached = pricingCache.get(modelId);
-  if (cached && cached.expiry > Date.now()) {
-    return cached.pricing;
-  }
-
-  // 2. 从数据库查询
+  // Production billing must read the latest admin/model pricing on every request.
+  // Stale process-local caches can undercharge after SQL data corrections or admin edits.
   const { data: model, error } = await supabase
     .from('ai_models')
     .select('input_token_cost, output_token_cost, web_search_cost')
@@ -213,9 +238,6 @@ export async function getModelPricing(
     const fallback = MODEL_PRICING[modelId as SupportedModelId] ?? MODEL_PRICING['claude-sonnet-4-20250514'];
     return fallback;
   }
-
-  // 5. 缓存结果
-  pricingCache.set(modelId, { pricing, expiry: Date.now() + CACHE_TTL });
 
   return pricing;
 }
@@ -326,6 +348,63 @@ export class BillingService {
       });
     } catch (error) {
       logger.error('billing', 'billing_invitation_rebate_failed');
+    }
+  }
+
+  private async ensureSettlePricingMetadata(params: {
+    settleId?: string | null;
+    preDeductId?: string | null;
+    pricing: unknown;
+  }): Promise<void> {
+    if (!params.pricing || (!params.settleId && !params.preDeductId)) {
+      return;
+    }
+
+    try {
+      let query = this.supabase
+        .from('billing_history')
+        .select('id, metadata')
+        .eq('user_id', this.userId)
+        .eq('operation_type', 'settle') as any;
+
+      query = params.settleId
+        ? query.eq('id', params.settleId)
+        : query.contains('metadata', { preDeductId: params.preDeductId });
+
+      const { data: settle, error } = await query.single();
+      if (error || !settle) {
+        logger.warn('billing', 'billing_settle_pricing_metadata_lookup_failed', {
+          hasSettleId: Boolean(params.settleId),
+          hasPreDeductId: Boolean(params.preDeductId),
+        });
+        return;
+      }
+
+      const metadata = (settle.metadata as Record<string, unknown> | null) ?? {};
+      if (metadata.pricing) {
+        return;
+      }
+
+      const { error: updateError } = await this.supabase
+        .from('billing_history')
+        .update({
+          metadata: {
+            ...metadata,
+            pricing: params.pricing,
+          },
+        })
+        .eq('id', settle.id);
+
+      if (updateError) {
+        logger.warn('billing', 'billing_settle_pricing_metadata_update_failed', {
+          hasSettleId: Boolean(params.settleId),
+        });
+      }
+    } catch {
+      logger.warn('billing', 'billing_settle_pricing_metadata_persist_failed', {
+        hasSettleId: Boolean(params.settleId),
+        hasPreDeductId: Boolean(params.preDeductId),
+      });
     }
   }
 
@@ -1074,6 +1153,9 @@ export class BillingService {
 
   async finalizeAISuccess(params: FinalizeAISuccessParams): Promise<FinalizeAISuccessResult> {
     const requestId = normalizeRequestId(params.requestId);
+    const pricingMetadata = extractPricingMetadata(params);
+    const tokenMetadata = withTopLevelPricingMetadata(params.tokenMetadata, pricingMetadata);
+    const usageMetadata = withTopLevelPricingMetadata(params.usageMetadata, pricingMetadata);
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
     if (typeof rpcFn === 'function') {
       const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_success', {
@@ -1086,8 +1168,8 @@ export class BillingService {
         p_total_credits: params.credits,
         p_pre_deduct_id: params.preDeductId ?? null,
         p_usage: params.usage,
-        p_token_metadata: params.tokenMetadata ?? {},
-        p_usage_metadata: params.usageMetadata ?? {},
+        p_token_metadata: tokenMetadata,
+        p_usage_metadata: usageMetadata,
         p_request_id: requestId ?? null,
         p_input_length: params.inputLength ?? null,
         p_latency_ms: params.latencyMs ?? null,
@@ -1101,6 +1183,11 @@ export class BillingService {
         if (params.preDeductId && params.credits > 0) {
           await this.applyInvitationRebate(params.credits, params.preDeductId);
         }
+        await this.ensureSettlePricingMetadata({
+          settleId: result.settle_id ?? null,
+          preDeductId: params.preDeductId ?? null,
+          pricing: pricingMetadata,
+        });
 
         return {
           userMessageId: result.user_message_id ?? null,
@@ -1145,6 +1232,10 @@ export class BillingService {
       );
       refundedCredits = Math.max(0, settleResult.difference);
       balanceAfter = settleResult.balanceAfter;
+      await this.ensureSettlePricingMetadata({
+        preDeductId: params.preDeductId,
+        pricing: pricingMetadata,
+      });
     }
 
     await this.recordTokenStats({
@@ -1155,7 +1246,7 @@ export class BillingService {
       costUsd: params.costUsd,
       credits: params.credits,
       searchCount: params.searchCount ?? 0,
-      metadata: params.tokenMetadata,
+      metadata: tokenMetadata,
     });
 
     await this.recordUsageLog({
@@ -1167,7 +1258,7 @@ export class BillingService {
       latencyMs: params.latencyMs,
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
-      metadata: params.usageMetadata,
+      metadata: usageMetadata,
     });
 
     return {

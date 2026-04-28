@@ -991,6 +991,29 @@ export async function POST(request: NextRequest) {
           const actualCredits = canUseFreeTier
             ? 0
             : calculatedCost.credits + (actualSearchCount * runtimeSettings.searchSurchargeCredits);
+          const pricingMetadata = {
+            inputPer1M: pricing.inputPer1M,
+            outputPer1M: pricing.outputPer1M,
+            searchPer1K: pricing.searchPer1K ?? 0,
+            pricingSource: 'ai_models',
+            modelId: runtimeModel.modelId,
+          };
+
+          if (
+            usage.inputTokens + usage.outputTokens > 0 &&
+            pricing.inputPer1M > 0 &&
+            pricing.outputPer1M > 0 &&
+            calculatedCost.costUsd.toFixed(6) === '0.000000'
+          ) {
+            logger.warn('billing', 'ai_stream_cost_rounded_to_zero', {
+              modelId: runtimeModel.modelId,
+              usage,
+              pricing: pricingMetadata,
+              costUsd: calculatedCost.costUsd,
+              credits: actualCredits,
+            });
+          }
+
           const finalizeResult = await billingService.finalizeAISuccess({
             conversationId: conversation.id,
             userMessage: message,
@@ -1011,10 +1034,12 @@ export async function POST(request: NextRequest) {
               count_source: countedInput.countSource,
               counter_version: countedInput.counterVersion,
               routing_decision: routingDecision,
+              pricing: pricingMetadata,
             },
             usageMetadata: {
               routingReason,
               routingDecision,
+              pricing: pricingMetadata,
               promptId: activePrompt?.id ?? null,
               promptName: activePrompt?.name ?? null,
               promptCacheEnabled: runtimeSettings.enablePromptCache,
