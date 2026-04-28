@@ -293,6 +293,67 @@ describe('calculateTokenCostWithPricing', () => {
 // ============================================
 
 describe('BillingService', () => {
+  describe('finalizeAISuccess', () => {
+    it('passes pricing metadata to atomic settle metadata inputs', async () => {
+      const rpc = vi.fn().mockResolvedValue({
+        data: [{
+          user_message_id: 'user-message-1',
+          assistant_message_id: 'assistant-message-1',
+          transaction_id: 'transaction-1',
+          settle_id: 'settle-1',
+          balance_after: 997,
+          refunded_credits: 3,
+        }],
+        error: null,
+      });
+      const pricing = {
+        inputPer1M: 1,
+        outputPer1M: 5,
+        searchPer1K: 10,
+        pricingSource: 'ai_models',
+        modelId: 'anthropic/claude-haiku-4.5',
+      };
+      const service = new BillingService({
+        supabase: { rpc } as unknown as BillingContext['supabase'],
+        userId: 'test-user',
+      });
+
+      await service.finalizeAISuccess({
+        conversationId: 'conversation-1',
+        userMessage: 'hello',
+        assistantMessage: 'hi',
+        modelUsed: 'anthropic/claude-haiku-4.5',
+        usage: {
+          inputTokens: 50,
+          outputTokens: 291,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        costUsd: 0.001505,
+        credits: 3,
+        preDeductId: '11111111-1111-4111-8111-111111111111',
+        tokenMetadata: {
+          count_method: 'provider_usage',
+        },
+        usageMetadata: {
+          routingReason: 'test',
+          pricing,
+        },
+      });
+
+      expect(rpc).toHaveBeenCalledWith('atomic_finalize_ai_success', expect.objectContaining({
+        p_total_cost_usd: '0.001505',
+        p_total_credits: 3,
+        p_token_metadata: expect.objectContaining({
+          pricing,
+        }),
+        p_usage_metadata: expect.objectContaining({
+          pricing,
+        }),
+      }));
+    });
+  });
+
   describe('getBalance', () => {
     it('should return user credits', async () => {
       const mockSupabase = createMockSupabase({ credits: 5000 });

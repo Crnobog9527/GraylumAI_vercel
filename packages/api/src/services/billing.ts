@@ -160,6 +160,27 @@ function normalizeRequestId(requestId?: string | null): string | undefined {
   return undefined;
 }
 
+function extractPricingMetadata(params: {
+  tokenMetadata?: Record<string, unknown>;
+  usageMetadata?: Record<string, unknown>;
+}): unknown {
+  return params.usageMetadata?.pricing ?? params.tokenMetadata?.pricing;
+}
+
+function withTopLevelPricingMetadata(
+  metadata: Record<string, unknown> | undefined,
+  pricing: unknown,
+): Record<string, unknown> {
+  if (!pricing || metadata?.pricing) {
+    return metadata ?? {};
+  }
+
+  return {
+    ...(metadata ?? {}),
+    pricing,
+  };
+}
+
 /**
  * 从数据库获取模型定价
  * @param supabase - Supabase 客户端
@@ -1063,6 +1084,9 @@ export class BillingService {
 
   async finalizeAISuccess(params: FinalizeAISuccessParams): Promise<FinalizeAISuccessResult> {
     const requestId = normalizeRequestId(params.requestId);
+    const pricingMetadata = extractPricingMetadata(params);
+    const tokenMetadata = withTopLevelPricingMetadata(params.tokenMetadata, pricingMetadata);
+    const usageMetadata = withTopLevelPricingMetadata(params.usageMetadata, pricingMetadata);
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
     if (typeof rpcFn === 'function') {
       const rpcResponse = await rpcFn.call(this.supabase, 'atomic_finalize_ai_success', {
@@ -1075,8 +1099,8 @@ export class BillingService {
         p_total_credits: params.credits,
         p_pre_deduct_id: params.preDeductId ?? null,
         p_usage: params.usage,
-        p_token_metadata: params.tokenMetadata ?? {},
-        p_usage_metadata: params.usageMetadata ?? {},
+        p_token_metadata: tokenMetadata,
+        p_usage_metadata: usageMetadata,
         p_request_id: requestId ?? null,
         p_input_length: params.inputLength ?? null,
         p_latency_ms: params.latencyMs ?? null,
@@ -1144,7 +1168,7 @@ export class BillingService {
       costUsd: params.costUsd,
       credits: params.credits,
       searchCount: params.searchCount ?? 0,
-      metadata: params.tokenMetadata,
+      metadata: tokenMetadata,
     });
 
     await this.recordUsageLog({
@@ -1156,7 +1180,7 @@ export class BillingService {
       latencyMs: params.latencyMs,
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
-      metadata: params.usageMetadata,
+      metadata: usageMetadata,
     });
 
     return {
