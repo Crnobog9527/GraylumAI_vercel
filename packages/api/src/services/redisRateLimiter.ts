@@ -45,11 +45,7 @@ export type RateLimitType =
 let redis: Redis | null = null;
 
 function shouldFailClosedRateLimit(): boolean {
-  if (process.env.VERCEL_ENV) {
-    return process.env.VERCEL_ENV === 'production';
-  }
-
-  return process.env.NODE_ENV === 'production';
+  return process.env.RATE_LIMIT_FAIL_CLOSED === 'true';
 }
 
 function getRedis(): Redis {

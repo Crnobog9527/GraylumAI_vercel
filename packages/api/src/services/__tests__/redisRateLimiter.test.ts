@@ -34,8 +34,27 @@ describe('redisRateLimiter', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('throws INTERNAL_SERVER_ERROR when the rate limit backend is unavailable', async () => {
+  it('allows requests by default when the rate limit backend is unavailable', async () => {
     process.env.NODE_ENV = 'production';
+    mockLimit.mockRejectedValue(new Error('redis down'));
+
+    const { checkRateLimit, checkRateLimitForMiddleware, checkRateLimitOrThrow } = await import('../redisRateLimiter');
+
+    await expect(checkRateLimit('user-1', 'api')).resolves.toMatchObject({
+      success: true,
+      limit: 0,
+      remaining: 0,
+      reset: 0,
+    });
+    await expect(checkRateLimitForMiddleware('user-1', 'api')).resolves.toBeNull();
+    await expect(checkRateLimitOrThrow('user-1', 'api')).resolves.toMatchObject({
+      success: true,
+    });
+  });
+
+  it('throws INTERNAL_SERVER_ERROR when fail-closed is explicitly enabled and the backend is unavailable', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.RATE_LIMIT_FAIL_CLOSED = 'true';
     mockLimit.mockRejectedValue(new Error('redis down'));
 
     const { checkRateLimitOrThrow } = await import('../redisRateLimiter');
@@ -46,8 +65,9 @@ describe('redisRateLimiter', () => {
     });
   });
 
-  it('returns a 503 middleware response when the rate limit backend is unavailable', async () => {
+  it('returns a 503 middleware response when fail-closed is explicitly enabled and the backend is unavailable', async () => {
     process.env.NODE_ENV = 'production';
+    process.env.RATE_LIMIT_FAIL_CLOSED = 'true';
     mockLimit.mockRejectedValue(new Error('redis down'));
 
     const { checkRateLimitForMiddleware } = await import('../redisRateLimiter');
