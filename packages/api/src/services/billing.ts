@@ -126,6 +126,7 @@ export interface ModelPricingInfo {
 /** 定价缓存 (避免每次请求都查询数据库) */
 const pricingCache = new Map<string, { pricing: ModelPricingInfo; expiry: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+const MICRO_DOLLARS_PER_USD = 1_000_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -194,15 +195,16 @@ export async function getModelPricing(
     return fallback;
   }
 
-  // 3. 转换数据库格式 (微美元 → 美元)
-  // 数据库存储: 每百万 Token 的微美元成本 (如 3000000 = $3.00)
+  // 3. 转换数据库格式 (micro-dollars → dollars)
+  // ai_models 成本字段统一存储为 micro-dollars:
+  // input/output 为 $/1M tokens，web_search 为 $/1K searches。
   const pricing: ModelPricingInfo = {
-    inputPer1M: (model.input_token_cost ?? 0) / 1_000_000,
-    outputPer1M: (model.output_token_cost ?? 0) / 1_000_000,
+    inputPer1M: (model.input_token_cost ?? 0) / MICRO_DOLLARS_PER_USD,
+    outputPer1M: (model.output_token_cost ?? 0) / MICRO_DOLLARS_PER_USD,
     // 缓存定价使用标准比例 (写入=1.25x输入, 读取=0.1x输入)
-    cacheWritePer1M: ((model.input_token_cost ?? 0) / 1_000_000) * 1.25,
-    cacheReadPer1M: ((model.input_token_cost ?? 0) / 1_000_000) * 0.1,
-    searchPer1K: (model.web_search_cost ?? 0) / 1_000,
+    cacheWritePer1M: ((model.input_token_cost ?? 0) / MICRO_DOLLARS_PER_USD) * 1.25,
+    cacheReadPer1M: ((model.input_token_cost ?? 0) / MICRO_DOLLARS_PER_USD) * 0.1,
+    searchPer1K: (model.web_search_cost ?? 0) / MICRO_DOLLARS_PER_USD,
   };
 
   // 4. 如果数据库定价为0，使用硬编码后备

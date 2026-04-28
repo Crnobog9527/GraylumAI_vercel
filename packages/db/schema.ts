@@ -68,11 +68,11 @@ export const aiModels = pgTable('ai_models', {
   maxTokens: integer('max_tokens').default(4096).notNull(),
   inputLimit: integer('input_limit').default(180000).notNull(),
   enableWebSearch: text('enable_web_search').default('false').notNull(),
-  inputTokenCost: integer('input_token_cost').default(0).notNull(), // Per 1M tokens, in micro-dollars
-  outputTokenCost: integer('output_token_cost').default(0).notNull(),
-  inputTokenCostAbove200k: integer('input_token_cost_above_200k').default(0).notNull(),
-  outputTokenCostAbove200k: integer('output_token_cost_above_200k').default(0).notNull(),
-  webSearchCost: integer('web_search_cost').default(0).notNull(), // Per 1K searches
+  inputTokenCost: integer('input_token_cost').default(0).notNull(), // $/1M input tokens, stored as micro-dollars
+  outputTokenCost: integer('output_token_cost').default(0).notNull(), // $/1M output tokens, stored as micro-dollars
+  inputTokenCostAbove200k: integer('input_token_cost_above_200k').default(0).notNull(), // $/1M input tokens above 200K, stored as micro-dollars
+  outputTokenCostAbove200k: integer('output_token_cost_above_200k').default(0).notNull(), // $/1M output tokens above 200K, stored as micro-dollars
+  webSearchCost: integer('web_search_cost').default(0).notNull(), // $/1K searches, stored as micro-dollars
   tokenCountingSupported: text('token_counting_supported').default('false').notNull(),
   tokenCountingMethod: text('token_counting_method', {
     enum: ['anthropic_count_tokens', 'gemini_count_tokens', 'provider_usage', 'estimate', 'unsupported'],
