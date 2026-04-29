@@ -406,7 +406,7 @@ export default function AdminSettingsPage() {
                 <h4 className="text-sm font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
                   有效设置
                 </h4>
-                {renderSettingGroup(['new_user_credits'])}
+                {renderSettingGroup(settingGroups.billing)}
               </div>
 
               {/* Deprecated settings with visual distinction */}
