@@ -62,6 +62,10 @@ export interface AbortSettleResult {
   refundedCredits: number;
   /** 结算后余额 */
   balanceAfter: number;
+  /** 本次中断结算使用的模型定价快照 */
+  pricing?: BillingPricingSnapshot;
+  /** 本次中断结算使用的计费运行时配置快照 */
+  billingSettingsSnapshot?: BillingSettingsSnapshot;
 }
 
 export interface BillingContext {
@@ -132,6 +136,22 @@ export interface BillingRuntimeSettings {
   requireModelPricing: boolean;
 }
 
+export interface BillingPricingSnapshot {
+  modelId: string;
+  inputPer1M: number;
+  outputPer1M: number;
+  searchPer1K: number;
+  pricingSource: 'ai_models';
+}
+
+export interface BillingSettingsSnapshot {
+  creditsPerUsd: number;
+  tokenPriceMultiplier: number;
+  minPreDeduct: number;
+  maxPreDeduct: number;
+  safetyMargin: number;
+}
+
 export const DEFAULT_BILLING_RUNTIME_SETTINGS: BillingRuntimeSettings = {
   creditsPerUsd: BILLING_CONSTANTS.CREDITS_PER_USD,
   tokenPriceMultiplier: BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
@@ -141,6 +161,31 @@ export const DEFAULT_BILLING_RUNTIME_SETTINGS: BillingRuntimeSettings = {
   safetyMargin: BILLING_CONSTANTS.SAFETY_MARGIN,
   requireModelPricing: true,
 };
+
+function createBillingPricingSnapshot(
+  modelId: string,
+  pricing: ModelPricingInfo,
+): BillingPricingSnapshot {
+  return {
+    modelId,
+    inputPer1M: pricing.inputPer1M,
+    outputPer1M: pricing.outputPer1M,
+    searchPer1K: pricing.searchPer1K ?? 0,
+    pricingSource: 'ai_models',
+  };
+}
+
+function createBillingSettingsSnapshot(
+  settings: BillingRuntimeSettings,
+): BillingSettingsSnapshot {
+  return {
+    creditsPerUsd: settings.creditsPerUsd,
+    tokenPriceMultiplier: settings.tokenPriceMultiplier,
+    minPreDeduct: settings.minPreDeduct,
+    maxPreDeduct: settings.maxPreDeduct,
+    safetyMargin: settings.safetyMargin,
+  };
+}
 
 export class ModelPricingUnavailableError extends Error {
   constructor(
@@ -377,8 +422,10 @@ export async function getModelPricing(
 // ============================================
 
 /**
- * 计算 Token 成本 (积分) - 使用硬编码定价 (后备)
- * @deprecated 建议使用 calculateTokenCostWithPricing 传入动态定价
+ * 计算 Token 成本 (积分) - 使用硬编码定价 (legacy 显式后备)
+ * @deprecated 生产聊天计费链路不得调用该 helper。请使用
+ * getModelPricing + getBillingRuntimeSettings + calculateTokenCostWithPricing，
+ * 只有测试、诊断估算或显式 fallback 场景可以继续使用。
  */
 export function calculateTokenCost(
   modelId: string,
@@ -441,7 +488,10 @@ export function estimatePreDeductCredits(
 }
 
 /**
- * 估算请求成本 (用于预扣)
+ * 估算请求成本 (legacy 预估)
+ * @deprecated 生产聊天预扣不得调用该 helper。请使用
+ * getModelPricing + getBillingRuntimeSettings + calculateTokenCostWithPricing
+ * 后再通过 estimatePreDeductCredits 应用运行时预扣配置。
  */
 export function estimateRequestCost(
   modelId: string,
@@ -1141,14 +1191,25 @@ export class BillingService {
     modelId: string,
     reason: string = '用户中断'
   ): Promise<AbortSettleResult> {
-    // 计算已消耗的成本
+    // 计算已消耗的成本。中断结算也必须走生产动态计费路径，不能回落到 MODEL_PRICING。
     const consumedUsage: TokenUsage = {
       inputTokens: consumedTokens.inputTokens,
       outputTokens: consumedTokens.outputTokens,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     };
-    const { credits: consumedCredits } = calculateTokenCost(modelId, consumedUsage);
+    const billingRuntimeSettings = await getBillingRuntimeSettings(this.supabase);
+    const pricing = await getModelPricing(this.supabase, modelId, {
+      requireModelPricing: billingRuntimeSettings.requireModelPricing,
+    });
+    const { credits: consumedCredits } = calculateTokenCostWithPricing(
+      consumedUsage,
+      pricing,
+      {},
+      billingRuntimeSettings,
+    );
+    const pricingSnapshot = createBillingPricingSnapshot(modelId, pricing);
+    const billingSettingsSnapshot = createBillingSettingsSnapshot(billingRuntimeSettings);
 
     // 尝试使用原子化 RPC 函数
     const rpcFn = (this.supabase as { rpc?: Function }).rpc;
@@ -1177,6 +1238,8 @@ export class BillingService {
         consumedCredits: result.consumed_credits,
         refundedCredits: result.refunded_credits,
         balanceAfter: result.balance_after,
+        pricing: pricingSnapshot,
+        billingSettingsSnapshot,
       };
     }
 
@@ -1261,6 +1324,8 @@ export class BillingService {
           refundedCredits,
           consumedTokens,
           modelId,
+          pricing: pricingSnapshot,
+          billingSettingsSnapshot,
           timestamp: new Date().toISOString(),
         },
       });
@@ -1284,6 +1349,8 @@ export class BillingService {
       consumedCredits,
       refundedCredits,
       balanceAfter: finalProfile?.credits ?? 0,
+      pricing: pricingSnapshot,
+      billingSettingsSnapshot,
     };
   }
 

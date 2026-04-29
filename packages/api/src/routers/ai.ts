@@ -622,6 +622,8 @@ export const aiRouter = router({
             aborted: true,
             consumedTokens: input.consumedTokens,
             refundedCredits: result.refundedCredits,
+            pricing: result.pricing,
+            billingSettingsSnapshot: result.billingSettingsSnapshot,
           },
         });
 

@@ -68,6 +68,87 @@ function createMockSupabase(options: {
   } as unknown as BillingContext['supabase'];
 }
 
+function createSettleAbortSupabase(options: {
+  modelPricing?: {
+    input_token_cost: number;
+    output_token_cost: number;
+    web_search_cost?: number;
+  } | null;
+  modelError?: { code?: string; message?: string } | null;
+  runtimeSettings?: Array<{ key: string; value: unknown }>;
+  rpcData?: Array<{
+    consumed_credits: number;
+    refunded_credits: number;
+    balance_after: number;
+  }>;
+}) {
+  const rpc = vi.fn().mockResolvedValue({
+    data: options.rpcData ?? [{
+      consumed_credits: 1,
+      refunded_credits: 9,
+      balance_after: 991,
+    }],
+    error: null,
+  });
+
+  const from = vi.fn((table: string) => {
+    const builder = {
+      select() {
+        return builder;
+      },
+      eq() {
+        return builder;
+      },
+      in(_column: string, keys: string[]) {
+        if (table === 'system_settings') {
+          if (keys.includes('billing_credits_per_usd')) {
+            return Promise.resolve({
+              data: options.runtimeSettings ?? [
+                { key: 'billing_credits_per_usd', value: '100' },
+                { key: 'billing_token_price_multiplier', value: '2' },
+                { key: 'billing_min_pre_deduct', value: '10' },
+                { key: 'billing_max_pre_deduct', value: '10000' },
+                { key: 'billing_safety_margin', value: '0.2' },
+                { key: 'billing_require_model_pricing', value: 'true' },
+              ],
+              error: null,
+            });
+          }
+
+          return Promise.resolve({
+            data: [{ key: 'invite_rebate_percent', value: '0' }],
+            error: null,
+          });
+        }
+
+        return builder;
+      },
+      single() {
+        if (table === 'ai_models') {
+          return Promise.resolve({
+            data: options.modelPricing ?? {
+              input_token_cost: 2_000_000,
+              output_token_cost: 4_000_000,
+              web_search_cost: 0,
+            },
+            error: options.modelError ?? null,
+          });
+        }
+
+        return Promise.resolve({ data: null, error: null });
+      },
+    };
+
+    return builder;
+  });
+
+  return {
+    supabase: { rpc, from } as unknown as BillingContext['supabase'],
+    rpc,
+    from,
+  };
+}
+
 // ============================================
 // calculateTokenCost Tests
 // ============================================
@@ -496,6 +577,108 @@ describe('production stream billing wiring', () => {
 // ============================================
 
 describe('BillingService', () => {
+  describe('settleAbort', () => {
+    it('uses dynamic ai_models pricing and billing runtime settings for consumed credits', async () => {
+      const { supabase, rpc } = createSettleAbortSupabase({
+        rpcData: [{
+          consumed_credits: 1,
+          refunded_credits: 9,
+          balance_after: 991,
+        }],
+      });
+      const service = new BillingService({
+        supabase,
+        userId: 'test-user',
+      });
+
+      const result = await service.settleAbort(
+        'pre-deduct-1',
+        { inputTokens: 1000, outputTokens: 500 },
+        'dynamic-model',
+        '用户中断',
+      );
+
+      expect(rpc).toHaveBeenCalledWith('atomic_abort_settle', expect.objectContaining({
+        p_model_id: 'dynamic-model',
+        p_consumed_credits: 1,
+        p_consumed_tokens: { inputTokens: 1000, outputTokens: 500 },
+      }));
+      expect(result).toMatchObject({
+        consumedCredits: 1,
+        refundedCredits: 9,
+        balanceAfter: 991,
+        pricing: {
+          modelId: 'dynamic-model',
+          inputPer1M: 2,
+          outputPer1M: 4,
+          searchPer1K: 0,
+          pricingSource: 'ai_models',
+        },
+        billingSettingsSnapshot: {
+          creditsPerUsd: 100,
+          tokenPriceMultiplier: 2,
+          minPreDeduct: 10,
+          maxPreDeduct: 10000,
+          safetyMargin: 0.2,
+        },
+      });
+    });
+
+    it('rejects missing model pricing before calling atomic_abort_settle', async () => {
+      const { supabase, rpc } = createSettleAbortSupabase({
+        modelPricing: null,
+        modelError: { code: 'PGRST116' },
+      });
+      const service = new BillingService({
+        supabase,
+        userId: 'test-user',
+      });
+
+      await expect(service.settleAbort(
+        'pre-deduct-1',
+        { inputTokens: 1000, outputTokens: 500 },
+        'missing-model',
+      )).rejects.toBeInstanceOf(ModelPricingUnavailableError);
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('rejects zero input or output pricing before calling atomic_abort_settle', async () => {
+      const { supabase, rpc } = createSettleAbortSupabase({
+        modelPricing: {
+          input_token_cost: 0,
+          output_token_cost: 4_000_000,
+          web_search_cost: 0,
+        },
+      });
+      const service = new BillingService({
+        supabase,
+        userId: 'test-user',
+      });
+
+      await expect(service.settleAbort(
+        'pre-deduct-1',
+        { inputTokens: 1000, outputTokens: 500 },
+        'zero-price-model',
+      )).rejects.toMatchObject({
+        reason: 'zero_pricing',
+      });
+      expect(rpc).not.toHaveBeenCalled();
+    });
+
+    it('does not call the legacy hardcoded calculateTokenCost path', () => {
+      const source = readFileSync(new URL('../billing.ts', import.meta.url), 'utf8');
+      const settleAbortBody = source.slice(
+        source.indexOf('async settleAbort('),
+        source.indexOf('async finalizeAISuccess('),
+      );
+
+      expect(settleAbortBody).toContain('getBillingRuntimeSettings(this.supabase)');
+      expect(settleAbortBody).toContain('getModelPricing(this.supabase, modelId');
+      expect(settleAbortBody).toContain('calculateTokenCostWithPricing(');
+      expect(settleAbortBody).not.toContain('calculateTokenCost(modelId, consumedUsage)');
+    });
+  });
+
   describe('finalizeAISuccess', () => {
     it('persists top-level pricing metadata on the settle record', async () => {
       const updatePayloads: Array<Record<string, unknown>> = [];

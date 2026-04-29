@@ -280,6 +280,10 @@ export const BILLING_CONSTANTS = {
 
 /**
  * 模型定价表 (每百万 Token 美元)
+ *
+ * @deprecated Legacy explicit fallback / tests only. Production chat billing
+ * must read ai_models through getModelPricing and must not silently default to
+ * this table when model pricing is missing or zero.
  */
 export const MODEL_PRICING = {
   // Claude Sonnet 4

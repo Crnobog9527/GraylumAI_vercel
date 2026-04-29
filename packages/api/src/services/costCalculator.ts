@@ -3,10 +3,14 @@
  *
  * 成本计算服务
  * 精确计算 AI 调用成本，支持多模型、缓存优化
+ *
+ * @deprecated Legacy estimator only. Production AI billing must use
+ * getModelPricing + getBillingRuntimeSettings + calculateTokenCostWithPricing
+ * from billing.ts so it reads ai_models and runtime billing settings.
  */
 
 import type { TokenUsage, CostBreakdown } from '../types/ai';
-import { BILLING_CONSTANTS, MODEL_PRICING, type SupportedModelId } from '../types/billing';
+import { BILLING_CONSTANTS } from '../types/billing';
 
 // ============================================
 // 类型定义
@@ -55,6 +59,9 @@ export interface EstimationParams {
 
 /**
  * 默认预估参数
+ *
+ * @deprecated Legacy estimator defaults. DEFAULT_ESTIMATION.webSearchCost must
+ * not be used for production billing deductions.
  */
 const DEFAULT_ESTIMATION = {
   outputTokens: 1024,
@@ -64,6 +71,9 @@ const DEFAULT_ESTIMATION = {
 
 /**
  * 扩展的模型定价表
+ *
+ * @deprecated Legacy estimator pricing. Do not route production billing through
+ * EXTENDED_MODEL_PRICING; use ai_models-backed pricing instead.
  */
 const EXTENDED_MODEL_PRICING: Record<string, ModelPricingConfig> = {
   // Claude 4 系列

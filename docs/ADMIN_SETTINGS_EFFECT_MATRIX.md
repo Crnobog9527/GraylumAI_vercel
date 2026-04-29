@@ -61,7 +61,7 @@ Last updated: 2026-04-28
 
 ## Billing Runtime Defaults
 
-The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. Missing or invalid values fall back to safe defaults:
+The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. PR 2B extends the same dynamic `ai_models` pricing + billing runtime settings path to `settleAbort`, so interrupted stream settlement no longer uses legacy hardcoded model prices. Missing or invalid values fall back to safe defaults:
 
 | Setting key | Safe default |
 | --- | --- |
@@ -72,9 +72,11 @@ The PR 2A billing runtime settings affect the AI chat main path for both pre-ded
 | `billing_safety_margin` | `0.2` |
 | `billing_require_model_pricing` | `true` |
 
-When `billing_require_model_pricing=true`, missing model pricing or zero input/output model pricing rejects the AI request before pre-deduct, so no credits are charged. `MODEL_PRICING` remains in code for explicit fallback and legacy/test paths, but the production chat main path no longer silently falls back to it by default.
+When `billing_require_model_pricing=true`, missing model pricing or zero input/output model pricing rejects the AI request before pre-deduct, so no credits are charged. The same missing/zero-price guard now applies before `settleAbort` calls `atomic_abort_settle`, so an interrupted request cannot silently settle against `MODEL_PRICING`.
 
-Known follow-up debt remains outside PR 2A: `settleAbort` still uses the legacy hardcoded pricing helper, and `costCalculator.ts` still contains its older extended pricing table.
+`MODEL_PRICING`, `calculateTokenCost`, `estimateRequestCost`, and `costCalculator.ts` remain in code as legacy / explicit fallback / test-only estimator paths. They must not be used as the default production billing path.
+
+Remaining PR 2B debt: `atomic_abort_settle` does not accept arbitrary metadata, so `billing_history.abort_settle.metadata` cannot yet persist a pricing snapshot through the RPC path without a future migration. The TypeScript fallback path and abort usage log can carry the pricing/settings snapshot, but RPC-level abort-settle metadata remains a follow-up item.
 
 ## Completion Rule
 
