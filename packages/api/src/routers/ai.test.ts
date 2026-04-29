@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const billingState = vi.hoisted(() => ({
   settleAbort: vi.fn(),
@@ -56,6 +57,14 @@ function createProtectedCaller(supabase: { from(table: string): unknown }) {
 }
 
 describe('aiRouter error sanitization', () => {
+  it('does not use hardcoded estimateRequestCost in the non-stream router', () => {
+    const source = readFileSync(new URL('./ai.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('estimateRequestCost');
+    expect(source).toContain('getBillingRuntimeSettings');
+    expect(source).toContain('estimatePreDeductCredits');
+  });
+
   it('sanitizes abortRequest settlement failures', async () => {
     billingState.settleAbort.mockRejectedValueOnce(
       new Error('relation ai_usage_logs does not exist'),

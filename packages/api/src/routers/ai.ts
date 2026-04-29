@@ -22,8 +22,10 @@ import {
 import {
   filterAIOutput,
   BillingService,
+  ModelPricingUnavailableError,
   calculateTokenCostWithPricing,
-  estimateRequestCost,
+  estimatePreDeductCredits,
+  getBillingRuntimeSettings,
   getModelPricing,
   logger,
 } from '../services';
@@ -375,7 +377,38 @@ export const aiRouter = router({
         fallbackToEstimate: true,
       });
       const estimatedInputTokens = countedInput.inputTokens;
-      const estimatedCost = estimateRequestCost(modelConfig.modelId, estimatedInputTokens);
+      const billingRuntimeSettings = await getBillingRuntimeSettings(ctx.supabase);
+      let pricing: Awaited<ReturnType<typeof getModelPricing>>;
+      try {
+        pricing = await getModelPricing(ctx.supabase, modelConfig.modelId, {
+          requireModelPricing: billingRuntimeSettings.requireModelPricing,
+        });
+      } catch (error) {
+        if (error instanceof ModelPricingUnavailableError) {
+          logger.warn('billing', 'ai_send_model_pricing_unavailable', {
+            modelId: modelConfig.modelId,
+            reason: error.reason,
+          });
+          throw new TRPCError({
+            code: 'SERVICE_UNAVAILABLE',
+            message: '模型计费价格未配置，请联系管理员',
+          });
+        }
+        throw error;
+      }
+      const estimatedUsage: TokenUsage = {
+        inputTokens: estimatedInputTokens,
+        outputTokens: 4096,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      };
+      const estimatedCostResult = calculateTokenCostWithPricing(
+        estimatedUsage,
+        pricing,
+        {},
+        billingRuntimeSettings,
+      );
+      const estimatedCost = estimatePreDeductCredits(estimatedCostResult.credits, billingRuntimeSettings);
 
       // 6. 安全检查 (包括余额)
       await preAICallSecurityChecks(
@@ -422,11 +455,11 @@ export const aiRouter = router({
           );
         }
 
-        // 10. 计算实际成本 (使用数据库动态定价)
-        const pricing = await getModelPricing(ctx.supabase, modelConfig.modelId);
         const { credits: actualCredits, costUsd, breakdown } = calculateTokenCostWithPricing(
           aiResponse.usage,
-          pricing
+          pricing,
+          {},
+          billingRuntimeSettings,
         );
         const pricingMetadata = {
           inputPer1M: pricing.inputPer1M,
@@ -461,8 +494,25 @@ export const aiRouter = router({
             count_source: countedInput.countSource,
             counter_version: countedInput.counterVersion,
             pricing: pricingMetadata,
+            billingSettingsSnapshot: {
+              creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
+              tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
+              minPreDeduct: billingRuntimeSettings.minPreDeduct,
+              maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
+              safetyMargin: billingRuntimeSettings.safetyMargin,
+            },
           },
-          usageMetadata: { routingReason, pricing: pricingMetadata },
+          usageMetadata: {
+            routingReason,
+            pricing: pricingMetadata,
+            billingSettingsSnapshot: {
+              creditsPerUsd: billingRuntimeSettings.creditsPerUsd,
+              tokenPriceMultiplier: billingRuntimeSettings.tokenPriceMultiplier,
+              minPreDeduct: billingRuntimeSettings.minPreDeduct,
+              maxPreDeduct: billingRuntimeSettings.maxPreDeduct,
+              safetyMargin: billingRuntimeSettings.safetyMargin,
+            },
+          },
         });
 
         // 12. 如果是新对话，更新标题
@@ -620,11 +670,22 @@ export const aiRouter = router({
         userPreferredModel: input.modelId,
       });
 
-      // 估算成本
-      const estimatedCost = estimateRequestCost(
-        modelConfig.modelId,
-        totalInputTokens
+      const billingRuntimeSettings = await getBillingRuntimeSettings(ctx.supabase);
+      const pricing = await getModelPricing(ctx.supabase, modelConfig.modelId, {
+        requireModelPricing: billingRuntimeSettings.requireModelPricing,
+      });
+      const estimatedCostResult = calculateTokenCostWithPricing(
+        {
+          inputTokens: totalInputTokens,
+          outputTokens: 4096,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        pricing,
+        {},
+        billingRuntimeSettings,
       );
+      const estimatedCost = estimatePreDeductCredits(estimatedCostResult.credits, billingRuntimeSettings);
 
       // 获取用户余额
       const billingService = new BillingService({

@@ -111,19 +111,27 @@ function formatRange(values: number[]): { min: number; max: number } | null {
   };
 }
 
-function convertUsdPer1MToCreditsPer1K(usdPer1M: number): number {
+function convertUsdPer1MToCreditsPer1K(
+  usdPer1M: number,
+  creditsPerUsd: number,
+  tokenPriceMultiplier: number,
+): number {
   return parseFloat(
     (
-      (usdPer1M * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER) /
+      (usdPer1M * creditsPerUsd * tokenPriceMultiplier) /
       1000
     ).toFixed(2),
   );
 }
 
-function convertUsdPer1KSearchToCreditsPer1KSearch(usdPer1K: number): number {
+function convertUsdPer1KSearchToCreditsPer1KSearch(
+  usdPer1K: number,
+  creditsPerUsd: number,
+  tokenPriceMultiplier: number,
+): number {
   return parseFloat(
     (
-      usdPer1K * BILLING_CONSTANTS.CREDITS_PER_USD * BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER
+      usdPer1K * creditsPerUsd * tokenPriceMultiplier
     ).toFixed(2),
   );
 }
@@ -2014,6 +2022,8 @@ export const adminRouter = router({
         .in('key', [
           'new_user_credits',
           'search_surcharge_credits',
+          'billing_credits_per_usd',
+          'billing_token_price_multiplier',
         ]);
 
       // Calculate overall stats
@@ -2188,24 +2198,44 @@ export const adminRouter = router({
       const activeMeteredModels = (models ?? []).filter((model) =>
         model.is_active === 'true' || model.is_active === true,
       );
+      const creditsPerUsd = parseNumericSetting(
+        settingsMap['billing_credits_per_usd'],
+        BILLING_CONSTANTS.CREDITS_PER_USD,
+      );
+      const tokenPriceMultiplier = parseNumericSetting(
+        settingsMap['billing_token_price_multiplier'],
+        BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
+      );
 
       const inputCreditsPer1KValues = activeMeteredModels
         .filter((model) => (model.input_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K((model.input_token_cost ?? 0) / 1_000_000));
+        .map((model) => convertUsdPer1MToCreditsPer1K(
+          (model.input_token_cost ?? 0) / 1_000_000,
+          creditsPerUsd,
+          tokenPriceMultiplier,
+        ));
 
       const outputCreditsPer1KValues = activeMeteredModels
         .filter((model) => (model.output_token_cost ?? 0) > 0)
-        .map((model) => convertUsdPer1MToCreditsPer1K((model.output_token_cost ?? 0) / 1_000_000));
+        .map((model) => convertUsdPer1MToCreditsPer1K(
+          (model.output_token_cost ?? 0) / 1_000_000,
+          creditsPerUsd,
+          tokenPriceMultiplier,
+        ));
 
       const searchCreditsPer1KValues = activeMeteredModels
         .filter((model) => (model.web_search_cost ?? 0) > 0)
         .map((model) =>
-          convertUsdPer1KSearchToCreditsPer1KSearch((model.web_search_cost ?? 0) / 1_000_000),
+          convertUsdPer1KSearchToCreditsPer1KSearch(
+            (model.web_search_cost ?? 0) / 1_000_000,
+            creditsPerUsd,
+            tokenPriceMultiplier,
+          ),
         );
 
       const runtimeBilling = {
-        creditsPerUsd: BILLING_CONSTANTS.CREDITS_PER_USD,
-        tokenPriceMultiplier: BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
+        creditsPerUsd,
+        tokenPriceMultiplier,
         activeModelCount: activeMeteredModels.length,
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
