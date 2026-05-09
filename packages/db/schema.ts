@@ -49,6 +49,8 @@ export const creditTransactions = pgTable('credit_transactions', {
   type: text('type', { enum: ['deduction', 'addition', 'purchase', 'refund'] }).notNull(),
   description: text('description'),
   idempotencyKey: text('idempotency_key'),
+  balanceBefore: integer('balance_before'),
+  balanceAfter: integer('balance_after'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   userIdempotencyKeyUnique: uniqueIndex('idx_credit_transactions_user_idempotency_key')
