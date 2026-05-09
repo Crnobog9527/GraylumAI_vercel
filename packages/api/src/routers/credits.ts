@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from '../trpc';
+import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
@@ -171,7 +171,7 @@ export const creditsRouter = router({
    * 注意：生产环境建议使用数据库事务（Supabase RPC）确保原子性
    * 这里使用乐观锁定策略作为替代方案
    */
-  deductCredits: protectedProcedure
+  deductCredits: adminProcedure
     .input(DeductCreditsInput)
     .mutation(async ({ ctx, input }) => {
       const { amount, reason, referenceId, referenceType, idempotencyKey } = input;
@@ -278,7 +278,7 @@ export const creditsRouter = router({
   /**
    * 添加积分
    */
-  addCredits: protectedProcedure
+  addCredits: adminProcedure
     .input(AddCreditsInput)
     .mutation(async ({ ctx, input }) => {
       const { amount, type, reason, referenceId, referenceType, idempotencyKey, expiresAt } = input;
