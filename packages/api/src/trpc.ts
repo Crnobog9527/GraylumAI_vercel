@@ -91,6 +91,39 @@ const t = initTRPC.context<typeof createTRPCContext>().create();
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+const OPENING_GRANT_CREDITS = 100;
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message);
+  }
+
+  return String(error);
+}
+
+async function applyOpeningGrant(ctx: Awaited<ReturnType<typeof createTRPCContext>>, userId: string) {
+  const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
+    p_user_id: userId,
+    p_amount: OPENING_GRANT_CREDITS,
+    p_type: 'addition',
+    p_description: 'Opening grant for new user profile bootstrap',
+    p_idempotency_key: `opening_grant:${userId}`,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const ledgerEntry = data?.[0];
+  if (!ledgerEntry) {
+    throw new Error('atomic opening grant ledger RPC returned no rows');
+  }
+}
+
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.user) {
     throw new TRPCError({
@@ -134,7 +167,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
           email: normalizedEmail,
           nickname: derivedNickname,
           role: 'user',
-          // credits property omitted to use database default of 100
+          credits: 0,
         })
         .select('id, role, credits, status, nickname, email')
         .single();
@@ -170,6 +203,32 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
           });
         }
       } else if (newProfile) {
+        try {
+          await applyOpeningGrant(ctx, ctx.user.id);
+        } catch (openingGrantError) {
+          logger.error('auth', 'profile_opening_grant_failed', {
+            userId: ctx.user.id,
+            error: getErrorMessage(openingGrantError),
+          });
+
+          const { error: cleanupError } = await ctx.supabaseAdmin
+            .from('profiles')
+            .delete()
+            .eq('id', ctx.user.id);
+
+          if (cleanupError) {
+            logger.error('auth', 'profile_opening_grant_cleanup_failed', {
+              userId: ctx.user.id,
+              error: getErrorMessage(cleanupError),
+            });
+          }
+
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: '创建用户资料失败，请联系客服',
+          });
+        }
+
         profileId = newProfile.id;
         userRole = newProfile.role || 'user';
         userStatus = newProfile.status || 'active';
