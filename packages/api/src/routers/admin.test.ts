@@ -68,7 +68,11 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createAdminCaller(adminSupabase: Record<string, unknown>) {
+function createAdminCaller(
+  adminSupabase: Record<string, unknown>,
+  options: { role?: 'user' | 'admin' } = {},
+) {
+  const role = options.role ?? 'admin';
   const userScopedSupabase = {
     from(table: string) {
       if (table === 'profiles') {
@@ -76,7 +80,7 @@ function createAdminCaller(adminSupabase: Record<string, unknown>) {
           Promise.resolve({
             data: {
               id: 'admin-user',
-              role: 'admin',
+              role,
               status: 'active',
               nickname: 'Admin',
               email: 'admin@example.com',
@@ -769,6 +773,294 @@ describe('adminRouter finance stats runtime billing summary', () => {
       table: 'system_settings',
       columns: '*',
     });
+  });
+});
+
+describe('adminRouter credit adjustments', () => {
+  const userId = '00000000-0000-4000-8000-00000000003c';
+
+  function createCreditAdjustmentSupabase(options: {
+    currentCredits: number;
+    rpcError?: { message: string };
+  }) {
+    const rpc = vi.fn().mockResolvedValue({
+      data: options.rpcError
+        ? null
+        : [{
+            transaction_id: '00000000-0000-4000-8000-0000000000aa',
+            balance_before: options.currentCredits,
+            balance_after: options.currentCredits,
+            amount: 0,
+            is_idempotent: false,
+          }],
+      error: options.rpcError ?? null,
+    });
+    const activityLogInsert = vi.fn().mockResolvedValue({ data: null, error: null });
+    const profileUpdates: unknown[] = [];
+    const creditTransactionInserts: unknown[] = [];
+
+    const adminSupabase = {
+      rpc,
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select() {
+              return this;
+            },
+            update(value: unknown) {
+              profileUpdates.push(value);
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({
+                data: { credits: options.currentCredits },
+                error: null,
+              });
+            },
+          };
+        }
+
+        if (table === 'user_activity_logs') {
+          return {
+            insert: activityLogInsert,
+          };
+        }
+
+        if (table === 'credit_transactions') {
+          return {
+            insert(value: unknown) {
+              creditTransactionInserts.push(value);
+              return Promise.resolve({ data: null, error: null });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    return {
+      adminSupabase,
+      rpc,
+      activityLogInsert,
+      profileUpdates,
+      creditTransactionInserts,
+    };
+  }
+
+  it('adds credits through the atomic ledger RPC and writes the activity log', async () => {
+    const { adminSupabase, rpc, activityLogInsert, profileUpdates, creditTransactionInserts } =
+      createCreditAdjustmentSupabase({ currentCredits: 100 });
+    rpc.mockResolvedValueOnce({
+      data: [{
+        transaction_id: '00000000-0000-4000-8000-0000000000aa',
+        balance_before: 100,
+        balance_after: 125,
+        amount: 25,
+        is_idempotent: false,
+      }],
+      error: null,
+    });
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.adjustUserCredits({
+      userId,
+      amount: 25,
+      reason: 'manual top-up',
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_user_id: userId,
+      p_amount: 25,
+      p_type: 'addition',
+      p_description: '[Admin] manual top-up',
+    }));
+    expect(rpc.mock.calls[0][1].p_idempotency_key).toMatch(/^admin_adjustment:/);
+    expect(profileUpdates).toEqual([]);
+    expect(creditTransactionInserts).toEqual([]);
+    expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: userId,
+      admin_id: 'admin-user',
+      action: '积分调整: +25',
+      action_type: 'credit_adjustment',
+      details: expect.objectContaining({
+        previousCredits: 100,
+        newCredits: 125,
+        requestedAdjustment: 25,
+        appliedAdjustment: 25,
+        reason: 'manual top-up',
+      }),
+    }));
+    expect(result).toEqual({
+      previousCredits: 100,
+      newCredits: 125,
+      adjustment: 25,
+    });
+  });
+
+  it('deducts credits through the atomic ledger RPC and preserves the activity log', async () => {
+    const { adminSupabase, rpc, activityLogInsert, profileUpdates, creditTransactionInserts } =
+      createCreditAdjustmentSupabase({ currentCredits: 100 });
+    rpc.mockResolvedValueOnce({
+      data: [{
+        transaction_id: '00000000-0000-4000-8000-0000000000ab',
+        balance_before: 100,
+        balance_after: 60,
+        amount: -40,
+        is_idempotent: false,
+      }],
+      error: null,
+    });
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.adjustUserCredits({
+      userId,
+      amount: -40,
+      reason: 'manual correction',
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_user_id: userId,
+      p_amount: -40,
+      p_type: 'deduction',
+      p_description: '[Admin] manual correction',
+    }));
+    expect(profileUpdates).toEqual([]);
+    expect(creditTransactionInserts).toEqual([]);
+    expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
+      action: '积分调整: -40',
+      details: expect.objectContaining({
+        previousCredits: 100,
+        newCredits: 60,
+        requestedAdjustment: -40,
+        appliedAdjustment: -40,
+      }),
+    }));
+    expect(result).toEqual({
+      previousCredits: 100,
+      newCredits: 60,
+      adjustment: -40,
+    });
+  });
+
+  it('caps excessive deductions at zero before calling the atomic ledger RPC', async () => {
+    const { adminSupabase, rpc, activityLogInsert } = createCreditAdjustmentSupabase({ currentCredits: 30 });
+    rpc.mockResolvedValueOnce({
+      data: [{
+        transaction_id: '00000000-0000-4000-8000-0000000000ac',
+        balance_before: 30,
+        balance_after: 0,
+        amount: -30,
+        is_idempotent: false,
+      }],
+      error: null,
+    });
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.adjustUserCredits({
+      userId,
+      amount: -100,
+      reason: 'cap at zero',
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_amount: -30,
+      p_type: 'deduction',
+    }));
+    expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
+      action: '积分调整: -30',
+      details: expect.objectContaining({
+        previousCredits: 30,
+        newCredits: 0,
+        requestedAdjustment: -100,
+        appliedAdjustment: -30,
+      }),
+    }));
+    expect(result).toEqual({
+      previousCredits: 30,
+      newCredits: 0,
+      adjustment: -30,
+    });
+  });
+
+  it('does not call the zero-amount RPC path when the capped adjustment is zero', async () => {
+    const { adminSupabase, rpc, activityLogInsert } = createCreditAdjustmentSupabase({ currentCredits: 0 });
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.adjustUserCredits({
+      userId,
+      amount: -100,
+      reason: 'already zero',
+    });
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
+      action: '积分调整: 0',
+      details: expect.objectContaining({
+        previousCredits: 0,
+        newCredits: 0,
+        requestedAdjustment: -100,
+        appliedAdjustment: 0,
+      }),
+    }));
+    expect(result).toEqual({
+      previousCredits: 0,
+      newCredits: 0,
+      adjustment: 0,
+    });
+  });
+
+  it('does not write activity logs or legacy credit updates when the atomic ledger RPC fails', async () => {
+    const {
+      adminSupabase,
+      rpc,
+      activityLogInsert,
+      profileUpdates,
+      creditTransactionInserts,
+    } = createCreditAdjustmentSupabase({
+      currentCredits: 100,
+      rpcError: { message: 'permission denied for function atomic_apply_credit_ledger_entry' },
+    });
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.adjustUserCredits({
+      userId,
+      amount: 25,
+      reason: 'rpc failure',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '调整用户积分失败，请稍后重试',
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_user_id: userId,
+      p_amount: 25,
+      p_type: 'addition',
+      p_description: '[Admin] rpc failure',
+    }));
+    expect(activityLogInsert).not.toHaveBeenCalled();
+    expect(profileUpdates).toEqual([]);
+    expect(creditTransactionInserts).toEqual([]);
+  });
+
+  it('rejects non-admin callers before credit adjustment logic runs', async () => {
+    const { adminSupabase, rpc, activityLogInsert } = createCreditAdjustmentSupabase({ currentCredits: 100 });
+    const caller = createAdminCaller(adminSupabase, { role: 'user' });
+
+    await expect(caller.adjustUserCredits({
+      userId,
+      amount: 10,
+      reason: 'not allowed',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'FORBIDDEN',
+    });
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(activityLogInsert).not.toHaveBeenCalled();
   });
 });
 
