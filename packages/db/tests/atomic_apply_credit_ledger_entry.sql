@@ -113,6 +113,37 @@ BEGIN
 
   BEGIN
     PERFORM atomic_apply_credit_ledger_entry(
+      v_user_id,
+      0,
+      'addition',
+      'smoke zero amount',
+      'smoke:zero'
+    );
+    RAISE EXCEPTION 'zero amount call unexpectedly succeeded';
+  EXCEPTION
+    WHEN raise_exception THEN
+      IF SQLERRM NOT LIKE 'amount must be non-zero' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT credits INTO v_balance FROM profiles WHERE id = v_user_id;
+  IF v_balance <> 85 THEN
+    RAISE EXCEPTION 'zero amount changed credits: %', v_balance;
+  END IF;
+
+  SELECT COUNT(*)
+  INTO v_transaction_count
+  FROM credit_transactions
+  WHERE user_id = v_user_id
+    AND idempotency_key = 'smoke:zero';
+
+  IF v_transaction_count <> 0 THEN
+    RAISE EXCEPTION 'zero amount wrote transaction: %', v_transaction_count;
+  END IF;
+
+  BEGIN
+    PERFORM atomic_apply_credit_ledger_entry(
       v_missing_user_id,
       1,
       'addition',

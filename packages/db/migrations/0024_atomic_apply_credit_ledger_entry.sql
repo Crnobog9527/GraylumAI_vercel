@@ -33,8 +33,8 @@ BEGIN
     RAISE EXCEPTION 'user_id is required';
   END IF;
 
-  IF p_amount IS NULL THEN
-    RAISE EXCEPTION 'amount is required';
+  IF p_amount IS NULL OR p_amount = 0 THEN
+    RAISE EXCEPTION 'amount must be non-zero';
   END IF;
 
   IF p_type IS NULL OR btrim(p_type) = '' THEN
@@ -109,6 +109,11 @@ BEGIN
     FALSE;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM anon;
+REVOKE ALL ON FUNCTION atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) TO service_role;
 
 COMMENT ON COLUMN credit_transactions.balance_before IS 'Profile credits balance before the ledger entry when written by atomic ledger RPCs';
 COMMENT ON COLUMN credit_transactions.balance_after IS 'Profile credits balance after the ledger entry when written by atomic ledger RPCs';
