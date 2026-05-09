@@ -818,6 +818,7 @@ export const adminRouter = router({
       userId: z.string().uuid(),
       amount: z.number().int(), // Positive to add, negative to deduct
       reason: z.string().min(1).max(500),
+      idempotencyKey: z.string().min(1).max(200).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Get current credits
@@ -834,46 +835,56 @@ export const adminRouter = router({
       const newCredits = Math.max(0, profile.credits + input.amount);
       const actualAdjustment = newCredits - profile.credits;
 
-      // Update credits
-      const { data, error } = await ctx.supabase
-        .from('profiles')
-        .update({ credits: newCredits })
-        .eq('id', input.userId)
-        .select()
-        .single();
-
-      if (error) {
-        throw createAdminOperationError('调整用户积分', error);
-      }
+      let previousCredits = profile.credits;
+      let appliedNewCredits = newCredits;
+      let appliedAdjustment = actualAdjustment;
 
       if (actualAdjustment !== 0) {
-        await ctx.supabase.from('credit_transactions').insert({
-          user_id: input.userId,
-          amount: actualAdjustment,
-          type: actualAdjustment > 0 ? 'addition' : 'deduction',
-          description: `[Admin] ${input.reason}`,
-        });
+        const ledgerPayload = {
+          p_user_id: input.userId,
+          p_amount: actualAdjustment,
+          p_type: actualAdjustment > 0 ? 'addition' : 'deduction',
+          p_description: `[Admin] ${input.reason}`,
+          ...(input.idempotencyKey
+            ? { p_idempotency_key: `admin_adjustment:${ctx.profileId}:${input.userId}:${input.idempotencyKey}` }
+            : {}),
+        };
+
+        const { data, error } = await ctx.supabase.rpc('atomic_apply_credit_ledger_entry', ledgerPayload);
+
+        if (error) {
+          throw createAdminOperationError('调整用户积分', error);
+        }
+
+        const ledgerEntry = data?.[0];
+        if (!ledgerEntry) {
+          throw createAdminOperationError('调整用户积分', new Error('atomic credit ledger RPC returned no rows'));
+        }
+
+        previousCredits = ledgerEntry.balance_before;
+        appliedNewCredits = ledgerEntry.balance_after;
+        appliedAdjustment = ledgerEntry.amount;
       }
 
       // Log the activity
       await ctx.supabase.from('user_activity_logs').insert({
         user_id: input.userId,
         admin_id: ctx.profileId,
-        action: `积分调整: ${actualAdjustment > 0 ? '+' : ''}${actualAdjustment}`,
+        action: `积分调整: ${appliedAdjustment > 0 ? '+' : ''}${appliedAdjustment}`,
         action_type: 'credit_adjustment',
         details: {
-          previousCredits: profile.credits,
-          newCredits,
+          previousCredits,
+          newCredits: appliedNewCredits,
           requestedAdjustment: input.amount,
-          appliedAdjustment: actualAdjustment,
+          appliedAdjustment,
           reason: input.reason,
         },
       });
 
       return {
-        previousCredits: profile.credits,
-        newCredits,
-        adjustment: actualAdjustment,
+        previousCredits,
+        newCredits: appliedNewCredits,
+        adjustment: appliedAdjustment,
       };
     }),
 
