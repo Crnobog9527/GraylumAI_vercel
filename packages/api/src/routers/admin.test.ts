@@ -851,7 +851,7 @@ describe('adminRouter credit adjustments', () => {
     };
   }
 
-  it('adds credits through the atomic ledger RPC and writes the activity log', async () => {
+  it('adds credits with idempotencyKey through the atomic ledger RPC and writes the activity log', async () => {
     const { adminSupabase, rpc, activityLogInsert, profileUpdates, creditTransactionInserts } =
       createCreditAdjustmentSupabase({ currentCredits: 100 });
     rpc.mockResolvedValueOnce({
@@ -870,6 +870,7 @@ describe('adminRouter credit adjustments', () => {
       userId,
       amount: 25,
       reason: 'manual top-up',
+      idempotencyKey: 'admin-request-1',
     });
 
     expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
@@ -877,8 +878,8 @@ describe('adminRouter credit adjustments', () => {
       p_amount: 25,
       p_type: 'addition',
       p_description: '[Admin] manual top-up',
+      p_idempotency_key: `admin_adjustment:admin-user:${userId}:admin-request-1`,
     }));
-    expect(rpc.mock.calls[0][1].p_idempotency_key).toMatch(/^admin_adjustment:/);
     expect(profileUpdates).toEqual([]);
     expect(creditTransactionInserts).toEqual([]);
     expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -901,7 +902,7 @@ describe('adminRouter credit adjustments', () => {
     });
   });
 
-  it('deducts credits through the atomic ledger RPC and preserves the activity log', async () => {
+  it('deducts credits with idempotencyKey through the atomic ledger RPC and preserves the activity log', async () => {
     const { adminSupabase, rpc, activityLogInsert, profileUpdates, creditTransactionInserts } =
       createCreditAdjustmentSupabase({ currentCredits: 100 });
     rpc.mockResolvedValueOnce({
@@ -920,6 +921,7 @@ describe('adminRouter credit adjustments', () => {
       userId,
       amount: -40,
       reason: 'manual correction',
+      idempotencyKey: 'admin-request-2',
     });
 
     expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
@@ -927,6 +929,7 @@ describe('adminRouter credit adjustments', () => {
       p_amount: -40,
       p_type: 'deduction',
       p_description: '[Admin] manual correction',
+      p_idempotency_key: `admin_adjustment:admin-user:${userId}:admin-request-2`,
     }));
     expect(profileUpdates).toEqual([]);
     expect(creditTransactionInserts).toEqual([]);
@@ -983,6 +986,34 @@ describe('adminRouter credit adjustments', () => {
       previousCredits: 30,
       newCredits: 0,
       adjustment: -30,
+    });
+  });
+
+  it('omits the ledger idempotency key when idempotencyKey is not provided', async () => {
+    const { adminSupabase, rpc } = createCreditAdjustmentSupabase({ currentCredits: 100 });
+    rpc.mockResolvedValueOnce({
+      data: [{
+        transaction_id: '00000000-0000-4000-8000-0000000000ad',
+        balance_before: 100,
+        balance_after: 110,
+        amount: 10,
+        is_idempotent: false,
+      }],
+      error: null,
+    });
+
+    const caller = createAdminCaller(adminSupabase);
+    await caller.adjustUserCredits({
+      userId,
+      amount: 10,
+      reason: 'legacy caller without request id',
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', {
+      p_user_id: userId,
+      p_amount: 10,
+      p_type: 'addition',
+      p_description: '[Admin] legacy caller without request id',
     });
   });
 

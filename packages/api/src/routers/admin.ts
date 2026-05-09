@@ -1,7 +1,6 @@
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { randomUUID } from 'crypto';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import { BILLING_CONSTANTS } from '../types/billing';
@@ -819,6 +818,7 @@ export const adminRouter = router({
       userId: z.string().uuid(),
       amount: z.number().int(), // Positive to add, negative to deduct
       reason: z.string().min(1).max(500),
+      idempotencyKey: z.string().min(1).max(200).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Get current credits
@@ -840,13 +840,17 @@ export const adminRouter = router({
       let appliedAdjustment = actualAdjustment;
 
       if (actualAdjustment !== 0) {
-        const { data, error } = await ctx.supabase.rpc('atomic_apply_credit_ledger_entry', {
+        const ledgerPayload = {
           p_user_id: input.userId,
           p_amount: actualAdjustment,
           p_type: actualAdjustment > 0 ? 'addition' : 'deduction',
           p_description: `[Admin] ${input.reason}`,
-          p_idempotency_key: `admin_adjustment:${randomUUID()}`,
-        });
+          ...(input.idempotencyKey
+            ? { p_idempotency_key: `admin_adjustment:${ctx.profileId}:${input.userId}:${input.idempotencyKey}` }
+            : {}),
+        };
+
+        const { data, error } = await ctx.supabase.rpc('atomic_apply_credit_ledger_entry', ledgerPayload);
 
         if (error) {
           throw createAdminOperationError('调整用户积分', error);
