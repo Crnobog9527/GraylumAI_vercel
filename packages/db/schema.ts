@@ -230,7 +230,10 @@ export const invitationRecords = pgTable('invitation_records', {
   userAgent: text('user_agent'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   rewardedAt: timestamp('rewarded_at', { withTimezone: true }),
-});
+}, (table) => ({
+  inviteCodeInviteeIdUnique: uniqueIndex('idx_invitation_records_invite_code_invitee_id')
+    .on(table.inviteCode, table.inviteeId),
+}));
 
 export const userCheckins = pgTable(
   'user_checkins',
