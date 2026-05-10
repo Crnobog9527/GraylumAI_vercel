@@ -17,6 +17,35 @@ function createInvitationOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
 }
 
+function getInvitationErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+
+  return String(error ?? '');
+}
+
+function createInvitationClaimRpcError(error: unknown) {
+  const message = getInvitationErrorMessage(error);
+
+  if (
+    message.includes('invitation code not found')
+    || message.includes('invitation code is not active')
+  ) {
+    return new TRPCError({ code: 'NOT_FOUND', message: '邀请码无效或已使用。', cause: error });
+  }
+
+  if (message.includes('cannot claim own invitation code')) {
+    return new TRPCError({ code: 'BAD_REQUEST', message: '不能使用自己的邀请码。', cause: error });
+  }
+
+  return createInvitationOperationError('领取邀请码', error);
+}
+
 function logInvitationEndpointMetric(
   endpoint: string,
   startedAt: number,
@@ -157,11 +186,10 @@ export const invitationRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: '当前账号缺少邮箱信息。' });
       }
 
-      const { data: invitation, error: invitationError } = await ctx.supabase
+      const { data: invitation, error: invitationError } = await ctx.supabaseAdmin
         .from('invitations')
         .select('code, created_by, status, used_by')
         .eq('code', normalizedCode)
-        .eq('status', 'active')
         .maybeSingle();
 
       if (invitationError) {
@@ -176,19 +204,30 @@ export const invitationRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: '不能使用自己的邀请码。' });
       }
 
-      const { data: existingRecord, error: existingRecordError } = await ctx.supabase
-        .from('invitation_records')
-        .select('id')
-        .eq('invite_code', normalizedCode)
-        .eq('invitee_id', inviteeId)
-        .maybeSingle();
+      if (invitation.status !== 'active' || invitation.used_by) {
+        const { data, error } = await ctx.supabaseAdmin.rpc('atomic_claim_invitation_code', {
+          p_invitation_code: normalizedCode,
+          p_invitee_id: inviteeId,
+          p_invitee_email: inviteeEmail,
+          p_claim_status: 'rejected',
+          p_risk_level: 'low',
+          p_block_reason: 'invitation_already_used',
+          p_inviter_reward: 0,
+          p_invitee_reward: 0,
+          p_ip_address: getClientIp(ctx.headers),
+          p_user_agent: ctx.headers.get('user-agent'),
+        });
 
-      if (existingRecordError) {
-        throw createInvitationOperationError('读取邀请记录', existingRecordError);
-      }
+        if (error) {
+          throw createInvitationClaimRpcError(error);
+        }
 
-      if (existingRecord) {
-        return { status: 'already_claimed' as const };
+        const existingClaim = Array.isArray(data) ? data[0] : data;
+        if (existingClaim?.is_idempotent) {
+          return { status: 'already_claimed' as const };
+        }
+
+        throw new TRPCError({ code: 'NOT_FOUND', message: '邀请码无效或已使用。' });
       }
 
       const now = new Date();
@@ -198,8 +237,6 @@ export const invitationRouter = router({
       const hourStartIso = getOneHourAgoIso(now);
 
       const [
-        inviterProfileResult,
-        inviteeProfileResult,
         settings,
         dailyRewardResult,
         totalRewardResult,
@@ -207,56 +244,39 @@ export const invitationRouter = router({
         sameIpHourResult,
         sameIpDayResult,
       ] = await Promise.all([
-        ctx.supabase
-          .from('profiles')
-          .select('id, email, credits')
-          .eq('id', invitation.created_by)
-          .single(),
-        ctx.supabase
-          .from('profiles')
-          .select('id, email, credits')
-          .eq('id', inviteeId)
-          .maybeSingle(),
-        loadInvitationRuntimeSettings(ctx.supabase),
-        ctx.supabase
+        loadInvitationRuntimeSettings(ctx.supabaseAdmin),
+        ctx.supabaseAdmin
           .from('invitation_records')
           .select('inviter_reward')
           .eq('inviter_id', invitation.created_by)
           .eq('status', 'rewarded')
           .gte('created_at', dayStartIso),
-        ctx.supabase
+        ctx.supabaseAdmin
           .from('invitation_records')
           .select('inviter_reward')
           .eq('inviter_id', invitation.created_by)
           .eq('status', 'rewarded'),
-        ctx.supabase
+        ctx.supabaseAdmin
           .from('invitation_records')
           .select('*', { count: 'exact', head: true })
           .eq('inviter_id', invitation.created_by)
           .eq('status', 'rewarded')
           .gte('created_at', monthStartIso),
         ipAddress
-          ? ctx.supabase
+          ? ctx.supabaseAdmin
               .from('invitation_records')
               .select('*', { count: 'exact', head: true })
               .eq('ip_address', ipAddress)
               .gte('created_at', hourStartIso)
           : Promise.resolve({ count: 0, error: null }),
         ipAddress
-          ? ctx.supabase
+          ? ctx.supabaseAdmin
               .from('invitation_records')
               .select('*', { count: 'exact', head: true })
               .eq('ip_address', ipAddress)
               .gte('created_at', dayStartIso)
           : Promise.resolve({ count: 0, error: null }),
       ]);
-
-      if (inviterProfileResult.error || !inviterProfileResult.data) {
-        throw createInvitationOperationError(
-          '读取邀请人资料',
-          inviterProfileResult.error ?? new Error('邀请人资料不存在'),
-        );
-      }
 
       if (dailyRewardResult.error || totalRewardResult.error || monthlyCountResult.error || sameIpHourResult.error || sameIpDayResult.error) {
         throw createInvitationOperationError(
@@ -270,8 +290,6 @@ export const invitationRouter = router({
         );
       }
 
-      const inviterProfile = inviterProfileResult.data;
-      const inviteeProfile = inviteeProfileResult.data;
       const inviterRewardedToday = (dailyRewardResult.data ?? []).reduce(
         (sum, record) => sum + (Number(record.inviter_reward ?? 0) || 0),
         0
@@ -294,113 +312,31 @@ export const invitationRouter = router({
       const inviterReward = decision.status === 'rewarded' ? decision.inviterRewardGranted : 0;
       const inviteeReward = decision.status === 'rewarded' ? decision.inviteeRewardGranted : 0;
 
-      if (inviteeProfile) {
-        const updateInviteePayload =
-          inviteeReward > 0
-            ? {
-                credits: Math.max(0, (inviteeProfile.credits ?? 0) + inviteeReward),
-              }
-            : null;
+      const { data, error } = await ctx.supabaseAdmin.rpc('atomic_claim_invitation_code', {
+        p_invitation_code: normalizedCode,
+        p_invitee_id: inviteeId,
+        p_invitee_email: inviteeEmail,
+        p_claim_status: decision.status,
+        p_risk_level: decision.riskLevel,
+        p_block_reason: decision.blockReason,
+        p_inviter_reward: inviterReward,
+        p_invitee_reward: inviteeReward,
+        p_ip_address: ipAddress,
+        p_user_agent: ctx.headers.get('user-agent'),
+      });
 
-        if (updateInviteePayload) {
-          const { error: updateInviteeError } = await ctx.supabase
-            .from('profiles')
-            .update(updateInviteePayload)
-            .eq('id', inviteeId);
-
-          if (updateInviteeError) {
-            throw createInvitationOperationError('更新被邀请人奖励', updateInviteeError);
-          }
-        }
-      } else {
-        const { error: createInviteeProfileError } = await ctx.supabase
-          .from('profiles')
-          .insert({
-            id: inviteeId,
-            email: inviteeEmail,
-            role: 'user',
-            credits: settings.newUserCredits + inviteeReward,
-          });
-
-        if (createInviteeProfileError) {
-          throw createInvitationOperationError('创建被邀请人资料', createInviteeProfileError);
-        }
+      if (error) {
+        throw createInvitationClaimRpcError(error);
       }
 
-      if (inviterReward > 0) {
-        const { error: updateInviterError } = await ctx.supabase
-          .from('profiles')
-          .update({
-            credits: Math.max(0, (inviterProfile.credits ?? 0) + inviterReward),
-          })
-          .eq('id', inviterProfile.id);
+      const claimResult = Array.isArray(data) ? data[0] : data;
 
-        if (updateInviterError) {
-          throw createInvitationOperationError('更新邀请人奖励', updateInviterError);
-        }
+      if (!claimResult) {
+        throw createInvitationOperationError('领取邀请码', new Error('atomic invitation claim RPC returned no rows'));
       }
 
-      const { error: recordError } = await ctx.supabase
-        .from('invitation_records')
-        .insert({
-          invite_code: normalizedCode,
-          inviter_id: inviterProfile.id,
-          inviter_email: inviterProfile.email,
-          invitee_id: inviteeId,
-          invitee_email: inviteeEmail,
-          status: decision.status,
-          risk_level: decision.riskLevel,
-          block_reason: decision.blockReason,
-          inviter_reward: inviterReward,
-          invitee_reward: inviteeReward,
-          ip_address: ipAddress,
-          user_agent: ctx.headers.get('user-agent'),
-          rewarded_at: decision.status === 'rewarded' ? now.toISOString() : null,
-        });
-
-      if (recordError) {
-        throw createInvitationOperationError('记录邀请关系', recordError);
-      }
-
-      const { error: invitationUpdateError } = await ctx.supabase
-        .from('invitations')
-          .update({
-            status: 'used',
-            used_by: inviteeId,
-          })
-          .eq('code', normalizedCode);
-
-      if (invitationUpdateError) {
-        throw createInvitationOperationError('更新邀请码状态', invitationUpdateError);
-      }
-
-      const creditTransactions = [
-        inviterReward > 0
-          ? {
-              user_id: inviterProfile.id,
-              amount: inviterReward,
-              type: 'addition',
-              description: `邀请奖励：${inviteeEmail} 注册成功`,
-            }
-          : null,
-        inviteeReward > 0
-          ? {
-              user_id: inviteeId,
-              amount: inviteeReward,
-              type: 'addition',
-              description: `邀请码奖励：使用 ${normalizedCode} 完成注册`,
-            }
-          : null,
-      ].filter(Boolean);
-
-      if (creditTransactions.length > 0) {
-        const { error: transactionError } = await ctx.supabase
-          .from('credit_transactions')
-          .insert(creditTransactions);
-
-        if (transactionError) {
-          throw createInvitationOperationError('记录积分变动', transactionError);
-        }
+      if (claimResult.is_idempotent) {
+        return { status: 'already_claimed' as const };
       }
 
       if (decision.status === 'rejected') {
