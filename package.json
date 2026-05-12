@@ -46,7 +46,7 @@
   "devDependencies": {
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8",
-    "pg": "^8.17.1",
+    "pg": "^8.20.0",
     "turbo": "^2.7.6"
   },
   "dependencies": {
