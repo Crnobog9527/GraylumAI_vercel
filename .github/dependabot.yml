@@ -18,10 +18,6 @@ updates:
     open-pull-requests-limit: 10
     # 版本更新策略
     versioning-strategy: increase
-    # 标签
-    labels:
-      - "dependencies"
-      - "security"
     # 提交信息前缀
     commit-message:
       prefix: "chore(deps)"
@@ -88,8 +84,5 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Shanghai"
-    labels:
-      - "dependencies"
-      - "ci"
     commit-message:
       prefix: "ci(deps)"

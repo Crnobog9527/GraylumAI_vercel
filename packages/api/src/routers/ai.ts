@@ -303,7 +303,7 @@ export const aiRouter = router({
       // 生成或使用客户端提供的 requestId (用于幂等性)
       const requestId = input.requestId ?? randomUUID();
       const billingService = new BillingService({
-        supabase: ctx.supabase,
+        supabase: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -600,7 +600,7 @@ export const aiRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const billingService = new BillingService({
-        supabase: ctx.supabase,
+        supabase: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
