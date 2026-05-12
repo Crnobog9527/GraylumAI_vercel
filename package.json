@@ -47,7 +47,7 @@
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.8",
     "pg": "^8.20.0",
-    "turbo": "^2.7.6"
+    "turbo": "^2.9.12"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.91.1",
