@@ -223,6 +223,71 @@ Output must avoid:
 - User emails.
 - User IDs from live data.
 
+## Read-Only Readiness Script
+
+Use the Phase 2A readiness script when auditing staging drift or checking a
+fresh staging rebuild before any approved repair SQL is applied.
+
+```bash
+node scripts/check-staging-db-readiness.mjs --env <staging-env-file> --confirm-staging
+```
+
+Optional JSON output:
+
+```bash
+node scripts/check-staging-db-readiness.mjs --env <staging-env-file> --confirm-staging --json
+```
+
+Required environment values:
+
+- `DATABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_APP_URL`
+
+Optional safety expectations:
+
+- `EXPECTED_SUPABASE_PROJECT_REF`
+- `EXPECTED_APP_HOST`
+
+The script requires `--confirm-staging` before it attempts a database
+connection. It refuses production-like targets by default, including the known
+production app host and hosts with production-like naming. If a target cannot be
+classified as staging, stop and investigate instead of overriding the guard.
+
+The script is read-only. It runs catalog and count queries inside a
+`BEGIN READ ONLY` transaction, verifies `transaction_read_only = on`, and rolls
+back before exiting. It does not apply migrations, seed data, schema changes,
+RLS changes, grants, or RPC calls that mutate data.
+
+The script checks:
+
+- Staging app host, Supabase host, Supabase project ref, and DB host metadata.
+- Required RPC/function existence and execute posture.
+- RLS enablement, policy names, and role grant summaries for key tables.
+- Active `ai_models`, `membership_plans`, and `credit_packages` counts.
+- `system_settings` and billing-related `system_settings` counts.
+- `ai_models` rows with non-null `api_key` as a count only.
+- Drift categories such as missing functions, disabled RLS, missing policies,
+  client-role grants to review, and missing readiness seed counts.
+
+Safe output includes only sanitized metadata: host names, project ref, counts,
+object names, policy names, grant summaries, and yes/no status. It must never
+print full connection strings, key values, auth tokens, cookies, passwords,
+user emails, user IDs from live data, or provider secrets.
+
+Exit codes:
+
+- `0`: readiness is acceptable for the documented baseline.
+- `1`: readiness gaps were found and need a reviewed follow-up plan.
+- `2`: safety violation, production-like target, missing required environment,
+  or query failure.
+
+Readiness gaps are not automatically repaired by this script. Missing RPCs,
+policies, grants, or seed counts should feed the next reviewed #148 phase.
+Any SQL write, seed, migration, Supabase/Vercel setting change, secret
+configuration, or real chat/billing smoke still requires explicit owner
+approval.
+
 ## Smoke Checklist
 
 Keep smoke checks separated by write risk.
