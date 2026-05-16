@@ -1,5 +1,8 @@
 # Database Operations Runbook
 
+For staging rebuild reproducibility, see
+[`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md).
+
 ## Connection Details
 
 ```
