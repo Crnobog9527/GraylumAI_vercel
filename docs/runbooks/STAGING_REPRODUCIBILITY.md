@@ -138,6 +138,47 @@ Do not store:
 If an environment-specific billing identifier is needed, keep it as an
 owner-provided value outside the repo.
 
+## Phase 3 Non-Secret Baseline Seed
+
+Phase 3 adds an explicit staging seed file:
+
+```text
+packages/db/seeds/staging_non_secret_baseline.sql
+```
+
+This seed is repo-owned, reviewed SQL for the non-secret readiness baseline. It
+is not an automatic migration and is not applied by CI, Vercel, or application
+startup. Applying it to staging is a database write and requires explicit owner
+approval before running any SQL.
+
+The seed covers:
+
+- `system_settings`
+- `membership_plans`
+- `credit_packages`
+- `ai_models`
+
+Security boundaries:
+
+- Secrets remain owner-provided and outside the repo.
+- `OPENROUTER_API_KEY` remains outside the repo.
+- `ai_models.api_key` remains `NULL`.
+- Stripe price identifiers remain `NULL` unless the owner supplies
+  staging-only values separately.
+- Test accounts, account credits, and admin access are outside this baseline
+  unless separately approved.
+- Real chat and billing smoke are outside this baseline.
+
+After the owner approves and applies the seed to staging, run the read-only
+readiness script to confirm counts and posture:
+
+```bash
+node scripts/check-staging-db-readiness.mjs --env .env.staging.local --confirm-staging --json
+```
+
+The readiness script must remain read-only. Do not use it to apply migrations,
+seed data, schema changes, RLS changes, grants, or platform configuration.
+
 ## Owner-Provided Secrets
 
 These values must remain owner-managed and must never be committed, pasted into
