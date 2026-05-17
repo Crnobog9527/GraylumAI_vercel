@@ -191,6 +191,34 @@ Policies and grants:
 - Service-only execute posture for privileged atomic functions.
 - Client-role grant hardening for table privileges that should not be exposed.
 
+## Admin Policy Shape / `is_admin` Decision
+
+The approved #148 direction is to avoid `is_admin` in public or anonymous RLS
+policy paths. Public read policies should be explicit active-read policies, for
+example active plans, active credit packages, user-facing settings, or active
+published content. They should not call helper functions that depend on
+privileged admin state.
+
+Authenticated admin-only policies should use a direct, reviewed role/status
+shape against `public.profiles` where that does not recurse through the same
+table's RLS:
+
+- `p.id = auth.uid()`
+- `p.role = 'admin'`
+- `p.status = 'active'`
+
+Do not recreate helper-backed admin policies on `public.profiles` itself,
+because a direct lookup inside a profiles policy can recurse through profiles
+RLS. Runtime admin profile access should remain covered by application-level
+admin checks and service-role server paths.
+
+If `public.is_admin()` exists from an earlier migration or manual repair, it
+must keep fixed `search_path = public, pg_temp`, remain `SECURITY DEFINER`, and
+must not be executable by `PUBLIC`, `anon`, or `authenticated`. `service_role`
+execute posture may be present or absent, but any change to that posture needs
+owner review. New RLS policies should not depend on `is_admin` without an
+explicit architecture review.
+
 ## Verification Checklist
 
 Verification should prefer read-only commands and sanitized output.
@@ -210,6 +238,9 @@ Required checks:
 - Billing-related `system_settings` count.
 - Required function existence count.
 - RLS policy names on key tables.
+- Policies referencing `is_admin` count.
+- `is_admin` fixed-search-path, security-definer, and client execute posture if
+  the helper exists.
 - Grant summary for `anon`, `authenticated`, and `service_role`.
 - Secret exposure check: no secret values printed.
 
@@ -263,6 +294,8 @@ The script checks:
 
 - Staging app host, Supabase host, Supabase project ref, and DB host metadata.
 - Required RPC/function existence and execute posture.
+- Admin policy shape: policy references to `is_admin`, direct admin role policy
+  names, and `is_admin` posture if the helper exists.
 - RLS enablement, policy names, and role grant summaries for key tables.
 - Active `ai_models`, `membership_plans`, and `credit_packages` counts.
 - `system_settings` and billing-related `system_settings` counts.

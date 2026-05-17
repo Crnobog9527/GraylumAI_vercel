@@ -20,7 +20,7 @@ const defaultExpectedAppHost = 'graylumai-staging.vercel.app';
 const knownProductionHostFragments = ['app.graylum.com'];
 const productionWordPattern = /(^|[-_.])prod(uction)?($|[-_.])/i;
 
-const functionTargets = [
+const requiredFunctionTargets = [
   'atomic_pre_deduct',
   'atomic_settle',
   'atomic_refund',
@@ -34,8 +34,10 @@ const functionTargets = [
   'atomic_fulfill_credit_package',
   'atomic_fulfill_membership_invoice',
   'validate_invitation_code',
-  'is_admin',
 ];
+
+const optionalFunctionTargets = ['is_admin'];
+const functionTargets = [...requiredFunctionTargets, ...optionalFunctionTargets];
 
 const tableTargets = [
   'conversations',
@@ -278,6 +280,7 @@ async function collectDatabaseReadiness(databaseUrl) {
     const functionsResult = await safeQuery(client, functionQuery, [functionTargets]);
     const tablesResult = await safeQuery(client, tableQuery, [tableTargets]);
     const policiesResult = await safeQuery(client, policyQuery, [tableTargets]);
+    const policyShapeResult = await safeQuery(client, policyShapeQuery);
     const grantsResult = await safeQuery(client, grantQuery, [tableTargets, roles]);
     const countsResult = await safeQuery(client, readinessCountsQuery);
 
@@ -285,6 +288,7 @@ async function collectDatabaseReadiness(databaseUrl) {
       transactionReadOnly,
       functions: summarizeFunctions(functionsResult.rows),
       tables: summarizeTables(tablesResult.rows, policiesResult.rows, grantsResult.rows),
+      policyShape: summarizePolicyShape(policyShapeResult.rows),
       counts: countsResult.rows[0],
     };
   } finally {
@@ -304,6 +308,12 @@ const functionQuery = `
       p.proname as function_name,
       p.prosecdef as security_definer,
       coalesce(p.proconfig, array[]::text[]) as config,
+      exists (
+        select 1
+        from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+        where acl.grantee = 0
+          and acl.privilege_type = 'EXECUTE'
+      ) as public_execute,
       has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
       has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
       has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute
@@ -316,6 +326,12 @@ const functionQuery = `
     count(f.function_name)::int as overload_count,
     bool_or(coalesce(f.security_definer, false)) as security_definer,
     bool_or(exists (select 1 from unnest(f.config) c where c like 'search_path=%')) as search_path_configured,
+    bool_or(exists (
+      select 1
+      from unnest(f.config) c
+      where lower(regexp_replace(c, '[[:space:]]+', '', 'g')) = 'search_path=public,pg_temp'
+    )) as search_path_fixed,
+    bool_or(coalesce(f.public_execute, false)) as public_execute,
     bool_or(coalesce(f.anon_execute, false)) as anon_execute,
     bool_or(coalesce(f.authenticated_execute, false)) as authenticated_execute,
     bool_or(coalesce(f.service_role_execute, false)) as service_role_execute
@@ -339,9 +355,37 @@ const tableQuery = `
 `;
 
 const policyQuery = `
-  select tablename, policyname, cmd, roles
+  select
+    tablename,
+    policyname,
+    cmd,
+    roles,
+    (coalesce(qual, '') ilike '%is_admin%' or coalesce(with_check, '') ilike '%is_admin%') as references_is_admin,
+    (
+      (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%profiles%'
+      and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%role%'
+      and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%admin%'
+    ) as uses_direct_admin_role_check
   from pg_policies
   where schemaname = 'public' and tablename = any($1::text[])
+  order by tablename, policyname
+`;
+
+const policyShapeQuery = `
+  select
+    schemaname,
+    tablename,
+    policyname,
+    cmd,
+    roles,
+    (coalesce(qual, '') ilike '%is_admin%' or coalesce(with_check, '') ilike '%is_admin%') as references_is_admin,
+    (
+      (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%profiles%'
+      and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%role%'
+      and (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ilike '%admin%'
+    ) as uses_direct_admin_role_check
+  from pg_policies
+  where schemaname = 'public'
   order by tablename, policyname
 `;
 
@@ -382,7 +426,9 @@ function summarizeFunctions(rows) {
     exists: Number(row.overload_count) > 0,
     securityDefiner: Boolean(row.security_definer),
     searchPathConfigured: Boolean(row.search_path_configured),
+    searchPathFixed: Boolean(row.search_path_fixed),
     grants: {
+      publicExecute: Boolean(row.public_execute),
       anonExecute: Boolean(row.anon_execute),
       authenticatedExecute: Boolean(row.authenticated_execute),
       serviceRoleExecute: Boolean(row.service_role_execute),
@@ -399,6 +445,8 @@ function summarizeTables(tableRows, policyRows, grantRows) {
       name: policy.policyname,
       command: policy.cmd,
       roles: String(policy.roles ?? '').replace(/[{}]/g, '').split(',').filter(Boolean),
+      referencesIsAdmin: Boolean(policy.references_is_admin),
+      usesDirectAdminRoleCheck: Boolean(policy.uses_direct_admin_role_check),
     }));
     const grants = Object.fromEntries(
       roles.map((role) => {
@@ -419,6 +467,18 @@ function summarizeTables(tableRows, policyRows, grantRows) {
   });
 }
 
+function summarizePolicyShape(rows) {
+  return rows.map((row) => ({
+    schema: row.schemaname,
+    table: row.tablename,
+    name: row.policyname,
+    command: row.cmd,
+    roles: String(row.roles ?? '').replace(/[{}]/g, '').split(',').filter(Boolean),
+    referencesIsAdmin: Boolean(row.references_is_admin),
+    usesDirectAdminRoleCheck: Boolean(row.uses_direct_admin_role_check),
+  }));
+}
+
 function groupBy(rows, key) {
   const grouped = new Map();
   for (const row of rows) {
@@ -433,7 +493,7 @@ function groupBy(rows, key) {
 
 function buildDriftSummary(readiness, environment) {
   const missingFunctions = readiness.functions
-    .filter((fn) => !fn.exists)
+    .filter((fn) => requiredFunctionTargets.includes(fn.name) && !fn.exists)
     .map((fn) => fn.name);
 
   const missingPolicies = [];
@@ -451,6 +511,10 @@ function buildDriftSummary(readiness, environment) {
 
   const unsafeGrants = findUnsafeGrants(readiness.tables);
   const missingSeedCounts = findMissingSeedCounts(readiness.counts);
+  const isAdminPolicyReferences = (readiness.policyShape ?? [])
+    .filter((policy) => policy.referencesIsAdmin)
+    .map((policy) => `${policy.table}.${policy.name}`);
+  const unsafeFunctionPosture = findUnsafeFunctionPosture(readiness.functions);
 
   return {
     productionSafetyViolation: environment.productionLikeTargetDetected,
@@ -459,7 +523,39 @@ function buildDriftSummary(readiness, environment) {
     missingPolicies,
     unsafeGrants,
     missingSeedCounts,
+    isAdminPolicyReferences,
+    unsafeFunctionPosture,
   };
+}
+
+function findUnsafeFunctionPosture(functions) {
+  const findings = [];
+  const isAdminFunction = functions.find((fn) => fn.name === 'is_admin');
+
+  if (!isAdminFunction?.exists) {
+    return findings;
+  }
+
+  if (!isAdminFunction.securityDefiner) {
+    findings.push('is_admin is not SECURITY DEFINER');
+  }
+  if (!isAdminFunction.searchPathConfigured) {
+    findings.push('is_admin search_path is not configured');
+  }
+  if (!isAdminFunction.searchPathFixed) {
+    findings.push('is_admin search_path is not fixed to public, pg_temp');
+  }
+  if (isAdminFunction.grants.publicExecute) {
+    findings.push('PUBLIC can execute is_admin');
+  }
+  if (isAdminFunction.grants.anonExecute) {
+    findings.push('anon can execute is_admin');
+  }
+  if (isAdminFunction.grants.authenticatedExecute) {
+    findings.push('authenticated can execute is_admin');
+  }
+
+  return findings;
 }
 
 function findUnsafeGrants(tables) {
@@ -512,7 +608,9 @@ function isReady(driftSummary) {
     && driftSummary.rlsDisabledTables.length === 0
     && driftSummary.missingPolicies.length === 0
     && driftSummary.unsafeGrants.length === 0
-    && driftSummary.missingSeedCounts.length === 0;
+    && driftSummary.missingSeedCounts.length === 0
+    && driftSummary.isAdminPolicyReferences.length === 0
+    && driftSummary.unsafeFunctionPosture.length === 0;
 }
 
 function printHumanReport(report) {
@@ -543,6 +641,25 @@ function printHumanReport(report) {
   writeStdout('RLS / policy readiness');
   writeStdout(`- tables with RLS disabled: ${listOrNone(report.drift.rlsDisabledTables)}`);
   writeStdout(`- missing expected policies: ${listOrNone(report.drift.missingPolicies)}`);
+  writeStdout('');
+  writeStdout('Admin policy shape');
+  const directAdminRolePolicies = report.database.policyShape
+    .filter((policy) => policy.usesDirectAdminRoleCheck)
+    .map((policy) => `${policy.table}.${policy.name}`);
+  const isAdminFunction = report.database.functions.find((fn) => fn.name === 'is_admin');
+  writeStdout(`- policies referencing is_admin: ${listOrNone(report.drift.isAdminPolicyReferences)}`);
+  writeStdout(`- direct admin role policies: ${listOrNone(directAdminRolePolicies)}`);
+  writeStdout(`- is_admin exists: ${yesNo(isAdminFunction?.exists)}`);
+  if (isAdminFunction?.exists) {
+    writeStdout(`- is_admin SECURITY DEFINER: ${yesNo(isAdminFunction.securityDefiner)}`);
+    writeStdout(`- is_admin search_path configured: ${yesNo(isAdminFunction.searchPathConfigured)}`);
+    writeStdout(`- is_admin search_path fixed to public, pg_temp: ${yesNo(isAdminFunction.searchPathFixed)}`);
+    writeStdout(`- is_admin EXECUTE PUBLIC: ${yesNo(isAdminFunction.grants.publicExecute)}`);
+    writeStdout(`- is_admin EXECUTE anon: ${yesNo(isAdminFunction.grants.anonExecute)}`);
+    writeStdout(`- is_admin EXECUTE authenticated: ${yesNo(isAdminFunction.grants.authenticatedExecute)}`);
+    writeStdout(`- is_admin EXECUTE service_role: ${yesNo(isAdminFunction.grants.serviceRoleExecute)}`);
+  }
+  writeStdout(`- is_admin posture warnings: ${listOrNone(report.drift.unsafeFunctionPosture)}`);
   writeStdout('');
   writeStdout('Grant review');
   writeStdout(`- client-role grants to review: ${report.drift.unsafeGrants.length}`);
@@ -591,6 +708,7 @@ function redactReportForJson(report) {
         policyNames: table.policyNames,
         grants: table.grants,
       })),
+      policyShape: report.database.policyShape,
       counts: report.database.counts,
     },
     drift: report.drift,
@@ -626,6 +744,8 @@ async function main() {
         missingPolicies: [],
         unsafeGrants: [],
         missingSeedCounts: [],
+        isAdminPolicyReferences: [],
+        unsafeFunctionPosture: [],
       },
     };
     if (options.json) {
@@ -640,7 +760,7 @@ async function main() {
   }
 
   const database = await collectDatabaseReadiness(process.env.DATABASE_URL);
-  const drift = buildDriftSummary({ functions: database.functions, tables: database.tables, counts: database.counts }, environment);
+  const drift = buildDriftSummary(database, environment);
   const ready = isReady(drift);
   const report = {
     ready,
