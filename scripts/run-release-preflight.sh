@@ -148,7 +148,7 @@ write_summary() {
   } > "$SUMMARY_FILE"
 }
 
-run_step "typecheck" pnpm --dir apps/web exec tsc --noEmit
+run_step "typecheck" pnpm --dir apps/web typecheck
 
 if [[ "$SKIP_LOCAL_BUILD" -eq 0 ]]; then
   run_step "build" pnpm build

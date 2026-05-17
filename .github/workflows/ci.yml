@@ -45,7 +45,7 @@ jobs:
         run: pnpm --filter web lint
 
       - name: Run TypeScript check
-        run: pnpm --filter web exec tsc --noEmit
+        run: pnpm --filter web typecheck
 
   # ============================================
   # 单元测试
