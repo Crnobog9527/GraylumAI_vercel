@@ -347,7 +347,7 @@ BEGIN
         TO anon, authenticated
         USING (
           active = 'true'
-          AND is_deleted = false
+          AND is_deleted = 'false'
           AND (start_date IS NULL OR start_date <= now())
           AND (end_date IS NULL OR end_date >= now())
         )
@@ -383,7 +383,7 @@ BEGIN
       CREATE POLICY "prompts_select_active_public"
         ON public.prompts FOR SELECT
         TO anon, authenticated
-        USING (active = 'true' AND is_deleted = false)
+        USING (active = 'true' AND is_deleted = 'false')
     $policy$;
     EXECUTE $policy$
       CREATE POLICY "prompts_select_admin"
