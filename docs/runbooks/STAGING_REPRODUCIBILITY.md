@@ -73,6 +73,8 @@ any step points at production or requires unapproved writes.
    - This step requires explicit owner approval because it writes to the DB.
    - Seeds must be idempotent and must not contain real API keys or production
      billing identifiers.
+   - Use the repo-owned baseline at
+     `packages/db/seeds/staging_non_secret_baseline.sql`.
 8. Verify RLS, grants, and RPC/function readiness.
    - Prefer read-only catalog queries or a future read-only verification script.
    - Report only counts, object names, policy names, grant summaries, and
@@ -115,16 +117,20 @@ from chat history, screenshots, or one-off dashboard actions.
 
 ## Required Non-Secret Staging Seed Categories
 
-Future seed work should define categories first, then implement idempotent seed
-logic in a later phase. The repo may contain non-secret defaults only.
+The repo-owned Phase 3 seed baseline is
+`packages/db/seeds/staging_non_secret_baseline.sql`. It is an explicit staging
+seed script, not an automatic migration, and it must be applied only after the
+operator has confirmed the target is staging.
 
-Required categories:
+The seed covers:
 
 - `system_settings`
 - `membership_plans`
 - `credit_packages`
 - `ai_models` with `api_key` set to NULL
-- Test profiles or credits only when owner-created and explicitly approved
+
+Test profiles or credits remain out of the baseline and require explicit owner
+approval if ever needed.
 
 Do not store:
 
@@ -399,7 +405,8 @@ Phase 2: migration/RPC/RLS reconciliation.
 
 Phase 3: seed strategy.
 
-- Add non-secret, idempotent staging seed strategy for required readiness rows.
+- Maintain the non-secret, idempotent staging seed baseline for required
+  readiness rows.
 - Keep real secrets and production billing identifiers out of the repo.
 
 Phase 4: verification script.
