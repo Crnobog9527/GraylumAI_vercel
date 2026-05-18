@@ -80,7 +80,7 @@
     "@playwright/test": "^1.60.0",
     "@repo/eslint-config-custom": "workspace:*",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv": "^17.4.2",
