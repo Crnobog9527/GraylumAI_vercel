@@ -38,6 +38,7 @@
       "ajv@8.17.1": "8.18.0",
       "brace-expansion@5.0.4": "5.0.5",
       "flatted": "3.4.2",
+      "@esbuild-kit/core-utils>esbuild": "0.25.12",
       "eslint>minimatch": "3.1.4",
       "glob>minimatch": "9.0.7",
       "next>postcss": "8.5.10",
