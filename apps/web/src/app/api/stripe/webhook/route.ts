@@ -11,10 +11,13 @@ import {
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
-import type Stripe from 'stripe';
 import { logServerError } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
+
+type StripeWebhookEvent = ReturnType<
+  ReturnType<typeof getStripeClient>['webhooks']['constructEvent']
+>;
 
 export async function POST(request: Request) {
   const signature = request.headers.get('stripe-signature');
@@ -25,7 +28,7 @@ export async function POST(request: Request) {
 
   const rawBody = await request.text();
 
-  let event: Stripe.Event;
+  let event: StripeWebhookEvent;
   try {
     event = getStripeClient().webhooks.constructEvent(rawBody, signature, getStripeWebhookSecret());
   } catch {
