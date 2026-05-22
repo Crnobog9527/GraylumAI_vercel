@@ -225,49 +225,58 @@ BEGIN
   )
   RETURNING credit_transactions.id INTO v_transaction_id;
 
-  INSERT INTO user_subscriptions (
-    user_id,
-    membership_plan_id,
-    stripe_customer_id,
-    stripe_subscription_id,
-    stripe_price_id,
-    billing_cycle,
-    status,
-    cancel_at_period_end,
-    current_period_start,
-    current_period_end,
-    metadata,
-    updated_at
-  ) VALUES (
-    v_session_order_user_id,
-    v_plan_id,
-    COALESCE(v_session_order_customer_id, p_stripe_customer_id),
-    p_subscription_id,
-    v_session_order_price_id,
-    v_session_order_billing_cycle,
-    COALESCE(p_payment_status, 'paid'),
-    'false',
-    p_period_start,
-    p_period_end,
-    jsonb_build_object(
+  UPDATE user_subscriptions AS us
+  SET
+    user_id = v_session_order_user_id,
+    membership_plan_id = v_plan_id,
+    stripe_customer_id = COALESCE(v_session_order_customer_id, p_stripe_customer_id),
+    stripe_price_id = v_session_order_price_id,
+    billing_cycle = v_session_order_billing_cycle,
+    status = COALESCE(p_payment_status, 'paid'),
+    cancel_at_period_end = 'false',
+    current_period_start = p_period_start,
+    current_period_end = p_period_end,
+    metadata = COALESCE(us.metadata, '{}'::jsonb) || jsonb_build_object(
       'lastInvoiceId', p_invoice_id,
       'transactionId', v_transaction_id,
       'fulfillmentSource', 'atomic_fulfill_membership_invoice'
     ),
-    v_fulfilled_at
-  )
-  ON CONFLICT (stripe_subscription_id) DO UPDATE
-  SET
-    membership_plan_id = EXCLUDED.membership_plan_id,
-    stripe_customer_id = EXCLUDED.stripe_customer_id,
-    stripe_price_id = EXCLUDED.stripe_price_id,
-    billing_cycle = EXCLUDED.billing_cycle,
-    status = EXCLUDED.status,
-    cancel_at_period_end = EXCLUDED.cancel_at_period_end,
-    current_period_start = EXCLUDED.current_period_start,
-    current_period_end = EXCLUDED.current_period_end,
-    metadata = COALESCE(user_subscriptions.metadata, '{}'::jsonb) || EXCLUDED.metadata,
-    updated_at = EXCLUDED.updated_at;
+    updated_at = v_fulfilled_at
+  WHERE us.stripe_subscription_id = p_subscription_id;
+
+  IF NOT FOUND THEN
+    INSERT INTO user_subscriptions (
+      user_id,
+      membership_plan_id,
+      stripe_customer_id,
+      stripe_subscription_id,
+      stripe_price_id,
+      billing_cycle,
+      status,
+      cancel_at_period_end,
+      current_period_start,
+      current_period_end,
+      metadata,
+      updated_at
+    ) VALUES (
+      v_session_order_user_id,
+      v_plan_id,
+      COALESCE(v_session_order_customer_id, p_stripe_customer_id),
+      p_subscription_id,
+      v_session_order_price_id,
+      v_session_order_billing_cycle,
+      COALESCE(p_payment_status, 'paid'),
+      'false',
+      p_period_start,
+      p_period_end,
+      jsonb_build_object(
+        'lastInvoiceId', p_invoice_id,
+        'transactionId', v_transaction_id,
+        'fulfillmentSource', 'atomic_fulfill_membership_invoice'
+      ),
+      v_fulfilled_at
+    );
+  END IF;
 
   IF v_invoice_order_id IS NOT NULL THEN
     UPDATE payment_orders AS po
