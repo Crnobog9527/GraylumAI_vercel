@@ -73,6 +73,21 @@ function normalizeAppUrl(appUrl: string): string {
   return appUrl.replace(/\/$/, '');
 }
 
+function assertValidAppUrl(appUrl: string): string {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(appUrl);
+  } catch {
+    throw new Error('NEXT_PUBLIC_APP_URL is not a valid absolute URL');
+  }
+
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.hostname !== 'localhost' && parsedUrl.hostname !== '127.0.0.1') {
+    throw new Error('NEXT_PUBLIC_APP_URL must use HTTPS outside local development');
+  }
+
+  return normalizeAppUrl(parsedUrl.toString());
+}
+
 function isTrustedHeaderAppUrl(headerAppUrl: string, configuredAppUrl: string | null): boolean {
   if (configuredAppUrl && headerAppUrl === configuredAppUrl) {
     return true;
@@ -114,7 +129,7 @@ function deriveAppUrlFromHeaders(headers?: Headers): string | null {
 export function getStripeAppUrl(headers?: Headers): string {
   ensureWorkspaceServerEnv();
   const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL
-    ? normalizeAppUrl(process.env.NEXT_PUBLIC_APP_URL)
+    ? assertValidAppUrl(normalizeAppUrl(process.env.NEXT_PUBLIC_APP_URL))
     : null;
   const headerAppUrl = deriveAppUrlFromHeaders(headers);
   if (headerAppUrl && isTrustedHeaderAppUrl(headerAppUrl, configuredAppUrl)) {

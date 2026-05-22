@@ -1,4 +1,10 @@
 .audit-output
+.agent
+.agents
+.claude
+.git
+.release-output
+.turbo
 .next
 node_modules
 apps/web/.next

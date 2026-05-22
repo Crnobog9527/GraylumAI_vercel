@@ -105,6 +105,14 @@ describe('stripe service helpers', () => {
     expect(() => getStripeAppUrl()).toThrow('NEXT_PUBLIC_APP_URL is not configured');
   });
 
+  it('throws before Stripe receives a malformed checkout return URL', async () => {
+    const { getStripeAppUrl } = await import('../stripe');
+
+    process.env.NEXT_PUBLIC_APP_URL = 'NEXT_PUBLIC_APP_URL=https://app.example.com';
+
+    expect(() => getStripeAppUrl()).toThrow('NEXT_PUBLIC_APP_URL is not a valid absolute URL');
+  });
+
   it('throws a single actionable error when Stripe checkout is partially configured', async () => {
     const { assertStripeCheckoutConfigured } = await import('../stripe');
 

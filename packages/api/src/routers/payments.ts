@@ -72,6 +72,91 @@ type PaymentOrderBillingRow = {
   created_at: string;
 };
 
+type CreateCheckoutInput = z.infer<typeof createCheckoutInput>;
+
+function maskIdentifier(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  if (value.length <= 12) {
+    return `${value.slice(0, 4)}...`;
+  }
+
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function summarizePaymentError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return {
+      name: null,
+      type: null,
+      code: null,
+      statusCode: null,
+      message: typeof error === 'string' ? error.slice(0, 240) : null,
+    };
+  }
+
+  const errorRecord = error as {
+    name?: unknown;
+    type?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+    message?: unknown;
+    raw?: {
+      type?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+  };
+
+  const rawMessage = typeof errorRecord.raw?.message === 'string'
+    ? errorRecord.raw.message
+    : typeof errorRecord.message === 'string'
+      ? errorRecord.message
+      : null;
+
+  return {
+    name: typeof errorRecord.name === 'string' ? errorRecord.name : null,
+    type: typeof errorRecord.raw?.type === 'string'
+      ? errorRecord.raw.type
+      : typeof errorRecord.type === 'string'
+        ? errorRecord.type
+        : null,
+    code: typeof errorRecord.raw?.code === 'string'
+      ? errorRecord.raw.code
+      : typeof errorRecord.code === 'string'
+        ? errorRecord.code
+        : null,
+    statusCode: typeof errorRecord.statusCode === 'number'
+      ? errorRecord.statusCode
+      : typeof errorRecord.status === 'number'
+        ? errorRecord.status
+        : null,
+    message: rawMessage?.slice(0, 240) ?? null,
+  };
+}
+
+function getCheckoutItemId(input: CreateCheckoutInput) {
+  return input.kind === 'credit_package' ? input.packageId : input.planId;
+}
+
+function logCheckoutStageFailure(
+  stage: string,
+  input: CreateCheckoutInput,
+  error: unknown,
+  extra: Record<string, unknown> = {},
+) {
+  logger.error('billing', 'payments_checkout_stage_failed', {
+    stage,
+    kind: input.kind,
+    itemId: getCheckoutItemId(input),
+    ...extra,
+    error: summarizePaymentError(error),
+  });
+}
+
 function toCheckoutConfigError(message: string) {
   return new TRPCError({
     code: 'BAD_REQUEST',
@@ -239,6 +324,7 @@ export const paymentsRouter = router({
         assertStripeCheckoutConfigured();
         stripe = getStripeClient();
       } catch (error) {
+        logCheckoutStageFailure('stripe_config', input, error);
         throw toCheckoutUnavailableError();
       }
 
@@ -249,20 +335,36 @@ export const paymentsRouter = router({
         .single();
 
       if (profileError || !profile) {
+        if (profileError) {
+          logCheckoutStageFailure('profile_read', input, profileError);
+        }
+
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '用户资料不存在，无法创建支付会话',
         });
       }
 
-      const customerId = await getOrCreateStripeCustomerId({
-        supabase: ctx.supabase,
-        userId: ctx.profileId,
-        email: profile.email ?? ctx.user.email ?? null,
-        nickname: profile.nickname ?? null,
-      });
+      let customerId;
+      try {
+        customerId = await getOrCreateStripeCustomerId({
+          supabase: ctx.supabaseAdmin,
+          userId: ctx.profileId,
+          email: profile.email ?? ctx.user.email ?? null,
+          nickname: profile.nickname ?? null,
+        });
+      } catch (error) {
+        logCheckoutStageFailure('customer_lookup', input, error);
+        throw createPaymentOperationError('创建支付会话', error);
+      }
 
-      const appUrl = getStripeAppUrl(ctx.headers);
+      let appUrl;
+      try {
+        appUrl = getStripeAppUrl(ctx.headers);
+      } catch (error) {
+        logCheckoutStageFailure('checkout_url', input, error);
+        throw toCheckoutUnavailableError();
+      }
       const successUrl = `${appUrl}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${appUrl}/profile?tab=subscription&checkout=cancelled`;
 
@@ -293,6 +395,10 @@ export const paymentsRouter = router({
         }
 
         if (membershipPlanError) {
+          logCheckoutStageFailure('plan_discount_read', input, membershipPlanError, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('读取会员折扣', membershipPlanError);
         }
 
@@ -361,6 +467,10 @@ export const paymentsRouter = router({
             metadata,
           });
         } catch (error) {
+          logCheckoutStageFailure('stripe_session_create', input, error, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('创建支付会话', error);
         }
 
@@ -381,6 +491,10 @@ export const paymentsRouter = router({
         });
 
         if (orderError) {
+          logCheckoutStageFailure('order_insert', input, orderError, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('保存支付订单', orderError);
         }
 
@@ -401,6 +515,10 @@ export const paymentsRouter = router({
         .single();
 
       if (error || !plan) {
+        if (error) {
+          logCheckoutStageFailure('plan_read', input, error);
+        }
+
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '会员套餐不存在',
@@ -452,6 +570,10 @@ export const paymentsRouter = router({
           },
         });
       } catch (error) {
+        logCheckoutStageFailure('stripe_session_create', input, error, {
+          priceId: maskIdentifier(selectedPriceId),
+          hasPriceId: Boolean(selectedPriceId),
+        });
         throw createPaymentOperationError('创建支付会话', error);
       }
 
@@ -473,6 +595,10 @@ export const paymentsRouter = router({
       });
 
       if (orderError) {
+        logCheckoutStageFailure('order_insert', input, orderError, {
+          priceId: maskIdentifier(selectedPriceId),
+          hasPriceId: Boolean(selectedPriceId),
+        });
         throw createPaymentOperationError('保存支付订单', orderError);
       }
 
