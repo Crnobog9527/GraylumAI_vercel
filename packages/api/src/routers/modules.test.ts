@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getPublicReadClient, toPublicModule } from './modules';
+import { PUBLIC_MODULE_SELECT, getPublicReadClient, toPublicModule } from './modules';
 
 describe('toPublicModule', () => {
   it('omits internal prompt fields from public module payloads', () => {
@@ -69,5 +69,18 @@ describe('getPublicReadClient', () => {
         hasSupabaseAdminPrivileges: true,
       }),
     ).toBe(publicClient);
+  });
+});
+
+describe('PUBLIC_MODULE_SELECT', () => {
+  it('selects only public module columns', () => {
+    expect(PUBLIC_MODULE_SELECT).not.toBe('*');
+    expect(PUBLIC_MODULE_SELECT).toContain('title');
+    expect(PUBLIC_MODULE_SELECT).toContain('description');
+    expect(PUBLIC_MODULE_SELECT).not.toContain('prompt_content');
+    expect(PUBLIC_MODULE_SELECT).not.toContain('system_prompt');
+    expect(PUBLIC_MODULE_SELECT).not.toContain('user_prompt_template');
+    expect(PUBLIC_MODULE_SELECT).not.toContain('model_id');
+    expect(PUBLIC_MODULE_SELECT).not.toContain('created_by');
   });
 });
