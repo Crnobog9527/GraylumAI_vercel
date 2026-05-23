@@ -38,6 +38,8 @@ import {
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 import { formatUsdFromCents } from '@/lib/currency';
+import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import { toast } from '@/components/ui/sonner';
 
 interface CreditPackage {
   id: string;
@@ -118,45 +120,81 @@ export default function AdminPackagesPage() {
   const packages = dashboard?.packages;
   const membershipPlans = dashboard?.membershipPlans;
 
+  const refreshPackagesDashboard = (fallback = '数据已保存，但列表刷新失败，请手动刷新页面确认。') => {
+    void refetchDashboard()
+      .then((result) => {
+        if (result.error) {
+          toast.error(getSafeErrorMessage(result.error, fallback));
+        }
+      })
+      .catch((error) => {
+        toast.error(getSafeErrorMessage(error, fallback));
+      });
+  };
+
   // Credit Package Mutations
   const createPackage = trpc.admin.createPackage.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
       closePackageDialog();
+      refreshPackagesDashboard();
+      toast.success('积分包已创建');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '创建积分包失败，请稍后重试'));
     }
   });
 
   const updatePackage = trpc.admin.updatePackage.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
       closePackageDialog();
+      refreshPackagesDashboard();
+      toast.success('积分包已保存');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '保存积分包失败，请稍后重试'));
     }
   });
 
   const deletePackage = trpc.admin.deletePackage.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
+      refreshPackagesDashboard('积分包已删除，但列表刷新失败，请手动刷新页面确认。');
+      toast.success('积分包已删除');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '删除积分包失败，请稍后重试'));
     }
   });
 
   // Membership Plan Mutations
   const createMembershipPlan = trpc.admin.createMembershipPlan.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
       closePlanDialog();
+      refreshPackagesDashboard();
+      toast.success('会员等级已创建');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '创建会员等级失败，请稍后重试'));
     }
   });
 
   const updateMembershipPlan = trpc.admin.updateMembershipPlan.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
       closePlanDialog();
+      refreshPackagesDashboard();
+      toast.success('会员等级已保存');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '保存会员等级失败，请稍后重试'));
     }
   });
 
   const deleteMembershipPlan = trpc.admin.deleteMembershipPlan.useMutation({
-    onSuccess: async () => {
-      await refetchDashboard();
+    onSuccess: () => {
+      refreshPackagesDashboard('会员等级已删除，但列表刷新失败，请手动刷新页面确认。');
+      toast.success('会员等级已删除');
+    },
+    onError: (error) => {
+      toast.error(getSafeErrorMessage(error, '删除会员等级失败，请稍后重试'));
     }
   });
 
@@ -207,30 +245,57 @@ export default function AdminPackagesPage() {
   };
 
   const handlePackageSubmit = () => {
-    const priceInCents = Math.round(parseFloat(packageFormData.price) * 100);
-    const creditsAmount = parseInt(packageFormData.creditsAmount);
-    const bonusCredits = parseInt(packageFormData.bonusCredits || '0');
-    const sortOrder = parseInt(packageFormData.sortOrder || '0');
+    const name = packageFormData.name.trim();
+    const priceInCents = Math.round(Number(packageFormData.price) * 100);
+    const creditsAmount = Math.trunc(Number(packageFormData.creditsAmount));
+    const bonusCredits = Math.trunc(Number(packageFormData.bonusCredits || '0'));
+    const sortOrder = Math.trunc(Number(packageFormData.sortOrder || '0'));
+    const stripePriceId = packageFormData.stripePriceId.trim();
+
+    if (!name) {
+      toast.error('请填写套餐名称');
+      return;
+    }
+
+    if (!Number.isFinite(priceInCents) || priceInCents <= 0) {
+      toast.error('请填写大于 0 的价格');
+      return;
+    }
+
+    if (!Number.isFinite(creditsAmount) || creditsAmount <= 0) {
+      toast.error('请填写大于 0 的积分数量');
+      return;
+    }
+
+    if (!Number.isFinite(bonusCredits) || bonusCredits < 0) {
+      toast.error('赠送积分不能小于 0');
+      return;
+    }
+
+    if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+      toast.error('排序顺序不能小于 0');
+      return;
+    }
 
     if (editingPackage) {
       updatePackage.mutate({
         id: editingPackage.id,
-        name: packageFormData.name,
+        name,
         price: priceInCents,
         creditsAmount,
         bonusCredits,
-        stripePriceId: packageFormData.stripePriceId || undefined,
+        stripePriceId: stripePriceId || null,
         sortOrder,
         isPopular: packageFormData.isPopular as 'true' | 'false',
         active: packageFormData.active as 'true' | 'false',
       });
     } else {
       createPackage.mutate({
-        name: packageFormData.name,
+        name,
         price: priceInCents,
         creditsAmount,
         bonusCredits,
-        stripePriceId: packageFormData.stripePriceId || undefined,
+        stripePriceId: stripePriceId || undefined,
         sortOrder,
         isPopular: packageFormData.isPopular as 'true' | 'false',
         active: packageFormData.active as 'true' | 'false',
@@ -298,29 +363,80 @@ export default function AdminPackagesPage() {
   };
 
   const handlePlanSubmit = () => {
+    const name = planFormData.name.trim();
+    const monthlyPrice = Math.round(Number(planFormData.monthlyPrice || '0') * 100);
+    const yearlyPrice = Math.round(Number(planFormData.yearlyPrice || '0') * 100);
+    const monthlyCredits = Math.trunc(Number(planFormData.monthlyCredits || '0'));
+    const yearlyCredits = Math.trunc(Number(planFormData.yearlyCredits || '0'));
+    const monthlyBonusCredits = Math.trunc(Number(planFormData.monthlyBonusCredits || '0'));
+    const packageDiscount = Math.trunc(Number(planFormData.packageDiscount || '100'));
+    const maxContextMessages = Math.trunc(Number(planFormData.maxContextMessages || '20'));
+    const sortOrder = Math.trunc(Number(planFormData.sortOrder || '0'));
+    const stripeMonthlyPriceId = planFormData.stripeMonthlyPriceId.trim();
+    const stripeYearlyPriceId = planFormData.stripeYearlyPriceId.trim();
+
+    if (!name) {
+      toast.error('请填写等级名称');
+      return;
+    }
+
+    if (!Number.isFinite(monthlyPrice) || monthlyPrice < 0 || !Number.isFinite(yearlyPrice) || yearlyPrice < 0) {
+      toast.error('会员价格不能小于 0');
+      return;
+    }
+
+    if (!Number.isFinite(monthlyCredits) || monthlyCredits < 0 || !Number.isFinite(yearlyCredits) || yearlyCredits < 0) {
+      toast.error('会员积分额度不能小于 0');
+      return;
+    }
+
+    if (!Number.isFinite(monthlyBonusCredits) || monthlyBonusCredits < 0) {
+      toast.error('月奖励积分不能小于 0');
+      return;
+    }
+
+    if (!Number.isFinite(packageDiscount) || packageDiscount < 0 || packageDiscount > 100) {
+      toast.error('加油包折扣必须在 0 到 100 之间');
+      return;
+    }
+
+    if (!Number.isFinite(maxContextMessages) || maxContextMessages < 5 || maxContextMessages > 100) {
+      toast.error('上下文消息数必须在 5 到 100 之间');
+      return;
+    }
+
+    if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+      toast.error('排序顺序不能小于 0');
+      return;
+    }
+
     const data = {
-      name: planFormData.name,
+      name,
       level: planFormData.level,
-      monthlyPrice: Math.round(parseFloat(planFormData.monthlyPrice || '0') * 100),
-      yearlyPrice: Math.round(parseFloat(planFormData.yearlyPrice || '0') * 100),
-      stripeMonthlyPriceId: planFormData.stripeMonthlyPriceId || undefined,
-      stripeYearlyPriceId: planFormData.stripeYearlyPriceId || undefined,
-      monthlyCredits: parseInt(planFormData.monthlyCredits || '0'),
-      yearlyCredits: parseInt(planFormData.yearlyCredits || '0'),
-      monthlyBonusCredits: parseInt(planFormData.monthlyBonusCredits || '0'),
-      packageDiscount: parseInt(planFormData.packageDiscount || '100'),
-      maxContextMessages: parseInt(planFormData.maxContextMessages || '20'),
+      monthlyPrice,
+      yearlyPrice,
+      monthlyCredits,
+      yearlyCredits,
+      monthlyBonusCredits,
+      packageDiscount,
+      maxContextMessages,
       features: planFormData.features.split('\n').filter(f => f.trim()),
-      sortOrder: parseInt(planFormData.sortOrder || '0'),
+      sortOrder,
     };
 
     if (editingPlan) {
       updateMembershipPlan.mutate({
         id: editingPlan.id,
         ...data,
+        stripeMonthlyPriceId: stripeMonthlyPriceId || null,
+        stripeYearlyPriceId: stripeYearlyPriceId || null,
       });
     } else {
-      createMembershipPlan.mutate(data);
+      createMembershipPlan.mutate({
+        ...data,
+        stripeMonthlyPriceId: stripeMonthlyPriceId || undefined,
+        stripeYearlyPriceId: stripeYearlyPriceId || undefined,
+      });
     }
   };
 
@@ -982,6 +1098,7 @@ export default function AdminPackagesPage() {
 
             <DialogFooter>
               <Button
+                type="button"
                 variant="outline"
                 onClick={closePackageDialog}
                 className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
@@ -989,6 +1106,7 @@ export default function AdminPackagesPage() {
                 取消
               </Button>
               <Button
+                type="button"
                 data-testid="credit-package-save"
                 onClick={handlePackageSubmit}
                 disabled={!packageFormData.name || !packageFormData.price || !packageFormData.creditsAmount || createPackage.isPending || updatePackage.isPending}
@@ -1191,6 +1309,7 @@ export default function AdminPackagesPage() {
 
             <DialogFooter>
               <Button
+                type="button"
                 variant="outline"
                 onClick={closePlanDialog}
                 className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
@@ -1198,6 +1317,7 @@ export default function AdminPackagesPage() {
                 取消
               </Button>
               <Button
+                type="button"
                 data-testid="membership-plan-save"
                 onClick={handlePlanSubmit}
                 disabled={!planFormData.name || createMembershipPlan.isPending || updateMembershipPlan.isPending}

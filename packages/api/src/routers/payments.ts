@@ -72,6 +72,113 @@ type PaymentOrderBillingRow = {
   created_at: string;
 };
 
+type CreateCheckoutInput = z.infer<typeof createCheckoutInput>;
+
+function maskIdentifier(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  if (value.length <= 12) {
+    return `${value.slice(0, 4)}...`;
+  }
+
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function maskKnownIdentifiers(message: string | null | undefined) {
+  if (!message) {
+    return null;
+  }
+
+  return message
+    .replace(
+      /\b(?:cs_(?:test|live)|sub|in|cus|price|pi|ch)_[A-Za-z0-9_]+\b/g,
+      (value) => maskIdentifier(value) ?? value,
+    )
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+      (value) => maskIdentifier(value) ?? value,
+    );
+}
+
+function summarizePaymentError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return {
+      name: null,
+      type: null,
+      code: null,
+      statusCode: null,
+      message: typeof error === 'string' ? maskKnownIdentifiers(error.slice(0, 240)) : null,
+    };
+  }
+
+  const errorRecord = error as {
+    name?: unknown;
+    type?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+    message?: unknown;
+    stage?: unknown;
+    safeContext?: unknown;
+    raw?: {
+      type?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+  };
+
+  const rawMessage = typeof errorRecord.raw?.message === 'string'
+      ? errorRecord.raw.message
+      : typeof errorRecord.message === 'string'
+        ? errorRecord.message
+        : null;
+
+  return {
+    name: typeof errorRecord.name === 'string' ? errorRecord.name : null,
+    type: typeof errorRecord.raw?.type === 'string'
+      ? errorRecord.raw.type
+      : typeof errorRecord.type === 'string'
+        ? errorRecord.type
+        : null,
+    code: typeof errorRecord.raw?.code === 'string'
+      ? errorRecord.raw.code
+      : typeof errorRecord.code === 'string'
+        ? errorRecord.code
+        : null,
+    statusCode: typeof errorRecord.statusCode === 'number'
+      ? errorRecord.statusCode
+      : typeof errorRecord.status === 'number'
+        ? errorRecord.status
+        : null,
+    stage: typeof errorRecord.stage === 'string' ? errorRecord.stage : null,
+    safeContext: errorRecord.safeContext && typeof errorRecord.safeContext === 'object'
+      ? errorRecord.safeContext
+      : null,
+    message: maskKnownIdentifiers(rawMessage?.slice(0, 240)) ?? null,
+  };
+}
+
+function getCheckoutItemId(input: CreateCheckoutInput) {
+  return input.kind === 'credit_package' ? input.packageId : input.planId;
+}
+
+function logCheckoutStageFailure(
+  stage: string,
+  input: CreateCheckoutInput,
+  error: unknown,
+  extra: Record<string, unknown> = {},
+) {
+  logger.error('billing', 'payments_checkout_stage_failed', {
+    stage,
+    kind: input.kind,
+    itemId: getCheckoutItemId(input),
+    ...extra,
+    error: summarizePaymentError(error),
+  });
+}
+
 function toCheckoutConfigError(message: string) {
   return new TRPCError({
     code: 'BAD_REQUEST',
@@ -81,6 +188,44 @@ function toCheckoutConfigError(message: string) {
 
 function createPaymentOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function getCheckoutSessionSubscriptionId(session: any) {
+  return typeof session.subscription === 'string'
+    ? session.subscription
+    : session.subscription?.id ?? null;
+}
+
+function getCheckoutSessionInvoiceId(session: any) {
+  return typeof session.invoice === 'string'
+    ? session.invoice
+    : session.invoice?.id ?? null;
+}
+
+function logSyncCheckoutStage(
+  stage: string,
+  input: z.infer<typeof syncCheckoutInput>,
+  extra: Record<string, unknown> = {},
+) {
+  logger.info('billing', 'payments_sync_checkout_stage', {
+    stage,
+    checkoutSessionId: maskIdentifier(input.sessionId),
+    ...extra,
+  });
+}
+
+function logSyncCheckoutStageFailure(
+  stage: string,
+  input: z.infer<typeof syncCheckoutInput>,
+  error: unknown,
+  extra: Record<string, unknown> = {},
+) {
+  logger.error('billing', 'payments_sync_checkout_stage_failed', {
+    stage,
+    checkoutSessionId: maskIdentifier(input.sessionId),
+    ...extra,
+    error: summarizePaymentError(error),
+  });
 }
 
 function toCheckoutUnavailableError() {
@@ -239,6 +384,7 @@ export const paymentsRouter = router({
         assertStripeCheckoutConfigured();
         stripe = getStripeClient();
       } catch (error) {
+        logCheckoutStageFailure('stripe_config', input, error);
         throw toCheckoutUnavailableError();
       }
 
@@ -249,20 +395,36 @@ export const paymentsRouter = router({
         .single();
 
       if (profileError || !profile) {
+        if (profileError) {
+          logCheckoutStageFailure('profile_read', input, profileError);
+        }
+
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '用户资料不存在，无法创建支付会话',
         });
       }
 
-      const customerId = await getOrCreateStripeCustomerId({
-        supabase: ctx.supabase,
-        userId: ctx.profileId,
-        email: profile.email ?? ctx.user.email ?? null,
-        nickname: profile.nickname ?? null,
-      });
+      let customerId;
+      try {
+        customerId = await getOrCreateStripeCustomerId({
+          supabase: ctx.supabaseAdmin,
+          userId: ctx.profileId,
+          email: profile.email ?? ctx.user.email ?? null,
+          nickname: profile.nickname ?? null,
+        });
+      } catch (error) {
+        logCheckoutStageFailure('customer_lookup', input, error);
+        throw createPaymentOperationError('创建支付会话', error);
+      }
 
-      const appUrl = getStripeAppUrl(ctx.headers);
+      let appUrl;
+      try {
+        appUrl = getStripeAppUrl(ctx.headers);
+      } catch (error) {
+        logCheckoutStageFailure('checkout_url', input, error);
+        throw toCheckoutUnavailableError();
+      }
       const successUrl = `${appUrl}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${appUrl}/profile?tab=subscription&checkout=cancelled`;
 
@@ -293,6 +455,10 @@ export const paymentsRouter = router({
         }
 
         if (membershipPlanError) {
+          logCheckoutStageFailure('plan_discount_read', input, membershipPlanError, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('读取会员折扣', membershipPlanError);
         }
 
@@ -361,6 +527,10 @@ export const paymentsRouter = router({
             metadata,
           });
         } catch (error) {
+          logCheckoutStageFailure('stripe_session_create', input, error, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('创建支付会话', error);
         }
 
@@ -381,6 +551,10 @@ export const paymentsRouter = router({
         });
 
         if (orderError) {
+          logCheckoutStageFailure('order_insert', input, orderError, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
           throw createPaymentOperationError('保存支付订单', orderError);
         }
 
@@ -401,6 +575,10 @@ export const paymentsRouter = router({
         .single();
 
       if (error || !plan) {
+        if (error) {
+          logCheckoutStageFailure('plan_read', input, error);
+        }
+
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '会员套餐不存在',
@@ -452,6 +630,10 @@ export const paymentsRouter = router({
           },
         });
       } catch (error) {
+        logCheckoutStageFailure('stripe_session_create', input, error, {
+          priceId: maskIdentifier(selectedPriceId),
+          hasPriceId: Boolean(selectedPriceId),
+        });
         throw createPaymentOperationError('创建支付会话', error);
       }
 
@@ -473,6 +655,10 @@ export const paymentsRouter = router({
       });
 
       if (orderError) {
+        logCheckoutStageFailure('order_insert', input, orderError, {
+          priceId: maskIdentifier(selectedPriceId),
+          hasPriceId: Boolean(selectedPriceId),
+        });
         throw createPaymentOperationError('保存支付订单', orderError);
       }
 
@@ -492,16 +678,31 @@ export const paymentsRouter = router({
       try {
         assertStripeCheckoutConfigured();
       } catch (error) {
+        logSyncCheckoutStageFailure('stripe_config', input, error);
         throw toCheckoutUnavailableError();
       }
 
       const stripe = getStripeClient();
       let session;
       try {
+        logSyncCheckoutStage('session_retrieve_start', input, {
+          profileId: maskIdentifier(ctx.profileId),
+        });
         session = await stripe.checkout.sessions.retrieve(input.sessionId, {
           expand: ['payment_intent', 'subscription', 'invoice'],
         });
+        logSyncCheckoutStage('session_retrieve', input, {
+          profileId: maskIdentifier(ctx.profileId),
+          mode: session.mode,
+          checkoutStatus: session.status,
+          paymentStatus: session.payment_status,
+          subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(session)),
+          invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(session)),
+        });
       } catch (error) {
+        logSyncCheckoutStageFailure('session_retrieve', input, error, {
+          profileId: maskIdentifier(ctx.profileId),
+        });
         throw createPaymentOperationError('同步支付会话', error);
       }
 
@@ -511,26 +712,46 @@ export const paymentsRouter = router({
         null;
 
       if (sessionUserId !== ctx.profileId) {
+        logSyncCheckoutStageFailure('session_owner_check', input, new Error('checkout session owner mismatch'), {
+          profileId: maskIdentifier(ctx.profileId),
+          sessionUserId: maskIdentifier(sessionUserId),
+        });
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: '你无权同步这笔支付会话',
         });
       }
 
+      let syncStage = 'upsert_payment_order';
+      let syncStageContext: Record<string, unknown> = {
+        profileId: maskIdentifier(ctx.profileId),
+        mode: session.mode,
+        checkoutStatus: session.status,
+        paymentStatus: session.payment_status,
+        subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(session)),
+        invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(session)),
+      };
+
       try {
+        logSyncCheckoutStage(syncStage, input, syncStageContext);
         await upsertPaymentOrderBySession(ctx.supabaseAdmin, session);
 
         if (session.mode === 'payment' && session.payment_status === 'paid') {
+          syncStage = 'fulfill_credit_package';
+          logSyncCheckoutStage(syncStage, input, syncStageContext);
           await fulfillCreditPackageOrder(ctx.supabaseAdmin, session);
         }
 
         if (session.mode === 'subscription') {
-          const subscriptionId =
-            typeof session.subscription === 'string'
-              ? session.subscription
-              : session.subscription?.id ?? null;
+          const subscriptionId = getCheckoutSessionSubscriptionId(session);
 
           if (subscriptionId) {
+            syncStageContext = {
+              ...syncStageContext,
+              subscriptionId: maskIdentifier(subscriptionId),
+            };
+            syncStage = 'subscription_retrieve';
+            logSyncCheckoutStage(syncStage, input, syncStageContext);
             const subscription =
               typeof session.subscription === 'string'
                 ? await stripe.subscriptions.retrieve(subscriptionId)
@@ -540,8 +761,15 @@ export const paymentsRouter = router({
               throw new Error('Stripe subscription unavailable');
             }
 
+            syncStage = 'sync_subscription_state';
+            logSyncCheckoutStage(syncStage, input, {
+              ...syncStageContext,
+              subscriptionStatus: subscription.status,
+            });
             await syncSubscriptionState(ctx.supabaseAdmin, subscription);
 
+            syncStage = 'invoice_lookup';
+            logSyncCheckoutStage(syncStage, input, syncStageContext);
             const expandedInvoice =
               typeof session.invoice === 'string'
                 ? await stripe.invoices.retrieve(session.invoice)
@@ -555,14 +783,37 @@ export const paymentsRouter = router({
                 })).data.find((invoice) => invoice.status === 'paid') ?? null;
 
             if (paidInvoice) {
+              syncStage = 'fulfill_membership_invoice';
+              syncStageContext = {
+                ...syncStageContext,
+                invoiceId: maskIdentifier(paidInvoice.id),
+                invoiceStatus: paidInvoice.status ?? null,
+              };
+              logSyncCheckoutStage(syncStage, input, syncStageContext);
               await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
+            } else {
+              logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
+                stage: syncStage,
+                checkoutSessionId: maskIdentifier(input.sessionId),
+                subscriptionId: maskIdentifier(subscriptionId),
+                expandedInvoiceId: maskIdentifier(expandedInvoice?.id),
+                expandedInvoiceStatus: expandedInvoice?.status ?? null,
+              });
             }
+          } else {
+            logger.warn('billing', 'payments_sync_checkout_missing_subscription', {
+              stage: 'subscription_id_parse',
+              checkoutSessionId: maskIdentifier(input.sessionId),
+              mode: session.mode,
+              paymentStatus: session.payment_status,
+            });
           }
         }
       } catch (error) {
         if (error instanceof TRPCError) {
           throw error;
         }
+        logSyncCheckoutStageFailure(syncStage, input, error, syncStageContext);
         throw createPaymentOperationError('同步支付会话', error);
       }
 
@@ -573,8 +824,20 @@ export const paymentsRouter = router({
         .maybeSingle();
 
       if (syncedOrderError) {
+        logSyncCheckoutStageFailure('final_order_read', input, syncedOrderError, {
+          profileId: maskIdentifier(ctx.profileId),
+        });
         throw createPaymentOperationError('读取支付同步结果', syncedOrderError);
       }
+
+      logSyncCheckoutStage('final_order_read', input, {
+        profileId: maskIdentifier(ctx.profileId),
+        orderStatus: syncedOrder?.status ?? null,
+        paymentStatus: syncedOrder?.payment_status ?? null,
+        fulfilledAt: syncedOrder?.fulfilled_at ?? null,
+        subscriptionId: maskIdentifier(syncedOrder?.stripe_subscription_id),
+        invoiceId: maskIdentifier(syncedOrder?.stripe_invoice_id),
+      });
 
       return {
         sessionId: session.id,

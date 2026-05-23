@@ -5,7 +5,16 @@
  */
 
 import type Stripe from 'stripe';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const loggerState = vi.hoisted(() => ({
+  error: vi.fn(),
+}));
+
+vi.mock('../../lib/logger', () => ({
+  logger: loggerState,
+}));
+
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
@@ -13,6 +22,10 @@ import {
 } from '../stripeFulfillment';
 
 describe('stripe fulfillment helpers', () => {
+  beforeEach(() => {
+    loggerState.error.mockReset();
+  });
+
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
     const updates: Array<{ table: string; payload: unknown }> = [];
 
@@ -137,6 +150,145 @@ describe('stripe fulfillment helpers', () => {
         payment_status: 'paid',
       }),
     );
+  });
+
+  it('throws a diagnostic error when checkout order update fails', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: { id: 'order-update-fail' },
+              error: null,
+            });
+          },
+          update() {
+            return {
+              eq() {
+                return Promise.resolve({
+                  error: {
+                    code: '42501',
+                    message: 'permission denied for table payment_orders',
+                  },
+                });
+              },
+            };
+          },
+          insert() {
+            throw new Error('insert should not be called for an existing order');
+          },
+        };
+      },
+    };
+
+    await expect(
+      upsertPaymentOrderBySession(
+        supabase,
+        {
+          id: 'cs_test_upsert_update_failure',
+          metadata: {
+            userId: 'user-1',
+            itemType: 'membership_plan',
+            itemId: 'plan-1',
+            billingCycle: 'monthly',
+            priceId: 'price_test_monthly',
+          },
+          client_reference_id: 'user-1',
+          customer: 'cus_test_123',
+          subscription: 'sub_test_123',
+          amount_total: 990,
+          currency: 'usd',
+          mode: 'subscription',
+          payment_status: 'paid',
+        } as Stripe.Checkout.Session,
+      ),
+    ).rejects.toMatchObject({
+      name: 'StripeFulfillmentError',
+      stage: 'upsert_payment_order_update',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({
+          code: '42501',
+          message: 'permission denied for table payment_orders',
+        }),
+      }),
+    });
+
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'stripe_fulfillment_stage_failed',
+      expect.objectContaining({
+        stage: 'upsert_payment_order_update',
+        supabaseError: expect.objectContaining({ code: '42501' }),
+      }),
+    );
+  });
+
+  it('throws a diagnostic error when checkout order insert fails', async () => {
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: null, error: null });
+          },
+          insert() {
+            return Promise.resolve({
+              error: {
+                code: '23505',
+                message: 'duplicate key value violates unique constraint for cs_test_insert_failure',
+              },
+            });
+          },
+        };
+      },
+    };
+
+    await expect(
+      upsertPaymentOrderBySession(
+        supabase,
+        {
+          id: 'cs_test_insert_failure',
+          metadata: {
+            userId: 'user-1',
+            itemType: 'membership_plan',
+            itemId: 'plan-1',
+            billingCycle: 'monthly',
+            priceId: 'price_test_monthly',
+          },
+          client_reference_id: 'user-1',
+          customer: 'cus_test_123',
+          subscription: 'sub_test_123',
+          amount_total: 990,
+          currency: 'usd',
+          mode: 'subscription',
+          payment_status: 'paid',
+        } as Stripe.Checkout.Session,
+      ),
+    ).rejects.toMatchObject({
+      name: 'StripeFulfillmentError',
+      stage: 'upsert_payment_order_insert',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({
+          code: '23505',
+          message: expect.stringContaining('cs_test_...ailure'),
+        }),
+      }),
+    });
   });
 
   it('backfills checkout order fulfillment when invoice fulfillment already exists', async () => {
@@ -394,5 +546,154 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
+  });
+
+  it('parses subscription id from the legacy invoice.subscription shape', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          fulfilled_at: '2026-03-22T12:34:56.000Z',
+        },
+      ],
+      error: null,
+    });
+
+    const supabase = {
+      rpc,
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_legacy_shape');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_legacy_shape');
+              return {
+                is() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          update() {
+            return this;
+          },
+        };
+      },
+    };
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_test_legacy_shape',
+        customer: 'cus_test_legacy',
+        status: 'paid',
+        currency: 'usd',
+        amount_paid: 990,
+        subscription: 'sub_test_legacy_shape',
+      } as Stripe.Invoice,
+    );
+
+    expect(rpc).toHaveBeenCalledWith(
+      'atomic_fulfill_membership_invoice',
+      expect.objectContaining({
+        p_invoice_id: 'in_test_legacy_shape',
+        p_subscription_id: 'sub_test_legacy_shape',
+      }),
+    );
+  });
+
+  it('logs the fulfillment stage and safe Supabase error when the membership RPC fails', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: 'P0001',
+        message: 'subscription order not found for invoice in_test_rpc_failure',
+      },
+    });
+
+    const supabase = {
+      rpc,
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_rpc_failure');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+        };
+      },
+    };
+
+    await expect(
+      fulfillMembershipInvoice(
+        supabase,
+        {
+          id: 'in_test_rpc_failure',
+          customer: 'cus_test_rpc',
+          status: 'paid',
+          currency: 'usd',
+          amount_paid: 990,
+          parent: {
+            subscription_details: {
+              subscription: 'sub_test_rpc_failure',
+            },
+          },
+        } as Stripe.Invoice,
+      ),
+    ).rejects.toMatchObject({
+      name: 'StripeFulfillmentError',
+      stage: 'fulfill_membership_invoice_rpc',
+      safeContext: expect.objectContaining({
+        invoiceId: 'in_test_...ailure',
+        subscriptionId: 'sub_test...ailure',
+        supabaseError: expect.objectContaining({
+          code: 'P0001',
+          message: 'subscription order not found for invoice in_test_...ailure',
+        }),
+      }),
+    });
+
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'stripe_fulfillment_stage_failed',
+      expect.objectContaining({
+        stage: 'fulfill_membership_invoice_rpc',
+        invoiceId: 'in_test_...ailure',
+        subscriptionId: 'sub_test...ailure',
+        supabaseError: expect.objectContaining({
+          code: 'P0001',
+        }),
+      }),
+    );
   });
 });

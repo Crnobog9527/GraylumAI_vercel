@@ -4,6 +4,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Provider from "@/trpc/provider";
 import { getPublicSiteSettings } from "@/lib/public-site";
+import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,6 +45,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Provider>{children}</Provider>
+        <Toaster />
         {shouldRenderSpeedInsights ? <SpeedInsights /> : null}
       </body>
     </html>

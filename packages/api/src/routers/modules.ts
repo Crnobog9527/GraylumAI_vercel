@@ -3,10 +3,31 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-// Preview deployments can temporarily lag schema migrations. Selecting `*`
-// keeps the public marketplace resilient across older DB shapes while we
-// still map only the safe fields we expose to the client.
-const PUBLIC_MODULE_SELECT = '*';
+export const PUBLIC_MODULE_SELECT = [
+  'id',
+  'title',
+  'description',
+  'full_description',
+  'icon',
+  'category',
+  'platform',
+  'features',
+  'examples',
+  'preparation_questions',
+  'usage_count',
+  'credits_multiplier',
+  'sort_order',
+  'is_featured',
+  'active',
+  'created_at',
+  'updated_at',
+  'image_url',
+  'badge_type',
+  'badge_text',
+  'credits_display',
+  'link_url',
+  'link_module_id',
+].join(',');
 
 export type PublicModule = {
   id: any;
