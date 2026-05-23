@@ -21,6 +21,12 @@ export const PUBLIC_MODULE_SELECT = [
   'active',
   'created_at',
   'updated_at',
+  'image_url',
+  'badge_type',
+  'badge_text',
+  'credits_display',
+  'link_url',
+  'link_module_id',
 ].join(',');
 
 export type PublicModule = {

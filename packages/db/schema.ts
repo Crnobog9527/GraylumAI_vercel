@@ -426,6 +426,14 @@ export const modules = pgTable('modules', {
   isFeatured: text('is_featured').default('false').notNull(), // 是否精选
   active: text('active').default('true').notNull(), // 是否启用
 
+  // 公开展示字段
+  imageUrl: text('image_url'), // 精选模块展示图
+  badgeType: text('badge_type'), // 展示徽标类型
+  badgeText: text('badge_text'), // 展示徽标文本
+  creditsDisplay: text('credits_display'), // 前端展示的积分说明
+  linkUrl: text('link_url'), // 展示卡片跳转链接
+  linkModuleId: uuid('link_module_id'), // 展示卡片关联模块
+
   // 元数据
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
