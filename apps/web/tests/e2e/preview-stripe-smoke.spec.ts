@@ -48,6 +48,9 @@ test.describe('preview-only stripe smoke', () => {
 
       const response = await responsePromise;
       expect(response.status()).toBe(200);
+      const payload = await response.json();
+      const sessionId = payload?.[0]?.result?.data?.json?.sessionId;
+      expect(sessionId).toMatch(/^cs_test_/);
 
       await page.waitForURL(/(checkout|buy)\.stripe\.com/, { timeout: 20000 });
       await expect(page).toHaveURL(/(checkout|buy)\.stripe\.com/);
