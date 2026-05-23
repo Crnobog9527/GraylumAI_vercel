@@ -438,6 +438,68 @@ function collectStripePriceReferences(dbStatus) {
   return references;
 }
 
+function getExpectedPriceShape(usage) {
+  if (usage === 'one_time') {
+    return {
+      type: 'one_time',
+      interval: null,
+      label: 'one-time',
+    };
+  }
+
+  if (usage === 'monthly') {
+    return {
+      type: 'recurring',
+      interval: 'month',
+      label: 'recurring monthly',
+    };
+  }
+
+  if (usage === 'yearly') {
+    return {
+      type: 'recurring',
+      interval: 'year',
+      label: 'recurring yearly',
+    };
+  }
+
+  return {
+    type: null,
+    interval: null,
+    label: 'unknown',
+  };
+}
+
+function getActualPriceShape(price) {
+  if (price.type === 'recurring') {
+    return `recurring ${price.recurring?.interval ?? 'unknown'}`;
+  }
+
+  if (price.type === 'one_time') {
+    return 'one-time';
+  }
+
+  return price.type ?? 'unknown';
+}
+
+function priceMatchesUsage(price, usage) {
+  const expected = getExpectedPriceShape(usage);
+
+  if (!expected.type) {
+    return false;
+  }
+
+  if (price.type !== expected.type) {
+    return false;
+  }
+
+  if (expected.interval) {
+    return price.recurring?.interval === expected.interval;
+  }
+
+  return true;
+}
+
 async function checkStripePrices(options, dbStatus) {
   const references = collectStripePriceReferences(dbStatus);
   const result = {
@@ -447,6 +509,7 @@ async function checkStripePrices(options, dbStatus) {
     missingOrUnreadable: [],
     inactive: [],
     liveModeInTestCheck: [],
+    typeMismatches: [],
   };
 
   if (!process.env.STRIPE_SECRET_KEY || references.length === 0) {
@@ -491,6 +554,18 @@ async function checkStripePrices(options, dbStatus) {
         result.liveModeInTestCheck.push({
           priceId: maskIdentifier(priceId),
           owners: owners.map((owner) => `${owner.ownerType}:${owner.ownerName}:${owner.usage}`),
+        });
+      }
+
+      const mismatchedOwners = owners.filter((owner) => !priceMatchesUsage(price, owner.usage));
+      if (mismatchedOwners.length > 0) {
+        result.typeMismatches.push({
+          priceId: maskIdentifier(priceId),
+          actual: getActualPriceShape(price),
+          owners: mismatchedOwners.map((owner) => {
+            const expected = getExpectedPriceShape(owner.usage);
+            return `${owner.ownerType}:${owner.ownerName}:${owner.usage}:expected ${expected.label}`;
+          }),
         });
       }
     } catch (error) {
@@ -540,7 +615,8 @@ async function main() {
     dbStatus.missingMembershipPlans.length === 0 &&
     stripePriceStatus.missingOrUnreadable.length === 0 &&
     stripePriceStatus.inactive.length === 0 &&
-    stripePriceStatus.liveModeInTestCheck.length === 0;
+    stripePriceStatus.liveModeInTestCheck.length === 0 &&
+    stripePriceStatus.typeMismatches.length === 0;
 
   const report = {
     ready,
@@ -573,6 +649,7 @@ async function main() {
     writeStdout(`- Missing/unreadable Price IDs: ${stripePriceStatus.missingOrUnreadable.length}`);
     writeStdout(`- Inactive Price IDs: ${stripePriceStatus.inactive.length}`);
     writeStdout(`- Live-mode IDs during test-mode check: ${stripePriceStatus.liveModeInTestCheck.length}`);
+    writeStdout(`- Price type mismatches: ${stripePriceStatus.typeMismatches.length}`);
 
     for (const warning of stripeMode.warnings) {
       writeStdout(`- Warning: ${warning}`);
