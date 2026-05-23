@@ -10,8 +10,7 @@ import { gotoWithBypass } from './support/deploymentProtection';
 
 test.describe('preview-only stripe smoke', () => {
   const previewBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
-  const isHostedPreviewTarget =
-    previewBaseUrl.includes('vercel.app') || previewBaseUrl.includes('staging.graylum.com');
+  const isHostedPreviewTarget = previewBaseUrl.includes('vercel.app');
 
   test.skip(!isHostedPreviewTarget, 'Preview-only Stripe smoke.');
 
