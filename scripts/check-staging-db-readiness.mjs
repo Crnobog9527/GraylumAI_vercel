@@ -16,7 +16,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const requiredEnvKeys = ['DATABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_APP_URL'];
 const optionalEnvKeys = ['EXPECTED_SUPABASE_PROJECT_REF', 'EXPECTED_APP_HOST'];
-const defaultExpectedAppHost = 'graylumai-staging.vercel.app';
+const defaultExpectedAppHost = 'staging.graylum.com';
 const knownProductionHostFragments = ['app.graylum.com'];
 const productionWordPattern = /(^|[-_.])prod(uction)?($|[-_.])/i;
 

@@ -397,6 +397,25 @@ Chat/billing readiness:
 - Active membership plan count is greater than 0.
 - Active credit package count is greater than 0.
 - Billing-related settings are present.
+- Stripe staging readiness passes without live-mode values:
+
+```bash
+pnpm stripe:readiness:staging
+```
+
+The Stripe readiness script loads `.env.staging.local`, refuses production-like
+app hosts, requires test-mode Stripe keys, checks active plan/package Price ID
+coverage, and verifies the referenced Stripe Price objects are readable,
+active, and not live-mode. It prints only presence flags, safe mode labels,
+counts, and masked Stripe identifiers.
+
+If the staging database was cloned from production, replace
+`credit_packages.stripe_price_id`,
+`membership_plans.stripe_monthly_price_id`, and
+`membership_plans.stripe_yearly_price_id` with staging Stripe test-mode Price
+IDs before running real billing smoke. Do not reuse production live Price,
+Checkout Session, Invoice, Subscription, or Customer identifiers for staging
+test-mode smoke.
 
 Real chat/billing smoke:
 

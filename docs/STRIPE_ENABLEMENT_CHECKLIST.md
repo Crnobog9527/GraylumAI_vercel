@@ -17,6 +17,16 @@
 pnpm stripe:readiness
 ```
 
+staging / preview 启用前运行：
+
+```bash
+pnpm stripe:readiness:staging
+```
+
+staging 必须使用 Stripe test mode key、test mode webhook secret、test mode
+Product/Price。若 staging 数据库来自 production 克隆，先把后台套餐与积分包的
+Stripe Price ID 替换为 test mode Price ID，或暂时置空让 checkout 保持关闭。
+
 ## 后台配置
 
 必须为以下对象填写真实 `price_xxx`：
@@ -83,9 +93,9 @@ pnpm stripe:readiness
 
 ### 本次真实 live 支付记录
 
-- Checkout Session：`cs_live_a1sjgMfsnWUiwrAVx6PC0yDI6qTJJLx6jbE1CiEkRl5n6Z7LsTaek1A5ST`
-- 用户：`simonni@grayscalegroup.cn`
-- 订单：`1774081a-8423-432c-ab4f-b1bc49242fd2`
+- Checkout Session：`cs_live_...`
+- 用户：已遮罩
+- 订单：已遮罩
 - `payment_orders`：`status=completed`，`payment_status=paid`
 - `credit_transactions`：新增 `purchase +500`
 - 用户积分：`2796 -> 3296`

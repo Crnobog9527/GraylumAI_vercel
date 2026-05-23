@@ -89,11 +89,11 @@ Last updated: 2026-03-30
 
 ## 2026-03-22 生产支付验收结果
 
-- 真实 Checkout Session：`cs_live_a1sjgMfsnWUiwrAVx6PC0yDI6qTJJLx6jbE1CiEkRl5n6Z7LsTaek1A5ST`
-- 订单：`payment_orders.id = 1774081a-8423-432c-ab4f-b1bc49242fd2`
+- 真实 Checkout Session：`cs_live_...`
+- 订单：已遮罩
 - 订单状态：`status=completed`，`payment_status=paid`
 - 完成时间：`2026-03-22T04:12:55.398Z`
-- 用户：`simonni@grayscalegroup.cn`
+- 用户：已遮罩
 - 支付前积分：`2796`
 - 支付后积分：`3296`
 - 积分交易：新增 `purchase +500`，描述为 `Stripe 购买积分包: 测试`
