@@ -397,6 +397,34 @@ Chat/billing readiness:
 - Active membership plan count is greater than 0.
 - Active credit package count is greater than 0.
 - Billing-related settings are present.
+- Stripe staging readiness passes without live-mode values:
+
+```bash
+pnpm stripe:readiness:staging
+```
+
+The current staging runtime is the standalone Vercel project `graylumai-staging`
+using the Vercel Production environment at
+`https://graylumai-staging.vercel.app`. Its Stripe test-mode webhook endpoint is:
+
+```text
+https://graylumai-staging.vercel.app/api/stripe/webhook
+```
+
+The Stripe readiness script loads `.env.staging.local`, refuses production-like
+app hosts, defaults to the `graylumai-staging.vercel.app` staging host, requires
+test-mode Stripe keys, checks active plan/package Price ID coverage, and verifies
+the referenced Stripe Price objects are readable, active, test-mode, and match
+their expected one-time/monthly/yearly usage. It prints only presence flags, safe
+mode labels, counts, and masked Stripe identifiers.
+
+If the staging database was cloned from production, replace
+`credit_packages.stripe_price_id`,
+`membership_plans.stripe_monthly_price_id`, and
+`membership_plans.stripe_yearly_price_id` with staging Stripe test-mode Price
+IDs before running real billing smoke. Do not reuse production live Price,
+Checkout Session, Invoice, Subscription, or Customer identifiers for staging
+test-mode smoke.
 
 Real chat/billing smoke:
 

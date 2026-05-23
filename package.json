@@ -19,6 +19,7 @@
     "release:preflight:preview": "bash ./scripts/run-release-preflight.sh --with-preview",
     "release:preflight:destructive": "bash ./scripts/run-release-preflight.sh --with-preview --with-admin-destructive",
     "stripe:readiness": "node ./scripts/check-stripe-readiness.mjs",
+    "stripe:readiness:staging": "node ./scripts/check-stripe-readiness.mjs --env .env.staging.local --confirm-staging --require-test-mode",
     "test": "turbo test",
     "test:api": "pnpm --filter @repo/api test:run",
     "db:push": "drizzle-kit push --config=packages/db/drizzle.config.ts"

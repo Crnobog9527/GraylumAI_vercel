@@ -10,8 +10,7 @@ import { gotoWithBypass } from './support/deploymentProtection';
 
 test.describe('preview-only stripe smoke', () => {
   const previewBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
-  const isHostedPreviewTarget =
-    previewBaseUrl.includes('vercel.app') || previewBaseUrl.includes('staging.graylum.com');
+  const isHostedPreviewTarget = previewBaseUrl.includes('vercel.app');
 
   test.skip(!isHostedPreviewTarget, 'Preview-only Stripe smoke.');
 
@@ -45,13 +44,13 @@ test.describe('preview-only stripe smoke', () => {
         response.url().includes('/api/trpc/payments.createCheckoutSession'),
       );
 
-      await page.getByRole('button', { name: '购买' }).click();
+      await page.getByRole('button', { name: '购买' }).first().click();
 
       const response = await responsePromise;
       expect(response.status()).toBe(200);
 
-      await page.waitForURL(/(checkout|buy)\.stripe\.com/, { timeout: 20000 });
-      await expect(page).toHaveURL(/(checkout|buy)\.stripe\.com/);
+      await page.waitForURL(/(checkout|buy)\.stripe\.com\/c\/pay\/cs_test_/, { timeout: 20000 });
+      await expect(page).toHaveURL(/(checkout|buy)\.stripe\.com\/c\/pay\/cs_test_/);
     });
   });
 });
