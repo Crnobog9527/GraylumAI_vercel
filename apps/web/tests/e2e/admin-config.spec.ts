@@ -1196,21 +1196,21 @@ test.describe('Admin Config Flows', () => {
     }
   });
 
-  test('should create, edit, toggle, and delete a prompt module', async ({ page }, testInfo) => {
+  test('should create, edit, toggle, and soft-disable a function module', async ({ page }, testInfo) => {
     test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    const promptName = `Parity Prompt ${Date.now()}`;
+    const promptName = `Parity Module ${Date.now()}`;
     const editedPromptName = `${promptName} Edited`;
-    let actual = 'Prompt module flow completed';
+    let actual = 'Function module flow completed';
 
     try {
       steps.push('Open /admin/prompts');
       await gotoWithBypass(page, '/admin/prompts');
       await expect(page).toHaveURL(/\/admin\/prompts/);
 
-      steps.push('Create a temporary prompt module');
-      await page.getByRole('button', { name: '新建提示词' }).click();
+      steps.push('Create a temporary function module');
+      await page.getByRole('button', { name: '新建模块' }).click();
       await page.getByTestId('prompt-name-input').fill(promptName);
       await page.getByTestId('prompt-description-input').fill(`Parity prompt description ${Date.now()}`);
       await page.getByTestId('prompt-content-input').fill(`You are a parity audit helper ${Date.now()}.`);
@@ -1218,7 +1218,7 @@ test.describe('Admin Config Flows', () => {
       await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15000 });
       await expect(page.locator('tr').filter({ hasText: promptName }).first()).toBeVisible({ timeout: 15000 });
 
-      steps.push('Edit the prompt module');
+      steps.push('Edit the function module');
       const promptRow = page.locator('tr').filter({ hasText: promptName }).first();
       await promptRow.getByRole('button').first().click();
       await page.getByTestId('prompt-name-input').fill(editedPromptName);
@@ -1229,34 +1229,37 @@ test.describe('Admin Config Flows', () => {
 
       const editedRow = page.locator('tr').filter({ hasText: editedPromptName }).first();
 
-      steps.push('Toggle the prompt active status');
-      const statusBadge = editedRow.getByText(/已启用|已禁用/).first();
+      steps.push('Toggle the function module active status');
+      const statusBadge = editedRow.getByText(/展示中|已下架/).first();
       const originalStatus = (await statusBadge.textContent())?.trim() ?? '';
       await statusBadge.click();
-      await expect.poll(async () => ((await editedRow.getByText(/已启用|已禁用/).first().textContent()) ?? '').trim(), {
+      await expect.poll(async () => ((await editedRow.getByText(/展示中|已下架/).first().textContent()) ?? '').trim(), {
         timeout: 15000,
       }).not.toBe(originalStatus);
 
-      steps.push('Delete the temporary prompt module');
-      const deletePromptDialogPromise = acceptNextDialog(page);
-      await editedRow.getByRole('button').nth(1).click();
-      await deletePromptDialogPromise;
-      await expect(editedRow).toHaveCount(0, { timeout: 15000 });
+      steps.push('Soft-disable the temporary function module');
+      if (!((await editedRow.getByText(/展示中|已下架/).first().textContent()) ?? '').includes('已下架')) {
+        const deletePromptDialogPromise = acceptNextDialog(page);
+        await editedRow.getByRole('button').nth(1).click();
+        await deletePromptDialogPromise;
+      }
+      await expect(editedRow).toBeVisible({ timeout: 15000 });
+      await expect(editedRow.getByText('已下架')).toBeVisible({ timeout: 15000 });
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
     } catch (error) {
-      actual = error instanceof Error ? error.message : 'Unknown prompt module failure';
+      actual = error instanceof Error ? error.message : 'Unknown function module failure';
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
       await writeFlowAudit(
         testInfo,
         {
-          title: 'admin-prompts-crud',
+          title: 'admin-function-modules-crud',
           role: 'admin',
           route: '/admin/prompts',
-          expected: 'Admin users can create, edit, toggle, and delete temporary prompt modules without blocking issues.',
+          expected: 'Admin users can create, edit, toggle, and soft-disable temporary function modules without blocking issues.',
         },
         actual,
         steps,

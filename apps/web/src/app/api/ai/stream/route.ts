@@ -31,7 +31,8 @@ import {
   applyUserPromptTemplate,
   buildRuntimeSystemPrompt,
   getChatRuntimeSettings,
-  resolveActiveChatPrompt,
+  isModulePromptResolutionError,
+  resolveActiveModulePrompt,
 } from '@repo/api/src/services/chatRuntime';
 import { countTokens, estimateOutputTokens } from '@repo/api/src/services/tokenCounter';
 import {
@@ -46,6 +47,7 @@ interface StreamRequest {
   message: string;
   conversationId?: string;
   modelId?: string;
+  moduleId?: string;
   requestId?: string;
 }
 
@@ -102,6 +104,15 @@ function normalizeRequestId(requestId?: string): string | undefined {
   });
 
   return undefined;
+}
+
+function normalizeModuleId(moduleId?: string): string | undefined {
+  const trimmed = moduleId?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return UUID_PATTERN.test(trimmed) ? trimmed : '';
 }
 
 async function getUserSecurityProfile(
@@ -329,12 +340,20 @@ export async function POST(request: NextRequest) {
     const stageTimings: Record<string, number> = {};
     const body: StreamRequest = await request.json();
     const { conversationId, modelId } = body;
+    const moduleId = normalizeModuleId(body.moduleId);
     const message = body.message?.trim();
     const requestId = normalizeRequestId(body.requestId) ?? crypto.randomUUID();
 
     if (!message) {
       return new Response(
         JSON.stringify({ error: '消息内容不能为空' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (moduleId === '') {
+      return new Response(
+        JSON.stringify({ error: '功能模块参数无效，请返回功能广场重新选择' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -454,6 +473,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const modulePromptStartedAt = Date.now();
+    let activePrompt: Awaited<ReturnType<typeof resolveActiveModulePrompt>> | null = null;
+    if (moduleId) {
+      try {
+        activePrompt = await resolveActiveModulePrompt(supabaseAdmin, {
+          moduleId,
+          platform: 'web',
+        });
+      } catch (error) {
+        if (isModulePromptResolutionError(error)) {
+          return new Response(
+            JSON.stringify({ error: error.message, code: error.code }),
+            { status: error.statusCode, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        throw error;
+      }
+    }
+    recordStageTiming(stageTimings, 'module_prompt_resolution', modulePromptStartedAt);
+
     const defaultModelsStartedAt = Date.now();
     const defaultModelsPromise = getSystemDefaultModels(supabaseAdmin, { runtimeSettings });
     const conversationStartedAt = Date.now();
@@ -494,12 +534,19 @@ export async function POST(request: NextRequest) {
       conversationId: conversation.id,
       message,
       conversationTurns,
-      userPreferredModel: modelId,
+      userPreferredModel: activePrompt?.modelId ?? modelId,
       runtimeSettings,
       defaultModels,
     });
     let { modelConfig, routingReason, routingDecision } = initialSelection;
     recordStageTiming(stageTimings, 'model_routing', routingStartedAt);
+
+    if (activePrompt?.modelId && modelConfig.id !== activePrompt.modelId) {
+      return new Response(
+        JSON.stringify({ error: '功能模块指定模型不可用，请联系管理员更新模块配置' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     const preFlightUpgrade = shouldUpgradeAssistantRoute({
       message,
@@ -507,7 +554,7 @@ export async function POST(request: NextRequest) {
       minConfidence: runtimeSettings.smartRoutingMinConfidence,
     });
 
-    if (preFlightUpgrade.shouldUpgrade) {
+    if (!activePrompt?.modelId && preFlightUpgrade.shouldUpgrade) {
       let primaryModelId =
         runtimeSettings.primaryModelId ??
         runtimeSettings.sonnetModelId ??
@@ -538,25 +585,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const promptStartedAt = Date.now();
     const runtimeModelStartedAt = Date.now();
-    const [activePrompt, runtimeModel] = await Promise.all([
-      resolveActiveChatPrompt(supabaseAdmin, {
-        platform: 'web',
-        modelId: modelConfig.id,
-      }),
-      getRuntimeModelConfig(supabaseAdmin, {
-        runtimeModelId: modelConfig.id,
-        fallbackModelId: modelConfig.modelId,
-        fallbackName: modelConfig.name,
-        fallbackProvider: modelConfig.provider,
-        fallbackMaxTokens: modelConfig.maxTokens,
-        fallbackInputTokenCost: modelConfig.inputTokenCost,
-        fallbackOutputTokenCost: modelConfig.outputTokenCost,
-        fallbackEnableWebSearch: modelConfig.enableWebSearch,
-      }),
-    ]);
-    recordStageTiming(stageTimings, 'prompt_resolution', promptStartedAt);
+    const runtimeModel = await getRuntimeModelConfig(supabaseAdmin, {
+      runtimeModelId: modelConfig.id,
+      fallbackModelId: modelConfig.modelId,
+      fallbackName: modelConfig.name,
+      fallbackProvider: modelConfig.provider,
+      fallbackMaxTokens: modelConfig.maxTokens,
+      fallbackInputTokenCost: modelConfig.inputTokenCost,
+      fallbackOutputTokenCost: modelConfig.outputTokenCost,
+      fallbackEnableWebSearch: modelConfig.enableWebSearch,
+    });
     recordStageTiming(stageTimings, 'runtime_model', runtimeModelStartedAt);
     const systemPrompt = buildRuntimeSystemPrompt(activePrompt);
     const transformedMessage = applyUserPromptTemplate(activePrompt, message);

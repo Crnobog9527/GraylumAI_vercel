@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { PUBLIC_MODULE_SELECT, getPublicReadClient, toPublicModule } from './modules';
+import { PUBLIC_MODULE_SELECT, getPublicReadClient, modulesRouter, toPublicModule } from './modules';
 
 const PUBLIC_DISPLAY_MODULE_FIELDS = [
   'image_url',
@@ -131,5 +131,82 @@ describe('public module display field migration', () => {
     for (const field of INTERNAL_MODULE_FIELDS) {
       expect(grantBlock).not.toContain(field);
     }
+  });
+});
+
+function createModulesCaller() {
+  const operations: Array<Record<string, unknown>> = [];
+  const supabasePublic = {
+    from(table: string) {
+      operations.push({ op: 'from', table });
+      const builder = {
+        select(columns: string, options?: unknown) {
+          operations.push({ op: 'select', columns, options });
+          return builder;
+        },
+        eq(column: string, value: unknown) {
+          operations.push({ op: 'eq', column, value });
+          return builder;
+        },
+        order(column: string, options?: { ascending?: boolean }) {
+          operations.push({ op: 'order', column, ascending: options?.ascending });
+          return builder;
+        },
+        range(from: number, to: number) {
+          operations.push({ op: 'range', from, to });
+          return Promise.resolve({ data: [], error: null, count: 0 });
+        },
+        limit(limit: number) {
+          operations.push({ op: 'limit', limit });
+          return Promise.resolve({ data: [], error: null });
+        },
+        single() {
+          return Promise.resolve({ data: null, error: { code: 'PGRST116' } });
+        },
+      };
+
+      return builder;
+    },
+  };
+
+  return {
+    operations,
+    caller: modulesRouter.createCaller({
+      supabase: supabasePublic,
+      supabasePublic,
+      supabaseAdmin: {},
+      hasSupabaseAdminPrivileges: false,
+    } as any),
+  };
+}
+
+describe('modulesRouter public marketplace queries', () => {
+  it('lists only active modules using admin-controlled sort order before created date', async () => {
+    const { caller, operations } = createModulesCaller();
+
+    await caller.getModules({ limit: 12, offset: 0, sortBy: 'newest' });
+
+    expect(operations).toEqual(expect.arrayContaining([
+      { op: 'from', table: 'modules' },
+      { op: 'eq', column: 'active', value: 'true' },
+      { op: 'order', column: 'sort_order', ascending: false },
+      { op: 'order', column: 'created_at', ascending: false },
+      { op: 'range', from: 0, to: 11 },
+    ]));
+  });
+
+  it('returns featured modules from active featured rows ordered by admin sort order', async () => {
+    const { caller, operations } = createModulesCaller();
+
+    await caller.getFeaturedModules({ limit: 4 });
+
+    expect(operations).toEqual(expect.arrayContaining([
+      { op: 'from', table: 'modules' },
+      { op: 'eq', column: 'active', value: 'true' },
+      { op: 'eq', column: 'is_featured', value: 'true' },
+      { op: 'order', column: 'sort_order', ascending: false },
+      { op: 'order', column: 'created_at', ascending: false },
+      { op: 'limit', limit: 4 },
+    ]));
   });
 });

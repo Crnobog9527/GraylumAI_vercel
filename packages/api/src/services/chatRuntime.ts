@@ -39,6 +39,110 @@ export interface ActiveChatPrompt {
   category: string;
 }
 
+export type ModulePromptResolutionCode =
+  | 'MODULE_NOT_FOUND'
+  | 'MODULE_INACTIVE'
+  | 'MODULE_PLATFORM_UNSUPPORTED'
+  | 'MODULE_PROMPT_MISSING';
+
+export class ModulePromptResolutionError extends Error {
+  code: ModulePromptResolutionCode;
+  statusCode: number;
+
+  constructor(code: ModulePromptResolutionCode, message: string, statusCode = 400) {
+    super(message);
+    this.name = 'ModulePromptResolutionError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+export function isModulePromptResolutionError(error: unknown): error is ModulePromptResolutionError {
+  return error instanceof ModulePromptResolutionError;
+}
+
+function normalizeOptionalText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizePromptPlatform(value: unknown, fallback: ActiveChatPrompt['platform']): ActiveChatPrompt['platform'] {
+  if (value === 'all' || value === 'web' || value === 'mobile' || value === 'desktop' || value === 'api') {
+    return value;
+  }
+
+  return fallback;
+}
+
+export async function resolveActiveModulePrompt(
+  supabase: SupabaseClient,
+  options: {
+    moduleId: string;
+    platform?: ActiveChatPrompt['platform'];
+  },
+): Promise<ActiveChatPrompt> {
+  const platform = options.platform ?? 'web';
+  const moduleId = options.moduleId.trim();
+  const { data, error } = await supabase
+    .from('modules')
+    .select('id, title, description, prompt_content, system_prompt, user_prompt_template, model_id, platform, category, active')
+    .eq('id', moduleId)
+    .single();
+
+  if (error || !data) {
+    throw new ModulePromptResolutionError(
+      'MODULE_NOT_FOUND',
+      '功能模块不存在，请返回功能广场重新选择',
+      404,
+    );
+  }
+
+  if (data.active !== 'true') {
+    throw new ModulePromptResolutionError(
+      'MODULE_INACTIVE',
+      '功能模块已下架，请返回功能广场重新选择',
+      404,
+    );
+  }
+
+  const modulePlatform = normalizePromptPlatform(data.platform, 'all');
+  if (modulePlatform !== 'all' && modulePlatform !== platform) {
+    throw new ModulePromptResolutionError(
+      'MODULE_PLATFORM_UNSUPPORTED',
+      '功能模块暂不支持当前入口',
+      400,
+    );
+  }
+
+  const title = normalizeOptionalText(data.title) ?? '未命名功能模块';
+  const description = normalizeOptionalText(data.description);
+  const promptContent = normalizeOptionalText(data.prompt_content);
+  const systemPrompt = normalizeOptionalText(data.system_prompt);
+  const userPromptTemplate = normalizeOptionalText(data.user_prompt_template);
+  const fallbackPrompt = description
+    ? `你正在作为「${title}」功能模块处理用户请求。\n模块说明：${description}`
+    : null;
+  const resolvedContent = promptContent ?? fallbackPrompt;
+
+  if (!resolvedContent && !systemPrompt && !userPromptTemplate) {
+    throw new ModulePromptResolutionError(
+      'MODULE_PROMPT_MISSING',
+      '功能模块提示词未配置，请联系管理员完善模块配置',
+      400,
+    );
+  }
+
+  return {
+    id: data.id,
+    name: title,
+    content: resolvedContent ?? '',
+    systemPrompt,
+    userPromptTemplate,
+    modelId: data.model_id ?? null,
+    platform: modulePlatform,
+    category: normalizeOptionalText(data.category) ?? 'other',
+  };
+}
+
 function parseBooleanValue(value: unknown, fallback: boolean): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
@@ -127,98 +231,6 @@ export async function getChatRuntimeSettings(
     defaultModelId: parseStringValue(aiModelsConfig.defaultModelId),
     sonnetModelId: parseStringValue(aiModelsConfig.sonnetModelId),
     haikuModelId: parseStringValue(aiModelsConfig.haikuModelId),
-  };
-}
-
-function scorePromptCandidate(
-  prompt: ActiveChatPrompt,
-  platform: ActiveChatPrompt['platform'],
-  modelId?: string
-) {
-  let score = 0;
-  if (prompt.platform === platform) score += 4;
-  else if (prompt.platform === 'all') score += 2;
-
-  if (modelId && prompt.modelId === modelId) score += 4;
-  else if (!prompt.modelId) score += 1;
-
-  return score;
-}
-
-export async function resolveActiveChatPrompt(
-  supabase: SupabaseClient,
-  options: {
-    platform?: ActiveChatPrompt['platform'];
-    modelId?: string;
-  } = {}
-): Promise<ActiveChatPrompt | null> {
-  const platform = options.platform ?? 'web';
-  const { data, error } = await supabase
-    .from('prompts')
-    .select('id, name, content, system_prompt, user_prompt_template, model_id, platform, category, active, is_system, is_deleted, sort_order, updated_at')
-    .eq('active', 'true')
-    .eq('is_system', 'true')
-    .eq('is_deleted', 'false');
-
-  if (error || !data || data.length === 0) {
-    return null;
-  }
-
-  type PromptRow = {
-    id: string;
-    name: string;
-    content: string;
-    system_prompt: string | null;
-    user_prompt_template: string | null;
-    model_id: string | null;
-    platform: ActiveChatPrompt['platform'];
-    category: string;
-    sort_order?: number | null;
-    updated_at?: string | null;
-  };
-
-  const compatible = (data as PromptRow[])
-    .filter((prompt) => prompt.platform === platform || prompt.platform === 'all')
-    .filter((prompt) => !prompt.model_id || !options.modelId || prompt.model_id === options.modelId)
-    .sort((a, b) => {
-      const scoreDiff = scorePromptCandidate({
-        id: b.id,
-        name: b.name,
-        content: b.content,
-        systemPrompt: b.system_prompt,
-        userPromptTemplate: b.user_prompt_template,
-        modelId: b.model_id,
-        platform: b.platform,
-        category: b.category,
-      }, platform, options.modelId) - scorePromptCandidate({
-        id: a.id,
-        name: a.name,
-        content: a.content,
-        systemPrompt: a.system_prompt,
-        userPromptTemplate: a.user_prompt_template,
-        modelId: a.model_id,
-        platform: a.platform,
-        category: a.category,
-      }, platform, options.modelId);
-      if (scoreDiff !== 0) return scoreDiff;
-      if ((b.sort_order ?? 0) !== (a.sort_order ?? 0)) return (b.sort_order ?? 0) - (a.sort_order ?? 0);
-      return new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime();
-    });
-
-  const selected = compatible[0];
-  if (!selected) {
-    return null;
-  }
-
-  return {
-    id: selected.id,
-    name: selected.name,
-    content: selected.content,
-    systemPrompt: selected.system_prompt,
-    userPromptTemplate: selected.user_prompt_template,
-    modelId: selected.model_id,
-    platform: selected.platform,
-    category: selected.category,
   };
 }
 

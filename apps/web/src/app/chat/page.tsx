@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { Suspense, useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { logClientDevError } from '@/lib/client-log';
 import { AppHeader } from '@/components/layout/AppHeader';
 import GlobalBanner from '@/components/layout/GlobalBanner';
@@ -43,7 +44,9 @@ function estimateTokens(text: string) {
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
 }
 
-export default function ChatPage() {
+function ChatPageContent() {
+  const searchParams = useSearchParams();
+  const moduleId = searchParams.get('module') ?? undefined;
   const { activeConversationId, setActiveConversation, refreshConversationList } = useChatStore();
   const [inputMessage, setInputMessage] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -140,6 +143,7 @@ export default function ChatPage() {
     clearChat,
   } = useStreamingChat({
     conversationId: activeConversationId ?? undefined,
+    moduleId,
     onMessageComplete: () => {
       // 消息完成后刷新对话列表（可能创建了新对话）
       utils.chat.getConversations.invalidate();
@@ -312,6 +316,7 @@ export default function ChatPage() {
     // 传递选中的模型 ID（如果启用了模型选择器）
     await sendStreamingMessage(messageToSend, {
       modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
+      moduleId,
     });
     if (pendingLongTextMessage === messageToSend) {
       setPendingLongTextMessage(null);
@@ -325,6 +330,7 @@ export default function ChatPage() {
     longTextWarningThreshold,
     maxReachableTokensAtCharLimit,
     maxInputCharacters,
+    moduleId,
     pendingLongTextMessage,
     refetchCreditsBalance,
     refetchSystemSettings,
@@ -680,5 +686,19 @@ export default function ChatPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center" style={{ background: 'var(--bg-primary)' }}>
+          <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
+        </div>
+      }
+    >
+      <ChatPageContent />
+    </Suspense>
   );
 }

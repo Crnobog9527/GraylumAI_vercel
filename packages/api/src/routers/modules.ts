@@ -123,9 +123,14 @@ export const modulesRouter = router({
 
       // Apply sorting
       if (sortBy === 'popular') {
-        query = query.order('usage_count', { ascending: false });
+        query = query
+          .order('usage_count', { ascending: false })
+          .order('sort_order', { ascending: false })
+          .order('created_at', { ascending: false });
       } else {
-        query = query.order('created_at', { ascending: false });
+        query = query
+          .order('sort_order', { ascending: false })
+          .order('created_at', { ascending: false });
       }
 
       // Apply pagination
@@ -164,7 +169,8 @@ export const modulesRouter = router({
         .select(PUBLIC_MODULE_SELECT)
         .eq('active', 'true')
         .eq('is_featured', 'true')
-        .order('sort_order', { ascending: true })
+        .order('sort_order', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(limit);
 
       if (error) {

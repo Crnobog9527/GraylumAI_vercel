@@ -23,7 +23,7 @@ const menuItems: MenuItem[] = [
   { name: '仪表盘', icon: LayoutDashboard, href: '/admin' },
   { name: 'AI 模型', icon: Bot, href: '/admin/models' },
   { name: 'AI 成本监控', icon: BarChart3, href: '/admin/costs' },
-  { name: '提示词模块', icon: Wand2, href: '/admin/prompts' },
+  { name: '功能模块', icon: Wand2, href: '/admin/prompts' },
   { name: '积分包', icon: Package, href: '/admin/packages' },
   { name: '用户管理', icon: Users, href: '/admin/users' },
   { name: '交易记录', icon: CreditCard, href: '/admin/transactions' },
