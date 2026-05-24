@@ -54,6 +54,7 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
 function createProtectedCaller(
   supabase: { from(table: string): unknown },
   supabaseAdmin: unknown = {},
+  hasSupabaseAdminPrivileges = true,
 ) {
   return aiRouter.createCaller({
     headers: new Headers(),
@@ -69,7 +70,7 @@ function createProtectedCaller(
     supabaseAuth: supabase,
     supabasePublic: {},
     supabaseAdmin,
-    hasSupabaseAdminPrivileges: true,
+    hasSupabaseAdminPrivileges,
   } as any);
 }
 
@@ -150,6 +151,42 @@ describe('aiRouter error sanitization', () => {
     });
   });
 
+  it('fails fast before sendMessage billing when admin privileges are unavailable', async () => {
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller(supabase, { client: 'anon-fallback' }, false);
+
+    await expect(caller.sendMessage({
+      message: 'hello',
+      requestId: '123e4567-e89b-42d3-a456-426614174000',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'AI 计费服务暂不可用，请稍后重试',
+    });
+
+    expect(billingState.constructorArgs).toHaveLength(0);
+    expect(billingState.checkIdempotency).not.toHaveBeenCalled();
+  });
+
   it('uses the admin client for abortRequest billing writes', async () => {
     billingState.settleAbort.mockResolvedValueOnce({
       consumedCredits: 1,
@@ -199,6 +236,48 @@ describe('aiRouter error sanitization', () => {
       supabase: supabaseAdmin,
       userId: 'user-1',
     });
+  });
+
+  it('fails fast before abortRequest billing when admin privileges are unavailable', async () => {
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller(supabase, { client: 'anon-fallback' }, false);
+
+    await expect(caller.abortRequest({
+      requestId: '123e4567-e89b-42d3-a456-426614174000',
+      preDeductId: '123e4567-e89b-42d3-a456-426614174001',
+      consumedTokens: {
+        inputTokens: 10,
+        outputTokens: 20,
+      },
+      modelId: 'dynamic-model',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'AI 计费服务暂不可用，请稍后重试',
+    });
+
+    expect(billingState.constructorArgs).toHaveLength(0);
+    expect(billingState.settleAbort).not.toHaveBeenCalled();
+    expect(billingState.recordUsageLog).not.toHaveBeenCalled();
   });
 
   it('records abort pricing metadata from settleAbort in the usage log', async () => {

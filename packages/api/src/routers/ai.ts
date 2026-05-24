@@ -288,6 +288,19 @@ function getTokenCounterProvider(model: {
   return model.provider;
 }
 
+const AI_BILLING_UNAVAILABLE_MESSAGE = 'AI 计费服务暂不可用，请稍后重试';
+
+function assertAiBillingAdminPrivileges(hasSupabaseAdminPrivileges: boolean) {
+  if (hasSupabaseAdminPrivileges) {
+    return;
+  }
+
+  throw new TRPCError({
+    code: 'SERVICE_UNAVAILABLE',
+    message: AI_BILLING_UNAVAILABLE_MESSAGE,
+  });
+}
+
 // ============================================
 // AI Router
 // ============================================
@@ -302,6 +315,7 @@ export const aiRouter = router({
       const startTime = Date.now();
       // 生成或使用客户端提供的 requestId (用于幂等性)
       const requestId = input.requestId ?? randomUUID();
+      assertAiBillingAdminPrivileges(ctx.hasSupabaseAdminPrivileges);
       const billingService = new BillingService({
         supabase: ctx.supabaseAdmin,
         userId: ctx.profileId,
@@ -599,6 +613,7 @@ export const aiRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      assertAiBillingAdminPrivileges(ctx.hasSupabaseAdminPrivileges);
       const billingService = new BillingService({
         supabase: ctx.supabaseAdmin,
         userId: ctx.profileId,
