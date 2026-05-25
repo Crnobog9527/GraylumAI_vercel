@@ -148,6 +148,12 @@ describe('module boolean flag migration', () => {
     expect(migrationSql).toContain("IN ('true', 't', '1', 'yes', 'on')");
     expect(migrationSql).toContain('USING (active IS TRUE)');
     expect(migrationSql).toContain('DROP POLICY IF EXISTS "modules_select_active_public"');
+    expect(migrationSql.indexOf('DROP POLICY IF EXISTS "modules_select_active_public"')).toBeLessThan(
+      migrationSql.indexOf('ALTER COLUMN active TYPE boolean'),
+    );
+    expect(migrationSql.indexOf('ALTER COLUMN active TYPE boolean')).toBeLessThan(
+      migrationSql.indexOf('CREATE POLICY "modules_select_active_public"'),
+    );
     expect(migrationSql).not.toMatch(/\bGRANT\b/i);
     expect(migrationSql).not.toMatch(/\bINSERT\s+INTO\b/i);
   });

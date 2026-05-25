@@ -15,6 +15,12 @@
 DO $$
 BEGIN
   IF to_regclass('public.modules') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS "modules_select_active" ON public.modules';
+    EXECUTE 'DROP POLICY IF EXISTS "Anyone can view active modules" ON public.modules';
+    EXECUTE 'DROP POLICY IF EXISTS "modules_select_active_public" ON public.modules';
+    EXECUTE 'DROP POLICY IF EXISTS "modules_admin_all" ON public.modules';
+    EXECUTE 'DROP POLICY IF EXISTS "modules_select_admin" ON public.modules';
+
     ALTER TABLE public.modules
       ALTER COLUMN active DROP DEFAULT,
       ALTER COLUMN is_featured DROP DEFAULT;
@@ -40,12 +46,6 @@ BEGIN
       ALTER COLUMN active SET NOT NULL,
       ALTER COLUMN is_featured SET DEFAULT FALSE,
       ALTER COLUMN is_featured SET NOT NULL;
-
-    EXECUTE 'DROP POLICY IF EXISTS "modules_select_active" ON public.modules';
-    EXECUTE 'DROP POLICY IF EXISTS "Anyone can view active modules" ON public.modules';
-    EXECUTE 'DROP POLICY IF EXISTS "modules_select_active_public" ON public.modules';
-    EXECUTE 'DROP POLICY IF EXISTS "modules_admin_all" ON public.modules';
-    EXECUTE 'DROP POLICY IF EXISTS "modules_select_admin" ON public.modules';
 
     EXECUTE $policy$
       CREATE POLICY "modules_select_active_public"
