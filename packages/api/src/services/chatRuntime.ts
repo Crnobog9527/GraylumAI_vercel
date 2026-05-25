@@ -96,7 +96,7 @@ export async function resolveActiveModulePrompt(
     );
   }
 
-  if (data.active !== 'true') {
+  if (data.active !== true) {
     throw new ModulePromptResolutionError(
       'MODULE_INACTIVE',
       '功能模块已下架，请返回功能广场重新选择',

@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex, boolean } from 'drizzle-orm/pg-core';
 
 // --- 核心表 ---
 
@@ -423,8 +423,8 @@ export const modules = pgTable('modules', {
   usageCount: integer('usage_count').default(0).notNull(), // 使用次数
   creditsMultiplier: decimal('credits_multiplier', { precision: 4, scale: 2 }).default('1.00'), // 积分倍率
   sortOrder: integer('sort_order').default(0).notNull(), // 排序权重
-  isFeatured: text('is_featured').default('false').notNull(), // 是否精选
-  active: text('active').default('true').notNull(), // 是否启用
+  isFeatured: boolean('is_featured').default(false).notNull(), // 是否精选
+  active: boolean('active').default(true).notNull(), // 是否启用
 
   // 公开展示字段
   imageUrl: text('image_url'), // 精选模块展示图

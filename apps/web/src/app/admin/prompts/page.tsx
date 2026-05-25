@@ -71,8 +71,8 @@ interface FeatureModule {
   badge_text: string | null;
   credits_display: string | null;
   category: ModuleCategory;
-  is_featured: string;
-  active: string;
+  is_featured: boolean;
+  active: boolean;
   sort_order: number;
   created_at: string;
 }
@@ -133,7 +133,7 @@ type BatchEditForm = {
   platform: Platform | BatchSentinel;
   modelId: string | BatchSentinel;
   icon: string | BatchSentinel;
-  isFeatured: 'true' | 'false' | BatchSentinel;
+  isFeatured: 'featured' | 'standard' | BatchSentinel;
 };
 
 function createEmptyForm(): ModuleForm {
@@ -265,8 +265,8 @@ export default function AdminPromptsPage() {
       creditsDisplay: module.credits_display || '',
       category: module.category || 'other',
       sortOrder: String(module.sort_order ?? 0),
-      active: module.active === 'true',
-      isFeatured: module.is_featured === 'true',
+      active: module.active,
+      isFeatured: module.is_featured,
     });
     setDialogOpen(true);
   };
@@ -301,8 +301,8 @@ export default function AdminPromptsPage() {
       creditsDisplay: formData.creditsDisplay || undefined,
       category: formData.category,
       sortOrder: parseInt(formData.sortOrder) || 0,
-      active: formData.active ? 'true' as const : 'false' as const,
-      isFeatured: formData.isFeatured ? 'true' as const : 'false' as const,
+      active: formData.active,
+      isFeatured: formData.isFeatured,
     };
   };
 
@@ -335,14 +335,14 @@ export default function AdminPromptsPage() {
   const handleToggleActive = (module: FeatureModule) => {
     updatePrompt.mutate({
       id: module.id,
-      active: module.active === 'true' ? 'false' : 'true',
+      active: !module.active,
     });
   };
 
   const handleToggleFeatured = (module: FeatureModule) => {
     updatePrompt.mutate({
       id: module.id,
-      isFeatured: module.is_featured === 'true' ? 'false' : 'true',
+      isFeatured: !module.is_featured,
     });
   };
 
@@ -397,7 +397,7 @@ export default function AdminPromptsPage() {
     if (batchForm.platform !== BATCH_NO_CHANGE) patch.platform = batchForm.platform;
     if (batchForm.modelId !== BATCH_NO_CHANGE) patch.modelId = batchForm.modelId === 'none' ? null : batchForm.modelId;
     if (batchForm.icon !== BATCH_NO_CHANGE) patch.icon = batchForm.icon;
-    if (batchForm.isFeatured !== BATCH_NO_CHANGE) patch.isFeatured = batchForm.isFeatured;
+    if (batchForm.isFeatured !== BATCH_NO_CHANGE) patch.isFeatured = batchForm.isFeatured === 'featured';
 
     if (Object.keys(patch).length === 0) {
       alert('请至少选择一个要批量更新的字段');
@@ -666,14 +666,14 @@ export default function AdminPromptsPage() {
                     </TableCell>
                     <TableCell>
                       <Badge
-                        className={module.is_featured === 'true'
+                        className={module.is_featured
                           ? 'bg-amber-500/20 text-amber-300 cursor-pointer'
                           : 'bg-slate-500/20 text-slate-300 cursor-pointer'
                         }
                         onClick={() => handleToggleFeatured(module)}
                       >
                         <Star className="h-3 w-3 mr-1" />
-                        {module.is_featured === 'true' ? '精选' : '普通'}
+                        {module.is_featured ? '精选' : '普通'}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -682,13 +682,13 @@ export default function AdminPromptsPage() {
                     <TableCell>
                       <Badge
                         data-testid={`admin-prompt-toggle-${module.id}`}
-                        className={module.active === 'true'
+                        className={module.active
                           ? 'bg-emerald-500/20 text-emerald-400 cursor-pointer'
                           : 'bg-rose-500/20 text-rose-400 cursor-pointer'
                         }
                         onClick={() => handleToggleActive(module)}
                       >
-                        {module.active === 'true' ? (
+                        {module.active ? (
                           <>
                             <Check className="h-3 w-3 mr-1" />
                             展示中
@@ -720,7 +720,7 @@ export default function AdminPromptsPage() {
                           size="icon"
                           data-testid={`admin-prompt-delete-${module.id}`}
                           onClick={() => handleDisable(module)}
-                          disabled={module.active !== 'true'}
+                          disabled={!module.active}
                           className="h-8 w-8 text-rose-400 hover:bg-rose-500/20 disabled:opacity-30"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -1157,8 +1157,8 @@ export default function AdminPromptsPage() {
                   </SelectTrigger>
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
                     <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
-                    <SelectItem value="true">设为精选</SelectItem>
-                    <SelectItem value="false">取消精选</SelectItem>
+                    <SelectItem value="featured">设为精选</SelectItem>
+                    <SelectItem value="standard">取消精选</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

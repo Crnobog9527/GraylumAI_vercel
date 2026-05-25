@@ -43,8 +43,8 @@ export type PublicModule = {
   usage_count: any;
   credits_multiplier: any;
   sort_order: any;
-  is_featured: any;
-  active: any;
+  is_featured: boolean;
+  active: boolean;
   created_at: any;
   updated_at: any;
   image_url?: any;
@@ -110,7 +110,7 @@ export const modulesRouter = router({
       let query = readClient
         .from('modules')
         .select(PUBLIC_MODULE_SELECT, { count: 'exact' })
-        .eq('active', 'true');
+        .eq('active', true);
 
       // Apply category filter
       if (category && category !== 'all') {
@@ -167,8 +167,8 @@ export const modulesRouter = router({
       const { data: modules, error } = await readClient
         .from('modules')
         .select(PUBLIC_MODULE_SELECT)
-        .eq('active', 'true')
-        .eq('is_featured', 'true')
+        .eq('active', true)
+        .eq('is_featured', true)
         .order('sort_order', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(limit);
@@ -195,7 +195,7 @@ export const modulesRouter = router({
         .from('modules')
         .select(PUBLIC_MODULE_SELECT)
         .eq('id', input.id)
-        .eq('active', 'true')
+        .eq('active', true)
         .single();
 
       if (error || !module) {

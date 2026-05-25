@@ -40,7 +40,7 @@ describe('resolveActiveModulePrompt', () => {
       model_id: '00000000-0000-4000-8000-000000000101',
       platform: 'web',
       category: 'video',
-      active: 'true',
+      active: true,
     }) as any, {
       moduleId: '00000000-0000-4000-8000-000000000001',
       platform: 'web',
@@ -70,7 +70,7 @@ describe('resolveActiveModulePrompt', () => {
       model_id: null,
       platform: 'all',
       category: 'marketing',
-      active: 'true',
+      active: true,
     }) as any, {
       moduleId: '00000000-0000-4000-8000-000000000002',
       platform: 'web',
@@ -91,7 +91,7 @@ describe('resolveActiveModulePrompt', () => {
       model_id: null,
       platform: 'all',
       category: 'other',
-      active: 'false',
+      active: false,
     }) as any, {
       moduleId: '00000000-0000-4000-8000-000000000003',
       platform: 'web',
@@ -112,7 +112,7 @@ describe('resolveActiveModulePrompt', () => {
       model_id: null,
       platform: 'all',
       category: 'other',
-      active: 'true',
+      active: true,
     }) as any, {
       moduleId: '00000000-0000-4000-8000-000000000004',
       platform: 'web',

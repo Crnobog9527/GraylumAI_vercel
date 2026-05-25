@@ -1748,7 +1748,7 @@ describe('adminRouter remaining performance-sensitive queries', () => {
         const execute = async () => {
           if (table === 'modules') {
             return {
-              data: [{ id: 'module-1', active: 'true', category: 'writing', is_featured: 'true' }],
+              data: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
               error: null,
               count: 1,
             };
@@ -1796,8 +1796,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     const result = await caller.getPromptsDashboard({ limit: 50, offset: 0, activeOnly: false });
 
     expect(result).toMatchObject({
-      modules: [{ id: 'module-1', active: 'true', category: 'writing', is_featured: 'true' }],
-      prompts: [{ id: 'module-1', active: 'true', category: 'writing', is_featured: 'true' }],
+      modules: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
+      prompts: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
       total: 1,
       hasMore: false,
       models: [{ id: 'model-1', name: 'Model 1' }],
@@ -1854,8 +1854,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
       badgeText: 'NEW',
       creditsDisplay: '按实际 token 计费',
       sortOrder: 88,
-      isFeatured: 'true',
-      active: 'true',
+      isFeatured: true,
+      active: true,
     });
 
     expect(inserts[0]).toMatchObject({
@@ -1874,8 +1874,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
       badge_text: 'NEW',
       credits_display: '按实际 token 计费',
       sort_order: 88,
-      is_featured: 'true',
-      active: 'true',
+      is_featured: true,
+      active: true,
     });
     expect(inserts[0]).not.toHaveProperty('is_system');
   });
@@ -1913,8 +1913,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     const caller = createAdminCaller(adminSupabase);
     await caller.updatePrompt({
       id: '00000000-0000-4000-8000-000000000002',
-      active: 'false',
-      isFeatured: 'true',
+      active: false,
+      isFeatured: false,
       sortOrder: 99,
       content: 'Updated module prompt',
       systemPrompt: 'Updated system',
@@ -1922,8 +1922,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     });
 
     expect(updates[0]).toMatchObject({
-      active: 'false',
-      is_featured: 'true',
+      active: false,
+      is_featured: false,
       sort_order: 99,
       prompt_content: 'Updated module prompt',
       system_prompt: 'Updated system',
@@ -1967,6 +1967,118 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     const result = await caller.deletePrompt({ id: '00000000-0000-4000-8000-000000000003' });
 
     expect(result).toMatchObject({ success: true });
-    expect(updates[0]).toMatchObject({ active: 'false' });
+    expect(updates[0]).toMatchObject({ active: false });
+  });
+
+  it('batch-updates featured flags as boolean module fields', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const filters: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in(column: string, values: unknown[]) {
+            filters.push({ column, values });
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000004' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchUpdatePrompts({
+      ids: ['00000000-0000-4000-8000-000000000004'],
+      patch: {
+        isFeatured: false,
+      },
+    });
+
+    expect(result).toMatchObject({ updatedCount: 1 });
+    expect(updates[0]).toMatchObject({ is_featured: false });
+    expect(filters).toContainEqual({
+      column: 'id',
+      values: ['00000000-0000-4000-8000-000000000004'],
+    });
+  });
+
+  it('batch-sets active as a boolean module field', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000005' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchSetPromptActive({
+      ids: ['00000000-0000-4000-8000-000000000005'],
+      active: false,
+    });
+
+    expect(result).toMatchObject({ updatedCount: 1, active: false });
+    expect(updates[0]).toMatchObject({ active: false });
+  });
+
+  it('batch soft-disables modules by setting active=false', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000006' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchDeletePrompts({
+      ids: ['00000000-0000-4000-8000-000000000006'],
+    });
+
+    expect(result).toMatchObject({ disabledCount: 1 });
+    expect(updates[0]).toMatchObject({ active: false });
   });
 });

@@ -20,8 +20,7 @@ import {
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
 const moduleBadgeTypeSchema = z.enum(['new', 'hot', 'recommend']).nullable().optional();
-const moduleBooleanTextSchema = z.union([z.boolean(), z.enum(['true', 'false'])])
-  .transform((value) => (value === true || value === 'true' ? 'true' : 'false'));
+const moduleBooleanSchema = z.boolean();
 const promptBatchPatchSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   fullDescription: z.string().max(5000).nullable().optional(),
@@ -40,7 +39,7 @@ const promptBatchPatchSchema = z.object({
   creditsDisplay: z.string().max(80).nullable().optional(),
   category: promptCategorySchema.optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
-  isFeatured: moduleBooleanTextSchema.optional(),
+  isFeatured: moduleBooleanSchema.optional(),
 }).refine(
   (patch) => Object.values(patch).some((value) => value !== undefined),
   { message: 'At least one patch field is required' },
@@ -75,14 +74,14 @@ function serializeTextList(value: string[] | null | undefined) {
   return cleaned.length > 0 ? JSON.stringify(cleaned) : null;
 }
 
-function summarizeModules(rows: Array<{ active?: string | null; category?: string | null; is_featured?: string | null }>) {
+function summarizeModules(rows: Array<{ active?: boolean | null; category?: string | null; is_featured?: boolean | null }>) {
   const categoryKeys = ['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other'];
 
   return {
     total: rows.length,
-    active: rows.filter((module) => module.active === 'true').length,
-    inactive: rows.filter((module) => module.active !== 'true').length,
-    featured: rows.filter((module) => module.is_featured === 'true').length,
+    active: rows.filter((module) => module.active === true).length,
+    inactive: rows.filter((module) => module.active !== true).length,
+    featured: rows.filter((module) => module.is_featured === true).length,
     byCategory: Object.fromEntries(
       categoryKeys.map((category) => [
         category,
@@ -1431,7 +1430,7 @@ export const adminRouter = router({
         .range(input.offset, input.offset + input.limit - 1);
 
       if (input.activeOnly) {
-        query = query.eq('active', 'true');
+        query = query.eq('active', true);
       }
 
       const { data, error, count } = await query;
@@ -1647,7 +1646,7 @@ export const adminRouter = router({
       }
 
       if (input.activeOnly) {
-        query = query.eq('active', 'true');
+        query = query.eq('active', true);
       }
 
       const { data, error, count } = await query;
@@ -1702,7 +1701,7 @@ export const adminRouter = router({
       }
 
       if (input.activeOnly) {
-        modulesQuery = modulesQuery.eq('active', 'true');
+        modulesQuery = modulesQuery.eq('active', true);
       }
 
       const [modulesResult, statsQuery, modelsResult] = await Promise.all([
@@ -1768,8 +1767,8 @@ export const adminRouter = router({
       creditsDisplay: z.string().max(80).optional(),
       category: promptCategorySchema.default('other'),
       sortOrder: z.number().int().min(0).max(1000).default(0),
-      isFeatured: moduleBooleanTextSchema.default('false'),
-      active: moduleBooleanTextSchema.default('true'),
+      isFeatured: moduleBooleanSchema.default(false),
+      active: moduleBooleanSchema.default(true),
     }))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
@@ -1828,8 +1827,8 @@ export const adminRouter = router({
       creditsDisplay: z.string().max(80).nullable().optional(),
       category: promptCategorySchema.optional(),
       sortOrder: z.number().int().min(0).max(1000).optional(),
-      active: moduleBooleanTextSchema.optional(),
-      isFeatured: moduleBooleanTextSchema.optional(),
+      active: moduleBooleanSchema.optional(),
+      isFeatured: moduleBooleanSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const updateData: Record<string, unknown> = {
@@ -1924,7 +1923,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('modules')
         .update({
-          active: input.active ? 'true' : 'false',
+          active: input.active,
           updated_at: new Date().toISOString(),
         })
         .in('id', input.ids)
@@ -1949,7 +1948,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('modules')
         .update({
-          active: 'false',
+          active: false,
           updated_at: new Date().toISOString(),
         })
         .in('id', input.ids)
@@ -1973,7 +1972,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase
         .from('modules')
         .update({
-          active: 'false',
+          active: false,
           updated_at: new Date().toISOString(),
         })
         .eq('id', input.id)

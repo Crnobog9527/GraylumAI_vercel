@@ -35,8 +35,8 @@ describe('toPublicModule', () => {
       usage_count: 42,
       credits_multiplier: '1.00',
       sort_order: 1,
-      is_featured: 'true',
-      active: 'true',
+      is_featured: true,
+      active: true,
       created_at: '2026-03-27T00:00:00.000Z',
       updated_at: '2026-03-27T00:00:00.000Z',
       image_url: 'https://example.com/module.png',
@@ -66,8 +66,8 @@ describe('toPublicModule', () => {
       usage_count: 42,
       credits_multiplier: '1.00',
       sort_order: 1,
-      is_featured: 'true',
-      active: 'true',
+      is_featured: true,
+      active: true,
       created_at: '2026-03-27T00:00:00.000Z',
       updated_at: '2026-03-27T00:00:00.000Z',
       image_url: 'https://example.com/module.png',
@@ -134,11 +134,52 @@ describe('public module display field migration', () => {
   });
 });
 
-function createModulesCaller() {
+describe('module boolean flag migration', () => {
+  it('normalizes text or boolean module flags without grants or seeds', () => {
+    const migrationSql = readFileSync(
+      new URL('../../../db/migrations/0038_normalize_module_boolean_flags.sql', import.meta.url),
+      'utf8',
+    );
+
+    expect(migrationSql).toContain('ALTER COLUMN active TYPE boolean');
+    expect(migrationSql).toContain('ALTER COLUMN is_featured TYPE boolean');
+    expect(migrationSql).toContain('active::text');
+    expect(migrationSql).toContain('is_featured::text');
+    expect(migrationSql).toContain("IN ('true', 't', '1', 'yes', 'on')");
+    expect(migrationSql).toContain('USING (active IS TRUE)');
+    expect(migrationSql).toContain('DROP POLICY IF EXISTS "modules_select_active_public"');
+    expect(migrationSql).not.toMatch(/\bGRANT\b/i);
+    expect(migrationSql).not.toMatch(/\bINSERT\s+INTO\b/i);
+  });
+});
+
+type ModuleRow = Record<string, any>;
+
+function createModulesCaller(rows: ModuleRow[] = []) {
   const operations: Array<Record<string, unknown>> = [];
   const supabasePublic = {
     from(table: string) {
       operations.push({ op: 'from', table });
+      const filters: Array<{ column: string; value: unknown }> = [];
+      const orders: Array<{ column: string; ascending?: boolean }> = [];
+
+      const executeRows = () => {
+        const filtered = rows.filter((row) =>
+          filters.every((filter) => row[filter.column] === filter.value),
+        );
+
+        return [...filtered].sort((a, b) => {
+          for (const order of orders) {
+            const left = a[order.column];
+            const right = b[order.column];
+            if (left === right) continue;
+            const direction = order.ascending ? 1 : -1;
+            return left > right ? direction : -direction;
+          }
+          return 0;
+        });
+      };
+
       const builder = {
         select(columns: string, options?: unknown) {
           operations.push({ op: 'select', columns, options });
@@ -146,22 +187,28 @@ function createModulesCaller() {
         },
         eq(column: string, value: unknown) {
           operations.push({ op: 'eq', column, value });
+          filters.push({ column, value });
           return builder;
         },
         order(column: string, options?: { ascending?: boolean }) {
           operations.push({ op: 'order', column, ascending: options?.ascending });
+          orders.push({ column, ascending: options?.ascending });
           return builder;
         },
         range(from: number, to: number) {
           operations.push({ op: 'range', from, to });
-          return Promise.resolve({ data: [], error: null, count: 0 });
+          const result = executeRows();
+          return Promise.resolve({ data: result.slice(from, to + 1), error: null, count: result.length });
         },
         limit(limit: number) {
           operations.push({ op: 'limit', limit });
-          return Promise.resolve({ data: [], error: null });
+          return Promise.resolve({ data: executeRows().slice(0, limit), error: null });
         },
         single() {
-          return Promise.resolve({ data: null, error: { code: 'PGRST116' } });
+          const [row] = executeRows();
+          return Promise.resolve(row
+            ? { data: row, error: null }
+            : { data: null, error: { code: 'PGRST116' } });
         },
       };
 
@@ -182,13 +229,19 @@ function createModulesCaller() {
 
 describe('modulesRouter public marketplace queries', () => {
   it('lists only active modules using admin-controlled sort order before created date', async () => {
-    const { caller, operations } = createModulesCaller();
+    const { caller, operations } = createModulesCaller([
+      { id: 'inactive', title: 'Inactive', active: false, is_featured: true, sort_order: 999, created_at: '2026-01-03' },
+      { id: 'second', title: 'Second', active: true, is_featured: false, sort_order: 10, created_at: '2026-01-02' },
+      { id: 'first', title: 'First', active: true, is_featured: true, sort_order: 99, created_at: '2026-01-01' },
+    ]);
 
-    await caller.getModules({ limit: 12, offset: 0, sortBy: 'newest' });
+    const result = await caller.getModules({ limit: 12, offset: 0, sortBy: 'newest' });
+
+    expect(result.modules.map((module) => module.id)).toEqual(['first', 'second']);
 
     expect(operations).toEqual(expect.arrayContaining([
       { op: 'from', table: 'modules' },
-      { op: 'eq', column: 'active', value: 'true' },
+      { op: 'eq', column: 'active', value: true },
       { op: 'order', column: 'sort_order', ascending: false },
       { op: 'order', column: 'created_at', ascending: false },
       { op: 'range', from: 0, to: 11 },
@@ -196,17 +249,39 @@ describe('modulesRouter public marketplace queries', () => {
   });
 
   it('returns featured modules from active featured rows ordered by admin sort order', async () => {
-    const { caller, operations } = createModulesCaller();
+    const { caller, operations } = createModulesCaller([
+      { id: 'inactive-featured', active: false, is_featured: true, sort_order: 999, created_at: '2026-01-04' },
+      { id: 'not-featured', active: true, is_featured: false, sort_order: 998, created_at: '2026-01-03' },
+      { id: 'featured-second', active: true, is_featured: true, sort_order: 10, created_at: '2026-01-02' },
+      { id: 'featured-first', active: true, is_featured: true, sort_order: 20, created_at: '2026-01-01' },
+    ]);
 
-    await caller.getFeaturedModules({ limit: 4 });
+    const result = await caller.getFeaturedModules({ limit: 4 });
+
+    expect(result.map((module) => module.id)).toEqual(['featured-first', 'featured-second']);
 
     expect(operations).toEqual(expect.arrayContaining([
       { op: 'from', table: 'modules' },
-      { op: 'eq', column: 'active', value: 'true' },
-      { op: 'eq', column: 'is_featured', value: 'true' },
+      { op: 'eq', column: 'active', value: true },
+      { op: 'eq', column: 'is_featured', value: true },
       { op: 'order', column: 'sort_order', ascending: false },
       { op: 'order', column: 'created_at', ascending: false },
       { op: 'limit', limit: 4 },
+    ]));
+  });
+
+  it('requires active modules when resolving a marketplace module by id', async () => {
+    const { caller, operations } = createModulesCaller([
+      { id: '00000000-0000-4000-8000-000000000001', active: false, title: 'Hidden' },
+    ]);
+
+    await expect(caller.getModuleById({
+      id: '00000000-0000-4000-8000-000000000001',
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(operations).toEqual(expect.arrayContaining([
+      { op: 'eq', column: 'id', value: '00000000-0000-4000-8000-000000000001' },
+      { op: 'eq', column: 'active', value: true },
     ]));
   });
 });
