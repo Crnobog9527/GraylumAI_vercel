@@ -165,8 +165,9 @@ async function sendChatPromptExpectError(
   page: import('@playwright/test').Page,
   prompt: string,
   expectedStatus: number,
+  options: { moduleId?: string } = {},
 ) {
-  const streamResult = await sendChatPromptThroughAuthenticatedSession(page, prompt);
+  const streamResult = await sendChatPromptThroughAuthenticatedSession(page, prompt, options);
   expect(streamResult.status).toBe(expectedStatus);
   return streamResult.body;
 }
@@ -174,13 +175,14 @@ async function sendChatPromptExpectError(
 async function sendChatPromptThroughAuthenticatedSession(
   page: import('@playwright/test').Page,
   prompt: string,
+  options: { moduleId?: string } = {},
 ): Promise<{ status: number; body: string; requestId: string }> {
   await gotoWithBypass(page, '/landing');
   await expect(page).toHaveURL(/\/landing/);
 
   const requestId = crypto.randomUUID();
 
-  return page.evaluate(async ({ message, requestId }) => {
+  return page.evaluate(async ({ message, requestId, moduleId }) => {
     const authCookieEntry = document.cookie
       .split('; ')
       .find((entry) => entry.includes('-auth-token='));
@@ -210,6 +212,7 @@ async function sendChatPromptThroughAuthenticatedSession(
       body: JSON.stringify({
         message,
         requestId,
+        ...(moduleId ? { moduleId } : {}),
       }),
     });
 
@@ -247,7 +250,7 @@ async function sendChatPromptThroughAuthenticatedSession(
       body,
       requestId,
     };
-  }, { message: prompt, requestId });
+  }, { message: prompt, requestId, moduleId: options.moduleId });
 }
 
 async function reloadUserSurface(page: import('@playwright/test').Page) {
@@ -1116,7 +1119,7 @@ test.describe('Admin Destructive Flows', () => {
     }
   });
 
-  test('should create a system prompt, verify runtime prompt metadata follows disable and restore, then clean it up', async ({ browser, page }, testInfo) => {
+  test('should create a function module, verify module prompt metadata follows disable and restore, then soft-disable it', async ({ browser, page }, testInfo) => {
     test.skip(
       !destructiveGateEnabled,
       'Destructive parity coverage is intentionally gated. Enable ENABLE_PARITY_DESTRUCTIVE_E2E=true only with isolated preview fixtures.',
@@ -1125,12 +1128,12 @@ test.describe('Admin Destructive Flows', () => {
 
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    let actual = 'System prompt rollback flow completed';
+    let actual = 'Function module prompt rollback flow completed';
     const userContext = await browser.newContext({ storageState: authStatePaths.user });
     const userPage = await userContext.newPage();
     const logPage = await page.context().newPage();
-    const systemPromptName = `Parity System Prompt ${Date.now()}`;
-    let targetPromptId = '';
+    const moduleName = `Parity Module ${Date.now()}`;
+    let targetModuleId = '';
     let originalMaxMessagesPerConversation: string | null = null;
     let originalMaxInputCharacters: string | null = null;
     let shouldRestoreRuntimeSettings = false;
@@ -1154,21 +1157,17 @@ test.describe('Admin Destructive Flows', () => {
         shouldRestoreRuntimeSettings = true;
       }
 
-      steps.push('Create an isolated high-priority system prompt in /admin/prompts');
+      steps.push('Create an isolated active function module in /admin/prompts');
       await gotoWithBypass(page, '/admin/prompts');
       if (!/\/admin\/prompts/.test(page.url())) {
-        await page.getByRole('link', { name: '提示词模块' }).click();
+        await page.getByRole('link', { name: /功能模块|功能模块\/提示词/ }).click();
       }
       await expect(page).toHaveURL(/\/admin\/prompts/, { timeout: 15000 });
-      await page.getByRole('button', { name: '新建提示词' }).click();
-      await page.getByTestId('prompt-name-input').fill(systemPromptName);
-      await page.getByTestId('prompt-content-input').fill('你是一个用于 E2E 验收的系统提示词。');
+      await page.getByRole('button', { name: '新建模块' }).click();
+      await page.getByTestId('prompt-name-input').fill(moduleName);
+      await page.getByTestId('prompt-description-input').fill('E2E 模块提示词绑定验收');
+      await page.getByTestId('prompt-content-input').fill('你是一个用于 E2E 验收的功能模块提示词。');
       await page.getByTestId('prompt-sort-order-input').fill('1000');
-      const systemSwitch = page.getByTestId('prompt-is-system-switch');
-      const switchState = await systemSwitch.getAttribute('data-state');
-      if (switchState !== 'checked') {
-        await systemSwitch.click();
-      }
 
       const createResponsePromise = page.waitForResponse(
         (response) =>
@@ -1180,73 +1179,73 @@ test.describe('Admin Destructive Flows', () => {
       const createResponse = await createResponsePromise;
       expect(createResponse.status()).toBe(200);
 
-      const promptRow = page.locator('tbody tr').filter({ hasText: systemPromptName }).first();
-      await expect(promptRow).toBeVisible({ timeout: 15000 });
-      const rowTestId = await promptRow.getAttribute('data-testid');
-      targetPromptId = rowTestId?.replace('admin-prompt-row-', '') ?? '';
-      expect(targetPromptId).not.toBe('');
+      const moduleRow = page.locator('tbody tr').filter({ hasText: moduleName }).first();
+      await expect(moduleRow).toBeVisible({ timeout: 15000 });
+      const rowTestId = await moduleRow.getAttribute('data-testid');
+      targetModuleId = rowTestId?.replace('admin-prompt-row-', '') ?? '';
+      expect(targetModuleId).not.toBe('');
 
-      steps.push('Send a direct authenticated chat request and verify usage logs record the new system prompt name');
+      steps.push('Send an authenticated chat request with moduleId and verify usage logs record the module prompt name');
       const baselineResponse = await sendChatPromptThroughAuthenticatedSession(
         userPage,
-        `Parity runtime prompt baseline ${Date.now()}`,
+        `Parity module runtime baseline ${Date.now()}`,
+        { moduleId: targetModuleId },
       );
       expect(baselineResponse.status).toBe(200);
       expect(baselineResponse.body).toContain('"type":"init"');
       await expect
         .poll(async () => readPromptNameForRequestId(logPage, baselineResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
-        .toBe(systemPromptName);
+        .toBe(moduleName);
 
-      steps.push('Disable the temporary system prompt');
+      steps.push('Disable the temporary function module');
       const disableResponsePromise = page.waitForResponse(
         (response) =>
           response.url().includes('/api/trpc/admin.updatePrompt') &&
           response.request().method() === 'POST',
         { timeout: 30000 },
       );
-      await page.getByTestId(`admin-prompt-toggle-${targetPromptId}`).click();
+      await page.getByTestId(`admin-prompt-toggle-${targetModuleId}`).click();
       const disableResponse = await disableResponsePromise;
       expect(disableResponse.status()).toBe(200);
-      await expect(page.getByTestId(`admin-prompt-toggle-${targetPromptId}`)).toContainText('已禁用', { timeout: 15000 });
+      await expect(page.getByTestId(`admin-prompt-toggle-${targetModuleId}`)).toContainText('已下架', { timeout: 15000 });
 
-      steps.push('Send another direct authenticated chat request and verify the runtime prompt metadata changes away from the disabled prompt');
-      const disabledResponse = await sendChatPromptThroughAuthenticatedSession(
+      steps.push('Send another chat request with the disabled moduleId and verify it fails explicitly');
+      const disabledError = await sendChatPromptExpectError(
         userPage,
-        `Parity runtime prompt disabled ${Date.now()}`,
+        `Parity module runtime disabled ${Date.now()}`,
+        404,
+        { moduleId: targetModuleId },
       );
-      expect(disabledResponse.status).toBe(200);
-      expect(disabledResponse.body).toContain('"type":"init"');
-      await expect
-        .poll(async () => readPromptNameForRequestId(logPage, disabledResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
-        .not.toBe(systemPromptName);
+      expect(disabledError).toContain('功能模块已下架');
 
-      steps.push('Re-enable the temporary system prompt and verify the runtime prompt metadata returns');
+      steps.push('Re-enable the temporary function module and verify the module prompt metadata returns');
       const enableResponsePromise = page.waitForResponse(
         (response) =>
           response.url().includes('/api/trpc/admin.updatePrompt') &&
           response.request().method() === 'POST',
         { timeout: 30000 },
       );
-      await page.getByTestId(`admin-prompt-toggle-${targetPromptId}`).click();
+      await page.getByTestId(`admin-prompt-toggle-${targetModuleId}`).click();
       const enableResponse = await enableResponsePromise;
       expect(enableResponse.status()).toBe(200);
-      await expect(page.getByTestId(`admin-prompt-toggle-${targetPromptId}`)).toContainText('已启用', { timeout: 15000 });
+      await expect(page.getByTestId(`admin-prompt-toggle-${targetModuleId}`)).toContainText('展示中', { timeout: 15000 });
 
       const restoredResponse = await sendChatPromptThroughAuthenticatedSession(
         userPage,
-        `Parity runtime prompt restored ${Date.now()}`,
+        `Parity module runtime restored ${Date.now()}`,
+        { moduleId: targetModuleId },
       );
       expect(restoredResponse.status).toBe(200);
       expect(restoredResponse.body).toContain('"type":"init"');
       await expect
         .poll(async () => readPromptNameForRequestId(logPage, restoredResponse.requestId), { timeout: 30000, intervals: [1500, 2000, 3000] })
-        .toBe(systemPromptName);
+        .toBe(moduleName);
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
-      actual = `System prompt ${systemPromptName} created, disabled, restored, and verified successfully`;
+      actual = `Function module ${moduleName} created, disabled, restored, and verified successfully`;
     } catch (error) {
-      actual = error instanceof Error ? error.message : 'Unknown system prompt rollback failure';
+      actual = error instanceof Error ? error.message : 'Unknown function module rollback failure';
       monitor.addAssertionIssue(actual, 'P1');
       throw error;
     } finally {
@@ -1268,39 +1267,11 @@ test.describe('Admin Destructive Flows', () => {
         await page.getByTestId('admin-settings-save-all').click().catch(() => undefined);
         await expect(page.getByTestId('admin-settings-save-all')).toBeEnabled({ timeout: 30000 }).catch(() => undefined);
       }
-      if (targetPromptId) {
+      if (targetModuleId) {
         await gotoWithBypass(page, '/admin/prompts').catch(() => undefined);
-        const promptToggle = page.getByTestId(`admin-prompt-toggle-${targetPromptId}`);
-        if (await promptToggle.isVisible().catch(() => false)) {
-          const label = await promptToggle.textContent();
-          if (label?.includes('已禁用')) {
-            const restoreResponsePromise = page.waitForResponse(
-              (response) =>
-                response.url().includes('/api/trpc/admin.updatePrompt') &&
-                response.request().method() === 'POST',
-              { timeout: 30000 },
-            ).catch(() => undefined);
-            await promptToggle.click().catch(() => undefined);
-            await restoreResponsePromise;
-          }
-          const editButton = page.getByTestId(`admin-prompt-edit-${targetPromptId}`);
-          if (await editButton.isVisible().catch(() => false)) {
-            await editButton.click().catch(() => undefined);
-            const promptIsSystemSwitch = page.getByTestId('prompt-is-system-switch');
-            const currentState = await promptIsSystemSwitch.getAttribute('data-state').catch(() => null);
-            if (currentState === 'checked') {
-              await promptIsSystemSwitch.click().catch(() => undefined);
-            }
-            const demoteResponsePromise = page.waitForResponse(
-              (response) =>
-                response.url().includes('/api/trpc/admin.updatePrompt') &&
-                response.request().method() === 'POST',
-              { timeout: 30000 },
-            ).catch(() => undefined);
-            await page.getByTestId('prompt-save').click().catch(() => undefined);
-            await demoteResponsePromise;
-          }
-          const deleteButton = page.getByTestId(`admin-prompt-delete-${targetPromptId}`);
+        const moduleToggle = page.getByTestId(`admin-prompt-toggle-${targetModuleId}`);
+        if (await moduleToggle.isVisible().catch(() => false)) {
+          const deleteButton = page.getByTestId(`admin-prompt-delete-${targetModuleId}`);
           if (await deleteButton.isVisible().catch(() => false)) {
             page.once('dialog', (dialog) => dialog.accept());
             const deleteResponsePromise = page.waitForResponse(
@@ -1319,10 +1290,10 @@ test.describe('Admin Destructive Flows', () => {
       await writeFlowAudit(
         testInfo,
         {
-          title: 'admin-system-prompt-runtime-rollback',
+          title: 'admin-module-prompt-runtime-rollback',
           role: 'admin',
           route: '/admin/prompts,/admin/costs,/chat',
-          expected: 'Admin users can create a temporary system prompt, verify runtime usage metadata selects it, disable it to force a different runtime prompt, then restore and clean it up safely.',
+          expected: 'Admin users can create a temporary function module, verify chat requests with moduleId use that module prompt, disable it to force an explicit module error, then restore and soft-disable it safely.',
         },
         actual,
         steps,

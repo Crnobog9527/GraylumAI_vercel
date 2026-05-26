@@ -60,6 +60,7 @@ interface StreamEvent {
 
 interface UseStreamingChatOptions {
   conversationId?: string;
+  moduleId?: string;
   onMessageStart?: () => void;
   onMessageComplete?: (message: StreamMessage) => void;
   onConversationCreated?: (conversationId: string) => void;
@@ -97,8 +98,9 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
    * Send message with streaming response
    */
   const sendMessage = useCallback(
-    async (content: string, sendOptions: { modelId?: string } = {}) => {
+    async (content: string, sendOptions: { modelId?: string; moduleId?: string } = {}) => {
       if (!content.trim() || state.isStreaming) return;
+      const activeModuleId = sendOptions.moduleId ?? options.moduleId;
 
       // Get auth token
       const { data: { session } } = await supabase.auth.getSession();
@@ -152,6 +154,7 @@ export function useStreamingChat(options: UseStreamingChatOptions = {}) {
             message: content.trim(),
             conversationId: state.conversationId,
             modelId: sendOptions.modelId,
+            moduleId: activeModuleId,
             requestId: crypto.randomUUID(),
           }),
           signal: abortControllerRef.current.signal,

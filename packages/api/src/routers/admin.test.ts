@@ -1738,7 +1738,7 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     ]);
   });
 
-  it('aggregates prompts page bootstrap data in one endpoint', async () => {
+  it('aggregates feature module page bootstrap data in one endpoint', async () => {
     const adminQueries: string[] = [];
 
     const adminSupabase = {
@@ -1746,9 +1746,9 @@ describe('adminRouter remaining performance-sensitive queries', () => {
         adminQueries.push(table);
 
         const execute = async () => {
-          if (table === 'prompts') {
+          if (table === 'modules') {
             return {
-              data: [{ id: 'prompt-1', active: 'true', category: 'general', is_system: 'false' }],
+              data: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
               error: null,
               count: 1,
             };
@@ -1796,7 +1796,8 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     const result = await caller.getPromptsDashboard({ limit: 50, offset: 0, activeOnly: false });
 
     expect(result).toMatchObject({
-      prompts: [{ id: 'prompt-1', active: 'true', category: 'general', is_system: 'false' }],
+      modules: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
+      prompts: [{ id: 'module-1', active: true, category: 'writing', is_featured: true }],
       total: 1,
       hasMore: false,
       models: [{ id: 'model-1', name: 'Model 1' }],
@@ -1804,9 +1805,280 @@ describe('adminRouter remaining performance-sensitive queries', () => {
         total: 1,
         active: 1,
         inactive: 0,
-        system: 0,
+        featured: 1,
       },
     });
-    expect(adminQueries).toEqual(['prompts', 'prompts', 'ai_models']);
+    expect(adminQueries).toEqual(['modules', 'modules', 'ai_models']);
+  });
+
+  it('creates prompt modules by inserting into modules instead of prompts', async () => {
+    const inserts: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          insert(payload: Record<string, unknown>) {
+            inserts.push(payload);
+            return builder;
+          },
+          select() {
+            return builder;
+          },
+          single() {
+            return Promise.resolve({
+              data: { id: '00000000-0000-4000-8000-000000000001', ...inserts[0] },
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    await caller.createPrompt({
+      name: 'Module A',
+      description: 'Visible in marketplace',
+      content: 'Use module A prompt',
+      systemPrompt: 'Module A system',
+      userPromptTemplate: 'Input: {{input}}',
+      category: 'writing',
+      platform: 'web',
+      features: ['fast'],
+      examples: ['example'],
+      userQuestions: ['question'],
+      icon: 'Wand2',
+      imageUrl: 'https://example.com/module.png',
+      badgeType: 'new',
+      badgeText: 'NEW',
+      creditsDisplay: '按实际 token 计费',
+      sortOrder: 88,
+      isFeatured: true,
+      active: true,
+    });
+
+    expect(inserts[0]).toMatchObject({
+      title: 'Module A',
+      description: 'Visible in marketplace',
+      prompt_content: 'Use module A prompt',
+      system_prompt: 'Module A system',
+      user_prompt_template: 'Input: {{input}}',
+      category: 'writing',
+      platform: 'web',
+      features: JSON.stringify(['fast']),
+      examples: JSON.stringify(['example']),
+      preparation_questions: JSON.stringify(['question']),
+      image_url: 'https://example.com/module.png',
+      badge_type: 'new',
+      badge_text: 'NEW',
+      credits_display: '按实际 token 计费',
+      sort_order: 88,
+      is_featured: true,
+      active: true,
+    });
+    expect(inserts[0]).not.toHaveProperty('is_system');
+  });
+
+  it('updates module visibility, featured status, sort order, and prompt fields in modules', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const filters: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, value });
+            return builder;
+          },
+          select() {
+            return builder;
+          },
+          single() {
+            return Promise.resolve({
+              data: { id: '00000000-0000-4000-8000-000000000002' },
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    await caller.updatePrompt({
+      id: '00000000-0000-4000-8000-000000000002',
+      active: false,
+      isFeatured: false,
+      sortOrder: 99,
+      content: 'Updated module prompt',
+      systemPrompt: 'Updated system',
+      userPromptTemplate: 'Updated {{input}}',
+    });
+
+    expect(updates[0]).toMatchObject({
+      active: false,
+      is_featured: false,
+      sort_order: 99,
+      prompt_content: 'Updated module prompt',
+      system_prompt: 'Updated system',
+      user_prompt_template: 'Updated {{input}}',
+    });
+    expect(filters).toContainEqual({
+      column: 'id',
+      value: '00000000-0000-4000-8000-000000000002',
+    });
+  });
+
+  it('soft-disables modules instead of physically deleting them', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          eq() {
+            return builder;
+          },
+          select() {
+            return builder;
+          },
+          single() {
+            return Promise.resolve({
+              data: { id: '00000000-0000-4000-8000-000000000003' },
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.deletePrompt({ id: '00000000-0000-4000-8000-000000000003' });
+
+    expect(result).toMatchObject({ success: true });
+    expect(updates[0]).toMatchObject({ active: false });
+  });
+
+  it('batch-updates featured flags as boolean module fields', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const filters: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in(column: string, values: unknown[]) {
+            filters.push({ column, values });
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000004' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchUpdatePrompts({
+      ids: ['00000000-0000-4000-8000-000000000004'],
+      patch: {
+        isFeatured: false,
+      },
+    });
+
+    expect(result).toMatchObject({ updatedCount: 1 });
+    expect(updates[0]).toMatchObject({ is_featured: false });
+    expect(filters).toContainEqual({
+      column: 'id',
+      values: ['00000000-0000-4000-8000-000000000004'],
+    });
+  });
+
+  it('batch-sets active as a boolean module field', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000005' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchSetPromptActive({
+      ids: ['00000000-0000-4000-8000-000000000005'],
+      active: false,
+    });
+
+    expect(result).toMatchObject({ updatedCount: 1, active: false });
+    expect(updates[0]).toMatchObject({ active: false });
+  });
+
+  it('batch soft-disables modules by setting active=false', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        expect(table).toBe('modules');
+        const builder = {
+          update(payload: Record<string, unknown>) {
+            updates.push(payload);
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          select() {
+            return Promise.resolve({
+              data: [{ id: '00000000-0000-4000-8000-000000000006' }],
+              error: null,
+            });
+          },
+        };
+
+        return builder;
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.batchDeletePrompts({
+      ids: ['00000000-0000-4000-8000-000000000006'],
+    });
+
+    expect(result).toMatchObject({ disabledCount: 1 });
+    expect(updates[0]).toMatchObject({ active: false });
   });
 });

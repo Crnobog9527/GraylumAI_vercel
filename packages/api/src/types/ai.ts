@@ -69,6 +69,7 @@ export const AIRequestSchema = z.object({
   conversationId: z.string().uuid().optional(),
   message: z.string().min(1, '消息不能为空').max(100000, '消息过长'),
   modelId: z.string().uuid().optional(),
+  moduleId: z.string().uuid().optional(),
   enableWebSearch: z.boolean().optional().default(false),
   attachments: z.array(AttachmentSchema).optional(),
   // 幂等性 Key - 用于防止重复请求
