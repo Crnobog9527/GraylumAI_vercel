@@ -159,6 +159,50 @@ describe('module boolean flag migration', () => {
   });
 });
 
+describe('module policy shape migration', () => {
+  it('reconciles module policies without column changes, grants, seeds, or prompt cleanup', () => {
+    const migrationSql = readFileSync(
+      new URL('../../../db/migrations/0039_normalize_module_policy_shape.sql', import.meta.url),
+      'utf8',
+    );
+
+    expect(migrationSql.match(/DROP POLICY IF EXISTS/g) ?? []).toHaveLength(7);
+    expect(migrationSql.match(/CREATE POLICY/g) ?? []).toHaveLength(2);
+
+    for (const policyName of [
+      'modules_select_active',
+      'Anyone can view active modules',
+      'modules_select_active_public',
+      'modules_admin_all',
+      'modules_select_admin',
+      'Admins can manage modules',
+      'Allow read access to modules',
+    ]) {
+      expect(migrationSql).toContain(`EXECUTE 'DROP POLICY IF EXISTS "${policyName}" ON public.modules';`);
+    }
+
+    expect(migrationSql).toContain('CREATE POLICY "modules_select_active_public"');
+    expect(migrationSql).toContain('TO anon, authenticated');
+    expect(migrationSql).toContain('USING (active IS TRUE)');
+    expect(migrationSql).toContain('CREATE POLICY "modules_select_admin"');
+    expect(migrationSql).toContain('TO authenticated');
+    expect(migrationSql).toContain('FROM public.profiles p');
+    expect(migrationSql).toContain("AND p.role = 'admin'");
+    expect(migrationSql).toContain("AND p.status = 'active'");
+    expect(migrationSql).not.toMatch(/FOR\s+ALL/i);
+    expect(migrationSql).not.toMatch(/ALTER\s+TABLE/i);
+    expect(migrationSql).not.toMatch(/\bGRANT\b/i);
+    expect(migrationSql).not.toMatch(/\bREVOKE\b/i);
+    expect(migrationSql).not.toMatch(/\bINSERT\s+INTO\b/i);
+    expect(migrationSql).not.toMatch(/\bUPDATE\b/i);
+    expect(migrationSql).not.toMatch(/\bDELETE\b/i);
+    expect(migrationSql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(migrationSql).not.toMatch(/\bseed\b/i);
+    expect(migrationSql).not.toMatch(/copy\s+production\s+data/i);
+    expect(migrationSql).not.toContain('public.prompts');
+  });
+});
+
 type ModuleRow = Record<string, any>;
 
 function createModulesCaller(rows: ModuleRow[] = []) {
