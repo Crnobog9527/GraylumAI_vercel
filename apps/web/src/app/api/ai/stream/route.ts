@@ -47,7 +47,7 @@ interface StreamRequest {
   message: string;
   conversationId?: string;
   modelId?: string;
-  moduleId?: string;
+  moduleId?: unknown;
   requestId?: string;
 }
 
@@ -106,8 +106,16 @@ function normalizeRequestId(requestId?: string): string | undefined {
   return undefined;
 }
 
-function normalizeModuleId(moduleId?: string): string | undefined {
-  const trimmed = moduleId?.trim();
+function normalizeModuleId(moduleId?: unknown): string | undefined {
+  if (moduleId == null) {
+    return undefined;
+  }
+
+  if (typeof moduleId !== 'string') {
+    return '';
+  }
+
+  const trimmed = moduleId.trim();
   if (!trimmed) {
     return undefined;
   }
