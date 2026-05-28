@@ -172,6 +172,51 @@ test.describe('Authentication', () => {
     }
   });
 
+  test('should expose public pricing and plans entry routes in www mode', async ({ page }, testInfo) => {
+    const steps: string[] = [];
+    const monitor = createIssueMonitor(page);
+    let actual = 'Public pricing entry routes rendered';
+
+    const routeExpectations = ['/pricing?domain=www', '/plans?domain=www'] as const;
+
+    try {
+      for (const route of routeExpectations) {
+        steps.push(`Open ${route}`);
+        await gotoWithBypass(page, route);
+
+        await expect(page).toHaveURL(/\/landing\?domain=www#pricing/);
+        await expect(page.getByRole('heading', { name: /选择适合你的.*套餐/ })).toBeVisible();
+      }
+
+      monitor.removeIssues((issue) =>
+        issue.source === 'requestfailed' &&
+        issue.message === 'net::ERR_ABORTED' &&
+        issue.resourceType === 'document' &&
+        routeExpectations.some((route) => issue.url?.includes(route.split('?')[0]))
+      );
+
+      const blockingIssues = monitor.getIssues('P1');
+      expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
+    } catch (error) {
+      actual = error instanceof Error ? error.message : 'Unknown public pricing route failure';
+      monitor.addAssertionIssue(actual, 'P1');
+      throw error;
+    } finally {
+      await writeFlowAudit(
+        testInfo,
+        {
+          title: 'public-pricing-plans-routes',
+          role: 'public',
+          route: '/pricing,/plans',
+          expected: 'Public pricing and plans routes land on the public pricing section without entering the login-required app route.',
+        },
+        actual,
+        steps,
+        monitor.getIssues(),
+      );
+    }
+  });
+
   test('should render public support and legal pages', async ({ page }, testInfo) => {
     test.setTimeout(90000);
     const steps: string[] = [];

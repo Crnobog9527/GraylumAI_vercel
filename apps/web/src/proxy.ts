@@ -43,6 +43,11 @@ const PUBLIC_SITE_PATHS = [
   '/favicon.ico',
 ];
 
+const PUBLIC_PRICING_ENTRY_PATHS = [
+  '/pricing',
+  '/plans',
+];
+
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
   '/api/ai/stream',
@@ -56,6 +61,17 @@ function isPublicPath(pathname: string): boolean {
 
 function isPublicSitePath(pathname: string): boolean {
   return PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path));
+}
+
+function isPublicPricingEntryPath(pathname: string): boolean {
+  return PUBLIC_PRICING_ENTRY_PATHS.some(path => pathname === path || pathname === `${path}/`);
+}
+
+function createPublicPricingRedirect(request: NextRequest): NextResponse {
+  const pricingUrl = request.nextUrl.clone();
+  pricingUrl.pathname = '/landing';
+  pricingUrl.hash = 'pricing';
+  return NextResponse.redirect(pricingUrl);
 }
 
 // 判断是否需要速率限制
@@ -254,6 +270,9 @@ export async function proxy(request: NextRequest) {
     isLocalhost ||
     normalizedHostname.includes('.github.dev') ||
     normalizedHostname.includes('.gitpod.io');
+  const domainParam = request.nextUrl.searchParams.get('domain');
+  const isPreviewPublicSitePricingEntry =
+    isPreviewDeployment && domainParam === 'www' && isPublicPricingEntryPath(pathname);
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -301,6 +320,10 @@ export async function proxy(request: NextRequest) {
   // 认证与路由逻辑
   // ========================================
 
+  if (isPreviewPublicSitePricingEntry) {
+    return createPublicPricingRedirect(request);
+  }
+
   // 公开站点域名: 展示着陆页 (公开访问)
   if (isPublicSiteDomain) {
     // 根路径重写到着陆页
@@ -308,6 +331,10 @@ export async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/landing';
       return NextResponse.rewrite(url);
+    }
+
+    if (isPublicPricingEntryPath(pathname)) {
+      return createPublicPricingRedirect(request);
     }
 
     if (isPublicSitePath(pathname)) {
@@ -372,9 +399,11 @@ export async function proxy(request: NextRequest) {
   // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
   if (isDevEnvironment) {
     // 开发环境使用查询参数 ?domain=www 模拟 www 域名
-    const domainParam = request.nextUrl.searchParams.get('domain');
-
     if (domainParam === 'www') {
+      if (isPublicPricingEntryPath(pathname)) {
+        return createPublicPricingRedirect(request);
+      }
+
       // 根路径重写到着陆页
       if (pathname === '/' || pathname === '') {
         // 使用 redirect 而非 rewrite 确保页面正确加载
