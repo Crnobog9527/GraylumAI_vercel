@@ -270,6 +270,9 @@ export async function proxy(request: NextRequest) {
     isLocalhost ||
     normalizedHostname.includes('.github.dev') ||
     normalizedHostname.includes('.gitpod.io');
+  const domainParam = request.nextUrl.searchParams.get('domain');
+  const isPreviewPublicSitePricingEntry =
+    isPreviewDeployment && domainParam === 'www' && isPublicPricingEntryPath(pathname);
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -316,6 +319,10 @@ export async function proxy(request: NextRequest) {
   // ========================================
   // 认证与路由逻辑
   // ========================================
+
+  if (isPreviewPublicSitePricingEntry) {
+    return createPublicPricingRedirect(request);
+  }
 
   // 公开站点域名: 展示着陆页 (公开访问)
   if (isPublicSiteDomain) {
@@ -392,8 +399,6 @@ export async function proxy(request: NextRequest) {
   // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
   if (isDevEnvironment) {
     // 开发环境使用查询参数 ?domain=www 模拟 www 域名
-    const domainParam = request.nextUrl.searchParams.get('domain');
-
     if (domainParam === 'www') {
       if (isPublicPricingEntryPath(pathname)) {
         return createPublicPricingRedirect(request);
