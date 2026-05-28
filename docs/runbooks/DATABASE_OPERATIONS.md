@@ -2,6 +2,8 @@
 
 For staging rebuild reproducibility, see
 [`STAGING_REPRODUCIBILITY.md`](./STAGING_REPRODUCIBILITY.md).
+For raw SQL migration execution evidence, see
+[`RAW_SQL_MIGRATION_LEDGER.md`](./RAW_SQL_MIGRATION_LEDGER.md).
 For staging drift checks, run the read-only readiness script documented there
 before planning any repair SQL.
 
