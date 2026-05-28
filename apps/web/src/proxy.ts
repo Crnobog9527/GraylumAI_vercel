@@ -43,6 +43,11 @@ const PUBLIC_SITE_PATHS = [
   '/favicon.ico',
 ];
 
+const PUBLIC_PRICING_ENTRY_PATHS = [
+  '/pricing',
+  '/plans',
+];
+
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
   '/api/ai/stream',
@@ -56,6 +61,17 @@ function isPublicPath(pathname: string): boolean {
 
 function isPublicSitePath(pathname: string): boolean {
   return PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path));
+}
+
+function isPublicPricingEntryPath(pathname: string): boolean {
+  return PUBLIC_PRICING_ENTRY_PATHS.some(path => pathname === path || pathname === `${path}/`);
+}
+
+function createPublicPricingRedirect(request: NextRequest): NextResponse {
+  const pricingUrl = request.nextUrl.clone();
+  pricingUrl.pathname = '/landing';
+  pricingUrl.hash = 'pricing';
+  return NextResponse.redirect(pricingUrl);
 }
 
 // 判断是否需要速率限制
@@ -310,6 +326,10 @@ export async function proxy(request: NextRequest) {
       return NextResponse.rewrite(url);
     }
 
+    if (isPublicPricingEntryPath(pathname)) {
+      return createPublicPricingRedirect(request);
+    }
+
     if (isPublicSitePath(pathname)) {
       return supabaseResponse;
     }
@@ -375,6 +395,10 @@ export async function proxy(request: NextRequest) {
     const domainParam = request.nextUrl.searchParams.get('domain');
 
     if (domainParam === 'www') {
+      if (isPublicPricingEntryPath(pathname)) {
+        return createPublicPricingRedirect(request);
+      }
+
       // 根路径重写到着陆页
       if (pathname === '/' || pathname === '') {
         // 使用 redirect 而非 rewrite 确保页面正确加载
