@@ -3,6 +3,23 @@ import { describe, expect, it } from 'vitest';
 import { PUBLIC_MODULE_SELECT, getPublicReadClient, modulesRouter, toPublicModule } from './modules';
 
 const PUBLIC_DISPLAY_MODULE_FIELDS = [
+  'id',
+  'title',
+  'description',
+  'full_description',
+  'icon',
+  'category',
+  'platform',
+  'features',
+  'examples',
+  'preparation_questions',
+  'usage_count',
+  'credits_multiplier',
+  'sort_order',
+  'is_featured',
+  'active',
+  'created_at',
+  'updated_at',
   'image_url',
   'badge_type',
   'badge_text',
@@ -105,8 +122,7 @@ describe('PUBLIC_MODULE_SELECT', () => {
     const selectedColumns = PUBLIC_MODULE_SELECT.split(',');
 
     expect(PUBLIC_MODULE_SELECT).not.toBe('*');
-    expect(selectedColumns).toEqual(expect.arrayContaining(['title', 'description']));
-    expect(selectedColumns).toEqual(expect.arrayContaining(PUBLIC_DISPLAY_MODULE_FIELDS));
+    expect(selectedColumns).toEqual(PUBLIC_DISPLAY_MODULE_FIELDS);
     for (const field of INTERNAL_MODULE_FIELDS) {
       expect(selectedColumns).not.toContain(field);
     }
@@ -124,8 +140,17 @@ describe('public module display field migration', () => {
     )?.[1];
 
     expect(grantBlock).toBeDefined();
-    for (const field of PUBLIC_DISPLAY_MODULE_FIELDS) {
+    for (const field of [
+      'image_url',
+      'badge_type',
+      'badge_text',
+      'credits_display',
+      'link_url',
+      'link_module_id',
+    ]) {
       expect(migrationSql).toContain(`ADD COLUMN IF NOT EXISTS ${field}`);
+    }
+    for (const field of PUBLIC_DISPLAY_MODULE_FIELDS) {
       expect(grantBlock).toContain(field);
     }
     for (const field of INTERNAL_MODULE_FIELDS) {
@@ -200,6 +225,52 @@ describe('module policy shape migration', () => {
     expect(migrationSql).not.toMatch(/\bseed\b/i);
     expect(migrationSql).not.toMatch(/copy\s+production\s+data/i);
     expect(migrationSql).not.toContain('public.prompts');
+  });
+});
+
+describe('module public grant reconciliation migration', () => {
+  it('revokes client-role non-select grants and preserves canonical public selects only', () => {
+    const migrationSql = readFileSync(
+      new URL('../../../db/migrations/0040_reconcile_module_public_grants.sql', import.meta.url),
+      'utf8',
+    );
+    const grantBlock = migrationSql.match(
+      /GRANT SELECT \(([\s\S]*?)\) ON TABLE public\.modules TO anon, authenticated/,
+    )?.[1];
+
+    expect(migrationSql).toContain('Grants-only reconciliation for public.modules anon/authenticated access');
+    expect(migrationSql).toContain("to_regclass('public.modules') IS NOT NULL");
+    expect(migrationSql).toContain('REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.modules FROM anon, authenticated');
+    expect(migrationSql).toContain("REVOKE INSERT (%s) ON TABLE public.modules FROM anon, authenticated");
+    expect(migrationSql).toContain("REVOKE UPDATE (%s) ON TABLE public.modules FROM anon, authenticated");
+    expect(migrationSql).toContain("REVOKE REFERENCES (%s) ON TABLE public.modules FROM anon, authenticated");
+
+    for (const field of INTERNAL_MODULE_FIELDS) {
+      expect(migrationSql).toContain(`'${field}'`);
+    }
+    expect(migrationSql).toContain('REVOKE SELECT (%s) ON TABLE public.modules FROM anon, authenticated');
+
+    expect(grantBlock).toBeDefined();
+    const grantColumns = grantBlock
+      ?.split(',')
+      .map((column) => column.trim())
+      .filter(Boolean);
+    expect(grantColumns).toEqual(PUBLIC_DISPLAY_MODULE_FIELDS);
+    for (const field of INTERNAL_MODULE_FIELDS) {
+      expect(grantColumns).not.toContain(field);
+    }
+
+    const publicReferences = [...migrationSql.matchAll(/public\.[a-z_]+/g)].map((match) => match[0]);
+    expect([...new Set(publicReferences)]).toEqual(['public.modules']);
+    expect(migrationSql).toContain('public.modules');
+    expect(migrationSql).not.toContain('public.prompts');
+    expect(migrationSql).not.toMatch(/\bINSERT\s+INTO\b/i);
+    expect(migrationSql).not.toMatch(/\bUPDATE\s+public\./i);
+    expect(migrationSql).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(migrationSql).not.toMatch(/\bTRUNCATE\s+public\./i);
+    expect(migrationSql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(migrationSql).not.toMatch(/\bCREATE\s+POLICY\b/i);
+    expect(migrationSql).not.toMatch(/\bDROP\s+POLICY\b/i);
   });
 });
 
