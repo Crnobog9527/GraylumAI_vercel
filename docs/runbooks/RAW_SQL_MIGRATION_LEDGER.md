@@ -31,7 +31,7 @@ instead of being inferred.
 
 | Migration | File | Commit / main SHA | SQL SHA256 | Staging status | Production status | Primary evidence source | Gaps |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0037 | `packages/db/migrations/0037_preserve_subscription_status_on_invoice_fulfillment.sql` | `1fe8638e54d1fcb65571d9318e1c25d715ae6e76` | `5e74b8f347221e9ee3d84c92e8828d8f6c7556191bffb4ca59bfdeedb0cc060a` | Direct raw SQL execution: `unknown / evidence missing`; staging behavior evidence: `verified` | `unknown / evidence missing` | PR #187 body, local migration file, git history | Direct execution timestamp/ref missing; production-equivalent function body evidence missing; owner seed hash mismatch |
+| 0037 | `packages/db/migrations/0037_preserve_subscription_status_on_invoice_fulfillment.sql` | `1fe8638e54d1fcb65571d9318e1c25d715ae6e76` | `5e74b8f347221e9ee3d84c92e8828d8f6c7556191bffb4ca59bfdeedb0cc060a` | Direct raw SQL execution: `unknown / evidence missing`; staging behavior evidence: `verified` | `unknown / evidence missing` | PR #187 body, local migration file, git history | Direct execution timestamp/ref missing; production-equivalent function body evidence missing; owner seed is not a complete 64-character SHA256 digest |
 | 0038 | `packages/db/migrations/0038_normalize_module_boolean_flags.sql` | `1233a7011405dbc7df5834da8c65967eca7625d0` | `bcb66233ddc2708bb603a64ec17524ac89e4668bde81a2fb8c0b6e51306c183e` | `unknown / evidence missing` | `verified` production-only execution evidence | PR #190 body, local migration file, git history | Staging execution evidence missing; Supabase refs missing; runtime smoke missing |
 | 0039 | `packages/db/migrations/0039_normalize_module_policy_shape.sql` | `1233a7011405dbc7df5834da8c65967eca7625d0` | `3dd6747f873f1151bdd60f2f6651e80b69f2499e8b231375cb8a021e293875ae` | `verified`, timestamp/ref missing | `verified` | PR #190 body, local migration file, git history | Staging timestamp missing; Supabase refs missing; runtime smoke missing |
 | 0040 | `packages/db/migrations/0040_reconcile_module_public_grants.sql` | `0200a73340b48868255f7c4967fd44cb20cb96a2` | `9e428e558be081a81928b9fa7e91fdb2ea5dfb15bdccbba16e8e0a5fe9a552e0` | `owner-provided`; repo-visible execution evidence not found in PR #203 | `owner-provided`; repo-visible execution evidence not found in PR #203 | PR #203 body for code/change scope; owner-provided task context for execution/postflight/smoke | Execution/postflight/smoke reports not found in PR #203 visible evidence |
@@ -53,8 +53,10 @@ instead of being inferred.
   `5e74b8f347221e9ee3d84c92e8828d8f6c7556191bffb4ca59bfdeedb0cc060a`.
 - Owner seed SHA256:
   `5e74b8f347221e9ee3d84c92e882d8f6c7556191bffb4ca59bfdeedb0cc060a`.
-- SHA256 note: owner seed does not match the repo-verified `sha256sum`
-  output for the migration file in `origin/main`.
+- SHA256 note: the owner-provided seed is not a complete 64-character SHA256
+  digest. The repo-verified `sha256sum` above is the canonical local file hash
+  for this pass. Do not treat the owner seed as confirmed until separately
+  verified.
 
 ### Environment Coverage
 
@@ -442,7 +444,10 @@ instead of being inferred.
 - No API, UI, billing, auth, AI, checkout, or webhook logic modified.
 - No tests modified.
 - No `public.prompts` cleanup.
-- No Vercel, Stripe, environment variable, or project setting changes.
+- No Vercel project, Vercel settings, Vercel environment variable, Stripe,
+  environment variable, or project setting changes.
+- Any Vercel preview deployment or status check was automatic from the PR
+  workflow and was not a production/staging runtime smoke.
 - No checkout session created.
 - No AI call triggered.
 - No webhook triggered.
@@ -460,8 +465,8 @@ audit task.
 
 - 0037: direct staging execution evidence, staging ref, execution timestamp,
   production-equivalent function body evidence, concrete function permission
-  postflight output, dirty data correction evidence, rollback notes, and SHA256
-  seed mismatch review.
+  postflight output, dirty data correction evidence, rollback notes, and review
+  of the incomplete owner-provided SHA256 seed.
 - 0038: staging execution evidence, staging/production refs, runtime smoke,
   direct SQL authorization evidence, and rollback notes.
 - 0039: staging execution timestamp, staging/production refs, runtime smoke,
