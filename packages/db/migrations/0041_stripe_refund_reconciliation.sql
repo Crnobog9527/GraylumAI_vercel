@@ -62,6 +62,7 @@ DECLARE
   v_now TIMESTAMPTZ := NOW();
   v_idempotency_key TEXT;
   v_refund_info JSONB;
+  v_granted_credits_gap TEXT := NULL;
 BEGIN
   IF p_order_id IS NULL THEN
     RAISE EXCEPTION 'order_id is required';
@@ -92,7 +93,16 @@ BEGIN
   END IF;
 
   v_metadata := COALESCE(v_metadata, '{}'::jsonb);
-  v_granted_credits := COALESCE(NULLIF(v_metadata->>'grantedCredits', '')::INTEGER, 0);
+  IF NOT v_metadata ? 'grantedCredits' THEN
+    v_granted_credits := 0;
+    v_granted_credits_gap := 'missing_grantedCredits';
+  ELSIF COALESCE(v_metadata->>'grantedCredits', '') ~ '^-?[0-9]+$' THEN
+    v_granted_credits := GREATEST((v_metadata->>'grantedCredits')::INTEGER, 0);
+  ELSE
+    v_granted_credits := 0;
+    v_granted_credits_gap := 'invalid_grantedCredits';
+  END IF;
+
   v_refund_info := jsonb_strip_nulls(jsonb_build_object(
     'refundId', p_refund_id,
     'eventType', p_refund_event_type,
@@ -108,6 +118,7 @@ BEGIN
     'reconciledAt', v_now,
     'source', 'atomic_reconcile_stripe_refund',
     'idempotencyKey', v_idempotency_key,
+    'grantedCreditsMetadataGap', v_granted_credits_gap,
     'fullRefund', p_is_full_refund,
     'failed', p_is_failed
   ));
@@ -188,33 +199,37 @@ BEGIN
         v_shortfall_amount := GREATEST(v_granted_credits - v_clawback_amount, 0);
         v_balance_after := GREATEST(v_balance_before - v_clawback_amount, 0);
 
-        UPDATE public.profiles AS p
-        SET credits = v_balance_after
-        WHERE p.id = v_user_id;
+        IF v_balance_after <> v_balance_before THEN
+          UPDATE public.profiles AS p
+          SET credits = v_balance_after
+          WHERE p.id = v_user_id;
+        END IF;
 
-        INSERT INTO public.credit_transactions (
-          user_id,
-          amount,
-          type,
-          description,
-          idempotency_key,
-          balance_before,
-          balance_after
-        ) VALUES (
-          v_user_id,
-          -v_clawback_amount,
-          'deduction',
-          format(
-            'Stripe refund credit clawback [order:%s refund:%s shortfall:%s]',
-            v_order_id,
-            COALESCE(p_refund_id, p_charge_id, v_idempotency_key),
-            v_shortfall_amount
-          ),
-          v_idempotency_key,
-          v_balance_before,
-          v_balance_after
-        )
-        RETURNING credit_transactions.id INTO v_transaction_id;
+        IF v_clawback_amount > 0 THEN
+          INSERT INTO public.credit_transactions (
+            user_id,
+            amount,
+            type,
+            description,
+            idempotency_key,
+            balance_before,
+            balance_after
+          ) VALUES (
+            v_user_id,
+            -v_clawback_amount,
+            'deduction',
+            format(
+              'Stripe refund credit clawback [order:%s refund:%s shortfall:%s]',
+              v_order_id,
+              COALESCE(p_refund_id, p_charge_id, v_idempotency_key),
+              v_shortfall_amount
+            ),
+            v_idempotency_key,
+            v_balance_before,
+            v_balance_after
+          )
+          RETURNING credit_transactions.id INTO v_transaction_id;
+        END IF;
       ELSE
         v_shortfall_amount := v_granted_credits;
       END IF;

@@ -1120,6 +1120,49 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
+  it('delegates missing grantedCredits full refunds to the RPC without local entitlement guesses', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_missing_granted_credits' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000250',
+        amount_total: 990,
+        metadata: {},
+      },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000250',
+          order_status: 'refunded',
+          clawback_amount: 0,
+          shortfall_amount: 0,
+          transaction_id: null,
+          already_reconciled: false,
+        },
+      ],
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_missing_granted_credits',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_missing_granted_credits',
+        amount: 990,
+        charge: 'ch_test_missing_granted_credits',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_missing_granted_credits',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: true,
+      p_order_id: '00000000-0000-4000-8000-000000000250',
+      p_refund_id: 're_test_missing_granted_credits',
+    }));
+  });
+
   it('reconciles credit package refunds through checkout payment intent metadata', async () => {
     const { lookups, rpc, supabase } = makeRefundSupabase({
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_refund' },
