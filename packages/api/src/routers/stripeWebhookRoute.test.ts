@@ -1,0 +1,161 @@
+/*
+ * Copyright (c) 2026 Grayscale Luminary LLC.
+ * All rights reserved.
+ * This code is proprietary and confidential.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const routeMocks = vi.hoisted(() => {
+  const supabaseClient = { serviceRole: true };
+
+  return {
+    constructEvent: vi.fn(),
+    createServiceRoleSupabaseClient: vi.fn(() => supabaseClient),
+    fulfillCreditPackageOrder: vi.fn(),
+    fulfillMembershipInvoice: vi.fn(),
+    getStripeWebhookSecret: vi.fn(() => 'whsec_test_secret'),
+    logServerError: vi.fn(),
+    reconcileStripeRefund: vi.fn(),
+    supabaseClient,
+    syncSubscriptionState: vi.fn(),
+    upsertPaymentOrderBySession: vi.fn(),
+  };
+});
+
+vi.mock('@repo/api/src/services/stripe', () => ({
+  createServiceRoleSupabaseClient: routeMocks.createServiceRoleSupabaseClient,
+  getStripeClient: () => ({
+    webhooks: {
+      constructEvent: routeMocks.constructEvent,
+    },
+  }),
+  getStripeWebhookSecret: routeMocks.getStripeWebhookSecret,
+}));
+
+vi.mock('@repo/api/src/services/stripeFulfillment', () => ({
+  fulfillCreditPackageOrder: routeMocks.fulfillCreditPackageOrder,
+  fulfillMembershipInvoice: routeMocks.fulfillMembershipInvoice,
+  reconcileStripeRefund: routeMocks.reconcileStripeRefund,
+  syncSubscriptionState: routeMocks.syncSubscriptionState,
+  upsertPaymentOrderBySession: routeMocks.upsertPaymentOrderBySession,
+}));
+
+vi.mock('@/lib/server-log', () => ({
+  logServerError: routeMocks.logServerError,
+}));
+
+const { POST } = await import('../../../../apps/web/src/app/api/stripe/webhook/route');
+
+function makeWebhookRequest(signature = 'sig_test') {
+  return new Request('https://graylum.test/api/stripe/webhook', {
+    method: 'POST',
+    headers: {
+      'stripe-signature': signature,
+    },
+    body: JSON.stringify({ object: 'event' }),
+  });
+}
+
+describe('stripe webhook route refund routing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns 400 for invalid Stripe webhook signatures', async () => {
+    routeMocks.constructEvent.mockImplementation(() => {
+      throw new Error('invalid signature');
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(400);
+    expect(routeMocks.createServiceRoleSupabaseClient).not.toHaveBeenCalled();
+    expect(routeMocks.logServerError).toHaveBeenCalledWith(
+      'billing',
+      'stripe_webhook_invalid_signature',
+    );
+  });
+
+  it('routes charge.refunded to refund reconciliation with the charge payload', async () => {
+    const charge = { id: 'ch_test_refunded', object: 'charge' };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_charge_refunded',
+      type: 'charge.refunded',
+      data: { object: charge },
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      {
+        eventId: 'evt_test_charge_refunded',
+        eventType: 'charge.refunded',
+        charge,
+      },
+    );
+  });
+
+  it.each([
+    'charge.refund.updated',
+    'refund.created',
+    'refund.updated',
+    'refund.failed',
+  ] as const)('routes %s to refund reconciliation with the refund payload', async (eventType) => {
+    const refund = { id: `re_test_${eventType.replaceAll('.', '_')}`, object: 'refund' };
+    routeMocks.constructEvent.mockReturnValue({
+      id: `evt_test_${eventType.replaceAll('.', '_')}`,
+      type: eventType,
+      data: { object: refund },
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      {
+        eventId: `evt_test_${eventType.replaceAll('.', '_')}`,
+        eventType,
+        refund,
+      },
+    );
+  });
+
+  it('safely ignores unknown Stripe events', async () => {
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_unknown',
+      type: 'customer.created',
+      data: { object: { id: 'cus_test_unknown' } },
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(routeMocks.syncSubscriptionState).not.toHaveBeenCalled();
+    expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 and logs when a refund handler fails', async () => {
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_refund_handler_failure',
+      type: 'refund.created',
+      data: { object: { id: 're_test_handler_failure' } },
+    });
+    routeMocks.reconcileStripeRefund.mockRejectedValue(new Error('rpc failure'));
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(500);
+    expect(routeMocks.logServerError).toHaveBeenCalledWith(
+      'billing',
+      'stripe_webhook_handler_failed',
+      { eventType: 'refund.created' },
+    );
+  });
+});

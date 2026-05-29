@@ -22,7 +22,8 @@ DECLARE
     'public.atomic_claim_invitation_code(text,uuid,text,text,text,text,integer,integer,text,text)',
     'public.atomic_apply_invitation_rebate(uuid,integer,text,integer,integer,integer,timestamp with time zone,timestamp with time zone,text)',
     'public.atomic_fulfill_credit_package(text,text)',
-    'public.atomic_fulfill_membership_invoice(text,text,integer,text,text,text,timestamp with time zone,timestamp with time zone)'
+    'public.atomic_fulfill_membership_invoice(text,text,integer,text,text,text,timestamp with time zone,timestamp with time zone)',
+    'public.atomic_reconcile_stripe_refund(uuid,text,text,text,text,integer,text,text,text,text,text,text,timestamp with time zone,boolean,boolean)'
   ];
 BEGIN
   IF has_column_privilege('anon', 'public.profiles', 'credits', 'UPDATE') THEN

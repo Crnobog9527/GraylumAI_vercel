@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loggerState = vi.hoisted(() => ({
   error: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock('../../lib/logger', () => ({
@@ -18,12 +19,74 @@ vi.mock('../../lib/logger', () => ({
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  reconcileStripeRefund,
+  syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
+
+function makeRefundSupabase(options: {
+  match: { column: string; value: string };
+  order?: { id: string; amount_total: number | string | null; metadata: Record<string, unknown> | null };
+  rpcData?: unknown[];
+}) {
+  const order = options.order ?? {
+    id: '00000000-0000-4000-8000-000000000100',
+    amount_total: 990,
+    metadata: { grantedCredits: 100 },
+  };
+  const lookups: Array<{ table: string; column: string; value: string }> = [];
+  const rpc = vi.fn().mockResolvedValue({
+    data: options.rpcData ?? [
+      {
+        order_id: order.id,
+        user_id: '00000000-0000-4000-8000-000000000101',
+        order_status: 'refunded',
+        clawback_amount: 100,
+        shortfall_amount: 0,
+        transaction_id: '00000000-0000-4000-8000-000000000102',
+        already_reconciled: false,
+      },
+    ],
+    error: null,
+  });
+
+  const supabase = {
+    rpc,
+    from(table: string) {
+      if (table !== 'payment_orders') {
+        throw new Error(`Refund reconciliation should not touch ${table}`);
+      }
+
+      let lookup: { column: string; value: string } | null = null;
+      return {
+        select() {
+          return this;
+        },
+        eq(column: string, value: string) {
+          lookup = { column, value };
+          lookups.push({ table, column, value });
+          return this;
+        },
+        maybeSingle() {
+          const matched = lookup?.column === options.match.column
+            && lookup.value === options.match.value;
+
+          return Promise.resolve({
+            data: matched ? order : null,
+            error: null,
+          });
+        },
+      };
+    },
+  };
+
+  return { lookups, order, rpc, supabase };
+}
 
 describe('stripe fulfillment helpers', () => {
   beforeEach(() => {
     loggerState.error.mockReset();
+    loggerState.warn.mockReset();
   });
 
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
@@ -148,6 +211,71 @@ describe('stripe fulfillment helpers', () => {
         stripe_price_id: 'price_test_monthly',
         status: 'completed',
         payment_status: 'paid',
+      }),
+    );
+  });
+
+  it('stores checkout payment intent metadata for future credit package refund lookup', async () => {
+    const updates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: { id: 'order-credit-payment-intent' },
+            });
+          },
+          update(payload: unknown) {
+            updates.push(payload);
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+          insert() {
+            throw new Error('insert should not be called for an existing order');
+          },
+        };
+      },
+    };
+
+    await upsertPaymentOrderBySession(
+      supabase,
+      {
+        id: 'cs_test_credit_payment_intent',
+        metadata: {
+          userId: 'user-1',
+          itemType: 'credit_package',
+          itemId: 'package-1',
+          priceId: 'price_test_credits',
+        },
+        client_reference_id: 'user-1',
+        customer: 'cus_test_123',
+        payment_intent: 'pi_test_credit_refund_lookup',
+        amount_total: 500,
+        currency: 'usd',
+        mode: 'payment',
+        payment_status: 'paid',
+      } as Stripe.Checkout.Session,
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          checkoutSessionId: 'cs_test_credit_payment_intent',
+          paymentIntentId: 'pi_test_credit_refund_lookup',
+        }),
       }),
     );
   });
@@ -695,5 +823,374 @@ describe('stripe fulfillment helpers', () => {
         }),
       }),
     );
+  });
+
+  it('reconciles a full membership invoice refund and delegates credit clawback to the atomic RPC', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'stripe_invoice_id', value: 'in_test_refund_full' },
+    });
+
+    const result = await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_refund_full',
+      eventType: 'charge.refunded',
+      charge: {
+        id: 'ch_test_refund_full',
+        amount: 990,
+        amount_refunded: 990,
+        currency: 'usd',
+        created: 1_742_646_400,
+        invoice: 'in_test_refund_full',
+        payment_intent: 'pi_test_refund_full',
+        refunded: true,
+        refunds: {
+          data: [
+            {
+              id: 're_test_refund_full',
+              amount: 990,
+              created: 1_742_646_500,
+              currency: 'usd',
+              metadata: {
+                subscriptionId: 'sub_test_refund_full',
+              },
+              reason: 'requested_by_customer',
+              status: 'succeeded',
+            },
+          ],
+        },
+      } as unknown as Stripe.Charge,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_charge_id: 'ch_test_refund_full',
+      p_idempotency_key: 'stripe_refund:re_test_refund_full',
+      p_invoice_id: 'in_test_refund_full',
+      p_is_failed: false,
+      p_is_full_refund: true,
+      p_refund_amount: 990,
+      p_refund_currency: 'usd',
+      p_refund_event_type: 'charge.refunded',
+      p_refund_id: 're_test_refund_full',
+      p_refund_reason: 'requested_by_customer',
+      p_refund_status: 'succeeded',
+      p_subscription_id: 'sub_test_refund_full',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      order_status: 'refunded',
+      clawback_amount: 100,
+      shortfall_amount: 0,
+    }));
+  });
+
+  it('uses a stable refund idempotency key for duplicate refund events', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_duplicate_refund' },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000100',
+          order_status: 'refunded',
+          clawback_amount: 100,
+          shortfall_amount: 0,
+          transaction_id: '00000000-0000-4000-8000-000000000102',
+          already_reconciled: false,
+        },
+        {
+          order_id: '00000000-0000-4000-8000-000000000100',
+          order_status: 'refunded',
+          clawback_amount: 0,
+          shortfall_amount: 0,
+          transaction_id: '00000000-0000-4000-8000-000000000102',
+          already_reconciled: true,
+        },
+      ],
+    });
+    const refund = {
+      id: 're_test_duplicate_refund',
+      amount: 990,
+      charge: 'ch_test_duplicate_refund',
+      created: 1_742_646_400,
+      currency: 'usd',
+      metadata: {},
+      payment_intent: 'pi_test_duplicate_refund',
+      reason: 'requested_by_customer',
+      status: 'succeeded',
+    } as unknown as Stripe.Refund;
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_duplicate_refund_1',
+      eventType: 'refund.created',
+      refund,
+    });
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_duplicate_refund_2',
+      eventType: 'refund.updated',
+      refund,
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(rpc.mock.calls.map((call) => call[1].p_idempotency_key)).toEqual([
+      'stripe_refund:re_test_duplicate_refund',
+      'stripe_refund:re_test_duplicate_refund',
+    ]);
+  });
+
+  it('records partial refunds without requesting a full credit clawback or subscription downgrade', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_partial_refund' },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000100',
+          order_status: 'partial_refunded',
+          clawback_amount: 0,
+          shortfall_amount: 0,
+          transaction_id: null,
+          already_reconciled: false,
+        },
+      ],
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_partial_refund',
+      eventType: 'refund.updated',
+      refund: {
+        id: 're_test_partial_refund',
+        amount: 100,
+        charge: 'ch_test_partial_refund',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_partial_refund',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: false,
+      p_refund_amount: 100,
+      p_refund_event_type: 'refund.updated',
+      p_refund_id: 're_test_partial_refund',
+    }));
+  });
+
+  it('keeps cancel-only handling scoped to subscription downgrade without credit clawback', async () => {
+    const tableCalls: string[] = [];
+    const subscriptionUpdates: unknown[] = [];
+    const profileUpdates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        tableCalls.push(table);
+
+        if (table === 'user_subscriptions') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  user_id: '00000000-0000-4000-8000-000000000200',
+                  membership_plan_id: 'plan-pro',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              subscriptionUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'profiles') {
+          return {
+            update(payload: unknown) {
+              profileUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`cancel-only should not touch ${table}`);
+      },
+    };
+
+    await syncSubscriptionState(supabase, {
+      id: 'sub_test_cancel_only',
+      cancel_at_period_end: false,
+      status: 'canceled',
+      items: {
+        data: [
+          {
+            current_period_start: 1_742_646_400,
+            current_period_end: 1_745_238_400,
+          },
+        ],
+      },
+    } as unknown as Stripe.Subscription);
+
+    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions', 'profiles']);
+    expect(subscriptionUpdates).toEqual([
+      expect.objectContaining({
+        status: 'canceled',
+        cancel_at_period_end: 'false',
+      }),
+    ]);
+    expect(profileUpdates).toEqual([
+      { membership_level: 'free' },
+    ]);
+  });
+
+  it('does not claim a Stripe subscription was canceled for refund-only events', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_refund_only' },
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_refund_only',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_refund_only',
+        amount: 990,
+        charge: 'ch_test_refund_only',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_refund_only',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: true,
+      p_subscription_id: null,
+    }));
+  });
+
+  it('returns insufficient-credit shortfall details from the atomic refund RPC', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_refund_shortfall' },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000100',
+          order_status: 'refunded',
+          clawback_amount: 20,
+          shortfall_amount: 80,
+          transaction_id: '00000000-0000-4000-8000-000000000102',
+          already_reconciled: false,
+        },
+      ],
+    });
+
+    const result = await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_refund_shortfall',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_refund_shortfall',
+        amount: 990,
+        charge: 'ch_test_refund_shortfall',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_refund_shortfall',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: true,
+      p_refund_id: 're_test_refund_shortfall',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      clawback_amount: 20,
+      shortfall_amount: 80,
+    }));
+  });
+
+  it('reconciles credit package refunds through checkout payment intent metadata', async () => {
+    const { lookups, rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_refund' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000300',
+        amount_total: 500,
+        metadata: {
+          checkoutSessionId: 'cs_test_credit_package_refund',
+          grantedCredits: 50,
+        },
+      },
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_credit_package_refund',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_credit_package_refund',
+        amount: 500,
+        charge: 'ch_test_credit_package_refund',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_credit_package_refund',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(lookups).toEqual([
+      {
+        table: 'payment_orders',
+        column: 'metadata->>paymentIntentId',
+        value: 'pi_test_credit_package_refund',
+      },
+    ]);
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: true,
+      p_order_id: '00000000-0000-4000-8000-000000000300',
+      p_payment_intent_id: 'pi_test_credit_package_refund',
+    }));
+  });
+
+  it('records refund.failed events without requesting entitlement recovery', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_refund_failed' },
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_refund_failed',
+      eventType: 'refund.failed',
+      refund: {
+        id: 're_test_refund_failed',
+        amount: 990,
+        charge: 'ch_test_refund_failed',
+        created: 1_742_646_400,
+        currency: 'usd',
+        failure_reason: 'lost_or_stolen_card',
+        metadata: {},
+        payment_intent: 'pi_test_refund_failed',
+        reason: null,
+        status: 'failed',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_failed: true,
+      p_is_full_refund: false,
+      p_refund_event_type: 'refund.failed',
+      p_refund_reason: 'lost_or_stolen_card',
+      p_refund_status: 'failed',
+    }));
   });
 });

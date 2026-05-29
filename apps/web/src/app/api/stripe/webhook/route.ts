@@ -8,6 +8,7 @@ import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecre
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  reconcileStripeRefund,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
@@ -56,6 +57,25 @@ export async function POST(request: Request) {
       }
       case 'invoice.payment_succeeded': {
         await fulfillMembershipInvoice(supabase, event.data.object);
+        break;
+      }
+      case 'charge.refunded': {
+        await reconcileStripeRefund(supabase, {
+          eventId: event.id,
+          eventType: event.type,
+          charge: event.data.object,
+        });
+        break;
+      }
+      case 'charge.refund.updated':
+      case 'refund.created':
+      case 'refund.updated':
+      case 'refund.failed': {
+        await reconcileStripeRefund(supabase, {
+          eventId: event.id,
+          eventType: event.type,
+          refund: event.data.object,
+        });
         break;
       }
       case 'customer.subscription.updated':
