@@ -19,6 +19,8 @@ const STRIPE_FULFILLMENT_ERRORS = {
   missingCreditFulfilledAt: 'Atomic credit fulfillment returned no fulfilled_at',
   invoiceSubscriptionMissing: 'Stripe invoice is missing subscription id',
   invoiceOrderLookup: 'Failed to look up invoice payment order',
+  invoiceRefundLookupMetadataBackfillLookup: 'Failed to look up invoice order refund metadata',
+  invoiceRefundLookupMetadataBackfillUpdate: 'Failed to update invoice order refund metadata',
   fulfillMembershipInvoice: 'Failed to fulfill membership invoice',
   missingMembershipFulfilledAt: 'Atomic membership fulfillment returned no fulfilled_at',
   subscriptionLookup: 'Failed to look up subscription state',
@@ -166,6 +168,19 @@ function getObjectId(value: { id?: string | null } | string | null | undefined) 
   return value?.id ?? null;
 }
 
+function getUnknownObjectId(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value && typeof value === 'object' && 'id' in value) {
+    const id = (value as { id?: unknown }).id;
+    return typeof id === 'string' && id.trim() ? id.trim() : null;
+  }
+
+  return null;
+}
+
 function getCheckoutSessionPaymentIntentId(session: Stripe.Checkout.Session) {
   return getObjectId(session.payment_intent as { id?: string | null } | string | null | undefined);
 }
@@ -176,6 +191,95 @@ function getChargeInvoiceId(charge: Stripe.Charge) {
   };
 
   return getObjectId(chargeRecord.invoice);
+}
+
+function getInvoicePaymentEntries(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    payments?: {
+      data?: unknown[];
+    } | null;
+  };
+
+  return Array.isArray(invoiceRecord.payments?.data) ? invoiceRecord.payments.data : [];
+}
+
+function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    confirmation_secret?: {
+      payment_intent?: unknown;
+    } | null;
+    payment_intent?: unknown;
+  };
+
+  const candidates: unknown[] = [
+    invoiceRecord.payment_intent,
+    invoiceRecord.confirmation_secret?.payment_intent,
+  ];
+
+  for (const entry of getInvoicePaymentEntries(invoice)) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const entryRecord = entry as unknown as Record<string, unknown>;
+    candidates.push(entryRecord.payment_intent);
+
+    const payment = entryRecord.payment;
+    if (payment && typeof payment === 'object') {
+      const paymentRecord = payment as Record<string, unknown>;
+      candidates.push(paymentRecord.payment_intent, paymentRecord.paymentIntent);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const id = getUnknownObjectId(candidate);
+    if (id) {
+      return id;
+    }
+  }
+
+  return null;
+}
+
+function getInvoiceChargeId(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    charge?: unknown;
+    latest_charge?: unknown;
+  };
+
+  const candidates: unknown[] = [
+    invoiceRecord.charge,
+    invoiceRecord.latest_charge,
+  ];
+
+  for (const entry of getInvoicePaymentEntries(invoice)) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const entryRecord = entry as unknown as Record<string, unknown>;
+    candidates.push(entryRecord.charge, entryRecord.latest_charge);
+
+    const payment = entryRecord.payment;
+    if (payment && typeof payment === 'object') {
+      const paymentRecord = payment as Record<string, unknown>;
+      candidates.push(paymentRecord.charge, paymentRecord.latest_charge);
+
+      const paymentIntent = paymentRecord.payment_intent ?? paymentRecord.paymentIntent;
+      if (paymentIntent && typeof paymentIntent === 'object') {
+        candidates.push((paymentIntent as Record<string, unknown>).latest_charge);
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const id = getUnknownObjectId(candidate);
+    if (id) {
+      return id;
+    }
+  }
+
+  return null;
 }
 
 function getMetadataString(
@@ -236,6 +340,98 @@ async function backfillCheckoutOrderFulfillment(
       STRIPE_FULFILLMENT_ERRORS.backfillCheckoutOrder,
       result.error,
       { subscriptionId: maskIdentifier(subscriptionId) },
+    );
+  }
+}
+
+function buildInvoiceRefundLookupMetadata(invoice: Stripe.Invoice): Record<string, string> | null {
+  const paymentIntentId = getInvoicePaymentIntentId(invoice);
+  const chargeId = getInvoiceChargeId(invoice);
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const metadata: Record<string, string> = {};
+
+  if (!paymentIntentId && !chargeId) {
+    return null;
+  }
+
+  if (paymentIntentId) metadata.paymentIntentId = paymentIntentId;
+  if (chargeId) metadata.chargeId = chargeId;
+  if (subscriptionId) metadata.subscriptionId = subscriptionId;
+
+  return metadata;
+}
+
+function mergeMetadata(
+  current: unknown,
+  patch: Record<string, string>,
+) {
+  return {
+    ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
+    ...patch,
+  };
+}
+
+async function backfillInvoiceRefundLookupMetadata(
+  supabase: SupabaseLikeClient,
+  invoiceOrderId: string | null | undefined,
+  invoice: Stripe.Invoice,
+) {
+  if (!invoiceOrderId) {
+    return;
+  }
+
+  const metadataPatch = buildInvoiceRefundLookupMetadata(invoice);
+  if (!metadataPatch) {
+    return;
+  }
+
+  const existing = await supabase
+    .from('payment_orders')
+    .select('metadata')
+    .eq('id', invoiceOrderId)
+    .maybeSingle();
+
+  if (existing.error) {
+    throwFulfillmentError(
+      'invoice_refund_lookup_metadata_backfill_lookup',
+      STRIPE_FULFILLMENT_ERRORS.invoiceRefundLookupMetadataBackfillLookup,
+      existing.error,
+      {
+        invoiceId: maskIdentifier(invoice.id),
+        orderId: maskIdentifier(invoiceOrderId),
+        paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+        chargeId: maskIdentifier(metadataPatch.chargeId),
+      },
+    );
+  }
+
+  if (!existing.data) {
+    logger.warn('billing', 'invoice_refund_lookup_metadata_order_not_found', {
+      invoiceId: maskIdentifier(invoice.id),
+      orderId: maskIdentifier(invoiceOrderId),
+      paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+      chargeId: maskIdentifier(metadataPatch.chargeId),
+    });
+    return;
+  }
+
+  const nextMetadata = mergeMetadata(existing.data.metadata, metadataPatch);
+  const result = await supabase
+    .from('payment_orders')
+    .update({ metadata: nextMetadata })
+    .eq('id', invoiceOrderId);
+
+  if (result.error) {
+    throwFulfillmentError(
+      'invoice_refund_lookup_metadata_backfill_update',
+      STRIPE_FULFILLMENT_ERRORS.invoiceRefundLookupMetadataBackfillUpdate,
+      result.error,
+      {
+        invoiceId: maskIdentifier(invoice.id),
+        orderId: maskIdentifier(invoiceOrderId),
+        paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+        chargeId: maskIdentifier(metadataPatch.chargeId),
+      },
     );
   }
 }
@@ -422,6 +618,11 @@ export async function fulfillMembershipInvoice(
   }
 
   if (existingInvoiceOrder?.fulfilled_at) {
+    await backfillInvoiceRefundLookupMetadata(
+      supabase,
+      existingInvoiceOrder.id,
+      invoice,
+    );
     await backfillCheckoutOrderFulfillment(
       supabase,
       subscriptionId,
@@ -453,11 +654,16 @@ export async function fulfillMembershipInvoice(
     );
   }
 
-  const result = getFirstRpcRow<{ fulfilled_at?: string | null }>(data);
+  const result = getFirstRpcRow<{ invoice_order_id?: string | null; fulfilled_at?: string | null }>(data);
   if (!result?.fulfilled_at) {
     throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
   }
 
+  await backfillInvoiceRefundLookupMetadata(
+    supabase,
+    result.invoice_order_id,
+    invoice,
+  );
   await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilled_at);
 }
 
