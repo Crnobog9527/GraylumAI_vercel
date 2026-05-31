@@ -14,6 +14,7 @@ DECLARE
   v_user_id UUID := gen_random_uuid();
   v_full_order_id UUID := gen_random_uuid();
   v_partial_order_id UUID := gen_random_uuid();
+  v_credit_full_order_id UUID := gen_random_uuid();
   v_failed_order_id UUID := gen_random_uuid();
   v_shortfall_order_id UUID := gen_random_uuid();
   v_zero_shortfall_order_id UUID := gen_random_uuid();
@@ -238,6 +239,124 @@ BEGIN
   SELECT credits INTO v_credits FROM profiles WHERE id = v_user_id;
   IF v_credits <> 20 THEN
     RAISE EXCEPTION 'partial refund changed balance: %', v_credits;
+  END IF;
+
+  UPDATE profiles SET credits = credits + 100 WHERE id = v_user_id;
+
+  INSERT INTO payment_orders (
+    id,
+    user_id,
+    item_type,
+    item_id,
+    billing_cycle,
+    stripe_checkout_session_id,
+    amount_total,
+    currency,
+    mode,
+    status,
+    payment_status,
+    fulfilled_at,
+    metadata
+  ) VALUES (
+    v_credit_full_order_id,
+    v_user_id,
+    'credit_package',
+    gen_random_uuid(),
+    'one_time',
+    'cs_refund_credit_full',
+    900,
+    'usd',
+    'payment',
+    'completed',
+    'paid',
+    NOW(),
+    jsonb_build_object(
+      'checkoutSessionId', 'cs_refund_credit_full',
+      'paymentIntentId', 'pi_credit_full',
+      'grantedCredits', 100
+    )
+  );
+
+  SELECT *
+  INTO v_result
+  FROM public.atomic_reconcile_stripe_refund(
+    v_credit_full_order_id,
+    'stripe_refund:re_credit_full',
+    'refund.created',
+    're_credit_full',
+    'succeeded',
+    900,
+    'usd',
+    'ch_credit_full',
+    'pi_credit_full',
+    NULL,
+    NULL,
+    'requested_by_customer',
+    NOW(),
+    TRUE,
+    FALSE
+  );
+
+  IF v_result.order_status <> 'refunded'
+    OR v_result.clawback_amount <> 100
+    OR v_result.shortfall_amount <> 0
+    OR v_result.transaction_id IS NULL
+    OR v_result.already_reconciled IS NOT FALSE THEN
+    RAISE EXCEPTION 'credit package full refund assertion failed: %', row_to_json(v_result);
+  END IF;
+
+  SELECT credits INTO v_credits FROM profiles WHERE id = v_user_id;
+  IF v_credits <> 20 THEN
+    RAISE EXCEPTION 'credit package full refund balance assertion failed: %', v_credits;
+  END IF;
+
+  SELECT COUNT(*)
+  INTO v_transaction_count
+  FROM credit_transactions
+  WHERE user_id = v_user_id
+    AND idempotency_key = 'stripe_refund:re_credit_full';
+
+  IF v_transaction_count <> 1 THEN
+    RAISE EXCEPTION 'credit package full refund transaction count: %', v_transaction_count;
+  END IF;
+
+  SELECT *
+  INTO v_result
+  FROM public.atomic_reconcile_stripe_refund(
+    v_credit_full_order_id,
+    'stripe_refund:re_credit_full',
+    'refund.updated',
+    're_credit_full',
+    'succeeded',
+    900,
+    'usd',
+    'ch_credit_full',
+    'pi_credit_full',
+    NULL,
+    NULL,
+    'requested_by_customer',
+    NOW(),
+    TRUE,
+    FALSE
+  );
+
+  IF v_result.already_reconciled IS NOT TRUE THEN
+    RAISE EXCEPTION 'duplicate credit package full refund did not report idempotent: %', row_to_json(v_result);
+  END IF;
+
+  SELECT COUNT(*)
+  INTO v_transaction_count
+  FROM credit_transactions
+  WHERE user_id = v_user_id
+    AND idempotency_key = 'stripe_refund:re_credit_full';
+
+  IF v_transaction_count <> 1 THEN
+    RAISE EXCEPTION 'duplicate credit package full refund transaction count: %', v_transaction_count;
+  END IF;
+
+  SELECT credits INTO v_credits FROM profiles WHERE id = v_user_id;
+  IF v_credits <> 20 THEN
+    RAISE EXCEPTION 'duplicate credit package full refund changed balance: %', v_credits;
   END IF;
 
   INSERT INTO payment_orders (

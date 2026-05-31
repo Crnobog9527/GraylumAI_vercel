@@ -280,6 +280,81 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('preserves atomic credit fulfillment metadata during later checkout sync upserts', async () => {
+    const updates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-credit-fulfilled',
+                metadata: {
+                  transactionId: '00000000-0000-4000-8000-000000000201',
+                  grantedCredits: 100,
+                  fulfillmentSource: 'atomic_fulfill_credit_package',
+                },
+              },
+            });
+          },
+          update(payload: unknown) {
+            updates.push(payload);
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+          insert() {
+            throw new Error('insert should not be called for an existing order');
+          },
+        };
+      },
+    };
+
+    await upsertPaymentOrderBySession(
+      supabase,
+      {
+        id: 'cs_test_credit_fulfilled_sync',
+        metadata: {
+          userId: 'user-1',
+          itemType: 'credit_package',
+          itemId: 'package-1',
+          priceId: 'price_test_credits',
+        },
+        client_reference_id: 'user-1',
+        customer: 'cus_test_123',
+        payment_intent: 'pi_test_credit_fulfilled_sync',
+        amount_total: 500,
+        currency: 'usd',
+        mode: 'payment',
+        payment_status: 'paid',
+      } as Stripe.Checkout.Session,
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          checkoutSessionId: 'cs_test_credit_fulfilled_sync',
+          paymentIntentId: 'pi_test_credit_fulfilled_sync',
+          transactionId: '00000000-0000-4000-8000-000000000201',
+          grantedCredits: 100,
+          fulfillmentSource: 'atomic_fulfill_credit_package',
+        }),
+      }),
+    );
+  });
+
   it('throws a diagnostic error when checkout order update fails', async () => {
     const supabase = {
       from(table: string) {
@@ -1423,7 +1498,7 @@ describe('stripe fulfillment helpers', () => {
       ],
     });
 
-    await reconcileStripeRefund(supabase, {
+    const result = await reconcileStripeRefund(supabase, {
       eventId: 'evt_test_missing_granted_credits',
       eventType: 'refund.created',
       refund: {
@@ -1444,6 +1519,12 @@ describe('stripe fulfillment helpers', () => {
       p_order_id: '00000000-0000-4000-8000-000000000250',
       p_refund_id: 're_test_missing_granted_credits',
     }));
+    expect(result).toEqual(expect.objectContaining({
+      order_status: 'refunded',
+      clawback_amount: 0,
+      shortfall_amount: 0,
+      transaction_id: null,
+    }));
   });
 
   it('reconciles credit package refunds through checkout payment intent metadata', async () => {
@@ -1457,9 +1538,20 @@ describe('stripe fulfillment helpers', () => {
           grantedCredits: 50,
         },
       },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000300',
+          user_id: '00000000-0000-4000-8000-000000000101',
+          order_status: 'refunded',
+          clawback_amount: 50,
+          shortfall_amount: 0,
+          transaction_id: '00000000-0000-4000-8000-000000000301',
+          already_reconciled: false,
+        },
+      ],
     });
 
-    await reconcileStripeRefund(supabase, {
+    const result = await reconcileStripeRefund(supabase, {
       eventId: 'evt_test_credit_package_refund',
       eventType: 'refund.created',
       refund: {
@@ -1486,6 +1578,12 @@ describe('stripe fulfillment helpers', () => {
       p_is_full_refund: true,
       p_order_id: '00000000-0000-4000-8000-000000000300',
       p_payment_intent_id: 'pi_test_credit_package_refund',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      order_status: 'refunded',
+      clawback_amount: 50,
+      shortfall_amount: 0,
+      already_reconciled: false,
     }));
   });
 

@@ -78,6 +78,14 @@ function maskKnownIdentifiers(message: string | null | undefined) {
     );
 }
 
+function asMetadataRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function summarizeSupabaseError(error: unknown) {
   if (!error || typeof error !== 'object') {
     return {
@@ -443,15 +451,9 @@ export async function upsertPaymentOrderBySession(
   const metadata = session.metadata ?? {};
   const paymentIntentId = getCheckoutSessionPaymentIntentId(session);
   const subscriptionId = getCheckoutSessionSubscriptionId(session);
-  const orderMetadata = {
-    ...metadata,
-    checkoutSessionId: session.id,
-    ...(paymentIntentId ? { paymentIntentId } : {}),
-    ...(subscriptionId ? { subscriptionId } : {}),
-  };
   const existing = await supabase
     .from('payment_orders')
-    .select('id')
+    .select('id, metadata')
     .eq('stripe_checkout_session_id', session.id)
     .maybeSingle();
 
@@ -464,6 +466,7 @@ export async function upsertPaymentOrderBySession(
     );
   }
 
+  const existingMetadata = asMetadataRecord(existing.data?.metadata);
   const payload = {
     user_id: metadata.userId ?? session.client_reference_id ?? null,
     item_type: metadata.itemType ?? null,
@@ -478,7 +481,13 @@ export async function upsertPaymentOrderBySession(
     mode: session.mode,
     status: session.payment_status === 'paid' ? 'completed' : 'pending',
     payment_status: session.payment_status ?? null,
-    metadata: orderMetadata,
+    metadata: {
+      ...metadata,
+      ...existingMetadata,
+      checkoutSessionId: session.id,
+      ...(paymentIntentId ? { paymentIntentId } : {}),
+      ...(subscriptionId ? { subscriptionId } : {}),
+    },
     updated_at: new Date().toISOString(),
   };
 
