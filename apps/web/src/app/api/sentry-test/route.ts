@@ -7,6 +7,24 @@ import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 const STAGING_PRODUCTION_HOST = 'graylumai-staging.vercel.app';
 
+function getSentryDiagnostics() {
+  const sentryClient = Sentry.getClient();
+  const sentryOptions = sentryClient?.getOptions();
+
+  return {
+    dsnConfigured: Boolean(process.env.NEXT_PUBLIC_SENTRY_DSN || sentryOptions?.dsn),
+    sentryClientConfigured: Boolean(sentryClient),
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+    appEnv: process.env.APP_ENV ?? process.env.NEXT_PUBLIC_APP_ENV ?? null,
+    nodeEnv: process.env.NODE_ENV ?? null,
+    sentryEnvironment:
+      sentryOptions?.environment ??
+      process.env.SENTRY_ENVIRONMENT ??
+      process.env.NODE_ENV ??
+      null,
+  };
+}
+
 /**
  * Sentry 测试端点
  * GET /api/sentry-test - 触发测试错误，验证 Sentry 配置是否正常
@@ -85,6 +103,7 @@ function isStagingSentryVerificationAllowed(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   const hostname = new URL(request.url).hostname.toLowerCase();
+  const searchParams = new URL(request.url).searchParams;
 
   if (!isStagingSentryVerificationAllowed(request)) {
     return NextResponse.json(
@@ -100,6 +119,8 @@ export async function GET(request: NextRequest) {
       { status: 403 }
     );
   }
+
+  const diagnostics = getSentryDiagnostics();
 
   // Add test context for better error tracking
   Sentry.setContext("sentry_test", {
@@ -123,6 +144,15 @@ export async function GET(request: NextRequest) {
     level: "info",
   });
 
+  if (searchParams.get("mode") === "throw") {
+    Sentry.setTag("environment", "staging");
+    Sentry.setTag("endpoint", "/api/sentry-test");
+    Sentry.setTag("verification", "true");
+    Sentry.setTag("test_type", "unhandled_verification");
+
+    throw new Error("graylumai-staging sentry unhandled verification");
+  }
+
   // Create and capture a test error
   const testError = new Error(
     `graylumai-staging sentry verification - ${new Date().toISOString()}`
@@ -142,7 +172,7 @@ export async function GET(request: NextRequest) {
   });
 
   // Flush events to ensure they are sent before response
-  await Sentry.flush(2000);
+  const flushOk = await Sentry.flush(5000);
 
   // Return error response to indicate the test was triggered
   return NextResponse.json(
@@ -153,6 +183,10 @@ export async function GET(request: NextRequest) {
       eventId,
       timestamp: new Date().toISOString(),
       environment: "staging",
+      diagnostics: {
+        ...diagnostics,
+        flushOk,
+      },
       instructions: [
         "1. 访问 Sentry 后台 (https://sentry.io)",
         "2. 在 Issues 页面查找 'graylumai-staging sentry verification' 错误",
