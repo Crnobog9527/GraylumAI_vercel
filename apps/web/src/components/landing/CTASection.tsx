@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { buildAuthHref } from '@/lib/site-config';
 const PARTICLES = Array.from({ length: 10 }, (_, index) => ({
   left: `${(index * 17 + (index % 3) * 11) % 100}%`,
@@ -43,7 +43,12 @@ export default function CTASection() {
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         {/* Icon */}
         <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-[#FFD700]/20 to-[#FFA500]/20 border border-[#FFD700]/30 mb-8">
-          <Sparkles className="w-10 h-10 text-[#FFD700]" />
+          <img
+            src="/graylum-logo.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-10 w-10 rounded-xl"
+          />
         </div>
 
         {/* Headline */}
