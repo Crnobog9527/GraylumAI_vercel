@@ -11,6 +11,7 @@ node_modules/
 
 # Playwright
 .playwright-cli/
+.playwright-mcp/
 playwright-report/
 playwright/.cache/
 test-results/
