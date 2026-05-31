@@ -10,7 +10,6 @@ import {
   Loader2,
   Mail,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { getErrorMessageText, getSafeErrorMessage } from '@/lib/safe-error-message';
@@ -283,7 +282,12 @@ function LoginPageContent() {
           <div className="relative space-y-8">
             <div className="space-y-4 text-center">
               <div className="mx-auto inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.24em] text-[#f8d25c]">
-                <Sparkles className="h-3.5 w-3.5" />
+                <img
+                  src="/graylum-logo.svg"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5 rounded"
+                />
                 {siteName} Access
               </div>
               <div className="space-y-3">
@@ -569,7 +573,12 @@ function LoginPageFallback() {
         >
           <CardContent className="space-y-6 px-6 py-8 text-center sm:px-8 sm:py-10">
             <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.24em] text-[#f8d25c]">
-              <Sparkles className="h-3.5 w-3.5" />
+              <img
+                src="/graylum-logo.svg"
+                alt=""
+                aria-hidden="true"
+                className="h-3.5 w-3.5 rounded"
+              />
               {fallbackSiteName} Access
             </div>
             <div className="space-y-3">
