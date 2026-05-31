@@ -5,11 +5,13 @@ import { createClient } from '@supabase/supabase-js';
 import { logServerError } from '@/lib/server-log';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
+const STAGING_PRODUCTION_HOST = 'graylumai-staging.vercel.app';
+
 /**
  * Sentry 测试端点
  * GET /api/sentry-test - 触发测试错误，验证 Sentry 配置是否正常
  *
- * 注意: 此端点在生产环境中被禁用，仅供开发/预览环境测试使用
+ * 注意: 此端点仅允许 graylumai-staging 的 Vercel Production deployment 使用。
  *
  * 使用方式:
  * 1. 访问 /api/sentry-test 触发错误
@@ -58,33 +60,53 @@ async function isPreviewAdminRequest(request: NextRequest): Promise<boolean> {
   return profile?.role === 'admin';
 }
 
+function normalizeHost(value?: string): string {
+  return (value ?? '')
+    .replace(/^https?:\/\//i, '')
+    .split('/')[0]
+    .toLowerCase();
+}
+
+function isStagingSentryVerificationAllowed(request: NextRequest): boolean {
+  const hostname = new URL(request.url).hostname.toLowerCase();
+  const projectProductionHost = normalizeHost(process.env.VERCEL_PROJECT_PRODUCTION_URL);
+  const appEnv = process.env.APP_ENV ?? process.env.NEXT_PUBLIC_APP_ENV;
+
+  if (appEnv && appEnv !== 'staging') {
+    return false;
+  }
+
+  return (
+    process.env.VERCEL_ENV === 'production' &&
+    projectProductionHost === STAGING_PRODUCTION_HOST &&
+    hostname === STAGING_PRODUCTION_HOST
+  );
+}
+
 export async function GET(request: NextRequest) {
-  // 生产环境禁用此测试端点
-  if (process.env.NODE_ENV === "production") {
+  const hostname = new URL(request.url).hostname.toLowerCase();
+
+  if (!isStagingSentryVerificationAllowed(request)) {
     return NextResponse.json(
       { error: "Not Found" },
       { status: 404 }
     );
   }
 
-  const hostname = new URL(request.url).hostname.toLowerCase();
-  const isLocalRequest = hostname === 'localhost' || hostname === '127.0.0.1';
-
-  if (!isLocalRequest) {
-    const isAdminRequest = await isPreviewAdminRequest(request);
-    if (!isAdminRequest) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
-    }
+  const isAdminRequest = await isPreviewAdminRequest(request);
+  if (!isAdminRequest) {
+    return NextResponse.json(
+      { error: "Forbidden" },
+      { status: 403 }
+    );
   }
 
   // Add test context for better error tracking
   Sentry.setContext("sentry_test", {
     purpose: "验证 Sentry 配置",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
+    environment: "staging",
+    host: hostname,
   });
 
   // Set a test user for tracking
@@ -103,17 +125,18 @@ export async function GET(request: NextRequest) {
 
   // Create and capture a test error
   const testError = new Error(
-    `[Sentry Test] 这是一个测试错误 - ${new Date().toISOString()}`
+    `graylumai-staging sentry verification - ${new Date().toISOString()}`
   );
 
   // Capture the error with additional context
-  Sentry.captureException(testError, {
+  const eventId = Sentry.captureException(testError, {
     tags: {
-      test_type: "manual_verification",
+      environment: "staging",
       endpoint: "/api/sentry-test",
+      verification: "true",
+      test_type: "manual_verification",
     },
     extra: {
-      request_url: request.url,
       test_description: "验证 Sentry 错误监控配置是否正常工作",
     },
   });
@@ -124,20 +147,20 @@ export async function GET(request: NextRequest) {
   // Return error response to indicate the test was triggered
   return NextResponse.json(
     {
-      success: false,
+      ok: true,
       message: "Sentry 测试错误已触发",
       description: "请检查 Sentry 后台是否收到错误报告",
+      eventId,
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV,
-      dsn_configured: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
+      environment: "staging",
       instructions: [
         "1. 访问 Sentry 后台 (https://sentry.io)",
-        "2. 在 Issues 页面查找 '[Sentry Test]' 错误",
+        "2. 在 Issues 页面查找 'graylumai-staging sentry verification' 错误",
         "3. 确认错误包含正确的上下文信息",
         "4. 验证用户信息 (sentry-test@graylum.internal) 已记录",
       ],
     },
-    { status: 500 }
+    { status: 202 }
   );
 }
 
