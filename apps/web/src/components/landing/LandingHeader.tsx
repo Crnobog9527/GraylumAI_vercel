@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Menu, X, Sparkles } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { buildAuthHref, resolveSiteName } from '@/lib/site-config';
 
 const NAV_LINKS = [
@@ -57,7 +57,12 @@ export default function LandingHeader({ siteName = resolveSiteName() }: { siteNa
           {/* Logo */}
           <Link href="/landing" className="flex items-center gap-2 group">
             <div className="relative">
-              <Sparkles className="h-8 w-8 text-[#FFD700] transition-transform group-hover:scale-110" />
+              <img
+                src="/graylum-logo.svg"
+                alt=""
+                aria-hidden="true"
+                className="h-8 w-8 rounded-[10px] transition-transform group-hover:scale-110"
+              />
               <div className="absolute inset-0 bg-[#FFD700] opacity-16 blur-[6px] transition-opacity group-hover:opacity-24 md:blur-sm" />
             </div>
             <span className="text-xl font-bold text-white">{siteName}</span>

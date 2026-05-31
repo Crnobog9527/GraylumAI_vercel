@@ -23,9 +23,9 @@ export async function generateMetadata(): Promise<Metadata> {
     title: siteName,
     description: `${siteName} - AI-powered chat application`,
     icons: {
-      icon: '/globe.svg',
-      shortcut: '/globe.svg',
-      apple: '/globe.svg',
+      icon: '/graylum-logo.svg',
+      shortcut: '/favicon.ico',
+      apple: '/graylum-logo.png',
     },
   };
 }

@@ -102,15 +102,12 @@ export function AppHeader() {
       <div className="h-full max-w-[1400px] mx-auto px-6 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 group">
-          <div
-            className="flex h-9 w-9 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-105"
-            style={{
-              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-              boxShadow: '0 0 20px rgba(255, 215, 0, 0.3)'
-            }}
-          >
-            <Sparkles className="h-5 w-5" style={{ color: 'var(--bg-primary)' }} />
-          </div>
+          <img
+            src="/graylum-logo.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-9 w-9 rounded-xl shadow-[0_0_20px_rgba(255,215,0,0.22)] transition-transform duration-300 group-hover:scale-105"
+          />
           <span
             className="text-xl font-bold tracking-tight"
             style={{
