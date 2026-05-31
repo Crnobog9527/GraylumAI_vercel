@@ -4,11 +4,20 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+function getSentryEnvironment() {
+  return (
+    process.env.SENTRY_ENVIRONMENT ??
+    process.env.APP_ENV ??
+    process.env.NEXT_PUBLIC_APP_ENV ??
+    process.env.NODE_ENV
+  );
+}
+
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
 
   // Environment identification
-  environment: process.env.NODE_ENV,
+  environment: getSentryEnvironment(),
 
   // Adjust this value in production, or use tracesSampler for greater control
   tracesSampleRate: process.env.NODE_ENV === "production" ? 1.0 : 0,
