@@ -1,14 +1,19 @@
-// This file configures the initialization of Sentry on the client.
-// The config you add here will be used whenever a users loads a page in their browser.
-// https://docs.sentry.io/platforms/javascript/guides/nextjs/
-
 import * as Sentry from "@sentry/nextjs";
+
+function getSentryEnvironment() {
+  return (
+    process.env.SENTRY_ENVIRONMENT ??
+    process.env.APP_ENV ??
+    process.env.NEXT_PUBLIC_APP_ENV ??
+    process.env.NODE_ENV
+  );
+}
 
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
 
   // Environment identification
-  environment: process.env.NODE_ENV,
+  environment: getSentryEnvironment(),
 
   // Adjust this value in production, or use tracesSampler for greater control
   tracesSampleRate: process.env.NODE_ENV === "production" ? 1.0 : 0,
@@ -76,3 +81,5 @@ Sentry.init({
     return event;
   },
 });
+
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

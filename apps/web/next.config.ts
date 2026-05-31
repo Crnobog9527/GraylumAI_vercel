@@ -41,6 +41,4 @@ const sentryWebpackPluginOptions = {
   hideSourceMaps: true,
 };
 
-export default sentryBuildUploadEnabled
-  ? withSentryConfig(nextConfig, sentryWebpackPluginOptions)
-  : nextConfig;
+export default withSentryConfig(nextConfig, sentryWebpackPluginOptions);
