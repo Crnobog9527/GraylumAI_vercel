@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Mail, Sparkles } from 'lucide-react';
+import { Mail } from 'lucide-react';
 import { buildAuthHref, resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
 
 const footerLinks = {
@@ -50,7 +50,12 @@ export default function LandingFooter({
           <div>
             <Link href="/landing" className="mb-4 flex items-center gap-2">
               <div className="relative">
-                <Sparkles className="w-8 h-8 text-[#FFD700]" />
+                <img
+                  src="/graylum-logo.svg"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-8 w-8 rounded-[10px]"
+                />
                 <div className="absolute inset-0 bg-[#FFD700] opacity-18 blur-[8px]" />
               </div>
               <span className="text-xl font-bold text-white">{siteName}</span>
