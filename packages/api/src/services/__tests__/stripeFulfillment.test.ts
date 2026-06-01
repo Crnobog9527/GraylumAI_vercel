@@ -1691,8 +1691,10 @@ describe('stripe fulfillment helpers', () => {
     const tableCalls: string[] = [];
     const subscriptionUpdates: unknown[] = [];
     const profileUpdates: unknown[] = [];
+    const rpc = vi.fn();
 
     const supabase = {
+      rpc,
       from(table: string) {
         tableCalls.push(table);
 
@@ -1763,14 +1765,29 @@ describe('stripe fulfillment helpers', () => {
       }),
     ]);
     expect(profileUpdates).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('keeps canceled subscription handling scoped away from credits and refund reconciliation', async () => {
     const tableCalls: string[] = [];
     const subscriptionUpdates: unknown[] = [];
-    const profileUpdates: unknown[] = [];
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          stripe_subscription_id: 'sub_test_cancel_only',
+          subscription_id: '00000000-0000-4000-8000-000000000201',
+          subscription_found: true,
+          user_id: '00000000-0000-4000-8000-000000000200',
+          profile_updated: true,
+          previous_membership_level: 'pro',
+          new_membership_level: 'free',
+        },
+      ],
+      error: null,
+    });
 
     const supabase = {
+      rpc,
       from(table: string) {
         tableCalls.push(table);
 
@@ -1793,19 +1810,6 @@ describe('stripe fulfillment helpers', () => {
             },
             update(payload: unknown) {
               subscriptionUpdates.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({ error: null });
-                },
-              };
-            },
-          };
-        }
-
-        if (table === 'profiles') {
-          return {
-            update(payload: unknown) {
-              profileUpdates.push(payload);
               return {
                 eq() {
                   return Promise.resolve({ error: null });
@@ -1833,25 +1837,32 @@ describe('stripe fulfillment helpers', () => {
       },
     } as unknown as Stripe.Subscription);
 
-    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions', 'profiles']);
+    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions']);
     expect(subscriptionUpdates).toEqual([
       expect.objectContaining({
         status: 'canceled',
         cancel_at_period_end: 'false',
       }),
     ]);
-    expect(profileUpdates).toEqual([
-      { membership_level: 'free' },
-    ]);
+    expect(rpc).toHaveBeenCalledWith('atomic_downgrade_canceled_subscription_profile', {
+      p_stripe_subscription_id: 'sub_test_cancel_only',
+    });
     expect(loggerState.warn).not.toHaveBeenCalled();
   });
 
-  it('does not fail the webhook when canceled subscription profile downgrade is blocked', async () => {
+  it('fails retryably when canceled subscription profile downgrade recovery fails', async () => {
     const tableCalls: string[] = [];
     const subscriptionUpdates: unknown[] = [];
-    const profileUpdates: unknown[] = [];
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: '42501',
+        message: 'permission denied for function atomic_downgrade_canceled_subscription_profile',
+      },
+    });
 
     const supabase = {
+      rpc,
       from(table: string) {
         tableCalls.push(table);
 
@@ -1883,24 +1894,6 @@ describe('stripe fulfillment helpers', () => {
           };
         }
 
-        if (table === 'profiles') {
-          return {
-            update(payload: unknown) {
-              profileUpdates.push(payload);
-              return {
-                eq() {
-                  return Promise.resolve({
-                    error: {
-                      code: '42501',
-                      message: 'permission denied for table profiles',
-                    },
-                  });
-                },
-              };
-            },
-          };
-        }
-
         throw new Error(`cancel-only should not touch ${table}`);
       },
     };
@@ -1917,29 +1910,93 @@ describe('stripe fulfillment helpers', () => {
           },
         ],
       },
-    } as unknown as Stripe.Subscription)).resolves.toBeUndefined();
+    } as unknown as Stripe.Subscription)).rejects.toThrow('Failed to downgrade canceled subscription profile');
 
-    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions', 'profiles']);
+    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions']);
     expect(subscriptionUpdates).toEqual([
       expect.objectContaining({
         status: 'canceled',
         cancel_at_period_end: 'false',
       }),
     ]);
-    expect(profileUpdates).toEqual([
-      { membership_level: 'free' },
-    ]);
-    expect(loggerState.warn).toHaveBeenCalledWith(
+    expect(rpc).toHaveBeenCalledWith('atomic_downgrade_canceled_subscription_profile', {
+      p_stripe_subscription_id: 'sub_test_cancel_profile_blocked',
+    });
+    expect(loggerState.error).toHaveBeenCalledWith(
       'billing',
-      'subscription_canceled_profile_update_failed',
+      'stripe_fulfillment_stage_failed',
       expect.objectContaining({
-        stage: 'subscription_canceled_profile_update',
+        stage: 'subscription_canceled_profile_downgrade_rpc',
         subscriptionId: 'sub_test...locked',
         userId: '00000000...000200',
         supabaseError: expect.objectContaining({
           code: '42501',
-          message: 'permission denied for table profiles',
+          message: 'permission denied for function atomic_downgrade_canceled_subscription_profile',
         }),
+      }),
+    );
+    expect(loggerState.warn).not.toHaveBeenCalled();
+  });
+
+  it('fails retryably when canceled subscription downgrade RPC does not confirm free membership', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          subscription_found: true,
+          new_membership_level: 'pro',
+        },
+      ],
+      error: null,
+    });
+
+    const supabase = {
+      rpc,
+      from(table: string) {
+        if (table !== 'user_subscriptions') {
+          throw new Error(`cancel-only should not touch ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                user_id: '00000000-0000-4000-8000-000000000200',
+                membership_plan_id: 'plan-pro',
+              },
+              error: null,
+            });
+          },
+          update() {
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await expect(syncSubscriptionState(supabase, {
+      id: 'sub_test_cancel_not_confirmed',
+      cancel_at_period_end: false,
+      status: 'canceled',
+      items: { data: [] },
+    } as unknown as Stripe.Subscription)).rejects.toThrow('Failed to downgrade canceled subscription profile');
+
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'stripe_fulfillment_stage_failed',
+      expect.objectContaining({
+        stage: 'subscription_canceled_profile_downgrade_rpc',
+        subscriptionFound: true,
+        newMembershipLevel: 'pro',
       }),
     );
   });

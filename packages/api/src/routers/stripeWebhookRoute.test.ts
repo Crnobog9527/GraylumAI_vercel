@@ -373,6 +373,38 @@ describe('stripe webhook route refund routing', () => {
     expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 
+  it('returns 500 when subscription state sync fails', async () => {
+    const subscription = {
+      id: 'sub_test_deleted_retryable',
+      object: 'subscription',
+      status: 'canceled',
+      cancel_at_period_end: false,
+    };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_subscription_deleted_failure',
+      type: 'customer.subscription.deleted',
+      data: { object: subscription },
+    });
+    routeMocks.syncSubscriptionState.mockRejectedValueOnce(new Error('profile downgrade recovery failed'));
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(500);
+    expect(routeMocks.syncSubscriptionState).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      subscription,
+    );
+    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    expect(routeMocks.logServerError).toHaveBeenCalledWith(
+      'billing',
+      'stripe_webhook_handler_failed',
+      { eventType: 'customer.subscription.deleted' },
+    );
+  });
+
   it('safely ignores unknown Stripe events', async () => {
     routeMocks.constructEvent.mockReturnValue({
       id: 'evt_test_unknown',

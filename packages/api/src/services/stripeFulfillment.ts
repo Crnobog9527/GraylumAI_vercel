@@ -1087,18 +1087,39 @@ export async function syncSubscriptionState(
   }
 
   if (subscription.status === 'canceled' && existingSubscription?.user_id) {
-    const profileResult = await supabase
-      .from('profiles')
-      .update({ membership_level: 'free' })
-      .eq('id', existingSubscription.user_id);
+    const { data, error } = await supabase.rpc('atomic_downgrade_canceled_subscription_profile', {
+      p_stripe_subscription_id: subscriptionId,
+    });
 
-    if (profileResult.error) {
-      logger.warn('billing', 'subscription_canceled_profile_update_failed', {
-        stage: 'subscription_canceled_profile_update',
-        subscriptionId: maskIdentifier(subscriptionId) ?? undefined,
-        userId: maskIdentifier(existingSubscription.user_id) ?? undefined,
-        supabaseError: summarizeSupabaseError(profileResult.error),
-      });
+    if (error) {
+      throwFulfillmentError(
+        'subscription_canceled_profile_downgrade_rpc',
+        STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
+        error,
+        {
+          subscriptionId: maskIdentifier(subscriptionId),
+          userId: maskIdentifier(existingSubscription.user_id),
+        },
+      );
+    }
+
+    const result = getFirstRpcRow<{
+      subscription_found?: boolean | null;
+      new_membership_level?: string | null;
+    }>(data);
+
+    if (!result?.subscription_found || result.new_membership_level !== 'free') {
+      throwFulfillmentError(
+        'subscription_canceled_profile_downgrade_rpc',
+        STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
+        new Error('Canceled subscription profile downgrade RPC did not confirm a free membership level'),
+        {
+          subscriptionId: maskIdentifier(subscriptionId),
+          userId: maskIdentifier(existingSubscription.user_id),
+          subscriptionFound: result?.subscription_found ?? null,
+          newMembershipLevel: result?.new_membership_level ?? null,
+        },
+      );
     }
   }
 }
