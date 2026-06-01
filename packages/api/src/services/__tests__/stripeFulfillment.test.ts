@@ -1687,7 +1687,85 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
-  it('keeps cancel-only handling scoped to subscription downgrade without credit clawback', async () => {
+  it('syncs cancel-at-period-end without downgrading the profile or touching credits', async () => {
+    const tableCalls: string[] = [];
+    const subscriptionUpdates: unknown[] = [];
+    const profileUpdates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        tableCalls.push(table);
+
+        if (table === 'user_subscriptions') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  user_id: '00000000-0000-4000-8000-000000000200',
+                  membership_plan_id: 'plan-pro',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              subscriptionUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'profiles') {
+          return {
+            update(payload: unknown) {
+              profileUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`cancel-only should not touch ${table}`);
+      },
+    };
+
+    await syncSubscriptionState(supabase, {
+      id: 'sub_test_cancel_at_period_end',
+      cancel_at_period_end: true,
+      status: 'active',
+      items: {
+        data: [
+          {
+            current_period_start: 1_742_646_400,
+            current_period_end: 1_745_238_400,
+          },
+        ],
+      },
+    } as unknown as Stripe.Subscription);
+
+    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions']);
+    expect(subscriptionUpdates).toEqual([
+      expect.objectContaining({
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }),
+    ]);
+    expect(profileUpdates).toEqual([]);
+  });
+
+  it('keeps canceled subscription handling scoped away from credits and refund reconciliation', async () => {
     const tableCalls: string[] = [];
     const subscriptionUpdates: unknown[] = [];
     const profileUpdates: unknown[] = [];
@@ -1765,6 +1843,105 @@ describe('stripe fulfillment helpers', () => {
     expect(profileUpdates).toEqual([
       { membership_level: 'free' },
     ]);
+    expect(loggerState.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the webhook when canceled subscription profile downgrade is blocked', async () => {
+    const tableCalls: string[] = [];
+    const subscriptionUpdates: unknown[] = [];
+    const profileUpdates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        tableCalls.push(table);
+
+        if (table === 'user_subscriptions') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  user_id: '00000000-0000-4000-8000-000000000200',
+                  membership_plan_id: 'plan-pro',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              subscriptionUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'profiles') {
+          return {
+            update(payload: unknown) {
+              profileUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({
+                    error: {
+                      code: '42501',
+                      message: 'permission denied for table profiles',
+                    },
+                  });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`cancel-only should not touch ${table}`);
+      },
+    };
+
+    await expect(syncSubscriptionState(supabase, {
+      id: 'sub_test_cancel_profile_blocked',
+      cancel_at_period_end: false,
+      status: 'canceled',
+      items: {
+        data: [
+          {
+            current_period_start: 1_742_646_400,
+            current_period_end: 1_745_238_400,
+          },
+        ],
+      },
+    } as unknown as Stripe.Subscription)).resolves.toBeUndefined();
+
+    expect(tableCalls).toEqual(['user_subscriptions', 'user_subscriptions', 'profiles']);
+    expect(subscriptionUpdates).toEqual([
+      expect.objectContaining({
+        status: 'canceled',
+        cancel_at_period_end: 'false',
+      }),
+    ]);
+    expect(profileUpdates).toEqual([
+      { membership_level: 'free' },
+    ]);
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_canceled_profile_update_failed',
+      expect.objectContaining({
+        stage: 'subscription_canceled_profile_update',
+        subscriptionId: 'sub_test...locked',
+        userId: '00000000...000200',
+        supabaseError: expect.objectContaining({
+          code: '42501',
+          message: 'permission denied for table profiles',
+        }),
+      }),
+    );
   });
 
   it('does not claim a Stripe subscription was canceled for refund-only events', async () => {

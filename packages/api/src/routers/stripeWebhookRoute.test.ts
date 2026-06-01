@@ -344,6 +344,35 @@ describe('stripe webhook route refund routing', () => {
     );
   });
 
+  it.each([
+    'customer.subscription.updated',
+    'customer.subscription.deleted',
+  ])('routes %s to subscription state sync only', async (eventType) => {
+    const subscription = {
+      id: 'sub_test_cancel_only',
+      object: 'subscription',
+      status: eventType.endsWith('deleted') ? 'canceled' : 'active',
+      cancel_at_period_end: eventType.endsWith('updated'),
+    };
+    routeMocks.constructEvent.mockReturnValue({
+      id: `evt_test_${eventType.replaceAll('.', '_')}`,
+      type: eventType,
+      data: { object: subscription },
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.syncSubscriptionState).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      subscription,
+    );
+    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+  });
+
   it('safely ignores unknown Stripe events', async () => {
     routeMocks.constructEvent.mockReturnValue({
       id: 'evt_test_unknown',

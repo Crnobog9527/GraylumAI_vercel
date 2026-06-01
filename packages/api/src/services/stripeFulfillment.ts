@@ -1093,12 +1093,12 @@ export async function syncSubscriptionState(
       .eq('id', existingSubscription.user_id);
 
     if (profileResult.error) {
-      throwFulfillmentError(
-        'subscription_canceled_profile_update',
-        STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
-        profileResult.error,
-        { subscriptionId: maskIdentifier(subscriptionId) },
-      );
+      logger.warn('billing', 'subscription_canceled_profile_update_failed', {
+        stage: 'subscription_canceled_profile_update',
+        subscriptionId: maskIdentifier(subscriptionId) ?? undefined,
+        userId: maskIdentifier(existingSubscription.user_id) ?? undefined,
+        supabaseError: summarizeSupabaseError(profileResult.error),
+      });
     }
   }
 }
