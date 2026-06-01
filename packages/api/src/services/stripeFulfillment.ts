@@ -358,15 +358,14 @@ function buildInvoiceRefundLookupMetadata(invoice: Stripe.Invoice): Record<strin
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   const metadata: Record<string, string> = {};
 
-  if (!paymentIntentId && !chargeId) {
-    return null;
-  }
-
   if (paymentIntentId) metadata.paymentIntentId = paymentIntentId;
   if (chargeId) metadata.chargeId = chargeId;
   if (subscriptionId) metadata.subscriptionId = subscriptionId;
+  if (!paymentIntentId && !chargeId && subscriptionId) {
+    metadata.refundLookupMetadataGap = 'missing_payment_lookup_ids';
+  }
 
-  return metadata;
+  return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
 function mergeMetadata(
@@ -409,6 +408,7 @@ async function backfillInvoiceRefundLookupMetadata(
         orderId: maskIdentifier(invoiceOrderId),
         paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
         chargeId: maskIdentifier(metadataPatch.chargeId),
+        subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
       },
     );
   }
@@ -419,8 +419,17 @@ async function backfillInvoiceRefundLookupMetadata(
       orderId: maskIdentifier(invoiceOrderId),
       paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
       chargeId: maskIdentifier(metadataPatch.chargeId),
+      subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
     });
     return;
+  }
+
+  if (!metadataPatch.paymentIntentId && !metadataPatch.chargeId) {
+    logger.warn('billing', 'invoice_refund_lookup_metadata_gap', {
+      invoiceId: maskIdentifier(invoice.id),
+      orderId: maskIdentifier(invoiceOrderId),
+      subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
+    });
   }
 
   const nextMetadata = mergeMetadata(existing.data.metadata, metadataPatch);
@@ -439,6 +448,7 @@ async function backfillInvoiceRefundLookupMetadata(
         orderId: maskIdentifier(invoiceOrderId),
         paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
         chargeId: maskIdentifier(metadataPatch.chargeId),
+        subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
       },
     );
   }

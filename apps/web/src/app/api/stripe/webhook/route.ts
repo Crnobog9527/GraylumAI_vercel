@@ -19,6 +19,43 @@ export const runtime = 'nodejs';
 type StripeWebhookEvent = ReturnType<
   ReturnType<typeof getStripeClient>['webhooks']['constructEvent']
 >;
+type StripeInvoice = Parameters<typeof fulfillMembershipInvoice>[1];
+
+const INVOICE_REFUND_LOOKUP_EXPANSIONS = [
+  'payments',
+  'payments.data.payment.charge',
+  'payments.data.payment.payment_intent',
+  'payments.data.payment.payment_intent.latest_charge',
+] as const;
+
+function maskStripeIdentifier(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  if (value.length <= 12) {
+    return `${value.slice(0, 4)}...`;
+  }
+
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+async function retrieveInvoiceWithRefundLookupDetails(invoice: StripeInvoice) {
+  if (!invoice.id) {
+    return invoice;
+  }
+
+  try {
+    return await getStripeClient().invoices.retrieve(invoice.id, {
+      expand: [...INVOICE_REFUND_LOOKUP_EXPANSIONS],
+    });
+  } catch {
+    logServerError('billing', 'stripe_invoice_refund_lookup_retrieve_failed', {
+      invoiceId: maskStripeIdentifier(invoice.id),
+    });
+    return invoice;
+  }
+}
 
 export async function POST(request: Request) {
   const signature = request.headers.get('stripe-signature');
@@ -56,7 +93,8 @@ export async function POST(request: Request) {
         break;
       }
       case 'invoice.payment_succeeded': {
-        await fulfillMembershipInvoice(supabase, event.data.object);
+        const invoice = await retrieveInvoiceWithRefundLookupDetails(event.data.object);
+        await fulfillMembershipInvoice(supabase, invoice);
         break;
       }
       case 'charge.refunded': {

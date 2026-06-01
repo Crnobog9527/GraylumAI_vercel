@@ -17,6 +17,7 @@ const routeMocks = vi.hoisted(() => {
     getStripeWebhookSecret: vi.fn(() => 'whsec_test_secret'),
     logServerError: vi.fn(),
     reconcileStripeRefund: vi.fn(),
+    retrieveInvoice: vi.fn(),
     supabaseClient,
     syncSubscriptionState: vi.fn(),
     upsertPaymentOrderBySession: vi.fn(),
@@ -26,6 +27,9 @@ const routeMocks = vi.hoisted(() => {
 vi.mock('@repo/api/src/services/stripe', () => ({
   createServiceRoleSupabaseClient: routeMocks.createServiceRoleSupabaseClient,
   getStripeClient: () => ({
+    invoices: {
+      retrieve: routeMocks.retrieveInvoice,
+    },
     webhooks: {
       constructEvent: routeMocks.constructEvent,
     },
@@ -121,6 +125,73 @@ describe('stripe webhook route refund routing', () => {
         eventType,
         refund,
       },
+    );
+  });
+
+  it('retrieves invoice.payment_succeeded with invoice payment expansions before fulfillment', async () => {
+    const invoice = { id: 'in_test_invoice_payment_succeeded', object: 'invoice' };
+    const expandedInvoice = {
+      ...invoice,
+      payments: {
+        data: [
+          {
+            payment: {
+              payment_intent: {
+                id: 'pi_test_invoice_payment_succeeded',
+                latest_charge: 'ch_test_invoice_payment_succeeded',
+              },
+            },
+          },
+        ],
+      },
+    };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_invoice_payment_succeeded',
+      type: 'invoice.payment_succeeded',
+      data: { object: invoice },
+    });
+    routeMocks.retrieveInvoice.mockResolvedValue(expandedInvoice);
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.retrieveInvoice).toHaveBeenCalledWith(
+      'in_test_invoice_payment_succeeded',
+      {
+        expand: expect.arrayContaining([
+          'payments',
+          'payments.data.payment.charge',
+          'payments.data.payment.payment_intent',
+          'payments.data.payment.payment_intent.latest_charge',
+        ]),
+      },
+    );
+    expect(routeMocks.fulfillMembershipInvoice).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      expandedInvoice,
+    );
+  });
+
+  it('continues invoice fulfillment with the webhook invoice when lookup expansion fails', async () => {
+    const invoice = { id: 'in_test_invoice_retrieve_failure', object: 'invoice' };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_invoice_retrieve_failure',
+      type: 'invoice.payment_succeeded',
+      data: { object: invoice },
+    });
+    routeMocks.retrieveInvoice.mockRejectedValue(new Error('Stripe retrieve unavailable'));
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.fulfillMembershipInvoice).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      invoice,
+    );
+    expect(routeMocks.logServerError).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_refund_lookup_retrieve_failed',
+      { invoiceId: 'in_test_...ailure' },
     );
   });
 

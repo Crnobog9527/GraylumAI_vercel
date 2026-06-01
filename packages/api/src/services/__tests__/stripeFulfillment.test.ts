@@ -503,12 +503,16 @@ describe('stripe fulfillment helpers', () => {
     const supabase = {
       from(table: string) {
         if (table === 'payment_orders') {
+          let selected = '';
+          let updatePayload: unknown = null;
+
           return {
-            select() {
+            select(value: string) {
+              selected = value;
               return this;
             },
             eq(column: string, value: string) {
-              if (column === 'stripe_invoice_id') {
+              if (!updatePayload && selected === 'id, fulfilled_at' && column === 'stripe_invoice_id') {
                 return {
                   maybeSingle() {
                     return Promise.resolve({
@@ -521,7 +525,28 @@ describe('stripe fulfillment helpers', () => {
                 };
               }
 
-              if (column === 'stripe_subscription_id') {
+              if (!updatePayload && selected === 'metadata' && column === 'id') {
+                expect(value).toBe('invoice-order-1');
+                return {
+                  maybeSingle() {
+                    return Promise.resolve({
+                      data: {
+                        metadata: {
+                          grantedCredits: 1500,
+                          fulfillmentSource: 'atomic_fulfill_membership_invoice',
+                        },
+                      },
+                      error: null,
+                    });
+                  },
+                };
+              }
+
+              if (updatePayload && column === 'id') {
+                return Promise.resolve({ error: null });
+              }
+
+              if (updatePayload && column === 'stripe_subscription_id') {
                 return {
                   is(nullColumn: string, nullValue: null) {
                     expect(nullColumn).toBe('stripe_invoice_id');
@@ -540,6 +565,7 @@ describe('stripe fulfillment helpers', () => {
               throw new Error('limit should not be called when invoice order already exists');
             },
             update(payload: unknown) {
+              updatePayload = payload;
               updates.push({ table, payload });
               return this;
             },
@@ -585,6 +611,17 @@ describe('stripe fulfillment helpers', () => {
     );
 
     expect(updates).toEqual([
+      {
+        table: 'payment_orders',
+        payload: {
+          metadata: {
+            grantedCredits: 1500,
+            fulfillmentSource: 'atomic_fulfill_membership_invoice',
+            subscriptionId: 'sub_test_123',
+            refundLookupMetadataGap: 'missing_payment_lookup_ids',
+          },
+        },
+      },
       {
         table: 'payment_orders',
         payload: expect.objectContaining({
@@ -917,8 +954,12 @@ describe('stripe fulfillment helpers', () => {
           data: [
             {
               payment: {
-                payment_intent: 'pi_test_invoice_lookup_metadata',
-                charge: 'ch_test_invoice_lookup_metadata',
+                payment_intent: {
+                  id: 'pi_test_invoice_lookup_metadata',
+                  latest_charge: {
+                    id: 'ch_test_invoice_lookup_metadata',
+                  },
+                },
               },
             },
           ],
@@ -952,6 +993,125 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
+  });
+
+  it('marks an invoice refund lookup metadata gap when Stripe invoice payment details are unavailable', async () => {
+    const updates: Array<{ type: string; payload: Record<string, unknown>; column: string; value: string }> = [];
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          invoice_order_id: '00000000-0000-4000-8000-000000000903',
+          fulfilled_at: '2026-03-22T12:34:56.000Z',
+        },
+      ],
+      error: null,
+    });
+
+    const supabase = {
+      rpc,
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        let selected = '';
+        let lookup: { column: string; value: string } | null = null;
+
+        return {
+          select(value: string) {
+            selected = value;
+            return this;
+          },
+          eq(column: string, value: string) {
+            lookup = { column, value };
+            return this;
+          },
+          maybeSingle() {
+            if (selected === 'id, fulfilled_at' && lookup?.column === 'stripe_invoice_id') {
+              expect(lookup.value).toBe('in_test_invoice_lookup_metadata_gap');
+              return Promise.resolve({ data: null, error: null });
+            }
+
+            if (selected === 'metadata' && lookup?.column === 'id') {
+              expect(lookup.value).toBe('00000000-0000-4000-8000-000000000903');
+              return Promise.resolve({
+                data: {
+                  metadata: {
+                    grantedCredits: 1500,
+                    transactionId: '00000000-0000-4000-8000-000000000904',
+                    fulfillmentSource: 'atomic_fulfill_membership_invoice',
+                  },
+                },
+                error: null,
+              });
+            }
+
+            throw new Error(`Unexpected maybeSingle(${selected}, ${lookup?.column})`);
+          },
+          update(payload: Record<string, unknown>) {
+            if ('metadata' in payload) {
+              return {
+                eq(column: string, value: string) {
+                  updates.push({ type: 'invoice-metadata', payload, column, value });
+                  return Promise.resolve({ error: null });
+                },
+              };
+            }
+
+            return {
+              eq(column: string, value: string) {
+                return {
+                  is() {
+                    updates.push({ type: 'checkout-backfill', payload, column, value });
+                    return Promise.resolve({ error: null });
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_test_invoice_lookup_metadata_gap',
+        customer: 'cus_test_invoice_lookup_metadata_gap',
+        status: 'paid',
+        currency: 'usd',
+        amount_paid: 990,
+        period_start: 1_742_646_400,
+        period_end: 1_745_238_400,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_invoice_lookup_metadata_gap',
+          },
+        },
+      } as unknown as Stripe.Invoice,
+    );
+
+    expect(updates[0]).toEqual({
+      type: 'invoice-metadata',
+      column: 'id',
+      value: '00000000-0000-4000-8000-000000000903',
+      payload: {
+        metadata: {
+          grantedCredits: 1500,
+          transactionId: '00000000-0000-4000-8000-000000000904',
+          fulfillmentSource: 'atomic_fulfill_membership_invoice',
+          subscriptionId: 'sub_test_invoice_lookup_metadata_gap',
+          refundLookupMetadataGap: 'missing_payment_lookup_ids',
+        },
+      },
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'invoice_refund_lookup_metadata_gap',
+      {
+        invoiceId: 'in_test_...ta_gap',
+        orderId: '00000000...000903',
+        subscriptionId: 'sub_test...ta_gap',
+      },
+    );
   });
 
   it('backfills refund lookup metadata when an already fulfilled invoice is replayed', async () => {
