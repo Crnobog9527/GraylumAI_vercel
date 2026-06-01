@@ -17,6 +17,9 @@ const routeMocks = vi.hoisted(() => {
     getStripeWebhookSecret: vi.fn(() => 'whsec_test_secret'),
     logServerError: vi.fn(),
     reconcileStripeRefund: vi.fn(),
+    listInvoicePayments: vi.fn(),
+    retrieveCharge: vi.fn(),
+    retrieveRefund: vi.fn(),
     retrieveInvoice: vi.fn(),
     supabaseClient,
     syncSubscriptionState: vi.fn(),
@@ -27,8 +30,17 @@ const routeMocks = vi.hoisted(() => {
 vi.mock('@repo/api/src/services/stripe', () => ({
   createServiceRoleSupabaseClient: routeMocks.createServiceRoleSupabaseClient,
   getStripeClient: () => ({
+    charges: {
+      retrieve: routeMocks.retrieveCharge,
+    },
     invoices: {
       retrieve: routeMocks.retrieveInvoice,
+    },
+    invoicePayments: {
+      list: routeMocks.listInvoicePayments,
+    },
+    refunds: {
+      retrieve: routeMocks.retrieveRefund,
     },
     webhooks: {
       constructEvent: routeMocks.constructEvent,
@@ -64,6 +76,10 @@ function makeWebhookRequest(signature = 'sig_test') {
 describe('stripe webhook route refund routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    routeMocks.listInvoicePayments.mockReset();
+    routeMocks.retrieveCharge.mockReset();
+    routeMocks.retrieveRefund.mockReset();
+    routeMocks.retrieveInvoice.mockReset();
   });
 
   it('returns 400 for invalid Stripe webhook signatures', async () => {
@@ -92,6 +108,14 @@ describe('stripe webhook route refund routing', () => {
     const response = await POST(makeWebhookRequest());
 
     expect(response.status).toBe(200);
+    expect(routeMocks.retrieveCharge).toHaveBeenCalledWith(
+      'ch_test_refunded',
+      {
+        expand: expect.arrayContaining([
+          'payment_intent',
+        ]),
+      },
+    );
     expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
       routeMocks.supabaseClient,
       {
@@ -109,6 +133,7 @@ describe('stripe webhook route refund routing', () => {
     'refund.failed',
   ] as const)('routes %s to refund reconciliation with the refund payload', async (eventType) => {
     const refund = { id: `re_test_${eventType.replaceAll('.', '_')}`, object: 'refund' };
+    routeMocks.retrieveRefund.mockResolvedValue(refund);
     routeMocks.constructEvent.mockReturnValue({
       id: `evt_test_${eventType.replaceAll('.', '_')}`,
       type: eventType,
@@ -118,12 +143,136 @@ describe('stripe webhook route refund routing', () => {
     const response = await POST(makeWebhookRequest());
 
     expect(response.status).toBe(200);
+    expect(routeMocks.retrieveRefund).toHaveBeenCalledWith(
+      refund.id,
+      {
+        expand: expect.arrayContaining([
+          'charge',
+          'charge.payment_intent',
+          'payment_intent',
+        ]),
+      },
+    );
     expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
       routeMocks.supabaseClient,
       {
         eventId: `evt_test_${eventType.replaceAll('.', '_')}`,
         eventType,
         refund,
+      },
+    );
+  });
+
+  it('enriches charge.refunded payloads with payment intent invoice lookup details', async () => {
+    const charge = { id: 'ch_test_subscription_refunded', object: 'charge' };
+    const enrichedCharge = {
+      ...charge,
+      amount: 990,
+      amount_refunded: 990,
+      payment_intent: {
+        id: 'pi_test_subscription_refunded',
+      },
+      refunded: true,
+    };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_subscription_charge_refunded',
+      type: 'charge.refunded',
+      data: { object: charge },
+    });
+    routeMocks.retrieveCharge.mockResolvedValue(enrichedCharge);
+    routeMocks.listInvoicePayments.mockResolvedValue({
+      data: [
+        {
+          invoice: 'in_test_subscription_refunded',
+        },
+      ],
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.listInvoicePayments).toHaveBeenCalledWith({
+      limit: 1,
+      payment: {
+        type: 'payment_intent',
+        payment_intent: 'pi_test_subscription_refunded',
+      },
+      expand: expect.arrayContaining(['data.invoice']),
+    });
+    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      {
+        eventId: 'evt_test_subscription_charge_refunded',
+        eventType: 'charge.refunded',
+        charge: expect.objectContaining({
+          id: 'ch_test_subscription_refunded',
+          payment_intent: expect.objectContaining({
+            id: 'pi_test_subscription_refunded',
+            invoice: 'in_test_subscription_refunded',
+          }),
+        }),
+      },
+    );
+  });
+
+  it('enriches refund payloads with expanded charge payment intent invoice lookup details', async () => {
+    const refund = {
+      id: 're_test_subscription_refund_created',
+      object: 'refund',
+      charge: 'ch_test_subscription_refund_created',
+    };
+    const enrichedRefund = {
+      ...refund,
+      payment_intent: 'pi_test_subscription_refund_created',
+    };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_subscription_refund_created',
+      type: 'refund.created',
+      data: { object: refund },
+    });
+    routeMocks.retrieveRefund.mockResolvedValue(enrichedRefund);
+    routeMocks.retrieveCharge.mockResolvedValue({
+      id: 'ch_test_subscription_refund_created',
+      payment_intent: {
+        id: 'pi_test_subscription_refund_created',
+      },
+    });
+    routeMocks.listInvoicePayments.mockResolvedValue({
+      data: [
+        {
+          invoice: 'in_test_subscription_refund_created',
+        },
+      ],
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(response.status).toBe(200);
+    expect(routeMocks.retrieveCharge).toHaveBeenCalledWith(
+      'ch_test_subscription_refund_created',
+      {
+        expand: expect.arrayContaining([
+          'payment_intent',
+        ]),
+      },
+    );
+    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      {
+        eventId: 'evt_test_subscription_refund_created',
+        eventType: 'refund.created',
+        refund: expect.objectContaining({
+          id: 're_test_subscription_refund_created',
+          charge: expect.objectContaining({
+            id: 'ch_test_subscription_refund_created',
+            payment_intent: expect.objectContaining({
+              invoice: 'in_test_subscription_refund_created',
+            }),
+          }),
+          payment_intent: expect.objectContaining({
+            invoice: 'in_test_subscription_refund_created',
+          }),
+        }),
       },
     );
   });

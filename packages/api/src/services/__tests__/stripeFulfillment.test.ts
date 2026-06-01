@@ -1399,6 +1399,203 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
+  it('reconciles charge.refunded through an expanded payment intent invoice when the charge has no direct invoice id', async () => {
+    const { lookups, rpc, supabase } = makeRefundSupabase({
+      match: { column: 'stripe_invoice_id', value: 'in_test_charge_refund_pi_invoice' },
+    });
+
+    await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_charge_refund_pi_invoice',
+      eventType: 'charge.refunded',
+      charge: {
+        id: 'ch_test_charge_refund_pi_invoice',
+        amount: 990,
+        amount_refunded: 990,
+        currency: 'usd',
+        created: 1_742_646_400,
+        invoice: null,
+        payment_intent: {
+          id: 'pi_test_charge_refund_pi_invoice',
+          invoice: {
+            id: 'in_test_charge_refund_pi_invoice',
+            parent: {
+              subscription_details: {
+                subscription: 'sub_test_charge_refund_pi_invoice',
+              },
+            },
+          },
+        },
+        refunded: true,
+        refunds: {
+          data: [
+            {
+              id: 're_test_charge_refund_pi_invoice',
+              amount: 990,
+              created: 1_742_646_500,
+              currency: 'usd',
+              metadata: {},
+              reason: 'requested_by_customer',
+              status: 'succeeded',
+            },
+          ],
+        },
+      } as unknown as Stripe.Charge,
+    });
+
+    expect(lookups).toEqual([
+      {
+        table: 'payment_orders',
+        column: 'stripe_invoice_id',
+        value: 'in_test_charge_refund_pi_invoice',
+      },
+    ]);
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_charge_id: 'ch_test_charge_refund_pi_invoice',
+      p_invoice_id: 'in_test_charge_refund_pi_invoice',
+      p_payment_intent_id: 'pi_test_charge_refund_pi_invoice',
+      p_refund_event_type: 'charge.refunded',
+      p_refund_id: 're_test_charge_refund_pi_invoice',
+      p_subscription_id: 'sub_test_charge_refund_pi_invoice',
+    }));
+  });
+
+  it('reconciles refund events through expanded charge payment intent invoice details', async () => {
+    const { lookups, rpc, supabase } = makeRefundSupabase({
+      match: { column: 'stripe_invoice_id', value: 'in_test_refund_pi_invoice' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000260',
+        amount_total: 990,
+        metadata: {
+          grantedCredits: 1500,
+          fulfillmentSource: 'atomic_fulfill_membership_invoice',
+          refundLookupMetadataGap: 'missing_payment_lookup_ids',
+          subscriptionId: 'sub_test_refund_pi_invoice',
+        },
+      },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000260',
+          user_id: '00000000-0000-4000-8000-000000000101',
+          order_status: 'refunded',
+          clawback_amount: 1500,
+          shortfall_amount: 0,
+          transaction_id: '00000000-0000-4000-8000-000000000261',
+          already_reconciled: false,
+        },
+      ],
+    });
+
+    const result = await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_refund_pi_invoice',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_refund_pi_invoice',
+        amount: 990,
+        charge: {
+          id: 'ch_test_refund_pi_invoice',
+          amount: 990,
+          currency: 'usd',
+          invoice: null,
+          payment_intent: {
+            id: 'pi_test_refund_pi_invoice',
+            invoice: {
+              id: 'in_test_refund_pi_invoice',
+              parent: {
+                subscription_details: {
+                  subscription: 'sub_test_refund_pi_invoice',
+                },
+              },
+            },
+          },
+          refunded: true,
+        },
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: null,
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(lookups).toEqual([
+      {
+        table: 'payment_orders',
+        column: 'stripe_invoice_id',
+        value: 'in_test_refund_pi_invoice',
+      },
+    ]);
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_charge_id: 'ch_test_refund_pi_invoice',
+      p_invoice_id: 'in_test_refund_pi_invoice',
+      p_is_full_refund: true,
+      p_order_id: '00000000-0000-4000-8000-000000000260',
+      p_payment_intent_id: 'pi_test_refund_pi_invoice',
+      p_refund_event_type: 'refund.created',
+      p_refund_id: 're_test_refund_pi_invoice',
+      p_subscription_id: 'sub_test_refund_pi_invoice',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      order_status: 'refunded',
+      clawback_amount: 1500,
+      shortfall_amount: 0,
+    }));
+  });
+
+  it('logs safe lookup context when a subscription refund still cannot find an order', async () => {
+    const { rpc, supabase } = makeRefundSupabase({
+      match: { column: 'stripe_invoice_id', value: 'in_test_unrelated_invoice' },
+    });
+
+    const result = await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_subscription_lookup_miss',
+      eventType: 'refund.updated',
+      refund: {
+        id: 're_test_subscription_lookup_miss',
+        amount: 990,
+        charge: {
+          id: 'ch_test_subscription_lookup_miss',
+          amount: 990,
+          currency: 'usd',
+          payment_intent: {
+            id: 'pi_test_subscription_lookup_miss',
+            invoice: {
+              id: 'in_test_subscription_lookup_miss',
+              parent: {
+                subscription_details: {
+                  subscription: 'sub_test_subscription_lookup_miss',
+                },
+              },
+            },
+          },
+          refunded: true,
+        },
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: null,
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(result).toBeNull();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'stripe_refund_order_not_found',
+      expect.objectContaining({
+        eventId: expect.any(String),
+        eventType: 'refund.updated',
+        refundId: expect.any(String),
+        chargeId: expect.any(String),
+        invoiceId: expect.any(String),
+        paymentIntentId: expect.any(String),
+        subscriptionId: expect.any(String),
+      }),
+    );
+  });
+
   it('uses a stable refund idempotency key for duplicate refund events', async () => {
     const { rpc, supabase } = makeRefundSupabase({
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_duplicate_refund' },
