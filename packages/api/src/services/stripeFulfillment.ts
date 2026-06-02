@@ -19,11 +19,15 @@ const STRIPE_FULFILLMENT_ERRORS = {
   missingCreditFulfilledAt: 'Atomic credit fulfillment returned no fulfilled_at',
   invoiceSubscriptionMissing: 'Stripe invoice is missing subscription id',
   invoiceOrderLookup: 'Failed to look up invoice payment order',
+  invoiceRefundLookupMetadataBackfillLookup: 'Failed to look up invoice order refund metadata',
+  invoiceRefundLookupMetadataBackfillUpdate: 'Failed to update invoice order refund metadata',
   fulfillMembershipInvoice: 'Failed to fulfill membership invoice',
   missingMembershipFulfilledAt: 'Atomic membership fulfillment returned no fulfilled_at',
   subscriptionLookup: 'Failed to look up subscription state',
   subscriptionUpdate: 'Failed to update subscription state',
   canceledProfileDowngrade: 'Failed to downgrade canceled subscription profile',
+  refundOrderLookup: 'Failed to look up refunded payment order',
+  reconcileRefund: 'Failed to reconcile Stripe refund',
 } as const;
 
 class StripeFulfillmentError extends Error {
@@ -65,13 +69,21 @@ function maskKnownIdentifiers(message: string | null | undefined) {
 
   return message
     .replace(
-      /\b(?:cs_(?:test|live)|sub|in|cus|price|pi|ch)_[A-Za-z0-9_]+\b/g,
+      /\b(?:cs_(?:test|live)|sub|in|cus|price|pi|ch|re|evt)_[A-Za-z0-9_]+\b/g,
       (value) => maskIdentifier(value) ?? value,
     )
     .replace(
       /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
       (value) => maskIdentifier(value) ?? value,
     );
+}
+
+function asMetadataRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function summarizeSupabaseError(error: unknown) {
@@ -156,6 +168,209 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   return null;
 }
 
+function getObjectId(value: { id?: string | null } | string | null | undefined) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  return value?.id ?? null;
+}
+
+function getUnknownObjectId(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value && typeof value === 'object' && 'id' in value) {
+    const id = (value as { id?: unknown }).id;
+    return typeof id === 'string' && id.trim() ? id.trim() : null;
+  }
+
+  return null;
+}
+
+function getCheckoutSessionPaymentIntentId(session: Stripe.Checkout.Session) {
+  return getObjectId(session.payment_intent as { id?: string | null } | string | null | undefined);
+}
+
+function getChargeInvoiceId(charge: Stripe.Charge) {
+  const chargeRecord = charge as Stripe.Charge & {
+    invoice?: string | Stripe.Invoice | null;
+  };
+
+  return getObjectId(chargeRecord.invoice);
+}
+
+function getInvoiceIdFromUnknown(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  return typeof record.id === 'string' ? record.id : null;
+}
+
+function getSubscriptionIdFromInvoiceLike(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  return getInvoiceSubscriptionId(value as Stripe.Invoice);
+}
+
+function getInvoiceIdFromPaymentIntent(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  return getInvoiceIdFromUnknown((value as Record<string, unknown>).invoice);
+}
+
+function getSubscriptionIdFromPaymentIntentInvoice(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  return getSubscriptionIdFromInvoiceLike((value as Record<string, unknown>).invoice);
+}
+
+function getChargeInvoiceSubscriptionId(charge: Stripe.Charge) {
+  const chargeRecord = charge as Stripe.Charge & {
+    invoice?: string | Stripe.Invoice | null;
+  };
+
+  return getSubscriptionIdFromInvoiceLike(chargeRecord.invoice);
+}
+
+function getInvoicePaymentEntries(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    payments?: {
+      data?: unknown[];
+    } | null;
+  };
+
+  return Array.isArray(invoiceRecord.payments?.data) ? invoiceRecord.payments.data : [];
+}
+
+function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    confirmation_secret?: {
+      payment_intent?: unknown;
+    } | null;
+    payment_intent?: unknown;
+  };
+
+  const candidates: unknown[] = [
+    invoiceRecord.payment_intent,
+    invoiceRecord.confirmation_secret?.payment_intent,
+  ];
+
+  for (const entry of getInvoicePaymentEntries(invoice)) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const entryRecord = entry as unknown as Record<string, unknown>;
+    candidates.push(entryRecord.payment_intent);
+
+    const payment = entryRecord.payment;
+    if (payment && typeof payment === 'object') {
+      const paymentRecord = payment as Record<string, unknown>;
+      candidates.push(paymentRecord.payment_intent, paymentRecord.paymentIntent);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const id = getUnknownObjectId(candidate);
+    if (id) {
+      return id;
+    }
+  }
+
+  return null;
+}
+
+function getInvoiceChargeId(invoice: Stripe.Invoice) {
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    charge?: unknown;
+    latest_charge?: unknown;
+  };
+
+  const candidates: unknown[] = [
+    invoiceRecord.charge,
+    invoiceRecord.latest_charge,
+  ];
+
+  for (const entry of getInvoicePaymentEntries(invoice)) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const entryRecord = entry as unknown as Record<string, unknown>;
+    candidates.push(entryRecord.charge, entryRecord.latest_charge);
+
+    const payment = entryRecord.payment;
+    if (payment && typeof payment === 'object') {
+      const paymentRecord = payment as Record<string, unknown>;
+      candidates.push(paymentRecord.charge, paymentRecord.latest_charge);
+
+      const paymentIntent = paymentRecord.payment_intent ?? paymentRecord.paymentIntent;
+      if (paymentIntent && typeof paymentIntent === 'object') {
+        candidates.push((paymentIntent as Record<string, unknown>).latest_charge);
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const id = getUnknownObjectId(candidate);
+    if (id) {
+      return id;
+    }
+  }
+
+  return null;
+}
+
+function getMetadataString(
+  metadata: Stripe.Metadata | null | undefined,
+  keys: string[],
+) {
+  if (!metadata) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getFirstMetadataString(
+  metadataSources: Array<Stripe.Metadata | null | undefined>,
+  keys: string[],
+) {
+  for (const metadata of metadataSources) {
+    const value = getMetadataString(metadata, keys);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function isUuid(value: string | null | undefined) {
+  return Boolean(value?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i));
+}
+
 async function backfillCheckoutOrderFulfillment(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
@@ -182,14 +397,118 @@ async function backfillCheckoutOrderFulfillment(
   }
 }
 
+function buildInvoiceRefundLookupMetadata(invoice: Stripe.Invoice): Record<string, string> | null {
+  const paymentIntentId = getInvoicePaymentIntentId(invoice);
+  const chargeId = getInvoiceChargeId(invoice);
+  const subscriptionId = getInvoiceSubscriptionId(invoice);
+  const metadata: Record<string, string> = {};
+
+  if (paymentIntentId) metadata.paymentIntentId = paymentIntentId;
+  if (chargeId) metadata.chargeId = chargeId;
+  if (subscriptionId) metadata.subscriptionId = subscriptionId;
+  if (!paymentIntentId && !chargeId && subscriptionId) {
+    metadata.refundLookupMetadataGap = 'missing_payment_lookup_ids';
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : null;
+}
+
+function mergeMetadata(
+  current: unknown,
+  patch: Record<string, string>,
+) {
+  return {
+    ...(current && typeof current === 'object' && !Array.isArray(current) ? current : {}),
+    ...patch,
+  };
+}
+
+async function backfillInvoiceRefundLookupMetadata(
+  supabase: SupabaseLikeClient,
+  invoiceOrderId: string | null | undefined,
+  invoice: Stripe.Invoice,
+) {
+  if (!invoiceOrderId) {
+    return;
+  }
+
+  const metadataPatch = buildInvoiceRefundLookupMetadata(invoice);
+  if (!metadataPatch) {
+    return;
+  }
+
+  const existing = await supabase
+    .from('payment_orders')
+    .select('metadata')
+    .eq('id', invoiceOrderId)
+    .maybeSingle();
+
+  if (existing.error) {
+    throwFulfillmentError(
+      'invoice_refund_lookup_metadata_backfill_lookup',
+      STRIPE_FULFILLMENT_ERRORS.invoiceRefundLookupMetadataBackfillLookup,
+      existing.error,
+      {
+        invoiceId: maskIdentifier(invoice.id),
+        orderId: maskIdentifier(invoiceOrderId),
+        paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+        chargeId: maskIdentifier(metadataPatch.chargeId),
+        subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
+      },
+    );
+  }
+
+  if (!existing.data) {
+    logger.warn('billing', 'invoice_refund_lookup_metadata_order_not_found', {
+      invoiceId: maskIdentifier(invoice.id),
+      orderId: maskIdentifier(invoiceOrderId),
+      paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+      chargeId: maskIdentifier(metadataPatch.chargeId),
+      subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
+    });
+    return;
+  }
+
+  if (!metadataPatch.paymentIntentId && !metadataPatch.chargeId) {
+    logger.warn('billing', 'invoice_refund_lookup_metadata_gap', {
+      invoiceId: maskIdentifier(invoice.id),
+      orderId: maskIdentifier(invoiceOrderId),
+      subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
+    });
+  }
+
+  const nextMetadata = mergeMetadata(existing.data.metadata, metadataPatch);
+  const result = await supabase
+    .from('payment_orders')
+    .update({ metadata: nextMetadata })
+    .eq('id', invoiceOrderId);
+
+  if (result.error) {
+    throwFulfillmentError(
+      'invoice_refund_lookup_metadata_backfill_update',
+      STRIPE_FULFILLMENT_ERRORS.invoiceRefundLookupMetadataBackfillUpdate,
+      result.error,
+      {
+        invoiceId: maskIdentifier(invoice.id),
+        orderId: maskIdentifier(invoiceOrderId),
+        paymentIntentId: maskIdentifier(metadataPatch.paymentIntentId),
+        chargeId: maskIdentifier(metadataPatch.chargeId),
+        subscriptionId: maskIdentifier(metadataPatch.subscriptionId),
+      },
+    );
+  }
+}
+
 export async function upsertPaymentOrderBySession(
   supabase: SupabaseLikeClient,
   session: Stripe.Checkout.Session,
 ) {
   const metadata = session.metadata ?? {};
+  const paymentIntentId = getCheckoutSessionPaymentIntentId(session);
+  const subscriptionId = getCheckoutSessionSubscriptionId(session);
   const existing = await supabase
     .from('payment_orders')
-    .select('id')
+    .select('id, metadata')
     .eq('stripe_checkout_session_id', session.id)
     .maybeSingle();
 
@@ -202,6 +521,7 @@ export async function upsertPaymentOrderBySession(
     );
   }
 
+  const existingMetadata = asMetadataRecord(existing.data?.metadata);
   const payload = {
     user_id: metadata.userId ?? session.client_reference_id ?? null,
     item_type: metadata.itemType ?? null,
@@ -209,14 +529,20 @@ export async function upsertPaymentOrderBySession(
     billing_cycle: metadata.billingCycle ?? 'one_time',
     stripe_checkout_session_id: session.id,
     stripe_customer_id: typeof session.customer === 'string' ? session.customer : null,
-    stripe_subscription_id: getCheckoutSessionSubscriptionId(session),
+    stripe_subscription_id: subscriptionId,
     stripe_price_id: metadata.priceId ?? null,
     amount_total: session.amount_total,
     currency: session.currency ?? 'usd',
     mode: session.mode,
     status: session.payment_status === 'paid' ? 'completed' : 'pending',
     payment_status: session.payment_status ?? null,
-    metadata,
+    metadata: {
+      ...metadata,
+      ...existingMetadata,
+      checkoutSessionId: session.id,
+      ...(paymentIntentId ? { paymentIntentId } : {}),
+      ...(subscriptionId ? { subscriptionId } : {}),
+    },
     updated_at: new Date().toISOString(),
   };
 
@@ -356,6 +682,11 @@ export async function fulfillMembershipInvoice(
   }
 
   if (existingInvoiceOrder?.fulfilled_at) {
+    await backfillInvoiceRefundLookupMetadata(
+      supabase,
+      existingInvoiceOrder.id,
+      invoice,
+    );
     await backfillCheckoutOrderFulfillment(
       supabase,
       subscriptionId,
@@ -387,12 +718,327 @@ export async function fulfillMembershipInvoice(
     );
   }
 
-  const result = getFirstRpcRow<{ fulfilled_at?: string | null }>(data);
+  const result = getFirstRpcRow<{ invoice_order_id?: string | null; fulfilled_at?: string | null }>(data);
   if (!result?.fulfilled_at) {
     throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
   }
 
+  await backfillInvoiceRefundLookupMetadata(
+    supabase,
+    result.invoice_order_id,
+    invoice,
+  );
   await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilled_at);
+}
+
+type RefundReconciliationEventType =
+  | 'charge.refunded'
+  | 'charge.refund.updated'
+  | 'refund.created'
+  | 'refund.updated'
+  | 'refund.failed';
+
+type RefundReconciliationInput =
+  | {
+      eventId?: string | null;
+      eventType: 'charge.refunded';
+      charge: Stripe.Charge;
+    }
+  | {
+      eventId?: string | null;
+      eventType: Exclude<RefundReconciliationEventType, 'charge.refunded'>;
+      refund: Stripe.Refund;
+    };
+
+type RefundPaymentOrder = {
+  id: string;
+  amount_total: number | string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type RefundFacts = {
+  amountRefunded: number | null;
+  chargeId: string | null;
+  checkoutSessionId: string | null;
+  currency: string | null;
+  eventId: string | null;
+  eventType: RefundReconciliationEventType;
+  failed: boolean;
+  forceFullRefund: boolean;
+  invoiceId: string | null;
+  orderId: string | null;
+  paymentIntentId: string | null;
+  reason: string | null;
+  refundCreatedAt: string | null;
+  refundId: string | null;
+  refundStatus: string | null;
+  subscriptionId: string | null;
+};
+
+function getLatestChargeRefund(charge: Stripe.Charge) {
+  return charge.refunds?.data?.[0] ?? null;
+}
+
+function buildChargeRefundFacts(input: Extract<RefundReconciliationInput, { charge: Stripe.Charge }>): RefundFacts {
+  const charge = input.charge;
+  const latestRefund = getLatestChargeRefund(charge);
+  const metadataSources = [latestRefund?.metadata, charge.metadata];
+  const refundId = latestRefund?.id ?? null;
+  const amountRefunded = charge.amount_refunded ?? null;
+  const invoiceId = getChargeInvoiceId(charge)
+    ?? getInvoiceIdFromPaymentIntent(charge.payment_intent)
+    ?? getFirstMetadataString(metadataSources, ['invoiceId', 'stripeInvoiceId', 'stripe_invoice_id']);
+  const subscriptionId = getFirstMetadataString(metadataSources, ['subscriptionId', 'stripeSubscriptionId', 'stripe_subscription_id'])
+    ?? getChargeInvoiceSubscriptionId(charge)
+    ?? getSubscriptionIdFromPaymentIntentInvoice(charge.payment_intent);
+
+  return {
+    amountRefunded,
+    chargeId: charge.id,
+    checkoutSessionId: getFirstMetadataString(metadataSources, ['checkoutSessionId', 'stripeCheckoutSessionId', 'stripe_checkout_session_id']),
+    currency: charge.currency ?? null,
+    eventId: input.eventId ?? null,
+    eventType: input.eventType,
+    failed: false,
+    forceFullRefund: Boolean(charge.refunded || (amountRefunded !== null && amountRefunded >= charge.amount)),
+    invoiceId,
+    orderId: getFirstMetadataString(metadataSources, ['paymentOrderId', 'orderId', 'payment_order_id']),
+    paymentIntentId: getObjectId(charge.payment_intent)
+      ?? getFirstMetadataString(metadataSources, ['paymentIntentId', 'stripePaymentIntentId', 'payment_intent_id']),
+    reason: latestRefund?.reason ?? getFirstMetadataString(metadataSources, ['refundReason', 'reason']),
+    refundCreatedAt: asIsoTimestamp(latestRefund?.created ?? charge.created),
+    refundId,
+    refundStatus: latestRefund?.status ?? (charge.refunded ? 'succeeded' : null),
+    subscriptionId,
+  };
+}
+
+function buildRefundFacts(input: Extract<RefundReconciliationInput, { refund: Stripe.Refund }>): RefundFacts {
+  const refund = input.refund;
+  const expandedCharge = typeof refund.charge === 'object' ? refund.charge : null;
+  const metadataSources = [refund.metadata, expandedCharge?.metadata];
+  const invoiceId = (expandedCharge ? getChargeInvoiceId(expandedCharge) : null)
+    ?? getInvoiceIdFromPaymentIntent(refund.payment_intent)
+    ?? getInvoiceIdFromPaymentIntent(expandedCharge?.payment_intent)
+    ?? getFirstMetadataString(metadataSources, ['invoiceId', 'stripeInvoiceId', 'stripe_invoice_id']);
+  const subscriptionId = getFirstMetadataString(metadataSources, ['subscriptionId', 'stripeSubscriptionId', 'stripe_subscription_id'])
+    ?? (expandedCharge ? getChargeInvoiceSubscriptionId(expandedCharge) : null)
+    ?? getSubscriptionIdFromPaymentIntentInvoice(refund.payment_intent)
+    ?? getSubscriptionIdFromPaymentIntentInvoice(expandedCharge?.payment_intent);
+
+  return {
+    amountRefunded: refund.amount ?? null,
+    chargeId: getObjectId(refund.charge),
+    checkoutSessionId: getFirstMetadataString(metadataSources, ['checkoutSessionId', 'stripeCheckoutSessionId', 'stripe_checkout_session_id']),
+    currency: refund.currency ?? null,
+    eventId: input.eventId ?? null,
+    eventType: input.eventType,
+    failed: input.eventType === 'refund.failed' || refund.status === 'failed',
+    forceFullRefund: Boolean(expandedCharge?.refunded || (expandedCharge && refund.amount >= expandedCharge.amount)),
+    invoiceId,
+    orderId: getFirstMetadataString(metadataSources, ['paymentOrderId', 'orderId', 'payment_order_id']),
+    paymentIntentId: getObjectId(refund.payment_intent)
+      ?? getObjectId(expandedCharge?.payment_intent)
+      ?? getFirstMetadataString(metadataSources, ['paymentIntentId', 'stripePaymentIntentId', 'payment_intent_id']),
+    reason: refund.failure_reason ?? refund.reason ?? getFirstMetadataString(metadataSources, ['refundReason', 'reason']),
+    refundCreatedAt: asIsoTimestamp(refund.created),
+    refundId: refund.id,
+    refundStatus: refund.status ?? null,
+    subscriptionId,
+  };
+}
+
+function buildRefundIdempotencyKey(facts: RefundFacts) {
+  if (facts.refundId) {
+    return `stripe_refund:${facts.refundId}`;
+  }
+
+  if (facts.chargeId) {
+    return `stripe_charge_refund:${facts.chargeId}:${facts.amountRefunded ?? 0}`;
+  }
+
+  if (facts.eventId) {
+    return `stripe_refund_event:${facts.eventId}`;
+  }
+
+  return `stripe_refund_order:${facts.eventType}:${facts.amountRefunded ?? 0}`;
+}
+
+async function maybeFindRefundOrder(
+  queryName: string,
+  buildQuery: () => Promise<{ data?: RefundPaymentOrder | null; error?: unknown }>,
+  safeContext: Record<string, unknown>,
+) {
+  const result = await buildQuery();
+
+  if (result.error) {
+    throwFulfillmentError(
+      `refund_order_lookup_${queryName}`,
+      STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+      result.error,
+      safeContext,
+    );
+  }
+
+  return result.data ?? null;
+}
+
+async function findRefundPaymentOrder(
+  supabase: SupabaseLikeClient,
+  facts: RefundFacts,
+): Promise<RefundPaymentOrder | null> {
+  const safeContext = {
+    eventId: maskIdentifier(facts.eventId),
+    eventType: facts.eventType,
+    refundId: maskIdentifier(facts.refundId),
+    chargeId: maskIdentifier(facts.chargeId),
+    invoiceId: maskIdentifier(facts.invoiceId),
+    paymentIntentId: maskIdentifier(facts.paymentIntentId),
+    checkoutSessionId: maskIdentifier(facts.checkoutSessionId),
+    subscriptionId: maskIdentifier(facts.subscriptionId),
+  };
+
+  if (isUuid(facts.orderId)) {
+    const order = await maybeFindRefundOrder(
+      'order_id',
+      () => supabase
+        .from('payment_orders')
+        .select('id, amount_total, metadata')
+        .eq('id', facts.orderId)
+        .maybeSingle(),
+      safeContext,
+    );
+    if (order) return order;
+  }
+
+  if (facts.invoiceId) {
+    const order = await maybeFindRefundOrder(
+      'invoice_id',
+      () => supabase
+        .from('payment_orders')
+        .select('id, amount_total, metadata')
+        .eq('stripe_invoice_id', facts.invoiceId)
+        .maybeSingle(),
+      safeContext,
+    );
+    if (order) return order;
+  }
+
+  if (facts.checkoutSessionId) {
+    const order = await maybeFindRefundOrder(
+      'checkout_session_id',
+      () => supabase
+        .from('payment_orders')
+        .select('id, amount_total, metadata')
+        .eq('stripe_checkout_session_id', facts.checkoutSessionId)
+        .maybeSingle(),
+      safeContext,
+    );
+    if (order) return order;
+  }
+
+  if (facts.paymentIntentId) {
+    const order = await maybeFindRefundOrder(
+      'payment_intent_id',
+      () => supabase
+        .from('payment_orders')
+        .select('id, amount_total, metadata')
+        .eq('metadata->>paymentIntentId', facts.paymentIntentId)
+        .maybeSingle(),
+      safeContext,
+    );
+    if (order) return order;
+  }
+
+  if (facts.chargeId) {
+    const order = await maybeFindRefundOrder(
+      'charge_id',
+      () => supabase
+        .from('payment_orders')
+        .select('id, amount_total, metadata')
+        .eq('metadata->>chargeId', facts.chargeId)
+        .maybeSingle(),
+      safeContext,
+    );
+    if (order) return order;
+  }
+
+  return null;
+}
+
+function isFullRefundForOrder(facts: RefundFacts, order: RefundPaymentOrder) {
+  if (facts.failed) {
+    return false;
+  }
+
+  if (facts.forceFullRefund) {
+    return true;
+  }
+
+  const orderAmount = Number(order.amount_total ?? 0);
+  return Number.isFinite(orderAmount)
+    && orderAmount > 0
+    && facts.amountRefunded !== null
+    && facts.amountRefunded >= orderAmount
+    && (facts.refundStatus === null || facts.refundStatus === 'succeeded');
+}
+
+export async function reconcileStripeRefund(
+  supabase: SupabaseLikeClient,
+  input: RefundReconciliationInput,
+) {
+  const facts = 'charge' in input ? buildChargeRefundFacts(input) : buildRefundFacts(input);
+  const order = await findRefundPaymentOrder(supabase, facts);
+
+  if (!order) {
+    logger.warn('billing', 'stripe_refund_order_not_found', {
+      eventId: maskIdentifier(facts.eventId),
+      eventType: facts.eventType,
+      refundId: maskIdentifier(facts.refundId),
+      chargeId: maskIdentifier(facts.chargeId),
+      invoiceId: maskIdentifier(facts.invoiceId),
+      paymentIntentId: maskIdentifier(facts.paymentIntentId),
+      checkoutSessionId: maskIdentifier(facts.checkoutSessionId),
+      subscriptionId: maskIdentifier(facts.subscriptionId),
+    });
+    return null;
+  }
+
+  const isFullRefund = isFullRefundForOrder(facts, order);
+  const idempotencyKey = buildRefundIdempotencyKey(facts);
+  const { data, error } = await supabase.rpc('atomic_reconcile_stripe_refund', {
+    p_charge_id: facts.chargeId,
+    p_idempotency_key: idempotencyKey,
+    p_invoice_id: facts.invoiceId,
+    p_is_failed: facts.failed,
+    p_is_full_refund: isFullRefund,
+    p_order_id: order.id,
+    p_payment_intent_id: facts.paymentIntentId,
+    p_refund_amount: facts.amountRefunded,
+    p_refund_created_at: facts.refundCreatedAt,
+    p_refund_currency: facts.currency,
+    p_refund_event_type: facts.eventType,
+    p_refund_id: facts.refundId,
+    p_refund_reason: facts.reason,
+    p_refund_status: facts.refundStatus,
+    p_subscription_id: facts.subscriptionId,
+  });
+
+  if (error) {
+    throwFulfillmentError(
+      'reconcile_stripe_refund_rpc',
+      STRIPE_FULFILLMENT_ERRORS.reconcileRefund,
+      error,
+      {
+        eventType: facts.eventType,
+        refundId: maskIdentifier(facts.refundId),
+        chargeId: maskIdentifier(facts.chargeId),
+        orderId: maskIdentifier(order.id),
+      },
+    );
+  }
+
+  return getFirstRpcRow(data);
 }
 
 export async function syncSubscriptionState(
@@ -441,17 +1087,38 @@ export async function syncSubscriptionState(
   }
 
   if (subscription.status === 'canceled' && existingSubscription?.user_id) {
-    const profileResult = await supabase
-      .from('profiles')
-      .update({ membership_level: 'free' })
-      .eq('id', existingSubscription.user_id);
+    const { data, error } = await supabase.rpc('atomic_downgrade_canceled_subscription_profile', {
+      p_stripe_subscription_id: subscriptionId,
+    });
 
-    if (profileResult.error) {
+    if (error) {
       throwFulfillmentError(
-        'subscription_canceled_profile_update',
+        'subscription_canceled_profile_downgrade_rpc',
         STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
-        profileResult.error,
-        { subscriptionId: maskIdentifier(subscriptionId) },
+        error,
+        {
+          subscriptionId: maskIdentifier(subscriptionId),
+          userId: maskIdentifier(existingSubscription.user_id),
+        },
+      );
+    }
+
+    const result = getFirstRpcRow<{
+      subscription_found?: boolean | null;
+      new_membership_level?: string | null;
+    }>(data);
+
+    if (!result?.subscription_found || result.new_membership_level !== 'free') {
+      throwFulfillmentError(
+        'subscription_canceled_profile_downgrade_rpc',
+        STRIPE_FULFILLMENT_ERRORS.canceledProfileDowngrade,
+        new Error('Canceled subscription profile downgrade RPC did not confirm a free membership level'),
+        {
+          subscriptionId: maskIdentifier(subscriptionId),
+          userId: maskIdentifier(existingSubscription.user_id),
+          subscriptionFound: result?.subscription_found ?? null,
+          newMembershipLevel: result?.new_membership_level ?? null,
+        },
       );
     }
   }

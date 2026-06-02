@@ -331,7 +331,7 @@ export const paymentOrders = pgTable('payment_orders', {
   amountTotal: integer('amount_total'),
   currency: text('currency').default('usd').notNull(),
   mode: text('mode', { enum: ['payment', 'subscription'] }).notNull(),
-  status: text('status', { enum: ['pending', 'completed', 'failed', 'cancelled'] }).default('pending').notNull(),
+  status: text('status', { enum: ['pending', 'completed', 'failed', 'cancelled', 'refunded', 'partial_refunded'] }).default('pending').notNull(),
   paymentStatus: text('payment_status'),
   metadata: jsonb('metadata').default({}).notNull(),
   fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
