@@ -65,6 +65,12 @@ function createMaybeSingleQueryBuilder(result: Promise<unknown>) {
     eq() {
       return this;
     },
+    order() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
     maybeSingle() {
       return result;
     },
@@ -371,6 +377,321 @@ describe('paymentsRouter error sanitization', () => {
       item_type: 'credit_package',
       item_id: '123e4567-e89b-42d3-a456-426614174000',
     });
+  });
+
+  it('rejects duplicate membership checkout before Stripe customer lookup, session creation, or order insert', async () => {
+    const sessionCreate = vi.fn();
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: sessionCreate,
+        },
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174111',
+                name: 'Pro',
+                level: 'pro',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_pro_monthly',
+                stripe_yearly_price_id: 'price_test_pro_yearly',
+                monthly_price: 990,
+                yearly_price: 9900,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'sub-row-1',
+                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
+                stripe_subscription_id: 'sub_test_active',
+                status: 'active',
+                cancel_at_period_end: 'false',
+                metadata: {},
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.createCheckoutSession({
+        kind: 'membership_plan',
+        planId: '123e4567-e89b-42d3-a456-426614174111',
+        billingCycle: 'monthly',
+      }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '当前会员订阅仍有效，暂不支持重复购买或切换套餐。',
+    });
+
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
+    expect(sessionCreate).not.toHaveBeenCalled();
+    expect(orderInserts).toHaveLength(0);
+  });
+
+  it('creates membership checkout for a free user with no active subscription', async () => {
+    const sessionCreate = vi.fn().mockResolvedValue({
+      id: 'cs_test_membership',
+      url: 'https://checkout.stripe.com/c/pay/cs_test_membership',
+      payment_status: 'unpaid',
+      subscription: 'sub_test_membership',
+    });
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: sessionCreate,
+        },
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'free',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174222',
+                name: 'Gold',
+                level: 'gold',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_gold_monthly',
+                stripe_yearly_price_id: 'price_test_gold_yearly',
+                monthly_price: 2990,
+                yearly_price: 29900,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions' || table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.createCheckoutSession({
+        kind: 'membership_plan',
+        planId: '123e4567-e89b-42d3-a456-426614174222',
+        billingCycle: 'yearly',
+      }),
+    ).resolves.toEqual({
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_membership',
+      sessionId: 'cs_test_membership',
+    });
+
+    expect(stripeState.getOrCreateStripeCustomerId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        supabase: adminSupabase,
+        userId: 'user-1',
+      }),
+    );
+    expect(sessionCreate).toHaveBeenCalledOnce();
+    expect(orderInserts[0]).toMatchObject({
+      user_id: 'user-1',
+      item_type: 'membership_plan',
+      item_id: '123e4567-e89b-42d3-a456-426614174222',
+      billing_cycle: 'yearly',
+      stripe_customer_id: 'cus_123',
+      stripe_subscription_id: 'sub_test_membership',
+      stripe_price_id: 'price_test_gold_yearly',
+      amount_total: 29900,
+    });
+  });
+
+  it('fails closed for refunded membership conflicts before Stripe session creation or order insert', async () => {
+    const sessionCreate = vi.fn();
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: sessionCreate,
+        },
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174333',
+                name: 'Gold',
+                level: 'gold',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_gold_monthly',
+                stripe_yearly_price_id: 'price_test_gold_yearly',
+                monthly_price: 2990,
+                yearly_price: 29900,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'sub-row-1',
+                stripe_subscription_id: 'sub_test_canceled',
+                status: 'canceled',
+                metadata: {},
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'order-1',
+                status: 'refunded',
+                payment_status: 'refunded',
+                metadata: {},
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.createCheckoutSession({
+        kind: 'membership_plan',
+        planId: '123e4567-e89b-42d3-a456-426614174333',
+        billingCycle: 'monthly',
+      }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '该会员订单存在退款状态，需要人工确认后再操作。',
+    });
+
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
+    expect(sessionCreate).not.toHaveBeenCalled();
+    expect(orderInserts).toHaveLength(0);
   });
 
   it('syncs a paid subscription checkout session through membership fulfillment', async () => {
