@@ -7,6 +7,7 @@
 import { isStripeManagedSubscriptionActive } from './subscriptionOverrides';
 
 export type MembershipLevel = 'free' | 'pro' | 'gold';
+export type EligibilityLevel = MembershipLevel | 'unknown';
 
 export type EntitlementState =
   | 'free'
@@ -30,13 +31,14 @@ export type MembershipEligibilityReasonCode =
   | 'UPGRADE_DOWNGRADE_UNSUPPORTED'
   | 'ENTITLEMENT_CONFLICT'
   | 'REFUNDED_ORDER_REQUIRES_POLICY'
+  | 'UNSUPPORTED_MEMBERSHIP_LEVEL'
   | 'PROFILE_MISSING'
   | 'READ_FAILED';
 
 export type MembershipEligibilityResult = {
   allowed: boolean;
   state: EntitlementState;
-  level: MembershipLevel;
+  level: EligibilityLevel;
   source: 'profile' | 'stripe_subscription' | 'payment_order' | 'admin_override' | 'none' | 'conflict';
   reasonCode: MembershipEligibilityReasonCode;
   safeMessage: string;
@@ -79,14 +81,35 @@ type ResolveMembershipEligibilityInput = {
   profile: ProfileSnapshot | null | undefined;
   action: MembershipEligibilityAction;
   targetPlan?: MembershipPlanSnapshot | null;
-  targetLevel?: MembershipLevel | null;
+  targetLevel?: string | null;
+};
+
+type EntitlementSnapshot = {
+  state: EntitlementState;
+  level: MembershipLevel;
+  source: MembershipEligibilityResult['source'];
+  diagnostics?: Record<string, unknown>;
 };
 
 const PAYMENT_ATTENTION_STATUSES = new Set(['past_due', 'incomplete', 'unpaid']);
 const CANCELED_STATUSES = new Set(['canceled', 'cancelled']);
 
-function normalizeMembershipLevel(value: unknown): MembershipLevel {
-  return value === 'pro' || value === 'gold' ? value : 'free';
+function parseMembershipLevel(value: unknown): {
+  level: MembershipLevel;
+  unsupportedValue: string | null;
+} {
+  if (value === null || value === undefined || value === '') {
+    return { level: 'free', unsupportedValue: null };
+  }
+
+  if (value === 'free' || value === 'pro' || value === 'gold') {
+    return { level: value, unsupportedValue: null };
+  }
+
+  return {
+    level: 'free',
+    unsupportedValue: String(value).slice(0, 80),
+  };
 }
 
 function normalizeStatus(value: unknown) {
@@ -130,7 +153,8 @@ function hasFullRefundSignal(order: PaymentOrderRow | null) {
   }
 
   const status = normalizeStatus(order.status);
-  if (status === 'refunded') {
+  const paymentStatus = normalizeStatus(order.payment_status);
+  if (status === 'refunded' || paymentStatus === 'refunded') {
     return true;
   }
 
@@ -177,7 +201,7 @@ function allowedResult(
 
 function deniedResult(params: {
   state: EntitlementState;
-  level: MembershipLevel;
+  level: EligibilityLevel;
   source: MembershipEligibilityResult['source'];
   reasonCode: MembershipEligibilityReasonCode;
   safeMessage: string;
@@ -201,11 +225,11 @@ function getState(input: {
   profileLevel: MembershipLevel;
   latestSubscription: SubscriptionRow | null;
   latestMembershipOrder: PaymentOrderRow | null;
-}): Omit<MembershipEligibilityResult, 'allowed' | 'reasonCode' | 'safeMessage'> {
+}): EntitlementSnapshot {
   const { profileLevel, latestSubscription, latestMembershipOrder } = input;
   const diagnostics = buildDiagnostics(latestSubscription, latestMembershipOrder);
 
-  if (hasFullRefundSignal(latestMembershipOrder) && profileLevel !== 'free') {
+  if (hasFullRefundSignal(latestMembershipOrder)) {
     return {
       state: 'refunded_requires_policy',
       level: profileLevel,
@@ -407,18 +431,40 @@ export async function resolveMembershipEligibility(
     });
   }
 
-  const profileLevel = normalizeMembershipLevel(input.profile.membership_level);
-  const targetLevel = input.targetLevel ?? normalizeMembershipLevel(input.targetPlan?.level);
+  const targetLevel = input.targetLevel ?? input.targetPlan?.level ?? null;
+  const parsedProfileLevel = parseMembershipLevel(input.profile.membership_level);
+  if (parsedProfileLevel.unsupportedValue) {
+    return deniedResult({
+      state: 'inconsistent',
+      level: 'unknown',
+      source: 'conflict',
+      reasonCode: 'UNSUPPORTED_MEMBERSHIP_LEVEL',
+      safeMessage: '会员等级状态暂不支持，请联系管理员处理后再操作。',
+      diagnostics: {
+        unsupportedProfileLevel: parsedProfileLevel.unsupportedValue,
+      },
+    });
+  }
 
-  if (input.action === 'create_credit_package_checkout' && profileLevel === 'free') {
-    return allowedResult('free', 'free', 'profile');
+  const parsedTargetLevel = parseMembershipLevel(targetLevel);
+  if (targetLevel !== null && targetLevel !== undefined && parsedTargetLevel.unsupportedValue) {
+    return deniedResult({
+      state: 'inconsistent',
+      level: parsedProfileLevel.level,
+      source: 'conflict',
+      reasonCode: 'UNSUPPORTED_MEMBERSHIP_LEVEL',
+      safeMessage: '目标会员等级暂不支持，请联系管理员处理后再操作。',
+      diagnostics: {
+        unsupportedTargetLevel: parsedTargetLevel.unsupportedValue,
+      },
+    });
   }
 
   const facts = await loadLatestMembershipFacts(input.supabase, input.userId);
   if (facts.error) {
     return deniedResult({
       state: 'inconsistent',
-      level: profileLevel,
+      level: parsedProfileLevel.level,
       source: 'conflict',
       reasonCode: 'READ_FAILED',
       safeMessage: '会员状态暂不可用，请稍后重试。',
@@ -429,7 +475,7 @@ export async function resolveMembershipEligibility(
   }
 
   const state = getState({
-    profileLevel,
+    profileLevel: parsedProfileLevel.level,
     latestSubscription: facts.latestSubscription,
     latestMembershipOrder: facts.latestMembershipOrder,
   });
@@ -439,7 +485,7 @@ export async function resolveMembershipEligibility(
     state: state.state,
     level: state.level,
     source: state.source,
-    targetLevel,
+    targetLevel: parsedTargetLevel.level,
     diagnostics: state.diagnostics,
   });
 }

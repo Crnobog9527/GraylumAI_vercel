@@ -382,6 +382,79 @@ describe('adminRouter membership eligibility guard', () => {
       membership_level: 'pro',
     });
   });
+
+  it('rejects unsupported profile membership levels before admin override writes', async () => {
+    const profileUpdate = vi.fn();
+    const activityLogInsert = vi.fn();
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({
+                data: {
+                  membership_level: 'legacy_platinum',
+                  nickname: 'User',
+                  email: 'user@example.com',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              profileUpdate(payload);
+              return {
+                eq() {
+                  return this;
+                },
+                select() {
+                  return this;
+                },
+                single() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'user_subscriptions' || table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        if (table === 'user_activity_logs') {
+          return {
+            insert(payload: unknown) {
+              activityLogInsert(payload);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.updateUserMembership({
+      userId: targetUserId,
+      membershipLevel: 'pro',
+      reason: 'support grant',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '会员等级状态暂不支持，请联系管理员处理后再操作。',
+    });
+
+    expect(profileUpdate).not.toHaveBeenCalled();
+    expect(activityLogInsert).not.toHaveBeenCalled();
+  });
 });
 
 describe('adminRouter performance stats aggregation', () => {

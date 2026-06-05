@@ -92,6 +92,30 @@ describe('resolveMembershipEligibility', () => {
     });
   });
 
+  it('fails closed for credit package checkout when a free profile has an active Stripe subscription', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-1',
+          stripe_subscription_id: 'sub_test_active',
+          status: 'active',
+          cancel_at_period_end: 'false',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'free' },
+      action: 'create_credit_package_checkout',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'inconsistent',
+      level: 'free',
+      source: 'conflict',
+      reasonCode: 'ENTITLEMENT_CONFLICT',
+    });
+  });
+
   it('keeps payment-attention subscriptions managed and blocks plan switches', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({
@@ -117,12 +141,12 @@ describe('resolveMembershipEligibility', () => {
     });
   });
 
-  it('returns refunded_requires_policy for paid profiles with full-refunded membership orders', async () => {
+  it('returns refunded_requires_policy when payment_status is refunded even if order status is not', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({
         order: {
           id: 'order-1',
-          status: 'refunded',
+          status: 'completed',
           payment_status: 'refunded',
         },
       }),
@@ -138,6 +162,42 @@ describe('resolveMembershipEligibility', () => {
       level: 'gold',
       source: 'payment_order',
       reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY',
+    });
+  });
+
+  it('fails closed for unsupported profile membership levels', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({}),
+      userId: 'user-1',
+      profile: { membership_level: 'legacy_platinum' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'inconsistent',
+      level: 'unknown',
+      source: 'conflict',
+      reasonCode: 'UNSUPPORTED_MEMBERSHIP_LEVEL',
+    });
+  });
+
+  it('fails closed for unsupported target plan membership levels', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({}),
+      userId: 'user-1',
+      profile: { membership_level: 'free' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-legacy', level: 'legacy_platinum' },
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'inconsistent',
+      level: 'free',
+      source: 'conflict',
+      reasonCode: 'UNSUPPORTED_MEMBERSHIP_LEVEL',
     });
   });
 
