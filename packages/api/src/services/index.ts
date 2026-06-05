@@ -29,6 +29,7 @@ export * from './promptCacheBuilder';
 // 上下文管理器
 export * from './contextManager';
 export * from './subscriptionOverrides';
+export * from './membershipEligibility';
 
 // 流式响应处理器
 export * from './streamHandler';
