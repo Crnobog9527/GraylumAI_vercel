@@ -685,6 +685,123 @@ describe('paymentsRouter error sanitization', () => {
     });
   });
 
+  it('creates membership checkout for a free user with a stale admin override marker', async () => {
+    const sessionCreate = vi.fn().mockResolvedValue({
+      id: 'cs_test_stale_admin_override',
+      url: 'https://checkout.stripe.com/c/pay/cs_test_stale_admin_override',
+      payment_status: 'unpaid',
+      subscription: 'sub_test_stale_admin_override',
+    });
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: sessionCreate,
+        },
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'free',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174555',
+                name: 'Pro',
+                level: 'pro',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_pro_monthly',
+                stripe_yearly_price_id: 'price_test_pro_yearly',
+                monthly_price: 990,
+                yearly_price: 9900,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'sub-row-admin-override',
+                status: 'admin_override',
+                metadata: { adminOverride: { adminId: 'admin-1' } },
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.createCheckoutSession({
+        kind: 'membership_plan',
+        planId: '123e4567-e89b-42d3-a456-426614174555',
+        billingCycle: 'monthly',
+      }),
+    ).resolves.toEqual({
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_stale_admin_override',
+      sessionId: 'cs_test_stale_admin_override',
+    });
+
+    expect(stripeState.getOrCreateStripeCustomerId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        supabase: adminSupabase,
+        userId: 'user-1',
+      }),
+    );
+    expect(sessionCreate).toHaveBeenCalledOnce();
+    expect(orderInserts[0]).toMatchObject({
+      user_id: 'user-1',
+      item_type: 'membership_plan',
+      item_id: '123e4567-e89b-42d3-a456-426614174555',
+      billing_cycle: 'monthly',
+      stripe_customer_id: 'cus_123',
+      stripe_subscription_id: 'sub_test_stale_admin_override',
+      stripe_price_id: 'price_test_pro_monthly',
+      amount_total: 990,
+    });
+  });
+
   it('rejects unsupported target membership levels before Stripe customer lookup, session creation, or order insert', async () => {
     const sessionCreate = vi.fn();
     const orderInserts: unknown[] = [];

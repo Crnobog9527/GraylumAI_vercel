@@ -66,6 +66,43 @@ describe('resolveMembershipEligibility', () => {
     });
   });
 
+  it.each([
+    [
+      'status marker',
+      {
+        id: 'sub-row-admin-status',
+        status: 'admin_override',
+        metadata: {},
+      },
+    ],
+    [
+      'metadata marker',
+      {
+        id: 'sub-row-admin-metadata',
+        status: 'inactive',
+        metadata: { adminOverride: { adminId: 'admin-1' } },
+      },
+    ],
+  ])('allows free users with a stale admin override %s to create a membership checkout', async (_caseName, subscription) => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription,
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'free' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+    });
+
+    expect(result).toMatchObject({
+      allowed: true,
+      state: 'free',
+      level: 'free',
+      source: 'profile',
+      reasonCode: 'ALLOWED',
+    });
+  });
+
   it('blocks duplicate checkout for the current active Stripe-managed subscription', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({
@@ -88,6 +125,30 @@ describe('resolveMembershipEligibility', () => {
       state: 'active',
       level: 'pro',
       source: 'stripe_subscription',
+      reasonCode: 'CURRENT_PLAN',
+    });
+  });
+
+  it('keeps paid admin overrides as an existing entitlement and blocks duplicate checkout', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-admin-paid',
+          status: 'admin_override',
+          metadata: { adminOverride: { adminId: 'admin-1' } },
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'admin_override',
+      level: 'pro',
+      source: 'admin_override',
       reasonCode: 'CURRENT_PLAN',
     });
   });

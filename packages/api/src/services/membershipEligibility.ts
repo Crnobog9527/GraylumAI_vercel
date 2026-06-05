@@ -299,7 +299,7 @@ function getState(input: {
     };
   }
 
-  if (hasAdminOverride(latestSubscription) || profileLevel !== 'free') {
+  if (profileLevel !== 'free') {
     return {
       state: 'admin_override',
       level: profileLevel,
