@@ -7,6 +7,8 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { logServerError } from '@/lib/server-log';
 import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
+const SENTRY_TUNNEL_PATH = '/monitoring';
+
 // 公开路径 - 不需要认证
 const PUBLIC_PATHS = [
   '/login',
@@ -56,15 +58,27 @@ const RATE_LIMITED_PATHS = [
 
 // 判断是否为公开路径
 function isPublicPath(pathname: string): boolean {
+  if (isSentryTunnelPath(pathname)) {
+    return true;
+  }
+
   return PUBLIC_PATHS.some(path => pathname.startsWith(path));
 }
 
 function isPublicSitePath(pathname: string): boolean {
+  if (isSentryTunnelPath(pathname)) {
+    return true;
+  }
+
   return PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path));
 }
 
 function isPublicPricingEntryPath(pathname: string): boolean {
   return PUBLIC_PRICING_ENTRY_PATHS.some(path => pathname === path || pathname === `${path}/`);
+}
+
+function isSentryTunnelPath(pathname: string): boolean {
+  return pathname === SENTRY_TUNNEL_PATH || pathname.startsWith(`${SENTRY_TUNNEL_PATH}/`);
 }
 
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
@@ -80,6 +94,10 @@ function needsRateLimit(pathname: string): boolean {
 }
 
 function isMaintenanceBypassPath(pathname: string): boolean {
+  if (isSentryTunnelPath(pathname)) {
+    return true;
+  }
+
   return (
     pathname === '/maintenance' ||
     pathname.startsWith('/admin') ||
