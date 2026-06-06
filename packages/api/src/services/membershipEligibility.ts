@@ -93,6 +93,7 @@ type EntitlementSnapshot = {
 
 const PAYMENT_ATTENTION_STATUSES = new Set(['past_due', 'incomplete', 'unpaid']);
 const CANCELED_STATUSES = new Set(['canceled', 'cancelled']);
+const SUBSCRIPTION_CANDIDATE_LIMIT = 10;
 
 function parseMembershipLevel(value: unknown): {
   level: MembershipLevel;
@@ -145,6 +146,33 @@ function hasAdminOverride(subscription: SubscriptionRow | null) {
 
   const metadata = asRecord(subscription.metadata);
   return normalizeStatus(subscription.status) === 'admin_override' || Boolean(metadata.adminOverride);
+}
+
+function isManagedCurrentSubscription(subscription: SubscriptionRow | null) {
+  if (!subscription?.stripe_subscription_id) {
+    return false;
+  }
+
+  return isStripeManagedSubscriptionActive({
+    stripeSubscriptionId: subscription.stripe_subscription_id,
+    status: subscription.status,
+  });
+}
+
+function normalizeSubscriptionRows(value: unknown): SubscriptionRow[] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(Boolean) as SubscriptionRow[];
+  }
+
+  return [value as SubscriptionRow];
+}
+
+function selectEntitlementSubscription(candidates: SubscriptionRow[]) {
+  return candidates.find(isManagedCurrentSubscription) ?? candidates[0] ?? null;
 }
 
 function hasFullRefundSignal(order: PaymentOrderRow | null) {
@@ -317,14 +345,14 @@ function getState(input: {
 }
 
 async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, userId: string) {
+  const subscriptionQuery = supabase
+    .from('user_subscriptions')
+    .select('id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, current_period_end, metadata')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+
   const [subscriptionResult, orderResult] = await Promise.all([
-    supabase
-      .from('user_subscriptions')
-      .select('id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, current_period_end, metadata')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    executeSubscriptionCandidatesQuery(subscriptionQuery),
     supabase
       .from('payment_orders')
       .select('id, status, payment_status, metadata')
@@ -334,12 +362,36 @@ async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, userId: s
       .limit(1)
       .maybeSingle(),
   ]);
+  const subscriptionCandidates = normalizeSubscriptionRows(subscriptionResult.data);
 
   return {
-    latestSubscription: subscriptionResult.data as SubscriptionRow | null,
+    latestSubscription: selectEntitlementSubscription(subscriptionCandidates),
     latestMembershipOrder: orderResult.data as PaymentOrderRow | null,
     error: subscriptionResult.error ?? orderResult.error ?? null,
   };
+}
+
+async function executeSubscriptionCandidatesQuery(query: any): Promise<{
+  data: unknown;
+  error: unknown;
+}> {
+  const limitedQuery = typeof query?.limit === 'function'
+    ? query.limit(SUBSCRIPTION_CANDIDATE_LIMIT)
+    : query;
+
+  if (typeof limitedQuery?.then === 'function') {
+    return limitedQuery;
+  }
+
+  if (typeof limitedQuery?.maybeSingle === 'function') {
+    const result = await limitedQuery.maybeSingle();
+    return {
+      data: normalizeSubscriptionRows(result.data),
+      error: result.error,
+    };
+  }
+
+  return limitedQuery;
 }
 
 function evaluateAction(input: {
