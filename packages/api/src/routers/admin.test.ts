@@ -68,6 +68,26 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
   };
 }
 
+function createMaybeSingleQueryBuilder(result: Promise<unknown>) {
+  return {
+    select() {
+      return this;
+    },
+    eq() {
+      return this;
+    },
+    order() {
+      return this;
+    },
+    limit() {
+      return this;
+    },
+    maybeSingle() {
+      return result;
+    },
+  };
+}
+
 function createAdminCaller(
   adminSupabase: Record<string, unknown>,
   options: { role?: 'user' | 'admin' } = {},
@@ -156,6 +176,284 @@ describe('adminRouter error sanitization', () => {
 
     expect(cleanupState.startScheduledJobRun).toHaveBeenCalledOnce();
     expect(cleanupState.finishScheduledJobRun).toHaveBeenCalledOnce();
+  });
+});
+
+describe('adminRouter membership eligibility guard', () => {
+  const targetUserId = '00000000-0000-4000-8000-000000000111';
+
+  it('rejects admin membership override for active Stripe-managed subscriptions before profile writes', async () => {
+    const profileUpdate = vi.fn();
+    const subscriptionUpdate = vi.fn();
+    const activityLogInsert = vi.fn();
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({
+                data: {
+                  membership_level: 'pro',
+                  nickname: 'User',
+                  email: 'user@example.com',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              profileUpdate(payload);
+              return {
+                eq() {
+                  return this;
+                },
+                select() {
+                  return this;
+                },
+                single() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'user_subscriptions') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            order() {
+              return this;
+            },
+            limit() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: 'sub-row-1',
+                  metadata: {},
+                  stripe_subscription_id: 'sub_test_active',
+                  status: 'active',
+                  cancel_at_period_end: 'false',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              subscriptionUpdate(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        if (table === 'user_activity_logs') {
+          return {
+            insert(payload: unknown) {
+              activityLogInsert(payload);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.updateUserMembership({
+      userId: targetUserId,
+      membershipLevel: 'gold',
+      reason: 'manual correction',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '该用户存在有效的 Stripe 订阅，禁止在后台直接修改会员等级。请先通过订阅侧调整或取消后再处理。',
+    });
+
+    expect(profileUpdate).not.toHaveBeenCalled();
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+    expect(activityLogInsert).not.toHaveBeenCalled();
+  });
+
+  it('allows admin membership override for a free user with no active subscription', async () => {
+    const profileUpdates: unknown[] = [];
+    const activityLogInsert = vi.fn();
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({
+                data: {
+                  membership_level: 'free',
+                  nickname: 'User',
+                  email: 'user@example.com',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              profileUpdates.push(payload);
+              return {
+                eq() {
+                  return this;
+                },
+                select() {
+                  return this;
+                },
+                single() {
+                  return Promise.resolve({
+                    data: {
+                      id: targetUserId,
+                      membership_level: 'pro',
+                    },
+                    error: null,
+                  });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'user_subscriptions' || table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        if (table === 'user_activity_logs') {
+          return {
+            insert(payload: unknown) {
+              activityLogInsert(payload);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+    const result = await caller.updateUserMembership({
+      userId: targetUserId,
+      membershipLevel: 'pro',
+      reason: 'support grant',
+    });
+
+    expect(profileUpdates).toEqual([{ membership_level: 'pro' }]);
+    expect(activityLogInsert).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: targetUserId,
+      admin_id: 'admin-user',
+      action: '会员等级变更: free → pro',
+      action_type: 'membership_change',
+      details: expect.objectContaining({
+        previousLevel: 'free',
+        newLevel: 'pro',
+        reason: 'support grant',
+      }),
+    }));
+    expect(result).toMatchObject({
+      id: targetUserId,
+      membership_level: 'pro',
+    });
+  });
+
+  it('rejects unsupported profile membership levels before admin override writes', async () => {
+    const profileUpdate = vi.fn();
+    const activityLogInsert = vi.fn();
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({
+                data: {
+                  membership_level: 'legacy_platinum',
+                  nickname: 'User',
+                  email: 'user@example.com',
+                },
+                error: null,
+              });
+            },
+            update(payload: unknown) {
+              profileUpdate(payload);
+              return {
+                eq() {
+                  return this;
+                },
+                select() {
+                  return this;
+                },
+                single() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+
+        if (table === 'user_subscriptions' || table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        if (table === 'user_activity_logs') {
+          return {
+            insert(payload: unknown) {
+              activityLogInsert(payload);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.updateUserMembership({
+      userId: targetUserId,
+      membershipLevel: 'pro',
+      reason: 'support grant',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '会员等级状态暂不支持，请联系管理员处理后再操作。',
+    });
+
+    expect(profileUpdate).not.toHaveBeenCalled();
+    expect(activityLogInsert).not.toHaveBeenCalled();
   });
 });
 

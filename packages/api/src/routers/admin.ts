@@ -7,9 +7,9 @@ import { BILLING_CONSTANTS } from '../types/billing';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import { ConversationCleanupService } from '../services/conversationCleanup';
 import {
-  getAdminMembershipOverrideErrorMessage,
-  isStripeManagedSubscriptionActive,
-} from '../services/subscriptionOverrides';
+  resolveMembershipEligibility,
+  type MembershipEligibilityResult,
+} from '../services/membershipEligibility';
 import {
   finishScheduledJobRun,
   getLatestScheduledJobRun,
@@ -47,6 +47,13 @@ const promptBatchPatchSchema = z.object({
 
 function createAdminOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function throwMembershipEligibilityError(result: MembershipEligibilityResult): never {
+  throw new TRPCError({
+    code: result.reasonCode === 'READ_FAILED' ? 'INTERNAL_SERVER_ERROR' : 'BAD_REQUEST',
+    message: result.safeMessage,
+  });
 }
 
 function logAdminEndpointMetric(
@@ -1107,19 +1114,19 @@ export const adminRouter = router({
       const previousLevel = profile.membership_level;
       const overrideTimestamp = new Date().toISOString();
 
-      // Update membership level
-      const { data, error } = await ctx.supabase
-        .from('profiles')
-        .update({ membership_level: input.membershipLevel })
-        .eq('id', input.userId)
-        .select()
-        .single();
+      const eligibility = await resolveMembershipEligibility({
+        supabase: ctx.supabase,
+        userId: input.userId,
+        profile,
+        action: 'admin_update_membership',
+        targetLevel: input.membershipLevel,
+      });
 
-      if (error) {
-        throw createAdminOperationError('更新用户会员等级', error);
+      if (!eligibility.allowed) {
+        throwMembershipEligibilityError(eligibility);
       }
 
-      const { data: latestSubscription } = await ctx.supabase
+      const { data: latestSubscription, error: latestSubscriptionError } = await ctx.supabase
         .from('user_subscriptions')
         .select('id, metadata, stripe_subscription_id, status')
         .eq('user_id', input.userId)
@@ -1127,23 +1134,12 @@ export const adminRouter = router({
         .limit(1)
         .maybeSingle();
 
-      if (
-        input.membershipLevel !== previousLevel &&
-        latestSubscription &&
-        isStripeManagedSubscriptionActive({
-          stripeSubscriptionId: latestSubscription.stripe_subscription_id,
-          status: latestSubscription.status,
-        })
-      ) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: getAdminMembershipOverrideErrorMessage(),
-        });
+      if (latestSubscriptionError) {
+        throw createAdminOperationError('更新用户会员等级', latestSubscriptionError);
       }
 
+      let targetPlanId: string | null = null;
       if (latestSubscription?.id) {
-        let targetPlanId: string | null = null;
-
         if (input.membershipLevel !== 'free') {
           const { data: targetPlan, error: targetPlanError } = await ctx.supabase
             .from('membership_plans')
@@ -1160,7 +1156,21 @@ export const adminRouter = router({
 
           targetPlanId = targetPlan?.id ?? null;
         }
+      }
 
+      // Update membership level only after all guard and lookup checks pass.
+      const { data, error } = await ctx.supabase
+        .from('profiles')
+        .update({ membership_level: input.membershipLevel })
+        .eq('id', input.userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw createAdminOperationError('更新用户会员等级', error);
+      }
+
+      if (latestSubscription?.id) {
         const metadata = latestSubscription.metadata && typeof latestSubscription.metadata === 'object'
           ? latestSubscription.metadata
           : {};

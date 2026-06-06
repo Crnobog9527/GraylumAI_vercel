@@ -23,6 +23,10 @@ import {
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
+import {
+  resolveMembershipEligibility,
+  type MembershipEligibilityResult,
+} from '../services/membershipEligibility';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
   z.object({
@@ -244,6 +248,13 @@ function assertPaymentPersistenceConfigured(hasSupabaseAdminPrivileges: boolean)
   throw toCheckoutUnavailableError();
 }
 
+function throwMembershipEligibilityError(result: MembershipEligibilityResult): never {
+  throw new TRPCError({
+    code: result.reasonCode === 'READ_FAILED' ? 'INTERNAL_SERVER_ERROR' : 'BAD_REQUEST',
+    message: result.safeMessage,
+  });
+}
+
 async function loadPaymentItemNames(
   supabase: any,
   orders: Array<{ item_id: string; item_type: string }>
@@ -405,47 +416,53 @@ export const paymentsRouter = router({
         });
       }
 
-      let customerId;
-      try {
-        customerId = await getOrCreateStripeCustomerId({
-          supabase: ctx.supabaseAdmin,
-          userId: ctx.profileId,
-          email: profile.email ?? ctx.user.email ?? null,
-          nickname: profile.nickname ?? null,
-        });
-      } catch (error) {
-        logCheckoutStageFailure('customer_lookup', input, error);
-        throw createPaymentOperationError('创建支付会话', error);
-      }
+      let checkoutContext: {
+        customerId: string;
+        successUrl: string;
+        cancelUrl: string;
+      } | null = null;
 
-      let appUrl;
-      try {
-        appUrl = getStripeAppUrl(ctx.headers);
-      } catch (error) {
-        logCheckoutStageFailure('checkout_url', input, error);
-        throw toCheckoutUnavailableError();
-      }
-      const successUrl = `${appUrl}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `${appUrl}/profile?tab=subscription&checkout=cancelled`;
+      const getCheckoutContext = async () => {
+        if (checkoutContext) {
+          return checkoutContext;
+        }
+
+        let customerId;
+        try {
+          customerId = await getOrCreateStripeCustomerId({
+            supabase: ctx.supabaseAdmin,
+            userId: ctx.profileId,
+            email: profile.email ?? ctx.user.email ?? null,
+            nickname: profile.nickname ?? null,
+          });
+        } catch (error) {
+          logCheckoutStageFailure('customer_lookup', input, error);
+          throw createPaymentOperationError('创建支付会话', error);
+        }
+
+        let appUrl;
+        try {
+          appUrl = getStripeAppUrl(ctx.headers);
+        } catch (error) {
+          logCheckoutStageFailure('checkout_url', input, error);
+          throw toCheckoutUnavailableError();
+        }
+
+        checkoutContext = {
+          customerId,
+          successUrl: `${appUrl}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${appUrl}/profile?tab=subscription&checkout=cancelled`,
+        };
+
+        return checkoutContext;
+      };
 
       if (input.kind === 'credit_package') {
-        const [{ data: creditPackage, error }, { data: membershipPlan, error: membershipPlanError }] =
-          await Promise.all([
-            ctx.supabase
-              .from('credit_packages')
-              .select('id, name, active, stripe_price_id, price')
-              .eq('id', input.packageId)
-              .single(),
-            profile.membership_level && profile.membership_level !== 'free'
-              ? ctx.supabase
-                  .from('membership_plans')
-                  .select('id, level, package_discount')
-                  .eq('level', profile.membership_level)
-                  .eq('is_active', 'true')
-                  .limit(1)
-                  .maybeSingle()
-              : Promise.resolve({ data: null, error: null }),
-          ]);
+        const { data: creditPackage, error } = await ctx.supabase
+          .from('credit_packages')
+          .select('id, name, active, stripe_price_id, price')
+          .eq('id', input.packageId)
+          .single();
 
         if (error || !creditPackage) {
           throw new TRPCError({
@@ -454,20 +471,42 @@ export const paymentsRouter = router({
           });
         }
 
-        if (membershipPlanError) {
-          logCheckoutStageFailure('plan_discount_read', input, membershipPlanError, {
-            priceId: maskIdentifier(creditPackage.stripe_price_id),
-            hasPriceId: Boolean(creditPackage.stripe_price_id),
-          });
-          throw createPaymentOperationError('读取会员折扣', membershipPlanError);
-        }
-
         if (creditPackage.active !== 'true') {
           throw toCheckoutConfigError('该积分包当前未上架');
         }
 
         if (!creditPackage.stripe_price_id) {
           throw toItemUnavailableError();
+        }
+
+        const eligibility = await resolveMembershipEligibility({
+          supabase: ctx.supabase,
+          userId: ctx.profileId,
+          profile,
+          action: 'create_credit_package_checkout',
+        });
+
+        if (!eligibility.allowed) {
+          throwMembershipEligibilityError(eligibility);
+        }
+
+        const { data: membershipPlan, error: membershipPlanError } =
+          eligibility.level !== 'free'
+            ? await ctx.supabase
+                .from('membership_plans')
+                .select('id, level, package_discount')
+                .eq('level', eligibility.level)
+                .eq('is_active', 'true')
+                .limit(1)
+                .maybeSingle()
+            : { data: null, error: null };
+
+        if (membershipPlanError) {
+          logCheckoutStageFailure('plan_discount_read', input, membershipPlanError, {
+            priceId: maskIdentifier(creditPackage.stripe_price_id),
+            hasPriceId: Boolean(creditPackage.stripe_price_id),
+          });
+          throw createPaymentOperationError('读取会员折扣', membershipPlanError);
         }
 
         const { baseAmountCents, discountedAmountCents, normalizedDiscount } =
@@ -488,7 +527,7 @@ export const paymentsRouter = router({
             priceId: creditPackage.stripe_price_id,
             billingCycle: 'one_time',
           }),
-          membershipLevel: profile.membership_level ?? 'free',
+          membershipLevel: eligibility.level,
           packageDiscount: String(normalizedDiscount),
           basePriceCents: String(baseAmountCents),
           discountedPriceCents: String(discountedAmountCents),
@@ -515,15 +554,16 @@ export const paymentsRouter = router({
                 },
               ];
 
+        const checkout = await getCheckoutContext();
         let session;
         try {
           session = await stripe.checkout.sessions.create({
             mode: 'payment',
-            customer: customerId,
+            customer: checkout.customerId,
             client_reference_id: ctx.profileId,
             line_items: lineItems,
-            success_url: successUrl,
-            cancel_url: cancelUrl,
+            success_url: checkout.successUrl,
+            cancel_url: checkout.cancelUrl,
             metadata,
           });
         } catch (error) {
@@ -540,7 +580,7 @@ export const paymentsRouter = router({
           item_id: creditPackage.id,
           billing_cycle: 'one_time',
           stripe_checkout_session_id: session.id,
-          stripe_customer_id: customerId,
+          stripe_customer_id: checkout.customerId,
           stripe_price_id: creditPackage.stripe_price_id,
           amount_total: discountedAmountCents,
           currency: 'usd',
@@ -602,6 +642,18 @@ export const paymentsRouter = router({
         throw toItemUnavailableError('该会员套餐暂不可购买，请稍后重试');
       }
 
+      const eligibility = await resolveMembershipEligibility({
+        supabase: ctx.supabase,
+        userId: ctx.profileId,
+        profile,
+        action: 'create_membership_checkout',
+        targetPlan: plan,
+      });
+
+      if (!eligibility.allowed) {
+        throwMembershipEligibilityError(eligibility);
+      }
+
       const metadata = buildStripeMetadata({
         itemType: 'membership_plan',
         itemId: plan.id,
@@ -610,11 +662,12 @@ export const paymentsRouter = router({
         billingCycle: input.billingCycle,
       });
 
+      const checkout = await getCheckoutContext();
       let session;
       try {
         session = await stripe.checkout.sessions.create({
           mode: 'subscription',
-          customer: customerId,
+          customer: checkout.customerId,
           client_reference_id: ctx.profileId,
           line_items: [
             {
@@ -622,8 +675,8 @@ export const paymentsRouter = router({
               quantity: 1,
             },
           ],
-          success_url: successUrl,
-          cancel_url: cancelUrl,
+          success_url: checkout.successUrl,
+          cancel_url: checkout.cancelUrl,
           metadata,
           subscription_data: {
             metadata,
@@ -643,7 +696,7 @@ export const paymentsRouter = router({
         item_id: plan.id,
         billing_cycle: input.billingCycle,
         stripe_checkout_session_id: session.id,
-        stripe_customer_id: customerId,
+        stripe_customer_id: checkout.customerId,
         stripe_subscription_id: typeof session.subscription === 'string' ? session.subscription : null,
         stripe_price_id: selectedPriceId,
         amount_total: input.billingCycle === 'monthly' ? plan.monthly_price : plan.yearly_price,
