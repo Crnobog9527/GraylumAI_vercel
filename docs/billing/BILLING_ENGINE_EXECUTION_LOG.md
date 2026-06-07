@@ -102,3 +102,71 @@ D packages/db/tests/atomic_reconcile_stripe_refund.sql
 - 未执行 production smoke。
 - 未执行真实付款、退款、取消、webhook replay。
 - 未修改 Supabase/Vercel/Stripe live settings。
+
+## PR 0.5 - main/staging billing baseline reconciliation
+
+### 时间
+
+- 执行时间：2026-06-07 13:06:54 CST
+
+### 范围
+
+- 只执行 PR 0.5。
+- 从最新 `origin/staging` 创建独立分支。
+- 只 backport `origin/main` 已有的 0041/0042 refund/cancel migration 与对应 DB tests。
+- 不修改业务代码、前端代码、package manifest、lockfile、配置或非 0041/0042 migration。
+- 不进入 PR 1。
+
+### 分支
+
+- PR0.5 本地分支：`codex/billing-v1-pr0-5-baseline-reconciliation`
+- PR0.5 基点：`origin/staging`
+- PR0.5 base SHA：`8699b2c83b983455439cdda7cb77035b6ff65e42`
+- `origin/main` SHA：`e831609fcd06f714640df9099645bb1d5363790a`
+
+### Backport 文件
+
+只读 diff 确认 `origin/main` 相对 `origin/staging` 独有的 0041/0042 相关文件：
+
+```text
+A packages/db/migrations/0041_stripe_refund_reconciliation.sql
+A packages/db/migrations/0042_canceled_subscription_profile_downgrade.sql
+A packages/db/tests/atomic_downgrade_canceled_subscription_profile.sql
+A packages/db/tests/atomic_reconcile_stripe_refund.sql
+```
+
+本 PR 仅恢复上述 4 个文件：
+
+- `packages/db/migrations/0041_stripe_refund_reconciliation.sql`
+- `packages/db/migrations/0042_canceled_subscription_profile_downgrade.sql`
+- `packages/db/tests/atomic_reconcile_stripe_refund.sql`
+- `packages/db/tests/atomic_downgrade_canceled_subscription_profile.sql`
+
+### 一致性
+
+- 4 个 backport 文件均使用 `git restore --source origin/main -- <path>` 恢复。
+- 4 个 backport 文件均已用 `cmp` 确认与 `origin/main` byte-for-byte 一致。
+- 未 cherry-pick 无关 commit。
+- 未执行 full branch sync。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未触发 checkout、payment、refund、cancel、webhook replay。
+- 未执行 production smoke。
+- 未修改 Vercel/Supabase/Stripe backend/env。
+- 未改写 0041 文件内容；0041 保持与 `origin/main` 完全一致。
+
+### 验证状态
+
+- `git diff --cached --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；仅安装 linked worktree 本地依赖，未产生 tracked 变更。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；40 个 test files / 485 个 tests passed。
+- `pnpm build`：首次因缺少构建期 Supabase 环境变量失败；使用本地 dummy、非 secret 的构建变量复跑通过。
+- DB tests：仓库没有独立 npm DB test 脚本；新增 SQL test 文件注释要求 against migrated database with psql，且本 PR 禁止执行 DB migration / 真实数据库写操作，因此不运行真实 DB SQL tests，只做文件一致性与静态范围校验。
+
+### 停线状态
+
+- PR1 仍不得开始，直到 PR0.5 合入并确认 `origin/staging` 具备 0041/0042 source-code baseline。
