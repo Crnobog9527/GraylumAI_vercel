@@ -170,3 +170,75 @@ A packages/db/tests/atomic_reconcile_stripe_refund.sql
 ### 停线状态
 
 - PR1 仍不得开始，直到 PR0.5 合入并确认 `origin/staging` 具备 0041/0042 source-code baseline。
+
+## Control Plane - GitHub issue 工作流
+
+### 时间
+
+- 执行时间：2026-06-07 14:05:29 CST
+
+### GitHub 控制台
+
+- Control Plane issue：[#225](https://github.com/Crnobog9527/GraylumAI_vercel/issues/225)
+- 当前 `origin/staging` SHA：`11516ae77906c0f3b24c002c145f253a1afd80de`
+- 当前 Billing Engine 阶段：PR 1 planning gate / `not_started`
+- 最新完成阶段：PR 0.5 / `merged`
+
+### 阶段状态源
+
+从本记录开始，Billing Engine v1.5 执行状态必须沉淀在：
+
+- GitHub Control Plane issue。
+- 对应 GitHub PR 描述。
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+
+不再依赖 owner 在 Codex 和 ChatGPT 之间手动转述长报告。
+
+### 每个 Billing Engine PR 的固定要求
+
+- PR 描述必须链接 Control Plane issue。
+- PR 描述必须写清楚本 PR 阶段、允许范围、禁止范围、测试结果。
+- PR 完成后必须更新本执行日志。
+- PR 完成后必须更新 Control Plane issue。
+- PR 进入 owner audit 前，必须确认 GitHub checks、Vercel checks、本地 lint/typecheck/test/build、changed files scope、本执行日志、Control Plane issue 均已满足。
+
+### 合并规则
+
+- docs-only / baseline-only PR：checks 全绿后可请求 owner 合并。
+- billing 业务代码 PR：checks 全绿后只标记 ready candidate，不得自行合并，必须等 owner audit。
+- production / Supabase DB / Vercel env / Stripe live / 真实付款退款取消 / webhook replay：必须单独停止并请求 owner 明确授权。
+
+### 严格禁止范围
+
+- 禁止绕过 branch protection。
+- 禁止在未通过测试时标记 ready。
+- 禁止把多个阶段混进一个 PR。
+- 禁止 owner 未授权时触发 production smoke。
+- 禁止 owner 未授权时执行 Supabase DB migration。
+- 禁止 owner 未授权时触发真实 checkout / payment / refund / cancel / webhook replay。
+- 禁止修改 Stripe live / Vercel env / Supabase production settings。
+- 禁止改变“年付按月释放积分”规则。
+
+### Owner 最小审计口令
+
+后续每个 PR 完成后，Codex 最终回复只需要输出一句短句，例如：
+
+```text
+PR #<number> ready for owner audit. Control Plane issue updated.
+```
+
+### 本次 docs-only 验证状态
+
+- `git diff --cached --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked lockfile/package 变更。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；40 个 test files / 485 个 tests passed。
+- `pnpm build`：首次因缺少构建期 Supabase 环境变量失败；使用本地 dummy、非 secret 的构建变量复跑通过。
+- Git scope：仅修改 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 禁止动作：未进入 PR 1，未修改业务代码/migration/package/lockfile/平台配置，未执行 DB migration、Stripe 行为或 production smoke。
+
+### 停线状态
+
+- 本次仅建立 Control Plane，不进入 PR 1 实现。
+- PR 1 可以在 Control Plane issue 与本日志更新合入后，从最新 `origin/staging` 独立分支开始。
