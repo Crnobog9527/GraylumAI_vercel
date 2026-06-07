@@ -29,6 +29,7 @@ const STRIPE_FULFILLMENT_ERRORS = {
   missingMembershipFulfilledAt: 'Atomic membership fulfillment returned no fulfilled_at',
   invoicePaymentFailedLookup: 'Failed to look up failed invoice payment order',
   invoicePaymentFailedUpdate: 'Failed to mark invoice payment order failed',
+  invoicePaymentFailedInsert: 'Failed to insert failed invoice payment order',
   subscriptionLookup: 'Failed to look up subscription state',
   subscriptionUpdate: 'Failed to update subscription state',
   canceledProfileDowngrade: 'Failed to downgrade canceled subscription profile',
@@ -186,6 +187,14 @@ function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
   return null;
 }
 
+function getInvoiceCustomerId(invoice: Stripe.Invoice) {
+  return typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id ?? null;
+}
+
+function getFailedInvoiceAmount(invoice: Stripe.Invoice) {
+  return invoice.amount_due ?? invoice.amount_remaining ?? invoice.amount_paid ?? null;
+}
+
 async function backfillCheckoutOrderFulfillment(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
@@ -323,14 +332,29 @@ export async function upsertPaymentOrderBySession(
   }
 }
 
-async function findInvoiceFailureOrder(
+const FAILED_INVOICE_ORDER_SELECT = [
+  'id',
+  'user_id',
+  'item_type',
+  'item_id',
+  'billing_cycle',
+  'stripe_invoice_id',
+  'stripe_subscription_id',
+  'stripe_customer_id',
+  'stripe_price_id',
+  'status',
+  'fulfilled_at',
+  'metadata',
+].join(',');
+
+async function findInvoiceFailureOrders(
   supabase: SupabaseLikeClient,
   invoiceId: string,
   subscriptionId: string | null,
 ) {
   const existingInvoiceOrder = await supabase
     .from('payment_orders')
-    .select('id, status, fulfilled_at, metadata')
+    .select(FAILED_INVOICE_ORDER_SELECT)
     .eq('stripe_invoice_id', invoiceId)
     .maybeSingle();
 
@@ -347,23 +371,25 @@ async function findInvoiceFailureOrder(
   }
 
   if (existingInvoiceOrder.data?.id || !subscriptionId) {
-    return existingInvoiceOrder.data ?? null;
+    return {
+      invoiceOrder: existingInvoiceOrder.data ?? null,
+      subscriptionOrder: null,
+    };
   }
 
-  const checkoutOrder = await supabase
+  const subscriptionOrder = await supabase
     .from('payment_orders')
-    .select('id, status, fulfilled_at, metadata')
+    .select(FAILED_INVOICE_ORDER_SELECT)
     .eq('stripe_subscription_id', subscriptionId)
-    .is('stripe_invoice_id', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (checkoutOrder.error) {
+  if (subscriptionOrder.error) {
     throwFulfillmentError(
       'invoice_payment_failed_subscription_lookup',
       STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
-      checkoutOrder.error,
+      subscriptionOrder.error,
       {
         invoiceId: maskIdentifier(invoiceId),
         subscriptionId: maskIdentifier(subscriptionId),
@@ -371,7 +397,134 @@ async function findInvoiceFailureOrder(
     );
   }
 
-  return checkoutOrder.data ?? null;
+  return {
+    invoiceOrder: null,
+    subscriptionOrder: subscriptionOrder.data ?? null,
+  };
+}
+
+function isPendingCheckoutOrderForFirstInvoice(order: any) {
+  return Boolean(order?.id)
+    && normalizePaymentOrderStatus(order.status) === 'pending'
+    && !order.fulfilled_at
+    && !order.stripe_invoice_id;
+}
+
+function buildFailedInvoiceOrderMetadata(input: {
+  existingMetadata?: unknown;
+  invoice: Stripe.Invoice;
+  invoiceId: string;
+  subscriptionId: string | null;
+  now: string;
+}) {
+  return {
+    ...asRecord(input.existingMetadata),
+    source: 'invoice.payment_failed',
+    invoiceId: input.invoiceId,
+    subscriptionId: input.subscriptionId,
+    invoiceStatus: input.invoice.status ?? null,
+    paymentIntentId: getInvoicePaymentIntentId(input.invoice),
+    lastPaymentOrderStatus: 'failed',
+    lastPaymentOrderStatusSource: 'invoice.payment_failed',
+    lastPaymentOrderStatusAt: input.now,
+  };
+}
+
+function buildFailedInvoiceOrderPayload(input: {
+  sourceOrder: any;
+  invoice: Stripe.Invoice;
+  invoiceId: string;
+  subscriptionId: string | null;
+  now: string;
+}) {
+  return {
+    user_id: input.sourceOrder.user_id,
+    item_type: 'membership_plan',
+    item_id: input.sourceOrder.item_id,
+    billing_cycle: input.sourceOrder.billing_cycle ?? 'monthly',
+    stripe_invoice_id: input.invoiceId,
+    stripe_subscription_id: input.subscriptionId,
+    stripe_customer_id: getInvoiceCustomerId(input.invoice) ?? input.sourceOrder.stripe_customer_id ?? null,
+    stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
+    amount_total: getFailedInvoiceAmount(input.invoice),
+    currency: input.invoice.currency ?? 'usd',
+    mode: 'subscription',
+    status: 'failed',
+    payment_status: input.invoice.status ?? 'payment_failed',
+    metadata: buildFailedInvoiceOrderMetadata({
+      existingMetadata: input.sourceOrder.metadata,
+      invoice: input.invoice,
+      invoiceId: input.invoiceId,
+      subscriptionId: input.subscriptionId,
+      now: input.now,
+    }),
+    updated_at: input.now,
+  };
+}
+
+function getMissingFailedInvoiceOrderFields(sourceOrder: any) {
+  const missingFields: string[] = [];
+
+  if (!sourceOrder?.user_id) {
+    missingFields.push('user_id');
+  }
+
+  if (!sourceOrder?.item_id) {
+    missingFields.push('item_id');
+  }
+
+  if (sourceOrder?.item_type && sourceOrder.item_type !== 'membership_plan') {
+    missingFields.push('item_type');
+  }
+
+  return missingFields;
+}
+
+async function insertFailedInvoiceOrder(
+  supabase: SupabaseLikeClient,
+  invoice: Stripe.Invoice,
+  subscriptionOrder: any,
+  subscriptionId: string | null,
+) {
+  const invoiceId = invoice.id;
+  const missingFields = getMissingFailedInvoiceOrderFields(subscriptionOrder);
+
+  if (missingFields.length > 0) {
+    logger.warn('billing', 'stripe_invoice_payment_failed_order_inference_incomplete', {
+      invoiceId: maskIdentifier(invoiceId),
+      subscriptionId: maskIdentifier(subscriptionId),
+      sourceOrderId: maskIdentifier(subscriptionOrder?.id),
+      sourceOrderStatus: subscriptionOrder?.status ?? null,
+      missingFields,
+    });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const payload = buildFailedInvoiceOrderPayload({
+    sourceOrder: subscriptionOrder,
+    invoice,
+    invoiceId,
+    subscriptionId,
+    now,
+  });
+
+  const result = await supabase
+    .from('payment_orders')
+    .insert(payload);
+
+  if (result.error) {
+    throwFulfillmentError(
+      'invoice_payment_failed_insert',
+      STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedInsert,
+      result.error,
+      {
+        invoiceId: maskIdentifier(invoiceId),
+        subscriptionId: maskIdentifier(subscriptionId),
+        sourceOrderId: maskIdentifier(subscriptionOrder.id),
+      },
+    );
+  }
 }
 
 export async function markMembershipInvoicePaymentFailed(
@@ -380,13 +533,23 @@ export async function markMembershipInvoicePaymentFailed(
 ) {
   const invoiceId = invoice.id;
   const subscriptionId = getInvoiceSubscriptionId(invoice);
-  const existingOrder = await findInvoiceFailureOrder(supabase, invoiceId, subscriptionId);
+  const { invoiceOrder, subscriptionOrder } = await findInvoiceFailureOrders(
+    supabase,
+    invoiceId,
+    subscriptionId,
+  );
+  const existingOrder = invoiceOrder ?? subscriptionOrder;
 
   if (!existingOrder?.id) {
     logger.warn('billing', 'stripe_invoice_payment_failed_order_missing', {
       invoiceId: maskIdentifier(invoiceId),
       subscriptionId: maskIdentifier(subscriptionId),
     });
+    return;
+  }
+
+  if (!invoiceOrder && !isPendingCheckoutOrderForFirstInvoice(subscriptionOrder)) {
+    await insertFailedInvoiceOrder(supabase, invoice, subscriptionOrder, subscriptionId);
     return;
   }
 
@@ -407,24 +570,20 @@ export async function markMembershipInvoicePaymentFailed(
   }
 
   const now = new Date().toISOString();
-  const metadata = {
-    ...asRecord(existingOrder.metadata),
-    source: 'invoice.payment_failed',
+  const metadata = buildFailedInvoiceOrderMetadata({
+    existingMetadata: existingOrder.metadata,
+    invoice,
     invoiceId,
     subscriptionId,
-    invoiceStatus: invoice.status ?? null,
-    paymentIntentId: getInvoicePaymentIntentId(invoice),
-    lastPaymentOrderStatus: 'failed',
-    lastPaymentOrderStatusSource: 'invoice.payment_failed',
-    lastPaymentOrderStatusAt: now,
-  };
+    now,
+  });
 
   const result = await supabase
     .from('payment_orders')
     .update({
       stripe_invoice_id: invoiceId,
       stripe_subscription_id: subscriptionId,
-      amount_total: invoice.amount_due ?? invoice.amount_paid ?? null,
+      amount_total: getFailedInvoiceAmount(invoice),
       currency: invoice.currency ?? 'usd',
       status: 'failed',
       payment_status: invoice.status ?? 'payment_failed',
