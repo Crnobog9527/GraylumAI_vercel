@@ -659,3 +659,94 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 本地 gate 已重新通过。
 - PR #230 保持 draft，等待本 owner-audit fix 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
 - billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。
+
+## PR 2 owner audit fix 2 - manual deduction spend classification
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- PR #230 仍有 unresolved P2 review thread。
+- 旧 `purchaseCredits` review thread 已变为 outdated，但新的有效 P2 指出：admin/manual deduction 如果通过 `credits.deductCredits` 写入，默认 reason `积分消费` 或其他不含 admin / 调整关键词的 reason 会被 fallback 归类为 `spend`。
+- 这会让 `getCreditsSummary`、`getUserUsageStats`、daily billing reconciliation 继续把 manual correction 错报为 AI consumption。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `apps/web/src/components/profile/creditLedgerPresentation.ts`
+- `packages/api/src/routers/credits.ts`
+- `packages/api/src/routers/credits.test.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `packages/api/src/services/__tests__/creditLedgerPresentation.test.ts`
+- `packages/db/migrations/0044_credit_transactions_v2_semantics.sql`
+- `packages/db/tests/credit_transactions_v2_semantics.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- Legacy negative `deduction` fallback 不再默认等于 `spend`。
+- 只有明确 AI signal 才归类为 `spend`：
+  - `ledger_type = spend`
+  - `source_type = ai_task`
+  - `reason_code = ai_task_spend`
+  - `idempotency_key` 以 `ai_spend:` 开头
+  - description 指向 `AI 对话消费` / `AI 对话结算` / `AI 对话中断结算` / `ai task` / `ai spend`
+- 明确 admin/manual signal 归类为 `adjustment`：
+  - `source_type = admin`
+  - `idempotency_key` 以 `admin_adjustment:` 或 `admin_credit_deduction:` 开头
+  - description 含 `管理员` / `admin` / `调整` / `adjustment`
+- `credits.deductCredits` 继续只写旧 schema 已存在字段，不插入 0044 新字段；但会写出稳定 admin signal：
+  - 默认 description：`[Admin] 积分消费`
+  - 有 idempotency key 时写为 `admin_credit_deduction:<adminId>:<requestKey>`
+- 前端 `CreditRecordsCard` presentation helper 同步同一分类规则，避免 UI 把 admin/manual deduction 显示为 AI spend。
+- 0044 migration source 的 future trigger 同步同一规则；本次未执行 migration。
+
+### 测试覆盖
+
+- `countsAsCreditSpend` 不统计 `source_type = admin`、`admin_credit_deduction:*`、默认 `积分消费` manual deduction。
+- Legacy `AI 对话消费` 仍统计为 AI spend。
+- Daily reconciliation 中 admin/manual deduction 不计入 `deductionCredits`。
+- `credits.deductCredits` 默认 reason 写出 admin adjustment signal。
+- `CreditRecordsCard` 对 admin/manual deduction 显示为系统调整，不显示为 AI 使用消耗。
+- DB smoke source 覆盖 future 0044 trigger 对默认 admin deduction 的 adjustment 分类。
+
+### 测试命令
+
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- targeted API tests：通过；44 test files / 510 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 510 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- 等待本 owner-audit fix 2 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。

@@ -49,8 +49,14 @@ describe('runDailyBillingReconciliation', () => {
         { operation_type: 'settle', amount: -80 },
       ],
       creditTransactions: [
-        { type: 'deduction', amount: -120 },
-        { type: 'deduction', amount: -80 },
+        { type: 'deduction', amount: -120, description: 'AI 对话消费' },
+        { type: 'deduction', amount: -80, description: 'AI 对话消费' },
+        {
+          type: 'deduction',
+          amount: -999,
+          description: '积分消费',
+          idempotency_key: 'admin_credit_deduction:admin-1:manual-1',
+        },
         { type: 'deduction', amount: -50, ledger_type: 'refund_clawback', counts_as_spend: false },
       ],
       paymentOrders: [],
@@ -79,7 +85,7 @@ describe('runDailyBillingReconciliation', () => {
         { operation_type: 'settle', amount: -40 },
       ],
       creditTransactions: [
-        { type: 'deduction', amount: -40 },
+        { type: 'deduction', amount: -40, description: 'AI 对话消费' },
       ],
       paymentOrders: [
         { status: 'completed', amount_total: 1999 },

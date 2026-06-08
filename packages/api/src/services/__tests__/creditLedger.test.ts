@@ -35,6 +35,25 @@ describe('credit ledger v2 semantics', () => {
       description: 'Stripe refund credit clawback [refund:re_123]',
       idempotency_key: 'stripe_refund:re_123',
     })).toBe(false);
+
+    expect(countsAsCreditSpend({
+      amount: -40,
+      type: 'deduction',
+      description: '积分消费',
+      idempotency_key: 'admin_credit_deduction:admin-1:request-1',
+    })).toBe(false);
+
+    expect(countsAsCreditSpend({
+      amount: -40,
+      type: 'deduction',
+      source_type: 'admin',
+    })).toBe(false);
+
+    expect(countsAsCreditSpend({
+      amount: -40,
+      type: 'deduction',
+      description: '积分消费',
+    })).toBe(false);
   });
 
   it('maps legacy transaction types without losing refund clawback semantics', () => {
@@ -43,6 +62,13 @@ describe('credit ledger v2 semantics', () => {
       type: 'deduction',
       description: 'AI 对话消费',
     })).toBe('spend');
+
+    expect(normalizeCreditLedgerType({
+      amount: -12,
+      type: 'deduction',
+      description: '积分消费',
+      idempotency_key: 'admin_credit_deduction:admin-1:request-1',
+    })).toBe('adjustment');
 
     expect(normalizeCreditLedgerType({
       amount: 100,

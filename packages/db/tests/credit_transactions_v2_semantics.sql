@@ -87,6 +87,22 @@ BEGIN
     OR v_row.source_type <> 'admin' THEN
     RAISE EXCEPTION 'adjustment v2 classification failed: %', row_to_json(v_row);
   END IF;
+
+  INSERT INTO credit_transactions (user_id, amount, type, description, idempotency_key)
+  VALUES (v_user_id, -25, 'deduction', '积分消费', 'admin_credit_deduction:admin-1:manual-1');
+
+  SELECT ledger_type, reason_code, counts_as_spend, source_type
+  INTO v_row
+  FROM credit_transactions
+  WHERE user_id = v_user_id
+    AND idempotency_key = 'admin_credit_deduction:admin-1:manual-1';
+
+  IF v_row.ledger_type <> 'adjustment'
+    OR v_row.reason_code <> 'admin_adjustment'
+    OR v_row.counts_as_spend IS NOT FALSE
+    OR v_row.source_type <> 'admin' THEN
+    RAISE EXCEPTION 'default admin deduction v2 classification failed: %', row_to_json(v_row);
+  END IF;
 END;
 $$;
 

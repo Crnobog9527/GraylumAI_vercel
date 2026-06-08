@@ -89,8 +89,10 @@ function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> =
 
 function createAdminMutationSupabase(options: { startingCredits?: number } = {}) {
   const startingCredits = options.startingCredits ?? 100;
+  const creditTransactionInserts: Array<Record<string, unknown>> = [];
 
   return {
+    creditTransactionInserts,
     from(table: string) {
       if (table === 'profiles') {
         return {
@@ -114,7 +116,20 @@ function createAdminMutationSupabase(options: { startingCredits?: number } = {})
 
       if (table === 'credit_transactions') {
         return {
-          insert(payload: { amount: number }) {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: null,
+              error: null,
+            });
+          },
+          insert(payload: { amount: number } & Record<string, unknown>) {
+            creditTransactionInserts.push(payload);
             return {
               select() {
                 return this;
@@ -209,6 +224,36 @@ describe('creditsRouter permissions', () => {
       newCredits: 75,
       amountDeducted: 25,
     });
+    expect(adminSupabase.creditTransactionInserts).toEqual([
+      expect.objectContaining({
+        type: 'deduction',
+        amount: -25,
+        description: 'Admin deduction',
+      }),
+    ]);
+  });
+
+  it('writes a stable admin adjustment signal for default deductCredits reasons', async () => {
+    const adminSupabase = createAdminMutationSupabase({ startingCredits: 100 });
+    const caller = createCreditsCaller({
+      role: 'admin',
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(caller.deductCredits({ amount: 25, idempotencyKey: 'manual-1' })).resolves.toMatchObject({
+      success: true,
+      previousCredits: 100,
+      newCredits: 75,
+      amountDeducted: 25,
+    });
+    expect(adminSupabase.creditTransactionInserts).toEqual([
+      expect.objectContaining({
+        type: 'deduction',
+        amount: -25,
+        description: '[Admin] 积分消费',
+        idempotency_key: 'admin_credit_deduction:admin-1:manual-1',
+      }),
+    ]);
   });
 
   it('allows ordinary users to read their balance', async () => {
@@ -226,7 +271,13 @@ describe('creditsRouter permissions', () => {
           return createProfileSupabase('user').from(table);
         }
         return createCreditTransactionsSupabase([
-          { id: 'txn-1', amount: -5, type: 'deduction', created_at: '2026-05-09T00:00:00.000Z' },
+          {
+            id: 'txn-1',
+            amount: -5,
+            type: 'deduction',
+            description: 'AI 对话消费',
+            created_at: '2026-05-09T00:00:00.000Z',
+          },
           {
             id: 'txn-2',
             amount: -20,

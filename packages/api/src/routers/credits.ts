@@ -123,6 +123,21 @@ function normalizeTransactionType(type: TransactionType): 'addition' | 'deductio
   }
 }
 
+function buildAdminCreditDeductionIdempotencyKey(adminId: string, idempotencyKey?: string | null): string | null {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  return `admin_credit_deduction:${adminId}:${idempotencyKey}`;
+}
+
+function formatAdminCreditDeductionDescription(reason?: string | null): string {
+  const normalizedReason = reason?.trim() || '积分消费';
+  return normalizedReason.toLowerCase().includes('admin') || normalizedReason.includes('管理员')
+    ? normalizedReason
+    : `[Admin] ${normalizedReason}`;
+}
+
 // ============================================================================
 // 积分路由器
 // ============================================================================
@@ -179,13 +194,14 @@ export const creditsRouter = router({
     .input(DeductCreditsInput)
     .mutation(async ({ ctx, input }) => {
       const { amount, reason, referenceId, referenceType, idempotencyKey } = input;
+      const adminIdempotencyKey = buildAdminCreditDeductionIdempotencyKey(ctx.profileId, idempotencyKey);
 
       // 1. 幂等性检查
-      if (idempotencyKey) {
+      if (adminIdempotencyKey) {
         const idempotencyCheck = await checkIdempotency(
           ctx.supabase,
           ctx.profileId,
-          idempotencyKey
+          adminIdempotencyKey
         );
         if (idempotencyCheck.exists) {
           // 返回已存在的交易结果
@@ -255,8 +271,8 @@ export const creditsRouter = router({
           user_id: ctx.profileId,
           type: 'deduction',
           amount: -amount, // 负数表示扣除
-          description: reason ?? '积分消费',
-          idempotency_key: idempotencyKey ?? null,
+          description: formatAdminCreditDeductionDescription(reason),
+          idempotency_key: adminIdempotencyKey,
         })
         .select()
         .single();

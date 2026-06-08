@@ -38,6 +38,33 @@ function includesAny(value: string, needles: string[]): boolean {
   return needles.some((needle) => normalizedValue.includes(needle.toLowerCase()));
 }
 
+function isAdminAdjustmentLedgerEntry(row: CreditLedgerPresentationInput): boolean {
+  const description = row.description ?? '';
+  const idempotencyKey = row.idempotency_key ?? '';
+  return (
+    row.source_type === 'admin' ||
+    idempotencyKey.startsWith('admin_adjustment:') ||
+    idempotencyKey.startsWith('admin_credit_deduction:') ||
+    includesAny(description, ['管理员', 'admin', '调整', 'adjustment'])
+  );
+}
+
+function isLegacyAiSpendLedgerEntry(row: CreditLedgerPresentationInput): boolean {
+  const description = row.description ?? '';
+  const idempotencyKey = row.idempotency_key ?? '';
+  return (
+    row.source_type === 'ai_task' ||
+    idempotencyKey.startsWith('ai_spend:') ||
+    includesAny(description, [
+      'AI 对话消费',
+      'AI 对话结算',
+      'AI 对话中断结算',
+      'ai task',
+      'ai spend',
+    ])
+  );
+}
+
 export function normalizeCreditLedgerType(row: CreditLedgerPresentationInput): CreditLedgerType {
   if (row.ledger_type && CREDIT_LEDGER_TYPES.has(row.ledger_type as CreditLedgerType)) {
     return row.ledger_type as CreditLedgerType;
@@ -69,7 +96,13 @@ export function normalizeCreditLedgerType(row: CreditLedgerPresentationInput): C
   }
 
   if (amount < 0 && (type === 'deduction' || type === 'consumption' || type === 'usage')) {
-    return includesAny(description, ['管理员', 'admin', '调整', 'adjustment']) ? 'adjustment' : 'spend';
+    if (isAdminAdjustmentLedgerEntry(row)) {
+      return 'adjustment';
+    }
+    if (isLegacyAiSpendLedgerEntry(row)) {
+      return 'spend';
+    }
+    return 'adjustment';
   }
 
   if (

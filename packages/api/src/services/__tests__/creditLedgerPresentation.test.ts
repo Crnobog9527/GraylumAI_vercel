@@ -36,4 +36,17 @@ describe('CreditRecordsCard ledger presentation', () => {
     expect(getCreditLedgerLabel(legacySpend)).toBe('AI 使用消耗');
     expect(countsAsCreditSpend(legacySpend)).toBe(true);
   });
+
+  it('labels admin/manual deductions separately from AI spend', () => {
+    const adminAdjustment = {
+      amount: -15,
+      type: 'deduction',
+      description: '积分消费',
+      idempotency_key: 'admin_credit_deduction:admin-1:request-1',
+    };
+
+    expect(normalizeCreditLedgerType(adminAdjustment)).toBe('adjustment');
+    expect(getCreditLedgerLabel(adminAdjustment)).toBe('系统调整');
+    expect(countsAsCreditSpend(adminAdjustment)).toBe(false);
+  });
 });

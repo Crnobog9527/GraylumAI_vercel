@@ -50,7 +50,10 @@ BEGIN
       WHEN COALESCE(NEW.amount, 0) < 0
         AND v_type IN ('deduction', 'consumption', 'usage')
         AND (
-          v_description ILIKE '%管理员%'
+          NEW.source_type = 'admin'
+          OR v_idempotency_key LIKE 'admin_adjustment:%'
+          OR v_idempotency_key LIKE 'admin_credit_deduction:%'
+          OR v_description ILIKE '%管理员%'
           OR v_description ILIKE '%admin%'
           OR v_description ILIKE '%调整%'
           OR v_description ILIKE '%adjustment%'
@@ -58,7 +61,19 @@ BEGIN
         THEN 'adjustment'
       WHEN COALESCE(NEW.amount, 0) < 0
         AND v_type IN ('deduction', 'consumption', 'usage')
+        AND (
+          NEW.source_type = 'ai_task'
+          OR v_idempotency_key LIKE 'ai_spend:%'
+          OR v_description ILIKE '%AI 对话消费%'
+          OR v_description ILIKE '%AI 对话结算%'
+          OR v_description ILIKE '%AI 对话中断结算%'
+          OR v_description ILIKE '%ai task%'
+          OR v_description ILIKE '%ai spend%'
+        )
         THEN 'spend'
+      WHEN COALESCE(NEW.amount, 0) < 0
+        AND v_type IN ('deduction', 'consumption', 'usage')
+        THEN 'adjustment'
       WHEN COALESCE(NEW.amount, 0) > 0
         AND v_type IN ('addition', 'purchase', 'bonus', 'checkin', 'membership')
         THEN 'grant'
