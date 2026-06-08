@@ -62,6 +62,7 @@ describe('runDailyBillingReconciliation', () => {
     expect(result.mismatches).toHaveLength(0);
     expect(result.summary.successfulAiRequests).toBe(2);
     expect(result.summary.tokenStatsCredits).toBe(200);
+    expect(result.summary.deductionCredits).toBe(200);
     expect(result.summary.webSearchCount).toBe(1);
   });
 
@@ -96,5 +97,102 @@ describe('runDailyBillingReconciliation', () => {
         expect.stringContaining('Completed payment orders'),
       ]),
     );
+  });
+
+  it('reports completed payment orders as unmatched when the only same-day credit is a check-in grant', async () => {
+    const supabase = createMockSupabase({
+      creditTransactions: [
+        {
+          type: 'addition',
+          amount: 10,
+          ledger_type: 'grant',
+          reason_code: 'checkin',
+          source_type: 'system',
+        },
+      ],
+      paymentOrders: [
+        { status: 'completed', amount_total: 1999 },
+      ],
+    });
+
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(false);
+    expect(result.summary.purchaseCredits).toBe(0);
+    expect(result.mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Completed payment orders'),
+      ]),
+    );
+  });
+
+  it('reports completed payment orders as unmatched when the only same-day credit is a subscription grant', async () => {
+    const supabase = createMockSupabase({
+      creditTransactions: [
+        {
+          type: 'addition',
+          amount: 1500,
+          ledger_type: 'grant',
+          reason_code: 'subscription_grant',
+          source_type: 'stripe_invoice',
+        },
+      ],
+      paymentOrders: [
+        { status: 'completed', amount_total: 1999 },
+      ],
+    });
+
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(false);
+    expect(result.summary.purchaseCredits).toBe(0);
+    expect(result.mismatches).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Completed payment orders'),
+      ]),
+    );
+  });
+
+  it('accepts v2 top-up purchase credits for completed payment order reconciliation', async () => {
+    const supabase = createMockSupabase({
+      creditTransactions: [
+        {
+          type: 'addition',
+          amount: 500,
+          ledger_type: 'grant',
+          reason_code: 'topup_purchase',
+          source_type: 'stripe_checkout',
+        },
+      ],
+      paymentOrders: [
+        { status: 'completed', amount_total: 500 },
+      ],
+    });
+
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(true);
+    expect(result.summary.purchaseCredits).toBe(500);
+    expect(result.mismatches).toHaveLength(0);
+  });
+
+  it('keeps legacy type purchase credits valid for completed payment order reconciliation', async () => {
+    const supabase = createMockSupabase({
+      creditTransactions: [
+        {
+          type: 'purchase',
+          amount: 500,
+        },
+      ],
+      paymentOrders: [
+        { status: 'completed', amount_total: 500 },
+      ],
+    });
+
+    const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(true);
+    expect(result.summary.purchaseCredits).toBe(500);
+    expect(result.mismatches).toHaveLength(0);
   });
 });

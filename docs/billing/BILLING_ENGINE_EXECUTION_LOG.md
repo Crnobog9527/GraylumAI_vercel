@@ -577,3 +577,85 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - 当前状态：PR #230 ready candidate for owner audit；不由 Codex merge。
 - 不进入 PR3，直到 PR2 owner audit / merge gate 完成。
+
+## PR 2 owner audit fix - top-up purchase reconciliation scope
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- Owner audit 退回 PR #230，暂不允许合并。
+- Codex review P2 成立：`billingReconciliation.ts` 曾把所有 `grant` 都计入 `purchaseCredits`，可能让 `checkin`、`bonus_grant`、`subscription_grant` 等非购买积分掩盖 “completed payment order 没有对应 top-up/purchase credit” 的对账异常。
+- PR #230 已转回 draft，在同一 PR / 同一分支内修复。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- 新增 `countsAsTopupPurchaseCredit(row)` helper。
+- daily billing reconciliation 的 `purchaseCredits` 只统计真正 top-up / purchase credits：
+  - v2：`ledger_type = grant` 且 `reason_code = topup_purchase`。
+  - Stripe Checkout top-up fallback：`source_type = stripe_checkout` 且描述指向 credit package / top-up purchase。
+  - legacy：`type = purchase`。
+- 明确不把以下 grant / adjustment 计入 `purchaseCredits`：
+  - `checkin`
+  - `bonus_grant`
+  - `subscription_grant`
+  - admin adjustment
+  - system grant
+  - refund reversal / credit refund
+- `deductionCredits` 继续只统计 AI spend，不统计 `refund_clawback`。
+
+### 测试覆盖
+
+- completed payment order + 同日 check-in grant、无 purchase credit：仍报告 mismatch。
+- completed payment order + 同日 `subscription_grant`、无 purchase credit：仍报告 mismatch。
+- completed payment order + v2 `topup_purchase`：通过 `purchaseCredits` 对账。
+- completed payment order + legacy `type = purchase`：通过 `purchaseCredits` 对账。
+- `refund_clawback` 不计入 spend / `deductionCredits`。
+
+### 测试命令
+
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- targeted API tests：通过；44 test files / 508 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 508 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- PR #230 保持 draft，等待本 owner-audit fix 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。

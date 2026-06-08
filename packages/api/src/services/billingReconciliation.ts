@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   countsAsCreditSpend,
-  normalizeCreditLedgerType,
+  countsAsTopupPurchaseCredit,
 } from './creditLedger';
 
 export interface BillingReconciliationSummary {
@@ -114,7 +114,7 @@ export async function runDailyBillingReconciliation(
   const completedPaymentOrders = paymentOrders.filter((row) => row.status === 'completed');
   const purchaseCredits = sumInteger(
     creditTransactions
-      .filter((row) => normalizeCreditLedgerType(row) === 'grant' && row.amount > 0)
+      .filter((row) => countsAsTopupPurchaseCredit(row))
       .map((row) => row.amount ?? 0),
   );
 

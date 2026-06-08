@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   countsAsCreditSpend,
+  countsAsTopupPurchaseCredit,
   inferCreditReasonCode,
   normalizeCreditLedgerType,
   normalizeCreditTransactionRow,
@@ -76,5 +77,50 @@ describe('credit ledger v2 semantics', () => {
       reason_code: 'ai_task_spend',
       counts_as_spend: true,
     });
+  });
+
+  it('counts only top-up purchase grants as purchase credits', () => {
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'purchase',
+    })).toBe(true);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'addition',
+      ledger_type: 'grant',
+      reason_code: 'topup_purchase',
+    })).toBe(true);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'addition',
+      ledger_type: 'grant',
+      reason_code: 'checkin',
+      source_type: 'system',
+    })).toBe(false);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'addition',
+      ledger_type: 'grant',
+      reason_code: 'subscription_grant',
+      source_type: 'stripe_invoice',
+    })).toBe(false);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'addition',
+      ledger_type: 'adjustment',
+      reason_code: 'admin_adjustment',
+      source_type: 'admin',
+    })).toBe(false);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'refund',
+      ledger_type: 'adjustment',
+      reason_code: 'credit_refund',
+    })).toBe(false);
   });
 });

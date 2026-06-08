@@ -135,6 +135,39 @@ export function countsAsCreditSpend(row: CreditLedgerLike): boolean {
   return ledgerType === 'spend';
 }
 
+export function countsAsTopupPurchaseCredit(row: CreditLedgerLike): boolean {
+  const amount = toNumber(row.amount);
+  if (amount <= 0) {
+    return false;
+  }
+
+  if (row.type === 'purchase') {
+    return true;
+  }
+
+  const ledgerType = normalizeCreditLedgerType(row);
+  const reasonCode = inferCreditReasonCode({ ...row, ledger_type: ledgerType });
+  if (ledgerType !== 'grant') {
+    return false;
+  }
+
+  if (reasonCode === 'topup_purchase') {
+    return true;
+  }
+
+  const description = row.description ?? '';
+  return (
+    row.source_type === 'stripe_checkout' &&
+    includesAny(description, [
+      '购买积分包',
+      'credit package',
+      'topup',
+      'top-up',
+      'top up',
+    ])
+  );
+}
+
 export function normalizeCreditTransactionRow<T extends CreditLedgerLike>(row: T): T & {
   ledger_type: CreditLedgerType;
   reason_code: string;
