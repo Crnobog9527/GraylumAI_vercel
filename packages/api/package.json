@@ -31,7 +31,7 @@
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.105.4",
+    "@supabase/supabase-js": "^2.107.0",
     "@trpc/server": "^11.17.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.1",
