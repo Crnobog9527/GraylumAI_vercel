@@ -412,3 +412,59 @@ PR #<number> ready for owner audit. Control Plane issue updated.
 
 - 不进入 PR2。
 - PR #227 仍需 owner audit / merge gate。
+
+## Staging Autopilot checkpoint / 上下文重置规则
+
+### 时间
+
+- 执行时间：2026-06-08 CST
+
+### 背景
+
+- Owner 要求 Billing Engine v1.5 Staging Autopilot 不再依赖长聊天上下文作为事实来源。
+- 每个阶段必须以 GitHub issue #225、blueprint、execution log、最新 `origin/staging` 为准。
+- 本次仅增加控制面 checkpoint 规则，不进入 PR2，不修改业务代码。
+
+### 新增规则
+
+- 每完成一个阶段，例如 PR2、PR2.x migration/runtime check、PR3、PR3.x 等，必须更新 issue #225 和本 execution log。
+- 进入下一个阶段前，必须重新执行 `git fetch --all --prune`，读取 issue #225、`BILLING_ENGINE_V1_5_BLUEPRINT.md`、本 execution log，并确认 latest `origin/staging` SHA、当前阶段、允许范围、禁止范围、停止条件。
+- 如果当前 Codex 窗口上下文已经很长，或者连续完成了一个完整阶段，应优先开启新的 Codex task / 新窗口继续下一阶段。
+- 新 task 只读取 issue #225、blueprint、execution log 和最新 `origin/staging`，不得依赖旧聊天记忆。
+- 每个新阶段开始时，必须先输出/记录 stage checkpoint：
+  - 当前阶段
+  - 最新 staging SHA
+  - 上一阶段完成状态
+  - 本阶段目标
+  - 本阶段允许范围
+  - 本阶段禁止范围
+  - 本阶段 stopping conditions
+- 如果聊天上下文、issue #225、blueprint、execution log 之间出现冲突，以以下优先级为准：
+  1. owner 硬规则
+  2. Staging Autopilot 授权边界
+  3. issue #225
+  4. blueprint
+  5. execution log
+  6. PR 描述
+  7. 当前聊天上下文
+- 任何时候不得因为旧聊天上下文而跳过 issue #225 / blueprint / execution log 的重新读取。
+- 如果无法确认当前阶段状态，必须暂停并输出：
+
+```text
+Autopilot paused: owner decision required on checkpoint ambiguity.
+```
+
+### 修改范围
+
+- `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 禁止动作确认
+
+- 未进入 PR2。
+- 未修改业务代码、测试代码、migration、package、lockfile。
+- 未执行 Supabase DB migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未执行 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
