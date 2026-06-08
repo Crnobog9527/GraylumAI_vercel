@@ -832,3 +832,42 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 本地 gate 已重新通过。
 - 等待本 owner-audit fix 3 推送后重新通过 GitHub / Vercel checks，再等待 owner 再次审计。
 - billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。
+
+## PR 2 merge record - credit_transactions v2 semantics
+
+### 时间
+
+- Merge gate processed：2026-06-09 CST
+- GitHub merged at：2026-06-08T17:50:48Z
+
+### 合并状态
+
+- PR #230：MERGED into `staging`。
+- PR head：`9f01280083c7c5af1c2845ba40dcefd273fcc93e`。
+- Squash merge commit：`708496962dbf683a28fbbd9feab4d1e8f95fd7d0`。
+- Base branch：`staging`。
+- PR branch：`codex/billing-v1-pr2-credit-ledger-v2`，merge 后已删除远端分支。
+- Merge gate checks：Vercel Preview Comments、`graylum-ai-vercel-v1`、`graylumai-staging` 在 PR head 上均为 success。
+- Changed files：仍限于 PR2 credit ledger v2 semantics / billing reconciliation / presentation / tests / 0044 migration source 文件范围。
+
+### Review thread closure
+
+- Positive admin adjustment P2 thread 已回复并标记 resolved。
+- Owner audit 已确认修复有效。
+- Admin adjustment signal 现在对正负金额均优先于 grant/spend fallback。
+- Positive admin adjustment 不计入 grant、`totalEarned`、`purchaseCredits`。
+- 对应测试已覆盖。
+
+### 当前阶段
+
+- PR2 状态：`merged`。
+- 当前 Billing Engine 阶段：PR2 merged。
+- 下一阶段：PR2.x staging DB 0044 migration application / runtime no-payment verification。
+
+### 禁止动作确认
+
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未进入 PR3。
