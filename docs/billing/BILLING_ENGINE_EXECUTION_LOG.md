@@ -479,7 +479,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - Control Plane issue：[#225](https://github.com/Crnobog9527/GraylumAI_vercel/issues/225)
 - PR：[#230](https://github.com/Crnobog9527/GraylumAI_vercel/pull/230)
-- 阶段：PR 2 / `draft_waiting_remote_checks`
+- 阶段：PR 2 / `ready_for_owner_audit`
 - Base：`origin/staging`
 - Base SHA：`964a0fa8d7ebbbd7a1ea16ac27b88d0c0803880e`
 - Branch：`codex/billing-v1-pr2-credit-ledger-v2`
@@ -556,8 +556,10 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### CI / Security / Vercel 状态
 
-- PR #230 已创建为 draft。
-- GitHub / Vercel checks 正在等待或运行中。
+- PR #230 已创建为 draft，准备在本 docs status update 推送并重新通过 checks 后标记 ready。
+- Vercel Preview Comments：通过。
+- Vercel `graylum-ai-vercel-v1`：通过。
+- Vercel `graylumai-staging`：通过。
 - billing 业务代码 PR 不自动合并，必须等待 owner audit。
 
 ### 已知风险
@@ -573,5 +575,5 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### 是否可进入下一 PR
 
-- 当前状态：PR #230 draft，等待远端 checks。
+- 当前状态：PR #230 ready candidate for owner audit；不由 Codex merge。
 - 不进入 PR3，直到 PR2 owner audit / merge gate 完成。
