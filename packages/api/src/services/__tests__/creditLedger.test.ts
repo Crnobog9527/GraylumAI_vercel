@@ -71,6 +71,20 @@ describe('credit ledger v2 semantics', () => {
     })).toBe('adjustment');
 
     expect(normalizeCreditLedgerType({
+      amount: 25,
+      type: 'addition',
+      description: '[Admin] manual top-up',
+      idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
+    })).toBe('adjustment');
+
+    expect(inferCreditReasonCode({
+      amount: 25,
+      type: 'addition',
+      description: '[Admin] manual top-up',
+      idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
+    })).toBe('admin_adjustment');
+
+    expect(normalizeCreditLedgerType({
       amount: 100,
       type: 'purchase',
       description: 'Stripe 购买积分包: Starter [checkout:cs_test]',
@@ -140,6 +154,13 @@ describe('credit ledger v2 semantics', () => {
       ledger_type: 'adjustment',
       reason_code: 'admin_adjustment',
       source_type: 'admin',
+    })).toBe(false);
+
+    expect(countsAsTopupPurchaseCredit({
+      amount: 100,
+      type: 'addition',
+      description: '[Admin] manual top-up',
+      idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
     })).toBe(false);
 
     expect(countsAsTopupPurchaseCredit({

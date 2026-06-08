@@ -95,10 +95,11 @@ export function normalizeCreditLedgerType(row: CreditLedgerPresentationInput): C
     return 'expiration';
   }
 
+  if (isAdminAdjustmentLedgerEntry(row)) {
+    return 'adjustment';
+  }
+
   if (amount < 0 && (type === 'deduction' || type === 'consumption' || type === 'usage')) {
-    if (isAdminAdjustmentLedgerEntry(row)) {
-      return 'adjustment';
-    }
     if (isLegacyAiSpendLedgerEntry(row)) {
       return 'spend';
     }

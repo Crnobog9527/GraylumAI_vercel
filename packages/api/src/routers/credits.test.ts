@@ -323,6 +323,13 @@ describe('creditsRouter permissions', () => {
           { id: 'txn-spend', amount: -40, type: 'deduction', ledger_type: 'spend', counts_as_spend: true },
           { id: 'txn-refund-clawback', amount: -25, type: 'deduction', ledger_type: 'refund_clawback', counts_as_spend: false },
           { id: 'txn-adjustment', amount: -5, type: 'deduction', ledger_type: 'adjustment', counts_as_spend: false },
+          {
+            id: 'txn-positive-admin-adjustment',
+            amount: 25,
+            type: 'addition',
+            description: '[Admin] manual top-up',
+            idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
+          },
           { id: 'txn-legacy-spend', amount: -10, type: 'deduction', description: 'AI 对话消费' },
           {
             id: 'txn-legacy-refund-clawback',
@@ -339,12 +346,12 @@ describe('creditsRouter permissions', () => {
     await expect(caller.getCreditsSummary({ period: 'month' })).resolves.toMatchObject({
       totalEarned: 100,
       totalSpent: 50,
-      transactionCount: 6,
+      transactionCount: 7,
       byLedgerType: {
         grant: { count: 1, amount: 100 },
         spend: { count: 2, amount: -50 },
         refund_clawback: { count: 2, amount: -75 },
-        adjustment: { count: 1, amount: -5 },
+        adjustment: { count: 2, amount: 20 },
       },
     });
   });

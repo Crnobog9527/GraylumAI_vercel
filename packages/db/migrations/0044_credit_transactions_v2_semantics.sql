@@ -47,8 +47,7 @@ BEGIN
         THEN 'refund_clawback'
       WHEN v_type = 'expiration'
         THEN 'expiration'
-      WHEN COALESCE(NEW.amount, 0) < 0
-        AND v_type IN ('deduction', 'consumption', 'usage')
+      WHEN COALESCE(NEW.amount, 0) <> 0
         AND (
           NEW.source_type = 'admin'
           OR v_idempotency_key LIKE 'admin_adjustment:%'

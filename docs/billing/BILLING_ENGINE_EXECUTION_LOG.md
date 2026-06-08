@@ -750,3 +750,85 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 本地 gate 已重新通过。
 - 等待本 owner-audit fix 2 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
 - billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。
+
+## PR 2 owner audit fix 3 - positive admin adjustment classification
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- PR #230 live GitHub head 已确认不是旧 `dcaa53f866b7952b6b638a3e551e642bd120d0b6`，而是 `64b332ac0d436fe574948a598c45e2e3faba1149`。
+- `purchaseCredits` P2 thread 与 manual deduction P2 thread 均已 outdated，但 GitHub 新增 active P2：positive admin adjustments 被 0044 trigger / fallback helper 归为 `grant` / `bonus_grant`。
+- 风险：`admin.adjustUserCredits` 正向调整写 `p_type = addition`、`[Admin] ...` description、`admin_adjustment:*` idempotency key；如果先按正数 `addition` 归为 grant，会错误进入 `getCreditsSummary.totalEarned` 和 grant metrics。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `apps/web/src/components/profile/creditLedgerPresentation.ts`
+- `packages/api/src/routers/credits.test.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/creditLedgerPresentation.test.ts`
+- `packages/db/migrations/0044_credit_transactions_v2_semantics.sql`
+- `packages/db/tests/credit_transactions_v2_semantics.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- Admin adjustment signal 现在对正负金额都优先于 grant/spend fallback：
+  - `source_type = admin`
+  - `idempotency_key` 以 `admin_adjustment:` 或 `admin_credit_deduction:` 开头
+  - description 含 `管理员` / `admin` / `调整` / `adjustment`
+- Positive admin additions 不再归类为 `grant` / `bonus_grant`。
+- Positive admin additions 不计入 `countsAsTopupPurchaseCredit`。
+- `getCreditsSummary.totalEarned` 只统计 ledger `grant`；positive admin adjustment 进入 `byLedgerType.adjustment`。
+- `CreditRecordsCard` presentation helper 同步显示 positive admin adjustment 为“系统调整”。
+- 0044 migration source 的 future trigger 同步同一顺序；本次未执行 migration。
+
+### 测试覆盖
+
+- `normalizeCreditLedgerType` 将 `[Admin] manual top-up` + `admin_adjustment:*` 正向 addition 归为 `adjustment`。
+- `inferCreditReasonCode` 返回 `admin_adjustment`。
+- `countsAsTopupPurchaseCredit` 不统计 positive admin adjustment。
+- `getCreditsSummary.totalEarned` 不包含 positive admin adjustment。
+- `CreditRecordsCard` 对 positive admin adjustment 显示“系统调整”。
+- DB smoke source 覆盖 future 0044 trigger 对 positive admin adjustment 的 adjustment 分类。
+
+### 测试命令
+
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- targeted API tests：通过；44 test files / 511 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 511 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- 等待本 owner-audit fix 3 推送后重新通过 GitHub / Vercel checks，再等待 owner 再次审计。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。

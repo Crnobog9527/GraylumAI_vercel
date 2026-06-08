@@ -49,4 +49,17 @@ describe('CreditRecordsCard ledger presentation', () => {
     expect(getCreditLedgerLabel(adminAdjustment)).toBe('系统调整');
     expect(countsAsCreditSpend(adminAdjustment)).toBe(false);
   });
+
+  it('labels positive admin adjustments separately from grants', () => {
+    const adminAdjustment = {
+      amount: 25,
+      type: 'addition',
+      description: '[Admin] manual top-up',
+      idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
+    };
+
+    expect(normalizeCreditLedgerType(adminAdjustment)).toBe('adjustment');
+    expect(getCreditLedgerLabel(adminAdjustment)).toBe('系统调整');
+    expect(countsAsCreditSpend(adminAdjustment)).toBe(false);
+  });
 });

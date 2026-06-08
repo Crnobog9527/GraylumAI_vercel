@@ -107,13 +107,14 @@ export function normalizeCreditLedgerType(row: CreditLedgerLike): CreditLedgerTy
     return 'expiration';
   }
 
+  if (isAdminAdjustmentLedgerEntry(row)) {
+    return 'adjustment';
+  }
+
   if (
     amount < 0 &&
     (type === 'deduction' || type === 'consumption' || type === 'usage')
   ) {
-    if (isAdminAdjustmentLedgerEntry(row)) {
-      return 'adjustment';
-    }
     if (isLegacyAiSpendLedgerEntry(row)) {
       return 'spend';
     }
@@ -168,6 +169,10 @@ export function countsAsCreditSpend(row: CreditLedgerLike): boolean {
 export function countsAsTopupPurchaseCredit(row: CreditLedgerLike): boolean {
   const amount = toNumber(row.amount);
   if (amount <= 0) {
+    return false;
+  }
+
+  if (isAdminAdjustmentLedgerEntry(row)) {
     return false;
   }
 
