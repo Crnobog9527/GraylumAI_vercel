@@ -242,3 +242,173 @@ PR #<number> ready for owner audit. Control Plane issue updated.
 
 - 本次仅建立 Control Plane，不进入 PR 1 实现。
 - PR 1 可以在 Control Plane issue 与本日志更新合入后，从最新 `origin/staging` 独立分支开始。
+
+## PR 1 - payment_orders 状态机 + BillingRecords 展示
+
+### 时间
+
+- 执行时间：2026-06-07 17:36 CST
+
+### Control Plane
+
+- Control Plane issue：[#225](https://github.com/Crnobog9527/GraylumAI_vercel/issues/225)
+- PR：[#227](https://github.com/Crnobog9527/GraylumAI_vercel/pull/227)
+- 阶段：PR 1 / `ready_for_owner_audit`
+- Base：`origin/staging`
+- Branch：`codex/billing-v1-pr1-payment-orders-state-machine`
+- PR 创建前 implementation commit：`b98431131a0e74235cb224943b3c5e0e379fce16`
+
+### 修改范围
+
+- `packages/api/src/services/paymentOrderStatus.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/routers/payments.ts`
+- `apps/web/src/app/api/stripe/webhook/route.ts`
+- `apps/web/src/components/profile/BillingRecordsCard.tsx`
+- `apps/web/src/components/profile/SubscriptionCard.tsx`
+- `apps/web/src/components/profile/billingRecordStatus.ts`
+- `packages/db/migrations/0043_payment_order_status_machine.sql`
+- `packages/db/schema.ts`
+- PR1 相关 API/unit tests
+
+### 行为收口
+
+- checkout 创建后本地 `payment_orders.status` 仅写入 `pending`。
+- paid checkout session 不再被 `upsertPaymentOrderBySession` 直接标记为 `completed`。
+- `completed` 仅由 fulfillment RPC 成功后写入。
+- `checkout.session.expired` 进入 `expired`。
+- `checkout.session.async_payment_failed` 进入 `failed`。
+- `invoice.payment_failed` 会将对应未 fulfillment 的订阅 checkout/invoice order 标记为 `failed`。
+- 用户从 Stripe cancel URL 返回时，同步本地订单为 canonical `canceled`；旧 `cancelled` URL 仍兼容。
+- `cancelled -> canceled`、`partial_refunded -> partially_refunded` 在 API/UI 层归一。
+- BillingRecords 不再只显示 completed/paid 订单，会显示 pending、failed、canceled、expired、refunded、partially_refunded。
+
+### Migration
+
+- 新增 source-only migration：`packages/db/migrations/0043_payment_order_status_machine.sql`。
+- 目的：扩展 `payment_orders_status_check`，支持 canonical PR1 状态，并保留 `cancelled` / `partial_refunded` legacy compatibility。
+- 本 PR 未执行任何 Supabase DB migration。
+- staging / production migration 应用必须等待 owner 单独授权。
+
+### 测试命令
+
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @repo/api test:run -- paymentOrderStatus stripeFulfillment payments billingRecordStatusPresentation`
+- `git diff --check`
+- `pnpm lint`
+- `pnpm --filter web typecheck`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- targeted API tests：通过；42 test files / 495 tests passed。
+- `git diff --check`：通过。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；42 test files / 495 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env。
+
+### CI / Security / Vercel 状态
+
+- PR #227 已创建为 draft。
+- GitHub / Vercel checks 需要等待远端完成；全绿后才允许标记 ready candidate。
+- billing 业务代码 PR 不自动合并，必须等待 owner audit。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未执行 production smoke。
+- 未修改 Stripe live / Vercel env / Supabase production settings。
+- 未实现会员升级。
+- 未实现 credit ledger v2。
+- 未实现年付按月释放。
+- 未实现退款扣回分类。
+- 未修改 `package.json` / `pnpm-lock.yaml`。
+
+### 已知风险
+
+- `0043_payment_order_status_machine.sql` 合入后仍需 owner 单独授权才可应用到 Supabase DB；应用前，真实环境写入 `canceled` / `expired` / `partially_refunded` 依赖数据库约束已扩展。
+- 0043 暂保留 `cancelled` / `partial_refunded` legacy values，是为了兼容既有 0041 refund RPC 和历史数据；后续 PR 可在更完整 refund 语义阶段继续收敛。
+
+### 后续 PR 依赖
+
+- PR2 继续处理 `credit_transactions` v2 语义与退款扣回分类。
+- PR3 继续处理 `subscription_credit_grants` 与年付按月释放。
+- PR1 不进入 PR2，直到 owner audit 完成。
+
+### 是否可进入下一 PR
+
+- 当前状态：PR #227 draft，等待 GitHub/Vercel checks。
+- checks 全绿后只标记 ready candidate，不合并。
+
+## PR 1 - owner audit fix：invoice.payment_failed 续费失败独立账单行
+
+### 时间
+
+- 执行时间：2026-06-07 18:05 CST
+
+### 背景
+
+- Owner audit 退回 PR #227，指出 `invoice.payment_failed` 续费失败场景下，旧逻辑可能 fallback 到原始 completed checkout order。
+- completed/fulfilled order 会被 durable preserve，导致新的失败续费 invoice 没有生成 failed `payment_orders` 记录，账单页看不到本次失败。
+
+### 修复范围
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/routers/payments.test.ts`
+
+### 修复行为
+
+- 如果 `invoice.payment_failed` 找到当前 `stripe_invoice_id` 对应订单：只在非 durable 状态下更新为 `failed`。
+- 如果没有当前 invoice order，且找到的是首笔订阅 checkout pending order：保留就地标记 `failed` 的能力。
+- 如果没有当前 invoice order，且订阅源订单是 completed/fulfilled/refund durable order：不覆盖原订单，只使用其可推断字段创建独立 failed invoice `payment_orders` 记录。
+- 新 failed invoice order 写入 `user_id`、`item_type = membership_plan`、`item_id`、`billing_cycle`、`stripe_invoice_id`、`stripe_subscription_id`、`stripe_customer_id`、`stripe_price_id`、`amount_total`、`currency`、`mode = subscription`、`status = failed`、`payment_status` 与 `metadata.source = invoice.payment_failed` 等审计字段。
+- 如果无法推断 `user_id` / `item_id` / `membership_plan` 信息，只记录 safe warning，不覆盖 completed checkout order。
+- completed/refunded/partially_refunded durable order 仍不会被失败事件覆盖。
+- BillingRecords 测试补充 failed membership invoice order 展示断言。
+
+### 测试命令
+
+- `pnpm --filter @repo/api test:run -- paymentOrderStatus stripeFulfillment payments billingRecordStatusPresentation`
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm lint`
+- `pnpm --filter web typecheck`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- PR1 targeted API tests：通过；42 test files / 497 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；42 test files / 497 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env。Next static generation 中若干页面首次超过 60s 后自动 retry，最终 39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未执行 production smoke。
+- 未修改 Stripe live / Vercel env / Supabase production settings。
+- 未实现会员升级。
+- 未实现 credit ledger v2。
+- 未实现年付按月释放。
+- 未实现退款扣回分类。
+- 未修改 `package.json` / `pnpm-lock.yaml`。
+
+### CI / Security / Vercel 状态
+
+- 修复提交推送后需等待 GitHub/Vercel checks 重新完成。
+- checks 全绿后只标记 ready candidate，不合并。
+
+### 是否可进入下一 PR
+
+- 不进入 PR2。
+- PR #227 仍需 owner audit / merge gate。

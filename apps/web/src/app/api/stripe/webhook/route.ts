@@ -8,6 +8,7 @@ import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecre
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  markMembershipInvoicePaymentFailed,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
@@ -42,7 +43,9 @@ export async function POST(request: Request) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
-        await upsertPaymentOrderBySession(supabase, session);
+        await upsertPaymentOrderBySession(supabase, session, {
+          eventType: event.type,
+        });
         if (session.mode === 'payment' && session.payment_status === 'paid') {
           await fulfillCreditPackageOrder(supabase, session);
         }
@@ -50,12 +53,32 @@ export async function POST(request: Request) {
       }
       case 'checkout.session.async_payment_succeeded': {
         const session = event.data.object;
-        await upsertPaymentOrderBySession(supabase, session);
+        await upsertPaymentOrderBySession(supabase, session, {
+          eventType: event.type,
+        });
         await fulfillCreditPackageOrder(supabase, session);
+        break;
+      }
+      case 'checkout.session.async_payment_failed': {
+        await upsertPaymentOrderBySession(supabase, event.data.object, {
+          orderStatus: 'failed',
+          eventType: event.type,
+        });
+        break;
+      }
+      case 'checkout.session.expired': {
+        await upsertPaymentOrderBySession(supabase, event.data.object, {
+          orderStatus: 'expired',
+          eventType: event.type,
+        });
         break;
       }
       case 'invoice.payment_succeeded': {
         await fulfillMembershipInvoice(supabase, event.data.object);
+        break;
+      }
+      case 'invoice.payment_failed': {
+        await markMembershipInvoicePaymentFailed(supabase, event.data.object);
         break;
       }
       case 'customer.subscription.updated':

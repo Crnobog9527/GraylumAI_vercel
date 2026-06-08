@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loggerState = vi.hoisted(() => ({
   error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock('../../lib/logger', () => ({
@@ -18,12 +20,15 @@ vi.mock('../../lib/logger', () => ({
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  markMembershipInvoicePaymentFailed,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
 
 describe('stripe fulfillment helpers', () => {
   beforeEach(() => {
     loggerState.error.mockReset();
+    loggerState.info.mockReset();
+    loggerState.warn.mockReset();
   });
 
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
@@ -82,7 +87,7 @@ describe('stripe fulfillment helpers', () => {
     expect(updates).toEqual([]);
   });
 
-  it('persists stripe_subscription_id when checkout session has an expanded subscription object', async () => {
+  it('persists stripe_subscription_id while keeping paid checkout sessions pending until fulfillment', async () => {
     const updates: unknown[] = [];
 
     const supabase = {
@@ -146,8 +151,160 @@ describe('stripe fulfillment helpers', () => {
         stripe_customer_id: 'cus_test_123',
         stripe_subscription_id: 'sub_test_123',
         stripe_price_id: 'price_test_monthly',
+        status: 'pending',
+        payment_status: 'paid',
+      }),
+    );
+  });
+
+  it('preserves completed fulfilled checkout orders during paid session replay', async () => {
+    const updates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-completed',
+                status: 'completed',
+                fulfilled_at: '2026-03-22T12:00:00.000Z',
+                metadata: {
+                  transactionId: 'txn-1',
+                  grantedCredits: 100,
+                },
+              },
+              error: null,
+            });
+          },
+          update(payload: unknown) {
+            updates.push(payload);
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await upsertPaymentOrderBySession(
+      supabase,
+      {
+        id: 'cs_test_replay_completed',
+        metadata: {
+          userId: 'user-1',
+          itemType: 'credit_package',
+          itemId: 'package-1',
+          billingCycle: 'one_time',
+          priceId: 'price_test_package',
+        },
+        client_reference_id: 'user-1',
+        customer: 'cus_test_123',
+        amount_total: 1000,
+        currency: 'usd',
+        mode: 'payment',
+        payment_status: 'paid',
+      } as Stripe.Checkout.Session,
+      {
+        eventType: 'checkout.session.completed',
+      },
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toEqual(
+      expect.objectContaining({
         status: 'completed',
         payment_status: 'paid',
+        metadata: expect.objectContaining({
+          transactionId: 'txn-1',
+          grantedCredits: 100,
+          lastPaymentOrderStatus: 'completed',
+          lastPaymentOrderStatusSource: 'checkout.session.completed',
+        }),
+      }),
+    );
+  });
+
+  it('marks expired checkout sessions as terminal without fulfillment', async () => {
+    const updates: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        expect(table).toBe('payment_orders');
+
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-expired',
+                status: 'pending',
+                fulfilled_at: null,
+                metadata: {},
+              },
+              error: null,
+            });
+          },
+          update(payload: unknown) {
+            updates.push(payload);
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await upsertPaymentOrderBySession(
+      supabase,
+      {
+        id: 'cs_test_expired',
+        status: 'expired',
+        metadata: {
+          userId: 'user-1',
+          itemType: 'credit_package',
+          itemId: 'package-1',
+          billingCycle: 'one_time',
+          priceId: 'price_test_package',
+        },
+        client_reference_id: 'user-1',
+        customer: 'cus_test_123',
+        amount_total: 1000,
+        currency: 'usd',
+        mode: 'payment',
+        payment_status: 'unpaid',
+      } as Stripe.Checkout.Session,
+      {
+        eventType: 'checkout.session.expired',
+      },
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toEqual(
+      expect.objectContaining({
+        status: 'expired',
+        payment_status: 'unpaid',
+        metadata: expect.objectContaining({
+          lastPaymentOrderStatus: 'expired',
+          lastPaymentOrderStatusSource: 'checkout.session.expired',
+        }),
       }),
     );
   });
@@ -546,6 +703,334 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
+  });
+
+  it('marks the pending subscription checkout order failed when the first invoice payment fails', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_failed');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_failed');
+              return this;
+            }
+
+            if (column === 'id') {
+              updates[updates.length - 1].orderId = value;
+              return Promise.resolve({ error: null });
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          is(column: string, value: null) {
+            expect(column).toBe('stripe_invoice_id');
+            expect(value).toBeNull();
+            return this;
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-pending-subscription',
+                status: 'pending',
+                fulfilled_at: null,
+                metadata: {
+                  existing: 'kept',
+                },
+              },
+              error: null,
+            });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return this;
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_failed',
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_failed',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(updates).toEqual([
+      {
+        table: 'payment_orders',
+        orderId: 'order-pending-subscription',
+        payload: expect.objectContaining({
+          stripe_invoice_id: 'in_test_failed',
+          stripe_subscription_id: 'sub_test_failed',
+          amount_total: 2990,
+          currency: 'usd',
+          status: 'failed',
+          payment_status: 'open',
+          metadata: expect.objectContaining({
+            existing: 'kept',
+            source: 'invoice.payment_failed',
+            invoiceId: 'in_test_failed',
+            subscriptionId: 'sub_test_failed',
+            lastPaymentOrderStatus: 'failed',
+            lastPaymentOrderStatusSource: 'invoice.payment_failed',
+          }),
+        }),
+      },
+    ]);
+  });
+
+  it('creates a separate failed invoice order for renewal invoice failures without touching the completed checkout order', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_renewal_failed');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_renewal');
+              return this;
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          order(column: string, options: { ascending: boolean }) {
+            expect(column).toBe('created_at');
+            expect(options).toEqual({ ascending: false });
+            return this;
+          },
+          limit(value: number) {
+            expect(value).toBe(1);
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-original-checkout-completed',
+                user_id: 'user-renewal',
+                item_type: 'membership_plan',
+                item_id: 'plan-renewal',
+                billing_cycle: 'yearly',
+                stripe_invoice_id: null,
+                stripe_subscription_id: 'sub_test_renewal',
+                stripe_customer_id: 'cus_test_renewal',
+                stripe_price_id: 'price_test_yearly',
+                status: 'completed',
+                fulfilled_at: '2026-05-07T09:00:00.000Z',
+                metadata: {
+                  checkoutSessionId: 'cs_test_completed_original',
+                  existing: 'source-kept',
+                },
+              },
+              error: null,
+            });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return this;
+          },
+          insert(payload: Record<string, unknown>) {
+            inserts.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_renewal_failed',
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        customer: 'cus_test_renewal',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_renewal',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([
+      {
+        table: 'payment_orders',
+        payload: expect.objectContaining({
+          user_id: 'user-renewal',
+          item_type: 'membership_plan',
+          item_id: 'plan-renewal',
+          billing_cycle: 'yearly',
+          stripe_invoice_id: 'in_test_renewal_failed',
+          stripe_subscription_id: 'sub_test_renewal',
+          stripe_customer_id: 'cus_test_renewal',
+          stripe_price_id: 'price_test_yearly',
+          amount_total: 2990,
+          currency: 'usd',
+          mode: 'subscription',
+          status: 'failed',
+          payment_status: 'open',
+          metadata: expect.objectContaining({
+            checkoutSessionId: 'cs_test_completed_original',
+            existing: 'source-kept',
+            source: 'invoice.payment_failed',
+            invoiceId: 'in_test_renewal_failed',
+            subscriptionId: 'sub_test_renewal',
+            lastPaymentOrderStatus: 'failed',
+            lastPaymentOrderStatusSource: 'invoice.payment_failed',
+          }),
+        }),
+      },
+    ]);
+  });
+
+  it('leaves a completed checkout order untouched when failed renewal invoice fields cannot be inferred', async () => {
+    const updates: unknown[] = [];
+    const inserts: unknown[] = [];
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_renewal_missing_plan');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_missing_plan');
+              return this;
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-completed-missing-plan',
+                user_id: 'user-renewal',
+                item_type: 'membership_plan',
+                item_id: null,
+                billing_cycle: 'monthly',
+                stripe_invoice_id: null,
+                stripe_subscription_id: 'sub_test_missing_plan',
+                stripe_customer_id: 'cus_test_missing_plan',
+                stripe_price_id: 'price_test_monthly',
+                status: 'completed',
+                fulfilled_at: '2026-05-07T09:00:00.000Z',
+                metadata: {},
+              },
+              error: null,
+            });
+          },
+          update(payload: unknown) {
+            updates.push(payload);
+            return this;
+          },
+          insert(payload: unknown) {
+            inserts.push(payload);
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_renewal_missing_plan',
+        status: 'open',
+        amount_due: 2990,
+        currency: 'usd',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_missing_plan',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([]);
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_payment_failed_order_inference_incomplete',
+      expect.objectContaining({
+        invoiceId: 'in_test_...g_plan',
+        subscriptionId: 'sub_test...g_plan',
+        sourceOrderId: 'order-co...g-plan',
+        sourceOrderStatus: 'completed',
+        missingFields: ['item_id'],
+      }),
+    );
   });
 
   it('parses subscription id from the legacy invoice.subscription shape', async () => {

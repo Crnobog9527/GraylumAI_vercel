@@ -308,16 +308,49 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
   }, [checkoutSessionId, checkoutState, router, syncCheckoutSessionMutation, utils]);
 
   useEffect(() => {
-    if (checkoutState !== 'cancelled') {
+    if (checkoutState !== 'canceled' && checkoutState !== 'cancelled') {
       return;
     }
 
+    if (!checkoutSessionId) {
+      setCheckoutNotice({
+        tone: 'cancelled',
+        message: '你已取消本次支付，没有发生扣费。',
+      });
+      clearCheckoutParams();
+      return;
+    }
+
+    if (syncedCheckoutSessionRef.current === checkoutSessionId) {
+      return;
+    }
+
+    syncedCheckoutSessionRef.current = checkoutSessionId;
     setCheckoutNotice({
-      tone: 'cancelled',
-      message: '你已取消本次支付，没有发生扣费。',
+      tone: 'syncing',
+      message: '正在记录这笔已取消的支付会话...',
     });
-    clearCheckoutParams();
-  }, [checkoutState]);
+
+    void syncCheckoutSessionMutation({
+      sessionId: checkoutSessionId,
+      checkoutState: 'canceled',
+    })
+      .then(async () => {
+        void utils.payments.listBillingRecords.invalidate();
+        setCheckoutNotice({
+          tone: 'cancelled',
+          message: '你已取消本次支付，没有发生扣费。',
+        });
+        clearCheckoutParams();
+      })
+      .catch(() => {
+        syncedCheckoutSessionRef.current = null;
+        setCheckoutNotice({
+          tone: 'cancelled',
+          message: '你已取消本次支付，没有发生扣费。账单状态稍后会自动同步。',
+        });
+      });
+  }, [checkoutSessionId, checkoutState, syncCheckoutSessionMutation, utils]);
 
   // 将 API 数据转换为 PlanConfig 格式
   const displayPlans: PlanConfig[] = apiPlans.map(plan => ({

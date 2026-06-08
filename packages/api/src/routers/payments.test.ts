@@ -94,6 +94,17 @@ function createAwaitableQueryBuilder(result: Promise<unknown>) {
   };
 }
 
+function createNameLookupBuilder(result: Promise<unknown>) {
+  return {
+    select() {
+      return this;
+    },
+    in() {
+      return result;
+    },
+  };
+}
+
 function createTrackedListQueryBuilder(result: Promise<unknown>, eqCalls: Array<[string, unknown]>) {
   return {
     select() {
@@ -289,11 +300,186 @@ describe('paymentsRouter error sanitization', () => {
     expect(eqCalls).toContainEqual(['user_id', 'user-1']);
   });
 
+  it('lists pending and terminal billing records with canonical statuses', async () => {
+    const paymentOrders = [
+      {
+        id: 'order-pending',
+        item_id: '123e4567-e89b-42d3-a456-426614174000',
+        item_type: 'credit_package',
+        billing_cycle: 'one_time',
+        stripe_checkout_session_id: 'cs_test_pending',
+        stripe_invoice_id: null,
+        amount_total: 1000,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'unpaid',
+        fulfilled_at: null,
+        created_at: '2026-06-07T09:00:00.000Z',
+      },
+      {
+        id: 'order-failed',
+        item_id: '123e4567-e89b-42d3-a456-426614174000',
+        item_type: 'credit_package',
+        billing_cycle: 'one_time',
+        stripe_checkout_session_id: 'cs_test_failed',
+        stripe_invoice_id: null,
+        amount_total: 1000,
+        currency: 'usd',
+        status: 'failed',
+        payment_status: 'unpaid',
+        fulfilled_at: null,
+        created_at: '2026-06-07T09:01:00.000Z',
+      },
+      {
+        id: 'order-canceled',
+        item_id: '123e4567-e89b-42d3-a456-426614174111',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_checkout_session_id: 'cs_test_canceled',
+        stripe_invoice_id: null,
+        amount_total: 990,
+        currency: 'usd',
+        status: 'cancelled',
+        payment_status: 'unpaid',
+        fulfilled_at: null,
+        created_at: '2026-06-07T09:02:00.000Z',
+      },
+      {
+        id: 'order-expired',
+        item_id: '123e4567-e89b-42d3-a456-426614174111',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_checkout_session_id: 'cs_test_expired',
+        stripe_invoice_id: null,
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'expired',
+        payment_status: 'unpaid',
+        fulfilled_at: null,
+        created_at: '2026-06-07T09:03:00.000Z',
+      },
+      {
+        id: 'order-failed-invoice',
+        item_id: '123e4567-e89b-42d3-a456-426614174111',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_checkout_session_id: null,
+        stripe_invoice_id: 'in_test_failed_invoice',
+        amount_total: 990,
+        currency: 'usd',
+        status: 'failed',
+        payment_status: 'open',
+        fulfilled_at: null,
+        created_at: '2026-06-07T09:03:30.000Z',
+      },
+      {
+        id: 'order-refunded',
+        item_id: '123e4567-e89b-42d3-a456-426614174000',
+        item_type: 'credit_package',
+        billing_cycle: 'one_time',
+        stripe_checkout_session_id: 'cs_test_refunded',
+        stripe_invoice_id: null,
+        amount_total: 1000,
+        currency: 'usd',
+        status: 'refunded',
+        payment_status: 'refunded',
+        fulfilled_at: '2026-06-07T09:04:00.000Z',
+        created_at: '2026-06-07T09:04:00.000Z',
+      },
+      {
+        id: 'order-partial',
+        item_id: '123e4567-e89b-42d3-a456-426614174000',
+        item_type: 'credit_package',
+        billing_cycle: 'one_time',
+        stripe_checkout_session_id: 'cs_test_partial',
+        stripe_invoice_id: null,
+        amount_total: 1000,
+        currency: 'usd',
+        status: 'partial_refunded',
+        payment_status: 'partial_refunded',
+        fulfilled_at: '2026-06-07T09:05:00.000Z',
+        created_at: '2026-06-07T09:05:00.000Z',
+      },
+    ];
+
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createAwaitableQueryBuilder(
+            Promise.resolve({
+              data: paymentOrders,
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'credit_packages') {
+          return createNameLookupBuilder(
+            Promise.resolve({
+              data: [
+                {
+                  id: '123e4567-e89b-42d3-a456-426614174000',
+                  name: 'Starter Credits',
+                },
+              ],
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createNameLookupBuilder(
+            Promise.resolve({
+              data: [
+                {
+                  id: '123e4567-e89b-42d3-a456-426614174111',
+                  name: 'Pro',
+                },
+              ],
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({ supabase });
+
+    await expect(caller.listBillingRecords()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'order-pending', status: 'pending', title: 'Starter Credits' }),
+        expect.objectContaining({ id: 'order-failed', status: 'failed', title: 'Starter Credits' }),
+        expect.objectContaining({ id: 'order-canceled', status: 'canceled', title: 'Pro' }),
+        expect.objectContaining({ id: 'order-expired', status: 'expired', title: 'Pro' }),
+        expect.objectContaining({ id: 'order-failed-invoice', status: 'failed', title: 'Pro' }),
+        expect.objectContaining({ id: 'order-refunded', status: 'refunded', title: 'Starter Credits' }),
+        expect.objectContaining({ id: 'order-partial', status: 'partially_refunded', title: 'Starter Credits' }),
+      ]),
+    );
+  });
+
   it('uses the service-role client for checkout customer lookup and order insert', async () => {
     const sessionCreate = vi.fn().mockResolvedValue({
       id: 'cs_test_123',
       url: 'https://checkout.stripe.com/c/pay/cs_test_123',
-      payment_status: 'unpaid',
+      payment_status: 'paid',
     });
     const orderInserts: unknown[] = [];
     stripeState.getStripeClient.mockReturnValue({
@@ -380,6 +566,8 @@ describe('paymentsRouter error sanitization', () => {
       user_id: 'user-1',
       item_type: 'credit_package',
       item_id: '123e4567-e89b-42d3-a456-426614174000',
+      status: 'pending',
+      payment_status: 'paid',
     });
   });
 
@@ -1116,7 +1304,9 @@ describe('paymentsRouter error sanitization', () => {
       stripeInvoiceId: 'in_test_sync_paid',
     });
 
-    expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session);
+    expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
+      eventType: 'checkout.session.sync',
+    });
     expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, subscription);
     expect(fulfillMembershipInvoice).toHaveBeenCalledWith(adminSupabase, paidInvoice);
     expect(loggerState.info).toHaveBeenCalledWith(
@@ -1129,6 +1319,110 @@ describe('paymentsRouter error sanitization', () => {
         invoiceId: 'in_test_...c_paid',
       }),
     );
+  });
+
+  it('records a canceled checkout return without attempting fulfillment', async () => {
+    const session = {
+      id: 'cs_test_canceled_return',
+      mode: 'payment',
+      status: 'open',
+      payment_status: 'unpaid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'credit_package',
+        itemId: 'package-1',
+        billingCycle: 'one_time',
+        priceId: 'price_test_package',
+      },
+      customer: 'cus_test_canceled',
+    };
+
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
+    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                status: 'canceled',
+                payment_status: 'unpaid',
+                fulfilled_at: null,
+                stripe_subscription_id: null,
+                stripe_invoice_id: null,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.syncCheckoutSession({
+        sessionId: 'cs_test_canceled_return',
+        checkoutState: 'canceled',
+      }),
+    ).resolves.toEqual({
+      sessionId: 'cs_test_canceled_return',
+      mode: 'payment',
+      checkoutStatus: 'open',
+      paymentStatus: 'unpaid',
+      orderStatus: 'canceled',
+      fulfilledAt: null,
+      stripeSubscriptionId: null,
+      stripeInvoiceId: null,
+    });
+
+    expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
+      orderStatus: 'canceled',
+      eventType: 'checkout.return.canceled',
+    });
+    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(syncSubscriptionState).not.toHaveBeenCalled();
   });
 
   it('logs the failing sync stage while returning a safe frontend message', async () => {
