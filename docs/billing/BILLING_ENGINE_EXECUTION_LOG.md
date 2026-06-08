@@ -468,3 +468,367 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 未触发 checkout / payment / refund / cancel / webhook replay。
 - 未执行 production smoke。
 - 未修改 Vercel / Supabase / Stripe backend/env。
+
+## PR 2 - credit_transactions v2 语义 + 退款扣回分类
+
+### 时间
+
+- 执行时间：2026-06-08 CST
+
+### Control Plane
+
+- Control Plane issue：[#225](https://github.com/Crnobog9527/GraylumAI_vercel/issues/225)
+- PR：[#230](https://github.com/Crnobog9527/GraylumAI_vercel/pull/230)
+- 阶段：PR 2 / `ready_for_owner_audit`
+- Base：`origin/staging`
+- Base SHA：`964a0fa8d7ebbbd7a1ea16ac27b88d0c0803880e`
+- Branch：`codex/billing-v1-pr2-credit-ledger-v2`
+- Implementation commit：`27460145656f462fd95bfc5806fb8263519eb85d`
+
+### Stage checkpoint
+
+- 已执行 `git fetch --all --prune`。
+- 已读取 issue #225。
+- 已读取 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`。
+- 已读取 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 已确认最新 `origin/staging` SHA：`964a0fa8d7ebbbd7a1ea16ac27b88d0c0803880e`。
+- 已确认 PR0 / PR0.5 / Control Plane / PR1 / PR1.1 / PR1.2 / #229 均已完成。
+- 已确认当前阶段为 PR2：`credit_transactions v2 语义 + 退款扣回分类`。
+
+### 修改范围
+
+- 新增 `credit_transactions` v2 source migration：`packages/db/migrations/0044_credit_transactions_v2_semantics.sql`。
+- 更新 Drizzle schema：`packages/db/schema.ts`。
+- 新增 API ledger 语义 helper：`packages/api/src/services/creditLedger.ts`。
+- 更新 `credits.getCreditTransactions` / `credits.getCreditsSummary`，返回 normalized `ledger_type` / `reason_code` / `counts_as_spend`，并且本月消耗只统计 AI spend。
+- 更新用户使用统计与 daily billing reconciliation 的 spend 统计语义，不再把退款扣回当作消耗。
+- 更新 `CreditRecordsCard` 与前端 presentation helper，退款扣回显示为“退款扣回”，每日趋势只统计 spend。
+- 补充 API/unit tests 与 DB smoke tests。
+
+### Migration
+
+- 新增 source-only migration：`0044_credit_transactions_v2_semantics.sql`。
+- Migration 内容：新增 `ledger_type`、`reason_code`、`counts_as_spend`、`source_type`、`source_id`、`source_order_id`、`source_refund_id`、`grant_period_key`、`metadata`；增加 normalization trigger；补 v2 indexes；兼容历史 `deduction/addition/purchase/refund` 语义。
+- 本 PR 未执行任何 Supabase DB migration。
+- staging / production migration 应用必须等待 owner 单独授权。
+
+### 行为收口
+
+- `refund_clawback` 负数不会计入本月消耗。
+- 旧 `Stripe refund credit clawback` / `stripe_refund:*` 交易兼容识别为 `refund_clawback`。
+- 旧 AI `deduction` 兼容识别为 `spend`。
+- `grant` / `adjustment` / `expiration` 默认不计入本月消耗。
+- 前端积分记录按 ledger 语义显示“积分到账 / AI 使用消耗 / 退款扣回 / 系统调整 / 积分过期”。
+
+### 测试命令
+
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+- `git diff --check`
+
+### 测试结果
+
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- targeted API tests：通过；44 test files / 503 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 503 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+- `git diff --check`：通过。
+- DB SQL smoke tests：仅新增/更新 source test 文件；本 PR 禁止执行 DB migration / 真实数据库写操作，因此未 against live DB 运行。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未访问 production host。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未触发 Stripe live 或真实资金行为。
+- 未修改 Stripe live / Vercel env / Supabase backend/env。
+- 未实现会员升级。
+- 未实现 subscription_credit_grants。
+- 未实现年付按月释放。
+- 未做大规模生产数据清洗。
+- 未修改 `package.json` / `pnpm-lock.yaml`。
+
+### CI / Security / Vercel 状态
+
+- PR #230 已创建为 draft，准备在本 docs status update 推送并重新通过 checks 后标记 ready。
+- Vercel Preview Comments：通过。
+- Vercel `graylum-ai-vercel-v1`：通过。
+- Vercel `graylumai-staging`：通过。
+- billing 业务代码 PR 不自动合并，必须等待 owner audit。
+
+### 已知风险
+
+- `0044_credit_transactions_v2_semantics.sql` 合入后仍需 owner 单独授权才可应用到 Supabase DB。
+- Migration 包含历史 ledger 兼容 backfill；生产应用前需要单独评估数据量、锁等待与回滚窗口。
+- PR2 不处理年付月度释放、订阅 partial refund 人工审计队列、负余额阻止 AI 使用；这些仍属于后续 PR3/PR6 范围。
+
+### 后续 PR 依赖
+
+- PR2.x：staging DB 0044 migration application / runtime no-payment verification，需 owner 单独授权。
+- PR3：`subscription_credit_grants` + 年付按月释放引擎。
+
+### 是否可进入下一 PR
+
+- 当前状态：PR #230 ready candidate for owner audit；不由 Codex merge。
+- 不进入 PR3，直到 PR2 owner audit / merge gate 完成。
+
+## PR 2 owner audit fix - top-up purchase reconciliation scope
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- Owner audit 退回 PR #230，暂不允许合并。
+- Codex review P2 成立：`billingReconciliation.ts` 曾把所有 `grant` 都计入 `purchaseCredits`，可能让 `checkin`、`bonus_grant`、`subscription_grant` 等非购买积分掩盖 “completed payment order 没有对应 top-up/purchase credit” 的对账异常。
+- PR #230 已转回 draft，在同一 PR / 同一分支内修复。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- 新增 `countsAsTopupPurchaseCredit(row)` helper。
+- daily billing reconciliation 的 `purchaseCredits` 只统计真正 top-up / purchase credits：
+  - v2：`ledger_type = grant` 且 `reason_code = topup_purchase`。
+  - Stripe Checkout top-up fallback：`source_type = stripe_checkout` 且描述指向 credit package / top-up purchase。
+  - legacy：`type = purchase`。
+- 明确不把以下 grant / adjustment 计入 `purchaseCredits`：
+  - `checkin`
+  - `bonus_grant`
+  - `subscription_grant`
+  - admin adjustment
+  - system grant
+  - refund reversal / credit refund
+- `deductionCredits` 继续只统计 AI spend，不统计 `refund_clawback`。
+
+### 测试覆盖
+
+- completed payment order + 同日 check-in grant、无 purchase credit：仍报告 mismatch。
+- completed payment order + 同日 `subscription_grant`、无 purchase credit：仍报告 mismatch。
+- completed payment order + v2 `topup_purchase`：通过 `purchaseCredits` 对账。
+- completed payment order + legacy `type = purchase`：通过 `purchaseCredits` 对账。
+- `refund_clawback` 不计入 spend / `deductionCredits`。
+
+### 测试命令
+
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- targeted API tests：通过；44 test files / 508 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 508 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- PR #230 保持 draft，等待本 owner-audit fix 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。
+
+## PR 2 owner audit fix 2 - manual deduction spend classification
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- PR #230 仍有 unresolved P2 review thread。
+- 旧 `purchaseCredits` review thread 已变为 outdated，但新的有效 P2 指出：admin/manual deduction 如果通过 `credits.deductCredits` 写入，默认 reason `积分消费` 或其他不含 admin / 调整关键词的 reason 会被 fallback 归类为 `spend`。
+- 这会让 `getCreditsSummary`、`getUserUsageStats`、daily billing reconciliation 继续把 manual correction 错报为 AI consumption。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `apps/web/src/components/profile/creditLedgerPresentation.ts`
+- `packages/api/src/routers/credits.ts`
+- `packages/api/src/routers/credits.test.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `packages/api/src/services/__tests__/creditLedgerPresentation.test.ts`
+- `packages/db/migrations/0044_credit_transactions_v2_semantics.sql`
+- `packages/db/tests/credit_transactions_v2_semantics.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- Legacy negative `deduction` fallback 不再默认等于 `spend`。
+- 只有明确 AI signal 才归类为 `spend`：
+  - `ledger_type = spend`
+  - `source_type = ai_task`
+  - `reason_code = ai_task_spend`
+  - `idempotency_key` 以 `ai_spend:` 开头
+  - description 指向 `AI 对话消费` / `AI 对话结算` / `AI 对话中断结算` / `ai task` / `ai spend`
+- 明确 admin/manual signal 归类为 `adjustment`：
+  - `source_type = admin`
+  - `idempotency_key` 以 `admin_adjustment:` 或 `admin_credit_deduction:` 开头
+  - description 含 `管理员` / `admin` / `调整` / `adjustment`
+- `credits.deductCredits` 继续只写旧 schema 已存在字段，不插入 0044 新字段；但会写出稳定 admin signal：
+  - 默认 description：`[Admin] 积分消费`
+  - 有 idempotency key 时写为 `admin_credit_deduction:<adminId>:<requestKey>`
+- 前端 `CreditRecordsCard` presentation helper 同步同一分类规则，避免 UI 把 admin/manual deduction 显示为 AI spend。
+- 0044 migration source 的 future trigger 同步同一规则；本次未执行 migration。
+
+### 测试覆盖
+
+- `countsAsCreditSpend` 不统计 `source_type = admin`、`admin_credit_deduction:*`、默认 `积分消费` manual deduction。
+- Legacy `AI 对话消费` 仍统计为 AI spend。
+- Daily reconciliation 中 admin/manual deduction 不计入 `deductionCredits`。
+- `credits.deductCredits` 默认 reason 写出 admin adjustment signal。
+- `CreditRecordsCard` 对 admin/manual deduction 显示为系统调整，不显示为 AI 使用消耗。
+- DB smoke source 覆盖 future 0044 trigger 对默认 admin deduction 的 adjustment 分类。
+
+### 测试命令
+
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- targeted API tests：通过；44 test files / 510 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 510 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- 等待本 owner-audit fix 2 推送后重新通过 GitHub / Vercel checks，再标记 ready candidate。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。
+
+## PR 2 owner audit fix 3 - positive admin adjustment classification
+
+### 时间
+
+- 执行时间：2026-06-09 CST
+
+### 背景
+
+- PR #230 live GitHub head 已确认不是旧 `dcaa53f866b7952b6b638a3e551e642bd120d0b6`，而是 `64b332ac0d436fe574948a598c45e2e3faba1149`。
+- `purchaseCredits` P2 thread 与 manual deduction P2 thread 均已 outdated，但 GitHub 新增 active P2：positive admin adjustments 被 0044 trigger / fallback helper 归为 `grant` / `bonus_grant`。
+- 风险：`admin.adjustUserCredits` 正向调整写 `p_type = addition`、`[Admin] ...` description、`admin_adjustment:*` idempotency key；如果先按正数 `addition` 归为 grant，会错误进入 `getCreditsSummary.totalEarned` 和 grant metrics。
+
+### 修复范围
+
+- `packages/api/src/services/creditLedger.ts`
+- `apps/web/src/components/profile/creditLedgerPresentation.ts`
+- `packages/api/src/routers/credits.test.ts`
+- `packages/api/src/services/__tests__/creditLedger.test.ts`
+- `packages/api/src/services/__tests__/creditLedgerPresentation.test.ts`
+- `packages/db/migrations/0044_credit_transactions_v2_semantics.sql`
+- `packages/db/tests/credit_transactions_v2_semantics.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- GitHub issue #225
+
+### 修复行为
+
+- Admin adjustment signal 现在对正负金额都优先于 grant/spend fallback：
+  - `source_type = admin`
+  - `idempotency_key` 以 `admin_adjustment:` 或 `admin_credit_deduction:` 开头
+  - description 含 `管理员` / `admin` / `调整` / `adjustment`
+- Positive admin additions 不再归类为 `grant` / `bonus_grant`。
+- Positive admin additions 不计入 `countsAsTopupPurchaseCredit`。
+- `getCreditsSummary.totalEarned` 只统计 ledger `grant`；positive admin adjustment 进入 `byLedgerType.adjustment`。
+- `CreditRecordsCard` presentation helper 同步显示 positive admin adjustment 为“系统调整”。
+- 0044 migration source 的 future trigger 同步同一顺序；本次未执行 migration。
+
+### 测试覆盖
+
+- `normalizeCreditLedgerType` 将 `[Admin] manual top-up` + `admin_adjustment:*` 正向 addition 归为 `adjustment`。
+- `inferCreditReasonCode` 返回 `admin_adjustment`。
+- `countsAsTopupPurchaseCredit` 不统计 positive admin adjustment。
+- `getCreditsSummary.totalEarned` 不包含 positive admin adjustment。
+- `CreditRecordsCard` 对 positive admin adjustment 显示“系统调整”。
+- DB smoke source 覆盖 future 0044 trigger 对 positive admin adjustment 的 adjustment 分类。
+
+### 测试命令
+
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `git diff --check`
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+
+### 测试结果
+
+- targeted API tests：通过；44 test files / 511 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 511 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 0044 migration。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未修改 Vercel / Supabase / Stripe backend/env。
+- 未实现 PR3 年付按月释放。
+- 未实现会员升级。
+- 未进入 PR2.x。
+
+### CI / Security / Vercel 状态
+
+- 本地 gate 已重新通过。
+- 等待本 owner-audit fix 3 推送后重新通过 GitHub / Vercel checks，再等待 owner 再次审计。
+- billing 业务代码 PR 不由 Codex merge，必须等待 owner audit。

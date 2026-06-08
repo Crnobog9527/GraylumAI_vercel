@@ -1,4 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  countsAsCreditSpend,
+  countsAsTopupPurchaseCredit,
+} from './creditLedger';
 
 export interface BillingReconciliationSummary {
   successfulAiRequests: number;
@@ -68,7 +72,7 @@ export async function runDailyBillingReconciliation(
         .lt('created_at', end),
       supabase
         .from('credit_transactions')
-        .select('type, amount, created_at')
+        .select('*')
         .gte('created_at', start)
         .lt('created_at', end),
       supabase
@@ -103,14 +107,14 @@ export async function runDailyBillingReconciliation(
 
   const deductionCredits = Math.abs(sumInteger(
     creditTransactions
-      .filter((row) => row.type === 'deduction')
+      .filter((row) => countsAsCreditSpend(row))
       .map((row) => row.amount ?? 0),
   ));
 
   const completedPaymentOrders = paymentOrders.filter((row) => row.status === 'completed');
   const purchaseCredits = sumInteger(
     creditTransactions
-      .filter((row) => row.type === 'purchase')
+      .filter((row) => countsAsTopupPurchaseCredit(row))
       .map((row) => row.amount ?? 0),
   );
 

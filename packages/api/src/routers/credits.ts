@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import {
+  countsAsCreditSpend,
+  normalizeCreditLedgerType,
+  normalizeCreditTransactionRow,
+} from '../services/creditLedger';
 
 // ============================================================================
 // 类型定义
@@ -75,8 +80,7 @@ const GetTransactionsInput = z.object({
 /**
  * 检查幂等性（防止重复操作）
  *
- * 当前 credit_transactions 表不包含 idempotency_key 列，
- * 因此这里只保留接口兼容性，不执行数据库级幂等检查。
+ * credit_transactions has a user-scoped idempotency key unique index.
  */
 export async function checkIdempotency(
   supabase: any,
@@ -117,6 +121,21 @@ function normalizeTransactionType(type: TransactionType): 'addition' | 'deductio
     default:
       return 'addition';
   }
+}
+
+function buildAdminCreditDeductionIdempotencyKey(adminId: string, idempotencyKey?: string | null): string | null {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  return `admin_credit_deduction:${adminId}:${idempotencyKey}`;
+}
+
+function formatAdminCreditDeductionDescription(reason?: string | null): string {
+  const normalizedReason = reason?.trim() || '积分消费';
+  return normalizedReason.toLowerCase().includes('admin') || normalizedReason.includes('管理员')
+    ? normalizedReason
+    : `[Admin] ${normalizedReason}`;
 }
 
 // ============================================================================
@@ -175,13 +194,14 @@ export const creditsRouter = router({
     .input(DeductCreditsInput)
     .mutation(async ({ ctx, input }) => {
       const { amount, reason, referenceId, referenceType, idempotencyKey } = input;
+      const adminIdempotencyKey = buildAdminCreditDeductionIdempotencyKey(ctx.profileId, idempotencyKey);
 
       // 1. 幂等性检查
-      if (idempotencyKey) {
+      if (adminIdempotencyKey) {
         const idempotencyCheck = await checkIdempotency(
           ctx.supabase,
           ctx.profileId,
-          idempotencyKey
+          adminIdempotencyKey
         );
         if (idempotencyCheck.exists) {
           // 返回已存在的交易结果
@@ -251,8 +271,8 @@ export const creditsRouter = router({
           user_id: ctx.profileId,
           type: 'deduction',
           amount: -amount, // 负数表示扣除
-          description: reason ?? '积分消费',
-          idempotency_key: idempotencyKey ?? null,
+          description: formatAdminCreditDeductionDescription(reason),
+          idempotency_key: adminIdempotencyKey,
         })
         .select()
         .single();
@@ -420,7 +440,8 @@ export const creditsRouter = router({
 
       // 处理分页
       const hasNextPage = transactions && transactions.length > limit;
-      const items = hasNextPage ? transactions.slice(0, limit) : transactions ?? [];
+      const rawItems = hasNextPage ? transactions.slice(0, limit) : transactions ?? [];
+      const items = rawItems.map((transaction: any) => normalizeCreditTransactionRow(transaction));
       const nextCursor = hasNextPage && items.length > 0
         ? items[items.length - 1].created_at
         : undefined;
@@ -468,7 +489,7 @@ export const creditsRouter = router({
       // 获取交易统计
       let query = ctx.supabase
         .from('credit_transactions')
-        .select('type, amount')
+        .select('*')
         .eq('user_id', ctx.profileId);
 
       if (startDate) {
@@ -487,6 +508,7 @@ export const creditsRouter = router({
           totalSpent: 0,
           transactionCount: 0,
           byType: {},
+          byLedgerType: {},
         };
       }
 
@@ -496,12 +518,15 @@ export const creditsRouter = router({
         totalSpent: 0,
         transactionCount: transactions?.length ?? 0,
         byType: {} as Record<string, { count: number; amount: number }>,
+        byLedgerType: {} as Record<string, { count: number; amount: number }>,
       };
 
       transactions?.forEach((txn) => {
-        if (txn.amount > 0) {
+        const ledgerType = normalizeCreditLedgerType(txn);
+        if (ledgerType === 'grant' && txn.amount > 0) {
           summary.totalEarned += txn.amount;
-        } else {
+        }
+        if (countsAsCreditSpend(txn)) {
           summary.totalSpent += Math.abs(txn.amount);
         }
 
@@ -510,6 +535,12 @@ export const creditsRouter = router({
         }
         summary.byType[txn.type].count += 1;
         summary.byType[txn.type].amount += txn.amount;
+
+        if (!summary.byLedgerType[ledgerType]) {
+          summary.byLedgerType[ledgerType] = { count: 0, amount: 0 };
+        }
+        summary.byLedgerType[ledgerType].count += 1;
+        summary.byLedgerType[ledgerType].amount += txn.amount;
       });
 
       return summary;

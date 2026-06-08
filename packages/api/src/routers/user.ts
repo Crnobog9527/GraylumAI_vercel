@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
 import { createSafeInternalError } from '../lib/publicError';
+import { countsAsCreditSpend } from '../services/creditLedger';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -113,9 +114,8 @@ export const userRouter = router({
         .eq('user_id', ctx.profileId),
       ctx.supabase
         .from('credit_transactions')
-        .select('amount')
+        .select('*')
         .eq('user_id', ctx.profileId)
-        .lt('amount', 0)
         .gte('created_at', monthStart),
       ctx.supabase
         .from('ai_usage_logs')
@@ -155,7 +155,7 @@ export const userRouter = router({
 
     // 计算本月消耗积分总和
     const monthlyCreditsUsed = monthlyTransactions.reduce(
-      (sum, tx) => sum + Math.abs(tx.amount),
+      (sum, tx) => sum + (countsAsCreditSpend(tx) ? Math.abs(tx.amount) : 0),
       0
     );
 
