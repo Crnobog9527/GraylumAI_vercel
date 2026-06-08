@@ -51,6 +51,7 @@ describe('runDailyBillingReconciliation', () => {
       creditTransactions: [
         { type: 'deduction', amount: -120 },
         { type: 'deduction', amount: -80 },
+        { type: 'deduction', amount: -50, ledger_type: 'refund_clawback', counts_as_spend: false },
       ],
       paymentOrders: [],
     });

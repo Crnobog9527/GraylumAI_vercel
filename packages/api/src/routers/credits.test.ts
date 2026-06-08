@@ -227,6 +227,14 @@ describe('creditsRouter permissions', () => {
         }
         return createCreditTransactionsSupabase([
           { id: 'txn-1', amount: -5, type: 'deduction', created_at: '2026-05-09T00:00:00.000Z' },
+          {
+            id: 'txn-2',
+            amount: -20,
+            type: 'deduction',
+            description: 'Stripe refund credit clawback [refund:re_test]',
+            idempotency_key: 'stripe_refund:re_test',
+            created_at: '2026-05-10T00:00:00.000Z',
+          },
         ]).from(table);
       },
     };
@@ -238,9 +246,55 @@ describe('creditsRouter permissions', () => {
           id: 'txn-1',
           amount: -5,
           type: 'deduction',
+          ledger_type: 'spend',
+          counts_as_spend: true,
+        },
+        {
+          id: 'txn-2',
+          amount: -20,
+          type: 'deduction',
+          ledger_type: 'refund_clawback',
+          counts_as_spend: false,
         },
       ],
-      totalCount: 1,
+      totalCount: 2,
+    });
+  });
+
+  it('summarizes monthly spend with credit ledger v2 semantics', async () => {
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createProfileSupabase('user').from(table);
+        }
+        return createCreditTransactionsSupabase([
+          { id: 'txn-grant', amount: 100, type: 'purchase', ledger_type: 'grant', counts_as_spend: false },
+          { id: 'txn-spend', amount: -40, type: 'deduction', ledger_type: 'spend', counts_as_spend: true },
+          { id: 'txn-refund-clawback', amount: -25, type: 'deduction', ledger_type: 'refund_clawback', counts_as_spend: false },
+          { id: 'txn-adjustment', amount: -5, type: 'deduction', ledger_type: 'adjustment', counts_as_spend: false },
+          { id: 'txn-legacy-spend', amount: -10, type: 'deduction', description: 'AI 对话消费' },
+          {
+            id: 'txn-legacy-refund-clawback',
+            amount: -50,
+            type: 'deduction',
+            description: 'Stripe refund credit clawback [refund:re_legacy]',
+            idempotency_key: 'stripe_refund:re_legacy',
+          },
+        ]).from(table);
+      },
+    };
+    const caller = createCreditsCaller({ role: 'user', supabase });
+
+    await expect(caller.getCreditsSummary({ period: 'month' })).resolves.toMatchObject({
+      totalEarned: 100,
+      totalSpent: 50,
+      transactionCount: 6,
+      byLedgerType: {
+        grant: { count: 1, amount: 100 },
+        spend: { count: 2, amount: -50 },
+        refund_clawback: { count: 2, amount: -75 },
+        adjustment: { count: 1, amount: -5 },
+      },
     });
   });
 });

@@ -468,3 +468,108 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 未触发 checkout / payment / refund / cancel / webhook replay。
 - 未执行 production smoke。
 - 未修改 Vercel / Supabase / Stripe backend/env。
+
+## PR 2 - credit_transactions v2 语义 + 退款扣回分类
+
+### 时间
+
+- 执行时间：2026-06-08 CST
+
+### Control Plane
+
+- Control Plane issue：[#225](https://github.com/Crnobog9527/GraylumAI_vercel/issues/225)
+- PR：pending
+- 阶段：PR 2 / `ready_candidate_pending_pr`
+- Base：`origin/staging`
+- Base SHA：`964a0fa8d7ebbbd7a1ea16ac27b88d0c0803880e`
+- Branch：`codex/billing-v1-pr2-credit-ledger-v2`
+
+### Stage checkpoint
+
+- 已执行 `git fetch --all --prune`。
+- 已读取 issue #225。
+- 已读取 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`。
+- 已读取 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 已确认最新 `origin/staging` SHA：`964a0fa8d7ebbbd7a1ea16ac27b88d0c0803880e`。
+- 已确认 PR0 / PR0.5 / Control Plane / PR1 / PR1.1 / PR1.2 / #229 均已完成。
+- 已确认当前阶段为 PR2：`credit_transactions v2 语义 + 退款扣回分类`。
+
+### 修改范围
+
+- 新增 `credit_transactions` v2 source migration：`packages/db/migrations/0044_credit_transactions_v2_semantics.sql`。
+- 更新 Drizzle schema：`packages/db/schema.ts`。
+- 新增 API ledger 语义 helper：`packages/api/src/services/creditLedger.ts`。
+- 更新 `credits.getCreditTransactions` / `credits.getCreditsSummary`，返回 normalized `ledger_type` / `reason_code` / `counts_as_spend`，并且本月消耗只统计 AI spend。
+- 更新用户使用统计与 daily billing reconciliation 的 spend 统计语义，不再把退款扣回当作消耗。
+- 更新 `CreditRecordsCard` 与前端 presentation helper，退款扣回显示为“退款扣回”，每日趋势只统计 spend。
+- 补充 API/unit tests 与 DB smoke tests。
+
+### Migration
+
+- 新增 source-only migration：`0044_credit_transactions_v2_semantics.sql`。
+- Migration 内容：新增 `ledger_type`、`reason_code`、`counts_as_spend`、`source_type`、`source_id`、`source_order_id`、`source_refund_id`、`grant_period_key`、`metadata`；增加 normalization trigger；补 v2 indexes；兼容历史 `deduction/addition/purchase/refund` 语义。
+- 本 PR 未执行任何 Supabase DB migration。
+- staging / production migration 应用必须等待 owner 单独授权。
+
+### 行为收口
+
+- `refund_clawback` 负数不会计入本月消耗。
+- 旧 `Stripe refund credit clawback` / `stripe_refund:*` 交易兼容识别为 `refund_clawback`。
+- 旧 AI `deduction` 兼容识别为 `spend`。
+- `grant` / `adjustment` / `expiration` 默认不计入本月消耗。
+- 前端积分记录按 ledger 语义显示“积分到账 / AI 使用消耗 / 退款扣回 / 系统调整 / 积分过期”。
+
+### 测试命令
+
+- `pnpm install --frozen-lockfile`
+- `pnpm --filter @repo/api test:run -- creditLedger credits billingReconciliation creditLedgerPresentation`
+- `pnpm --filter web typecheck`
+- `pnpm lint`
+- `pnpm test:api`
+- `NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=<dummy> NEXT_PUBLIC_APP_URL=https://example.com OPENROUTER_API_KEY=<dummy> pnpm build`
+- `git diff --check`
+
+### 测试结果
+
+- `pnpm install --frozen-lockfile`：通过；未产生 tracked package/lockfile 变更。
+- targeted API tests：通过；44 test files / 503 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；44 test files / 503 tests passed。
+- `pnpm build`：通过；使用本地 dummy、非 secret 构建期 env；39/39 pages generated successfully。
+- `git diff --check`：通过。
+- DB SQL smoke tests：仅新增/更新 source test 文件；本 PR 禁止执行 DB migration / 真实数据库写操作，因此未 against live DB 运行。
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未访问 production host。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未触发 Stripe live 或真实资金行为。
+- 未修改 Stripe live / Vercel env / Supabase backend/env。
+- 未实现会员升级。
+- 未实现 subscription_credit_grants。
+- 未实现年付按月释放。
+- 未做大规模生产数据清洗。
+- 未修改 `package.json` / `pnpm-lock.yaml`。
+
+### CI / Security / Vercel 状态
+
+- PR 尚未创建；创建并推送后等待 GitHub / Vercel checks。
+- billing 业务代码 PR 不自动合并，必须等待 owner audit。
+
+### 已知风险
+
+- `0044_credit_transactions_v2_semantics.sql` 合入后仍需 owner 单独授权才可应用到 Supabase DB。
+- Migration 包含历史 ledger 兼容 backfill；生产应用前需要单独评估数据量、锁等待与回滚窗口。
+- PR2 不处理年付月度释放、订阅 partial refund 人工审计队列、负余额阻止 AI 使用；这些仍属于后续 PR3/PR6 范围。
+
+### 后续 PR 依赖
+
+- PR2.x：staging DB 0044 migration application / runtime no-payment verification，需 owner 单独授权。
+- PR3：`subscription_credit_grants` + 年付按月释放引擎。
+
+### 是否可进入下一 PR
+
+- 当前状态：local ready candidate，等待创建 PR 与远端 checks。
+- 不进入 PR3，直到 PR2 owner audit / merge gate 完成。
