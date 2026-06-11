@@ -1280,10 +1280,11 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 ### Validation
 
 - `git diff --check`：通过。
-- Full lint/typecheck/test/build：未运行；本轮 tracked 变更仅为 docs/status 记录，且 runtime no-payment 被本机 DNS / network 阻塞。
+- Full lint/typecheck/test/build：未运行；本轮 tracked 变更仅为 docs/status 记录；runtime no-payment 已在网络恢复后补跑通过。
 
 ### Stop point
 
-- 当前停止点：PR3.x staging DB 0045 migration 与 SQL smoke 已完成；runtime no-payment check blocked；cron decision 已记录。
+- 当前停止点：PR3.x staging DB 0045 migration applied；SQL smoke `BEGIN` / `ROLLBACK` passed；rollback 后测试数据为 0；runtime no-payment check passed；cron schedule decision recorded。
+- `apps/web/vercel.json` 未修改；production cron 未启用；PR4 未开始。
 - Owner audit needed。
 - 禁止动作确认：未访问 production host；未访问 Supabase production DB；未修改 Vercel env / Project Settings；未访问 Stripe live；未触发 checkout/payment/refund/cancel/webhook replay；未做 production smoke；未启用 production cron；未修改 `apps/web/vercel.json` 注册 release-subscription-credits cron；未进入 PR4 / PR5 / PR6；未实现真实订阅升级；未修改 membership upgrade API；未修改 Stripe price；未 merge main；未关闭 issue #225。
