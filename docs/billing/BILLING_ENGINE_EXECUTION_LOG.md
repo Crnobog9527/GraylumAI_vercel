@@ -1258,6 +1258,18 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Rerun result：仍 failed / blocked；runtime no-payment 未通过。
 - Forbidden runtime actions confirmation：未登录、未点击购买/升级/Stripe invoice/payment/refund/cancel；未使用 cron secret；未访问 cron release route；未触发 checkout/payment/refund/cancel/webhook/release；未留下 runtime 数据。
 
+#### Runtime no-payment success rerun
+
+- 时间：2026-06-11 CST。
+- DNS / HTTPS：system DNS now resolves `graylumai-staging.vercel.app` to Clash/Mihomo fake-ip `198.18.0.4`; normal HTTPS to staging host reaches Vercel.
+- `/`：loaded on `graylumai-staging.vercel.app` with title `Graylum AI Staging`; no console error / warning observed.
+- `/profile?tab=subscription`：loaded on `graylumai-staging.vercel.app` with title `Graylum AI Staging`; visible content includes personal center, membership subscription, billing records, credit overview, credit balance, and monthly spend.
+- Error check：no Next/app error page signal; no internal server error signal; no body-leading `500`.
+- Resource / request check：observed resource hosts only `graylumai-staging.vercel.app`; no production host resource; no observed checkout / Stripe / refund / cancel / webhook / `release-subscription-credits` request.
+- Visible payment-adjacent controls / links existed on the page, including invoice links and purchase buttons, but none were clicked.
+- Runtime no-payment result：passed.
+- Forbidden runtime actions confirmation：no production host; no Supabase DB access; no cron secret; no checkout/payment/refund/cancel/webhook/release; no `apps/web/vercel.json` change; no PR4 / PR5 / PR6.
+
 ### Cron schedule decision
 
 - `apps/web/vercel.json`：已确认未注册 `/api/cron/release-subscription-credits`。
