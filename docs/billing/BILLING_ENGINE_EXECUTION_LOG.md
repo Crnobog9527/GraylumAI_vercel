@@ -1248,6 +1248,16 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Rerun result：仍 blocked by local DNS / network / client blocking；runtime no-payment page/API verification 未完成。
 - Forbidden runtime actions confirmation：未登录、未点击购买/升级/Stripe invoice/payment/refund/cancel；未携带 cron secret；未触发 authorized cron release；未留下 runtime 数据。
 
+#### Owner-directed runtime no-payment rerun
+
+- 时间：2026-06-11 CST。
+- Owner 指令边界：不重新执行 0045 migration；不修改 staging DB；不使用 cron secret；不触发 `release-subscription-credits`；仅检查 staging host。
+- System DNS rerun：`graylumai-staging.vercel.app` 仍解析到异常非 Vercel 地址 `154.85.102.30`。
+- CLI HTTPS rerun：`https://graylumai-staging.vercel.app/` 返回 SSL handshake failure / `SSL_ERROR_SYSCALL`。
+- Chrome existing-network rerun：新建只读 Chrome tab，访问 `/` 与 `/profile?tab=subscription` 均在 `Page.navigate` 阶段 timeout；未进入页面 DOM，无法读取账单/订阅/积分展示。
+- Rerun result：仍 failed / blocked；runtime no-payment 未通过。
+- Forbidden runtime actions confirmation：未登录、未点击购买/升级/Stripe invoice/payment/refund/cancel；未使用 cron secret；未访问 cron release route；未触发 checkout/payment/refund/cancel/webhook/release；未留下 runtime 数据。
+
 ### Cron schedule decision
 
 - `apps/web/vercel.json`：已确认未注册 `/api/cron/release-subscription-credits`。
