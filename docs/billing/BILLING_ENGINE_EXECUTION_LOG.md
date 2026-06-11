@@ -1002,8 +1002,8 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - Branch：`codex/billing-v1-pr3-subscription-credit-grants`
 - Base：`origin/staging`
-- PR：pending
-- Head SHA：pending
+- PR：[#232](https://github.com/Crnobog9527/GraylumAI_vercel/pull/232)
+- Head SHA：见 PR #232 branch head / final report
 
 ### 允许范围
 
@@ -1061,5 +1061,5 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### 当前状态
 
-- PR3 implementation in progress。
+- PR3 draft PR created for owner audit：[#232](https://github.com/Crnobog9527/GraylumAI_vercel/pull/232)。
 - PR3.x DB migration 未授权，未执行。
