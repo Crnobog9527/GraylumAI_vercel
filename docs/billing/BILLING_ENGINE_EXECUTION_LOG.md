@@ -1110,3 +1110,21 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - `pnpm test:api`：通过；45 files / 523 tests passed。
 - dummy non-secret env `pnpm build`：通过；40/40 pages generated，`/api/cron/release-subscription-credits` route 编译成功。
 - SQL smoke：未运行 against live DB；本 PR 仅提交 migration source，PR3.x DB migration 未授权。
+
+### Owner audit return - PR #232 cron scheduling scope clarification
+
+- 时间：2026-06-11 CST
+- Owner audit 结论：PR #232 退回补审计；不得 merge，不得进入 PR3.x / PR4。
+- Codex review P1 thread：已回复，并作为 scope clarification 处理。
+- Review finding：`/api/cron/release-subscription-credits` route 已新增，但未注册到 `apps/web/vercel.json` 的 `crons` 数组；因此 Vercel 不会自动调度该 route。
+- 判断：该 review 指出的是有效运行闭环风险；但 PR #232 是 PR3 source-code PR，owner 当前未授权启用 production cron，也未授权修改 `apps/web/vercel.json` 注册 release-subscription-credits cron。
+- 当前范围：`/api/cron/release-subscription-credits` 在 PR #232 中仅作为 source-only route。
+- `apps/web/vercel.json`：未修改；未注册 release-subscription-credits cron。
+- Production cron：未启用。
+- Automatic annual catch-up：不会自动运行，直到后续单独授权的 scheduling gate 添加调度。
+- 后续 PR3.x / ops gate 必须单独覆盖：
+  - `0045_subscription_credit_grants` staging DB migration。
+  - staging runtime no-payment verification。
+  - cron schedule enablement decision。
+  - 如涉及 production cron，必须再次 owner 授权。
+- 当前停止点：PR3 `ready_for_owner_audit` / #232；等待 owner 重新审计；不得 merge，不得进入 PR3.x / PR4。
