@@ -377,6 +377,33 @@ export const userSubscriptions = pgTable('user_subscriptions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  membershipPlanId: uuid('membership_plan_id').references(() => membershipPlans.id, { onDelete: 'set null' }),
+  stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+  stripeInvoiceId: text('stripe_invoice_id'),
+  billingCycle: text('billing_cycle', { enum: ['monthly', 'yearly'] }).notNull(),
+  grantType: text('grant_type', {
+    enum: ['monthly_invoice', 'annual_monthly_release', 'upgrade', 'manual', 'reversal'],
+  }).notNull(),
+  grantPeriodKey: text('grant_period_key').notNull(),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  periodIndex: integer('period_index'),
+  totalPeriods: integer('total_periods'),
+  creditsGranted: integer('credits_granted').notNull(),
+  status: text('status', { enum: ['granted', 'skipped', 'reversed', 'failed'] }).default('granted').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  creditTransactionId: uuid('credit_transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
+  metadata: jsonb('metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  idempotencyKeyUnique: uniqueIndex('subscription_credit_grants_idempotency_key_key')
+    .on(table.idempotencyKey),
+}));
+
 /**
  * 计费历史表 - 记录三段式计费的每一步操作
  * 预扣 (pre_deduct) → 结算 (settle) → 退费 (refund)

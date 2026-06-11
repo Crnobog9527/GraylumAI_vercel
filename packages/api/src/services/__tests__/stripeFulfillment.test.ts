@@ -612,56 +612,113 @@ describe('stripe fulfillment helpers', () => {
     });
   });
 
-  it('delegates pending membership invoice fulfillment to the atomic RPC and backfills checkout order', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          fulfilled_at: '2026-03-22T12:34:56.000Z',
-        },
-      ],
-      error: null,
-    });
-    const updates: Array<{ table: string; payload: unknown }> = [];
+  it('fulfills membership invoices through subscription credit grants and backfills checkout order', async () => {
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [{
+        id: 'order-source',
+        user_id: 'user-atomic',
+        item_id: 'plan-atomic',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: null,
+        stripe_subscription_id: 'sub_test_atomic',
+        stripe_customer_id: 'cus_test_atomic',
+        stripe_price_id: 'price_yearly',
+      }],
+      membership_plans: [{
+        id: 'plan-atomic',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+        monthly_credits: 20,
+        monthly_bonus_credits: 0,
+      }],
+      subscription_credit_grants: [],
+      credit_transactions: [],
+      user_subscriptions: [],
+    };
 
     const supabase = {
-      rpc,
+      async rpc(name: string, payload: Record<string, unknown>) {
+        expect(name).toBe('atomic_apply_credit_ledger_entry');
+        const transaction = {
+          id: 'txn-membership-grant',
+          user_id: payload.p_user_id,
+          amount: payload.p_amount,
+          type: payload.p_type,
+          idempotency_key: payload.p_idempotency_key,
+        };
+        tables.credit_transactions.push(transaction);
+        return {
+          data: [{
+            transaction_id: transaction.id,
+            balance_before: 0,
+            balance_after: payload.p_amount,
+            amount: payload.p_amount,
+            is_idempotent: false,
+          }],
+          error: null,
+        };
+      },
       from(table: string) {
-        if (table === 'payment_orders') {
-          return {
-            select() {
-              return this;
-            },
-            eq(column: string, value: string) {
-              if (column === 'stripe_invoice_id') {
-                expect(value).toBe('in_test_atomic');
-                return {
-                  maybeSingle() {
-                    return Promise.resolve({ data: null });
-                  },
-                };
-              }
+        const filters: Array<{ column: string; value: unknown }> = [];
+        let mode: 'select' | 'insert' | 'update' = 'select';
+        let payload: Record<string, unknown> = {};
 
-              if (column === 'stripe_subscription_id') {
-                expect(value).toBe('sub_test_atomic');
-                return {
-                  is(nullColumn: string, nullValue: null) {
-                    expect(nullColumn).toBe('stripe_invoice_id');
-                    expect(nullValue).toBeNull();
-                    return Promise.resolve({ error: null });
-                  },
-                };
-              }
+        const matchingRows = () => tables[table].filter((row) =>
+          filters.every(({ column, value }) => row[column] === value),
+        );
 
-              throw new Error(`Unexpected eq(${column}, ${value})`);
-            },
-            update(payload: unknown) {
-              updates.push({ table, payload });
-              return this;
-            },
-          };
-        }
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, value });
+            return this;
+          },
+          is(column: string, value: unknown) {
+            filters.push({ column, value });
+            if (mode === 'update') {
+              matchingRows().forEach((row) => Object.assign(row, payload));
+            }
+            return Promise.resolve({ error: null });
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          update(nextPayload: Record<string, unknown>) {
+            mode = 'update';
+            payload = nextPayload;
+            return this;
+          },
+          insert(nextPayload: Record<string, unknown>) {
+            mode = 'insert';
+            payload = nextPayload;
+            return this;
+          },
+          async maybeSingle() {
+            if (mode === 'insert') {
+              const inserted = {
+                id: `${table}-${tables[table].length + 1}`,
+                ...payload,
+              };
+              tables[table].push(inserted);
+              return { data: inserted, error: null };
+            }
 
-        throw new Error(`Unexpected table: ${table}`);
+            if (mode === 'update') {
+              const rows = matchingRows();
+              rows.forEach((row) => Object.assign(row, payload));
+              return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+            }
+
+            return { data: matchingRows()[0] ?? null, error: null };
+          },
+        };
       },
     };
 
@@ -683,26 +740,37 @@ describe('stripe fulfillment helpers', () => {
       } as Stripe.Invoice,
     );
 
-    expect(rpc).toHaveBeenCalledWith('atomic_fulfill_membership_invoice', {
-      p_amount_total: 1990,
-      p_currency: 'usd',
-      p_invoice_id: 'in_test_atomic',
-      p_payment_status: 'paid',
-      p_period_end: '2025-04-21T12:26:40.000Z',
-      p_period_start: '2025-03-22T12:26:40.000Z',
-      p_stripe_customer_id: 'cus_test_atomic',
-      p_subscription_id: 'sub_test_atomic',
+    expect(tables.subscription_credit_grants).toHaveLength(1);
+    expect(tables.subscription_credit_grants[0]).toMatchObject({
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 10,
     });
-    expect(updates).toEqual([
-      {
-        table: 'payment_orders',
-        payload: expect.objectContaining({
-          fulfilled_at: '2026-03-22T12:34:56.000Z',
-          payment_status: 'paid',
+    expect(tables.credit_transactions[0]).toMatchObject({
+      amount: 10,
+      ledger_type: 'grant',
+      reason_code: 'annual_monthly_release',
+      counts_as_spend: false,
+      source_type: 'stripe_invoice',
+      source_id: 'in_test_atomic',
+    });
+    expect(tables.payment_orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stripe_invoice_id: 'in_test_atomic',
           status: 'completed',
+          payment_status: 'paid',
         }),
-      },
-    ]);
+        expect.objectContaining({
+          id: 'order-source',
+          fulfilled_at: expect.any(String),
+          status: 'completed',
+          payment_status: 'paid',
+        }),
+      ]),
+    );
   });
 
   it('marks the pending subscription checkout order failed when the first invoice payment fails', async () => {
@@ -1034,17 +1102,9 @@ describe('stripe fulfillment helpers', () => {
   });
 
   it('parses subscription id from the legacy invoice.subscription shape', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          fulfilled_at: '2026-03-22T12:34:56.000Z',
-        },
-      ],
-      error: null,
-    });
+    const updates: Array<Record<string, unknown>> = [];
 
     const supabase = {
-      rpc,
       from(table: string) {
         if (table !== 'payment_orders') {
           throw new Error(`Unexpected table: ${table}`);
@@ -1059,7 +1119,13 @@ describe('stripe fulfillment helpers', () => {
               expect(value).toBe('in_test_legacy_shape');
               return {
                 maybeSingle() {
-                  return Promise.resolve({ data: null, error: null });
+                  return Promise.resolve({
+                    data: {
+                      id: 'order-invoice-legacy',
+                      fulfilled_at: '2026-03-22T12:34:56.000Z',
+                    },
+                    error: null,
+                  });
                 },
               };
             }
@@ -1068,6 +1134,7 @@ describe('stripe fulfillment helpers', () => {
               expect(value).toBe('sub_test_legacy_shape');
               return {
                 is() {
+                  updates.push({ subscriptionId: value });
                   return Promise.resolve({ error: null });
                 },
               };
@@ -1076,6 +1143,7 @@ describe('stripe fulfillment helpers', () => {
             throw new Error(`Unexpected eq(${column}, ${value})`);
           },
           update() {
+            updates.push({ status: 'completed', payment_status: 'paid' });
             return this;
           },
         };
@@ -1094,26 +1162,14 @@ describe('stripe fulfillment helpers', () => {
       } as Stripe.Invoice,
     );
 
-    expect(rpc).toHaveBeenCalledWith(
-      'atomic_fulfill_membership_invoice',
-      expect.objectContaining({
-        p_invoice_id: 'in_test_legacy_shape',
-        p_subscription_id: 'sub_test_legacy_shape',
-      }),
-    );
+    expect(updates).toEqual([
+      { status: 'completed', payment_status: 'paid' },
+      { subscriptionId: 'sub_test_legacy_shape' },
+    ]);
   });
 
-  it('logs the fulfillment stage and safe Supabase error when the membership RPC fails', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: null,
-      error: {
-        code: 'P0001',
-        message: 'subscription order not found for invoice in_test_rpc_failure',
-      },
-    });
-
+  it('logs the subscription grant stage and safe Supabase error when source order lookup fails', async () => {
     const supabase = {
-      rpc,
       from(table: string) {
         if (table !== 'payment_orders') {
           throw new Error(`Unexpected table: ${table}`);
@@ -1133,7 +1189,27 @@ describe('stripe fulfillment helpers', () => {
               };
             }
 
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_rpc_failure');
+              return this;
+            }
+
             throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: null,
+              error: {
+                code: 'P0001',
+                message: 'subscription order not found for invoice in_test_rpc_failure',
+              },
+            });
           },
         };
       },
@@ -1156,24 +1232,22 @@ describe('stripe fulfillment helpers', () => {
         } as Stripe.Invoice,
       ),
     ).rejects.toMatchObject({
-      name: 'StripeFulfillmentError',
-      stage: 'fulfill_membership_invoice_rpc',
+      name: 'SubscriptionCreditGrantError',
+      stage: 'subscription_source_order_lookup',
       safeContext: expect.objectContaining({
-        invoiceId: 'in_test_...ailure',
         subscriptionId: 'sub_test...ailure',
         supabaseError: expect.objectContaining({
           code: 'P0001',
-          message: 'subscription order not found for invoice in_test_...ailure',
+          message: 'subscription order not found for invoice in_test_rpc_failure',
         }),
       }),
     });
 
     expect(loggerState.error).toHaveBeenCalledWith(
       'billing',
-      'stripe_fulfillment_stage_failed',
+      'subscription_credit_grant_stage_failed',
       expect.objectContaining({
-        stage: 'fulfill_membership_invoice_rpc',
-        invoiceId: 'in_test_...ailure',
+        stage: 'subscription_source_order_lookup',
         subscriptionId: 'sub_test...ailure',
         supabaseError: expect.objectContaining({
           code: 'P0001',

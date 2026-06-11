@@ -977,3 +977,89 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR2.x staging DB 0044 migration application / runtime no-payment verification：完成。
 - 当前停止点：PR2.x complete；等待 owner audit / next-stage authorization。
 - PR3 remains `not_started`。
+
+## PR 3 - subscription_credit_grants + 年付按月释放引擎
+
+### 时间
+
+- 执行时间：2026-06-11 CST
+
+### Stage checkpoint
+
+- 已执行 `git fetch --all --prune`。
+- 已读取 GitHub issue #225。
+- 已读取 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`。
+- 已读取 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 已确认 PR #230：`MERGED` into `staging`，merge commit `708496962dbf683a28fbbd9feab4d1e8f95fd7d0`。
+- 已确认 PR #231：`MERGED` into `staging`，merge commit `a61da585bc1c55c43a83ea8702623959b241bdb7`。
+- 已确认当前阶段：PR2.x `complete` / `merged`。
+- 已确认下一阶段：PR3 `subscription_credit_grants` + 年付按月释放引擎。
+- 已确认 PR3 状态：`not_started`，owner 已在当前任务明确授权进入 PR3 source-code PR。
+- latest `origin/staging` SHA：`a61da585bc1c55c43a83ea8702623959b241bdb7`。
+- 主工作区仍在 `main` 且存在未提交 `.gitignore` 改动；PR3 在独立临时 clone `/private/tmp/graylum-pr3-subscription-credit-grants-work` 从 latest `origin/staging` 创建，未覆盖主工作区改动。
+
+### Branch
+
+- Branch：`codex/billing-v1-pr3-subscription-credit-grants`
+- Base：`origin/staging`
+- PR：pending
+- Head SHA：pending
+
+### 允许范围
+
+- 新增 `subscription_credit_grants` migration source。
+- 实现 subscription credit grant service。
+- 修改 membership invoice fulfillment，使月付发放当期月度积分，年付 paid invoice 不一次性发全年积分，年付首次 invoice 只释放第 1 个月积分。
+- 订阅积分发放写入 `subscription_credit_grants`，对应 `credit_transactions` 写 `ledger_type = grant`、`counts_as_spend = false`、`grant_period_key` 与 v2 source metadata。
+- 实现年付 `yearly_credits` 12 期分摊算法，remainder 前置分配且可测试。
+- 新增 source-only cron route，用于补发应释放但未释放的年付月份；本 PR 不启用 production cron，不修改 `vercel.json`。
+- 处理 `cancel_at_period_end`、到期 canceled、full refund 停止未来释放。
+
+### 初始修改范围
+
+- `packages/db/migrations/0045_subscription_credit_grants.sql`
+- `packages/db/schema.ts`
+- `packages/api/package.json`
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/index.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `apps/web/src/app/api/cron/release-subscription-credits/route.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 PR3 migration 到 staging DB。
+- 未访问 Supabase production DB。
+- 未访问 production host。
+- 未做 production smoke。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel env / Project Settings。
+- 未启用 production cron。
+- 未修改 Stripe price。
+- 未实现真实订阅升级机制。
+- 未修改 membership upgrade API。
+- 未进入 PR4 / PR5 / PR6。
+- 未 merge PR。
+- 未 merge main。
+- 未关闭 issue #225。
+- 未打印 secret、token、cookie、数据库连接串或 service role key。
+
+### 验证状态
+
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- PR3 targeted tests：`pnpm --filter @repo/api test:run -- subscriptionCreditGrants stripeFulfillment` 通过；45 files / 520 tests passed。
+- `git diff --check`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；45 files / 520 tests passed。
+- dummy non-secret env `pnpm build`：首次在 sandbox 内因 Turbopack 绑定本地端口被 sandbox 拒绝失败；同一 dummy env 在获准的非沙箱环境重跑通过，40/40 pages generated，新增 `/api/cron/release-subscription-credits` route 编译成功。
+- SQL smoke：未运行 against live DB；本 PR 仅提交 migration source，PR3.x DB migration 未授权。
+
+### 当前状态
+
+- PR3 implementation in progress。
+- PR3.x DB migration 未授权，未执行。

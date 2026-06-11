@@ -26,6 +26,7 @@
     "./src/services/diagnostics": "./src/services/diagnostics.ts",
     "./src/services/stripe": "./src/services/stripe.ts",
     "./src/services/stripeFulfillment": "./src/services/stripeFulfillment.ts",
+    "./src/services/subscriptionCreditGrants": "./src/services/subscriptionCreditGrants.ts",
     "./src/services/contextManager": "./src/services/contextManager.ts",
     "./src/services/contextSnapshots": "./src/services/contextSnapshots.ts",
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts"
