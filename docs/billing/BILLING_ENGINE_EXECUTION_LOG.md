@@ -871,3 +871,109 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 未做 production smoke。
 - 未修改 Vercel / Supabase / Stripe backend/env。
 - 未进入 PR3。
+
+## PR 2.x - staging 0044 migration application / runtime no-payment verification
+
+### 时间
+
+- 执行时间：2026-06-11 CST
+
+### Stage checkpoint
+
+- 已执行 `git fetch --all --prune`。
+- 已读取 GitHub issue #225。
+- 已读取 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`。
+- 已读取 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 已确认 PR #230：`MERGED` into `staging`，merge commit `708496962dbf683a28fbbd9feab4d1e8f95fd7d0`。
+- 已确认当前阶段：PR2 `merged`。
+- 已确认下一阶段：PR2.x staging DB 0044 migration application / runtime no-payment verification。
+- 最新 `origin/staging` SHA：`c5495e1d083ad946e6e9ba01bf8792a6b6dad77e`。
+- PR2.x 本地工作区：`codex/billing-v1-pr2x-staging-0044`，从 `origin/staging` 创建；工作区干净。
+- 主工作区仍在 `main` 且存在未提交 `.gitignore` 改动；PR2.x 未在主工作区执行写操作。
+
+### Supabase staging target
+
+- Supabase project ref：`gvcpmcunmfrbxuwimxfa`。
+- Supabase project name：`GraylumAI Staging`。
+- Supabase database host metadata：`db.gvcpmcunmfrbxuwimxfa.supabase.co`。
+- Production project `fhmshnqjjnnlvplojktv` 未作为目标。
+
+### 0044 执行前 credit_transactions 状态
+
+- Columns：旧 schema 仅有 `id`、`user_id`、`amount`、`type`、`description`、`idempotency_key`、`balance_before`、`balance_after`、`created_at`。
+- Constraints：仅 `credit_transactions_pkey` 与 `credit_transactions_user_id_profiles_id_fk`。
+- Indexes：`credit_transactions_pkey`、`idx_credit_transactions_user_idempotency_key`。
+- Triggers：无。
+- Function `public.normalize_credit_transaction_v2()`：不存在。
+- Supabase migration history：执行前未记录 repo migrations。
+
+### Migration
+
+- 执行文件：`packages/db/migrations/0044_credit_transactions_v2_semantics.sql`。
+- 执行目标：Supabase staging only。
+- 执行结果：成功。
+- Supabase migration history：新增 version `20260611044532`，name `0044_credit_transactions_v2_semantics`。
+
+### 0044 执行后验证
+
+- Columns 已存在：`ledger_type`、`reason_code`、`counts_as_spend`、`source_type`、`source_id`、`source_order_id`、`source_refund_id`、`grant_period_key`、`metadata`。
+- `counts_as_spend`：`boolean not null default false`。
+- `metadata`：`jsonb not null default '{}'::jsonb`。
+- Check constraints 已存在：
+  - `credit_transactions_ledger_type_check`
+  - `credit_transactions_source_type_check`
+- Trigger 已存在：`trg_normalize_credit_transaction_v2`，`BEFORE INSERT OR UPDATE`。
+- Function 已存在：`public.normalize_credit_transaction_v2()`，returns `trigger`。
+- Indexes 已存在：
+  - `idx_credit_transactions_user_ledger_created`
+  - `idx_credit_transactions_user_spend_created`
+  - `idx_credit_transactions_source`
+
+### SQL smoke test
+
+- 执行：`packages/db/tests/credit_transactions_v2_semantics.sql` equivalent SQL smoke。
+- Transaction：`BEGIN` / `ROLLBACK`。
+- 覆盖分类：
+  - AI spend -> `ledger_type = spend`，`reason_code = ai_task_spend`，`counts_as_spend = true`，`source_type = ai_task`。
+  - refund clawback -> `ledger_type = refund_clawback`，`reason_code = refund_clawback`，`counts_as_spend = false`，`source_type = stripe_refund`，`source_refund_id = re_v2`。
+  - top-up purchase grant -> `ledger_type = grant`，`reason_code = topup_purchase`，`counts_as_spend = false`，`source_type = stripe_checkout`。
+  - admin/manual negative adjustment -> `ledger_type = adjustment`，`reason_code = admin_adjustment`，`counts_as_spend = false`，`source_type = admin`。
+  - default admin deduction -> `ledger_type = adjustment`，`reason_code = admin_adjustment`，`counts_as_spend = false`，`source_type = admin`。
+  - positive admin adjustment -> `ledger_type = adjustment`，`reason_code = admin_adjustment`，`counts_as_spend = false`，`source_type = admin`。
+- Rollback verification：测试 profile 与测试 credit_transactions idempotency keys 执行前为 0，执行后仍为 0；未留下测试数据。
+
+### Staging no-payment runtime check
+
+- Target app host：`graylumai-staging.vercel.app`。
+- Checked page：`/profile?tab=subscription`。
+- Browser state：Chrome existing staging login state；in-app browser without login state redirected to login and was not used for authenticated assertions。
+- 页面可见：`个人中心`、`会员订阅`、`账单记录`、`积分概览`、`积分余额`、`本月消耗`。
+- Billing display：可见 `账单记录`、`订阅账单`、`已完成`。
+- Credit display：可见 `积分概览`、`积分余额`、`本月消耗`、积分包列表。
+- Production check：页面 host 为 staging；resource check 未发现 production resource。
+- Network/API observation：只观察到 staging `/api/trpc/...payments.listBillingRecords...credits.getCreditsSummary` 等只读页面数据请求。
+- Payment-related controls observed but not clicked：Stripe `PDF 发票`、`在线发票` links and `购买` buttons。
+
+### 禁止动作确认
+
+- 未访问 production host。
+- 未使用 Supabase production DB。
+- 未修改 Vercel env / Project Settings。
+- 未触发 Stripe live。
+- 未点击购买、升级、退款、取消、Stripe invoice/payment 链接。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未做 production smoke。
+- 未进入 PR3。
+- 未实现 `subscription_credit_grants`。
+- 未实现年付按月释放引擎。
+- 未实现会员升级相关实现。
+- 未修改 `main`。
+- 未 merge `main`。
+- 未关闭 issue #225。
+- 未打印 secret、token、cookie、数据库连接串或 service role key。
+
+### 当前状态
+
+- PR2.x staging DB 0044 migration application / runtime no-payment verification：完成。
+- 当前停止点：PR2.x complete；等待 owner audit / next-stage authorization。
+- PR3 remains `not_started`。
