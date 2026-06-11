@@ -1233,6 +1233,21 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 未完成项：页面加载与 cron unauthenticated response 未能在本机完成。
 - Forbidden runtime actions confirmation：未点击购买、升级、Stripe invoice/payment、退款、取消按钮或链接；未携带 cron secret；未触发 `releaseDueAnnualSubscriptionCredits`；未留下 runtime 数据。
 
+#### Runtime no-payment rerun
+
+- 时间：2026-06-11 CST。
+- 重跑目标仍限 staging host：`graylumai-staging.vercel.app`。
+- System DNS rerun：仍返回异常非 Vercel 地址，例如 `199.16.156.103`、`108.160.166.142`、`2a03:2880:f117:83:face:b00c:0:25de`。
+- Public DoH rerun：Cloudflare DoH 与 Google DoH 均在本机网络层 HTTPS 443 timeout。
+- Vercel edge forced-connect rerun：使用 staging Host header 指向 common Vercel edge IP `76.76.21.21` 时连接被 reset。
+- In-app Browser rerun：
+  - `/`：`net::ERR_BLOCKED_BY_CLIENT`
+  - `/login`：`net::ERR_BLOCKED_BY_CLIENT`
+  - `/profile?tab=subscription`：`net::ERR_BLOCKED_BY_CLIENT`
+  - `/api/cron/release-subscription-credits`：`net::ERR_BLOCKED_BY_CLIENT`
+- Rerun result：仍 blocked by local DNS / network / client blocking；runtime no-payment page/API verification 未完成。
+- Forbidden runtime actions confirmation：未登录、未点击购买/升级/Stripe invoice/payment/refund/cancel；未携带 cron secret；未触发 authorized cron release；未留下 runtime 数据。
+
 ### Cron schedule decision
 
 - `apps/web/vercel.json`：已确认未注册 `/api/cron/release-subscription-credits`。
