@@ -1128,3 +1128,19 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
   - cron schedule enablement decision。
   - 如涉及 production cron，必须再次 owner 授权。
 - 当前停止点：PR3 `ready_for_owner_audit` / #232；等待 owner 重新审计；不得 merge，不得进入 PR3.x / PR4。
+
+### PR3 source-code merge record
+
+- 时间：2026-06-11 CST
+- PR #232：MERGED into `staging`。
+- PR head：`db57963faf6516e914370ce908471bd938546e94`。
+- Squash merge commit：`4d0cc1cdc38d54fa358a11045930186d64bad7c8`。
+- Merge gate：base = `staging`；PR 非 draft；mergeable = true；all review threads resolved；Vercel Preview Comments、`graylum-ai-vercel-v1`、`graylumai-staging` 均为 SUCCESS。
+- Remote PR branch：`codex/billing-v1-pr3-subscription-credit-grants` 已删除。
+- PR3 source-code scope complete：`subscription_credit_grants` migration source、subscription credit grant service、membership invoice fulfillment updates、source-only annual catch-up route、tests、schema/source exports 已进入 `staging`。
+- 0045 migration：source only；未执行到 staging DB。
+- Cron scheduling：`/api/cron/release-subscription-credits` route source exists；未注册 `apps/web/vercel.json`；production cron 未启用。
+- 当前阶段：PR3 source-code complete。
+- 下一阶段：PR3.x staging DB 0045 migration / runtime no-payment verification / cron schedule decision。
+- PR3.x 状态：未开始；不得自动进入 PR3.x / PR4。
+- 禁止动作确认：未执行 DB migration；未访问或修改 staging DB；未访问 production；未触发 Stripe live 或真实 checkout/payment/refund/cancel/webhook replay；未修改 Vercel env / Project Settings；未启用 production cron；未修改 `apps/web/vercel.json` 注册 release-subscription-credits cron；未进入 PR4 / PR5 / PR6；未 merge main。
