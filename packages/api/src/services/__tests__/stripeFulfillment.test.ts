@@ -450,7 +450,7 @@ describe('stripe fulfillment helpers', () => {
 
   it('backfills checkout order fulfillment when invoice fulfillment already exists', async () => {
     const updates: Array<{ table: string; payload: unknown }> = [];
-    let profileTouched = false;
+    const profileUpdates: unknown[] = [];
     let transactionsTouched = false;
     let subscriptionTouched = false;
 
@@ -463,6 +463,7 @@ describe('stripe fulfillment helpers', () => {
             },
             eq(column: string, value: string) {
               if (column === 'stripe_invoice_id') {
+                expect(value).toBe('in_test_123');
                 return {
                   maybeSingle() {
                     return Promise.resolve({
@@ -476,26 +477,41 @@ describe('stripe fulfillment helpers', () => {
               }
 
               if (column === 'stripe_subscription_id') {
-                return {
-                  is(nullColumn: string, nullValue: null) {
-                    expect(nullColumn).toBe('stripe_invoice_id');
-                    expect(nullValue).toBeNull();
-                    return Promise.resolve({ error: null });
-                  },
-                };
+                expect(value).toBe('sub_test_123');
+                return this;
               }
 
               throw new Error(`Unexpected eq(${column}, ${value})`);
             },
             order() {
-              throw new Error('order should not be called when invoice order already exists');
+              return this;
             },
             limit() {
-              throw new Error('limit should not be called when invoice order already exists');
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: 'order-source-1',
+                  user_id: 'user-1',
+                  item_id: 'plan-1',
+                  item_type: 'membership_plan',
+                  billing_cycle: 'monthly',
+                  stripe_subscription_id: 'sub_test_123',
+                  stripe_customer_id: 'cus_test_123',
+                  stripe_price_id: 'price_monthly',
+                },
+                error: null,
+              });
             },
             update(payload: unknown) {
               updates.push({ table, payload });
               return this;
+            },
+            is(nullColumn: string, nullValue: null) {
+              expect(nullColumn).toBe('stripe_invoice_id');
+              expect(nullValue).toBeNull();
+              return Promise.resolve({ error: null });
             },
             insert() {
               throw new Error('insert should not be called when invoice order already exists');
@@ -503,9 +519,49 @@ describe('stripe fulfillment helpers', () => {
           };
         }
 
+        if (table === 'membership_plans') {
+          return {
+            select() {
+              return this;
+            },
+            eq(column: string, value: string) {
+              expect(column).toBe('id');
+              expect(value).toBe('plan-1');
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: 'plan-1',
+                  name: 'Pro',
+                  level: 'pro',
+                  monthly_credits: 1000,
+                  monthly_bonus_credits: 0,
+                },
+                error: null,
+              });
+            },
+          };
+        }
+
         if (table === 'profiles') {
-          profileTouched = true;
-          throw new Error('profiles should not be touched during invoice replay');
+          return {
+            update(payload: unknown) {
+              profileUpdates.push(payload);
+              return this;
+            },
+            eq(column: string, value: string) {
+              expect(column).toBe('id');
+              expect(value).toBe('user-1');
+              return this;
+            },
+            select() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({ data: { id: 'user-1' }, error: null });
+            },
+          };
         }
 
         if (table === 'credit_transactions') {
@@ -548,7 +604,7 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
-    expect(profileTouched).toBe(false);
+    expect(profileUpdates).toEqual([{ membership_level: 'pro' }]);
     expect(transactionsTouched).toBe(false);
     expect(subscriptionTouched).toBe(false);
   });
@@ -636,6 +692,10 @@ describe('stripe fulfillment helpers', () => {
       subscription_credit_grants: [],
       credit_transactions: [],
       user_subscriptions: [],
+      profiles: [{
+        id: 'user-atomic',
+        membership_level: 'free',
+      }],
     };
 
     const supabase = {
@@ -755,6 +815,10 @@ describe('stripe fulfillment helpers', () => {
       counts_as_spend: false,
       source_type: 'stripe_invoice',
       source_id: 'in_test_atomic',
+    });
+    expect(tables.profiles[0]).toMatchObject({
+      id: 'user-atomic',
+      membership_level: 'gold',
     });
     expect(tables.payment_orders).toEqual(
       expect.arrayContaining([
@@ -1103,48 +1167,89 @@ describe('stripe fulfillment helpers', () => {
 
   it('parses subscription id from the legacy invoice.subscription shape', async () => {
     const updates: Array<Record<string, unknown>> = [];
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [{
+        id: 'order-source-legacy',
+        user_id: 'user-legacy',
+        item_id: 'plan-legacy',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_invoice_id: null,
+        stripe_subscription_id: 'sub_test_legacy_shape',
+        stripe_customer_id: 'cus_test_legacy',
+        stripe_price_id: 'price_legacy',
+      }, {
+        id: 'order-invoice-legacy',
+        stripe_invoice_id: 'in_test_legacy_shape',
+        stripe_subscription_id: 'sub_test_legacy_shape',
+        fulfilled_at: '2026-03-22T12:34:56.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-legacy',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 1000,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-legacy',
+        membership_level: 'free',
+      }],
+    };
 
     const supabase = {
       from(table: string) {
-        if (table !== 'payment_orders') {
+        if (!tables[table]) {
           throw new Error(`Unexpected table: ${table}`);
         }
+
+        const filters: Array<{ column: string; value: unknown }> = [];
+        let mode: 'select' | 'update' = 'select';
+        let payload: Record<string, unknown> = {};
+        const matchingRows = () => tables[table].filter((row) =>
+          filters.every(({ column, value }) => row[column] === value),
+        );
 
         return {
           select() {
             return this;
           },
-          eq(column: string, value: string) {
-            if (column === 'stripe_invoice_id') {
-              expect(value).toBe('in_test_legacy_shape');
-              return {
-                maybeSingle() {
-                  return Promise.resolve({
-                    data: {
-                      id: 'order-invoice-legacy',
-                      fulfilled_at: '2026-03-22T12:34:56.000Z',
-                    },
-                    error: null,
-                  });
-                },
-              };
-            }
-
+          eq(column: string, value: unknown) {
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_legacy_shape');
-              return {
-                is() {
-                  updates.push({ subscriptionId: value });
-                  return Promise.resolve({ error: null });
-                },
-              };
             }
 
-            throw new Error(`Unexpected eq(${column}, ${value})`);
-          },
-          update() {
-            updates.push({ status: 'completed', payment_status: 'paid' });
+            filters.push({ column, value });
             return this;
+          },
+          order() {
+            return this;
+          },
+          limit() {
+            return this;
+          },
+          update(nextPayload: Record<string, unknown>) {
+            mode = 'update';
+            payload = nextPayload;
+            return this;
+          },
+          is(column: string, value: unknown) {
+            filters.push({ column, value });
+            if (mode === 'update') {
+              updates.push({ status: payload.status, payment_status: payload.payment_status });
+              matchingRows().forEach((row) => Object.assign(row, payload));
+            }
+
+            return Promise.resolve({ error: null });
+          },
+          async maybeSingle() {
+            if (mode === 'update') {
+              const rows = matchingRows();
+              rows.forEach((row) => Object.assign(row, payload));
+              return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+            }
+
+            return { data: matchingRows()[0] ?? null, error: null };
           },
         };
       },
@@ -1164,8 +1269,8 @@ describe('stripe fulfillment helpers', () => {
 
     expect(updates).toEqual([
       { status: 'completed', payment_status: 'paid' },
-      { subscriptionId: 'sub_test_legacy_shape' },
     ]);
+    expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro' });
   });
 
   it('logs the subscription grant stage and safe Supabase error when source order lookup fails', async () => {

@@ -18,7 +18,8 @@ type TableName =
   | 'membership_plans'
   | 'subscription_credit_grants'
   | 'credit_transactions'
-  | 'user_subscriptions';
+  | 'user_subscriptions'
+  | 'profiles';
 
 type Row = Record<string, any>;
 
@@ -128,6 +129,7 @@ function createMockSupabase(seed: Partial<Record<TableName, Row[]>> = {}) {
     subscription_credit_grants: seed.subscription_credit_grants ?? [],
     credit_transactions: seed.credit_transactions ?? [],
     user_subscriptions: seed.user_subscriptions ?? [],
+    profiles: seed.profiles ?? [],
   };
 
   const supabase = {
@@ -213,6 +215,10 @@ describe('subscription credit grants', () => {
         monthly_credits: 2000,
         monthly_bonus_credits: 100,
       }],
+      profiles: [{
+        id: 'user-yearly',
+        membership_level: 'free',
+      }],
     });
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
@@ -228,6 +234,10 @@ describe('subscription credit grants', () => {
     });
 
     expect(result.grantedCredits).toBe(1667);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-yearly',
+      membership_level: 'gold',
+    });
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
       billing_cycle: 'yearly',
@@ -264,6 +274,10 @@ describe('subscription credit grants', () => {
         monthly_bonus_credits: 250,
         yearly_credits: 18_000,
       }],
+      profiles: [{
+        id: 'user-monthly',
+        membership_level: 'free',
+      }],
     });
 
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
@@ -275,6 +289,10 @@ describe('subscription credit grants', () => {
       now: '2026-06-01T00:00:01.000Z',
     });
 
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-monthly',
+      membership_level: 'pro',
+    });
     expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
       billing_cycle: 'monthly',
       grant_type: 'monthly_invoice',
@@ -302,8 +320,13 @@ describe('subscription credit grants', () => {
       membership_plans: [{
         id: 'plan-repeat',
         name: 'Pro',
+        level: 'pro',
         monthly_credits: 1000,
         monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-repeat',
+        membership_level: 'free',
       }],
     });
 
@@ -317,10 +340,148 @@ describe('subscription credit grants', () => {
     };
 
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+    supabase.tables.profiles[0].membership_level = 'free';
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-repeat',
+      membership_level: 'pro',
+    });
+  });
+
+  it('fails safely before grant/order/subscription writes when the profile is missing', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-source-missing-profile',
+        user_id: 'user-missing-profile',
+        item_id: 'plan-missing-profile',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_missing_profile',
+      }],
+      membership_plans: [{
+        id: 'plan-missing-profile',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 1000,
+        monthly_bonus_credits: 0,
+      }],
+    });
+
+    await expect(
+      fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+        amountTotal: 990,
+        invoiceId: 'in_missing_profile',
+        periodStart: '2026-06-01T00:00:00.000Z',
+        periodEnd: '2026-07-01T00:00:00.000Z',
+        subscriptionId: 'sub_missing_profile',
+        now: '2026-06-01T00:00:01.000Z',
+      }),
+    ).rejects.toMatchObject({
+      name: 'SubscriptionCreditGrantError',
+      stage: 'subscription_profile_missing',
+    });
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.user_subscriptions).toHaveLength(0);
+    expect(supabase.tables.payment_orders).toHaveLength(1);
+  });
+
+  it('preserves existing cancel_at_period_end during invoice fulfillment', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-source-canceling',
+        user_id: 'user-canceling',
+        item_id: 'plan-canceling',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_canceling',
+      }],
+      membership_plans: [{
+        id: 'plan-canceling',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 1000,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-canceling',
+        membership_level: 'free',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-canceling',
+        user_id: 'user-canceling',
+        membership_plan_id: 'plan-canceling',
+        stripe_subscription_id: 'sub_canceling',
+        billing_cycle: 'monthly',
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_canceling',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      subscriptionId: 'sub_canceling',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      id: 'subscription-canceling',
+      cancel_at_period_end: 'true',
+    });
+  });
+
+  it('preserves existing subscription lifecycle status during invoice fulfillment', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-source-lifecycle',
+        user_id: 'user-lifecycle',
+        item_id: 'plan-lifecycle',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_lifecycle',
+      }],
+      membership_plans: [{
+        id: 'plan-lifecycle',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 1000,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-lifecycle',
+        membership_level: 'free',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-lifecycle',
+        user_id: 'user-lifecycle',
+        membership_plan_id: 'plan-lifecycle',
+        stripe_subscription_id: 'sub_lifecycle',
+        billing_cycle: 'monthly',
+        status: 'past_due',
+        cancel_at_period_end: 'false',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_lifecycle',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      subscriptionId: 'sub_lifecycle',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      id: 'subscription-lifecycle',
+      status: 'past_due',
+    });
   });
 
   it('lets cron catch up missing annual release months', async () => {

@@ -674,33 +674,6 @@ export async function fulfillMembershipInvoice(
     );
   }
 
-  const { data: existingInvoiceOrder, error: existingInvoiceOrderError } = await supabase
-    .from('payment_orders')
-    .select('id, fulfilled_at')
-    .eq('stripe_invoice_id', invoiceId)
-    .maybeSingle();
-
-  if (existingInvoiceOrderError) {
-    throwFulfillmentError(
-      'invoice_order_lookup',
-      STRIPE_FULFILLMENT_ERRORS.invoiceOrderLookup,
-      existingInvoiceOrderError,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-      },
-    );
-  }
-
-  if (existingInvoiceOrder?.fulfilled_at) {
-    await backfillCheckoutOrderFulfillment(
-      supabase,
-      subscriptionId,
-      existingInvoiceOrder.fulfilled_at,
-    );
-    return;
-  }
-
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',

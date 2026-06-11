@@ -46,6 +46,7 @@ interface SubscriptionRow {
   current_period_start?: string | null;
   current_period_end?: string | null;
   metadata?: Record<string, unknown> | null;
+  updated_at?: string | null;
 }
 
 interface GrantPeriod {
@@ -102,8 +103,11 @@ const SUBSCRIPTION_GRANT_ERRORS = {
   creditGrantRpc: 'Failed to apply subscription credit grant',
   paymentOrderWrite: 'Failed to write subscription invoice payment order',
   subscriptionWrite: 'Failed to write subscription mirror',
+  profileWrite: 'Failed to update membership profile level',
   missingSubscriptionOrder: 'Subscription source order is missing required billing fields',
   missingMembershipPlan: 'Membership plan is missing for subscription grant',
+  missingMembershipPlanLevel: 'Membership plan level is missing for subscription grant',
+  missingProfile: 'Profile is missing for membership invoice fulfillment',
 } as const;
 
 class SubscriptionCreditGrantError extends Error {
@@ -186,6 +190,14 @@ function normalizeBillingCycle(value: string | null | undefined): SubscriptionBi
 
 function isCancelAtPeriodEnd(value: string | boolean | null | undefined): boolean {
   return value === true || value === 'true';
+}
+
+function shouldInitializeMirrorStatus(value: string | null | undefined): boolean {
+  return !value?.trim();
+}
+
+function shouldInitializeCancelAtPeriodEnd(value: string | boolean | null | undefined): boolean {
+  return value === null || value === undefined || value === '';
 }
 
 function buildMonthlyGrantPeriodKey(invoiceId: string) {
@@ -393,6 +405,61 @@ async function getMembershipPlan(
   }
 
   return result.data;
+}
+
+function requireMembershipPlanLevel(plan: MembershipPlanRow, context: Record<string, unknown>): string {
+  const level = plan.level?.trim();
+  if (!level) {
+    throwGrantError(
+      'subscription_membership_plan_level_missing',
+      SUBSCRIPTION_GRANT_ERRORS.missingMembershipPlanLevel,
+      new Error('membership plan level missing'),
+      context,
+    );
+  }
+
+  return level;
+}
+
+async function syncProfileMembershipLevel(input: {
+  supabase: SupabaseLikeClient;
+  userId: string;
+  membershipLevel: string;
+  subscriptionId: string;
+  invoiceId: string;
+}) {
+  const result = await input.supabase
+    .from('profiles')
+    .update({ membership_level: input.membershipLevel })
+    .eq('id', input.userId)
+    .select('id')
+    .maybeSingle();
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_profile_membership_level_update',
+      SUBSCRIPTION_GRANT_ERRORS.profileWrite,
+      result.error,
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        invoiceId: maskIdentifier(input.invoiceId),
+      },
+    );
+  }
+
+  if (!result.data?.id) {
+    throwGrantError(
+      'subscription_profile_missing',
+      SUBSCRIPTION_GRANT_ERRORS.missingProfile,
+      new Error('profile missing for membership invoice fulfillment'),
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        invoiceId: maskIdentifier(input.invoiceId),
+      },
+    );
+  }
 }
 
 async function hasSubscriptionFullRefund(
@@ -651,17 +718,32 @@ async function upsertSubscriptionMirror(input: {
   invoiceId: string;
   paymentStatus?: string | null;
 }) {
-  const payload = {
+  const existingResult = await input.supabase
+    .from('user_subscriptions')
+    .select('id, status, cancel_at_period_end, metadata')
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .maybeSingle();
+
+  if (existingResult.error) {
+    throwGrantError(
+      'subscription_mirror_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
+      existingResult.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId) },
+    );
+  }
+
+  const existingSubscription = existingResult.data as SubscriptionRow | null;
+  const payload: SubscriptionRow = {
     user_id: input.sourceOrder.user_id,
     membership_plan_id: input.plan.id,
     stripe_customer_id: input.sourceOrder.stripe_customer_id ?? input.stripeCustomerId ?? null,
     stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
     billing_cycle: input.billingCycle,
-    status: 'active',
-    cancel_at_period_end: 'false',
     current_period_start: input.periodStart ?? null,
     current_period_end: input.periodEnd ?? null,
     metadata: {
+      ...asRecord(existingSubscription?.metadata),
       lastInvoiceId: input.invoiceId,
       lastInvoicePaymentStatus: input.paymentStatus ?? 'paid',
       transactionId: input.transactionId ?? null,
@@ -670,40 +752,52 @@ async function upsertSubscriptionMirror(input: {
     updated_at: input.now,
   };
 
-  const updateResult = await input.supabase
-    .from('user_subscriptions')
-    .update(payload)
-    .eq('stripe_subscription_id', input.subscriptionId)
-    .select('id')
-    .maybeSingle();
+  if (existingSubscription?.id) {
+    if (shouldInitializeMirrorStatus(existingSubscription.status)) {
+      payload.status = 'active';
+    }
 
-  if (updateResult.error) {
-    throwGrantError(
-      'subscription_mirror_update',
-      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-      updateResult.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
-  }
+    if (shouldInitializeCancelAtPeriodEnd(existingSubscription.cancel_at_period_end)) {
+      payload.cancel_at_period_end = 'false';
+    }
 
-  if (!updateResult.data?.id) {
-    const insertResult = await input.supabase
+    const updateResult = await input.supabase
       .from('user_subscriptions')
-      .insert({
-        ...payload,
-        stripe_subscription_id: input.subscriptionId,
-      })
+      .update(payload)
+      .eq('id', existingSubscription.id)
       .select('id')
       .maybeSingle();
 
-    if (insertResult.error) {
+    if (updateResult.error) {
       throwGrantError(
-        'subscription_mirror_insert',
+        'subscription_mirror_update',
         SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-        insertResult.error,
+        updateResult.error,
         { subscriptionId: maskIdentifier(input.subscriptionId) },
       );
     }
+
+    return;
+  }
+
+  const insertResult = await input.supabase
+    .from('user_subscriptions')
+    .insert({
+      ...payload,
+      stripe_subscription_id: input.subscriptionId,
+      status: 'active',
+      cancel_at_period_end: 'false',
+    })
+    .select('id')
+    .maybeSingle();
+
+  if (insertResult.error) {
+    throwGrantError(
+      'subscription_mirror_insert',
+      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
+      insertResult.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId) },
+    );
   }
 }
 
@@ -797,15 +891,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
-  if (existingInvoiceOrder?.fulfilled_at) {
-    return {
-      fulfilledAt: existingInvoiceOrder.fulfilled_at,
-      alreadyFulfilled: true,
-      grantedCredits: 0,
-      creditTransactionId: null,
-    };
-  }
-
   const sourceOrder = await getLatestSubscriptionOrder(supabase, input.subscriptionId);
   if (
     !sourceOrder?.user_id
@@ -821,10 +906,33 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   }
 
   const plan = await getMembershipPlan(supabase, sourceOrder.item_id);
+  const membershipLevel = requireMembershipPlanLevel(plan, {
+    membershipPlanId: maskIdentifier(plan.id),
+    subscriptionId: maskIdentifier(input.subscriptionId),
+    invoiceId: maskIdentifier(input.invoiceId),
+  });
   const billingCycle = normalizeBillingCycle(sourceOrder.billing_cycle);
   const fulfilledAt = input.now ?? new Date().toISOString();
   const periodStart = input.periodStart ?? fulfilledAt;
   const periodEnd = input.periodEnd ?? periodStart;
+
+  await syncProfileMembershipLevel({
+    supabase,
+    userId: sourceOrder.user_id,
+    membershipLevel,
+    subscriptionId: input.subscriptionId,
+    invoiceId: input.invoiceId,
+  });
+
+  if (existingInvoiceOrder?.fulfilled_at) {
+    return {
+      fulfilledAt: existingInvoiceOrder.fulfilled_at,
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+    };
+  }
+
   const grantPeriod: GrantPeriod = billingCycle === 'yearly'
     ? {
       periodIndex: 1,

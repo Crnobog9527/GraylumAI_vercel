@@ -1063,3 +1063,50 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - PR3 draft PR created for owner audit：[#232](https://github.com/Crnobog9527/GraylumAI_vercel/pull/232)。
 - PR3.x DB migration 未授权，未执行。
+
+### Owner audit return - PR #232 P1/P2 fix
+
+- 时间：2026-06-11 CST
+- Owner audit 结论：PR #232 退回补审计；保持 draft，不 merge，不进入 PR3.x / PR4。
+
+#### P1 - profile membership_level restore
+
+- 恢复 PR3 membership invoice fulfillment 对 `profiles.membership_level` 的同步。
+- 同步来源为 paid membership plan 的 `membership_plans.level`；plan level 缺失时 fail closed，不发放积分。
+- `fulfillMembershipInvoiceWithSubscriptionCreditGrants` 在 source order 与 membership plan 解析后，先同步 profile level；profile 不存在时抛出 `subscription_profile_missing`，并在任何 `subscription_credit_grants`、`credit_transactions`、`user_subscriptions`、invoice `payment_orders` 写入前停止。
+- repeated invoice / repeated webhook 不重复 grant；已 fulfilled invoice replay 仍会重新按 plan level 同步 profile，确保 `profiles.membership_level` 不停留在 free / 旧等级。
+- `fulfillMembershipInvoice` 不再在 invoice 已 fulfilled 时完全绕过 PR3 service；统一委托 subscription credit grant service 做幂等判断，再 backfill checkout order。
+
+#### P2 - subscription lifecycle preservation
+
+- `upsertSubscriptionMirror` 先读取现有 `user_subscriptions` mirror。
+- 新建 mirror 时初始化 `status = active`、`cancel_at_period_end = false`。
+- 已有 mirror 仅在 `status` 为空时初始化 status，且仅在 `cancel_at_period_end` 为空时初始化 cancel flag。
+- 已有 Stripe lifecycle state（例如 `past_due`）与 `cancel_at_period_end = true` 不会被 invoice fulfillment 无条件覆盖。
+
+#### Atomic boundary note
+
+- 本补丁没有新增或执行 DB RPC / DB migration。
+- 现有 PR3 runtime 仍由多次 Supabase writes + `atomic_apply_credit_ledger_entry` RPC 组成；因此 profile update、credit grant、`subscription_credit_grants`、`user_subscriptions`、invoice `payment_orders` 之间不能达到旧 `atomic_fulfill_membership_invoice` 的单事务强原子性。
+- 为降低半完成风险，本补丁把 profile missing / plan level missing 作为 grant 前置门禁：profile 缺失不会产生 grant、ledger、subscription mirror 或 completed invoice order。
+- 完整原子化应在后续 owner 单独授权的 DB/RPC migration 阶段处理；本 PR 仍只停留在 PR3 source-code PR 范围。
+
+#### Added tests
+
+- yearly paid invoice 后 `profiles.membership_level` 更新为 plan level。
+- monthly paid invoice 后 `profiles.membership_level` 更新为 plan level。
+- repeated invoice fulfillment 不重复 grant，且会把 profile level 重新同步为 plan level。
+- profile 缺失时安全失败，且不产生 grant / credit transaction / subscription mirror / completed invoice order。
+- 已有 `cancel_at_period_end = true` 不被 invoice fulfillment 改为 false。
+- 已有 subscription lifecycle `status` 不被 invoice fulfillment 无条件覆盖。
+
+#### Validation
+
+- Targeted PR3 rerun：`pnpm --filter @repo/api test:run -- subscriptionCreditGrants stripeFulfillment` 通过；45 files / 523 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过；route types generated successfully，`tsc --noEmit` 通过。
+- `pnpm test:api`：通过；45 files / 523 tests passed。
+- dummy non-secret env `pnpm build`：通过；40/40 pages generated，`/api/cron/release-subscription-credits` route 编译成功。
+- SQL smoke：未运行 against live DB；本 PR 仅提交 migration source，PR3.x DB migration 未授权。
