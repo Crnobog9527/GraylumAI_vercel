@@ -12,6 +12,7 @@ import {
   resolveCheckoutSessionOrderStatus,
   type PaymentOrderStatusLike,
 } from './paymentOrderStatus';
+import { fulfillMembershipInvoiceWithSubscriptionCreditGrants } from './subscriptionCreditGrants';
 
 type SupabaseLikeClient = any;
 const STRIPE_FULFILLMENT_ERRORS = {
@@ -673,62 +674,22 @@ export async function fulfillMembershipInvoice(
     );
   }
 
-  const { data: existingInvoiceOrder, error: existingInvoiceOrderError } = await supabase
-    .from('payment_orders')
-    .select('id, fulfilled_at')
-    .eq('stripe_invoice_id', invoiceId)
-    .maybeSingle();
-
-  if (existingInvoiceOrderError) {
-    throwFulfillmentError(
-      'invoice_order_lookup',
-      STRIPE_FULFILLMENT_ERRORS.invoiceOrderLookup,
-      existingInvoiceOrderError,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-      },
-    );
-  }
-
-  if (existingInvoiceOrder?.fulfilled_at) {
-    await backfillCheckoutOrderFulfillment(
-      supabase,
-      subscriptionId,
-      existingInvoiceOrder.fulfilled_at,
-    );
-    return;
-  }
-
-  const { data, error } = await supabase.rpc('atomic_fulfill_membership_invoice', {
-    p_amount_total: invoice.amount_paid,
-    p_currency: invoice.currency ?? 'usd',
-    p_invoice_id: invoiceId,
-    p_payment_status: invoice.status ?? 'paid',
-    p_period_end: asIsoTimestamp(invoice.period_end),
-    p_period_start: asIsoTimestamp(invoice.period_start),
-    p_stripe_customer_id: typeof invoice.customer === 'string' ? invoice.customer : null,
-    p_subscription_id: subscriptionId,
+  const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+    amountTotal: invoice.amount_paid,
+    currency: invoice.currency ?? 'usd',
+    invoiceId,
+    paymentStatus: invoice.status ?? 'paid',
+    periodEnd: asIsoTimestamp(invoice.period_end),
+    periodStart: asIsoTimestamp(invoice.period_start),
+    stripeCustomerId: typeof invoice.customer === 'string' ? invoice.customer : null,
+    subscriptionId,
   });
 
-  if (error) {
-    throwFulfillmentError(
-      'fulfill_membership_invoice_rpc',
-      STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice,
-      error,
-      {
-        invoiceId: maskIdentifier(invoiceId),
-        subscriptionId: maskIdentifier(subscriptionId),
-      },
-    );
-  }
-
-  const result = getFirstRpcRow<{ fulfilled_at?: string | null }>(data);
-  if (!result?.fulfilled_at) {
+  if (!result?.fulfilledAt) {
     throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
   }
 
-  await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilled_at);
+  await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilledAt);
 }
 
 export async function syncSubscriptionState(

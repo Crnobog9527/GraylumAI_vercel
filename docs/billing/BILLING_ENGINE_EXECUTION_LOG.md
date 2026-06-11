@@ -977,3 +977,154 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR2.x staging DB 0044 migration application / runtime no-payment verification：完成。
 - 当前停止点：PR2.x complete；等待 owner audit / next-stage authorization。
 - PR3 remains `not_started`。
+
+## PR 3 - subscription_credit_grants + 年付按月释放引擎
+
+### 时间
+
+- 执行时间：2026-06-11 CST
+
+### Stage checkpoint
+
+- 已执行 `git fetch --all --prune`。
+- 已读取 GitHub issue #225。
+- 已读取 `docs/billing/BILLING_ENGINE_V1_5_BLUEPRINT.md`。
+- 已读取 `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`。
+- 已确认 PR #230：`MERGED` into `staging`，merge commit `708496962dbf683a28fbbd9feab4d1e8f95fd7d0`。
+- 已确认 PR #231：`MERGED` into `staging`，merge commit `a61da585bc1c55c43a83ea8702623959b241bdb7`。
+- 已确认当前阶段：PR2.x `complete` / `merged`。
+- 已确认下一阶段：PR3 `subscription_credit_grants` + 年付按月释放引擎。
+- 已确认 PR3 状态：`not_started`，owner 已在当前任务明确授权进入 PR3 source-code PR。
+- latest `origin/staging` SHA：`a61da585bc1c55c43a83ea8702623959b241bdb7`。
+- 主工作区仍在 `main` 且存在未提交 `.gitignore` 改动；PR3 在独立临时 clone `/private/tmp/graylum-pr3-subscription-credit-grants-work` 从 latest `origin/staging` 创建，未覆盖主工作区改动。
+
+### Branch
+
+- Branch：`codex/billing-v1-pr3-subscription-credit-grants`
+- Base：`origin/staging`
+- PR：[#232](https://github.com/Crnobog9527/GraylumAI_vercel/pull/232)
+- Head SHA：见 PR #232 branch head / final report
+
+### 允许范围
+
+- 新增 `subscription_credit_grants` migration source。
+- 实现 subscription credit grant service。
+- 修改 membership invoice fulfillment，使月付发放当期月度积分，年付 paid invoice 不一次性发全年积分，年付首次 invoice 只释放第 1 个月积分。
+- 订阅积分发放写入 `subscription_credit_grants`，对应 `credit_transactions` 写 `ledger_type = grant`、`counts_as_spend = false`、`grant_period_key` 与 v2 source metadata。
+- 实现年付 `yearly_credits` 12 期分摊算法，remainder 前置分配且可测试。
+- 新增 source-only cron route，用于补发应释放但未释放的年付月份；本 PR 不启用 production cron，不修改 `vercel.json`。
+- 处理 `cancel_at_period_end`、到期 canceled、full refund 停止未来释放。
+
+### 初始修改范围
+
+- `packages/db/migrations/0045_subscription_credit_grants.sql`
+- `packages/db/schema.ts`
+- `packages/api/package.json`
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/index.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `apps/web/src/app/api/cron/release-subscription-credits/route.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### 禁止动作确认
+
+- 未执行 Supabase DB migration。
+- 未执行 PR3 migration 到 staging DB。
+- 未访问 Supabase production DB。
+- 未访问 production host。
+- 未做 production smoke。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel env / Project Settings。
+- 未启用 production cron。
+- 未修改 Stripe price。
+- 未实现真实订阅升级机制。
+- 未修改 membership upgrade API。
+- 未进入 PR4 / PR5 / PR6。
+- 未 merge PR。
+- 未 merge main。
+- 未关闭 issue #225。
+- 未打印 secret、token、cookie、数据库连接串或 service role key。
+
+### 验证状态
+
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- PR3 targeted tests：`pnpm --filter @repo/api test:run -- subscriptionCreditGrants stripeFulfillment` 通过；45 files / 520 tests passed。
+- `git diff --check`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；45 files / 520 tests passed。
+- dummy non-secret env `pnpm build`：首次在 sandbox 内因 Turbopack 绑定本地端口被 sandbox 拒绝失败；同一 dummy env 在获准的非沙箱环境重跑通过，40/40 pages generated，新增 `/api/cron/release-subscription-credits` route 编译成功。
+- SQL smoke：未运行 against live DB；本 PR 仅提交 migration source，PR3.x DB migration 未授权。
+
+### 当前状态
+
+- PR3 draft PR created for owner audit：[#232](https://github.com/Crnobog9527/GraylumAI_vercel/pull/232)。
+- PR3.x DB migration 未授权，未执行。
+
+### Owner audit return - PR #232 P1/P2 fix
+
+- 时间：2026-06-11 CST
+- Owner audit 结论：PR #232 退回补审计；保持 draft，不 merge，不进入 PR3.x / PR4。
+
+#### P1 - profile membership_level restore
+
+- 恢复 PR3 membership invoice fulfillment 对 `profiles.membership_level` 的同步。
+- 同步来源为 paid membership plan 的 `membership_plans.level`；plan level 缺失时 fail closed，不发放积分。
+- `fulfillMembershipInvoiceWithSubscriptionCreditGrants` 在 source order 与 membership plan 解析后，先同步 profile level；profile 不存在时抛出 `subscription_profile_missing`，并在任何 `subscription_credit_grants`、`credit_transactions`、`user_subscriptions`、invoice `payment_orders` 写入前停止。
+- repeated invoice / repeated webhook 不重复 grant；已 fulfilled invoice replay 仍会重新按 plan level 同步 profile，确保 `profiles.membership_level` 不停留在 free / 旧等级。
+- `fulfillMembershipInvoice` 不再在 invoice 已 fulfilled 时完全绕过 PR3 service；统一委托 subscription credit grant service 做幂等判断，再 backfill checkout order。
+
+#### P2 - subscription lifecycle preservation
+
+- `upsertSubscriptionMirror` 先读取现有 `user_subscriptions` mirror。
+- 新建 mirror 时初始化 `status = active`、`cancel_at_period_end = false`。
+- 已有 mirror 仅在 `status` 为空时初始化 status，且仅在 `cancel_at_period_end` 为空时初始化 cancel flag。
+- 已有 Stripe lifecycle state（例如 `past_due`）与 `cancel_at_period_end = true` 不会被 invoice fulfillment 无条件覆盖。
+
+#### Atomic boundary note
+
+- 本补丁没有新增或执行 DB RPC / DB migration。
+- 现有 PR3 runtime 仍由多次 Supabase writes + `atomic_apply_credit_ledger_entry` RPC 组成；因此 profile update、credit grant、`subscription_credit_grants`、`user_subscriptions`、invoice `payment_orders` 之间不能达到旧 `atomic_fulfill_membership_invoice` 的单事务强原子性。
+- 为降低半完成风险，本补丁把 profile missing / plan level missing 作为 grant 前置门禁：profile 缺失不会产生 grant、ledger、subscription mirror 或 completed invoice order。
+- 完整原子化应在后续 owner 单独授权的 DB/RPC migration 阶段处理；本 PR 仍只停留在 PR3 source-code PR 范围。
+
+#### Added tests
+
+- yearly paid invoice 后 `profiles.membership_level` 更新为 plan level。
+- monthly paid invoice 后 `profiles.membership_level` 更新为 plan level。
+- repeated invoice fulfillment 不重复 grant，且会把 profile level 重新同步为 plan level。
+- profile 缺失时安全失败，且不产生 grant / credit transaction / subscription mirror / completed invoice order。
+- 已有 `cancel_at_period_end = true` 不被 invoice fulfillment 改为 false。
+- 已有 subscription lifecycle `status` 不被 invoice fulfillment 无条件覆盖。
+
+#### Validation
+
+- Targeted PR3 rerun：`pnpm --filter @repo/api test:run -- subscriptionCreditGrants stripeFulfillment` 通过；45 files / 523 tests passed。
+- `git diff --check`：通过。
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过；route types generated successfully，`tsc --noEmit` 通过。
+- `pnpm test:api`：通过；45 files / 523 tests passed。
+- dummy non-secret env `pnpm build`：通过；40/40 pages generated，`/api/cron/release-subscription-credits` route 编译成功。
+- SQL smoke：未运行 against live DB；本 PR 仅提交 migration source，PR3.x DB migration 未授权。
+
+### Owner audit return - PR #232 cron scheduling scope clarification
+
+- 时间：2026-06-11 CST
+- Owner audit 结论：PR #232 退回补审计；不得 merge，不得进入 PR3.x / PR4。
+- Codex review P1 thread：已回复，并作为 scope clarification 处理。
+- Review finding：`/api/cron/release-subscription-credits` route 已新增，但未注册到 `apps/web/vercel.json` 的 `crons` 数组；因此 Vercel 不会自动调度该 route。
+- 判断：该 review 指出的是有效运行闭环风险；但 PR #232 是 PR3 source-code PR，owner 当前未授权启用 production cron，也未授权修改 `apps/web/vercel.json` 注册 release-subscription-credits cron。
+- 当前范围：`/api/cron/release-subscription-credits` 在 PR #232 中仅作为 source-only route。
+- `apps/web/vercel.json`：未修改；未注册 release-subscription-credits cron。
+- Production cron：未启用。
+- Automatic annual catch-up：不会自动运行，直到后续单独授权的 scheduling gate 添加调度。
+- 后续 PR3.x / ops gate 必须单独覆盖：
+  - `0045_subscription_credit_grants` staging DB migration。
+  - staging runtime no-payment verification。
+  - cron schedule enablement decision。
+  - 如涉及 production cron，必须再次 owner 授权。
+- 当前停止点：PR3 `ready_for_owner_audit` / #232；等待 owner 重新审计；不得 merge，不得进入 PR3.x / PR4。
