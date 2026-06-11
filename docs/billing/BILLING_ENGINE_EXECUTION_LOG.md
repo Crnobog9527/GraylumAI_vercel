@@ -1144,3 +1144,109 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 下一阶段：PR3.x staging DB 0045 migration / runtime no-payment verification / cron schedule decision。
 - PR3.x 状态：未开始；不得自动进入 PR3.x / PR4。
 - 禁止动作确认：未执行 DB migration；未访问或修改 staging DB；未访问 production；未触发 Stripe live 或真实 checkout/payment/refund/cancel/webhook replay；未修改 Vercel env / Project Settings；未启用 production cron；未修改 `apps/web/vercel.json` 注册 release-subscription-credits cron；未进入 PR4 / PR5 / PR6；未 merge main。
+
+## PR 3.x - staging DB 0045 migration / runtime no-payment verification / cron schedule decision
+
+- 时间：2026-06-11 CST。
+- 当前阶段：PR3.x / staging DB 0045 migration / runtime no-payment verification / cron schedule decision。
+- Owner 授权：本轮明确授权进入 PR3.x；范围仅限 staging，不进入 PR4。
+- 工作分支：`codex/billing-v1-pr3x-staging-0045-runtime`，从 latest `origin/staging` 创建。
+- latest `origin/staging` SHA：`8b1eb3d1e5226bda5db4dec8b4b7ff1e2a86fa21`。
+- PR #232 live 状态：`MERGED` into `staging`。
+- PR #232 squash merge commit：`4d0cc1cdc38d54fa358a11045930186d64bad7c8`。
+- 主工作区仍存在用户自有 `.gitignore` 未提交改动；PR3.x 在独立 worktree 执行，未切换本地 `staging`，未覆盖主工作区改动。
+
+### Supabase staging target
+
+- Supabase project ref：`gvcpmcunmfrbxuwimxfa`。
+- Supabase project name：`GraylumAI Staging`。
+- App host：`graylumai-staging.vercel.app`。
+- Safety check：`NEXT_PUBLIC_SUPABASE_URL` project ref 与 `EXPECTED_SUPABASE_PROJECT_REF` 匹配；未发现 production-like target。
+- Production project / production host：未访问、未作为目标。
+
+### 0045 执行前 staging DB 状态
+
+- `subscription_credit_grants`：不存在。
+- `credit_transactions` v2 columns 已存在：`ledger_type`、`reason_code`、`counts_as_spend`、`source_type`、`source_id`、`source_order_id`、`source_refund_id`、`grant_period_key`、`metadata`。
+- `credit_transactions` v2 constraints / indexes 已存在：
+  - `credit_transactions_ledger_type_check`
+  - `credit_transactions_source_type_check`
+  - `idx_credit_transactions_source`
+  - `idx_credit_transactions_user_idempotency_key`
+  - `idx_credit_transactions_user_ledger_created`
+  - `idx_credit_transactions_user_spend_created`
+- `user_subscriptions` 相关字段已记录：`id`、`user_id`、`membership_plan_id`、`stripe_customer_id`、`stripe_subscription_id`、`stripe_price_id`、`billing_cycle`、`status`、`cancel_at_period_end`、`current_period_start`、`current_period_end`、`created_at`、`updated_at`。
+- Relevant functions 已存在：`normalize_credit_transaction_v2()`、`atomic_apply_credit_ledger_entry()`、`atomic_fulfill_membership_invoice()`、`is_admin()`。
+- Supabase migration history 执行前包含：`20260611044532` / `0044_credit_transactions_v2_semantics`。
+
+### Migration
+
+- 执行文件：`packages/db/migrations/0045_subscription_credit_grants.sql`。
+- 执行目标：Supabase staging only。
+- 执行结果：成功。
+- Supabase migration history：新增 `20260611141733` / `0045_subscription_credit_grants`。
+
+### 0045 执行后验证
+
+- `subscription_credit_grants` table：存在，RLS enabled。
+- Columns 已存在：`id`、`user_id`、`membership_plan_id`、`stripe_subscription_id`、`stripe_invoice_id`、`billing_cycle`、`grant_type`、`grant_period_key`、`period_start`、`period_end`、`period_index`、`total_periods`、`credits_granted`、`status`、`idempotency_key`、`credit_transaction_id`、`metadata`、`created_at`、`updated_at`。
+- Constraints 已存在：
+  - `subscription_credit_grants_billing_cycle_check`
+  - `subscription_credit_grants_grant_type_check`
+  - `subscription_credit_grants_period_index_check`
+  - `subscription_credit_grants_status_check`
+  - FK to `profiles`
+  - FK to `membership_plans`
+  - FK to `credit_transactions`
+- Indexes 已存在：
+  - `subscription_credit_grants_idempotency_key_key`
+  - `idx_subscription_credit_grants_user_time`
+  - `idx_subscription_credit_grants_subscription_period`
+  - `idx_subscription_credit_grants_invoice`
+- RLS policies 已存在：
+  - `users_own_subscription_credit_grants_select`
+  - `admin_all_subscription_credit_grants`
+- 0044 `credit_transactions` v2 semantics 未破坏：v2 columns、constraints、indexes 均仍存在。
+
+### SQL smoke test
+
+- 执行方式：staging DB transaction `BEGIN` / `ROLLBACK`。
+- 覆盖：
+  - monthly subscription grant insert shape。
+  - yearly `annual_monthly_release` grant insert shape。
+  - `idempotency_key` unique index 防重复。
+  - `credit_transaction_id` reference 能 join 到对应 `credit_transactions`。
+  - `credit_transactions` rows 保持 `ledger_type = grant`、`reason_code = subscription_grant`、`counts_as_spend = false`、`source_type = stripe_invoice`。
+- 事务内测试数据：1 个 test profile、2 条 test `credit_transactions`、2 条 test `subscription_credit_grants`。
+- Rollback 结果：rollback 后 test profile / test `credit_transactions` / test `subscription_credit_grants` 均为 0。
+- SQL smoke 结果：通过。
+
+### Staging runtime no-payment check
+
+- 执行模式：unauthenticated / no-payment / no cron secret。
+- 尝试访问：
+  - `https://graylumai-staging.vercel.app/`
+  - `https://graylumai-staging.vercel.app/login`
+  - `https://graylumai-staging.vercel.app/profile?tab=subscription`
+  - `https://graylumai-staging.vercel.app/api/cron/release-subscription-credits`
+- 结果：blocked by local DNS / network. 本机 DNS 将 `graylumai-staging.vercel.app` 解析到异常非 Vercel 地址，并且 HTTPS 443 连接超时。
+- 未完成项：页面加载与 cron unauthenticated response 未能在本机完成。
+- Forbidden runtime actions confirmation：未点击购买、升级、Stripe invoice/payment、退款、取消按钮或链接；未携带 cron secret；未触发 `releaseDueAnnualSubscriptionCredits`；未留下 runtime 数据。
+
+### Cron schedule decision
+
+- `apps/web/vercel.json`：已确认未注册 `/api/cron/release-subscription-credits`。
+- `/api/cron/release-subscription-credits` route：source exists；无 dry-run 模式；带授权调用会执行 annual release 写入路径。
+- 本轮 decision：不修改 `apps/web/vercel.json`，不启用 production cron。
+- Recommendation：后续单独 owner 授权 scheduling gate 时，再决定 staging / production cron schedule；production cron 启用必须单独授权。
+
+### Validation
+
+- `git diff --check`：通过。
+- Full lint/typecheck/test/build：未运行；本轮 tracked 变更仅为 docs/status 记录，且 runtime no-payment 被本机 DNS / network 阻塞。
+
+### Stop point
+
+- 当前停止点：PR3.x staging DB 0045 migration 与 SQL smoke 已完成；runtime no-payment check blocked；cron decision 已记录。
+- Owner audit needed。
+- 禁止动作确认：未访问 production host；未访问 Supabase production DB；未修改 Vercel env / Project Settings；未访问 Stripe live；未触发 checkout/payment/refund/cancel/webhook replay；未做 production smoke；未启用 production cron；未修改 `apps/web/vercel.json` 注册 release-subscription-credits cron；未进入 PR4 / PR5 / PR6；未实现真实订阅升级；未修改 membership upgrade API；未修改 Stripe price；未 merge main；未关闭 issue #225。
