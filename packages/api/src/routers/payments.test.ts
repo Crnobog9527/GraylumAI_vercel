@@ -761,12 +761,207 @@ describe('paymentsRouter error sanitization', () => {
       }),
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'BAD_REQUEST',
-      message: '当前会员订阅仍有效，暂不支持重复购买或切换套餐。',
+      message: '当前套餐仍有效，无需重复购买。',
     });
 
     expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(sessionCreate).not.toHaveBeenCalled();
     expect(orderInserts).toHaveLength(0);
+  });
+
+  it('rejects upgrade-needed membership checkout before Stripe customer lookup, session creation, or order insert', async () => {
+    const sessionCreate = vi.fn();
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: sessionCreate,
+        },
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174222',
+                name: 'Gold',
+                level: 'gold',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_gold_monthly',
+                stripe_yearly_price_id: 'price_test_gold_yearly',
+                monthly_price: 2990,
+                yearly_price: 29900,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'sub-row-1',
+                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
+                stripe_subscription_id: 'sub_test_active',
+                status: 'active',
+                billing_cycle: 'monthly',
+                cancel_at_period_end: 'false',
+                metadata: {},
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.createCheckoutSession({
+        kind: 'membership_plan',
+        planId: '123e4567-e89b-42d3-a456-426614174222',
+        billingCycle: 'yearly',
+      }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '当前会员订阅仍有效，升级套餐需要通过 changeSubscriptionPlan 处理；该能力将在 PR5 实现，本次不会创建新的 Checkout。',
+    });
+
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
+    expect(sessionCreate).not.toHaveBeenCalled();
+    expect(orderInserts).toHaveLength(0);
+  });
+
+  it('returns a membership eligibility matrix that matches checkout guard actions', async () => {
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createAwaitableQueryBuilder(
+            Promise.resolve({
+              data: [
+                { id: 'plan-free', level: 'free', is_active: 'true' },
+                { id: 'plan-pro', level: 'pro', is_active: 'true' },
+                { id: 'plan-gold', level: 'gold', is_active: 'true' },
+              ],
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'sub-row-1',
+                membership_plan_id: 'plan-pro',
+                stripe_subscription_id: 'sub_test_active',
+                status: 'active',
+                billing_cycle: 'monthly',
+                cancel_at_period_end: 'false',
+                metadata: {},
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+    });
+
+    await expect(caller.getMembershipEligibilityMatrix()).resolves.toMatchObject({
+      currentLevel: 'pro',
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          planId: 'plan-pro',
+          planLevel: 'pro',
+          billingCycle: 'monthly',
+          allowed: false,
+          action: 'none',
+          reasonCode: 'CURRENT_PLAN',
+        }),
+        expect.objectContaining({
+          planId: 'plan-pro',
+          planLevel: 'pro',
+          billingCycle: 'yearly',
+          allowed: false,
+          action: 'changeSubscriptionPlan',
+          reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+        }),
+        expect.objectContaining({
+          planId: 'plan-gold',
+          planLevel: 'gold',
+          billingCycle: 'monthly',
+          allowed: false,
+          action: 'changeSubscriptionPlan',
+          reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+        }),
+      ]),
+    });
   });
 
   it('creates membership checkout for a free user with no active subscription', async () => {

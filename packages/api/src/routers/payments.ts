@@ -30,6 +30,7 @@ import {
 import {
   resolveMembershipEligibility,
   type MembershipEligibilityResult,
+  type MembershipBillingCycle,
 } from '../services/membershipEligibility';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
@@ -413,6 +414,67 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 }
 
 export const paymentsRouter = router({
+  getMembershipEligibilityMatrix: protectedProcedure
+    .query(async ({ ctx }) => {
+      const { data: profile, error: profileError } = await ctx.supabase
+        .from('profiles')
+        .select('membership_level')
+        .eq('id', ctx.profileId)
+        .single();
+
+      if (profileError || !profile) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '用户资料不存在，无法确认会员状态',
+        });
+      }
+
+      const { data: plans, error: plansError } = await ctx.supabase
+        .from('membership_plans')
+        .select('id, level, is_active')
+        .eq('is_active', 'true')
+        .order('sort_order', { ascending: true });
+
+      if (plansError) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '会员状态暂不可用，请稍后重试',
+        });
+      }
+
+      const billingCycles: MembershipBillingCycle[] = ['monthly', 'yearly'];
+      const entries = await Promise.all(
+        (plans ?? []).flatMap((plan) =>
+          billingCycles.map(async (billingCycle) => {
+            const eligibility = await resolveMembershipEligibility({
+              supabase: ctx.supabase,
+              userId: ctx.profileId,
+              profile,
+              action: 'create_membership_checkout',
+              targetPlan: plan,
+              targetBillingCycle: billingCycle,
+            });
+
+            return {
+              planId: plan.id,
+              planLevel: plan.level,
+              billingCycle,
+              allowed: eligibility.allowed,
+              state: eligibility.state,
+              currentLevel: eligibility.level,
+              action: eligibility.action,
+              reasonCode: eligibility.reasonCode,
+              safeMessage: eligibility.safeMessage,
+            };
+          }),
+        ),
+      );
+
+      return {
+        currentLevel: profile.membership_level ?? 'free',
+        entries,
+      };
+    }),
   createCheckoutSession: protectedProcedure
     .input(createCheckoutInput)
     .mutation(async ({ ctx, input }) => {
@@ -675,6 +737,7 @@ export const paymentsRouter = router({
         profile,
         action: 'create_membership_checkout',
         targetPlan: plan,
+        targetBillingCycle: input.billingCycle,
       });
 
       if (!eligibility.allowed) {

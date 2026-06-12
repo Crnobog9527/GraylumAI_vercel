@@ -1305,3 +1305,89 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR4 状态：not_started。
 - Stop point：不得自动进入 PR4。
 - 禁止动作确认：未执行 0045 migration；未修改 staging DB；未访问 production；未访问 Supabase production DB；未做 production smoke；未访问 Stripe live；未触发 checkout/payment/refund/cancel/webhook replay；未使用 cron secret；未触发 `release-subscription-credits`；未启用 production cron；未修改 Vercel env / Project Settings；未修改 `apps/web/vercel.json`；未进入 PR4 / PR5 / PR6；未 merge main；未关闭 issue #225。
+
+## PR 4 - membership eligibility matrix frontend/backend alignment
+
+- 时间：2026-06-12 CST。
+- 阶段：PR4 / membership eligibility matrix frontend/backend alignment。
+- Branch：`codex/billing-v1-pr4-membership-eligibility`。
+- PR：[#235](https://github.com/Crnobog9527/GraylumAI_vercel/pull/235)。
+- Base：`staging`。
+- Base SHA：`395976b3a4b8a733b823d5cabbeb21144aa2ca2e`。
+- Implementation commit：`c692891ae8ff7c6f806432001350a0279f87d60f`。
+- 状态：draft PR created；ready for owner audit after this control-plane record is pushed and issue #225 is updated。
+
+### Scope
+
+- PR4 scope only：membership eligibility helper / backend checkout guard / frontend subscription button state / pricing copy / tests / execution log / issue #225 status update。
+- 后端 eligibility 现在返回结构化 `action` / `reasonCode`，区分可购买、可升级、禁止降级、当前套餐、付款异常、cancel_at_period_end、退款/冲突等状态。
+- `createCheckoutSession` 继续在 Stripe customer lookup、Stripe checkout session creation、`payment_orders` insert 之前执行同一 eligibility guard。
+- 新增 read-only `payments.getMembershipEligibilityMatrix`，供 `SubscriptionCard` 使用后端 eligibility matrix 渲染按钮状态。
+- `SubscriptionCard` 不再只按 `plan.level === currentLevel` 判断当前套餐 / 按钮状态。
+- 年付文案保持：年付积分按月释放，未使用积分可累积，不按月清零。
+
+### Changed files
+
+- `packages/api/src/services/membershipEligibility.ts`
+- `packages/api/src/services/__tests__/membershipEligibility.test.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `apps/web/src/components/profile/SubscriptionCard.tsx`
+- `apps/web/src/components/profile/subscriptionPlanButtonState.ts`
+- `packages/api/src/services/__tests__/subscriptionPlanButtonState.test.ts`
+- `apps/web/src/components/landing/PricingSection.tsx`
+- `apps/web/tests/e2e/auth.spec.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Test matrix covered
+
+- Free -> Pro / Gold：允许 checkout。
+- Pro 月付 -> Gold 月付 / 年付：标记 `action = changeSubscriptionPlan`，但不走 `createCheckoutSession`。
+- Pro 月付 -> Pro 年付：标记 `action = changeSubscriptionPlan`，但不走 `createCheckoutSession`。
+- Gold -> Pro：禁止降级。
+- Gold 年付 -> 任意低级 / 同级：禁止降级或当前套餐，不走 checkout。
+- 同级同周期重复购买：禁止。
+- active subscription 用户不得 create 第二个 subscription。
+- cancel_at_period_end 未到期仍按 active 权益处理；升级只返回 future PR5 action。
+- past_due / incomplete / unpaid：禁止切换，返回付款异常 action。
+- 前端按钮状态由后端 matrix 的 action/reason 驱动。
+- blocked / upgrade-needed 场景不会创建 checkout session。
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- Targeted API/unit tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/membershipEligibility.test.ts src/routers/payments.test.ts src/routers/admin.test.ts src/services/__tests__/subscriptionOverrides.test.ts src/services/__tests__/subscriptionPlanButtonState.test.ts` 通过；46 files / 545 tests passed。
+- `pnpm --filter web typecheck`：通过；route types generated successfully，`tsc --noEmit` 通过。
+- `git diff --check`：通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；46 files / 545 tests passed。
+- Dummy non-secret env `pnpm build`：通过；40/40 pages generated。
+
+### Forbidden actions confirmation
+
+- 未调用 Stripe subscription update。
+- 未实现真实订阅升级。
+- 未新增 `changeSubscriptionPlan` API。
+- 未修改 Stripe price。
+- 未改积分发放。
+- 未改 DB schema。
+- 未执行 DB migration。
+- 未修改 staging DB。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未触发 Stripe live。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未使用 cron secret。
+- 未触发 `release-subscription-credits`。
+- 未启用 cron。
+- 未修改 Vercel env / Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未进入 PR5 / PR6。
+- 未 merge main。
+- 未关闭 issue #225。
+
+### Stop point
+
+- PR #235 created against `staging`。
+- PR4 implementation complete and awaiting owner audit。
+- PR5 remains `not_started`。
