@@ -242,6 +242,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const syncedCheckoutSessionRef = useRef<string | null>(null);
 
   const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
+  const changeSubscriptionPlan = trpc.payments.changeSubscriptionPlan.useMutation();
   const syncCheckoutSession = trpc.payments.syncCheckoutSession.useMutation();
   const syncCheckoutSessionMutation = syncCheckoutSession.mutateAsync;
   const checkoutState = searchParams.get('checkout');
@@ -411,9 +412,11 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       pending: pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`,
     });
 
-    if (!buttonState.canCreateCheckout) {
-      const summary = eligibility?.allowed && eligibility.action === 'createCheckoutSession' && !ready
+    if (!buttonState.canCreateCheckout && !buttonState.canChangeSubscriptionPlan) {
+      const summary = eligibility?.action === 'createCheckoutSession' && !ready
         ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会按最新配置协助你完成开通。`
+        : eligibility?.action === 'changeSubscriptionPlan' && !ready
+          ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会协助处理升级。`
         : buttonState.message ?? '正在确认当前会员状态，请稍后再试。';
 
       setPurchaseIntent({
@@ -421,6 +424,38 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         title: plan.name,
         summary,
       });
+      return;
+    }
+
+    if (buttonState.canChangeSubscriptionPlan) {
+      const checkoutKey = `plan:${plan.id}:${billingCycle}`;
+      setPendingCheckoutKey(checkoutKey);
+
+      try {
+        const result = await changeSubscriptionPlan.mutateAsync({
+          planId: plan.id,
+          billingCycle,
+        });
+
+        await Promise.all([
+          utils.user.getUserProfile.invalidate(),
+          utils.payments.getMembershipEligibilityMatrix.invalidate(),
+          utils.payments.listBillingRecords.invalidate(),
+        ]);
+
+        setCheckoutNotice({
+          tone: 'success',
+          message: `${plan.name} 升级请求已提交，当前订阅状态为 ${result.status}。`,
+        });
+      } catch (error) {
+        setPurchaseIntent({
+          kind: 'plan',
+          title: plan.name,
+          summary: getSafeErrorMessage(error, '切换订阅套餐失败，请稍后重试。'),
+        });
+      } finally {
+        setPendingCheckoutKey(null);
+      }
       return;
     }
 

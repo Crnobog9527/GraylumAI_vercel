@@ -33,6 +33,7 @@ describe('getMembershipPlanButtonState', () => {
       disabled: false,
       label: '立即订阅',
       canCreateCheckout: true,
+      canChangeSubscriptionPlan: false,
       message: null,
     });
   });
@@ -54,11 +55,12 @@ describe('getMembershipPlanButtonState', () => {
       disabled: false,
       label: '联系我们',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: 'safe message',
     });
   });
 
-  it('shows upgrade state without allowing checkout creation', () => {
+  it('enables subscription change for backend upgrade actions without allowing checkout creation', () => {
     const result = getMembershipPlanButtonState({
       eligibility: {
         ...baseEligibility,
@@ -72,9 +74,10 @@ describe('getMembershipPlanButtonState', () => {
     });
 
     expect(result).toMatchObject({
-      disabled: true,
+      disabled: false,
       label: '升级套餐',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: true,
     });
   });
 
@@ -99,6 +102,7 @@ describe('getMembershipPlanButtonState', () => {
       disabled: true,
       label,
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: 'safe message',
     });
   });

@@ -23,6 +23,7 @@ export type MembershipPlanButtonState = {
   disabled: boolean;
   label: string;
   canCreateCheckout: boolean;
+  canChangeSubscriptionPlan: boolean;
   message: string | null;
 };
 
@@ -41,8 +42,9 @@ export function getMembershipPlanButtonState(input: {
   if (pending) {
     return {
       disabled: true,
-      label: '跳转中...',
+      label: '处理中...',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: null,
     };
   }
@@ -52,6 +54,7 @@ export function getMembershipPlanButtonState(input: {
       disabled: true,
       label: '检查中...',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: '正在确认当前会员状态，请稍后再试。',
     };
   }
@@ -61,15 +64,17 @@ export function getMembershipPlanButtonState(input: {
       disabled: false,
       label: checkoutReady ? '立即订阅' : '联系我们',
       canCreateCheckout: checkoutReady,
+      canChangeSubscriptionPlan: false,
       message: checkoutReady ? null : eligibility.safeMessage,
     };
   }
 
   if (eligibility.action === 'changeSubscriptionPlan') {
     return {
-      disabled: true,
-      label: '升级套餐',
+      disabled: false,
+      label: checkoutReady ? '升级套餐' : '联系我们',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: checkoutReady,
       message: eligibility.safeMessage,
     };
   }
@@ -79,6 +84,7 @@ export function getMembershipPlanButtonState(input: {
       disabled: true,
       label: '请先处理付款异常',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: eligibility.safeMessage,
     };
   }
@@ -88,6 +94,7 @@ export function getMembershipPlanButtonState(input: {
       disabled: true,
       label: '当前套餐',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: eligibility.safeMessage,
     };
   }
@@ -97,6 +104,7 @@ export function getMembershipPlanButtonState(input: {
       disabled: true,
       label: '暂不支持降级',
       canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
       message: eligibility.safeMessage,
     };
   }
@@ -105,6 +113,7 @@ export function getMembershipPlanButtonState(input: {
     disabled: true,
     label: '暂不可操作',
     canCreateCheckout: false,
+    canChangeSubscriptionPlan: false,
     message: eligibility.safeMessage,
   };
 }
