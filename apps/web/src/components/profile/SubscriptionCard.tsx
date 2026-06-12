@@ -19,6 +19,7 @@ import {
   getPlanEligibilityKey,
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
+import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -296,11 +297,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
 
     void syncCheckoutSessionMutation({ sessionId: checkoutSessionId })
       .then(async (result) => {
-        void Promise.allSettled([
-          utils.user.getUserProfile.invalidate(),
-          utils.credits.getBalance.invalidate(),
-          utils.credits.getCreditsSummary.invalidate(),
-        ]);
+        void invalidatePostCheckoutMembershipQueries(utils);
 
         if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
