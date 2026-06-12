@@ -1391,3 +1391,77 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR #235 created against `staging`。
 - PR4 implementation complete and awaiting owner audit。
 - PR5 remains `not_started`。
+
+## PR 5 - real subscription upgrade mechanism source-code PR
+
+- 时间：2026-06-12 CST。
+- 阶段：PR5 / real subscription upgrade mechanism。
+- Branch：`codex/billing-v1-pr5-subscription-upgrade`。
+- PR：[#236](https://github.com/Crnobog9527/GraylumAI_vercel/pull/236)。
+- Base：`staging`。
+- Base SHA：`e45e0900e812c63ec631d1f3e164c5f954a2dd50`。
+- Implementation commit：`85dda0bf51148c43269ab912891286e9acd8d892`。
+- 状态：draft PR created；issue #225 updated to PR5 `in_progress` after this control-plane record is pushed。
+
+### Scope
+
+- PR5 source-code PR only：实现真实订阅升级机制的后端能力和前端入口。
+- 新增 `payments.changeSubscriptionPlan` protected mutation。
+- Upgrade 场景复用 PR4 `resolveMembershipEligibility` matrix；只有 `action = changeSubscriptionPlan` 才允许继续。
+- 同级重复购买 / 当前套餐 / 降级 / payment attention / conflict 仍在 Stripe subscription update 前 fail closed。
+- `createCheckoutSession` 继续阻断 active subscription 用户创建第二个 subscription。
+- Stripe subscription update 路径更新 existing subscription item price，使用 `proration_behavior = create_prorations`，并清除 `cancel_at_period_end`。
+- 成功后同步 `user_subscriptions` mirror，并写入本地 `payment_orders` plan-change source row，供后续 invoice fulfillment 找到升级后的套餐。
+- 不修改 `subscription_credit_grants` / credit grant calculation / annual monthly release 逻辑。
+- `SubscriptionCard` 使用 PR4 eligibility matrix 驱动 upgrade button，upgrade 调用 `changeSubscriptionPlan`，普通新购仍调用 checkout。
+
+### Changed files
+
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `apps/web/src/components/profile/SubscriptionCard.tsx`
+- `apps/web/src/components/profile/subscriptionPlanButtonState.ts`
+- `packages/api/src/services/__tests__/subscriptionPlanButtonState.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Test matrix covered
+
+- Pro monthly -> Gold yearly：允许 `changeSubscriptionPlan`；不创建 checkout session；不调用 membership invoice fulfillment；不直接写 credit grant。
+- Pro monthly -> Pro monthly：重复购买 / current plan blocked before Stripe subscription update。
+- Gold yearly -> Pro monthly：downgrade blocked before Stripe subscription update。
+- `payment_orders` plan-change source row records target plan / billing cycle / Stripe price so later invoice fulfillment can resolve the upgraded plan without changing PR3 credit grant logic。
+- Button helper exposes separate `canCreateCheckout` and `canChangeSubscriptionPlan` flags so checkout and subscription update do not share a loose click path。
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- Targeted API/unit tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionPlanButtonState.test.ts` 通过；47 files / 549 tests passed。
+- `pnpm --filter web typecheck`：通过；route types generated successfully，`tsc --noEmit` 通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；47 files / 549 tests passed。
+- `git diff --check`：通过。
+- Dummy non-secret env `pnpm build`：未通过；Next/Turbopack 无法从 `fonts.googleapis.com` 获取 `Geist` / `Geist Mono`，构建在 Google Fonts 外部网络请求处失败，未到达应用代码错误。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未改积分发放逻辑。
+- 未执行真实 Stripe live 行为。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未修改 Vercel env / Project Settings。
+- 未修改 Supabase / Stripe backend settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未触发 `release-subscription-credits`。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 created as draft against `staging`。
+- PR5 implementation is ready for owner audit as draft PR, with build risk noted above。
+- Issue #225 remains open and is the control-plane tracker。
+- No merge / no PR6 without separate owner authorization。
