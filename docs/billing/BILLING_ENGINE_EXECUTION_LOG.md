@@ -1288,3 +1288,20 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - `apps/web/vercel.json` 未修改；production cron 未启用；PR4 未开始。
 - Owner audit needed。
 - 禁止动作确认：未访问 production host；未访问 Supabase production DB；未修改 Vercel env / Project Settings；未访问 Stripe live；未触发 checkout/payment/refund/cancel/webhook replay；未做 production smoke；未启用 production cron；未修改 `apps/web/vercel.json` 注册 release-subscription-credits cron；未进入 PR4 / PR5 / PR6；未实现真实订阅升级；未修改 membership upgrade API；未修改 Stripe price；未 merge main；未关闭 issue #225。
+
+## PR3.x merge record
+
+- PR #233：MERGED into `staging`。
+- PR head：`0c3abc7e41da41a85e46577261049831a43a5760`。
+- Squash merge commit：`37798c8c07655b3b45bc47d23165e96b9313e415`。
+- PR3.x status：complete。
+- staging DB 0045 migration：applied。
+- SQL smoke：`BEGIN` / `ROLLBACK` passed。
+- Rollback result：rollback 后 test profile / test `credit_transactions` / test `subscription_credit_grants` 均为 0。
+- Runtime no-payment：passed。
+- Cron schedule decision：recorded；`apps/web/vercel.json` 未修改；production cron 未启用。
+- 当前阶段：PR3.x complete。
+- 下一阶段：PR4 membership eligibility matrix。
+- PR4 状态：not_started。
+- Stop point：不得自动进入 PR4。
+- 禁止动作确认：未执行 0045 migration；未修改 staging DB；未访问 production；未访问 Supabase production DB；未做 production smoke；未访问 Stripe live；未触发 checkout/payment/refund/cancel/webhook replay；未使用 cron secret；未触发 `release-subscription-credits`；未启用 production cron；未修改 Vercel env / Project Settings；未修改 `apps/web/vercel.json`；未进入 PR4 / PR5 / PR6；未 merge main；未关闭 issue #225。
