@@ -1083,7 +1083,7 @@ describe('stripe fulfillment helpers', () => {
                 id: 'order-pending-subscription',
                 status: 'pending',
                 fulfilled_at: null,
-                created_at: '2026-06-13T10:20:00.000Z',
+                created_at: '2026-06-13T10:25:00.500Z',
                 stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_failed',
                 metadata: {
                   existing: 'kept',

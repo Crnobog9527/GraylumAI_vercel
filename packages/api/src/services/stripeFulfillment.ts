@@ -16,6 +16,7 @@ import { fulfillMembershipInvoiceWithSubscriptionCreditGrants } from './subscrip
 import { isSubscriptionPlanChangeOrder } from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
+const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
 const STRIPE_FULFILLMENT_ERRORS = {
   checkoutOrderLookup: 'Failed to look up checkout order',
   checkoutOrderUpdate: 'Failed to update checkout order from session',
@@ -422,7 +423,11 @@ function isPendingCheckoutOrderForFirstInvoice(order: any) {
     && !order.stripe_invoice_id;
 }
 
-function isCreatedNoLaterThan(createdAt: string | null | undefined, referenceAt: string | null) {
+function isCreatedNoLaterThan(
+  createdAt: string | null | undefined,
+  referenceAt: string | null,
+  toleranceMs = 0,
+) {
   if (!createdAt || !referenceAt) {
     return false;
   }
@@ -432,7 +437,7 @@ function isCreatedNoLaterThan(createdAt: string | null | undefined, referenceAt:
 
   return Number.isFinite(createdTime)
     && Number.isFinite(referenceTime)
-    && createdTime <= referenceTime;
+    && createdTime <= referenceTime + toleranceMs;
 }
 
 function isPlanChangeLockKnownForFailedInvoice(order: any, invoice: Stripe.Invoice) {
@@ -440,7 +445,11 @@ function isPlanChangeLockKnownForFailedInvoice(order: any, invoice: Stripe.Invoi
     return true;
   }
 
-  return isCreatedNoLaterThan(order.created_at, asIsoTimestamp(invoice.created));
+  return isCreatedNoLaterThan(
+    order.created_at,
+    asIsoTimestamp(invoice.created),
+    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
+  );
 }
 
 function buildFailedInvoiceOrderMetadata(input: {
