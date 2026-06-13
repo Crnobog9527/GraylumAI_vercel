@@ -524,6 +524,12 @@ describe('stripe fulfillment helpers', () => {
               backfillFilters.push([nullColumn, nullValue]);
               return this;
             },
+            like(column: string, value: string) {
+              expect(column).toBe('stripe_checkout_session_id');
+              expect(value).toBe('cs_%');
+              backfillFilters.push([column, value]);
+              return this;
+            },
             neq(column: string, value: string) {
               expect(column).toBe('status');
               expect(value).toBe('failed');
@@ -622,12 +628,163 @@ describe('stripe fulfillment helpers', () => {
       },
     ]);
     expect(backfillFilters).toEqual([
+      ['stripe_checkout_session_id', 'cs_%'],
       ['stripe_invoice_id', null],
       ['status', 'failed'],
     ]);
     expect(profileUpdates).toEqual([]);
     expect(transactionsTouched).toBe(false);
     expect(subscriptionTouched).toBe(false);
+  });
+
+  it('does not backfill a newer pending plan-change lock during old invoice replay', async () => {
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [
+        {
+          id: 'order-initial-checkout',
+          user_id: 'user-1',
+          item_id: 'plan-pro',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_test_123',
+          stripe_checkout_session_id: 'cs_test_initial',
+          stripe_invoice_id: null,
+          status: 'pending',
+          payment_status: 'paid',
+          created_at: '2026-03-12T14:00:00.000Z',
+        },
+        {
+          id: 'order-new-plan-change-lock',
+          user_id: 'user-1',
+          item_id: 'plan-gold',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_test_123',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_123',
+          stripe_invoice_id: null,
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-03-12T15:10:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-old-invoice',
+          stripe_invoice_id: 'in_test_old',
+          stripe_subscription_id: 'sub_test_123',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-03-12T14:58:21.498Z',
+          created_at: '2026-03-12T14:58:21.498Z',
+        },
+      ],
+    };
+
+    const supabase = {
+      from(table: string) {
+        if (!tables[table]) {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        const filters: Array<{
+          column: string;
+          operator: 'eq' | 'is' | 'like' | 'neq';
+          value: unknown;
+        }> = [];
+        let mode: 'select' | 'update' = 'select';
+        let payload: Record<string, unknown> = {};
+
+        const matchingRows = () => tables[table].filter((row) =>
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'neq') {
+              return row[column] !== value;
+            }
+
+            if (operator === 'like') {
+              if (value !== 'cs_%') {
+                throw new Error(`Unexpected like pattern: ${String(value)}`);
+              }
+
+              return typeof row[column] === 'string' && row[column].startsWith('cs_');
+            }
+
+            return row[column] === value;
+          }),
+        );
+
+        return {
+          select() {
+            return this;
+          },
+          update(nextPayload: Record<string, unknown>) {
+            mode = 'update';
+            payload = nextPayload;
+            return this;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, operator: 'eq', value });
+            return this;
+          },
+          is(column: string, value: unknown) {
+            filters.push({ column, operator: 'is', value });
+            return this;
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
+          },
+          neq(column: string, value: unknown) {
+            filters.push({ column, operator: 'neq', value });
+            if (mode === 'update') {
+              matchingRows().forEach((row) => Object.assign(row, payload));
+              return Promise.resolve({ error: null });
+            }
+
+            return this;
+          },
+          maybeSingle() {
+            if (mode === 'update') {
+              const rows = matchingRows();
+              rows.forEach((row) => Object.assign(row, payload));
+              return Promise.resolve({ data: rows[0] ? { id: rows[0].id } : null, error: null });
+            }
+
+            return Promise.resolve({ data: matchingRows()[0] ?? null, error: null });
+          },
+        };
+      },
+    };
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_test_old',
+        customer: 'cus_test_123',
+        status: 'paid',
+        currency: 'usd',
+        amount_paid: 990,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_123',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(tables.payment_orders[0]).toMatchObject({
+      id: 'order-initial-checkout',
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-03-12T14:58:21.498Z',
+    });
+    expect(tables.payment_orders[1]).toMatchObject({
+      id: 'order-new-plan-change-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_123',
+      status: 'pending',
+      payment_status: 'active',
+    });
+    expect(tables.payment_orders[1]).not.toHaveProperty('fulfilled_at');
   });
 
   it('delegates pending credit package fulfillment to the atomic RPC', async () => {
@@ -699,6 +856,7 @@ describe('stripe fulfillment helpers', () => {
         billing_cycle: 'yearly',
         stripe_invoice_id: null,
         stripe_subscription_id: 'sub_test_atomic',
+        stripe_checkout_session_id: 'cs_test_atomic',
         stripe_customer_id: 'cus_test_atomic',
         stripe_price_id: 'price_yearly',
       }],
@@ -742,12 +900,23 @@ describe('stripe fulfillment helpers', () => {
         };
       },
       from(table: string) {
-        const filters: Array<{ column: string; value: unknown }> = [];
+        const filters: Array<{ column: string; operator: 'eq' | 'like'; value: unknown }> = [];
         let mode: 'select' | 'insert' | 'update' = 'select';
         let payload: Record<string, unknown> = {};
 
         const matchingRows = () => tables[table].filter((row) =>
-          filters.every(({ column, value }) => row[column] === value),
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'like') {
+              const pattern = String(value);
+              if (pattern.endsWith('%')) {
+                return typeof row[column] === 'string' && row[column].startsWith(pattern.slice(0, -1));
+              }
+
+              return row[column] === value;
+            }
+
+            return row[column] === value;
+          }),
         );
 
         return {
@@ -755,15 +924,19 @@ describe('stripe fulfillment helpers', () => {
             return this;
           },
           eq(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             return this;
           },
           is(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             if (mode === 'update') {
               matchingRows().forEach((row) => Object.assign(row, payload));
             }
             return Promise.resolve({ error: null });
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
           },
           order() {
             return this;
@@ -1208,6 +1381,7 @@ describe('stripe fulfillment helpers', () => {
         billing_cycle: 'monthly',
         stripe_invoice_id: null,
         stripe_subscription_id: 'sub_test_legacy_shape',
+        stripe_checkout_session_id: 'cs_test_legacy_shape',
         stripe_customer_id: 'cus_test_legacy',
         stripe_price_id: 'price_legacy',
       }, {
@@ -1235,11 +1409,22 @@ describe('stripe fulfillment helpers', () => {
           throw new Error(`Unexpected table: ${table}`);
         }
 
-        const filters: Array<{ column: string; value: unknown }> = [];
+        const filters: Array<{ column: string; operator: 'eq' | 'like'; value: unknown }> = [];
         let mode: 'select' | 'update' = 'select';
         let payload: Record<string, unknown> = {};
         const matchingRows = () => tables[table].filter((row) =>
-          filters.every(({ column, value }) => row[column] === value),
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'like') {
+              const pattern = String(value);
+              if (pattern.endsWith('%')) {
+                return typeof row[column] === 'string' && row[column].startsWith(pattern.slice(0, -1));
+              }
+
+              return row[column] === value;
+            }
+
+            return row[column] === value;
+          }),
         );
 
         return {
@@ -1251,7 +1436,7 @@ describe('stripe fulfillment helpers', () => {
               expect(value).toBe('sub_test_legacy_shape');
             }
 
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             return this;
           },
           order() {
@@ -1266,13 +1451,17 @@ describe('stripe fulfillment helpers', () => {
             return this;
           },
           is(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             if (mode === 'update') {
               updates.push({ status: payload.status, payment_status: payload.payment_status });
               matchingRows().forEach((row) => Object.assign(row, payload));
             }
 
             return Promise.resolve({ error: null });
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
           },
           async maybeSingle() {
             if (mode === 'update') {

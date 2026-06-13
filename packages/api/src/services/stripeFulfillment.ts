@@ -211,6 +211,7 @@ async function backfillCheckoutOrderFulfillment(
       updated_at: fulfilledAt,
     })
     .eq('stripe_subscription_id', subscriptionId)
+    .like('stripe_checkout_session_id', 'cs_%')
     .is('stripe_invoice_id', null);
   const result = typeof query.neq === 'function'
     ? await query.neq('status', 'failed')
