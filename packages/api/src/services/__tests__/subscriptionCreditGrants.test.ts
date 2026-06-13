@@ -319,15 +319,15 @@ describe('subscription credit grants', () => {
   it('ignores failed plan-change source rows when resolving the subscription source order', async () => {
     const supabase = createMockSupabase({
       payment_orders: [
-        {
-          id: 'order-failed-upgrade',
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `order-failed-upgrade-${index + 1}`,
           user_id: 'user-monthly',
           item_id: 'plan-gold-monthly',
           item_type: 'membership_plan',
           billing_cycle: 'monthly',
           stripe_subscription_id: 'sub_monthly',
           status: 'failed',
-        },
+        })),
         {
           id: 'order-source-monthly',
           user_id: 'user-monthly',

@@ -381,11 +381,15 @@ async function findInvoiceFailureOrders(
     };
   }
 
-  const subscriptionOrder = await supabase
+  const subscriptionOrderQuery = supabase
     .from('payment_orders')
     .select(FAILED_INVOICE_ORDER_SELECT)
     .eq('stripe_subscription_id', subscriptionId)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false });
+  const filteredSubscriptionOrderQuery = typeof subscriptionOrderQuery.neq === 'function'
+    ? subscriptionOrderQuery.neq('status', 'failed')
+    : subscriptionOrderQuery;
+  const subscriptionOrder = await filteredSubscriptionOrderQuery
     .limit(1)
     .maybeSingle();
 

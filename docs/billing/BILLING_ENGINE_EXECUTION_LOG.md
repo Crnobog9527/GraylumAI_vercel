@@ -1480,6 +1480,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Follow-up P1：invoice fulfillment checkout-order backfill now excludes `status = failed` rows so failed plan-change source rows cannot be converted back to `completed` during a later invoice backfill。
 - Follow-up P1：when a failed plan-change invoice is later paid, the same invoice order is now used as the source so the retried paid invoice grants/syncs the upgraded plan instead of falling back to the previous subscription order。
 - Follow-up P1：already-fulfilled invoice replays now return before source selection or profile sync so stale invoice replays cannot downgrade a user after a later upgrade。
+- Follow-up P1/P2：subscription source lookups used by successful invoice fulfillment and failed-invoice handling now filter `status != failed` before applying their limits, so failed upgrade attempts cannot seed later paid/failed invoice rows or hide older valid source rows。
 
 ### Validation
 

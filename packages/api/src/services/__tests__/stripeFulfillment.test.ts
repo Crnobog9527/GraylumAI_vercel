@@ -959,6 +959,7 @@ describe('stripe fulfillment helpers', () => {
   it('creates a separate failed invoice order for renewal invoice failures without touching the completed checkout order', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
     const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const sourceFilters: Array<[string, unknown]> = [];
 
     const supabase = {
       from(table: string) {
@@ -990,6 +991,12 @@ describe('stripe fulfillment helpers', () => {
           order(column: string, options: { ascending: boolean }) {
             expect(column).toBe('created_at');
             expect(options).toEqual({ ascending: false });
+            return this;
+          },
+          neq(column: string, value: string) {
+            expect(column).toBe('status');
+            expect(value).toBe('failed');
+            sourceFilters.push([column, value]);
             return this;
           },
           limit(value: number) {
@@ -1048,6 +1055,7 @@ describe('stripe fulfillment helpers', () => {
     );
 
     expect(updates).toEqual([]);
+    expect(sourceFilters).toEqual([['status', 'failed']]);
     expect(inserts).toEqual([
       {
         table: 'payment_orders',

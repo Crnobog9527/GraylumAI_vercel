@@ -371,11 +371,15 @@ async function getLatestSubscriptionOrder(
     .from('payment_orders')
     .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, metadata')
     .eq('stripe_subscription_id', subscriptionId)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false });
+  const filteredQuery = typeof query.neq === 'function'
+    ? query.neq('status', 'failed')
+    : query;
+  const limitedQuery = filteredQuery
     .limit(10);
-  const result = typeof query.then === 'function'
-    ? await query
-    : await query.maybeSingle();
+  const result = typeof limitedQuery.then === 'function'
+    ? await limitedQuery
+    : await limitedQuery.maybeSingle();
 
   if (result.error) {
     throwGrantError(
