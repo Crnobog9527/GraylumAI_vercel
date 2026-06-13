@@ -337,7 +337,7 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, fulfilled_at, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, fulfilled_at, metadata')
     .eq('stripe_invoice_id', invoiceId)
     .maybeSingle();
 
@@ -351,6 +351,16 @@ async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: 
   }
 
   return result.data ?? null;
+}
+
+function isUsableMembershipSourceOrder(
+  order: PaymentOrderRow | null | undefined,
+): order is PaymentOrderRow & { user_id: string; item_id: string } {
+  return Boolean(
+    order?.user_id
+    && order.item_id
+    && (!order.item_type || order.item_type === 'membership_plan'),
+  );
 }
 
 async function getLatestSubscriptionOrder(
@@ -896,12 +906,10 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
-  const sourceOrder = await getLatestSubscriptionOrder(supabase, input.subscriptionId);
-  if (
-    !sourceOrder?.user_id
-    || !sourceOrder.item_id
-    || (sourceOrder.item_type && sourceOrder.item_type !== 'membership_plan')
-  ) {
+  const sourceOrder = isUsableMembershipSourceOrder(existingInvoiceOrder)
+    ? existingInvoiceOrder
+    : await getLatestSubscriptionOrder(supabase, input.subscriptionId);
+  if (!isUsableMembershipSourceOrder(sourceOrder)) {
     throwGrantError(
       'subscription_source_order_missing',
       SUBSCRIPTION_GRANT_ERRORS.missingSubscriptionOrder,

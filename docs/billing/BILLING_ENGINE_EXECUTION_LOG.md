@@ -1478,12 +1478,13 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - P2：`changeSubscriptionPlan` now rejects a repeated request when the active `user_subscriptions` mirror already matches the requested plan and billing cycle, before any Stripe update attempt。
 - Follow-up P1：if `stripe.subscriptions.update` fails after the source row is inserted, PR5 now marks that source row `failed`; invoice fulfillment source-order lookup skips failed rows so failed upgrades cannot become the newest grant source。
 - Follow-up P1：invoice fulfillment checkout-order backfill now excludes `status = failed` rows so failed plan-change source rows cannot be converted back to `completed` during a later invoice backfill。
+- Follow-up P1：when a failed plan-change invoice is later paid, the same invoice order is now used as the source so the retried paid invoice grants/syncs the upgraded plan instead of falling back to the previous subscription order。
 
 ### Validation
 
 - `pnpm lint`：通过。
-- `pnpm test:api`：通过；47 files / 552 tests passed。
-- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/routers/payments.test.ts` 通过；47 files / 552 tests passed。
+- `pnpm test:api`：通过；47 files / 553 tests passed。
+- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` 通过；47 files / 553 tests passed。
 - `pnpm --filter web typecheck`：通过。
 - `git diff --check`：通过。
 - Dummy non-secret env `pnpm build`：未通过；Next/Turbopack failed fetching existing `Geist` / `Geist Mono` from Google Fonts via `next/font/google` in `apps/web/src/app/layout.tsx`。

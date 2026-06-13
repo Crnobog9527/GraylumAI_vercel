@@ -381,6 +381,83 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('uses a failed same-invoice upgrade row as the source when the invoice is later paid', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-failed-upgrade-invoice',
+          user_id: 'user-retry',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_retry_paid',
+          stripe_subscription_id: 'sub_retry',
+          stripe_customer_id: 'cus_retry',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'failed',
+          payment_status: 'open',
+        },
+        {
+          id: 'order-source-previous',
+          user_id: 'user-retry',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_retry',
+          stripe_customer_id: 'cus_retry',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+        },
+      ],
+      profiles: [{
+        id: 'user-retry',
+        membership_level: 'pro',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 1990,
+      invoiceId: 'in_retry_paid',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      stripeCustomerId: 'cus_retry',
+      subscriptionId: 'sub_retry',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-retry',
+      membership_level: 'gold',
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-gold-monthly',
+      credits_granted: 3500,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-failed-upgrade-invoice',
+      item_id: 'plan-gold-monthly',
+      status: 'completed',
+      payment_status: 'paid',
+    });
+  });
+
   it('does not duplicate grants for repeated invoice fulfillment', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
