@@ -492,13 +492,14 @@ describe('subscription credit grants', () => {
 
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
     supabase.tables.profiles[0].membership_level = 'free';
-    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+    const replayResult = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
 
+    expect(replayResult.alreadyFulfilled).toBe(true);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.profiles[0]).toMatchObject({
       id: 'user-repeat',
-      membership_level: 'pro',
+      membership_level: 'free',
     });
   });
 

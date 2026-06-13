@@ -616,7 +616,7 @@ describe('stripe fulfillment helpers', () => {
       ['stripe_invoice_id', null],
       ['status', 'failed'],
     ]);
-    expect(profileUpdates).toEqual([{ membership_level: 'pro' }]);
+    expect(profileUpdates).toEqual([]);
     expect(transactionsTouched).toBe(false);
     expect(subscriptionTouched).toBe(false);
   });
@@ -1282,7 +1282,7 @@ describe('stripe fulfillment helpers', () => {
     expect(updates).toEqual([
       { status: 'completed', payment_status: 'paid' },
     ]);
-    expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro' });
+    expect(tables.profiles[0]).toMatchObject({ membership_level: 'free' });
   });
 
   it('logs the subscription grant stage and safe Supabase error when source order lookup fails', async () => {

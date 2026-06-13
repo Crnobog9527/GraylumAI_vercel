@@ -1479,6 +1479,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Follow-up P1：if `stripe.subscriptions.update` fails after the source row is inserted, PR5 now marks that source row `failed`; invoice fulfillment source-order lookup skips failed rows so failed upgrades cannot become the newest grant source。
 - Follow-up P1：invoice fulfillment checkout-order backfill now excludes `status = failed` rows so failed plan-change source rows cannot be converted back to `completed` during a later invoice backfill。
 - Follow-up P1：when a failed plan-change invoice is later paid, the same invoice order is now used as the source so the retried paid invoice grants/syncs the upgraded plan instead of falling back to the previous subscription order。
+- Follow-up P1：already-fulfilled invoice replays now return before source selection or profile sync so stale invoice replays cannot downgrade a user after a later upgrade。
 
 ### Validation
 

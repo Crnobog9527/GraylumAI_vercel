@@ -906,6 +906,15 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
+  if (existingInvoiceOrder?.fulfilled_at) {
+    return {
+      fulfilledAt: existingInvoiceOrder.fulfilled_at,
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+    };
+  }
+
   const sourceOrder = isUsableMembershipSourceOrder(existingInvoiceOrder)
     ? existingInvoiceOrder
     : await getLatestSubscriptionOrder(supabase, input.subscriptionId);
@@ -936,15 +945,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     subscriptionId: input.subscriptionId,
     invoiceId: input.invoiceId,
   });
-
-  if (existingInvoiceOrder?.fulfilled_at) {
-    return {
-      fulfilledAt: existingInvoiceOrder.fulfilled_at,
-      alreadyFulfilled: true,
-      grantedCredits: 0,
-      creditTransactionId: null,
-    };
-  }
 
   const grantPeriod: GrantPeriod = billingCycle === 'yearly'
     ? {
