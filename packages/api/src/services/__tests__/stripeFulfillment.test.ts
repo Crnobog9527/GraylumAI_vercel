@@ -450,6 +450,7 @@ describe('stripe fulfillment helpers', () => {
 
   it('backfills checkout order fulfillment when invoice fulfillment already exists', async () => {
     const updates: Array<{ table: string; payload: unknown }> = [];
+    const backfillFilters: Array<[string, unknown]> = [];
     const profileUpdates: unknown[] = [];
     let transactionsTouched = false;
     let subscriptionTouched = false;
@@ -511,6 +512,13 @@ describe('stripe fulfillment helpers', () => {
             is(nullColumn: string, nullValue: null) {
               expect(nullColumn).toBe('stripe_invoice_id');
               expect(nullValue).toBeNull();
+              backfillFilters.push([nullColumn, nullValue]);
+              return this;
+            },
+            neq(column: string, value: string) {
+              expect(column).toBe('status');
+              expect(value).toBe('failed');
+              backfillFilters.push([column, value]);
               return Promise.resolve({ error: null });
             },
             insert() {
@@ -603,6 +611,10 @@ describe('stripe fulfillment helpers', () => {
           payment_status: 'paid',
         }),
       },
+    ]);
+    expect(backfillFilters).toEqual([
+      ['stripe_invoice_id', null],
+      ['status', 'failed'],
     ]);
     expect(profileUpdates).toEqual([{ membership_level: 'pro' }]);
     expect(transactionsTouched).toBe(false);

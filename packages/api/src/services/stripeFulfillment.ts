@@ -201,7 +201,7 @@ async function backfillCheckoutOrderFulfillment(
   subscriptionId: string,
   fulfilledAt: string,
 ) {
-  const result = await supabase
+  const query = supabase
     .from('payment_orders')
     .update({
       fulfilled_at: fulfilledAt,
@@ -211,6 +211,9 @@ async function backfillCheckoutOrderFulfillment(
     })
     .eq('stripe_subscription_id', subscriptionId)
     .is('stripe_invoice_id', null);
+  const result = typeof query.neq === 'function'
+    ? await query.neq('status', 'failed')
+    : await query;
 
   if (result.error) {
     throwFulfillmentError(
