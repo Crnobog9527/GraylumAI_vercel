@@ -430,6 +430,33 @@ async function markSubscriptionPlanChangeOrderFailed(input: {
   }
 }
 
+async function loadPendingSubscriptionPlanChangeOrder(
+  supabase: any,
+  subscriptionId: string,
+): Promise<Array<{ item_id?: string | null; billing_cycle?: MembershipBillingCycle | null }>> {
+  const query = supabase
+    .from('payment_orders')
+    .select('id, item_id, billing_cycle, status')
+    .eq('stripe_subscription_id', subscriptionId)
+    .eq('item_type', 'membership_plan')
+    .eq('status', 'pending')
+    .order('updated_at', { ascending: false })
+    .limit(10);
+  const result = typeof query.then === 'function'
+    ? await query
+    : await query.maybeSingle();
+
+  if (result.error) {
+    throw createPaymentOperationError('读取待处理订阅升级记录', result.error);
+  }
+
+  if (Array.isArray(result.data)) {
+    return result.data;
+  }
+
+  return result.data ? [result.data] : [];
+}
+
 async function loadPaymentItemNames(
   supabase: any,
   orders: Array<{ item_id: string; item_type: string }>
@@ -734,6 +761,19 @@ export const paymentsRouter = router({
         });
       }
 
+      const pendingPlanChangeOrders = await loadPendingSubscriptionPlanChangeOrder(
+        ctx.supabase,
+        currentSubscription.stripe_subscription_id,
+      );
+      if (pendingPlanChangeOrders.some((order) =>
+        order.item_id === plan.id && order.billing_cycle === input.billingCycle
+      )) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '该订阅升级正在处理中，请等待付款完成后再试。',
+        });
+      }
+
       let stripeSubscription: Stripe.Subscription;
       try {
         stripeSubscription = await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id);
@@ -829,26 +869,6 @@ export const paymentsRouter = router({
           subscriptionId: maskIdentifier(updatedSubscription.id),
         });
         throw createPaymentOperationError('同步订阅状态', error);
-      }
-
-      const mirrorUpdate = await ctx.supabaseAdmin
-        .from('user_subscriptions')
-        .update({
-          membership_plan_id: plan.id,
-          stripe_price_id: selectedPriceId,
-          billing_cycle: input.billingCycle,
-          status: updatedSubscription.status,
-          cancel_at_period_end: updatedSubscription.cancel_at_period_end ? 'true' : 'false',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('stripe_subscription_id', updatedSubscription.id);
-
-      if (mirrorUpdate.error) {
-        logSubscriptionChangeStageFailure('subscription_mirror_update', input, mirrorUpdate.error, {
-          subscriptionId: maskIdentifier(updatedSubscription.id),
-          priceId: maskIdentifier(selectedPriceId),
-        });
-        throw createPaymentOperationError('保存订阅升级结果', mirrorUpdate.error);
       }
 
       return {

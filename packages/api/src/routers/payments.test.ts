@@ -1084,13 +1084,7 @@ describe('paymentsRouter error sanitization', () => {
       cancel_at_period_end: false,
     }));
     expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, updatedSubscription);
-    expect(subscriptionUpdates[0]).toMatchObject({
-      membership_plan_id: '123e4567-e89b-42d3-a456-426614174222',
-      stripe_price_id: 'price_test_gold_yearly',
-      billing_cycle: 'yearly',
-      status: 'active',
-      cancel_at_period_end: 'false',
-    });
+    expect(subscriptionUpdates).toHaveLength(0);
     expect(orderInserts).toHaveLength(1);
     expect(orderInserts[0]).toMatchObject({
       user_id: 'user-1',
@@ -1189,6 +1183,101 @@ describe('paymentsRouter error sanitization', () => {
       message: '当前套餐仍有效，无需重复购买。',
     });
 
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects repeated pending changeSubscriptionPlan requests before Stripe subscription update', async () => {
+    const subscriptionUpdate = vi.fn();
+    const subscriptionRetrieve = vi.fn();
+    stripeState.getStripeClient.mockReturnValue({
+      subscriptions: {
+        retrieve: subscriptionRetrieve,
+        update: subscriptionUpdate,
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174222',
+                name: 'Gold',
+                level: 'gold',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_gold_monthly',
+                stripe_yearly_price_id: 'price_test_gold_yearly',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createListQueryBuilder(
+            Promise.resolve({
+              data: [{
+                id: 'sub-row-1',
+                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
+                stripe_subscription_id: 'sub_test_active',
+                stripe_customer_id: 'cus_test_active',
+                status: 'active',
+                billing_cycle: 'monthly',
+                cancel_at_period_end: 'false',
+              }],
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'order-change-pending',
+                item_id: '123e4567-e89b-42d3-a456-426614174222',
+                billing_cycle: 'yearly',
+                status: 'pending',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+    });
+
+    await expect(
+      caller.changeSubscriptionPlan({
+        planId: '123e4567-e89b-42d3-a456-426614174222',
+        billingCycle: 'yearly',
+      }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '该订阅升级正在处理中，请等待付款完成后再试。',
+    });
+
+    expect(subscriptionRetrieve).not.toHaveBeenCalled();
     expect(subscriptionUpdate).not.toHaveBeenCalled();
   });
 
