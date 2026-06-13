@@ -351,6 +351,7 @@ const FAILED_INVOICE_ORDER_SELECT = [
   'stripe_price_id',
   'status',
   'fulfilled_at',
+  'created_at',
   'metadata',
 ].join(',');
 
@@ -419,6 +420,27 @@ function isPendingCheckoutOrderForFirstInvoice(order: any) {
     && normalizePaymentOrderStatus(order.status) === 'pending'
     && !order.fulfilled_at
     && !order.stripe_invoice_id;
+}
+
+function isCreatedNoLaterThan(createdAt: string | null | undefined, referenceAt: string | null) {
+  if (!createdAt || !referenceAt) {
+    return false;
+  }
+
+  const createdTime = Date.parse(createdAt);
+  const referenceTime = Date.parse(referenceAt);
+
+  return Number.isFinite(createdTime)
+    && Number.isFinite(referenceTime)
+    && createdTime <= referenceTime;
+}
+
+function isPlanChangeLockKnownForFailedInvoice(order: any, invoice: Stripe.Invoice) {
+  if (!isSubscriptionPlanChangeOrder(order)) {
+    return true;
+  }
+
+  return isCreatedNoLaterThan(order.created_at, asIsoTimestamp(invoice.created));
 }
 
 function buildFailedInvoiceOrderMetadata(input: {
@@ -555,6 +577,17 @@ export async function markMembershipInvoicePaymentFailed(
     logger.warn('billing', 'stripe_invoice_payment_failed_order_missing', {
       invoiceId: maskIdentifier(invoiceId),
       subscriptionId: maskIdentifier(subscriptionId),
+    });
+    return;
+  }
+
+  if (!invoiceOrder && !isPlanChangeLockKnownForFailedInvoice(existingOrder, invoice)) {
+    logger.info('billing', 'stripe_invoice_payment_failed_plan_change_lock_preserved', {
+      invoiceId: maskIdentifier(invoiceId),
+      subscriptionId: maskIdentifier(subscriptionId),
+      orderId: maskIdentifier(existingOrder.id),
+      sourceOrderCreatedAt: existingOrder.created_at ?? null,
+      invoiceCreatedAt: asIsoTimestamp(invoice.created),
     });
     return;
   }

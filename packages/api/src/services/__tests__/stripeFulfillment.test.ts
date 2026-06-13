@@ -1083,6 +1083,7 @@ describe('stripe fulfillment helpers', () => {
                 id: 'order-pending-subscription',
                 status: 'pending',
                 fulfilled_at: null,
+                created_at: '2026-06-13T10:20:00.000Z',
                 stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_failed',
                 metadata: {
                   existing: 'kept',
@@ -1104,6 +1105,7 @@ describe('stripe fulfillment helpers', () => {
       supabase,
       {
         id: 'in_test_failed',
+        created: 1781346300,
         status: 'open',
         amount_due: 2990,
         amount_paid: 0,
@@ -1139,6 +1141,117 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
+  });
+
+  it('preserves a newer pending plan-change lock during stale failed invoice replay', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_stale_failed');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_stale_failed');
+              return this;
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          order(column: string, options: { ascending: boolean }) {
+            expect(column).toBe('created_at');
+            expect(options).toEqual({ ascending: false });
+            return this;
+          },
+          neq(column: string, value: string) {
+            expect(column).toBe('status');
+            expect(value).toBe('failed');
+            return this;
+          },
+          limit(value: number) {
+            expect(value).toBe(1);
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-new-plan-change-lock',
+                user_id: 'user-stale-failed',
+                item_type: 'membership_plan',
+                item_id: 'plan-upgrade',
+                billing_cycle: 'monthly',
+                stripe_invoice_id: null,
+                stripe_subscription_id: 'sub_test_stale_failed',
+                stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_stale_failed',
+                status: 'pending',
+                fulfilled_at: null,
+                created_at: '2026-06-13T10:20:00.000Z',
+                metadata: {
+                  existing: 'kept',
+                  source: 'changeSubscriptionPlan',
+                },
+              },
+              error: null,
+            });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return this;
+          },
+          insert(payload: Record<string, unknown>) {
+            inserts.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_stale_failed',
+        created: 1781344800,
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_stale_failed',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([]);
+    expect(loggerState.info).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_payment_failed_plan_change_lock_preserved',
+      expect.objectContaining({
+        invoiceId: 'in_test_...failed',
+        subscriptionId: 'sub_test...failed',
+        orderId: 'order-ne...e-lock',
+        sourceOrderCreatedAt: '2026-06-13T10:20:00.000Z',
+        invoiceCreatedAt: '2026-06-13T10:00:00.000Z',
+      }),
+    );
   });
 
   it('creates a separate failed invoice order for renewal invoice failures without touching the completed checkout order', async () => {
