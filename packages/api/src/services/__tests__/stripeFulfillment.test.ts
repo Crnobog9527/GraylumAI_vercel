@@ -859,6 +859,7 @@ describe('stripe fulfillment helpers', () => {
         stripe_checkout_session_id: 'cs_test_atomic',
         stripe_customer_id: 'cus_test_atomic',
         stripe_price_id: 'price_yearly',
+        created_at: '2025-03-22T12:26:40.000Z',
       }],
       membership_plans: [{
         id: 'plan-atomic',

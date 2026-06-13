@@ -413,16 +413,6 @@ async function getLatestSubscriptionOrder(
   return isUsableSourceForInvoice(order, options) ? order : null;
 }
 
-function isCreatedNoLaterThan(createdAt: string | null | undefined, fulfilledAt: string) {
-  if (!createdAt) {
-    return true;
-  }
-
-  const createdTime = Date.parse(createdAt);
-  const fulfilledTime = Date.parse(fulfilledAt);
-  return Number.isNaN(createdTime) || Number.isNaN(fulfilledTime) || createdTime <= fulfilledTime;
-}
-
 function isCreatedNoLaterThanWithTolerance(
   createdAt: string | null | undefined,
   referenceAt: string | null | undefined,
@@ -440,6 +430,13 @@ function isCreatedNoLaterThanWithTolerance(
     && createdTime <= referenceTime + toleranceMs;
 }
 
+function getInvoiceSourceCutoff(options: {
+  invoiceCreatedAt?: string | null;
+  periodStart?: string | null;
+}) {
+  return options.invoiceCreatedAt ?? options.periodStart ?? null;
+}
+
 function isUsableSourceForInvoice(
   order: PaymentOrderRow | null | undefined,
   options: {
@@ -447,11 +444,15 @@ function isUsableSourceForInvoice(
     periodStart?: string | null;
   },
 ) {
-  if (!order || !isSubscriptionPlanChangeOrder(order)) {
+  if (!order) {
     return true;
   }
 
-  const sourceCutoff = options.invoiceCreatedAt ?? options.periodStart ?? null;
+  const sourceCutoff = getInvoiceSourceCutoff(options);
+  if (!sourceCutoff) {
+    return true;
+  }
+
   return isCreatedNoLaterThanWithTolerance(
     order.created_at,
     sourceCutoff,
@@ -462,7 +463,7 @@ function isUsableSourceForInvoice(
 async function getResidualSubscriptionPlanChangeLock(input: {
   supabase: SupabaseLikeClient;
   subscriptionId: string;
-  fulfilledAt: string;
+  sourceCutoff?: string | null;
 }): Promise<PaymentOrderRow | null> {
   const lockKey = buildSubscriptionPlanChangeLockKey(input.subscriptionId);
   const result = await input.supabase
@@ -486,7 +487,11 @@ async function getResidualSubscriptionPlanChangeLock(input: {
     return null;
   }
 
-  return isCreatedNoLaterThan(order.created_at, input.fulfilledAt) ? order : null;
+  return isCreatedNoLaterThanWithTolerance(
+    order.created_at,
+    input.sourceCutoff,
+    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
+  ) ? order : null;
 }
 
 async function getMembershipPlan(
@@ -1039,7 +1044,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
       supabase,
       subscriptionId: input.subscriptionId,
-      fulfilledAt: existingInvoiceOrder.fulfilled_at,
+      sourceCutoff: getInvoiceSourceCutoff(input),
     });
     if (residualPlanChangeLock) {
       await releaseSubscriptionPlanChangeLock({

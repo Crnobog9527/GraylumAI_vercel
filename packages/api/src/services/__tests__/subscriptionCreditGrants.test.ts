@@ -306,6 +306,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_monthly',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-pro-monthly',
@@ -366,6 +367,24 @@ describe('subscription credit grants', () => {
           created_at: '2026-06-01T00:05:00.000Z',
           metadata: {
             source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-later-gold-invoice',
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_later_upgrade_success',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:10:01.000Z',
+          created_at: '2026-06-01T00:10:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
           },
         },
         {
@@ -435,6 +454,12 @@ describe('subscription credit grants', () => {
       payment_status: 'active',
     });
     expect(supabase.tables.payment_orders[0].fulfilled_at).toBeUndefined();
+    expect(supabase.tables.payment_orders[1]).toMatchObject({
+      id: 'order-later-gold-invoice',
+      item_id: 'plan-gold-monthly',
+      status: 'completed',
+      payment_status: 'paid',
+    });
     expect(supabase.tables.profiles[0]).toMatchObject({
       id: 'user-stale-success',
       membership_level: 'pro',
@@ -476,6 +501,7 @@ describe('subscription credit grants', () => {
           billing_cycle: 'monthly',
           stripe_subscription_id: 'sub_monthly',
           status: 'completed',
+          created_at: '2026-06-01T00:00:00.000Z',
         },
       ],
       membership_plans: [
@@ -607,6 +633,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_repeat',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-repeat',
@@ -685,6 +712,7 @@ describe('subscription credit grants', () => {
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       amountTotal: 1990,
       invoiceId: 'in_replay_lock',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
       paymentStatus: 'paid',
       subscriptionId: 'sub_replay_lock',
       now: '2026-06-01T00:00:02.000Z',
@@ -734,8 +762,8 @@ describe('subscription credit grants', () => {
           stripe_subscription_id: 'sub_newer_lock',
           status: 'completed',
           payment_status: 'paid',
-          fulfilled_at: '2026-06-01T00:00:01.000Z',
-          created_at: '2026-06-01T00:00:01.000Z',
+          fulfilled_at: '2026-06-01T00:05:30.000Z',
+          created_at: '2026-06-01T00:05:30.000Z',
           metadata: {
             source: 'invoice.payment_succeeded',
           },
@@ -746,9 +774,10 @@ describe('subscription credit grants', () => {
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       amountTotal: 990,
       invoiceId: 'in_newer_lock_replay',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
       paymentStatus: 'paid',
       subscriptionId: 'sub_newer_lock',
-      now: '2026-06-01T00:05:01.000Z',
+      now: '2026-06-01T00:05:31.000Z',
     });
 
     expect(result.alreadyFulfilled).toBe(true);
@@ -769,6 +798,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_missing_profile',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-missing-profile',
@@ -808,6 +838,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_canceling',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-canceling',
@@ -855,6 +886,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_lifecycle',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-lifecycle',
