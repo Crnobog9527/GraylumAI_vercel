@@ -1465,3 +1465,45 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR5 implementation is ready for owner audit as draft PR, with build risk noted above。
 - Issue #225 remains open and is the control-plane tracker。
 - No merge / no PR6 without separate owner authorization。
+
+## PR 5 audit follow-up - Codex review fixes
+
+- 时间：2026-06-13 CST。
+- 阶段：PR5 audit closeout；PR #236 remains draft。
+- 状态：Codex review returned actionable P1/P2 findings; fixes pushed in PR5 branch; PR5 remains source-code PR only。
+
+### Review findings addressed
+
+- P1：`payment_orders` plan-change source row now writes before `stripe.subscriptions.update` so a failed local source write cannot leave a successful Stripe update without durable target-plan source metadata。
+- P2：`changeSubscriptionPlan` now rejects a repeated request when the active `user_subscriptions` mirror already matches the requested plan and billing cycle, before any Stripe update attempt。
+
+### Validation
+
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；47 files / 550 tests passed。
+- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionPlanButtonState.test.ts` 通过；47 files / 550 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+- Dummy non-secret env `pnpm build`：未通过；Next/Turbopack failed fetching existing `Geist` / `Geist Mono` from Google Fonts via `next/font/google` in `apps/web/src/app/layout.tsx`。
+- Google Fonts direct curl evidence：`curl -I --max-time 20 https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap` timed out。
+- Google Fonts proxied curl evidence：same request with `-x http://127.0.0.1:7897` returned HTTP 200, while the local Next/Turbopack font fetcher still failed under shell proxy env。
+- Alternative validation：GitHub/Vercel PR checks for #236 were passing before the review-fix commit; local lint/typecheck/API/unit coverage passed after the fix commit。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未改积分发放逻辑。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 remains draft against `staging`。
+- Issue #225 remains the control-plane tracker; PR5 should stay `in_progress` until fresh review/check evidence is complete and owner explicitly accepts moving it to owner audit。
+- No merge / no PR6 without separate owner authorization。

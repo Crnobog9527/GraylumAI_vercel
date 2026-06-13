@@ -698,6 +698,16 @@ export const paymentsRouter = router({
         });
       }
 
+      if (
+        currentSubscription.membership_plan_id === plan.id &&
+        currentSubscription.billing_cycle === input.billingCycle
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '当前套餐仍有效，无需重复购买。',
+        });
+      }
+
       let stripeSubscription: Stripe.Subscription;
       try {
         stripeSubscription = await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id);
@@ -732,6 +742,25 @@ export const paymentsRouter = router({
         }),
         changeSource: 'graylum_change_subscription_plan',
       };
+
+      try {
+        await recordSubscriptionPlanChangeOrder({
+          supabase: ctx.supabaseAdmin,
+          userId: ctx.profileId,
+          plan,
+          billingCycle: input.billingCycle,
+          subscription: currentSubscription,
+          stripePriceId: selectedPriceId,
+          stripeSubscription,
+          metadata,
+        });
+      } catch (error) {
+        logSubscriptionChangeStageFailure('plan_change_order_insert', input, error, {
+          subscriptionId: maskIdentifier(stripeSubscription.id),
+          priceId: maskIdentifier(selectedPriceId),
+        });
+        throw error;
+      }
 
       let updatedSubscription: Stripe.Subscription;
       try {
@@ -781,25 +810,6 @@ export const paymentsRouter = router({
           priceId: maskIdentifier(selectedPriceId),
         });
         throw createPaymentOperationError('保存订阅升级结果', mirrorUpdate.error);
-      }
-
-      try {
-        await recordSubscriptionPlanChangeOrder({
-          supabase: ctx.supabaseAdmin,
-          userId: ctx.profileId,
-          plan,
-          billingCycle: input.billingCycle,
-          subscription: currentSubscription,
-          stripePriceId: selectedPriceId,
-          stripeSubscription: updatedSubscription,
-          metadata,
-        });
-      } catch (error) {
-        logSubscriptionChangeStageFailure('plan_change_order_insert', input, error, {
-          subscriptionId: maskIdentifier(updatedSubscription.id),
-          priceId: maskIdentifier(selectedPriceId),
-        });
-        throw error;
       }
 
       return {

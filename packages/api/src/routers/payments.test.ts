@@ -1172,6 +1172,128 @@ describe('paymentsRouter error sanitization', () => {
     expect(subscriptionUpdate).not.toHaveBeenCalled();
   });
 
+  it('rejects subscription changes before Stripe update when the plan-change source row cannot be saved', async () => {
+    const subscriptionRetrieve = vi.fn().mockResolvedValue({
+      id: 'sub_test_active',
+      status: 'active',
+      cancel_at_period_end: false,
+      metadata: { userId: 'user-1' },
+      items: {
+        data: [
+          {
+            id: 'si_test_current',
+            current_period_start: 1_742_646_400,
+            current_period_end: 1_745_238_400,
+          },
+        ],
+      },
+    });
+    const subscriptionUpdate = vi.fn();
+    const orderInserts: unknown[] = [];
+    stripeState.buildStripeMetadata.mockReturnValue({
+      itemType: 'membership_plan',
+      itemId: '123e4567-e89b-42d3-a456-426614174222',
+      userId: 'user-1',
+      priceId: 'price_test_gold_yearly',
+      billingCycle: 'yearly',
+    });
+    stripeState.getStripeClient.mockReturnValue({
+      subscriptions: {
+        retrieve: subscriptionRetrieve,
+        update: subscriptionUpdate,
+      },
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'pro',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'membership_plans') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: '123e4567-e89b-42d3-a456-426614174222',
+                name: 'Gold',
+                level: 'gold',
+                is_active: 'true',
+                stripe_monthly_price_id: 'price_test_gold_monthly',
+                stripe_yearly_price_id: 'price_test_gold_yearly',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'user_subscriptions') {
+          return createListQueryBuilder(
+            Promise.resolve({
+              data: [{
+                id: 'sub-row-1',
+                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
+                stripe_subscription_id: 'sub_test_active',
+                stripe_customer_id: 'cus_test_active',
+                status: 'active',
+                billing_cycle: 'monthly',
+                cancel_at_period_end: 'false',
+              }],
+              error: null,
+            }),
+          );
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createInsertBuilder(
+            Promise.resolve({ error: { message: 'permission denied for table payment_orders' } }),
+            orderInserts,
+          );
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.changeSubscriptionPlan({
+        planId: '123e4567-e89b-42d3-a456-426614174222',
+        billingCycle: 'yearly',
+      }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '保存订阅升级记录失败，请稍后重试',
+    });
+
+    expect(subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
+    expect(orderInserts).toHaveLength(1);
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
   it('rejects downgrade changeSubscriptionPlan requests before Stripe subscription update', async () => {
     const subscriptionUpdate = vi.fn();
     stripeState.getStripeClient.mockReturnValue({
