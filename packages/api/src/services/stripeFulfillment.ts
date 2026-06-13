@@ -358,9 +358,10 @@ const FAILED_INVOICE_ORDER_SELECT = [
 
 async function findInvoiceFailureOrders(
   supabase: SupabaseLikeClient,
-  invoiceId: string,
+  invoice: Stripe.Invoice,
   subscriptionId: string | null,
 ) {
+  const invoiceId = invoice.id;
   const existingInvoiceOrder = await supabase
     .from('payment_orders')
     .select(FAILED_INVOICE_ORDER_SELECT)
@@ -386,17 +387,25 @@ async function findInvoiceFailureOrders(
     };
   }
 
+  const sourceCutoff = getFailedInvoiceSourceQueryCutoff(invoice);
   const subscriptionOrderQuery = supabase
     .from('payment_orders')
     .select(FAILED_INVOICE_ORDER_SELECT)
-    .eq('stripe_subscription_id', subscriptionId)
-    .order('created_at', { ascending: false });
-  const filteredSubscriptionOrderQuery = typeof subscriptionOrderQuery.neq === 'function'
-    ? subscriptionOrderQuery.neq('status', 'failed')
+    .eq('stripe_subscription_id', subscriptionId);
+  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof subscriptionOrderQuery.lte === 'function'
+    ? subscriptionOrderQuery.lte('created_at', sourceCutoff)
     : subscriptionOrderQuery;
-  const subscriptionOrder = await filteredSubscriptionOrderQuery
-    .limit(1)
-    .maybeSingle();
+  const filteredSubscriptionOrderQuery = typeof cutoffSubscriptionOrderQuery.neq === 'function'
+    ? cutoffSubscriptionOrderQuery.neq('status', 'failed')
+    : cutoffSubscriptionOrderQuery;
+  const orderedSubscriptionOrderQuery = filteredSubscriptionOrderQuery
+    .order('created_at', { ascending: false });
+  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof subscriptionOrderQuery.lte === 'function';
+  const limitedSubscriptionOrderQuery = canApplyLimitBeforeInvoiceFilter
+    && typeof orderedSubscriptionOrderQuery.limit === 'function'
+    ? orderedSubscriptionOrderQuery.limit(1)
+    : orderedSubscriptionOrderQuery;
+  const subscriptionOrder = await limitedSubscriptionOrderQuery.maybeSingle();
 
   if (subscriptionOrder.error) {
     throwFulfillmentError(
@@ -440,14 +449,31 @@ function isCreatedNoLaterThan(
     && createdTime <= referenceTime + toleranceMs;
 }
 
-function isPlanChangeLockKnownForFailedInvoice(order: any, invoice: Stripe.Invoice) {
-  if (!isSubscriptionPlanChangeOrder(order)) {
+function getFailedInvoiceSourceCutoff(invoice: Stripe.Invoice) {
+  return asIsoTimestamp(invoice.created) ?? asIsoTimestamp(invoice.period_start);
+}
+
+function getFailedInvoiceSourceQueryCutoff(invoice: Stripe.Invoice) {
+  const sourceCutoff = getFailedInvoiceSourceCutoff(invoice);
+  if (!sourceCutoff) {
+    return null;
+  }
+
+  const parsedCutoff = Date.parse(sourceCutoff);
+  return Number.isFinite(parsedCutoff)
+    ? new Date(parsedCutoff + STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS).toISOString()
+    : sourceCutoff;
+}
+
+function isSourceOrderKnownForFailedInvoice(order: any, invoice: Stripe.Invoice) {
+  const sourceCutoff = getFailedInvoiceSourceCutoff(invoice);
+  if (!sourceCutoff) {
     return true;
   }
 
   return isCreatedNoLaterThan(
     order.created_at,
-    asIsoTimestamp(invoice.created),
+    sourceCutoff,
     STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
   );
 }
@@ -577,7 +603,7 @@ export async function markMembershipInvoicePaymentFailed(
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   const { invoiceOrder, subscriptionOrder } = await findInvoiceFailureOrders(
     supabase,
-    invoiceId,
+    invoice,
     subscriptionId,
   );
   const existingOrder = invoiceOrder ?? subscriptionOrder;
@@ -590,13 +616,16 @@ export async function markMembershipInvoicePaymentFailed(
     return;
   }
 
-  if (!invoiceOrder && !isPlanChangeLockKnownForFailedInvoice(existingOrder, invoice)) {
-    logger.info('billing', 'stripe_invoice_payment_failed_plan_change_lock_preserved', {
+  if (!invoiceOrder && !isSourceOrderKnownForFailedInvoice(existingOrder, invoice)) {
+    const isPlanChangeLock = isSubscriptionPlanChangeOrder(existingOrder);
+    logger.info('billing', isPlanChangeLock
+      ? 'stripe_invoice_payment_failed_plan_change_lock_preserved'
+      : 'stripe_invoice_payment_failed_stale_source_preserved', {
       invoiceId: maskIdentifier(invoiceId),
       subscriptionId: maskIdentifier(subscriptionId),
       orderId: maskIdentifier(existingOrder.id),
       sourceOrderCreatedAt: existingOrder.created_at ?? null,
-      invoiceCreatedAt: asIsoTimestamp(invoice.created),
+      invoiceCreatedAt: getFailedInvoiceSourceCutoff(invoice),
     });
     return;
   }

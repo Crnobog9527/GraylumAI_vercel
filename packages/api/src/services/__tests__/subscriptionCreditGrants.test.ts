@@ -24,7 +24,7 @@ type TableName =
 type Row = Record<string, any>;
 
 class MockQuery {
-  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' }> = [];
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
   private limitValue: number | null = null;
@@ -46,6 +46,11 @@ class MockQuery {
 
   neq(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'neq' });
+    return this;
+  }
+
+  lte(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'lte' });
     return this;
   }
 
@@ -124,11 +129,17 @@ class MockQuery {
 
   private matchingRows() {
     const rows = this.tables[this.table].filter((row) =>
-      this.filters.every(({ column, value, operator }) =>
-        operator === 'eq'
-          ? row[column] === value
-          : row[column] !== value,
-      ),
+      this.filters.every(({ column, value, operator }) => {
+        if (operator === 'eq') {
+          return row[column] === value;
+        }
+
+        if (operator === 'neq') {
+          return row[column] !== value;
+        }
+
+        return row[column] <= value;
+      }),
     );
 
     if (!this.orderBy) {
@@ -370,7 +381,7 @@ describe('subscription credit grants', () => {
           },
         },
         {
-          id: 'order-later-gold-invoice',
+          id: 'order-later-gold-invoice-0',
           user_id: 'user-stale-success',
           item_id: 'plan-gold-monthly',
           item_type: 'membership_plan',
@@ -387,6 +398,24 @@ describe('subscription credit grants', () => {
             source: 'invoice.payment_succeeded',
           },
         },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          id: `order-later-gold-invoice-${index + 1}`,
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: `in_later_upgrade_success_${index + 1}`,
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: `2026-06-01T00:${String(11 + index).padStart(2, '0')}:01.000Z`,
+          created_at: `2026-06-01T00:${String(11 + index).padStart(2, '0')}:01.000Z`,
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        })),
         {
           id: 'order-source-previous-pro',
           user_id: 'user-stale-success',
@@ -454,8 +483,8 @@ describe('subscription credit grants', () => {
       payment_status: 'active',
     });
     expect(supabase.tables.payment_orders[0].fulfilled_at).toBeUndefined();
-    expect(supabase.tables.payment_orders[1]).toMatchObject({
-      id: 'order-later-gold-invoice',
+    expect(supabase.tables.payment_orders.find((row) => row.id === 'order-later-gold-invoice-0')).toMatchObject({
+      id: 'order-later-gold-invoice-0',
       item_id: 'plan-gold-monthly',
       status: 'completed',
       payment_status: 'paid',

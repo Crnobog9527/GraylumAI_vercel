@@ -380,16 +380,23 @@ async function getLatestSubscriptionOrder(
     periodStart?: string | null;
   } = {},
 ): Promise<PaymentOrderRow | null> {
+  const sourceCutoff = getInvoiceSourceQueryCutoff(options);
   const query = supabase
     .from('payment_orders')
     .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
-    .eq('stripe_subscription_id', subscriptionId)
-    .order('created_at', { ascending: false });
-  const filteredQuery = typeof query.neq === 'function'
-    ? query.neq('status', 'failed')
+    .eq('stripe_subscription_id', subscriptionId);
+  const cutoffQuery = sourceCutoff && typeof query.lte === 'function'
+    ? query.lte('created_at', sourceCutoff)
     : query;
-  const limitedQuery = filteredQuery
-    .limit(10);
+  const filteredQuery = typeof cutoffQuery.neq === 'function'
+    ? cutoffQuery.neq('status', 'failed')
+    : cutoffQuery;
+  const orderedQuery = filteredQuery
+    .order('created_at', { ascending: false });
+  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof query.lte === 'function';
+  const limitedQuery = canApplyLimitBeforeInvoiceFilter && typeof orderedQuery.limit === 'function'
+    ? orderedQuery.limit(10)
+    : orderedQuery;
   const result = typeof limitedQuery.then === 'function'
     ? await limitedQuery
     : await limitedQuery.maybeSingle();
@@ -435,6 +442,21 @@ function getInvoiceSourceCutoff(options: {
   periodStart?: string | null;
 }) {
   return options.invoiceCreatedAt ?? options.periodStart ?? null;
+}
+
+function getInvoiceSourceQueryCutoff(options: {
+  invoiceCreatedAt?: string | null;
+  periodStart?: string | null;
+}) {
+  const sourceCutoff = getInvoiceSourceCutoff(options);
+  if (!sourceCutoff) {
+    return null;
+  }
+
+  const parsedCutoff = Date.parse(sourceCutoff);
+  return Number.isFinite(parsedCutoff)
+    ? new Date(parsedCutoff + STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS).toISOString()
+    : sourceCutoff;
 }
 
 function isUsableSourceForInvoice(

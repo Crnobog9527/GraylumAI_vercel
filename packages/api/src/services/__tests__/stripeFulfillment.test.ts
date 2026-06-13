@@ -1255,6 +1255,166 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('does not infer a stale failed invoice from a later completed upgraded invoice order', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const lteFilters: Array<[string, unknown]> = [];
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [
+        {
+          id: 'order-later-upgraded-completed',
+          user_id: 'user-stale-failed-completed',
+          item_type: 'membership_plan',
+          item_id: 'plan-gold-monthly',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_later_upgrade_paid',
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_customer_id: 'cus_test_stale_failed_completed',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-13T10:20:01.000Z',
+          created_at: '2026-06-13T10:20:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+        {
+          id: 'order-older-valid-source',
+          user_id: 'user-stale-failed-completed',
+          item_type: 'membership_plan',
+          item_id: 'plan-pro-monthly',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: null,
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_customer_id: 'cus_test_stale_failed_completed',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-13T09:55:00.000Z',
+          created_at: '2026-06-13T09:55:00.000Z',
+          metadata: {
+            source: 'checkout.session.completed',
+          },
+        },
+      ],
+    };
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        const filters: Array<{ column: string; operator: 'eq' | 'neq' | 'lte'; value: unknown }> = [];
+        let orderBy: { column: string; ascending: boolean } | null = null;
+        let limitValue: number | null = null;
+
+        const matchingRows = () => {
+          const rows = tables.payment_orders.filter((row) =>
+            filters.every(({ column, operator, value }) => {
+              if (operator === 'eq') {
+                return row[column] === value;
+              }
+
+              if (operator === 'neq') {
+                return row[column] !== value;
+              }
+
+              return row[column] <= value;
+            }),
+          );
+
+          const orderedRows = orderBy
+            ? [...rows].sort((left, right) => {
+              const comparison = left[orderBy.column] > right[orderBy.column] ? 1 : -1;
+              return orderBy.ascending ? comparison : -comparison;
+            })
+            : rows;
+
+          return limitValue === null ? orderedRows : orderedRows.slice(0, limitValue);
+        };
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, operator: 'eq', value });
+            return this;
+          },
+          neq(column: string, value: unknown) {
+            filters.push({ column, operator: 'neq', value });
+            return this;
+          },
+          lte(column: string, value: unknown) {
+            lteFilters.push([column, value]);
+            filters.push({ column, operator: 'lte', value });
+            return this;
+          },
+          order(column: string, options: { ascending?: boolean } = {}) {
+            orderBy = { column, ascending: options.ascending ?? true };
+            return this;
+          },
+          limit(value: number) {
+            limitValue = value;
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: matchingRows()[0] ?? null, error: null });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+          insert(payload: Record<string, unknown>) {
+            inserts.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_stale_failed_completed',
+        created: Date.parse('2026-06-13T10:00:00.000Z') / 1000,
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        customer: 'cus_test_stale_failed_completed',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_stale_failed_completed',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(lteFilters).toEqual([['created_at', '2026-06-13T10:00:00.999Z']]);
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([
+      {
+        table: 'payment_orders',
+        payload: expect.objectContaining({
+          user_id: 'user-stale-failed-completed',
+          item_id: 'plan-pro-monthly',
+          stripe_invoice_id: 'in_test_stale_failed_completed',
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'failed',
+          payment_status: 'open',
+        }),
+      },
+    ]);
+    expect(inserts[0]?.payload).not.toMatchObject({
+      item_id: 'plan-gold-monthly',
+      stripe_price_id: 'price_gold_monthly',
+    });
+  });
+
   it('creates a separate failed invoice order for renewal invoice failures without touching the completed checkout order', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
     const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
