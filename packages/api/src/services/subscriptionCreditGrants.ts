@@ -27,6 +27,7 @@ interface PaymentOrderRow {
   item_id?: string | null;
   item_type?: string | null;
   billing_cycle?: string | null;
+  status?: string | null;
   stripe_customer_id?: string | null;
   stripe_price_id?: string | null;
   fulfilled_at?: string | null;
@@ -356,13 +357,15 @@ async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
 ): Promise<PaymentOrderRow | null> {
-  const result = await supabase
+  const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, stripe_customer_id, stripe_price_id, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, metadata')
     .eq('stripe_subscription_id', subscriptionId)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
+  const result = typeof query.then === 'function'
+    ? await query
+    : await query.maybeSingle();
 
   if (result.error) {
     throwGrantError(
@@ -373,7 +376,9 @@ async function getLatestSubscriptionOrder(
     );
   }
 
-  return result.data ?? null;
+  return Array.isArray(result.data)
+    ? (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) => order.status !== 'failed') ?? null
+    : result.data ?? null;
 }
 
 async function getMembershipPlan(

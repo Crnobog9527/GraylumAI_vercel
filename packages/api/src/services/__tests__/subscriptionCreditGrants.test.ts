@@ -24,7 +24,7 @@ type TableName =
 type Row = Record<string, any>;
 
 class MockQuery {
-  private filters: Array<{ column: string; value: unknown }> = [];
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
   private limitValue: number | null = null;
@@ -39,7 +39,12 @@ class MockQuery {
   }
 
   eq(column: string, value: unknown) {
-    this.filters.push({ column, value });
+    this.filters.push({ column, value, operator: 'eq' });
+    return this;
+  }
+
+  neq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'neq' });
     return this;
   }
 
@@ -117,7 +122,11 @@ class MockQuery {
 
   private matchingRows() {
     return this.tables[this.table].filter((row) =>
-      this.filters.every(({ column, value }) => row[column] === value),
+      this.filters.every(({ column, value, operator }) =>
+        operator === 'eq'
+          ? row[column] === value
+          : row[column] !== value,
+      ),
     );
   }
 }
@@ -304,6 +313,71 @@ describe('subscription credit grants', () => {
       ledger_type: 'grant',
       reason_code: 'subscription_grant',
       counts_as_spend: false,
+    });
+  });
+
+  it('ignores failed plan-change source rows when resolving the subscription source order', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-failed-upgrade',
+          user_id: 'user-monthly',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_monthly',
+          status: 'failed',
+        },
+        {
+          id: 'order-source-monthly',
+          user_id: 'user-monthly',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_monthly',
+          status: 'completed',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+          yearly_credits: 18_000,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+          yearly_credits: 36_000,
+        },
+      ],
+      profiles: [{
+        id: 'user-monthly',
+        membership_level: 'free',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_monthly_failed_source_guard',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      subscriptionId: 'sub_monthly',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-monthly',
+      membership_level: 'pro',
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-pro-monthly',
+      credits_granted: 1750,
     });
   });
 

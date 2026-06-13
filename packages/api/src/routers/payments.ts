@@ -397,10 +397,36 @@ async function recordSubscriptionPlanChangeOrder(input: {
         previousMembershipPlanId: input.subscription.membership_plan_id,
         previousBillingCycle: input.subscription.billing_cycle,
       },
-    });
+    })
+    .select('id')
+    .single();
 
   if (result.error) {
     throw createPaymentOperationError('保存订阅升级记录', result.error);
+  }
+
+  return typeof result.data?.id === 'string' ? result.data.id : null;
+}
+
+async function markSubscriptionPlanChangeOrderFailed(input: {
+  supabase: any;
+  orderId: string | null;
+  stripeSubscriptionId: string;
+}) {
+  if (!input.orderId) return;
+
+  const result = await input.supabase
+    .from('payment_orders')
+    .update({
+      status: 'failed',
+      payment_status: 'failed',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.orderId)
+    .eq('stripe_subscription_id', input.stripeSubscriptionId);
+
+  if (result.error) {
+    throw createPaymentOperationError('标记订阅升级记录失败', result.error);
   }
 }
 
@@ -743,8 +769,9 @@ export const paymentsRouter = router({
         changeSource: 'graylum_change_subscription_plan',
       };
 
+      let planChangeOrderId: string | null = null;
       try {
-        await recordSubscriptionPlanChangeOrder({
+        planChangeOrderId = await recordSubscriptionPlanChangeOrder({
           supabase: ctx.supabaseAdmin,
           userId: ctx.profileId,
           plan,
@@ -780,6 +807,18 @@ export const paymentsRouter = router({
           subscriptionId: maskIdentifier(stripeSubscription.id),
           priceId: maskIdentifier(selectedPriceId),
         });
+        try {
+          await markSubscriptionPlanChangeOrderFailed({
+            supabase: ctx.supabaseAdmin,
+            orderId: planChangeOrderId,
+            stripeSubscriptionId: stripeSubscription.id,
+          });
+        } catch (markFailedError) {
+          logSubscriptionChangeStageFailure('plan_change_order_mark_failed', input, markFailedError, {
+            subscriptionId: maskIdentifier(stripeSubscription.id),
+            priceId: maskIdentifier(selectedPriceId),
+          });
+        }
         throw createPaymentOperationError('切换订阅套餐', error);
       }
 
