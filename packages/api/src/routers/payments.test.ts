@@ -456,6 +456,23 @@ describe('paymentsRouter error sanitization', () => {
         fulfilled_at: '2026-06-07T09:05:00.000Z',
         created_at: '2026-06-07T09:05:00.000Z',
       },
+      {
+        id: 'order-plan-change-lock',
+        item_id: '123e4567-e89b-42d3-a456-426614174111',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_checkout_session_id: null,
+        stripe_invoice_id: null,
+        amount_total: null,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        fulfilled_at: '2026-06-07T09:06:00.000Z',
+        created_at: '2026-06-07T09:06:00.000Z',
+        metadata: {
+          source: 'changeSubscriptionPlan',
+        },
+      },
     ];
 
     const supabase = {
@@ -518,7 +535,8 @@ describe('paymentsRouter error sanitization', () => {
 
     const caller = createProtectedCaller({ supabase });
 
-    await expect(caller.listBillingRecords()).resolves.toEqual(
+    const records = await caller.listBillingRecords();
+    expect(records).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'order-pending', status: 'pending', title: 'Starter Credits' }),
         expect.objectContaining({ id: 'order-failed', status: 'failed', title: 'Starter Credits' }),
@@ -527,6 +545,11 @@ describe('paymentsRouter error sanitization', () => {
         expect.objectContaining({ id: 'order-failed-invoice', status: 'failed', title: 'Pro' }),
         expect.objectContaining({ id: 'order-refunded', status: 'refunded', title: 'Starter Credits' }),
         expect.objectContaining({ id: 'order-partial', status: 'partially_refunded', title: 'Starter Credits' }),
+      ]),
+    );
+    expect(records).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'order-plan-change-lock' }),
       ]),
     );
   });

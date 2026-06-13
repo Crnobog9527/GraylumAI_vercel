@@ -514,6 +514,123 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('releases a residual plan-change lock on already fulfilled invoice replay', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-replay-lock',
+          user_id: 'user-replay-lock',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_replay_lock',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_replay_lock',
+          stripe_customer_id: 'cus_replay_lock',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:00:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-invoice-replay-lock',
+          user_id: 'user-replay-lock',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_replay_lock',
+          stripe_subscription_id: 'sub_replay_lock',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:00:01.000Z',
+          created_at: '2026-06-01T00:00:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+      ],
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 1990,
+      invoiceId: 'in_replay_lock',
+      paymentStatus: 'paid',
+      subscriptionId: 'sub_replay_lock',
+      now: '2026-06-01T00:00:02.000Z',
+    });
+
+    expect(result).toMatchObject({
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-replay-lock',
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-06-01T00:00:01.000Z',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('does not release a newer plan-change lock when replaying an older fulfilled invoice', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-newer-lock',
+          user_id: 'user-newer-lock',
+          item_id: 'plan-gold-yearly',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_newer_lock',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_newer_lock',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:05:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-invoice-newer-lock',
+          user_id: 'user-newer-lock',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_newer_lock_replay',
+          stripe_subscription_id: 'sub_newer_lock',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:00:01.000Z',
+          created_at: '2026-06-01T00:00:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+      ],
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_newer_lock_replay',
+      paymentStatus: 'paid',
+      subscriptionId: 'sub_newer_lock',
+      now: '2026-06-01T00:05:01.000Z',
+    });
+
+    expect(result.alreadyFulfilled).toBe(true);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-newer-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_newer_lock',
+      status: 'pending',
+      payment_status: 'active',
+    });
+  });
+
   it('fails safely before grant/order/subscription writes when the profile is missing', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{

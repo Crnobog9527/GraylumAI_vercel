@@ -5,7 +5,10 @@
  */
 
 import { logger } from '../lib/logger';
-import { isSubscriptionPlanChangeOrder } from './subscriptionPlanChangeLock';
+import {
+  buildSubscriptionPlanChangeLockKey,
+  isSubscriptionPlanChangeOrder,
+} from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
 
@@ -32,7 +35,9 @@ interface PaymentOrderRow {
   stripe_customer_id?: string | null;
   stripe_price_id?: string | null;
   stripe_checkout_session_id?: string | null;
+  payment_status?: string | null;
   fulfilled_at?: string | null;
+  created_at?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -339,7 +344,7 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, fulfilled_at, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
     .eq('stripe_invoice_id', invoiceId)
     .maybeSingle();
 
@@ -371,7 +376,7 @@ async function getLatestSubscriptionOrder(
 ): Promise<PaymentOrderRow | null> {
   const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
     .eq('stripe_subscription_id', subscriptionId)
     .order('created_at', { ascending: false });
   const filteredQuery = typeof query.neq === 'function'
@@ -395,6 +400,46 @@ async function getLatestSubscriptionOrder(
   return Array.isArray(result.data)
     ? (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) => order.status !== 'failed') ?? null
     : result.data ?? null;
+}
+
+function isCreatedNoLaterThan(createdAt: string | null | undefined, fulfilledAt: string) {
+  if (!createdAt) {
+    return true;
+  }
+
+  const createdTime = Date.parse(createdAt);
+  const fulfilledTime = Date.parse(fulfilledAt);
+  return Number.isNaN(createdTime) || Number.isNaN(fulfilledTime) || createdTime <= fulfilledTime;
+}
+
+async function getResidualSubscriptionPlanChangeLock(input: {
+  supabase: SupabaseLikeClient;
+  subscriptionId: string;
+  fulfilledAt: string;
+}): Promise<PaymentOrderRow | null> {
+  const lockKey = buildSubscriptionPlanChangeLockKey(input.subscriptionId);
+  const result = await input.supabase
+    .from('payment_orders')
+    .select('id, stripe_checkout_session_id, status, payment_status, fulfilled_at, created_at, metadata')
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('stripe_checkout_session_id', lockKey)
+    .maybeSingle();
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_plan_change_lock_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+      result.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId) },
+    );
+  }
+
+  const order = result.data as PaymentOrderRow | null;
+  if (!order || !isSubscriptionPlanChangeOrder(order)) {
+    return null;
+  }
+
+  return isCreatedNoLaterThan(order.created_at, input.fulfilledAt) ? order : null;
 }
 
 async function getMembershipPlan(
@@ -944,6 +989,20 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
   if (existingInvoiceOrder?.fulfilled_at) {
+    const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
+      supabase,
+      subscriptionId: input.subscriptionId,
+      fulfilledAt: existingInvoiceOrder.fulfilled_at,
+    });
+    if (residualPlanChangeLock) {
+      await releaseSubscriptionPlanChangeLock({
+        supabase,
+        sourceOrder: residualPlanChangeLock,
+        fulfilledAt: existingInvoiceOrder.fulfilled_at,
+        paymentStatus: existingInvoiceOrder.payment_status ?? input.paymentStatus,
+      });
+    }
+
     return {
       fulfilledAt: existingInvoiceOrder.fulfilled_at,
       alreadyFulfilled: true,

@@ -616,6 +616,10 @@ function createStripeBillingDocumentLoader(stripe: ReturnType<typeof getStripeCl
 }
 
 function shouldListBillingOrder(order: PaymentOrderBillingRow) {
+  if (isSubscriptionPlanChangeOrder(order) && !order.stripe_invoice_id && order.amount_total == null) {
+    return false;
+  }
+
   const status = normalizePaymentOrderStatus(order.status);
 
   if (

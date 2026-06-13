@@ -482,6 +482,15 @@ describe('stripe fulfillment helpers', () => {
                 return this;
               }
 
+              if (column === 'stripe_checkout_session_id') {
+                expect(value).toBe('change_subscription_plan_lock:sub_test_123');
+                return {
+                  maybeSingle() {
+                    return Promise.resolve({ data: null, error: null });
+                  },
+                };
+              }
+
               throw new Error(`Unexpected eq(${column}, ${value})`);
             },
             order() {
