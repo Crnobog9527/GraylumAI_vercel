@@ -213,8 +213,12 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'yearly',
         stripe_subscription_id: 'sub_yearly',
+        stripe_checkout_session_id: 'change_subscription_plan_lock:sub_yearly',
         stripe_customer_id: 'cus_yearly',
         stripe_price_id: 'price_yearly',
+        metadata: {
+          source: 'changeSubscriptionPlan',
+        },
       }],
       membership_plans: [{
         id: 'plan-gold-yearly',
@@ -262,6 +266,13 @@ describe('subscription credit grants', () => {
       counts_as_spend: false,
       source_type: 'stripe_invoice',
       source_id: 'in_yearly_1',
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-yearly',
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-06-01T00:00:01.000Z',
     });
   });
 

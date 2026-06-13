@@ -5,6 +5,7 @@
  */
 
 import { logger } from '../lib/logger';
+import { isSubscriptionPlanChangeOrder } from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
 
@@ -30,6 +31,7 @@ interface PaymentOrderRow {
   status?: string | null;
   stripe_customer_id?: string | null;
   stripe_price_id?: string | null;
+  stripe_checkout_session_id?: string | null;
   fulfilled_at?: string | null;
   metadata?: Record<string, unknown> | null;
 }
@@ -337,7 +339,7 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, fulfilled_at, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, fulfilled_at, metadata')
     .eq('stripe_invoice_id', invoiceId)
     .maybeSingle();
 
@@ -369,7 +371,7 @@ async function getLatestSubscriptionOrder(
 ): Promise<PaymentOrderRow | null> {
   const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, metadata')
     .eq('stripe_subscription_id', subscriptionId)
     .order('created_at', { ascending: false });
   const filteredQuery = typeof query.neq === 'function'
@@ -905,6 +907,37 @@ async function writeCompletedInvoiceOrder(input: {
   return insertResult.data?.id ?? null;
 }
 
+async function releaseSubscriptionPlanChangeLock(input: {
+  supabase: SupabaseLikeClient;
+  sourceOrder: PaymentOrderRow;
+  fulfilledAt: string;
+  paymentStatus?: string | null;
+}) {
+  if (!input.sourceOrder.id || !isSubscriptionPlanChangeOrder(input.sourceOrder)) {
+    return;
+  }
+
+  const result = await input.supabase
+    .from('payment_orders')
+    .update({
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: input.paymentStatus ?? 'paid',
+      fulfilled_at: input.fulfilledAt,
+      updated_at: input.fulfilledAt,
+    })
+    .eq('id', input.sourceOrder.id);
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_plan_change_lock_release',
+      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+      result.error,
+      { sourceOrderId: maskIdentifier(input.sourceOrder.id) },
+    );
+  }
+}
+
 export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
@@ -1013,6 +1046,13 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     grantedCredits: grant.creditsGranted,
     creditTransactionId: grant.creditTransactionId,
     grantId: grant.grantId,
+  });
+
+  await releaseSubscriptionPlanChangeLock({
+    supabase,
+    sourceOrder,
+    fulfilledAt,
+    paymentStatus: input.paymentStatus,
   });
 
   if (grant.creditTransactionId && invoiceOrderId) {

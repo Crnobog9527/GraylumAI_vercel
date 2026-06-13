@@ -13,6 +13,7 @@ import {
   type PaymentOrderStatusLike,
 } from './paymentOrderStatus';
 import { fulfillMembershipInvoiceWithSubscriptionCreditGrants } from './subscriptionCreditGrants';
+import { isSubscriptionPlanChangeOrder } from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
 const STRIPE_FULFILLMENT_ERRORS = {
@@ -342,6 +343,7 @@ const FAILED_INVOICE_ORDER_SELECT = [
   'item_type',
   'item_id',
   'billing_cycle',
+  'stripe_checkout_session_id',
   'stripe_invoice_id',
   'stripe_subscription_id',
   'stripe_customer_id',
@@ -585,11 +587,13 @@ export async function markMembershipInvoicePaymentFailed(
     subscriptionId,
     now,
   });
+  const shouldReleasePlanChangeLock = isSubscriptionPlanChangeOrder(existingOrder);
 
   const result = await supabase
     .from('payment_orders')
     .update({
       stripe_invoice_id: invoiceId,
+      ...(shouldReleasePlanChangeLock ? { stripe_checkout_session_id: null } : {}),
       stripe_subscription_id: subscriptionId,
       amount_total: getFailedInvoiceAmount(invoice),
       currency: invoice.currency ?? 'usd',

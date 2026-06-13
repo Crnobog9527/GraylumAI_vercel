@@ -33,6 +33,10 @@ import {
   type MembershipEligibilityResult,
   type MembershipBillingCycle,
 } from '../services/membershipEligibility';
+import {
+  buildSubscriptionPlanChangeLockKey,
+  isSubscriptionPlanChangeOrder,
+} from '../services/subscriptionPlanChangeLock';
 import { isStripeManagedSubscriptionActive } from '../services/subscriptionOverrides';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
@@ -87,6 +91,7 @@ type PaymentOrderBillingRow = {
   payment_status: string | null;
   fulfilled_at: string | null;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 type CreateCheckoutInput = z.infer<typeof createCheckoutInput>;
@@ -366,6 +371,19 @@ function getPrimarySubscriptionItemId(subscription: Stripe.Subscription) {
   return subscription.items.data[0]?.id ?? null;
 }
 
+function isUniqueConstraintViolation(error: unknown) {
+  const maybeError = error as { code?: string; message?: string } | null | undefined;
+  return maybeError?.code === '23505'
+    || /duplicate key value violates unique constraint/i.test(maybeError?.message ?? '');
+}
+
+function toPendingSubscriptionPlanChangeError() {
+  return new TRPCError({
+    code: 'BAD_REQUEST',
+    message: '该订阅升级正在处理中，请等待付款完成后再试。',
+  });
+}
+
 async function recordSubscriptionPlanChangeOrder(input: {
   supabase: any;
   userId: string;
@@ -384,6 +402,7 @@ async function recordSubscriptionPlanChangeOrder(input: {
       item_id: input.plan.id,
       billing_cycle: input.billingCycle,
       stripe_subscription_id: input.stripeSubscription.id,
+      stripe_checkout_session_id: buildSubscriptionPlanChangeLockKey(input.stripeSubscription.id),
       stripe_customer_id: input.subscription.stripe_customer_id,
       stripe_price_id: input.stripePriceId,
       amount_total: null,
@@ -402,6 +421,10 @@ async function recordSubscriptionPlanChangeOrder(input: {
     .single();
 
   if (result.error) {
+    if (isUniqueConstraintViolation(result.error)) {
+      throw toPendingSubscriptionPlanChangeError();
+    }
+
     throw createPaymentOperationError('保存订阅升级记录', result.error);
   }
 
@@ -420,6 +443,7 @@ async function markSubscriptionPlanChangeOrderFailed(input: {
     .update({
       status: 'failed',
       payment_status: 'failed',
+      stripe_checkout_session_id: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.orderId)
@@ -517,6 +541,10 @@ async function loadStripeBillingDocument(stripe: ReturnType<typeof getStripeClie
   }
 
   try {
+    if (isSubscriptionPlanChangeOrder(order)) {
+      return emptyDocument;
+    }
+
     if (order.stripe_invoice_id) {
       const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
       return {
@@ -766,10 +794,7 @@ export const paymentsRouter = router({
         currentSubscription.stripe_subscription_id,
       );
       if (pendingPlanChangeOrders.length > 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '该订阅升级正在处理中，请等待付款完成后再试。',
-        });
+        throw toPendingSubscriptionPlanChangeError();
       }
 
       let stripeSubscription: Stripe.Subscription;
@@ -1425,6 +1450,7 @@ export const paymentsRouter = router({
           'payment_status',
           'fulfilled_at',
           'created_at',
+          'metadata',
         ].join(','))
         .eq('user_id', ctx.profileId)
         .order('created_at', { ascending: false });

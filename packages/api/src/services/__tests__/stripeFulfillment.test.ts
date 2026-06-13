@@ -849,7 +849,7 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
-  it('marks the pending subscription checkout order failed when the first invoice payment fails', async () => {
+  it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 
     const supabase = {
@@ -901,8 +901,10 @@ describe('stripe fulfillment helpers', () => {
                 id: 'order-pending-subscription',
                 status: 'pending',
                 fulfilled_at: null,
+                stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_failed',
                 metadata: {
                   existing: 'kept',
+                  source: 'changeSubscriptionPlan',
                 },
               },
               error: null,
@@ -938,6 +940,7 @@ describe('stripe fulfillment helpers', () => {
         orderId: 'order-pending-subscription',
         payload: expect.objectContaining({
           stripe_invoice_id: 'in_test_failed',
+          stripe_checkout_session_id: null,
           stripe_subscription_id: 'sub_test_failed',
           amount_total: 2990,
           currency: 'usd',

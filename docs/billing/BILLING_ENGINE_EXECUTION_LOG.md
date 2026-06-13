@@ -1514,3 +1514,46 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR #236 remains draft against `staging`。
 - Issue #225 remains the control-plane tracker; PR5 should stay `in_progress` until fresh review/check evidence is complete and owner explicitly accepts moving it to owner audit。
 - No merge / no PR6 without separate owner authorization。
+
+## PR 5 audit follow-up - atomic pending upgrade guard
+
+- 时间：2026-06-13 CST。
+- 阶段：PR5 Codex Review P1 follow-up。
+- PR：[#236](https://github.com/Crnobog9527/GraylumAI_vercel/pull/236)。
+- 状态：PR #236 remains draft / PR5 remains `in_progress`。
+
+### Review finding addressed
+
+- Latest P1：`Make the pending upgrade guard atomic`。
+- 问题：两个并发 `changeSubscriptionPlan` 请求可能同时通过 pending preflight read，然后都插入 pending source row 并触发多次 `stripe.subscriptions.update`。
+- 修复：复用既有 `payment_orders.stripe_checkout_session_id` UNIQUE 约束作为内部 pending lock key；plan-change source row 在 Stripe update 前写入 `change_subscription_plan_lock:<subscription_id>`。
+- 效果：同一个 Stripe subscription 的并发 plan-change insert 只能有一个成功；DB unique violation 会在 Stripe update 前转成 “升级正在处理中” 错误，不会触发第二次 Stripe subscription update。
+- Lock release：Stripe update 失败、invoice payment_failed 更新 plan-change source row、invoice payment_succeeded fulfillment 完成后都会清空内部 lock key，避免永久阻塞后续升级。
+- Billing records：内部 lock key 不作为真实 checkout session 拉取 Stripe receipt / session document。
+
+### Validation
+
+- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts` 通过；47 files / 555 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；47 files / 555 tests passed。
+- `git diff --check`：通过。
+- Local `pnpm build`：未重跑；此前已记录为 local Next/Turbopack `next/font/google` 未成功使用当前代理环境的工具链问题。Vercel PR checks 继续作为替代 build evidence。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 remains draft against `staging`。
+- PR5 remains `in_progress` until review threads are re-checked and owner explicitly accepts moving it to owner audit。
+- No merge / no PR6 without separate owner authorization。
