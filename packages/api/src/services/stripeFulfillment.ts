@@ -732,6 +732,7 @@ export async function fulfillMembershipInvoice(
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,
+    invoiceCreatedAt: asIsoTimestamp(invoice.created),
     paymentStatus: invoice.status ?? 'paid',
     periodEnd: asIsoTimestamp(invoice.period_end),
     periodStart: asIsoTimestamp(invoice.period_start),

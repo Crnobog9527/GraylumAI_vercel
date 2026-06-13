@@ -11,6 +11,7 @@ import {
 } from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
+const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
 
 export type SubscriptionBillingCycle = 'monthly' | 'yearly';
 export type SubscriptionGrantType = 'monthly_invoice' | 'annual_monthly_release';
@@ -82,6 +83,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
   invoiceId: string;
+  invoiceCreatedAt?: string | null;
   subscriptionId: string;
   amountTotal: number | null;
   currency?: string | null;
@@ -373,6 +375,10 @@ function isUsableMembershipSourceOrder(
 async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
+  options: {
+    invoiceCreatedAt?: string | null;
+    periodStart?: string | null;
+  } = {},
 ): Promise<PaymentOrderRow | null> {
   const query = supabase
     .from('payment_orders')
@@ -397,9 +403,14 @@ async function getLatestSubscriptionOrder(
     );
   }
 
-  return Array.isArray(result.data)
-    ? (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) => order.status !== 'failed') ?? null
-    : result.data ?? null;
+  if (Array.isArray(result.data)) {
+    return (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) =>
+      order.status !== 'failed' && isUsableSourceForInvoice(order, options),
+    ) ?? null;
+  }
+
+  const order = result.data as PaymentOrderRow | null;
+  return isUsableSourceForInvoice(order, options) ? order : null;
 }
 
 function isCreatedNoLaterThan(createdAt: string | null | undefined, fulfilledAt: string) {
@@ -410,6 +421,42 @@ function isCreatedNoLaterThan(createdAt: string | null | undefined, fulfilledAt:
   const createdTime = Date.parse(createdAt);
   const fulfilledTime = Date.parse(fulfilledAt);
   return Number.isNaN(createdTime) || Number.isNaN(fulfilledTime) || createdTime <= fulfilledTime;
+}
+
+function isCreatedNoLaterThanWithTolerance(
+  createdAt: string | null | undefined,
+  referenceAt: string | null | undefined,
+  toleranceMs = 0,
+) {
+  if (!createdAt || !referenceAt) {
+    return false;
+  }
+
+  const createdTime = Date.parse(createdAt);
+  const referenceTime = Date.parse(referenceAt);
+
+  return Number.isFinite(createdTime)
+    && Number.isFinite(referenceTime)
+    && createdTime <= referenceTime + toleranceMs;
+}
+
+function isUsableSourceForInvoice(
+  order: PaymentOrderRow | null | undefined,
+  options: {
+    invoiceCreatedAt?: string | null;
+    periodStart?: string | null;
+  },
+) {
+  if (!order || !isSubscriptionPlanChangeOrder(order)) {
+    return true;
+  }
+
+  const sourceCutoff = options.invoiceCreatedAt ?? options.periodStart ?? null;
+  return isCreatedNoLaterThanWithTolerance(
+    order.created_at,
+    sourceCutoff,
+    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
+  );
 }
 
 async function getResidualSubscriptionPlanChangeLock(input: {
@@ -1013,7 +1060,10 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
 
   const sourceOrder = isUsableMembershipSourceOrder(existingInvoiceOrder)
     ? existingInvoiceOrder
-    : await getLatestSubscriptionOrder(supabase, input.subscriptionId);
+    : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
+      invoiceCreatedAt: input.invoiceCreatedAt,
+      periodStart: input.periodStart,
+    });
   if (!isUsableMembershipSourceOrder(sourceOrder)) {
     throwGrantError(
       'subscription_source_order_missing',

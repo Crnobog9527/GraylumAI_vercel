@@ -28,6 +28,7 @@ class MockQuery {
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
   private limitValue: number | null = null;
+  private orderBy: { column: string; ascending: boolean } | null = null;
 
   constructor(
     private readonly tables: Record<TableName, Row[]>,
@@ -48,7 +49,8 @@ class MockQuery {
     return this;
   }
 
-  order() {
+  order(column: string, options: { ascending?: boolean } = {}) {
+    this.orderBy = { column, ascending: options.ascending ?? true };
     return this;
   }
 
@@ -121,13 +123,30 @@ class MockQuery {
   }
 
   private matchingRows() {
-    return this.tables[this.table].filter((row) =>
+    const rows = this.tables[this.table].filter((row) =>
       this.filters.every(({ column, value, operator }) =>
         operator === 'eq'
           ? row[column] === value
           : row[column] !== value,
       ),
     );
+
+    if (!this.orderBy) {
+      return rows;
+    }
+
+    const { column, ascending } = this.orderBy;
+    return [...rows].sort((left, right) => {
+      const leftValue = left[column] ?? '';
+      const rightValue = right[column] ?? '';
+
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return ascending ? comparison : -comparison;
+    });
   }
 }
 
@@ -216,6 +235,7 @@ describe('subscription credit grants', () => {
         stripe_checkout_session_id: 'change_subscription_plan_lock:sub_yearly',
         stripe_customer_id: 'cus_yearly',
         stripe_price_id: 'price_yearly',
+        created_at: '2026-06-01T00:00:00.500Z',
         metadata: {
           source: 'changeSubscriptionPlan',
         },
@@ -238,6 +258,7 @@ describe('subscription credit grants', () => {
       amountTotal: 9900,
       currency: 'usd',
       invoiceId: 'in_yearly_1',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
       paymentStatus: 'paid',
       periodStart: '2026-06-01T00:00:00.000Z',
       periodEnd: '2027-06-01T00:00:00.000Z',
@@ -324,6 +345,114 @@ describe('subscription credit grants', () => {
       ledger_type: 'grant',
       reason_code: 'subscription_grant',
       counts_as_spend: false,
+    });
+  });
+
+  it('does not use a newer pending plan-change lock for a stale successful invoice replay', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-new-upgrade-lock',
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:05:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-source-previous-pro',
+          user_id: 'user-stale-success',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_checkout_session_id: 'cs_test_previous_pro',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          created_at: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+        },
+      ],
+      profiles: [{
+        id: 'user-stale-success',
+        membership_level: 'pro',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-stale-success',
+        user_id: 'user-stale-success',
+        membership_plan_id: 'plan-pro-monthly',
+        stripe_subscription_id: 'sub_stale_success',
+        stripe_customer_id: 'cus_stale_success',
+        stripe_price_id: 'price_pro_monthly',
+        billing_cycle: 'monthly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      invoiceId: 'in_stale_success_replay',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      stripeCustomerId: 'cus_stale_success',
+      subscriptionId: 'sub_stale_success',
+      now: '2026-06-01T00:05:01.000Z',
+    });
+
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-new-upgrade-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_stale_success',
+      status: 'pending',
+      payment_status: 'active',
+    });
+    expect(supabase.tables.payment_orders[0].fulfilled_at).toBeUndefined();
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-stale-success',
+      membership_level: 'pro',
+    });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      id: 'subscription-stale-success',
+      membership_plan_id: 'plan-pro-monthly',
+      stripe_price_id: 'price_pro_monthly',
+      billing_cycle: 'monthly',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-pro-monthly',
+      credits_granted: 1750,
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).not.toMatchObject({
+      membership_plan_id: 'plan-gold-monthly',
+      credits_granted: 3500,
     });
   });
 
