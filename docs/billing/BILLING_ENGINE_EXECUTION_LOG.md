@@ -1482,6 +1482,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Follow-up P1：already-fulfilled invoice replays now return before source selection or profile sync so stale invoice replays cannot downgrade a user after a later upgrade。
 - Follow-up P1/P2：subscription source lookups used by successful invoice fulfillment and failed-invoice handling now filter `status != failed` before applying their limits, so failed upgrade attempts cannot seed later paid/failed invoice rows or hide older valid source rows。
 - Follow-up P1：`changeSubscriptionPlan` no longer updates `user_subscriptions` plan/cycle/price before a paid invoice; pending source rows block duplicate upgrade requests while paid invoice fulfillment remains responsible for final mirror changes and credit release eligibility。
+- Follow-up P1/P2：Stripe subscription updates now use `proration_behavior = always_invoice` so same-interval upgrades create an immediate invoice for deferred fulfillment, and any in-flight pending plan-change row blocks further upgrades for that subscription until resolved。
 
 ### Validation
 

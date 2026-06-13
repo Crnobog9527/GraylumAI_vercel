@@ -1080,7 +1080,7 @@ describe('paymentsRouter error sanitization', () => {
     expect(subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
     expect(subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
       items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
-      proration_behavior: 'create_prorations',
+      proration_behavior: 'always_invoice',
       cancel_at_period_end: false,
     }));
     expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, updatedSubscription);

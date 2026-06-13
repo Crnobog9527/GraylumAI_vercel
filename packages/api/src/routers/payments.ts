@@ -765,9 +765,7 @@ export const paymentsRouter = router({
         ctx.supabase,
         currentSubscription.stripe_subscription_id,
       );
-      if (pendingPlanChangeOrders.some((order) =>
-        order.item_id === plan.id && order.billing_cycle === input.billingCycle
-      )) {
+      if (pendingPlanChangeOrders.length > 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: '该订阅升级正在处理中，请等待付款完成后再试。',
@@ -838,7 +836,7 @@ export const paymentsRouter = router({
               price: selectedPriceId,
             },
           ],
-          proration_behavior: 'create_prorations',
+          proration_behavior: 'always_invoice',
           cancel_at_period_end: false,
           metadata,
         });
