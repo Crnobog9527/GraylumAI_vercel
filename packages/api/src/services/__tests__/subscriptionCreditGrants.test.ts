@@ -24,10 +24,11 @@ type TableName =
 type Row = Record<string, any>;
 
 class MockQuery {
-  private filters: Array<{ column: string; value: unknown }> = [];
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
   private limitValue: number | null = null;
+  private orderBy: { column: string; ascending: boolean } | null = null;
 
   constructor(
     private readonly tables: Record<TableName, Row[]>,
@@ -39,11 +40,22 @@ class MockQuery {
   }
 
   eq(column: string, value: unknown) {
-    this.filters.push({ column, value });
+    this.filters.push({ column, value, operator: 'eq' });
     return this;
   }
 
-  order() {
+  neq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'neq' });
+    return this;
+  }
+
+  lte(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  order(column: string, options: { ascending?: boolean } = {}) {
+    this.orderBy = { column, ascending: options.ascending ?? true };
     return this;
   }
 
@@ -116,9 +128,36 @@ class MockQuery {
   }
 
   private matchingRows() {
-    return this.tables[this.table].filter((row) =>
-      this.filters.every(({ column, value }) => row[column] === value),
+    const rows = this.tables[this.table].filter((row) =>
+      this.filters.every(({ column, value, operator }) => {
+        if (operator === 'eq') {
+          return row[column] === value;
+        }
+
+        if (operator === 'neq') {
+          return row[column] !== value;
+        }
+
+        return row[column] <= value;
+      }),
     );
+
+    if (!this.orderBy) {
+      return rows;
+    }
+
+    const { column, ascending } = this.orderBy;
+    return [...rows].sort((left, right) => {
+      const leftValue = left[column] ?? '';
+      const rightValue = right[column] ?? '';
+
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return ascending ? comparison : -comparison;
+    });
   }
 }
 
@@ -204,8 +243,13 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'yearly',
         stripe_subscription_id: 'sub_yearly',
+        stripe_checkout_session_id: 'change_subscription_plan_lock:sub_yearly',
         stripe_customer_id: 'cus_yearly',
         stripe_price_id: 'price_yearly',
+        created_at: '2026-06-01T00:00:00.500Z',
+        metadata: {
+          source: 'changeSubscriptionPlan',
+        },
       }],
       membership_plans: [{
         id: 'plan-gold-yearly',
@@ -225,6 +269,7 @@ describe('subscription credit grants', () => {
       amountTotal: 9900,
       currency: 'usd',
       invoiceId: 'in_yearly_1',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
       paymentStatus: 'paid',
       periodStart: '2026-06-01T00:00:00.000Z',
       periodEnd: '2027-06-01T00:00:00.000Z',
@@ -254,6 +299,13 @@ describe('subscription credit grants', () => {
       source_type: 'stripe_invoice',
       source_id: 'in_yearly_1',
     });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-yearly',
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-06-01T00:00:01.000Z',
+    });
   });
 
   it('grants monthly credits plus monthly bonus for a paid monthly invoice', async () => {
@@ -265,6 +317,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_monthly',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-pro-monthly',
@@ -307,6 +360,299 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('does not use a newer pending plan-change lock for a stale successful invoice replay', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-new-upgrade-lock',
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:05:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-later-gold-invoice-0',
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_later_upgrade_success',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:10:01.000Z',
+          created_at: '2026-06-01T00:10:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          id: `order-later-gold-invoice-${index + 1}`,
+          user_id: 'user-stale-success',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: `in_later_upgrade_success_${index + 1}`,
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: `2026-06-01T00:${String(11 + index).padStart(2, '0')}:01.000Z`,
+          created_at: `2026-06-01T00:${String(11 + index).padStart(2, '0')}:01.000Z`,
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        })),
+        {
+          id: 'order-source-previous-pro',
+          user_id: 'user-stale-success',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_stale_success',
+          stripe_checkout_session_id: 'cs_test_previous_pro',
+          stripe_customer_id: 'cus_stale_success',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          created_at: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+        },
+      ],
+      profiles: [{
+        id: 'user-stale-success',
+        membership_level: 'pro',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-stale-success',
+        user_id: 'user-stale-success',
+        membership_plan_id: 'plan-pro-monthly',
+        stripe_subscription_id: 'sub_stale_success',
+        stripe_customer_id: 'cus_stale_success',
+        stripe_price_id: 'price_pro_monthly',
+        billing_cycle: 'monthly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      invoiceId: 'in_stale_success_replay',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      stripeCustomerId: 'cus_stale_success',
+      subscriptionId: 'sub_stale_success',
+      now: '2026-06-01T00:05:01.000Z',
+    });
+
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-new-upgrade-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_stale_success',
+      status: 'pending',
+      payment_status: 'active',
+    });
+    expect(supabase.tables.payment_orders[0].fulfilled_at).toBeUndefined();
+    expect(supabase.tables.payment_orders.find((row) => row.id === 'order-later-gold-invoice-0')).toMatchObject({
+      id: 'order-later-gold-invoice-0',
+      item_id: 'plan-gold-monthly',
+      status: 'completed',
+      payment_status: 'paid',
+    });
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-stale-success',
+      membership_level: 'pro',
+    });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      id: 'subscription-stale-success',
+      membership_plan_id: 'plan-pro-monthly',
+      stripe_price_id: 'price_pro_monthly',
+      billing_cycle: 'monthly',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-pro-monthly',
+      credits_granted: 1750,
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).not.toMatchObject({
+      membership_plan_id: 'plan-gold-monthly',
+      credits_granted: 3500,
+    });
+  });
+
+  it('ignores failed plan-change source rows when resolving the subscription source order', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        ...Array.from({ length: 10 }, (_, index) => ({
+          id: `order-failed-upgrade-${index + 1}`,
+          user_id: 'user-monthly',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_monthly',
+          status: 'failed',
+        })),
+        {
+          id: 'order-source-monthly',
+          user_id: 'user-monthly',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_monthly',
+          status: 'completed',
+          created_at: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+          yearly_credits: 18_000,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+          yearly_credits: 36_000,
+        },
+      ],
+      profiles: [{
+        id: 'user-monthly',
+        membership_level: 'free',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_monthly_failed_source_guard',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      subscriptionId: 'sub_monthly',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-monthly',
+      membership_level: 'pro',
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-pro-monthly',
+      credits_granted: 1750,
+    });
+  });
+
+  it('uses a failed same-invoice upgrade row as the source when the invoice is later paid', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-failed-upgrade-invoice',
+          user_id: 'user-retry',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_retry_paid',
+          stripe_subscription_id: 'sub_retry',
+          stripe_customer_id: 'cus_retry',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'failed',
+          payment_status: 'open',
+        },
+        {
+          id: 'order-source-previous',
+          user_id: 'user-retry',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_retry',
+          stripe_customer_id: 'cus_retry',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+        },
+      ],
+      membership_plans: [
+        {
+          id: 'plan-pro-monthly',
+          name: 'Pro',
+          level: 'pro',
+          monthly_credits: 1500,
+          monthly_bonus_credits: 250,
+        },
+        {
+          id: 'plan-gold-monthly',
+          name: 'Gold',
+          level: 'gold',
+          monthly_credits: 3000,
+          monthly_bonus_credits: 500,
+        },
+      ],
+      profiles: [{
+        id: 'user-retry',
+        membership_level: 'pro',
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 1990,
+      invoiceId: 'in_retry_paid',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2026-07-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      stripeCustomerId: 'cus_retry',
+      subscriptionId: 'sub_retry',
+      now: '2026-06-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-retry',
+      membership_level: 'gold',
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      membership_plan_id: 'plan-gold-monthly',
+      credits_granted: 3500,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-failed-upgrade-invoice',
+      item_id: 'plan-gold-monthly',
+      status: 'completed',
+      payment_status: 'paid',
+    });
+  });
+
   it('does not duplicate grants for repeated invoice fulfillment', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
@@ -316,6 +662,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_repeat',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-repeat',
@@ -341,13 +688,133 @@ describe('subscription credit grants', () => {
 
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
     supabase.tables.profiles[0].membership_level = 'free';
-    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+    const replayResult = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
 
+    expect(replayResult.alreadyFulfilled).toBe(true);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.profiles[0]).toMatchObject({
       id: 'user-repeat',
-      membership_level: 'pro',
+      membership_level: 'free',
+    });
+  });
+
+  it('releases a residual plan-change lock on already fulfilled invoice replay', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-replay-lock',
+          user_id: 'user-replay-lock',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_replay_lock',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_replay_lock',
+          stripe_customer_id: 'cus_replay_lock',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:00:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-invoice-replay-lock',
+          user_id: 'user-replay-lock',
+          item_id: 'plan-gold-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_replay_lock',
+          stripe_subscription_id: 'sub_replay_lock',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:00:01.000Z',
+          created_at: '2026-06-01T00:00:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+      ],
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 1990,
+      invoiceId: 'in_replay_lock',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      subscriptionId: 'sub_replay_lock',
+      now: '2026-06-01T00:00:02.000Z',
+    });
+
+    expect(result).toMatchObject({
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-replay-lock',
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-06-01T00:00:01.000Z',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('does not release a newer plan-change lock when replaying an older fulfilled invoice', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-source-newer-lock',
+          user_id: 'user-newer-lock',
+          item_id: 'plan-gold-yearly',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_newer_lock',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_newer_lock',
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-06-01T00:05:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-invoice-newer-lock',
+          user_id: 'user-newer-lock',
+          item_id: 'plan-pro-monthly',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_newer_lock_replay',
+          stripe_subscription_id: 'sub_newer_lock',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-01T00:05:30.000Z',
+          created_at: '2026-06-01T00:05:30.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+      ],
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      invoiceId: 'in_newer_lock_replay',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      subscriptionId: 'sub_newer_lock',
+      now: '2026-06-01T00:05:31.000Z',
+    });
+
+    expect(result.alreadyFulfilled).toBe(true);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-source-newer-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_newer_lock',
+      status: 'pending',
+      payment_status: 'active',
     });
   });
 
@@ -360,6 +827,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_missing_profile',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-missing-profile',
@@ -399,6 +867,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_canceling',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-canceling',
@@ -446,6 +915,7 @@ describe('subscription credit grants', () => {
         item_type: 'membership_plan',
         billing_cycle: 'monthly',
         stripe_subscription_id: 'sub_lifecycle',
+        created_at: '2026-06-01T00:00:00.000Z',
       }],
       membership_plans: [{
         id: 'plan-lifecycle',

@@ -450,6 +450,7 @@ describe('stripe fulfillment helpers', () => {
 
   it('backfills checkout order fulfillment when invoice fulfillment already exists', async () => {
     const updates: Array<{ table: string; payload: unknown }> = [];
+    const backfillFilters: Array<[string, unknown]> = [];
     const profileUpdates: unknown[] = [];
     let transactionsTouched = false;
     let subscriptionTouched = false;
@@ -479,6 +480,15 @@ describe('stripe fulfillment helpers', () => {
               if (column === 'stripe_subscription_id') {
                 expect(value).toBe('sub_test_123');
                 return this;
+              }
+
+              if (column === 'stripe_checkout_session_id') {
+                expect(value).toBe('change_subscription_plan_lock:sub_test_123');
+                return {
+                  maybeSingle() {
+                    return Promise.resolve({ data: null, error: null });
+                  },
+                };
               }
 
               throw new Error(`Unexpected eq(${column}, ${value})`);
@@ -511,6 +521,19 @@ describe('stripe fulfillment helpers', () => {
             is(nullColumn: string, nullValue: null) {
               expect(nullColumn).toBe('stripe_invoice_id');
               expect(nullValue).toBeNull();
+              backfillFilters.push([nullColumn, nullValue]);
+              return this;
+            },
+            like(column: string, value: string) {
+              expect(column).toBe('stripe_checkout_session_id');
+              expect(value).toBe('cs_%');
+              backfillFilters.push([column, value]);
+              return this;
+            },
+            neq(column: string, value: string) {
+              expect(column).toBe('status');
+              expect(value).toBe('failed');
+              backfillFilters.push([column, value]);
               return Promise.resolve({ error: null });
             },
             insert() {
@@ -604,9 +627,164 @@ describe('stripe fulfillment helpers', () => {
         }),
       },
     ]);
-    expect(profileUpdates).toEqual([{ membership_level: 'pro' }]);
+    expect(backfillFilters).toEqual([
+      ['stripe_checkout_session_id', 'cs_%'],
+      ['stripe_invoice_id', null],
+      ['status', 'failed'],
+    ]);
+    expect(profileUpdates).toEqual([]);
     expect(transactionsTouched).toBe(false);
     expect(subscriptionTouched).toBe(false);
+  });
+
+  it('does not backfill a newer pending plan-change lock during old invoice replay', async () => {
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [
+        {
+          id: 'order-initial-checkout',
+          user_id: 'user-1',
+          item_id: 'plan-pro',
+          item_type: 'membership_plan',
+          billing_cycle: 'monthly',
+          stripe_subscription_id: 'sub_test_123',
+          stripe_checkout_session_id: 'cs_test_initial',
+          stripe_invoice_id: null,
+          status: 'pending',
+          payment_status: 'paid',
+          created_at: '2026-03-12T14:00:00.000Z',
+        },
+        {
+          id: 'order-new-plan-change-lock',
+          user_id: 'user-1',
+          item_id: 'plan-gold',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_test_123',
+          stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_123',
+          stripe_invoice_id: null,
+          status: 'pending',
+          payment_status: 'active',
+          created_at: '2026-03-12T15:10:00.000Z',
+          metadata: {
+            source: 'changeSubscriptionPlan',
+          },
+        },
+        {
+          id: 'order-old-invoice',
+          stripe_invoice_id: 'in_test_old',
+          stripe_subscription_id: 'sub_test_123',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-03-12T14:58:21.498Z',
+          created_at: '2026-03-12T14:58:21.498Z',
+        },
+      ],
+    };
+
+    const supabase = {
+      from(table: string) {
+        if (!tables[table]) {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        const filters: Array<{
+          column: string;
+          operator: 'eq' | 'is' | 'like' | 'neq';
+          value: unknown;
+        }> = [];
+        let mode: 'select' | 'update' = 'select';
+        let payload: Record<string, unknown> = {};
+
+        const matchingRows = () => tables[table].filter((row) =>
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'neq') {
+              return row[column] !== value;
+            }
+
+            if (operator === 'like') {
+              if (value !== 'cs_%') {
+                throw new Error(`Unexpected like pattern: ${String(value)}`);
+              }
+
+              return typeof row[column] === 'string' && row[column].startsWith('cs_');
+            }
+
+            return row[column] === value;
+          }),
+        );
+
+        return {
+          select() {
+            return this;
+          },
+          update(nextPayload: Record<string, unknown>) {
+            mode = 'update';
+            payload = nextPayload;
+            return this;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, operator: 'eq', value });
+            return this;
+          },
+          is(column: string, value: unknown) {
+            filters.push({ column, operator: 'is', value });
+            return this;
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
+          },
+          neq(column: string, value: unknown) {
+            filters.push({ column, operator: 'neq', value });
+            if (mode === 'update') {
+              matchingRows().forEach((row) => Object.assign(row, payload));
+              return Promise.resolve({ error: null });
+            }
+
+            return this;
+          },
+          maybeSingle() {
+            if (mode === 'update') {
+              const rows = matchingRows();
+              rows.forEach((row) => Object.assign(row, payload));
+              return Promise.resolve({ data: rows[0] ? { id: rows[0].id } : null, error: null });
+            }
+
+            return Promise.resolve({ data: matchingRows()[0] ?? null, error: null });
+          },
+        };
+      },
+    };
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_test_old',
+        customer: 'cus_test_123',
+        status: 'paid',
+        currency: 'usd',
+        amount_paid: 990,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_123',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(tables.payment_orders[0]).toMatchObject({
+      id: 'order-initial-checkout',
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-03-12T14:58:21.498Z',
+    });
+    expect(tables.payment_orders[1]).toMatchObject({
+      id: 'order-new-plan-change-lock',
+      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_123',
+      status: 'pending',
+      payment_status: 'active',
+    });
+    expect(tables.payment_orders[1]).not.toHaveProperty('fulfilled_at');
   });
 
   it('delegates pending credit package fulfillment to the atomic RPC', async () => {
@@ -678,8 +856,10 @@ describe('stripe fulfillment helpers', () => {
         billing_cycle: 'yearly',
         stripe_invoice_id: null,
         stripe_subscription_id: 'sub_test_atomic',
+        stripe_checkout_session_id: 'cs_test_atomic',
         stripe_customer_id: 'cus_test_atomic',
         stripe_price_id: 'price_yearly',
+        created_at: '2025-03-22T12:26:40.000Z',
       }],
       membership_plans: [{
         id: 'plan-atomic',
@@ -721,12 +901,23 @@ describe('stripe fulfillment helpers', () => {
         };
       },
       from(table: string) {
-        const filters: Array<{ column: string; value: unknown }> = [];
+        const filters: Array<{ column: string; operator: 'eq' | 'like'; value: unknown }> = [];
         let mode: 'select' | 'insert' | 'update' = 'select';
         let payload: Record<string, unknown> = {};
 
         const matchingRows = () => tables[table].filter((row) =>
-          filters.every(({ column, value }) => row[column] === value),
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'like') {
+              const pattern = String(value);
+              if (pattern.endsWith('%')) {
+                return typeof row[column] === 'string' && row[column].startsWith(pattern.slice(0, -1));
+              }
+
+              return row[column] === value;
+            }
+
+            return row[column] === value;
+          }),
         );
 
         return {
@@ -734,15 +925,19 @@ describe('stripe fulfillment helpers', () => {
             return this;
           },
           eq(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             return this;
           },
           is(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             if (mode === 'update') {
               matchingRows().forEach((row) => Object.assign(row, payload));
             }
             return Promise.resolve({ error: null });
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
           },
           order() {
             return this;
@@ -837,7 +1032,7 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
-  it('marks the pending subscription checkout order failed when the first invoice payment fails', async () => {
+  it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 
     const supabase = {
@@ -889,8 +1084,11 @@ describe('stripe fulfillment helpers', () => {
                 id: 'order-pending-subscription',
                 status: 'pending',
                 fulfilled_at: null,
+                created_at: '2026-06-13T10:25:00.500Z',
+                stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_failed',
                 metadata: {
                   existing: 'kept',
+                  source: 'changeSubscriptionPlan',
                 },
               },
               error: null,
@@ -908,6 +1106,7 @@ describe('stripe fulfillment helpers', () => {
       supabase,
       {
         id: 'in_test_failed',
+        created: 1781346300,
         status: 'open',
         amount_due: 2990,
         amount_paid: 0,
@@ -926,6 +1125,7 @@ describe('stripe fulfillment helpers', () => {
         orderId: 'order-pending-subscription',
         payload: expect.objectContaining({
           stripe_invoice_id: 'in_test_failed',
+          stripe_checkout_session_id: null,
           stripe_subscription_id: 'sub_test_failed',
           amount_total: 2990,
           currency: 'usd',
@@ -944,9 +1144,281 @@ describe('stripe fulfillment helpers', () => {
     ]);
   });
 
+  it('preserves a newer pending plan-change lock during stale failed invoice replay', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: string) {
+            if (column === 'stripe_invoice_id') {
+              expect(value).toBe('in_test_stale_failed');
+              return {
+                maybeSingle() {
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            }
+
+            if (column === 'stripe_subscription_id') {
+              expect(value).toBe('sub_test_stale_failed');
+              return this;
+            }
+
+            throw new Error(`Unexpected eq(${column}, ${value})`);
+          },
+          order(column: string, options: { ascending: boolean }) {
+            expect(column).toBe('created_at');
+            expect(options).toEqual({ ascending: false });
+            return this;
+          },
+          neq(column: string, value: string) {
+            expect(column).toBe('status');
+            expect(value).toBe('failed');
+            return this;
+          },
+          limit(value: number) {
+            expect(value).toBe(1);
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: {
+                id: 'order-new-plan-change-lock',
+                user_id: 'user-stale-failed',
+                item_type: 'membership_plan',
+                item_id: 'plan-upgrade',
+                billing_cycle: 'monthly',
+                stripe_invoice_id: null,
+                stripe_subscription_id: 'sub_test_stale_failed',
+                stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_stale_failed',
+                status: 'pending',
+                fulfilled_at: null,
+                created_at: '2026-06-13T10:20:00.000Z',
+                metadata: {
+                  existing: 'kept',
+                  source: 'changeSubscriptionPlan',
+                },
+              },
+              error: null,
+            });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return this;
+          },
+          insert(payload: Record<string, unknown>) {
+            inserts.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_stale_failed',
+        created: 1781344800,
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_stale_failed',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([]);
+    expect(loggerState.info).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_payment_failed_plan_change_lock_preserved',
+      expect.objectContaining({
+        invoiceId: 'in_test_...failed',
+        subscriptionId: 'sub_test...failed',
+        orderId: 'order-ne...e-lock',
+        sourceOrderCreatedAt: '2026-06-13T10:20:00.000Z',
+        invoiceCreatedAt: '2026-06-13T10:00:00.000Z',
+      }),
+    );
+  });
+
+  it('does not infer a stale failed invoice from a later completed upgraded invoice order', async () => {
+    const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const lteFilters: Array<[string, unknown]> = [];
+    const tables: Record<string, Array<Record<string, any>>> = {
+      payment_orders: [
+        {
+          id: 'order-later-upgraded-completed',
+          user_id: 'user-stale-failed-completed',
+          item_type: 'membership_plan',
+          item_id: 'plan-gold-monthly',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: 'in_later_upgrade_paid',
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_customer_id: 'cus_test_stale_failed_completed',
+          stripe_price_id: 'price_gold_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-13T10:20:01.000Z',
+          created_at: '2026-06-13T10:20:01.000Z',
+          metadata: {
+            source: 'invoice.payment_succeeded',
+          },
+        },
+        {
+          id: 'order-older-valid-source',
+          user_id: 'user-stale-failed-completed',
+          item_type: 'membership_plan',
+          item_id: 'plan-pro-monthly',
+          billing_cycle: 'monthly',
+          stripe_invoice_id: null,
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_customer_id: 'cus_test_stale_failed_completed',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-13T09:55:00.000Z',
+          created_at: '2026-06-13T09:55:00.000Z',
+          metadata: {
+            source: 'checkout.session.completed',
+          },
+        },
+      ],
+    };
+
+    const supabase = {
+      from(table: string) {
+        if (table !== 'payment_orders') {
+          throw new Error(`Unexpected table: ${table}`);
+        }
+
+        const filters: Array<{ column: string; operator: 'eq' | 'neq' | 'lte'; value: unknown }> = [];
+        let orderBy: { column: string; ascending: boolean } | null = null;
+        let limitValue: number | null = null;
+
+        const matchingRows = () => {
+          const rows = tables.payment_orders.filter((row) =>
+            filters.every(({ column, operator, value }) => {
+              if (operator === 'eq') {
+                return row[column] === value;
+              }
+
+              if (operator === 'neq') {
+                return row[column] !== value;
+              }
+
+              return row[column] <= value;
+            }),
+          );
+
+          const orderedRows = orderBy
+            ? [...rows].sort((left, right) => {
+              const comparison = left[orderBy.column] > right[orderBy.column] ? 1 : -1;
+              return orderBy.ascending ? comparison : -comparison;
+            })
+            : rows;
+
+          return limitValue === null ? orderedRows : orderedRows.slice(0, limitValue);
+        };
+
+        return {
+          select() {
+            return this;
+          },
+          eq(column: string, value: unknown) {
+            filters.push({ column, operator: 'eq', value });
+            return this;
+          },
+          neq(column: string, value: unknown) {
+            filters.push({ column, operator: 'neq', value });
+            return this;
+          },
+          lte(column: string, value: unknown) {
+            lteFilters.push([column, value]);
+            filters.push({ column, operator: 'lte', value });
+            return this;
+          },
+          order(column: string, options: { ascending?: boolean } = {}) {
+            orderBy = { column, ascending: options.ascending ?? true };
+            return this;
+          },
+          limit(value: number) {
+            limitValue = value;
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({ data: matchingRows()[0] ?? null, error: null });
+          },
+          update(payload: Record<string, unknown>) {
+            updates.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+          insert(payload: Record<string, unknown>) {
+            inserts.push({ table, payload });
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
+    };
+
+    await markMembershipInvoicePaymentFailed(
+      supabase,
+      {
+        id: 'in_test_stale_failed_completed',
+        created: Date.parse('2026-06-13T10:00:00.000Z') / 1000,
+        status: 'open',
+        amount_due: 2990,
+        amount_paid: 0,
+        currency: 'usd',
+        customer: 'cus_test_stale_failed_completed',
+        parent: {
+          subscription_details: {
+            subscription: 'sub_test_stale_failed_completed',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(lteFilters).toEqual([['created_at', '2026-06-13T10:00:00.999Z']]);
+    expect(updates).toEqual([]);
+    expect(inserts).toEqual([
+      {
+        table: 'payment_orders',
+        payload: expect.objectContaining({
+          user_id: 'user-stale-failed-completed',
+          item_id: 'plan-pro-monthly',
+          stripe_invoice_id: 'in_test_stale_failed_completed',
+          stripe_subscription_id: 'sub_test_stale_failed_completed',
+          stripe_price_id: 'price_pro_monthly',
+          status: 'failed',
+          payment_status: 'open',
+        }),
+      },
+    ]);
+    expect(inserts[0]?.payload).not.toMatchObject({
+      item_id: 'plan-gold-monthly',
+      stripe_price_id: 'price_gold_monthly',
+    });
+  });
+
   it('creates a separate failed invoice order for renewal invoice failures without touching the completed checkout order', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown> }> = [];
     const inserts: Array<{ table: string; payload: Record<string, unknown> }> = [];
+    const sourceFilters: Array<[string, unknown]> = [];
 
     const supabase = {
       from(table: string) {
@@ -978,6 +1450,12 @@ describe('stripe fulfillment helpers', () => {
           order(column: string, options: { ascending: boolean }) {
             expect(column).toBe('created_at');
             expect(options).toEqual({ ascending: false });
+            return this;
+          },
+          neq(column: string, value: string) {
+            expect(column).toBe('status');
+            expect(value).toBe('failed');
+            sourceFilters.push([column, value]);
             return this;
           },
           limit(value: number) {
@@ -1036,6 +1514,7 @@ describe('stripe fulfillment helpers', () => {
     );
 
     expect(updates).toEqual([]);
+    expect(sourceFilters).toEqual([['status', 'failed']]);
     expect(inserts).toEqual([
       {
         table: 'payment_orders',
@@ -1176,6 +1655,7 @@ describe('stripe fulfillment helpers', () => {
         billing_cycle: 'monthly',
         stripe_invoice_id: null,
         stripe_subscription_id: 'sub_test_legacy_shape',
+        stripe_checkout_session_id: 'cs_test_legacy_shape',
         stripe_customer_id: 'cus_test_legacy',
         stripe_price_id: 'price_legacy',
       }, {
@@ -1203,11 +1683,22 @@ describe('stripe fulfillment helpers', () => {
           throw new Error(`Unexpected table: ${table}`);
         }
 
-        const filters: Array<{ column: string; value: unknown }> = [];
+        const filters: Array<{ column: string; operator: 'eq' | 'like'; value: unknown }> = [];
         let mode: 'select' | 'update' = 'select';
         let payload: Record<string, unknown> = {};
         const matchingRows = () => tables[table].filter((row) =>
-          filters.every(({ column, value }) => row[column] === value),
+          filters.every(({ column, operator, value }) => {
+            if (operator === 'like') {
+              const pattern = String(value);
+              if (pattern.endsWith('%')) {
+                return typeof row[column] === 'string' && row[column].startsWith(pattern.slice(0, -1));
+              }
+
+              return row[column] === value;
+            }
+
+            return row[column] === value;
+          }),
         );
 
         return {
@@ -1219,7 +1710,7 @@ describe('stripe fulfillment helpers', () => {
               expect(value).toBe('sub_test_legacy_shape');
             }
 
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             return this;
           },
           order() {
@@ -1234,13 +1725,17 @@ describe('stripe fulfillment helpers', () => {
             return this;
           },
           is(column: string, value: unknown) {
-            filters.push({ column, value });
+            filters.push({ column, operator: 'eq', value });
             if (mode === 'update') {
               updates.push({ status: payload.status, payment_status: payload.payment_status });
               matchingRows().forEach((row) => Object.assign(row, payload));
             }
 
             return Promise.resolve({ error: null });
+          },
+          like(column: string, value: unknown) {
+            filters.push({ column, operator: 'like', value });
+            return this;
           },
           async maybeSingle() {
             if (mode === 'update') {
@@ -1270,7 +1765,7 @@ describe('stripe fulfillment helpers', () => {
     expect(updates).toEqual([
       { status: 'completed', payment_status: 'paid' },
     ]);
-    expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro' });
+    expect(tables.profiles[0]).toMatchObject({ membership_level: 'free' });
   });
 
   it('logs the subscription grant stage and safe Supabase error when source order lookup fails', async () => {

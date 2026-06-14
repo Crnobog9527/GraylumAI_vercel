@@ -5,8 +5,13 @@
  */
 
 import { logger } from '../lib/logger';
+import {
+  buildSubscriptionPlanChangeLockKey,
+  isSubscriptionPlanChangeOrder,
+} from './subscriptionPlanChangeLock';
 
 type SupabaseLikeClient = any;
+const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
 
 export type SubscriptionBillingCycle = 'monthly' | 'yearly';
 export type SubscriptionGrantType = 'monthly_invoice' | 'annual_monthly_release';
@@ -27,9 +32,13 @@ interface PaymentOrderRow {
   item_id?: string | null;
   item_type?: string | null;
   billing_cycle?: string | null;
+  status?: string | null;
   stripe_customer_id?: string | null;
   stripe_price_id?: string | null;
+  stripe_checkout_session_id?: string | null;
+  payment_status?: string | null;
   fulfilled_at?: string | null;
+  created_at?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -74,6 +83,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
   invoiceId: string;
+  invoiceCreatedAt?: string | null;
   subscriptionId: string;
   amountTotal: number | null;
   currency?: string | null;
@@ -336,7 +346,7 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, fulfilled_at, metadata')
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
     .eq('stripe_invoice_id', invoiceId)
     .maybeSingle();
 
@@ -352,17 +362,44 @@ async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: 
   return result.data ?? null;
 }
 
+function isUsableMembershipSourceOrder(
+  order: PaymentOrderRow | null | undefined,
+): order is PaymentOrderRow & { user_id: string; item_id: string } {
+  return Boolean(
+    order?.user_id
+    && order.item_id
+    && (!order.item_type || order.item_type === 'membership_plan'),
+  );
+}
+
 async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
+  options: {
+    invoiceCreatedAt?: string | null;
+    periodStart?: string | null;
+  } = {},
 ): Promise<PaymentOrderRow | null> {
-  const result = await supabase
+  const sourceCutoff = getInvoiceSourceQueryCutoff(options);
+  const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, stripe_customer_id, stripe_price_id, metadata')
-    .eq('stripe_subscription_id', subscriptionId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
+    .eq('stripe_subscription_id', subscriptionId);
+  const cutoffQuery = sourceCutoff && typeof query.lte === 'function'
+    ? query.lte('created_at', sourceCutoff)
+    : query;
+  const filteredQuery = typeof cutoffQuery.neq === 'function'
+    ? cutoffQuery.neq('status', 'failed')
+    : cutoffQuery;
+  const orderedQuery = filteredQuery
+    .order('created_at', { ascending: false });
+  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof query.lte === 'function';
+  const limitedQuery = canApplyLimitBeforeInvoiceFilter && typeof orderedQuery.limit === 'function'
+    ? orderedQuery.limit(10)
+    : orderedQuery;
+  const result = typeof limitedQuery.then === 'function'
+    ? await limitedQuery
+    : await limitedQuery.maybeSingle();
 
   if (result.error) {
     throwGrantError(
@@ -373,7 +410,110 @@ async function getLatestSubscriptionOrder(
     );
   }
 
-  return result.data ?? null;
+  if (Array.isArray(result.data)) {
+    return (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) =>
+      order.status !== 'failed' && isUsableSourceForInvoice(order, options),
+    ) ?? null;
+  }
+
+  const order = result.data as PaymentOrderRow | null;
+  return isUsableSourceForInvoice(order, options) ? order : null;
+}
+
+function isCreatedNoLaterThanWithTolerance(
+  createdAt: string | null | undefined,
+  referenceAt: string | null | undefined,
+  toleranceMs = 0,
+) {
+  if (!createdAt || !referenceAt) {
+    return false;
+  }
+
+  const createdTime = Date.parse(createdAt);
+  const referenceTime = Date.parse(referenceAt);
+
+  return Number.isFinite(createdTime)
+    && Number.isFinite(referenceTime)
+    && createdTime <= referenceTime + toleranceMs;
+}
+
+function getInvoiceSourceCutoff(options: {
+  invoiceCreatedAt?: string | null;
+  periodStart?: string | null;
+}) {
+  return options.invoiceCreatedAt ?? options.periodStart ?? null;
+}
+
+function getInvoiceSourceQueryCutoff(options: {
+  invoiceCreatedAt?: string | null;
+  periodStart?: string | null;
+}) {
+  const sourceCutoff = getInvoiceSourceCutoff(options);
+  if (!sourceCutoff) {
+    return null;
+  }
+
+  const parsedCutoff = Date.parse(sourceCutoff);
+  return Number.isFinite(parsedCutoff)
+    ? new Date(parsedCutoff + STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS).toISOString()
+    : sourceCutoff;
+}
+
+function isUsableSourceForInvoice(
+  order: PaymentOrderRow | null | undefined,
+  options: {
+    invoiceCreatedAt?: string | null;
+    periodStart?: string | null;
+  },
+) {
+  if (!order) {
+    return true;
+  }
+
+  const sourceCutoff = getInvoiceSourceCutoff(options);
+  if (!sourceCutoff) {
+    return true;
+  }
+
+  return isCreatedNoLaterThanWithTolerance(
+    order.created_at,
+    sourceCutoff,
+    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
+  );
+}
+
+async function getResidualSubscriptionPlanChangeLock(input: {
+  supabase: SupabaseLikeClient;
+  subscriptionId: string;
+  sourceCutoff?: string | null;
+}): Promise<PaymentOrderRow | null> {
+  const lockKey = buildSubscriptionPlanChangeLockKey(input.subscriptionId);
+  const result = await input.supabase
+    .from('payment_orders')
+    .select('id, stripe_checkout_session_id, status, payment_status, fulfilled_at, created_at, metadata')
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('stripe_checkout_session_id', lockKey)
+    .maybeSingle();
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_plan_change_lock_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+      result.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId) },
+    );
+  }
+
+  const order = result.data as PaymentOrderRow | null;
+  if (!order || !isSubscriptionPlanChangeOrder(order)) {
+    return null;
+  }
+
+  return isCreatedNoLaterThanWithTolerance(
+    order.created_at,
+    input.sourceCutoff,
+    STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS,
+  ) ? order : null;
 }
 
 async function getMembershipPlan(
@@ -886,17 +1026,72 @@ async function writeCompletedInvoiceOrder(input: {
   return insertResult.data?.id ?? null;
 }
 
+async function releaseSubscriptionPlanChangeLock(input: {
+  supabase: SupabaseLikeClient;
+  sourceOrder: PaymentOrderRow;
+  fulfilledAt: string;
+  paymentStatus?: string | null;
+}) {
+  if (!input.sourceOrder.id || !isSubscriptionPlanChangeOrder(input.sourceOrder)) {
+    return;
+  }
+
+  const result = await input.supabase
+    .from('payment_orders')
+    .update({
+      stripe_checkout_session_id: null,
+      status: 'completed',
+      payment_status: input.paymentStatus ?? 'paid',
+      fulfilled_at: input.fulfilledAt,
+      updated_at: input.fulfilledAt,
+    })
+    .eq('id', input.sourceOrder.id);
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_plan_change_lock_release',
+      SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+      result.error,
+      { sourceOrderId: maskIdentifier(input.sourceOrder.id) },
+    );
+  }
+}
+
 export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
-  const sourceOrder = await getLatestSubscriptionOrder(supabase, input.subscriptionId);
-  if (
-    !sourceOrder?.user_id
-    || !sourceOrder.item_id
-    || (sourceOrder.item_type && sourceOrder.item_type !== 'membership_plan')
-  ) {
+  if (existingInvoiceOrder?.fulfilled_at) {
+    const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
+      supabase,
+      subscriptionId: input.subscriptionId,
+      sourceCutoff: getInvoiceSourceCutoff(input),
+    });
+    if (residualPlanChangeLock) {
+      await releaseSubscriptionPlanChangeLock({
+        supabase,
+        sourceOrder: residualPlanChangeLock,
+        fulfilledAt: existingInvoiceOrder.fulfilled_at,
+        paymentStatus: existingInvoiceOrder.payment_status ?? input.paymentStatus,
+      });
+    }
+
+    return {
+      fulfilledAt: existingInvoiceOrder.fulfilled_at,
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+    };
+  }
+
+  const sourceOrder = isUsableMembershipSourceOrder(existingInvoiceOrder)
+    ? existingInvoiceOrder
+    : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
+      invoiceCreatedAt: input.invoiceCreatedAt,
+      periodStart: input.periodStart,
+    });
+  if (!isUsableMembershipSourceOrder(sourceOrder)) {
     throwGrantError(
       'subscription_source_order_missing',
       SUBSCRIPTION_GRANT_ERRORS.missingSubscriptionOrder,
@@ -923,15 +1118,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     subscriptionId: input.subscriptionId,
     invoiceId: input.invoiceId,
   });
-
-  if (existingInvoiceOrder?.fulfilled_at) {
-    return {
-      fulfilledAt: existingInvoiceOrder.fulfilled_at,
-      alreadyFulfilled: true,
-      grantedCredits: 0,
-      creditTransactionId: null,
-    };
-  }
 
   const grantPeriod: GrantPeriod = billingCycle === 'yearly'
     ? {
@@ -996,6 +1182,13 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     grantedCredits: grant.creditsGranted,
     creditTransactionId: grant.creditTransactionId,
     grantId: grant.grantId,
+  });
+
+  await releaseSubscriptionPlanChangeLock({
+    supabase,
+    sourceOrder,
+    fulfilledAt,
+    paymentStatus: input.paymentStatus,
   });
 
   if (grant.creditTransactionId && invoiceOrderId) {

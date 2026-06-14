@@ -1391,3 +1391,169 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR #235 created against `staging`。
 - PR4 implementation complete and awaiting owner audit。
 - PR5 remains `not_started`。
+
+## PR 5 - real subscription upgrade mechanism source-code PR
+
+- 时间：2026-06-12 CST。
+- 阶段：PR5 / real subscription upgrade mechanism。
+- Branch：`codex/billing-v1-pr5-subscription-upgrade`。
+- PR：[#236](https://github.com/Crnobog9527/GraylumAI_vercel/pull/236)。
+- Base：`staging`。
+- Base SHA：`e45e0900e812c63ec631d1f3e164c5f954a2dd50`。
+- Implementation commit：`85dda0bf51148c43269ab912891286e9acd8d892`。
+- 状态：draft PR created；issue #225 updated to PR5 `in_progress` after this control-plane record is pushed。
+
+### Scope
+
+- PR5 source-code PR only：实现真实订阅升级机制的后端能力和前端入口。
+- 新增 `payments.changeSubscriptionPlan` protected mutation。
+- Upgrade 场景复用 PR4 `resolveMembershipEligibility` matrix；只有 `action = changeSubscriptionPlan` 才允许继续。
+- 同级重复购买 / 当前套餐 / 降级 / payment attention / conflict 仍在 Stripe subscription update 前 fail closed。
+- `createCheckoutSession` 继续阻断 active subscription 用户创建第二个 subscription。
+- Stripe subscription update 路径更新 existing subscription item price，使用 `proration_behavior = create_prorations`，并清除 `cancel_at_period_end`。
+- 成功后同步 `user_subscriptions` mirror，并写入本地 `payment_orders` plan-change source row，供后续 invoice fulfillment 找到升级后的套餐。
+- 不修改 `subscription_credit_grants` / credit grant calculation / annual monthly release 逻辑。
+- `SubscriptionCard` 使用 PR4 eligibility matrix 驱动 upgrade button，upgrade 调用 `changeSubscriptionPlan`，普通新购仍调用 checkout。
+
+### Changed files
+
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `apps/web/src/components/profile/SubscriptionCard.tsx`
+- `apps/web/src/components/profile/subscriptionPlanButtonState.ts`
+- `packages/api/src/services/__tests__/subscriptionPlanButtonState.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Test matrix covered
+
+- Pro monthly -> Gold yearly：允许 `changeSubscriptionPlan`；不创建 checkout session；不调用 membership invoice fulfillment；不直接写 credit grant。
+- Pro monthly -> Pro monthly：重复购买 / current plan blocked before Stripe subscription update。
+- Gold yearly -> Pro monthly：downgrade blocked before Stripe subscription update。
+- `payment_orders` plan-change source row records target plan / billing cycle / Stripe price so later invoice fulfillment can resolve the upgraded plan without changing PR3 credit grant logic。
+- Button helper exposes separate `canCreateCheckout` and `canChangeSubscriptionPlan` flags so checkout and subscription update do not share a loose click path。
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：通过；lockfile 已是最新，未产生 tracked package/lockfile 变更。
+- Targeted API/unit tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionPlanButtonState.test.ts` 通过；47 files / 549 tests passed。
+- `pnpm --filter web typecheck`：通过；route types generated successfully，`tsc --noEmit` 通过。
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；47 files / 549 tests passed。
+- `git diff --check`：通过。
+- Dummy non-secret env `pnpm build`：未通过；Next/Turbopack 无法从 `fonts.googleapis.com` 获取 `Geist` / `Geist Mono`，构建在 Google Fonts 外部网络请求处失败，未到达应用代码错误。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未改积分发放逻辑。
+- 未执行真实 Stripe live 行为。
+- 未触发 checkout / payment / refund / cancel / webhook replay。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未修改 Vercel env / Project Settings。
+- 未修改 Supabase / Stripe backend settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未触发 `release-subscription-credits`。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 created as draft against `staging`。
+- PR5 implementation is ready for owner audit as draft PR, with build risk noted above。
+- Issue #225 remains open and is the control-plane tracker。
+- No merge / no PR6 without separate owner authorization。
+
+## PR 5 audit follow-up - Codex review fixes
+
+- 时间：2026-06-13 CST。
+- 阶段：PR5 audit closeout；PR #236 remains draft。
+- 状态：Codex review returned actionable P1/P2 findings; fixes pushed in PR5 branch; PR5 remains source-code PR only。
+
+### Review findings addressed
+
+- P1：`payment_orders` plan-change source row now writes before `stripe.subscriptions.update` so a failed local source write cannot leave a successful Stripe update without durable target-plan source metadata。
+- P2：`changeSubscriptionPlan` now rejects a repeated request when the active `user_subscriptions` mirror already matches the requested plan and billing cycle, before any Stripe update attempt。
+- Follow-up P1：if `stripe.subscriptions.update` fails after the source row is inserted, PR5 now marks that source row `failed`; invoice fulfillment source-order lookup skips failed rows so failed upgrades cannot become the newest grant source。
+- Follow-up P1：invoice fulfillment checkout-order backfill now excludes `status = failed` rows so failed plan-change source rows cannot be converted back to `completed` during a later invoice backfill。
+- Follow-up P1：when a failed plan-change invoice is later paid, the same invoice order is now used as the source so the retried paid invoice grants/syncs the upgraded plan instead of falling back to the previous subscription order。
+- Follow-up P1：already-fulfilled invoice replays now return before source selection or profile sync so stale invoice replays cannot downgrade a user after a later upgrade。
+- Follow-up P1/P2：subscription source lookups used by successful invoice fulfillment and failed-invoice handling now filter `status != failed` before applying their limits, so failed upgrade attempts cannot seed later paid/failed invoice rows or hide older valid source rows。
+- Follow-up P1：`changeSubscriptionPlan` no longer updates `user_subscriptions` plan/cycle/price before a paid invoice; pending source rows block duplicate upgrade requests while paid invoice fulfillment remains responsible for final mirror changes and credit release eligibility。
+- Follow-up P1/P2：Stripe subscription updates now use `proration_behavior = always_invoice` so same-interval upgrades create an immediate invoice for deferred fulfillment, and any in-flight pending plan-change row blocks further upgrades for that subscription until resolved。
+
+### Validation
+
+- `pnpm lint`：通过。
+- `pnpm test:api`：通过；47 files / 554 tests passed。
+- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts` 通过；47 files / 554 tests passed。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+- Dummy non-secret env `pnpm build`：未通过；Next/Turbopack failed fetching existing `Geist` / `Geist Mono` from Google Fonts via `next/font/google` in `apps/web/src/app/layout.tsx`。
+- Google Fonts direct curl evidence：`curl -I --max-time 20 https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap` timed out。
+- Google Fonts proxied curl evidence：same request with `-x http://127.0.0.1:7897` returned HTTP 200, while the local Next/Turbopack font fetcher still failed under shell proxy env。
+- Alternative validation：GitHub/Vercel PR checks for #236 were passing before the review-fix commit; local lint/typecheck/API/unit coverage passed after the fix commit。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未改积分发放逻辑。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 remains draft against `staging`。
+- Issue #225 remains the control-plane tracker; PR5 should stay `in_progress` until fresh review/check evidence is complete and owner explicitly accepts moving it to owner audit。
+- No merge / no PR6 without separate owner authorization。
+
+## PR 5 audit follow-up - atomic pending upgrade guard
+
+- 时间：2026-06-13 CST。
+- 阶段：PR5 Codex Review P1 follow-up。
+- PR：[#236](https://github.com/Crnobog9527/GraylumAI_vercel/pull/236)。
+- 状态：PR #236 remains draft / PR5 remains `in_progress`。
+
+### Review finding addressed
+
+- Latest P1：`Make the pending upgrade guard atomic`。
+- 问题：两个并发 `changeSubscriptionPlan` 请求可能同时通过 pending preflight read，然后都插入 pending source row 并触发多次 `stripe.subscriptions.update`。
+- 修复：复用既有 `payment_orders.stripe_checkout_session_id` UNIQUE 约束作为内部 pending lock key；plan-change source row 在 Stripe update 前写入 `change_subscription_plan_lock:<subscription_id>`。
+- 效果：同一个 Stripe subscription 的并发 plan-change insert 只能有一个成功；DB unique violation 会在 Stripe update 前转成 “升级正在处理中” 错误，不会触发第二次 Stripe subscription update。
+- Lock release：Stripe update 失败、invoice payment_failed 更新 plan-change source row、invoice payment_succeeded fulfillment 完成后都会清空内部 lock key，避免永久阻塞后续升级。
+- Billing records：内部 lock key 不作为真实 checkout session 拉取 Stripe receipt / session document。
+
+### Validation
+
+- Targeted PR5 tests：`pnpm --filter @repo/api test:run -- src/routers/payments.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts` 通过；47 files / 555 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `pnpm test:api`：通过；47 files / 555 tests passed。
+- `git diff --check`：通过。
+- Local `pnpm build`：未重跑；此前已记录为 local Next/Turbopack `next/font/google` 未成功使用当前代理环境的工具链问题。Vercel PR checks 继续作为替代 build evidence。
+
+### Forbidden actions confirmation
+
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未触发 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未 merge。
+- 未进入 PR6。
+
+### Stop point
+
+- PR #236 remains draft against `staging`。
+- PR5 remains `in_progress` until review threads are re-checked and owner explicitly accepts moving it to owner audit。
+- No merge / no PR6 without separate owner authorization。
