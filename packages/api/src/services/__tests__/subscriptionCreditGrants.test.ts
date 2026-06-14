@@ -10,8 +10,10 @@ import {
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
   grantSubscriptionCredits,
   releaseDueAnnualSubscriptionCredits,
+  reconcileSubscriptionRefundCreditGrants,
   shouldReleaseAnnualSubscriptionCredits,
 } from '../subscriptionCreditGrants';
+import { countsAsCreditSpend } from '../creditLedger';
 
 type TableName =
   | 'payment_orders'
@@ -984,6 +986,46 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants.map((row) => row.period_index)).toEqual([1, 2, 3]);
   });
 
+  it('releases only the currently due annual month for a normal paid active subscription', async () => {
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-active-paid',
+        user_id: 'user-active-paid',
+        membership_plan_id: 'plan-active-paid',
+        stripe_subscription_id: 'sub_active_paid',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_active_paid' },
+      }],
+      membership_plans: [{
+        id: 'plan-active-paid',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-01-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 1,
+      releasedCredits: 10,
+      skippedSubscriptions: 0,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 10,
+      status: 'granted',
+    });
+  });
+
   it('continues annual release before current_period_end when cancel_at_period_end is true', () => {
     expect(shouldReleaseAnnualSubscriptionCredits({
       billingCycle: 'yearly',
@@ -1002,6 +1044,18 @@ describe('subscription credit grants', () => {
       currentPeriodEnd: '2026-07-01T00:00:00.000Z',
       now: new Date('2026-08-01T00:00:00.000Z'),
     })).toBe(false);
+  });
+
+  it('does not release annual credits for canceled, refunded, or invalid subscription states', () => {
+    for (const status of ['canceled', 'cancelled', 'refunded', 'past_due', 'incomplete', 'incomplete_expired', 'unpaid', 'paused']) {
+      expect(shouldReleaseAnnualSubscriptionCredits({
+        billingCycle: 'yearly',
+        status,
+        cancelAtPeriodEnd: 'true',
+        currentPeriodEnd: '2027-01-01T00:00:00.000Z',
+        now: new Date('2026-03-01T00:00:00.000Z'),
+      })).toBe(false);
+    }
   });
 
   it('stops future annual release after full refund', async () => {
@@ -1036,6 +1090,205 @@ describe('subscription credit grants', () => {
     expect(result.releasedGrantCount).toBe(0);
     expect(result.skippedSubscriptions).toBe(1);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+  });
+
+  it('claws back released annual grants on full refund and keeps the clawback out of spend', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund',
+        user_id: 'user-subscription-refund',
+        stripe_subscription_id: 'sub_subscription_refund',
+        stripe_invoice_id: 'in_subscription_refund',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 10 },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-refund-reversal',
+        user_id: 'user-subscription-refund',
+        membership_plan_id: 'plan-subscription-refund',
+        stripe_subscription_id: 'sub_subscription_refund',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_subscription_refund' },
+      }],
+      membership_plans: [{
+        id: 'plan-subscription-refund',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-subscription-refund',
+        credits: 100,
+      }],
+      subscription_credit_grants: [1, 2, 3].map((periodIndex) => ({
+        id: `grant-refund-${periodIndex}`,
+        user_id: 'user-subscription-refund',
+        membership_plan_id: 'plan-subscription-refund',
+        stripe_subscription_id: 'sub_subscription_refund',
+        stripe_invoice_id: 'in_subscription_refund',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_subscription_refund:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund',
+      subscriptionId: 'sub_subscription_refund',
+      refundId: 're_subscription_full',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund',
+      isFullRefund: true,
+      now: '2026-04-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      creditTransactionId: 'txn-1',
+      alreadyReconciled: false,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-subscription-refund',
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: true,
+          reviewRequired: false,
+          clawbackAmount: 30,
+          reversedGrantCount: 3,
+          creditTransactionId: 'txn-1',
+          idempotencyKey: 'stripe_refund:subscription_grants:re_subscription_full:sub_subscription_refund',
+        }),
+      },
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -30,
+      type: 'deduction',
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_type: 'stripe_refund',
+      source_id: 're_subscription_full',
+      source_refund_id: 're_subscription_full',
+      source_order_id: 'order-subscription-refund',
+    });
+    expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+      'reversed',
+    ]);
+    expect(supabase.tables.subscription_credit_grants[0].metadata.reversal).toMatchObject({
+      refundId: 're_subscription_full',
+      creditTransactionId: 'txn-1',
+      source: 'subscription_refund',
+    });
+
+    const releaseAfterRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund',
+      subscriptionId: 'sub_subscription_refund',
+      refundId: 're_subscription_full',
+      refundEventType: 'refund.updated',
+      refundStatus: 'succeeded',
+      isFullRefund: true,
+      now: '2026-04-01T00:05:00.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyReconciled: true,
+      clawbackAmount: 30,
+      creditTransactionId: 'txn-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('marks partial subscription refunds for review without clawing back released grants', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-partial-refund',
+        user_id: 'user-subscription-partial-refund',
+        stripe_subscription_id: 'sub_subscription_partial_refund',
+        stripe_invoice_id: 'in_subscription_partial_refund',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 10 },
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-partial-refund-1',
+        user_id: 'user-subscription-partial-refund',
+        membership_plan_id: 'plan-subscription-partial-refund',
+        stripe_subscription_id: 'sub_subscription_partial_refund',
+        stripe_invoice_id: 'in_subscription_partial_refund',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'sub_subscription_partial_refund:2026-01:01',
+        period_index: 1,
+        credits_granted: 10,
+        status: 'granted',
+      }],
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-partial-refund',
+      subscriptionId: 'sub_subscription_partial_refund',
+      refundId: 're_subscription_partial',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 1000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_partial_refund',
+      isFullRefund: false,
+      now: '2026-04-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: false,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: false,
+          reviewRequired: true,
+          clawbackAmount: 0,
+          reversedGrantCount: 0,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      id: 'grant-partial-refund-1',
+      status: 'granted',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
   });
 
   it('uses subscription_credit_grants idempotency keys to prevent duplicate direct grants', async () => {

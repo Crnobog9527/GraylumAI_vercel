@@ -1557,3 +1557,81 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR #236 remains draft against `staging`。
 - PR5 remains `in_progress` until review threads are re-checked and owner explicitly accepts moving it to owner audit。
 - No merge / no PR6 without separate owner authorization。
+
+## PR 6 - refund and annual monthly release linkage source-code PR
+
+- 时间：2026-06-14 CST。
+- 阶段：PR6 / refund and annual monthly release linkage。
+- Branch：`codex/billing-v1-pr6-refund-monthly-release`。
+- PR：draft PR pending creation。
+- Base：`staging`。
+- Base SHA：`0c982e2888bb7fd683ad8c33a749fd8dde39236e`。
+- 状态：source-code implementation complete locally；issue #225 updated to PR6 `in_progress` before implementation。
+
+### Scope
+
+- PR6 source-code-only：联动 subscription full/partial refund 与 annual monthly release。
+- Full subscription refund now marks the payment order `refunded` before grant reversal work, so future annual release scans stop for that subscription.
+- Full subscription refund claws back already released `subscription_credit_grants` via a single `credit_transactions` row with `ledger_type = refund_clawback` and `counts_as_spend = false`.
+- Full subscription refund marks released grant rows `reversed` while preserving per-grant audit metadata and reversal transaction metadata.
+- Partial subscription refund marks `payment_orders.status = partially_refunded` and records `reviewRequired = true`; it does not auto-clawback complex partial annual releases.
+- Annual release eligibility now fails closed for `refunded`, `canceled/cancelled`, `past_due`, `incomplete`, `incomplete_expired`, `unpaid`, and `paused` states.
+- Annual release full-refund detection now also honors canonical/legacy payment status and refund metadata, not only `status = refunded`.
+- Refund order/subscription mismatch fails closed before any clawback.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Test matrix covered
+
+- Full refund after 3 released annual months claws back exactly those released months.
+- Full refund writes `refund_clawback` with `counts_as_spend = false`, so it does not count as monthly spend.
+- Full refund marks released `subscription_credit_grants` as `reversed` and keeps reversal audit metadata.
+- Full refund stops future annual monthly releases for the refunded subscription.
+- Partial refund enters review-required state and does not auto-clawback released annual grants.
+- Normal paid active annual subscription still releases only the currently due monthly credit.
+- Canceled/refunded/invalid/payment-attention subscription states do not receive annual release.
+- Duplicate refund reconciliation does not duplicate clawback transactions.
+- Existing PR5 source-order / invoice replay protection remains covered by targeted `stripeFulfillment` and `payments` tests.
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：通过；lockfile already up to date，未产生 tracked package/lockfile 变更。
+- Targeted PR6 grant tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；47 files / 565 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` 通过；47 files / 565 tests passed。
+- `pnpm test:api`：通过；47 files / 565 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### CI / Security / Vercel status
+
+- Draft PR pending creation.
+- Vercel checks pending after push / PR creation.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration。
+- 未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Known risk / stop line
+
+- Blueprint PR6 的“余额不足时允许负余额，并阻止继续 AI 使用”未在本 source-code-only PR 中实现：当前数据库历史约束 `profiles_credits_non_negative` 与现有 `atomic_apply_credit_ledger_entry` RPC 都会阻止负余额。实现该策略需要单独 DB/RPC migration 或替代原子写入设计，必须等待 owner 单独授权。
+- 本 PR 不执行真实 Stripe refund，也不 replay webhook；所有 refund 行为通过 source-level service tests 验证。
+
+### Stop point
+
+- PR6 remains `in_progress` until draft PR is created, remote checks are observed, and owner audit is complete.
+- No DB migration / no production / no real Stripe refund / no PR7.
