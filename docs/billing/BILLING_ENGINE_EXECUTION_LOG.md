@@ -1693,3 +1693,56 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
+## PR 6 latest-head review follow-up - subscription refund webhook wiring
+
+- 时间：2026-06-14 15:49 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`1ad0021181812503b0bdb65cde0e704403cd54de`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review is clean；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Wire subscription refunds into the webhook`: the real Stripe webhook route now routes `refund.created`, `refund.updated`, and `charge.refunded` into PR6 subscription refund grant reconciliation.
+- Added `reconcileSubscriptionRefundFromStripeWebhook` in Stripe fulfillment code. It only proceeds for invoice-backed membership subscription orders, resolves refund invoice scope from Stripe charge / refund payloads, and then reuses `reconcileSubscriptionRefundCreditGrants`.
+- Kept replay/idempotency delegated to the existing PR6 reconciliation idempotency key and grant-reversal audit path; no real webhook replay was triggered.
+- Closed old shortfall P1 evidence path: webhook-driven full refund with insufficient balance records `reviewRequired`, `appliedClawbackAmount`, `shortfallAmount`, `shortfallReason`, and `reversalStatus = shortfall_review_required`; future annual monthly release is blocked.
+- Pending / review-required / shortfall full-refund markers remain blocking for annual monthly release through `subscriptionCreditGrantReversal.fullRefund = true`.
+- Refund reversal remains invoice-scoped: webhook tests prove a refund for one invoice reverses only that invoice's released grant rows and does not reverse other invoice months.
+
+### Changed files
+
+- `apps/web/src/app/api/stripe/webhook/route.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/services/__tests__/stripeWebhookRoute.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscriptionCreditGrants / webhook / refund fulfillment tests：`pnpm --filter @repo/api test:run -- stripeWebhookRoute stripeFulfillment subscriptionCreditGrants` 通过；48 files / 574 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api test:run -- subscriptionCreditGrants stripeFulfillment -t "plan-change|stale|replay|refund"` 通过；48 files / 574 tests passed。
+- `pnpm test:api`：通过；48 files / 574 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.

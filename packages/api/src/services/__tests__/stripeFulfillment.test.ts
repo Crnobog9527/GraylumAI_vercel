@@ -21,8 +21,260 @@ import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
   markMembershipInvoicePaymentFailed,
+  reconcileSubscriptionRefundFromStripeWebhook,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
+import { releaseDueAnnualSubscriptionCredits } from '../subscriptionCreditGrants';
+
+type RefundWebhookTableName =
+  | 'payment_orders'
+  | 'membership_plans'
+  | 'subscription_credit_grants'
+  | 'credit_transactions'
+  | 'user_subscriptions'
+  | 'profiles';
+type RefundWebhookRow = Record<string, any>;
+
+class RefundWebhookMockQuery {
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private containsFilters: Array<{ column: string; value: unknown }> = [];
+  private mode: 'select' | 'insert' | 'update' = 'select';
+  private payload: RefundWebhookRow | null = null;
+  private limitValue: number | null = null;
+  private orderBy: { column: string; ascending: boolean } | null = null;
+
+  constructor(
+    private readonly tables: Record<RefundWebhookTableName, RefundWebhookRow[]>,
+    private readonly table: RefundWebhookTableName,
+  ) {}
+
+  select() {
+    return this;
+  }
+
+  eq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'eq' });
+    return this;
+  }
+
+  neq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'neq' });
+    return this;
+  }
+
+  lte(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  contains(column: string, value: unknown) {
+    this.containsFilters.push({ column, value });
+    return this;
+  }
+
+  order(column: string, options: { ascending?: boolean } = {}) {
+    this.orderBy = { column, ascending: options.ascending ?? true };
+    return this;
+  }
+
+  limit(value: number) {
+    this.limitValue = value;
+    return this;
+  }
+
+  update(payload: RefundWebhookRow) {
+    this.mode = 'update';
+    this.payload = payload;
+    return this;
+  }
+
+  insert(payload: RefundWebhookRow) {
+    this.mode = 'insert';
+    this.payload = payload;
+    return this;
+  }
+
+  async maybeSingle() {
+    if (this.mode === 'insert') {
+      const inserted = {
+        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
+        ...this.payload,
+      };
+      this.tables[this.table].push(inserted);
+      return { data: inserted, error: null };
+    }
+
+    if (this.mode === 'update') {
+      const rows = this.matchingRows();
+      rows.forEach((row) => Object.assign(row, this.payload));
+      return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+    }
+
+    const rows = this.matchingRows();
+    return { data: rows[0] ?? null, error: null };
+  }
+
+  then<TResult1 = { data: RefundWebhookRow[]; error: null }, TResult2 = never>(
+    onfulfilled?: ((value: { data: RefundWebhookRow[]; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+  ) {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+
+  private async execute() {
+    if (this.mode === 'insert') {
+      const inserted = {
+        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
+        ...this.payload,
+      };
+      this.tables[this.table].push(inserted);
+      return { data: [inserted], error: null };
+    }
+
+    if (this.mode === 'update') {
+      const rows = this.matchingRows();
+      rows.forEach((row) => Object.assign(row, this.payload));
+      return { data: rows, error: null };
+    }
+
+    return {
+      data: this.limitValue === null
+        ? this.matchingRows()
+        : this.matchingRows().slice(0, this.limitValue),
+      error: null,
+    };
+  }
+
+  private matchingRows() {
+    const rows = this.tables[this.table].filter((row) =>
+      this.filters.every(({ column, value, operator }) => {
+        if (operator === 'eq') {
+          return row[column] === value;
+        }
+
+        if (operator === 'neq') {
+          return row[column] !== value;
+        }
+
+        return row[column] <= value;
+      })
+      && this.containsFilters.every(({ column, value }) =>
+        refundWebhookContainsValue(row[column], value),
+      ),
+    );
+
+    if (!this.orderBy) {
+      return rows;
+    }
+
+    const { column, ascending } = this.orderBy;
+    return [...rows].sort((left, right) => {
+      const leftValue = left[column] ?? '';
+      const rightValue = right[column] ?? '';
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return ascending ? comparison : -comparison;
+    });
+  }
+}
+
+function refundWebhookContainsValue(actual: unknown, expected: unknown): boolean {
+  if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)) {
+      return false;
+    }
+
+    return Object.entries(expected as RefundWebhookRow).every(([key, value]) =>
+      refundWebhookContainsValue((actual as RefundWebhookRow)[key], value),
+    );
+  }
+
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual)
+      && expected.every((value) => (actual as unknown[]).some((item) => refundWebhookContainsValue(item, value)));
+  }
+
+  return actual === expected;
+}
+
+function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName, RefundWebhookRow[]>> = {}) {
+  const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+    payment_orders: seed.payment_orders ?? [],
+    membership_plans: seed.membership_plans ?? [],
+    subscription_credit_grants: seed.subscription_credit_grants ?? [],
+    credit_transactions: seed.credit_transactions ?? [],
+    user_subscriptions: seed.user_subscriptions ?? [],
+    profiles: seed.profiles ?? [],
+  };
+
+  const supabase = {
+    tables,
+    from(table: RefundWebhookTableName) {
+      return new RefundWebhookMockQuery(tables, table);
+    },
+    async rpc(name: string, payload: RefundWebhookRow) {
+      expect(name).toBe('atomic_apply_credit_ledger_entry');
+      const existing = tables.credit_transactions.find((row) =>
+        row.user_id === payload.p_user_id
+        && row.idempotency_key === payload.p_idempotency_key,
+      );
+
+      if (existing) {
+        return {
+          data: [{
+            transaction_id: existing.id,
+            balance_before: existing.balance_before ?? 0,
+            balance_after: existing.balance_after ?? 0,
+            amount: existing.amount,
+            is_idempotent: true,
+          }],
+          error: null,
+        };
+      }
+
+      const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
+      const balanceBefore = typeof profile?.credits === 'number' ? profile.credits : Number(profile?.credits ?? 0);
+      const balanceAfter = balanceBefore + payload.p_amount;
+      if (balanceAfter < 0) {
+        return {
+          data: null,
+          error: { message: 'insufficient credits' },
+        };
+      }
+
+      const transaction = {
+        id: `txn-refund-webhook-${tables.credit_transactions.length + 1}`,
+        user_id: payload.p_user_id,
+        amount: payload.p_amount,
+        type: payload.p_type,
+        description: payload.p_description,
+        idempotency_key: payload.p_idempotency_key,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+      };
+      if (profile) {
+        profile.credits = balanceAfter;
+      }
+      tables.credit_transactions.push(transaction);
+
+      return {
+        data: [{
+          transaction_id: transaction.id,
+          balance_before: transaction.balance_before,
+          balance_after: transaction.balance_after,
+          amount: payload.p_amount,
+          is_idempotent: false,
+        }],
+        error: null,
+      };
+    },
+  };
+
+  return supabase;
+}
 
 describe('stripe fulfillment helpers', () => {
   beforeEach(() => {
@@ -1030,6 +1282,325 @@ describe('stripe fulfillment helpers', () => {
         }),
       ]),
     );
+  });
+
+  it('reconciles charge.refunded subscription webhooks into invoice-scoped grant reversal markers', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-charge-refund',
+        user_id: 'user-webhook-charge-refund',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_charge_refund',
+        stripe_invoice_id: 'in_webhook_charge_refund_2027',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-charge-refund',
+        user_id: 'user-webhook-charge-refund',
+        membership_plan_id: 'plan-webhook-charge-refund',
+        stripe_subscription_id: 'sub_webhook_charge_refund',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_charge_refund_2027' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-charge-refund',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-charge-refund',
+        credits: 100,
+      }],
+      subscription_credit_grants: [
+        ...[1, 2].map((periodIndex) => ({
+          id: `grant-webhook-charge-2026-${periodIndex}`,
+          user_id: 'user-webhook-charge-refund',
+          membership_plan_id: 'plan-webhook-charge-refund',
+          stripe_subscription_id: 'sub_webhook_charge_refund',
+          stripe_invoice_id: 'in_webhook_charge_refund_2026',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_webhook_charge_refund:2026-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2026' },
+        })),
+        ...[1, 2].map((periodIndex) => ({
+          id: `grant-webhook-charge-2027-${periodIndex}`,
+          user_id: 'user-webhook-charge-refund',
+          membership_plan_id: 'plan-webhook-charge-refund',
+          stripe_subscription_id: 'sub_webhook_charge_refund',
+          stripe_invoice_id: 'in_webhook_charge_refund_2027',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_webhook_charge_refund:2027-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2027' },
+        })),
+      ],
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_charge_refund',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_charge_refund_2027',
+            payment_intent: 'pi_webhook_charge_refund',
+            refunds: {
+              data: [{
+                id: 're_webhook_charge_refund_full',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2027-03-01T00:00:00.000Z' },
+    );
+
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_charge_refund_full',
+          eventType: 'charge.refunded',
+          invoiceId: 'in_webhook_charge_refund_2027',
+          fullRefund: true,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+          reversedGrantCount: 2,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_webhook_charge_refund_2026')
+      .map((grant) => grant.status)).toEqual(['granted', 'granted']);
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_webhook_charge_refund_2027')
+      .map((grant) => grant.status)).toEqual(['reversed', 'reversed']);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -20,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_type: 'stripe_refund',
+      source_refund_id: 're_webhook_charge_refund_full',
+    });
+
+    const releaseAfterRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2027-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const replay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded_replay',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_charge_refund',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_charge_refund_2027',
+            payment_intent: 'pi_webhook_charge_refund',
+            refunds: {
+              data: [{
+                id: 're_webhook_charge_refund_full',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2027-03-01T00:05:00.000Z' },
+    );
+
+    expect(replay).toMatchObject({
+      reconciled: true,
+      alreadyReconciled: true,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('reconciles refund.created subscription webhooks into auditable shortfall markers', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-refund-created',
+        user_id: 'user-webhook-refund-created',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        stripe_invoice_id: 'in_webhook_refund_created',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-refund-created',
+        user_id: 'user-webhook-refund-created',
+        membership_plan_id: 'plan-webhook-refund-created',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_refund_created' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-refund-created',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-refund-created',
+        credits: 5,
+      }],
+      subscription_credit_grants: [1, 2, 3].map((periodIndex) => ({
+        id: `grant-webhook-refund-created-${periodIndex}`,
+        user_id: 'user-webhook-refund-created',
+        membership_plan_id: 'plan-webhook-refund-created',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        stripe_invoice_id: 'in_webhook_refund_created',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_webhook_refund_created:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_refund_created',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_refund_created',
+      payment_intent: 'pi_webhook_refund_created',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_refund_created',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_refund_created_full',
+            amount: 9900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_refund_created',
+            payment_intent: 'pi_webhook_refund_created',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-04-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_refund_created');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_refund_created_full',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_refund_created',
+          fullRefund: true,
+          reviewRequired: true,
+          clawbackAmount: 30,
+          appliedClawbackAmount: 5,
+          shortfallAmount: 25,
+          shortfallReason: 'insufficient_balance',
+          reversalStatus: 'shortfall_review_required',
+          reversedGrantCount: 3,
+          creditTransactionId: 'txn-refund-webhook-1',
+        }),
+      },
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -5,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 30,
+        shortfallAmount: 25,
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+      'reversed',
+    ]);
+
+    const releaseAfterShortfall = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterShortfall).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
   });
 
   it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
