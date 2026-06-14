@@ -634,6 +634,47 @@ describe('resolveMembershipEligibility', () => {
     });
   });
 
+  it('returns refunded_requires_policy for pending subscription grant full-refund markers', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-pending-refund',
+          membership_plan_id: 'plan-gold',
+          stripe_subscription_id: 'sub_test_pending_refund',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: 'false',
+        },
+        order: {
+          id: 'order-pending-full-refund',
+          status: 'partially_refunded',
+          payment_status: 'partially_refunded',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              fullRefund: true,
+              reviewRequired: true,
+              reversalStatus: 'pending',
+            },
+          },
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'gold' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-gold', level: 'gold' },
+      targetBillingCycle: 'yearly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'refunded_requires_policy',
+      level: 'gold',
+      source: 'payment_order',
+      action: 'contactSupport',
+      reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY',
+    });
+  });
+
   it('fails closed for unsupported profile membership levels', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({}),

@@ -214,15 +214,18 @@ function hasFullRefundSignal(order: PaymentOrderRow | null) {
   }
 
   const metadata = asRecord(order.metadata);
-  const refundMetadata = asRecord(
-    metadata.stripeRefundReconciliation ??
-    metadata.refundReconciliation ??
+  const refundMetadataCandidates = [
+    metadata.stripeRefundReconciliation,
+    metadata.subscriptionCreditGrantReversal,
+    metadata.refundReconciliation,
     metadata.refund,
-  );
+  ].map(asRecord);
 
-  return refundMetadata.isFullRefund === true ||
+  return refundMetadataCandidates.some((refundMetadata) =>
+    refundMetadata.isFullRefund === true ||
     refundMetadata.fullRefund === true ||
-    refundMetadata.refundType === 'full';
+    refundMetadata.refundType === 'full',
+  );
 }
 
 function buildDiagnostics(subscription: SubscriptionRow | null, order: PaymentOrderRow | null) {

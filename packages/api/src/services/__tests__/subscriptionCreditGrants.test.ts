@@ -1479,6 +1479,120 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('limits full-refund reversal to grants from the refunded invoice', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-renewal',
+        user_id: 'user-subscription-refund-renewal',
+        stripe_subscription_id: 'sub_subscription_refund_renewal',
+        stripe_invoice_id: 'in_subscription_refund_2027',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 20 },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-refund-renewal',
+        user_id: 'user-subscription-refund-renewal',
+        membership_plan_id: 'plan-subscription-refund-renewal',
+        stripe_subscription_id: 'sub_subscription_refund_renewal',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_subscription_refund_2027' },
+      }],
+      membership_plans: [{
+        id: 'plan-subscription-refund-renewal',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-renewal',
+        credits: 100,
+      }],
+      subscription_credit_grants: [
+        ...[1, 2, 3].map((periodIndex) => ({
+          id: `grant-refund-2026-${periodIndex}`,
+          user_id: 'user-subscription-refund-renewal',
+          membership_plan_id: 'plan-subscription-refund-renewal',
+          stripe_subscription_id: 'sub_subscription_refund_renewal',
+          stripe_invoice_id: 'in_subscription_refund_2026',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_subscription_refund_renewal:2026-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_subscription_refund_2026' },
+        })),
+        ...[1, 2].map((periodIndex) => ({
+          id: `grant-refund-2027-${periodIndex}`,
+          user_id: 'user-subscription-refund-renewal',
+          membership_plan_id: 'plan-subscription-refund-renewal',
+          stripe_subscription_id: 'sub_subscription_refund_renewal',
+          stripe_invoice_id: 'in_subscription_refund_2027',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_subscription_refund_renewal:2027-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_subscription_refund_2027' },
+        })),
+      ],
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-renewal',
+      subscriptionId: 'sub_subscription_refund_renewal',
+      refundId: 're_subscription_renewal_full',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_2027',
+      isFullRefund: true,
+      now: '2027-03-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-1',
+    });
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_subscription_refund_2026')
+      .map((grant) => grant.status)).toEqual(['granted', 'granted', 'granted']);
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_subscription_refund_2027')
+      .map((grant) => grant.status)).toEqual(['reversed', 'reversed']);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -20,
+      ledger_type: 'refund_clawback',
+      counts_as_spend: false,
+      metadata: expect.objectContaining({
+        invoiceId: 'in_subscription_refund_2027',
+        requiredClawbackAmount: 20,
+        reversedGrantCount: 2,
+        reversedGrantPeriodKeys: [
+          'sub_subscription_refund_renewal:2027-01:01',
+          'sub_subscription_refund_renewal:2027-02:02',
+        ],
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants
+      .find((grant) => grant.id === 'grant-refund-2026-1')?.metadata.reversal).toBeUndefined();
+    expect(supabase.tables.subscription_credit_grants
+      .find((grant) => grant.id === 'grant-refund-2027-1')?.metadata.reversal).toMatchObject({
+        invoiceId: 'in_subscription_refund_2027',
+        source: 'subscription_refund',
+      });
+  });
+
   it('marks partial subscription refunds for review without clawing back released grants', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{

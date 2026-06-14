@@ -1016,23 +1016,51 @@ async function getExistingRefundClawbackTransaction(
 
 async function loadSubscriptionCreditGrantsForRefund(
   supabase: SupabaseLikeClient,
-  subscriptionId: string,
+  input: { subscriptionId: string; invoiceId: string },
 ): Promise<SubscriptionCreditGrantRow[]> {
   const result = await supabase
     .from('subscription_credit_grants')
     .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_index, credits_granted, status, credit_transaction_id, metadata')
-    .eq('stripe_subscription_id', subscriptionId);
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('stripe_invoice_id', input.invoiceId);
 
   if (result.error) {
     throwGrantError(
       'subscription_refund_credit_grant_lookup',
       SUBSCRIPTION_GRANT_ERRORS.creditGrantLookup,
       result.error,
-      { subscriptionId: maskIdentifier(subscriptionId) },
+      { subscriptionId: maskIdentifier(input.subscriptionId), invoiceId: maskIdentifier(input.invoiceId) },
     );
   }
 
   return result.data ?? [];
+}
+
+function getRefundInvoiceScope(order: PaymentOrderRow, input: ReconcileSubscriptionRefundCreditGrantsInput) {
+  const inputInvoiceId = input.invoiceId?.trim() || null;
+  const orderInvoiceId = order.stripe_invoice_id?.trim() || null;
+
+  if (inputInvoiceId && orderInvoiceId && inputInvoiceId !== orderInvoiceId) {
+    return {
+      invoiceId: null,
+      status: 'invoice_scope_mismatch_review_required',
+      reason: 'invoice_scope_mismatch',
+    };
+  }
+
+  if (!inputInvoiceId && !orderInvoiceId) {
+    return {
+      invoiceId: null,
+      status: 'invoice_scope_missing_review_required',
+      reason: 'invoice_scope_missing',
+    };
+  }
+
+  return {
+    invoiceId: inputInvoiceId ?? orderInvoiceId,
+    status: 'scoped',
+    reason: null,
+  };
 }
 
 function isRefundableGrantForReconciliation(
@@ -1201,12 +1229,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const now = input.now ?? new Date().toISOString();
   const order = await getSubscriptionRefundOrder(supabase, input);
   const idempotencyKey = buildSubscriptionRefundIdempotencyKey(input);
+  const invoiceScope = getRefundInvoiceScope(order, input);
+  const scopedRefund = invoiceScope.invoiceId && invoiceScope.invoiceId !== input.invoiceId
+    ? { ...input, invoiceId: invoiceScope.invoiceId }
+    : input;
 
   if (!input.isFullRefund) {
     await updateSubscriptionRefundOrder({
       supabase,
       order,
-      refund: input,
+      refund: scopedRefund,
       now,
       idempotencyKey,
       reviewRequired: true,
@@ -1248,7 +1280,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   await updateSubscriptionRefundOrder({
     supabase,
     order,
-    refund: input,
+    refund: scopedRefund,
     now,
     idempotencyKey,
     reviewRequired: true,
@@ -1257,7 +1289,39 @@ export async function reconcileSubscriptionRefundCreditGrants(
     paymentStatus: 'partially_refunded',
   });
 
-  const grants = await loadSubscriptionCreditGrantsForRefund(supabase, input.subscriptionId);
+  if (!invoiceScope.invoiceId) {
+    await updateSubscriptionRefundOrder({
+      supabase,
+      order,
+      refund: scopedRefund,
+      now,
+      idempotencyKey,
+      reviewRequired: true,
+      shortfallReason: invoiceScope.reason,
+      reversalStatus: invoiceScope.status,
+      orderStatus: 'partially_refunded',
+      paymentStatus: 'partially_refunded',
+    });
+
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: false,
+    };
+  }
+
+  const grants = await loadSubscriptionCreditGrantsForRefund(supabase, {
+    subscriptionId: input.subscriptionId,
+    invoiceId: invoiceScope.invoiceId,
+  });
   const refundableGrants = grants.filter((grant) =>
     isRefundableGrantForReconciliation(grant, idempotencyKey),
   );
@@ -1289,7 +1353,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
         await updateRefundClawbackTransactionSemantics({
           supabase,
           transactionId: creditTransactionId,
-          refund: input,
+          refund: scopedRefund,
           idempotencyKey,
           amount: appliedClawbackAmount,
           requiredAmount: clawbackAmount,
@@ -1315,14 +1379,14 @@ export async function reconcileSubscriptionRefundCreditGrants(
           supabase,
           userId,
           amount: appliedClawbackAmount,
-          refund: input,
+          refund: scopedRefund,
           idempotencyKey,
           reversedGrantCount: refundableGrants.length,
         });
         await updateRefundClawbackTransactionSemantics({
           supabase,
           transactionId: creditTransactionId,
-          refund: input,
+          refund: scopedRefund,
           idempotencyKey,
           amount: appliedClawbackAmount,
           requiredAmount: clawbackAmount,
@@ -1347,7 +1411,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
     await markSubscriptionCreditGrantReversed({
       supabase,
       grant,
-      refund: input,
+      refund: scopedRefund,
       now,
       transactionId: creditTransactionId,
       idempotencyKey,
@@ -1362,7 +1426,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   await updateSubscriptionRefundOrder({
     supabase,
     order,
-    refund: input,
+    refund: scopedRefund,
     now,
     idempotencyKey,
     reviewRequired,

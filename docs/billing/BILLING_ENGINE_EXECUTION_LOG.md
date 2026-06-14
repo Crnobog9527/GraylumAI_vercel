@@ -1642,3 +1642,54 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - PR6 remains `in_progress` until the P1 fix is pushed, latest-head Codex review is clean, remote checks are observed, and owner audit is complete.
 - No DB migration / no production / no real Stripe refund / no PR7.
+
+## PR 6 latest-head review follow-up - invoice-scoped refund reversal
+
+- 时间：2026-06-14 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`9dc3871ddbfa480f040e9c20c6480ef298580814`。
+- 状态：PR remains draft；PR6 remains `in_progress`；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Limit refund reversal to the refunded invoice`: subscription refund reversal now loads `subscription_credit_grants` by both `stripe_subscription_id` and the refunded `stripe_invoice_id`, so a refund for one invoice cannot reverse grants from another invoice, renewal, month, or release period.
+- Added fail-safe invoice scope handling: if a full-refund event cannot be tied to a matching refund invoice / payment order invoice, PR6 leaves a review-required `partially_refunded` full-refund marker and does not fall back to subscription-wide grant reversal.
+- Fixed latest-head P2 `Make pending full-refund markers block entitlement`: membership eligibility now treats `payment_orders.metadata.subscriptionCreditGrantReversal.fullRefund = true` the same as existing full-refund markers, including pending / review-required / shortfall markers.
+- Old P1 shortfall closure remains intact: final `payment_orders.status = refunded` is written only after clawback/reversal/shortfall metadata is complete; insufficient-balance cases record `shortfallAmount`, `appliedClawbackAmount`, `shortfallReason`, and review-required metadata.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/membershipEligibility.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/membershipEligibility.test.ts`
+
+### Validation
+
+- Targeted subscription credit grants test：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；47 files / 569 tests passed。
+- Targeted membership eligibility test：`pnpm --filter @repo/api test:run -- src/services/__tests__/membershipEligibility.test.ts` 通过；47 files / 569 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` 通过；47 files / 569 tests passed。
+- `pnpm test:api`：通过；47 files / 569 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
