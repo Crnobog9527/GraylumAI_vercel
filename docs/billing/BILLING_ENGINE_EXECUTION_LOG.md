@@ -1563,10 +1563,11 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - 时间：2026-06-14 CST。
 - 阶段：PR6 / refund and annual monthly release linkage。
 - Branch：`codex/billing-v1-pr6-refund-monthly-release`。
-- PR：draft PR pending creation。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
 - Base：`staging`。
 - Base SHA：`0c982e2888bb7fd683ad8c33a749fd8dde39236e`。
-- 状态：source-code implementation complete locally；issue #225 updated to PR6 `in_progress` before implementation。
+- Implementation commit：`baa449518e2bfbbe2ea612abfc68ddb90038c220`。
+- 状态：draft PR created；issue #225 updated to PR6 `in_progress` before implementation。
 
 ### Scope
 
@@ -1609,8 +1610,8 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 ### CI / Security / Vercel status
 
-- Draft PR pending creation.
-- Vercel checks pending after push / PR creation.
+- Draft PR #237 created against `staging`.
+- Initial PR checks after creation: Vercel Preview Comments = success; `Vercel – graylum-ai-vercel-v1` = pending; `Vercel – graylumai-staging` = pending.
 
 ### Forbidden actions confirmation
 
