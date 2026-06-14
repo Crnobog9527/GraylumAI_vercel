@@ -1603,6 +1603,257 @@ describe('stripe fulfillment helpers', () => {
     });
   });
 
+  it('treats cumulative partial refunds that reach the order total as full subscription refunds', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-cumulative-full',
+        user_id: 'user-webhook-cumulative-full',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        stripe_invoice_id: 'in_webhook_cumulative_full',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-cumulative-full',
+        user_id: 'user-webhook-cumulative-full',
+        membership_plan_id: 'plan-webhook-cumulative-full',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_cumulative_full' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-cumulative-full',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-cumulative-full',
+        credits: 100,
+      }],
+      subscription_credit_grants: [1, 2].map((periodIndex) => ({
+        id: `grant-webhook-cumulative-full-${periodIndex}`,
+        user_id: 'user-webhook-cumulative-full',
+        membership_plan_id: 'plan-webhook-cumulative-full',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        stripe_invoice_id: 'in_webhook_cumulative_full',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_webhook_cumulative_full:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_cumulative_full',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_cumulative_full',
+      payment_intent: 'pi_webhook_cumulative_full',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_full',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_full_second',
+            amount: 4900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_full',
+            payment_intent: 'pi_webhook_cumulative_full',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-03-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_cumulative_full');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_cumulative_full_second',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_cumulative_full',
+          amountRefunded: 4900,
+          fullRefund: true,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+          reversedGrantCount: 2,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+    ]);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -20,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_refund_id: 're_webhook_cumulative_full_second',
+    });
+
+    const releaseAfterCumulativeFullRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterCumulativeFullRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+  });
+
+  it('keeps cumulative partial refunds below the order total in review without clawback', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-cumulative-partial',
+        user_id: 'user-webhook-cumulative-partial',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        stripe_invoice_id: 'in_webhook_cumulative_partial',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-cumulative-partial',
+        user_id: 'user-webhook-cumulative-partial',
+        membership_plan_id: 'plan-webhook-cumulative-partial',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_cumulative_partial' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-cumulative-partial',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-cumulative-partial',
+        credits: 100,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-webhook-cumulative-partial-1',
+        user_id: 'user-webhook-cumulative-partial',
+        membership_plan_id: 'plan-webhook-cumulative-partial',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        stripe_invoice_id: 'in_webhook_cumulative_partial',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'sub_webhook_cumulative_partial:2026-01:01',
+        period_index: 1,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      }],
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_cumulative_partial',
+      amount: 9900,
+      amount_refunded: 4000,
+      currency: 'usd',
+      refunded: false,
+      status: 'succeeded',
+      invoice: 'in_webhook_cumulative_partial',
+      payment_intent: 'pi_webhook_cumulative_partial',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_partial',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_partial_second',
+            amount: 2500,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_partial',
+            payment_intent: 'pi_webhook_cumulative_partial',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-02-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_cumulative_partial');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: false,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_cumulative_partial_second',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_cumulative_partial',
+          amountRefunded: 2500,
+          fullRefund: false,
+          reviewRequired: true,
+          reversalStatus: 'partial_refund_review_required',
+          reversedGrantCount: 0,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+  });
+
   it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 

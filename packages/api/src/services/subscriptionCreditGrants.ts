@@ -669,27 +669,32 @@ async function syncProfileMembershipLevel(input: {
 
 async function hasSubscriptionFullRefund(
   supabase: SupabaseLikeClient,
-  subscriptionId: string,
+  input: { subscriptionId: string; invoiceId?: string | null },
 ): Promise<boolean> {
+  const subscriptionId = input.subscriptionId;
+  const invoiceId = input.invoiceId?.trim() || null;
   const statusChecks = [
     { stage: 'subscription_full_refund_status_lookup', column: 'status', value: 'refunded' },
     { stage: 'subscription_full_refund_payment_status_lookup', column: 'payment_status', value: 'refunded' },
   ];
 
   for (const check of statusChecks) {
-    const result = await supabase
+    const query = supabase
       .from('payment_orders')
       .select('id')
       .eq('stripe_subscription_id', subscriptionId)
-      .eq(check.column, check.value)
-      .limit(1);
+      .eq(check.column, check.value);
+    const result = await (invoiceId
+      ? query.eq('stripe_invoice_id', invoiceId)
+      : query
+    ).limit(1);
 
     if (result.error) {
       throwGrantError(
         check.stage,
         SUBSCRIPTION_GRANT_ERRORS.refundLookup,
         result.error,
-        { subscriptionId: maskIdentifier(subscriptionId) },
+        { subscriptionId: maskIdentifier(subscriptionId), invoiceId: maskIdentifier(invoiceId) },
       );
     }
 
@@ -701,11 +706,21 @@ async function hasSubscriptionFullRefund(
   const metadataChecks = [
     {
       stage: 'subscription_full_refund_reconciliation_marker_lookup',
-      marker: { stripeRefundReconciliation: { fullRefund: true } },
+      marker: {
+        stripeRefundReconciliation: {
+          fullRefund: true,
+          ...(invoiceId ? { invoiceId } : {}),
+        },
+      },
     },
     {
       stage: 'subscription_full_refund_grant_reversal_marker_lookup',
-      marker: { subscriptionCreditGrantReversal: { fullRefund: true } },
+      marker: {
+        subscriptionCreditGrantReversal: {
+          fullRefund: true,
+          ...(invoiceId ? { invoiceId } : {}),
+        },
+      },
     },
   ];
 
@@ -722,7 +737,7 @@ async function hasSubscriptionFullRefund(
         check.stage,
         SUBSCRIPTION_GRANT_ERRORS.refundLookup,
         result.error,
-        { subscriptionId: maskIdentifier(subscriptionId) },
+        { subscriptionId: maskIdentifier(subscriptionId), invoiceId: maskIdentifier(invoiceId) },
       );
     }
 
@@ -732,6 +747,13 @@ async function hasSubscriptionFullRefund(
   }
 
   return false;
+}
+
+function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
+  const invoiceId = subscription.metadata?.lastInvoiceId;
+  return typeof invoiceId === 'string' && invoiceId.trim()
+    ? invoiceId.trim()
+    : null;
 }
 
 function buildSubscriptionRefundIdempotencyKey(input: ReconcileSubscriptionRefundCreditGrantsInput) {
@@ -2084,7 +2106,11 @@ export async function releaseDueAnnualSubscriptionCredits(
       continue;
     }
 
-    const hasFullRefund = await hasSubscriptionFullRefund(supabase, subscriptionId);
+    const invoiceId = getAnnualReleaseInvoiceId(subscription);
+    const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
+      subscriptionId,
+      invoiceId,
+    });
     if (!shouldReleaseAnnualSubscriptionCredits({
       billingCycle: subscription.billing_cycle,
       status: subscription.status,
@@ -2107,9 +2133,6 @@ export async function releaseDueAnnualSubscriptionCredits(
     });
 
     for (const period of periods) {
-      const invoiceId = typeof subscription.metadata?.lastInvoiceId === 'string'
-        ? subscription.metadata.lastInvoiceId
-        : null;
       const grant = await grantSubscriptionCredits(supabase, {
         ...period,
         userId: subscription.user_id,

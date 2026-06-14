@@ -293,12 +293,12 @@ function isFullRefundForOrder(input: {
   }
 
   const orderAmount = toNonNegativeInteger(input.order.amount_total);
+  const chargeAmountRefunded = toNonNegativeInteger(input.charge?.amount_refunded);
   if (orderAmount > 0) {
-    return input.amountRefunded >= orderAmount;
+    return chargeAmountRefunded >= orderAmount || input.amountRefunded >= orderAmount;
   }
 
   const chargeAmount = toNonNegativeInteger(input.charge?.amount);
-  const chargeAmountRefunded = toNonNegativeInteger(input.charge?.amount_refunded);
   if (chargeAmount > 0) {
     return chargeAmountRefunded >= chargeAmount || input.amountRefunded >= chargeAmount;
   }

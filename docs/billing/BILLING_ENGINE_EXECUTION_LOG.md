@@ -1694,6 +1694,71 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - invoice-scoped annual release blocks and cumulative refunds
+
+- 时间：2026-06-14 16:38 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`22e06bc3566530e347245c4346966221d0c32d0c`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P2 `Scope annual-release refund blocks to the current invoice`: annual monthly release now scopes full-refund status / payment status checks to the current release invoice from `user_subscriptions.metadata.lastInvoiceId` when present.
+- Full-refund metadata markers now block only when their marker payload includes the current release `invoiceId`; old invoice full-refund markers no longer block a later paid renewal invoice under the same Stripe subscription id.
+- Preserved conservative fallback for subscriptions with no current release invoice: those still use the existing subscription-level refund marker/status lookup.
+- Fixed latest-head P2 `Check cumulative charge refunds before returning partial`: refund webhook reconciliation now checks `charge.amount_refunded` against the order total before returning partial, so multiple partial refunds that cumulatively reach full refund enter the full-refund clawback/reversal/block path.
+- Partial cumulative refunds that remain below the order total continue to enter the partial review-required path without automatic clawback or grant reversal.
+- Kept prior PR6/PR5 protections in place: refund reversal remains invoice-scoped, refund clawback remains non-spend, and subscription upgrade replay/source-order tests still pass.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscriptionCreditGrants tests：`pnpm --filter api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；1 file / 25 tests passed。
+- Targeted webhook / stripeFulfillment refund tests：`pnpm --filter api exec vitest run src/services/__tests__/stripeFulfillment.test.ts` 通过；1 file / 21 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts -t "replay|plan-change|source order|refund"` 通过；2 files / 21 tests passed / 25 skipped。
+- `pnpm test:api`：通过；48 files / 577 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- Old refunded annual invoice under the same Stripe subscription id does not block a later paid renewal invoice's valid annual monthly release.
+- Current invoice full refund still blocks that invoice/current cycle's future annual monthly release.
+- Multiple partial refunds on the same charge are treated as full refund once cumulative `charge.amount_refunded` reaches the order total.
+- Cumulative partial refund below the order total remains partial / review-required and does not auto-clawback or reverse grants.
+- Full refund marker / shortfall marker continues to block future annual monthly release for the matching invoice.
+- `refund_clawback` remains `counts_as_spend = false`.
+- Normal paid active annual subscription still releases only the currently due monthly credit.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - subscription refund webhook wiring
 
 - 时间：2026-06-14 15:49 CST。

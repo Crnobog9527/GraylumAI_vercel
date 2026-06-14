@@ -1106,6 +1106,7 @@ describe('subscription credit grants', () => {
       payment_orders: [{
         id: 'order-refunded',
         stripe_subscription_id: 'sub_refunded',
+        stripe_invoice_id: 'in_refunded',
         status: 'refunded',
       }],
       user_subscriptions: [{
@@ -1149,10 +1150,12 @@ describe('subscription credit grants', () => {
         {
           id: 'order-refund-marker-many-rows',
           stripe_subscription_id: 'sub_refund_marker_many_rows',
+          stripe_invoice_id: 'in_refund_marker_many_rows',
           status: 'partially_refunded',
           payment_status: 'partially_refunded',
           metadata: {
             subscriptionCreditGrantReversal: {
+              invoiceId: 'in_refund_marker_many_rows',
               fullRefund: true,
               reviewRequired: true,
               shortfallAmount: 15,
@@ -1190,6 +1193,85 @@ describe('subscription credit grants', () => {
       skippedSubscriptions: 1,
     });
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+  });
+
+  it('does not let an old refunded annual invoice block a later paid renewal invoice', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-old-refunded-renewal',
+          stripe_subscription_id: 'sub_refund_scope_renewal',
+          stripe_invoice_id: 'in_refund_scope_2026',
+          status: 'refunded',
+          payment_status: 'refunded',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              invoiceId: 'in_refund_scope_2026',
+              fullRefund: true,
+              reversalStatus: 'complete',
+            },
+          },
+        },
+        {
+          id: 'order-new-paid-renewal',
+          user_id: 'user-refund-scope-renewal',
+          item_type: 'membership_plan',
+          item_id: 'plan-refund-scope-renewal',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_refund_scope_renewal',
+          stripe_invoice_id: 'in_refund_scope_2027',
+          status: 'completed',
+          payment_status: 'paid',
+        },
+      ],
+      user_subscriptions: [{
+        id: 'subscription-refund-scope-renewal',
+        user_id: 'user-refund-scope-renewal',
+        membership_plan_id: 'plan-refund-scope-renewal',
+        stripe_subscription_id: 'sub_refund_scope_renewal',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_refund_scope_2027' },
+      }],
+      membership_plans: [{
+        id: 'plan-refund-scope-renewal',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-refund-scope-renewal',
+        credits: 0,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2027-01-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 1,
+      releasedCredits: 10,
+      skippedSubscriptions: 0,
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      user_id: 'user-refund-scope-renewal',
+      stripe_subscription_id: 'sub_refund_scope_renewal',
+      stripe_invoice_id: 'in_refund_scope_2027',
+      grant_type: 'annual_monthly_release',
+      period_index: 1,
+      credits_granted: 10,
+    });
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: 10,
+      source_type: 'stripe_invoice',
+      source_id: 'in_refund_scope_2027',
+      reason_code: 'annual_monthly_release',
+      counts_as_spend: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(10);
   });
 
   it('claws back released annual grants on full refund and keeps the clawback out of spend', async () => {
