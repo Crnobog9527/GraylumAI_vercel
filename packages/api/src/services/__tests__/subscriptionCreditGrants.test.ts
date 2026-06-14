@@ -1353,7 +1353,7 @@ describe('subscription credit grants', () => {
           clawbackAmount: 30,
           reversedGrantCount: 3,
           creditTransactionId: 'txn-1',
-          idempotencyKey: 'stripe_refund:subscription_grants:re_subscription_full:sub_subscription_refund',
+          idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
         }),
       },
     });
@@ -1368,6 +1368,7 @@ describe('subscription credit grants', () => {
       source_id: 're_subscription_full',
       source_refund_id: 're_subscription_full',
       source_order_id: 'order-subscription-refund',
+      idempotency_key: 'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
     });
     expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
     expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
@@ -1393,7 +1394,7 @@ describe('subscription credit grants', () => {
     const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
       orderId: 'order-subscription-refund',
       subscriptionId: 'sub_subscription_refund',
-      refundId: 're_subscription_full',
+      refundId: 're_subscription_full_later_event',
       refundEventType: 'refund.updated',
       refundStatus: 'succeeded',
       isFullRefund: true,
@@ -1406,6 +1407,21 @@ describe('subscription credit grants', () => {
       creditTransactionId: 'txn-1',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_subscription_full',
+      eventType: 'refund.created',
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      reviewRequired: false,
+      idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) =>
+      grant.metadata.reversal.idempotencyKey,
+    )).toEqual([
+      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
+      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
+      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
+    ]);
   });
 
   it('records an auditable full-refund shortfall when the current balance cannot cover clawback', async () => {
@@ -1538,7 +1554,7 @@ describe('subscription credit grants', () => {
     const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
       orderId: 'order-subscription-refund-shortfall',
       subscriptionId: 'sub_subscription_refund_shortfall',
-      refundId: 're_subscription_shortfall',
+      refundId: 're_subscription_shortfall_later_event',
       refundEventType: 'refund.updated',
       refundStatus: 'succeeded',
       isFullRefund: true,
@@ -1555,10 +1571,117 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_subscription_shortfall',
       reversedGrantCount: 3,
       shortfallAmount: 25,
       reversalStatus: 'shortfall_review_required',
+      idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund_shortfall:sub_subscription_refund_shortfall',
     });
+  });
+
+  it('includes already reversed invoice grants when completing a later full-refund event', async () => {
+    const invoiceScopedKey = 'stripe_refund:subscription_grants:invoice:in_subscription_refund_pending:sub_subscription_refund_pending';
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-pending',
+        user_id: 'user-subscription-refund-pending',
+        stripe_subscription_id: 'sub_subscription_refund_pending',
+        stripe_invoice_id: 'in_subscription_refund_pending',
+        status: 'partially_refunded',
+        payment_status: 'partially_refunded',
+        metadata: {
+          subscriptionCreditGrantReversal: {
+            fullRefund: true,
+            invoiceId: 'in_subscription_refund_pending',
+            idempotencyKey: invoiceScopedKey,
+            reversalStatus: 'pending',
+          },
+        },
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-pending',
+        credits: 80,
+      }],
+      credit_transactions: [{
+        id: 'txn-existing-invoice-refund',
+        user_id: 'user-subscription-refund-pending',
+        amount: -20,
+        idempotency_key: invoiceScopedKey,
+        ledger_type: 'refund_clawback',
+        reason_code: 'refund_clawback',
+        counts_as_spend: false,
+      }],
+      subscription_credit_grants: [1, 2].map((periodIndex) => ({
+        id: `grant-refund-pending-${periodIndex}`,
+        user_id: 'user-subscription-refund-pending',
+        membership_plan_id: 'plan-subscription-refund-pending',
+        stripe_subscription_id: 'sub_subscription_refund_pending',
+        stripe_invoice_id: 'in_subscription_refund_pending',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_subscription_refund_pending:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'reversed',
+        metadata: {
+          sourceType: 'stripe_invoice',
+          reversal: {
+            invoiceId: 'in_subscription_refund_pending',
+            idempotencyKey: invoiceScopedKey,
+            creditTransactionId: 'txn-existing-invoice-refund',
+            source: 'subscription_refund',
+          },
+        },
+      })),
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-pending',
+      subscriptionId: 'sub_subscription_refund_pending',
+      refundId: 're_subscription_refund_pending_later_event',
+      refundEventType: 'charge.refunded',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_pending',
+      isFullRefund: true,
+      now: '2026-04-01T00:05:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-existing-invoice-refund',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_subscription_refund_pending_later_event',
+          eventType: 'charge.refunded',
+          fullRefund: true,
+          reviewRequired: false,
+          reversedGrantCount: 2,
+          clawbackAmount: 20,
+          appliedClawbackAmount: 20,
+          shortfallAmount: 0,
+          creditTransactionId: 'txn-existing-invoice-refund',
+          idempotencyKey: invoiceScopedKey,
+          reversalStatus: 'complete',
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+    ]);
   });
 
   it('limits full-refund reversal to grants from the refunded invoice', async () => {

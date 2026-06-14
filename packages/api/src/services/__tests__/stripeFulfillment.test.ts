@@ -1601,6 +1601,54 @@ describe('stripe fulfillment helpers', () => {
       releasedCredits: 0,
       skippedSubscriptions: 1,
     });
+
+    const chargeRefundedReplay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_refund_created_charge_replay',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_refund_created',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_refund_created',
+            payment_intent: 'pi_webhook_refund_created',
+            refunds: {
+              data: [{
+                id: 're_webhook_refund_created_charge_later',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2026-04-01T00:05:00.000Z' },
+    );
+
+    expect(chargeRefundedReplay).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_webhook_refund_created_full',
+      eventType: 'refund.created',
+      invoiceId: 'in_webhook_refund_created',
+      reviewRequired: true,
+      shortfallAmount: 25,
+      reversalStatus: 'shortfall_review_required',
+      reversedGrantCount: 3,
+    });
   });
 
   it('treats cumulative partial refunds that reach the order total as full subscription refunds', async () => {
@@ -1725,6 +1773,56 @@ describe('stripe fulfillment helpers', () => {
       reason_code: 'refund_clawback',
       counts_as_spend: false,
       source_refund_id: 're_webhook_cumulative_full_second',
+      idempotency_key: 'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) =>
+      grant.metadata.reversal.idempotencyKey,
+    )).toEqual([
+      'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+      'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+    ]);
+
+    const refundUpdatedReplay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_full_update',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_full_update',
+            amount: 100,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_full',
+            payment_intent: 'pi_webhook_cumulative_full',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.updated'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-03-01T00:05:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(refundUpdatedReplay).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_webhook_cumulative_full_second',
+      eventType: 'refund.created',
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      reviewRequired: false,
     });
 
     const releaseAfterCumulativeFullRefund = await releaseDueAnnualSubscriptionCredits(supabase, {

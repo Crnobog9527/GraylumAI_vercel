@@ -756,7 +756,18 @@ function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
     : null;
 }
 
-function buildSubscriptionRefundIdempotencyKey(input: ReconcileSubscriptionRefundCreditGrantsInput) {
+function buildSubscriptionRefundIdempotencyKey(
+  input: ReconcileSubscriptionRefundCreditGrantsInput,
+  scope: { invoiceId?: string | null } = {},
+) {
+  if (input.isFullRefund) {
+    const invoiceToken = scope.invoiceId?.trim() || input.invoiceId?.trim() || null;
+    const fullRefundToken = invoiceToken
+      ? `invoice:${invoiceToken}`
+      : `order:${input.orderId}`;
+    return `stripe_refund:subscription_grants:${fullRefundToken}:${input.subscriptionId}`;
+  }
+
   const refundToken = input.refundId?.trim() || input.orderId;
   return `stripe_refund:subscription_grants:${refundToken}:${input.subscriptionId}`;
 }
@@ -849,7 +860,7 @@ function buildSubscriptionRefundMetadata(input: {
 
 function getExistingRefundReversalMetadata(
   order: PaymentOrderRow,
-  idempotencyKey: string,
+  input: { idempotencyKey: string; invoiceId?: string | null },
 ): (Pick<SubscriptionRefundCreditGrantReconciliationResult,
   | 'reviewRequired'
   | 'reversedGrantCount'
@@ -860,9 +871,15 @@ function getExistingRefundReversalMetadata(
   | 'alreadyReconciled'
 > & { reversalStatus: string | null }) | null {
   const reversal = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
+  const reversalInvoiceId = typeof reversal.invoiceId === 'string'
+    ? reversal.invoiceId
+    : null;
+  const invoiceId = input.invoiceId?.trim() || null;
+  const matchesReconciliation = reversal.idempotencyKey === input.idempotencyKey
+    || Boolean(invoiceId && reversalInvoiceId === invoiceId);
   if (
     reversal.fullRefund !== true
-    || reversal.idempotencyKey !== idempotencyKey
+    || !matchesReconciliation
   ) {
     return null;
   }
@@ -1087,7 +1104,7 @@ function getRefundInvoiceScope(order: PaymentOrderRow, input: ReconcileSubscript
 
 function isRefundableGrantForReconciliation(
   grant: SubscriptionCreditGrantRow,
-  idempotencyKey: string,
+  input: { idempotencyKey: string; invoiceId?: string | null },
 ) {
   if (toPositiveInteger(grant.credits_granted) <= 0) {
     return false;
@@ -1098,7 +1115,15 @@ function isRefundableGrantForReconciliation(
   }
 
   const reversal = asRecord(asRecord(grant.metadata).reversal);
-  return grant.status === 'reversed' && reversal.idempotencyKey === idempotencyKey;
+  const reversalInvoiceId = typeof reversal.invoiceId === 'string'
+    ? reversal.invoiceId
+    : null;
+  const invoiceId = input.invoiceId?.trim() || null;
+  return grant.status === 'reversed'
+    && (
+      reversal.idempotencyKey === input.idempotencyKey
+      || Boolean(invoiceId && reversalInvoiceId === invoiceId)
+    );
 }
 
 async function applySubscriptionRefundClawback(input: {
@@ -1250,11 +1275,13 @@ export async function reconcileSubscriptionRefundCreditGrants(
 ): Promise<SubscriptionRefundCreditGrantReconciliationResult> {
   const now = input.now ?? new Date().toISOString();
   const order = await getSubscriptionRefundOrder(supabase, input);
-  const idempotencyKey = buildSubscriptionRefundIdempotencyKey(input);
   const invoiceScope = getRefundInvoiceScope(order, input);
   const scopedRefund = invoiceScope.invoiceId && invoiceScope.invoiceId !== input.invoiceId
     ? { ...input, invoiceId: invoiceScope.invoiceId }
     : input;
+  const idempotencyKey = buildSubscriptionRefundIdempotencyKey(scopedRefund, {
+    invoiceId: invoiceScope.invoiceId,
+  });
 
   if (!input.isFullRefund) {
     await updateSubscriptionRefundOrder({
@@ -1282,7 +1309,10 @@ export async function reconcileSubscriptionRefundCreditGrants(
     };
   }
 
-  const existingReversal = getExistingRefundReversalMetadata(order, idempotencyKey);
+  const existingReversal = getExistingRefundReversalMetadata(order, {
+    idempotencyKey,
+    invoiceId: invoiceScope.invoiceId,
+  });
   if (existingReversal) {
     return {
       orderId: order.id as string,
@@ -1345,7 +1375,10 @@ export async function reconcileSubscriptionRefundCreditGrants(
     invoiceId: invoiceScope.invoiceId,
   });
   const refundableGrants = grants.filter((grant) =>
-    isRefundableGrantForReconciliation(grant, idempotencyKey),
+    isRefundableGrantForReconciliation(grant, {
+      idempotencyKey,
+      invoiceId: invoiceScope.invoiceId,
+    }),
   );
   const grantsToReverse = refundableGrants.filter((grant) => grant.status === 'granted');
   const userId = order.user_id ?? refundableGrants[0]?.user_id ?? null;

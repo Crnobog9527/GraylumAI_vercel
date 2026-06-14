@@ -1694,6 +1694,71 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - invoice-scoped full-refund reconciliation key
+
+- 时间：2026-06-14 17:05 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`bc69835b1c2b2aad48a172cbe6165438c3883530`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P2 `Use an invoice-scoped key for full-refund reconciliation`.
+- Full-refund reconciliation now uses an invoice-scoped idempotency key when an invoice is available, with an order-scoped fallback only for invoice-missing review-required cases.
+- Partial refund reconciliation keeps refund-id scoped audit semantics; cumulative partial refunds that reach full refund switch into the invoice-scoped full-refund path.
+- Same invoice / later `refund.updated` or `charge.refunded` events with a different refund id now return already-reconciled results or safely complete pending metadata without duplicate clawback.
+- Existing complete shortfall / review-required metadata is not overwritten by later same-invoice full-refund events.
+- Already reversed grants for the same invoice are counted in later completion/replay paths, so `reversedGrantCount`, clawback amount, and shortfall audit totals do not collapse to zero.
+- Kept prior PR6/PR5 protections in place: refund reversal remains invoice-scoped, refund clawback remains non-spend, annual monthly release remains invoice-scoped, and subscription upgrade replay/source-order tests still pass.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscriptionCreditGrants tests：`pnpm --filter api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；1 file / 26 tests passed。
+- Targeted webhook / stripeFulfillment refund tests：`pnpm --filter api exec vitest run src/services/__tests__/stripeFulfillment.test.ts` 通过；1 file / 21 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts -t "replay|plan-change|source order|refund"` 通过；2 files / 22 tests passed / 25 skipped。
+- `pnpm test:api`：通过；48 files / 578 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- Same invoice: first `refund.created` full refund, then `refund.updated` with a different refund id does not duplicate clawback.
+- Same invoice: `charge.refunded` after full-refund shortfall returns already reconciled and does not overwrite existing review-required / shortfall metadata.
+- Already reversed same-invoice grants remain included in later completion/replay audit totals.
+- Multiple partial refunds that cumulatively reach full refund use the invoice-scoped full-refund key.
+- `refund_clawback` remains `counts_as_spend = false`.
+- Current invoice full refund still blocks annual monthly release.
+- Old invoice refund does not block a later paid renewal invoice's valid annual monthly release.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - invoice-scoped annual release blocks and cumulative refunds
 
 - 时间：2026-06-14 16:38 CST。
