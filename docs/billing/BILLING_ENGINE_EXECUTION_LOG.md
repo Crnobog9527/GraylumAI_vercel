@@ -1567,17 +1567,20 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Base：`staging`。
 - Base SHA：`0c982e2888bb7fd683ad8c33a749fd8dde39236e`。
 - Implementation commit：`baa449518e2bfbbe2ea612abfc68ddb90038c220`。
+- Latest-head before P1 fix：`3a888867f2aa56cd9394b17f8fd0a2a04f2c458f`。
 - 状态：draft PR created；issue #225 updated to PR6 `in_progress` before implementation。
 
 ### Scope
 
 - PR6 source-code-only：联动 subscription full/partial refund 与 annual monthly release。
-- Full subscription refund now marks the payment order `refunded` before grant reversal work, so future annual release scans stop for that subscription.
+- Full subscription refund now first writes a review-required `partially_refunded` marker with `fullRefund = true`, blocking future annual release before risky clawback/reversal work begins.
+- Full subscription refund only writes final `payment_orders.status = refunded` after clawback, grant reversal, and shortfall/review metadata have reached a consistent auditable state.
 - Full subscription refund claws back already released `subscription_credit_grants` via a single `credit_transactions` row with `ledger_type = refund_clawback` and `counts_as_spend = false`.
 - Full subscription refund marks released grant rows `reversed` while preserving per-grant audit metadata and reversal transaction metadata.
+- If current profile credits cannot cover the full clawback and DB/RPC would reject a negative balance, PR6 clamps the applied clawback to the available balance, records `shortfallAmount`, `appliedClawbackAmount`, `shortfallReason`, and `reversalStatus = shortfall_review_required`, and keeps future annual release blocked.
 - Partial subscription refund marks `payment_orders.status = partially_refunded` and records `reviewRequired = true`; it does not auto-clawback complex partial annual releases.
 - Annual release eligibility now fails closed for `refunded`, `canceled/cancelled`, `past_due`, `incomplete`, `incomplete_expired`, `unpaid`, and `paused` states.
-- Annual release full-refund detection now also honors canonical/legacy payment status and refund metadata, not only `status = refunded`.
+- Annual release full-refund detection now uses deterministic existence queries for `status = refunded`, `payment_status = refunded`, `stripeRefundReconciliation.fullRefund`, and `subscriptionCreditGrantReversal.fullRefund`; it no longer depends on capped/unordered payment-order scans.
 - Refund order/subscription mismatch fails closed before any clawback.
 
 ### Changed files
@@ -1592,6 +1595,8 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Full refund writes `refund_clawback` with `counts_as_spend = false`, so it does not count as monthly spend.
 - Full refund marks released `subscription_credit_grants` as `reversed` and keeps reversal audit metadata.
 - Full refund stops future annual monthly releases for the refunded subscription.
+- Full refund with insufficient current credits records a review-required shortfall, avoids negative-balance RPC failure, reverses released grant rows, and still blocks future annual monthly release.
+- Full-refund marker detection still blocks annual release when the refund/reversal marker is beyond the first 20 historical `payment_orders` rows.
 - Partial refund enters review-required state and does not auto-clawback released annual grants.
 - Normal paid active annual subscription still releases only the currently due monthly credit.
 - Canceled/refunded/invalid/payment-attention subscription states do not receive annual release.
@@ -1601,9 +1606,9 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 ### Validation
 
 - `pnpm install --frozen-lockfile`：通过；lockfile already up to date，未产生 tracked package/lockfile 变更。
-- Targeted PR6 grant tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；47 files / 565 tests passed。
-- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` 通过；47 files / 565 tests passed。
-- `pnpm test:api`：通过；47 files / 565 tests passed。
+- Targeted PR6 grant tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；47 files / 567 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` 通过；47 files / 567 tests passed。
+- `pnpm test:api`：通过；47 files / 567 tests passed。
 - `pnpm lint`：通过。
 - `pnpm --filter web typecheck`：通过。
 - `git diff --check`：通过。
@@ -1630,9 +1635,10 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 ### Known risk / stop line
 
 - Blueprint PR6 的“余额不足时允许负余额，并阻止继续 AI 使用”未在本 source-code-only PR 中实现：当前数据库历史约束 `profiles_credits_non_negative` 与现有 `atomic_apply_credit_ledger_entry` RPC 都会阻止负余额。实现该策略需要单独 DB/RPC migration 或替代原子写入设计，必须等待 owner 单独授权。
+- PR6 P1 fix does not perform that migration. Instead, source code now records a review-required shortfall and blocks future annual release when full refund clawback cannot be fully applied under the current non-negative balance RPC.
 - 本 PR 不执行真实 Stripe refund，也不 replay webhook；所有 refund 行为通过 source-level service tests 验证。
 
 ### Stop point
 
-- PR6 remains `in_progress` until draft PR is created, remote checks are observed, and owner audit is complete.
+- PR6 remains `in_progress` until the P1 fix is pushed, latest-head Codex review is clean, remote checks are observed, and owner audit is complete.
 - No DB migration / no production / no real Stripe refund / no PR7.

@@ -27,6 +27,7 @@ type Row = Record<string, any>;
 
 class MockQuery {
   private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private containsFilters: Array<{ column: string; value: unknown }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
   private limitValue: number | null = null;
@@ -53,6 +54,11 @@ class MockQuery {
 
   lte(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  contains(column: string, value: unknown) {
+    this.containsFilters.push({ column, value });
     return this;
   }
 
@@ -141,7 +147,10 @@ class MockQuery {
         }
 
         return row[column] <= value;
-      }),
+      })
+      && this.containsFilters.every(({ column, value }) =>
+        containsValue(row[column], value),
+      ),
     );
 
     if (!this.orderBy) {
@@ -161,6 +170,25 @@ class MockQuery {
       return ascending ? comparison : -comparison;
     });
   }
+}
+
+function containsValue(actual: unknown, expected: unknown): boolean {
+  if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)) {
+      return false;
+    }
+
+    return Object.entries(expected as Row).every(([key, value]) =>
+      containsValue((actual as Row)[key], value),
+    );
+  }
+
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual)
+      && expected.every((value) => (actual as unknown[]).some((item) => containsValue(item, value)));
+  }
+
+  return actual === expected;
 }
 
 function createMockSupabase(seed: Partial<Record<TableName, Row[]>> = {}) {
@@ -208,13 +236,28 @@ function createMockSupabase(seed: Partial<Record<TableName, Row[]>> = {}) {
         balance_before: 0,
         balance_after: payload.p_amount,
       };
+      const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
+      if (profile) {
+        const balanceBefore = typeof profile.credits === 'number' ? profile.credits : Number(profile.credits ?? 0);
+        const balanceAfter = balanceBefore + payload.p_amount;
+        if (balanceAfter < 0) {
+          return {
+            data: null,
+            error: { message: 'insufficient credits' },
+          };
+        }
+
+        profile.credits = balanceAfter;
+        transaction.balance_before = balanceBefore;
+        transaction.balance_after = balanceAfter;
+      }
       tables.credit_transactions.push(transaction);
 
       return {
         data: [{
           transaction_id: transaction.id,
-          balance_before: 0,
-          balance_after: payload.p_amount,
+          balance_before: transaction.balance_before,
+          balance_after: transaction.balance_after,
           amount: payload.p_amount,
           is_idempotent: false,
         }],
@@ -1092,6 +1135,63 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
   });
 
+  it('finds full-refund markers beyond the first payment order page before annual release', async () => {
+    const historicalOrders = Array.from({ length: 35 }, (_, index) => ({
+      id: `order-history-${index + 1}`,
+      stripe_subscription_id: 'sub_refund_marker_many_rows',
+      status: 'completed',
+      payment_status: 'paid',
+      metadata: { sequence: index + 1 },
+    }));
+    const supabase = createMockSupabase({
+      payment_orders: [
+        ...historicalOrders,
+        {
+          id: 'order-refund-marker-many-rows',
+          stripe_subscription_id: 'sub_refund_marker_many_rows',
+          status: 'partially_refunded',
+          payment_status: 'partially_refunded',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              fullRefund: true,
+              reviewRequired: true,
+              shortfallAmount: 15,
+              reversalStatus: 'shortfall_review_required',
+            },
+          },
+        },
+      ],
+      user_subscriptions: [{
+        id: 'subscription-refund-marker-many-rows',
+        user_id: 'user-refund-marker-many-rows',
+        membership_plan_id: 'plan-refund-marker-many-rows',
+        stripe_subscription_id: 'sub_refund_marker_many_rows',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_refund_marker_many_rows' },
+      }],
+      membership_plans: [{
+        id: 'plan-refund-marker-many-rows',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+  });
+
   it('claws back released annual grants on full refund and keeps the clawback out of spend', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
@@ -1224,6 +1324,159 @@ describe('subscription credit grants', () => {
       creditTransactionId: 'txn-1',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('records an auditable full-refund shortfall when the current balance cannot cover clawback', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-shortfall',
+        user_id: 'user-subscription-refund-shortfall',
+        stripe_subscription_id: 'sub_subscription_refund_shortfall',
+        stripe_invoice_id: 'in_subscription_refund_shortfall',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 20 },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-refund-shortfall',
+        user_id: 'user-subscription-refund-shortfall',
+        membership_plan_id: 'plan-subscription-refund-shortfall',
+        stripe_subscription_id: 'sub_subscription_refund_shortfall',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_subscription_refund_shortfall' },
+      }],
+      membership_plans: [{
+        id: 'plan-subscription-refund-shortfall',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-shortfall',
+        credits: 5,
+      }],
+      subscription_credit_grants: [1, 2, 3].map((periodIndex) => ({
+        id: `grant-refund-shortfall-${periodIndex}`,
+        user_id: 'user-subscription-refund-shortfall',
+        membership_plan_id: 'plan-subscription-refund-shortfall',
+        stripe_subscription_id: 'sub_subscription_refund_shortfall',
+        stripe_invoice_id: 'in_subscription_refund_shortfall',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_subscription_refund_shortfall:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-shortfall',
+      subscriptionId: 'sub_subscription_refund_shortfall',
+      refundId: 're_subscription_shortfall',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_shortfall',
+      isFullRefund: true,
+      now: '2026-04-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-1',
+      alreadyReconciled: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: true,
+          reviewRequired: true,
+          clawbackAmount: 30,
+          appliedClawbackAmount: 5,
+          shortfallAmount: 25,
+          shortfallReason: 'insufficient_balance',
+          reversedGrantCount: 3,
+          creditTransactionId: 'txn-1',
+          reversalStatus: 'shortfall_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -5,
+      type: 'deduction',
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_type: 'stripe_refund',
+      source_refund_id: 're_subscription_shortfall',
+      source_order_id: 'order-subscription-refund-shortfall',
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 30,
+        shortfallAmount: 25,
+      }),
+    });
+    expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+      'reversed',
+    ]);
+    expect(supabase.tables.subscription_credit_grants[0].metadata.reversal).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      shortfallReason: 'insufficient_balance',
+      source: 'subscription_refund',
+    });
+
+    const releaseAfterShortfall = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterShortfall).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-shortfall',
+      subscriptionId: 'sub_subscription_refund_shortfall',
+      refundId: 're_subscription_shortfall',
+      refundEventType: 'refund.updated',
+      refundStatus: 'succeeded',
+      isFullRefund: true,
+      now: '2026-04-01T00:05:00.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      reversedGrantCount: 3,
+      shortfallAmount: 25,
+      reversalStatus: 'shortfall_review_required',
+    });
   });
 
   it('marks partial subscription refunds for review without clawing back released grants', async () => {
