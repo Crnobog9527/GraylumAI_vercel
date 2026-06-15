@@ -5,6 +5,7 @@
  */
 
 import { logger } from '../lib/logger';
+import { normalizePaymentOrderStatus } from './paymentOrderStatus';
 import {
   buildSubscriptionPlanChangeLockKey,
   isSubscriptionPlanChangeOrder,
@@ -442,12 +443,12 @@ function getInvoiceOrderRefundBlockReason(order: PaymentOrderRow | null | undefi
     return null;
   }
 
-  const status = (order.status ?? '').trim().toLowerCase();
+  const status = normalizePaymentOrderStatus(order.status);
   if (status === 'refunded') {
     return 'refunded_status';
   }
 
-  const paymentStatus = (order.payment_status ?? '').trim().toLowerCase();
+  const paymentStatus = normalizePaymentOrderStatus(order.payment_status);
   if (paymentStatus === 'refunded') {
     return 'refunded_payment_status';
   }
@@ -773,6 +774,18 @@ async function hasSubscriptionFullRefund(
   const statusChecks = [
     { stage: 'subscription_full_refund_status_lookup', column: 'status', value: 'refunded' },
     { stage: 'subscription_full_refund_payment_status_lookup', column: 'payment_status', value: 'refunded' },
+    { stage: 'subscription_refund_review_status_lookup', column: 'status', value: 'partially_refunded' },
+    { stage: 'subscription_refund_review_legacy_status_lookup', column: 'status', value: 'partial_refunded' },
+    {
+      stage: 'subscription_refund_review_payment_status_lookup',
+      column: 'payment_status',
+      value: 'partially_refunded',
+    },
+    {
+      stage: 'subscription_refund_review_legacy_payment_status_lookup',
+      column: 'payment_status',
+      value: 'partial_refunded',
+    },
   ];
 
   for (const check of statusChecks) {

@@ -642,6 +642,70 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
   });
 
+  it('does not grant credits or complete a legacy partial_refunded invoice order', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-invoice-legacy-partial-review-block',
+        user_id: 'user-invoice-legacy-partial-review-block',
+        item_id: 'plan-invoice-legacy-partial-review-block',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_invoice_legacy_partial_review_block',
+        stripe_subscription_id: 'sub_invoice_legacy_partial_review_block',
+        stripe_customer_id: 'cus_invoice_legacy_partial_review_block',
+        stripe_price_id: 'price_invoice_legacy_partial_review_block',
+        status: 'partial_refunded',
+        payment_status: 'partial_refunded',
+        metadata: { source: 'legacy_refund_marker' },
+      }],
+      membership_plans: [{
+        id: 'plan-invoice-legacy-partial-review-block',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-invoice-legacy-partial-review-block',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    const replay = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 9900,
+      currency: 'usd',
+      invoiceId: 'in_invoice_legacy_partial_review_block',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2027-06-01T00:00:00.000Z',
+      stripeCustomerId: 'cus_invoice_legacy_partial_review_block',
+      subscriptionId: 'sub_invoice_legacy_partial_review_block',
+      now: '2026-06-01T00:00:03.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+      invoiceOrderId: 'order-invoice-legacy-partial-review-block',
+      skippedReason: 'blocked_by_refund_marker',
+      refundBlockReason: 'partial_refund_status',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partial_refunded',
+      payment_status: 'partial_refunded',
+      metadata: { source: 'legacy_refund_marker' },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+  });
+
   it('skips refund-review invoice source orders and falls back to a paid source order', async () => {
     const supabase = createMockSupabase({
       payment_orders: [
@@ -655,17 +719,10 @@ describe('subscription credit grants', () => {
           stripe_subscription_id: 'sub_source_refund_review',
           stripe_customer_id: 'cus_source_refund_review',
           stripe_price_id: 'price_source_gold_yearly',
-          status: 'partially_refunded',
-          payment_status: 'partially_refunded',
+          status: 'partial_refunded',
+          payment_status: 'partial_refunded',
           created_at: '2026-06-01T00:00:02.000Z',
-          metadata: {
-            subscriptionCreditGrantReversal: {
-              refundId: 're_source_partial_review',
-              fullRefund: false,
-              reviewRequired: true,
-              reversalStatus: 'partial_refund_review_required',
-            },
-          },
+          metadata: { source: 'legacy_refund_marker' },
         },
         {
           id: 'order-source-paid-older',
@@ -733,15 +790,9 @@ describe('subscription credit grants', () => {
       counts_as_spend: false,
     });
     expect(supabase.tables.payment_orders.find((row) => row.id === 'order-source-partial-review-newer')).toMatchObject({
-      status: 'partially_refunded',
-      payment_status: 'partially_refunded',
-      metadata: {
-        subscriptionCreditGrantReversal: expect.objectContaining({
-          fullRefund: false,
-          reviewRequired: true,
-          reversalStatus: 'partial_refund_review_required',
-        }),
-      },
+      status: 'partial_refunded',
+      payment_status: 'partial_refunded',
+      metadata: { source: 'legacy_refund_marker' },
     });
     expect(supabase.tables.payment_orders.find((row) => row.stripe_invoice_id === 'in_source_paid_replay')).toMatchObject({
       user_id: 'user-source-refund-review',
@@ -1642,6 +1693,46 @@ describe('subscription credit grants', () => {
 
     expect(result.releasedGrantCount).toBe(0);
     expect(result.skippedSubscriptions).toBe(1);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+  });
+
+  it('stops future annual release for legacy partial-refund invoice status', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-legacy-partial-refunded',
+        stripe_subscription_id: 'sub_legacy_partial_refunded',
+        stripe_invoice_id: 'in_legacy_partial_refunded',
+        status: 'partial_refunded',
+        payment_status: 'partial_refunded',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-legacy-partial-refunded',
+        user_id: 'user-legacy-partial-refunded',
+        membership_plan_id: 'plan-legacy-partial-refunded',
+        stripe_subscription_id: 'sub_legacy_partial_refunded',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_legacy_partial_refunded' },
+      }],
+      membership_plans: [{
+        id: 'plan-legacy-partial-refunded',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
   });
 

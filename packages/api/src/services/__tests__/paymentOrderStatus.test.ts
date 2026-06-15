@@ -33,6 +33,7 @@ describe('payment order status mapper', () => {
   it('normalizes legacy spelling to the canonical v1.5 status vocabulary', () => {
     expect(normalizePaymentOrderStatus('cancelled')).toBe('canceled');
     expect(normalizePaymentOrderStatus('partial_refunded')).toBe('partially_refunded');
+    expect(normalizePaymentOrderStatus(' partial_refunded ')).toBe('partially_refunded');
   });
 
   it('preserves fulfilled and refund terminal states during checkout replays', () => {

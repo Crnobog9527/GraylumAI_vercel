@@ -5,6 +5,7 @@
  */
 
 import { isStripeManagedSubscriptionActive } from './subscriptionOverrides';
+import { isRefundPaymentOrderStatus } from './paymentOrderStatus';
 
 export type MembershipLevel = 'free' | 'pro' | 'gold';
 export type EligibilityLevel = MembershipLevel | 'unknown';
@@ -207,9 +208,7 @@ function hasFullRefundSignal(order: PaymentOrderRow | null) {
     return false;
   }
 
-  const status = normalizeStatus(order.status);
-  const paymentStatus = normalizeStatus(order.payment_status);
-  if (status === 'refunded' || paymentStatus === 'refunded') {
+  if (isRefundPaymentOrderStatus(order.status) || isRefundPaymentOrderStatus(order.payment_status)) {
     return true;
   }
 
@@ -224,6 +223,7 @@ function hasFullRefundSignal(order: PaymentOrderRow | null) {
   return refundMetadataCandidates.some((refundMetadata) =>
     refundMetadata.isFullRefund === true ||
     refundMetadata.fullRefund === true ||
+    refundMetadata.reviewRequired === true ||
     refundMetadata.refundType === 'full',
   );
 }
