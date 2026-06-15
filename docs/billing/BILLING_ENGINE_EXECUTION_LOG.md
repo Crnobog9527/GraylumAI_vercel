@@ -1700,7 +1700,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
 - Base：`staging`。
 - PR head SHA：`10147e0083c4feca7b21fda3e9d1443058a42810`。
-- Squash merge commit / current `origin/staging` SHA：`e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`。
+- Squash merge commit：`e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`。
 - 状态：PR6 `merged / #237`；PR7 remains `not_started`；stop after merge gate；not PR7。
 
 ### Merge Gate Evidence
