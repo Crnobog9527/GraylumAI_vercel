@@ -238,8 +238,22 @@ function hasRefundAuditMetadata(order: PaymentOrderRow) {
   );
 }
 
-function hasFullRefundSignal(value: unknown): boolean {
-  return asRecord(value).fullRefund === true;
+function getInvoiceId(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function hasFullRefundSignal(value: unknown, invoiceId?: string | null): boolean {
+  const record = asRecord(value);
+  if (record.fullRefund !== true) {
+    return false;
+  }
+
+  const scopedInvoiceId = getInvoiceId(invoiceId);
+  if (!scopedInvoiceId) {
+    return true;
+  }
+
+  return getInvoiceId(record.invoiceId) === scopedInvoiceId;
 }
 
 function isFullRefundedSubscriptionOrder(order: PaymentOrderRow) {
@@ -259,6 +273,32 @@ function isFullRefundedSubscriptionOrder(order: PaymentOrderRow) {
     || hasFullRefundSignal(metadata.subscriptionCreditGrantReversal)
     || hasFullRefundSignal(metadata.refundReconciliation)
     || hasFullRefundSignal(metadata.refund)
+  );
+}
+
+function isFullRefundedSubscriptionOrderForInvoice(order: PaymentOrderRow, invoiceId: string | null) {
+  if (!isMembershipSubscriptionOrder(order)) {
+    return false;
+  }
+
+  const scopedInvoiceId = getInvoiceId(invoiceId);
+  if (!scopedInvoiceId) {
+    return isFullRefundedSubscriptionOrder(order);
+  }
+
+  const orderInvoiceId = getInvoiceId(order.stripe_invoice_id);
+  const status = getRawPaymentOrderStatus(order.status);
+  const paymentStatus = getRawPaymentOrderStatus(order.payment_status);
+  if (orderInvoiceId === scopedInvoiceId && (status === 'refunded' || paymentStatus === 'refunded')) {
+    return true;
+  }
+
+  const metadata = asRecord(order.metadata);
+  return (
+    hasFullRefundSignal(metadata.stripeRefundReconciliation, scopedInvoiceId)
+    || hasFullRefundSignal(metadata.subscriptionCreditGrantReversal, scopedInvoiceId)
+    || hasFullRefundSignal(metadata.refundReconciliation, scopedInvoiceId)
+    || hasFullRefundSignal(metadata.refund, scopedInvoiceId)
   );
 }
 
@@ -337,6 +377,10 @@ function getDueAnnualGrantPeriodKeys(subscription: SubscriptionRow, now: Date) {
     const periodStartMs = Math.round(startMs + periodMs * index);
     return buildAnnualGrantPeriodKey(subscriptionId, periodStartMs, periodIndex);
   });
+}
+
+function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
+  return getInvoiceId(asRecord(subscription.metadata).lastInvoiceId);
 }
 
 function addFinding(
@@ -740,19 +784,21 @@ export function buildBillingEngineV15ReadinessAudit(
   }
 
   if (!hasTruncatedAnnualReleaseInput) {
-    const fullRefundedSubscriptionIds = new Set(
-      rows.paymentOrders
-        .filter((order) => order.stripe_subscription_id && isFullRefundedSubscriptionOrder(order))
-        .map((order) => order.stripe_subscription_id as string),
-    );
-
     for (const subscription of rows.subscriptions) {
       const subscriptionId = subscription.stripe_subscription_id;
       if (
         !subscriptionId
         || !isAnnualReleaseEligibleSubscription(subscription)
-        || fullRefundedSubscriptionIds.has(subscriptionId)
       ) {
+        continue;
+      }
+
+      const invoiceId = getAnnualReleaseInvoiceId(subscription);
+      const hasFullRefund = rows.paymentOrders.some((order) => (
+        order.stripe_subscription_id === subscriptionId
+        && isFullRefundedSubscriptionOrderForInvoice(order, invoiceId)
+      ));
+      if (hasFullRefund) {
         continue;
       }
 
