@@ -1374,6 +1374,28 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
       now,
     });
 
+    const logContext = {
+      eventType: event.type,
+      refundId: maskIdentifier(refundId),
+      refundStatus,
+      invoiceId: maskIdentifier(invoiceId),
+      orderId: maskIdentifier(order.id),
+      subscriptionId: maskIdentifier(order.stripe_subscription_id),
+      fullRefund: reconciliation.fullRefund,
+      reviewRequired: reconciliation.reviewRequired,
+      clawbackAmount: reconciliation.clawbackAmount,
+      appliedClawbackAmount: reconciliation.appliedClawbackAmount,
+      shortfallAmount: reconciliation.shortfallAmount,
+      reversedGrantCount: reconciliation.reversedGrantCount,
+      alreadyReconciled: reconciliation.alreadyReconciled,
+    };
+
+    if (reconciliation.reviewRequired) {
+      logger.warn('billing', 'stripe_refund_subscription_reconciliation_review_required', logContext);
+    } else {
+      logger.info('billing', 'stripe_refund_subscription_reconciled', logContext);
+    }
+
     return {
       reconciled: true,
       reason: null,

@@ -2398,3 +2398,64 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
+## PR 7 start checkpoint - reconciliation, monitoring, and final source-code validation
+
+- 时间：2026-06-15 22:55 CST。
+- 阶段：PR7 / reconciliation, monitoring, and final source-code validation。
+- Base：`staging`。
+- Base SHA：`c708fa01775f48baba17f1537b4184aae23cb870`。
+- Branch：`codex/billing-v1-pr7-reconciliation-monitoring`。
+- 状态：PR7 implementation in progress；draft PR pending；not merged；not production。
+- Previous stage：PR6 `merged / #237`；PR6 head `10147e0083c4feca7b21fda3e9d1443058a42810`；squash merge commit `e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`。
+
+### Scope
+
+- Added a source-code-only Billing Engine v1.5 readiness audit in `billingReconciliation`.
+- The audit is read-only and checks:
+  - `profiles.credits` against summed `credit_transactions`;
+  - `subscription_credit_grants` against matching subscription grant credit transactions;
+  - canonical / legacy `payment_orders` status vocabulary and stale pending orders;
+  - refunded subscription order audit metadata;
+  - refund clawback entries that must not count as spend;
+  - duplicate active subscription rows per user;
+  - duplicate annual monthly release grant periods;
+  - duplicate idempotency keys.
+- The existing `billing-reconcile` route now runs daily reconciliation and the PR7 readiness audit together, returns both results, and logs readiness findings in the existing cron log context.
+- Added structured refund reconciliation outcome logs for successful and review-required subscription refund reconciliations.
+
+### Changed files so far
+
+- `apps/web/src/app/api/cron/billing-reconcile/route.ts`
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation so far
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 9 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 145 tests.
+- Targeted refund / webhook / PR7 tests after observability patch：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts` passed；3 files / 47 tests.
+- `pnpm test:api` passed；48 files / 604 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Continue PR7 only inside source-code / tests / docs / draft PR / issue #225 control-plane updates.
+- Before owner audit, still required: `git diff --check`, final PR body, issue #225 update, latest-head Codex review clean, and Vercel checks success.
