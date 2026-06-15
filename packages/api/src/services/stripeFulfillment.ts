@@ -55,7 +55,10 @@ const STRIPE_FULFILLMENT_ERRORS = {
   invoicePaymentFailedUpdate: 'Failed to mark invoice payment order failed',
   invoicePaymentFailedInsert: 'Failed to insert failed invoice payment order',
   refundChargeLookup: 'Failed to retrieve Stripe refund charge',
+  refundPaymentIntentLookup: 'Failed to retrieve Stripe refund payment intent',
+  refundInvoiceLookup: 'Failed to resolve subscription refund invoice',
   refundOrderLookup: 'Failed to look up subscription refund order',
+  refundOrderUpdate: 'Failed to update subscription refund order',
   refundReconciliation: 'Failed to reconcile subscription refund credit grants',
   subscriptionLookup: 'Failed to look up subscription state',
   subscriptionUpdate: 'Failed to update subscription state',
@@ -255,6 +258,20 @@ function getChargePaymentIntentId(charge: Stripe.Charge | null | undefined) {
   return getExpandableId(charge?.payment_intent);
 }
 
+function getExpandedChargePaymentIntent(charge: Stripe.Charge | null | undefined) {
+  return typeof charge?.payment_intent === 'object' && charge.payment_intent !== null
+    ? charge.payment_intent as Stripe.PaymentIntent
+    : null;
+}
+
+function getPaymentIntentInvoiceId(paymentIntent: Stripe.PaymentIntent | null | undefined) {
+  const paymentIntentRecord = paymentIntent as (Stripe.PaymentIntent & {
+    invoice?: string | Stripe.Invoice | null;
+  }) | null | undefined;
+
+  return getExpandableId(paymentIntentRecord?.invoice);
+}
+
 function getRefundPaymentIntentId(refund: Stripe.Refund) {
   return getExpandableId(refund.payment_intent);
 }
@@ -272,6 +289,73 @@ function getRefundChargeId(refund: Stripe.Refund) {
 function getChargeRefundId(charge: Stripe.Charge) {
   const refund = charge.refunds?.data?.[0];
   return refund?.id ?? null;
+}
+
+function getChargeRefundStatus(charge: Stripe.Charge | null | undefined) {
+  const refund = charge?.refunds?.data?.[0] as (Stripe.Refund & { status?: string | null }) | undefined;
+  return typeof refund?.status === 'string' ? refund.status : null;
+}
+
+function getMetadataStringValue(metadata: unknown, keys: string[]) {
+  const metadataRecord = asRecord(metadata);
+  for (const key of keys) {
+    const value = metadataRecord[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getMetadataInvoiceId(metadata: unknown) {
+  return getMetadataStringValue(metadata, [
+    'invoiceId',
+    'stripeInvoiceId',
+    'invoice_id',
+    'stripe_invoice_id',
+  ]);
+}
+
+function getMetadataPaymentIntentId(metadata: unknown) {
+  return getMetadataStringValue(metadata, [
+    'paymentIntentId',
+    'stripePaymentIntentId',
+    'payment_intent',
+    'stripe_payment_intent_id',
+  ]);
+}
+
+function getMetadataChargeId(metadata: unknown) {
+  return getMetadataStringValue(metadata, [
+    'chargeId',
+    'stripeChargeId',
+    'charge_id',
+    'stripe_charge_id',
+  ]);
+}
+
+function isSuccessfulRefundStatus(status: string | null | undefined) {
+  const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  return normalizedStatus === 'succeeded' || normalizedStatus === 'successful';
+}
+
+function isRefundReadyForCreditReconciliation(input: {
+  eventType: StripeRefundWebhookEvent['type'];
+  refundStatus: string | null;
+  charge: Stripe.Charge | null;
+}) {
+  if (input.eventType === 'charge.refunded') {
+    const chargeRefundStatus = getChargeRefundStatus(input.charge);
+    if (chargeRefundStatus) {
+      return isSuccessfulRefundStatus(chargeRefundStatus);
+    }
+
+    return input.charge?.refunded === true
+      || toNonNegativeInteger(input.charge?.amount_refunded) > 0;
+  }
+
+  return isSuccessfulRefundStatus(input.refundStatus);
 }
 
 function isSubscriptionRefundOrder(
@@ -309,7 +393,7 @@ function isFullRefundForOrder(input: {
 async function retrieveStripeCharge(chargeId: string) {
   try {
     return await getStripeClient().charges.retrieve(chargeId, {
-      expand: ['invoice'],
+      expand: ['invoice', 'payment_intent'],
     });
   } catch (error) {
     throwFulfillmentError(
@@ -317,6 +401,21 @@ async function retrieveStripeCharge(chargeId: string) {
       STRIPE_FULFILLMENT_ERRORS.refundChargeLookup,
       error,
       { chargeId: maskIdentifier(chargeId) },
+    );
+  }
+}
+
+async function retrieveStripePaymentIntent(paymentIntentId: string) {
+  try {
+    return await getStripeClient().paymentIntents.retrieve(paymentIntentId, {
+      expand: ['invoice'],
+    });
+  } catch (error) {
+    throwFulfillmentError(
+      'refund_payment_intent_lookup',
+      STRIPE_FULFILLMENT_ERRORS.refundPaymentIntentLookup,
+      error,
+      { paymentIntentId: maskIdentifier(paymentIntentId) },
     );
   }
 }
@@ -334,6 +433,20 @@ async function resolveRefundCharge(
   return chargeId ? retrieveCharge(chargeId) : null;
 }
 
+const SUBSCRIPTION_REFUND_ORDER_SELECT = [
+  'id',
+  'user_id',
+  'item_type',
+  'billing_cycle',
+  'status',
+  'payment_status',
+  'stripe_invoice_id',
+  'stripe_subscription_id',
+  'amount_total',
+  'currency',
+  'metadata',
+].join(', ');
+
 async function getSubscriptionRefundOrderByInvoice(
   supabase: SupabaseLikeClient,
   input: {
@@ -343,7 +456,7 @@ async function getSubscriptionRefundOrderByInvoice(
 ): Promise<SubscriptionRefundOrderRow | null> {
   const result = await supabase
     .from('payment_orders')
-    .select('id, user_id, item_type, billing_cycle, status, payment_status, stripe_invoice_id, stripe_subscription_id, amount_total, currency, metadata')
+    .select(SUBSCRIPTION_REFUND_ORDER_SELECT)
     .eq('stripe_invoice_id', input.invoiceId)
     .maybeSingle();
 
@@ -357,6 +470,186 @@ async function getSubscriptionRefundOrderByInvoice(
   }
 
   return result.data ?? null;
+}
+
+async function getSubscriptionRefundOrderByMetadataReference(
+  supabase: SupabaseLikeClient,
+  input: {
+    eventType: string;
+    refundId?: string | null;
+    chargeId?: string | null;
+    paymentIntentId?: string | null;
+  },
+): Promise<SubscriptionRefundOrderRow | null> {
+  const referenceMarkers = [
+    input.paymentIntentId
+      ? [
+        { paymentIntentId: input.paymentIntentId },
+        { stripePaymentIntentId: input.paymentIntentId },
+        { payment_intent: input.paymentIntentId },
+        { stripe_payment_intent_id: input.paymentIntentId },
+      ]
+      : [],
+    input.chargeId
+      ? [
+        { chargeId: input.chargeId },
+        { stripeChargeId: input.chargeId },
+        { charge_id: input.chargeId },
+        { stripe_charge_id: input.chargeId },
+      ]
+      : [],
+    input.refundId
+      ? [
+        { refundId: input.refundId },
+        { stripeRefundId: input.refundId },
+        { refund_id: input.refundId },
+        { stripe_refund_id: input.refundId },
+      ]
+      : [],
+  ].flat();
+
+  for (const marker of referenceMarkers) {
+    const result = await supabase
+      .from('payment_orders')
+      .select(SUBSCRIPTION_REFUND_ORDER_SELECT)
+      .contains('metadata', marker)
+      .limit(1);
+
+    if (result.error) {
+      throwFulfillmentError(
+        'refund_order_lookup',
+        STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+        result.error,
+        {
+          eventType: input.eventType,
+          refundId: maskIdentifier(input.refundId),
+          chargeId: maskIdentifier(input.chargeId),
+          paymentIntentId: maskIdentifier(input.paymentIntentId),
+        },
+      );
+    }
+
+    if ((result.data ?? []).length > 0) {
+      return result.data[0] ?? null;
+    }
+  }
+
+  return null;
+}
+
+async function resolveSubscriptionRefundInvoice(input: {
+  supabase: SupabaseLikeClient;
+  eventType: string;
+  refundId: string | null;
+  refundMetadata: Stripe.Metadata | null;
+  charge: Stripe.Charge | null;
+  chargeId: string | null;
+  paymentIntentId: string | null;
+  retrievePaymentIntent: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+}): Promise<{ invoiceId: string | null; order: SubscriptionRefundOrderRow | null }> {
+  const invoiceIdFromMetadata = getMetadataInvoiceId(input.refundMetadata)
+    ?? getMetadataInvoiceId(input.charge?.metadata);
+  const invoiceIdFromCharge = getChargeInvoiceId(input.charge);
+  const invoiceIdFromExpandedPaymentIntent = getPaymentIntentInvoiceId(
+    getExpandedChargePaymentIntent(input.charge),
+  );
+  let invoiceIdFromRetrievedPaymentIntent: string | null = null;
+
+  if (
+    !invoiceIdFromMetadata
+    && !invoiceIdFromCharge
+    && !invoiceIdFromExpandedPaymentIntent
+    && input.paymentIntentId
+  ) {
+    const paymentIntent = await input.retrievePaymentIntent(input.paymentIntentId);
+    invoiceIdFromRetrievedPaymentIntent = getPaymentIntentInvoiceId(paymentIntent);
+  }
+
+  const invoiceId = invoiceIdFromMetadata
+    ?? invoiceIdFromCharge
+    ?? invoiceIdFromExpandedPaymentIntent
+    ?? invoiceIdFromRetrievedPaymentIntent;
+
+  if (invoiceId) {
+    return {
+      invoiceId,
+      order: null,
+    };
+  }
+
+  const order = await getSubscriptionRefundOrderByMetadataReference(input.supabase, {
+    eventType: input.eventType,
+    refundId: input.refundId,
+    chargeId: input.chargeId,
+    paymentIntentId: input.paymentIntentId,
+  });
+
+  return {
+    invoiceId: order?.stripe_invoice_id?.trim() || null,
+    order,
+  };
+}
+
+async function recordSubscriptionRefundWebhookAudit(input: {
+  supabase: SupabaseLikeClient;
+  order: SubscriptionRefundOrderRow & { id: string; stripe_subscription_id: string };
+  eventType: StripeRefundWebhookEvent['type'];
+  refundId: string | null;
+  refundStatus: string | null;
+  refundAmount: number;
+  refundCurrency: string | null;
+  invoiceId: string;
+  chargeId: string | null;
+  paymentIntentId: string | null;
+  now: string;
+}) {
+  const status = typeof input.refundStatus === 'string'
+    ? input.refundStatus.trim().toLowerCase()
+    : null;
+  const metadata = {
+    ...asRecord(input.order.metadata),
+    stripeRefundWebhookAudit: {
+      ...asRecord(asRecord(input.order.metadata).stripeRefundWebhookAudit),
+      refundId: input.refundId,
+      eventType: input.eventType,
+      refundStatus: input.refundStatus,
+      refundAmount: input.refundAmount,
+      currency: input.refundCurrency,
+      invoiceId: input.invoiceId,
+      chargeId: input.chargeId,
+      paymentIntentId: input.paymentIntentId,
+      reconciliationStatus: status === 'pending'
+        ? 'waiting_for_successful_refund'
+        : 'ignored_non_successful_refund',
+      creditClawbackApplied: false,
+      grantReversalApplied: false,
+      auditedAt: input.now,
+      source: 'stripe_refund_webhook',
+    },
+  };
+
+  const result = await input.supabase
+    .from('payment_orders')
+    .update({
+      metadata,
+      updated_at: input.now,
+    })
+    .eq('id', input.order.id);
+
+  if (result.error) {
+    throwFulfillmentError(
+      'refund_order_update',
+      STRIPE_FULFILLMENT_ERRORS.refundOrderUpdate,
+      result.error,
+      {
+        eventType: input.eventType,
+        refundId: maskIdentifier(input.refundId),
+        invoiceId: maskIdentifier(input.invoiceId),
+        orderId: maskIdentifier(input.order.id),
+        subscriptionId: maskIdentifier(input.order.stripe_subscription_id),
+      },
+    );
+  }
 }
 
 async function backfillCheckoutOrderFulfillment(
@@ -908,9 +1201,11 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   options: {
     now?: string;
     retrieveCharge?: (chargeId: string) => Promise<Stripe.Charge>;
+    retrievePaymentIntent?: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
   } = {},
 ) {
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
+  const retrievePaymentIntent = options.retrievePaymentIntent ?? retrieveStripePaymentIntent;
   const now = options.now ?? new Date().toISOString();
   let charge: Stripe.Charge | null = null;
   let refundId: string | null = null;
@@ -922,7 +1217,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   if (event.type === 'charge.refunded') {
     charge = event.data.object;
     refundId = getChargeRefundId(charge) ?? charge.id;
-    refundStatus = charge.status ?? null;
+    refundStatus = getChargeRefundStatus(charge) ?? null;
     refundAmount = toNonNegativeInteger(charge.amount_refunded);
     refundCurrency = charge.currency ?? null;
   } else {
@@ -935,34 +1230,52 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     charge = await resolveRefundCharge(refund, retrieveCharge);
   }
 
-  const invoiceId = getChargeInvoiceId(charge);
   const chargeId = charge?.id ?? null;
-  const paymentIntentId = charge
-    ? getChargePaymentIntentId(charge)
-    : event.type === 'charge.refunded'
-      ? null
-      : getRefundPaymentIntentId(event.data.object);
+  const paymentIntentId = getMetadataPaymentIntentId(refundMetadata)
+    ?? getMetadataPaymentIntentId(charge?.metadata)
+    ?? (
+      charge
+        ? getChargePaymentIntentId(charge)
+        : event.type === 'charge.refunded'
+          ? null
+          : getRefundPaymentIntentId(event.data.object)
+    );
+  const resolvedChargeId = getMetadataChargeId(refundMetadata)
+    ?? getMetadataChargeId(charge?.metadata)
+    ?? chargeId;
+  const resolvedInvoice = await resolveSubscriptionRefundInvoice({
+    supabase,
+    eventType: event.type,
+    refundId,
+    refundMetadata,
+    charge,
+    chargeId: resolvedChargeId,
+    paymentIntentId,
+    retrievePaymentIntent,
+  });
+  const invoiceId = resolvedInvoice.invoiceId;
 
   if (!invoiceId) {
-    logger.warn('billing', 'stripe_refund_subscription_invoice_missing', {
-      eventType: event.type,
-      refundId: maskIdentifier(refundId),
-      chargeId: maskIdentifier(chargeId),
-      paymentIntentId: maskIdentifier(paymentIntentId),
-    });
-    return {
-      reconciled: false,
-      reason: 'invoice_missing',
-      orderId: null,
-      subscriptionId: null,
-      refundId,
-    };
+    throwFulfillmentError(
+      'refund_subscription_invoice_missing',
+      STRIPE_FULFILLMENT_ERRORS.refundInvoiceLookup,
+      new Error('subscription refund invoice missing; retry webhook'),
+      {
+        eventType: event.type,
+        refundId: maskIdentifier(refundId),
+        chargeId: maskIdentifier(resolvedChargeId),
+        paymentIntentId: maskIdentifier(paymentIntentId),
+        metadataOrderId: maskIdentifier(resolvedInvoice.order?.id),
+      },
+    );
   }
 
-  const order = await getSubscriptionRefundOrderByInvoice(supabase, {
-    invoiceId,
-    eventType: event.type,
-  });
+  const order = resolvedInvoice.order?.stripe_invoice_id === invoiceId
+    ? resolvedInvoice.order
+    : await getSubscriptionRefundOrderByInvoice(supabase, {
+      invoiceId,
+      eventType: event.type,
+    });
 
   if (!order?.id) {
     throwFulfillmentError(
@@ -973,7 +1286,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
         eventType: event.type,
         refundId: maskIdentifier(refundId),
         invoiceId: maskIdentifier(invoiceId),
-        chargeId: maskIdentifier(chargeId),
+        chargeId: maskIdentifier(resolvedChargeId),
         paymentIntentId: maskIdentifier(paymentIntentId),
       },
     );
@@ -994,6 +1307,44 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
       orderId: order?.id ?? null,
       subscriptionId: order?.stripe_subscription_id ?? null,
       refundId,
+    };
+  }
+
+  if (!isRefundReadyForCreditReconciliation({
+    eventType: event.type,
+    refundStatus,
+    charge,
+  })) {
+    await recordSubscriptionRefundWebhookAudit({
+      supabase,
+      order,
+      eventType: event.type,
+      refundId,
+      refundStatus,
+      refundAmount,
+      refundCurrency,
+      invoiceId,
+      chargeId: resolvedChargeId,
+      paymentIntentId,
+      now,
+    });
+
+    logger.info('billing', 'stripe_refund_subscription_waiting_for_successful_refund', {
+      eventType: event.type,
+      refundId: maskIdentifier(refundId),
+      refundStatus,
+      invoiceId: maskIdentifier(invoiceId),
+      orderId: maskIdentifier(order.id),
+      subscriptionId: maskIdentifier(order.stripe_subscription_id),
+    });
+
+    return {
+      reconciled: false,
+      reason: 'refund_not_successful',
+      orderId: order.id,
+      subscriptionId: order.stripe_subscription_id,
+      refundId,
+      refundStatus,
     };
   }
 

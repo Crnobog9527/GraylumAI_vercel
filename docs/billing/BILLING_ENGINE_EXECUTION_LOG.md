@@ -1694,6 +1694,72 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - refund invoice resolution and refund status gate
+
+- 时间：2026-06-15 16:12 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`c30666d81d7e8cc24f9f3dd9c7b7f89884f28294`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Resolve refunds without relying on Charge.invoice`.
+- Refund webhook reconciliation now resolves invoice scope from refund metadata, charge metadata, expanded charge invoice, expanded / retrieved PaymentIntent invoice, and payment-order metadata references before falling back to retryable failure.
+- If no invoice can be resolved, the webhook path now throws `refund_subscription_invoice_missing` so the event is retryable instead of silently returning success and allowing later annual release.
+- Fixed latest-head P1 `Gate credit clawbacks on successful refunds`.
+- `refund.created` / `refund.updated` now require `status = succeeded` or `successful` before calling subscription credit grant reconciliation.
+- `pending`, `failed`, and `canceled` refund events now leave auditable `stripeRefundWebhookAudit` metadata on the invoice order without changing the order to refunded, without reversing grants, and without writing `refund_clawback`.
+- Successful refund events still enter the existing invoice-scoped PR6 full-refund reconciliation path, including grant reversal, clawback semantics, shortfall handling, and future annual release block.
+- Kept prior PR6/PR5 protections in place: invoice-scoped reversal, annual monthly release scoping, legacy partial-refund guard, refund_clawback non-spend semantics, and subscription upgrade replay/source-order protections.
+
+### Changed files
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted webhook / stripeFulfillment refund tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/stripeFulfillment.test.ts` 通过；48 files / 597 tests passed。
+- Targeted subscriptionCreditGrants tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；48 files / 597 tests passed。
+- Targeted membershipEligibility tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/membershipEligibility.test.ts` 通过；48 files / 597 tests passed。
+- Targeted PR6 + PR5 replay/source-order coverage remained included in the `subscriptionCreditGrants` and `stripeFulfillment` targeted runs.
+- `pnpm test:api`：通过；48 files / 597 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- Charge object without `invoice` still resolves the subscription refund invoice through PaymentIntent and processes full-refund grant reversal / clawback.
+- Fully unresolved refund invoice path throws retryable `refund_subscription_invoice_missing`; no fake success, no payment-order mutation, no grant reversal, no clawback.
+- `pending`, `failed`, and `canceled` refund events do not trigger clawback or grant reversal, preserve paid order state, and record auditable webhook metadata.
+- Non-successful refund audit metadata does not block normal paid annual release; successful refund still blocks matching current invoice release through existing full-refund markers.
+- `refund_clawback` remains `counts_as_spend = false`.
+- Normal paid active annual invoice remains eligible for due monthly release.
+- Old invoice refund still does not block later paid renewal invoice release.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - normalize legacy partial-refund statuses
 
 - 时间：2026-06-15 15:00 CST。
