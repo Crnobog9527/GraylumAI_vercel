@@ -287,13 +287,23 @@ function getRefundChargeId(refund: Stripe.Refund) {
 }
 
 function getChargeRefundId(charge: Stripe.Charge) {
-  const refund = charge.refunds?.data?.[0];
+  const refund = getSuccessfulChargeRefund(charge) ?? charge.refunds?.data?.[0];
   return refund?.id ?? null;
 }
 
 function getChargeRefundStatus(charge: Stripe.Charge | null | undefined) {
-  const refund = charge?.refunds?.data?.[0] as (Stripe.Refund & { status?: string | null }) | undefined;
+  const refund = getSuccessfulChargeRefund(charge) ?? getChargeRefunds(charge)[0];
   return typeof refund?.status === 'string' ? refund.status : null;
+}
+
+function getChargeRefunds(charge: Stripe.Charge | null | undefined) {
+  return (charge?.refunds?.data ?? []) as Array<Stripe.Refund & { status?: string | null }>;
+}
+
+function getSuccessfulChargeRefund(charge: Stripe.Charge | null | undefined) {
+  return getChargeRefunds(charge).find((refund) =>
+    isSuccessfulRefundStatus(refund.status),
+  ) ?? null;
 }
 
 function getMetadataStringValue(metadata: unknown, keys: string[]) {
@@ -346,13 +356,7 @@ function isRefundReadyForCreditReconciliation(input: {
   charge: Stripe.Charge | null;
 }) {
   if (input.eventType === 'charge.refunded') {
-    const chargeRefundStatus = getChargeRefundStatus(input.charge);
-    if (chargeRefundStatus) {
-      return isSuccessfulRefundStatus(chargeRefundStatus);
-    }
-
-    return input.charge?.refunded === true
-      || toNonNegativeInteger(input.charge?.amount_refunded) > 0;
+    return Boolean(getSuccessfulChargeRefund(input.charge));
   }
 
   return isSuccessfulRefundStatus(input.refundStatus);
@@ -606,6 +610,11 @@ async function recordSubscriptionRefundWebhookAudit(input: {
   const status = typeof input.refundStatus === 'string'
     ? input.refundStatus.trim().toLowerCase()
     : null;
+  const reconciliationStatus = status
+    ? status === 'pending' || status === 'requires_action'
+      ? 'waiting_for_successful_refund'
+      : 'ignored_non_successful_refund'
+    : 'waiting_for_successful_refund_status';
   const metadata = {
     ...asRecord(input.order.metadata),
     stripeRefundWebhookAudit: {
@@ -618,9 +627,7 @@ async function recordSubscriptionRefundWebhookAudit(input: {
       invoiceId: input.invoiceId,
       chargeId: input.chargeId,
       paymentIntentId: input.paymentIntentId,
-      reconciliationStatus: status === 'pending'
-        ? 'waiting_for_successful_refund'
-        : 'ignored_non_successful_refund',
+      reconciliationStatus,
       creditClawbackApplied: false,
       grantReversalApplied: false,
       auditedAt: input.now,

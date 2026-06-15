@@ -1694,6 +1694,71 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - require successful charge refund status
+
+- 时间：2026-06-15 16:54 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`9a6cb7f630a2623090fdc65bea7734463151ada7`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Require successful status before charge refund clawback`.
+- `charge.refunded` reconciliation no longer treats `Charge.refunded = true` or `amount_refunded > 0` as proof that credits may be clawed back.
+- The charge-refund path now requires at least one embedded refund object with explicit `succeeded` / `successful` status before subscription refund clawback, grant reversal, or final full-refund markers can run.
+- Missing, pending, failed, and canceled refund statuses now leave auditable `stripeRefundWebhookAudit` metadata and return the non-successful refund path without changing the completed/paid order state.
+- Unknown charge refund status uses `reconciliationStatus = waiting_for_successful_refund_status`; pending/requires-action uses `waiting_for_successful_refund`; failed/canceled uses `ignored_non_successful_refund`.
+- Successful charge refund events still reconcile through the existing invoice-scoped PR6 path, preserve replay idempotency, and keep `refund_clawback` non-spend.
+
+### Changed files
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted stripeFulfillment refund status tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/stripeFulfillment.test.ts` 通过；48 files / 601 tests passed。
+- Targeted subscriptionCreditGrants tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；48 files / 601 tests passed。
+- Targeted webhook refund tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/stripeWebhookRoute.test.ts` 通过；48 files / 601 tests passed。
+- Targeted membershipEligibility tests：`pnpm --filter @repo/api test:run -- src/services/__tests__/membershipEligibility.test.ts` 通过；48 files / 601 tests passed。
+- Targeted PR6 + PR5 replay/source-order coverage remains inside the API suite and passed in the targeted runs above.
+- `pnpm test:api`：通过；48 files / 601 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- `charge.refunded` with no refund status does not trigger clawback or grant reversal.
+- `charge.refunded` with full `amount_refunded` but no successful refund status does not trigger clawback.
+- `charge.refunded` with pending / failed / canceled refund status does not trigger clawback or grant reversal.
+- `charge.refunded` with at least one explicit succeeded / successful refund object and cumulative full refund still triggers the invoice-scoped reconciliation path.
+- Pending / unknown status leaves auditable metadata.
+- Normal paid active annual invoice remains eligible for its due monthly release.
+- Old invoice refund markers do not block a later paid renewal invoice's valid release.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by passing tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - refund invoice resolution and refund status gate
 
 - 时间：2026-06-15 16:12 CST。
