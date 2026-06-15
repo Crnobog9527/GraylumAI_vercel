@@ -328,7 +328,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
 function createReadinessAuditSupabase(
   rows: Parameters<typeof buildBillingEngineV15ReadinessAudit>[0],
   serverCaps: Record<string, number> = {},
-  plannedCounts: Record<string, number> = {},
+  exactCounts: Record<string, number> = {},
 ) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
     profiles: rows.profiles as Array<Record<string, unknown>>,
@@ -346,7 +346,7 @@ function createReadinessAuditSupabase(
           const serverCap = serverCaps[table] ?? limit;
           return {
             data: allRows.slice(0, Math.min(limit, serverCap)),
-            count: plannedCounts[table] ?? allRows.length,
+            count: exactCounts[table] ?? allRows.length,
             error: null,
           };
         },
@@ -356,7 +356,7 @@ function createReadinessAuditSupabase(
 }
 
 describe('runBillingEngineV15ReadinessAudit', () => {
-  it('detects server-capped readiness scans from planned counts', async () => {
+  it('detects server-capped readiness scans from exact counts', async () => {
     const result = await runBillingEngineV15ReadinessAudit(
       createReadinessAuditSupabase(createReadinessRows(), {
         credit_transactions: 0,
@@ -384,7 +384,7 @@ describe('runBillingEngineV15ReadinessAudit', () => {
     expect(result.summary.grantLedgerMismatches).toBe(0);
   });
 
-  it('prefers sentinel rows over underestimated planned counts', async () => {
+  it('prefers sentinel rows over count metadata', async () => {
     const result = await runBillingEngineV15ReadinessAudit(
       createReadinessAuditSupabase(
         createReadinessRows({
