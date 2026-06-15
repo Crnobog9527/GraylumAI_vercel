@@ -9,6 +9,7 @@ import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
   markMembershipInvoicePaymentFailed,
+  reconcileSubscriptionRefundFromStripeWebhook,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '@repo/api/src/services/stripeFulfillment';
@@ -19,6 +20,67 @@ export const runtime = 'nodejs';
 type StripeWebhookEvent = ReturnType<
   ReturnType<typeof getStripeClient>['webhooks']['constructEvent']
 >;
+
+export async function handleStripeWebhookEvent(
+  supabase: ReturnType<typeof createServiceRoleSupabaseClient>,
+  event: StripeWebhookEvent,
+) {
+  switch (event.type) {
+    case 'checkout.session.completed': {
+      const session = event.data.object;
+      await upsertPaymentOrderBySession(supabase, session, {
+        eventType: event.type,
+      });
+      if (session.mode === 'payment' && session.payment_status === 'paid') {
+        await fulfillCreditPackageOrder(supabase, session);
+      }
+      break;
+    }
+    case 'checkout.session.async_payment_succeeded': {
+      const session = event.data.object;
+      await upsertPaymentOrderBySession(supabase, session, {
+        eventType: event.type,
+      });
+      await fulfillCreditPackageOrder(supabase, session);
+      break;
+    }
+    case 'checkout.session.async_payment_failed': {
+      await upsertPaymentOrderBySession(supabase, event.data.object, {
+        orderStatus: 'failed',
+        eventType: event.type,
+      });
+      break;
+    }
+    case 'checkout.session.expired': {
+      await upsertPaymentOrderBySession(supabase, event.data.object, {
+        orderStatus: 'expired',
+        eventType: event.type,
+      });
+      break;
+    }
+    case 'invoice.payment_succeeded': {
+      await fulfillMembershipInvoice(supabase, event.data.object);
+      break;
+    }
+    case 'invoice.payment_failed': {
+      await markMembershipInvoicePaymentFailed(supabase, event.data.object);
+      break;
+    }
+    case 'refund.created':
+    case 'refund.updated':
+    case 'charge.refunded': {
+      await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
+      break;
+    }
+    case 'customer.subscription.updated':
+    case 'customer.subscription.deleted': {
+      await syncSubscriptionState(supabase, event.data.object);
+      break;
+    }
+    default:
+      break;
+  }
+}
 
 export async function POST(request: Request) {
   const signature = request.headers.get('stripe-signature');
@@ -40,55 +102,7 @@ export async function POST(request: Request) {
   const supabase = createServiceRoleSupabaseClient();
 
   try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        await upsertPaymentOrderBySession(supabase, session, {
-          eventType: event.type,
-        });
-        if (session.mode === 'payment' && session.payment_status === 'paid') {
-          await fulfillCreditPackageOrder(supabase, session);
-        }
-        break;
-      }
-      case 'checkout.session.async_payment_succeeded': {
-        const session = event.data.object;
-        await upsertPaymentOrderBySession(supabase, session, {
-          eventType: event.type,
-        });
-        await fulfillCreditPackageOrder(supabase, session);
-        break;
-      }
-      case 'checkout.session.async_payment_failed': {
-        await upsertPaymentOrderBySession(supabase, event.data.object, {
-          orderStatus: 'failed',
-          eventType: event.type,
-        });
-        break;
-      }
-      case 'checkout.session.expired': {
-        await upsertPaymentOrderBySession(supabase, event.data.object, {
-          orderStatus: 'expired',
-          eventType: event.type,
-        });
-        break;
-      }
-      case 'invoice.payment_succeeded': {
-        await fulfillMembershipInvoice(supabase, event.data.object);
-        break;
-      }
-      case 'invoice.payment_failed': {
-        await markMembershipInvoicePaymentFailed(supabase, event.data.object);
-        break;
-      }
-      case 'customer.subscription.updated':
-      case 'customer.subscription.deleted': {
-        await syncSubscriptionState(supabase, event.data.object);
-        break;
-      }
-      default:
-        break;
-    }
+    await handleStripeWebhookEvent(supabase, event);
   } catch {
     logServerError('billing', 'stripe_webhook_handler_failed', {
       eventType: event.type,

@@ -42,12 +42,16 @@ const FAILURE_TERMINAL_STATUSES = new Set<PaymentOrderStatus>([
 ]);
 
 export function normalizePaymentOrderStatus(status: PaymentOrderStatusLike): PaymentOrderStatus {
-  if (status === 'cancelled' || status === 'partial_refunded') {
-    return LEGACY_STATUS_MAP[status];
+  const normalizedStatus = typeof status === 'string'
+    ? status.trim().toLowerCase()
+    : status;
+
+  if (normalizedStatus === 'cancelled' || normalizedStatus === 'partial_refunded') {
+    return LEGACY_STATUS_MAP[normalizedStatus];
   }
 
-  if (typeof status === 'string' && CANONICAL_STATUSES.has(status)) {
-    return status as PaymentOrderStatus;
+  if (typeof normalizedStatus === 'string' && CANONICAL_STATUSES.has(normalizedStatus)) {
+    return normalizedStatus as PaymentOrderStatus;
   }
 
   return 'pending';

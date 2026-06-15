@@ -21,8 +21,260 @@ import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
   markMembershipInvoicePaymentFailed,
+  reconcileSubscriptionRefundFromStripeWebhook,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
+import { releaseDueAnnualSubscriptionCredits } from '../subscriptionCreditGrants';
+
+type RefundWebhookTableName =
+  | 'payment_orders'
+  | 'membership_plans'
+  | 'subscription_credit_grants'
+  | 'credit_transactions'
+  | 'user_subscriptions'
+  | 'profiles';
+type RefundWebhookRow = Record<string, any>;
+
+class RefundWebhookMockQuery {
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private containsFilters: Array<{ column: string; value: unknown }> = [];
+  private mode: 'select' | 'insert' | 'update' = 'select';
+  private payload: RefundWebhookRow | null = null;
+  private limitValue: number | null = null;
+  private orderBy: { column: string; ascending: boolean } | null = null;
+
+  constructor(
+    private readonly tables: Record<RefundWebhookTableName, RefundWebhookRow[]>,
+    private readonly table: RefundWebhookTableName,
+  ) {}
+
+  select() {
+    return this;
+  }
+
+  eq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'eq' });
+    return this;
+  }
+
+  neq(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'neq' });
+    return this;
+  }
+
+  lte(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  contains(column: string, value: unknown) {
+    this.containsFilters.push({ column, value });
+    return this;
+  }
+
+  order(column: string, options: { ascending?: boolean } = {}) {
+    this.orderBy = { column, ascending: options.ascending ?? true };
+    return this;
+  }
+
+  limit(value: number) {
+    this.limitValue = value;
+    return this;
+  }
+
+  update(payload: RefundWebhookRow) {
+    this.mode = 'update';
+    this.payload = payload;
+    return this;
+  }
+
+  insert(payload: RefundWebhookRow) {
+    this.mode = 'insert';
+    this.payload = payload;
+    return this;
+  }
+
+  async maybeSingle() {
+    if (this.mode === 'insert') {
+      const inserted = {
+        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
+        ...this.payload,
+      };
+      this.tables[this.table].push(inserted);
+      return { data: inserted, error: null };
+    }
+
+    if (this.mode === 'update') {
+      const rows = this.matchingRows();
+      rows.forEach((row) => Object.assign(row, this.payload));
+      return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+    }
+
+    const rows = this.matchingRows();
+    return { data: rows[0] ?? null, error: null };
+  }
+
+  then<TResult1 = { data: RefundWebhookRow[]; error: null }, TResult2 = never>(
+    onfulfilled?: ((value: { data: RefundWebhookRow[]; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+  ) {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+
+  private async execute() {
+    if (this.mode === 'insert') {
+      const inserted = {
+        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
+        ...this.payload,
+      };
+      this.tables[this.table].push(inserted);
+      return { data: [inserted], error: null };
+    }
+
+    if (this.mode === 'update') {
+      const rows = this.matchingRows();
+      rows.forEach((row) => Object.assign(row, this.payload));
+      return { data: rows, error: null };
+    }
+
+    return {
+      data: this.limitValue === null
+        ? this.matchingRows()
+        : this.matchingRows().slice(0, this.limitValue),
+      error: null,
+    };
+  }
+
+  private matchingRows() {
+    const rows = this.tables[this.table].filter((row) =>
+      this.filters.every(({ column, value, operator }) => {
+        if (operator === 'eq') {
+          return row[column] === value;
+        }
+
+        if (operator === 'neq') {
+          return row[column] !== value;
+        }
+
+        return row[column] <= value;
+      })
+      && this.containsFilters.every(({ column, value }) =>
+        refundWebhookContainsValue(row[column], value),
+      ),
+    );
+
+    if (!this.orderBy) {
+      return rows;
+    }
+
+    const { column, ascending } = this.orderBy;
+    return [...rows].sort((left, right) => {
+      const leftValue = left[column] ?? '';
+      const rightValue = right[column] ?? '';
+      if (leftValue === rightValue) {
+        return 0;
+      }
+
+      const comparison = leftValue > rightValue ? 1 : -1;
+      return ascending ? comparison : -comparison;
+    });
+  }
+}
+
+function refundWebhookContainsValue(actual: unknown, expected: unknown): boolean {
+  if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)) {
+      return false;
+    }
+
+    return Object.entries(expected as RefundWebhookRow).every(([key, value]) =>
+      refundWebhookContainsValue((actual as RefundWebhookRow)[key], value),
+    );
+  }
+
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual)
+      && expected.every((value) => (actual as unknown[]).some((item) => refundWebhookContainsValue(item, value)));
+  }
+
+  return actual === expected;
+}
+
+function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName, RefundWebhookRow[]>> = {}) {
+  const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+    payment_orders: seed.payment_orders ?? [],
+    membership_plans: seed.membership_plans ?? [],
+    subscription_credit_grants: seed.subscription_credit_grants ?? [],
+    credit_transactions: seed.credit_transactions ?? [],
+    user_subscriptions: seed.user_subscriptions ?? [],
+    profiles: seed.profiles ?? [],
+  };
+
+  const supabase = {
+    tables,
+    from(table: RefundWebhookTableName) {
+      return new RefundWebhookMockQuery(tables, table);
+    },
+    async rpc(name: string, payload: RefundWebhookRow) {
+      expect(name).toBe('atomic_apply_credit_ledger_entry');
+      const existing = tables.credit_transactions.find((row) =>
+        row.user_id === payload.p_user_id
+        && row.idempotency_key === payload.p_idempotency_key,
+      );
+
+      if (existing) {
+        return {
+          data: [{
+            transaction_id: existing.id,
+            balance_before: existing.balance_before ?? 0,
+            balance_after: existing.balance_after ?? 0,
+            amount: existing.amount,
+            is_idempotent: true,
+          }],
+          error: null,
+        };
+      }
+
+      const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
+      const balanceBefore = typeof profile?.credits === 'number' ? profile.credits : Number(profile?.credits ?? 0);
+      const balanceAfter = balanceBefore + payload.p_amount;
+      if (balanceAfter < 0) {
+        return {
+          data: null,
+          error: { message: 'insufficient credits' },
+        };
+      }
+
+      const transaction = {
+        id: `txn-refund-webhook-${tables.credit_transactions.length + 1}`,
+        user_id: payload.p_user_id,
+        amount: payload.p_amount,
+        type: payload.p_type,
+        description: payload.p_description,
+        idempotency_key: payload.p_idempotency_key,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+      };
+      if (profile) {
+        profile.credits = balanceAfter;
+      }
+      tables.credit_transactions.push(transaction);
+
+      return {
+        data: [{
+          transaction_id: transaction.id,
+          balance_before: transaction.balance_before,
+          balance_after: transaction.balance_after,
+          amount: payload.p_amount,
+          is_idempotent: false,
+        }],
+        error: null,
+      };
+    },
+  };
+
+  return supabase;
+}
 
 describe('stripe fulfillment helpers', () => {
   beforeEach(() => {
@@ -1032,6 +1284,1213 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('throws retryable errors for subscription refund webhooks when the invoice order is not visible yet', async () => {
+    const charge = {
+      id: 'ch_webhook_order_missing',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_order_missing',
+      payment_intent: 'pi_webhook_order_missing',
+      refunds: {
+        data: [{
+          id: 're_webhook_order_missing_full',
+          status: 'succeeded',
+        }],
+      },
+    } as Stripe.Charge;
+    const retrieveCharge = vi.fn().mockResolvedValue(charge);
+    const webhookCases = [
+      {
+        event: {
+          id: 'evt_webhook_refund_created_order_missing',
+          type: 'refund.created',
+          data: {
+            object: {
+              id: 're_webhook_order_missing_full',
+              amount: 9900,
+              currency: 'usd',
+              status: 'succeeded',
+              charge: 'ch_webhook_order_missing',
+              payment_intent: 'pi_webhook_order_missing',
+              metadata: {},
+            } as Stripe.Refund,
+          },
+        } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+        options: { retrieveCharge },
+      },
+      {
+        event: {
+          id: 'evt_webhook_charge_refunded_order_missing',
+          type: 'charge.refunded',
+          data: {
+            object: charge,
+          },
+        } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+        options: {},
+      },
+    ];
+
+    for (const webhookCase of webhookCases) {
+      const supabase = createRefundWebhookSupabase();
+
+      await expect(reconcileSubscriptionRefundFromStripeWebhook(
+        supabase,
+        webhookCase.event,
+        webhookCase.options,
+      )).rejects.toMatchObject({
+        stage: 'refund_subscription_order_missing',
+      });
+      expect(supabase.tables.payment_orders).toHaveLength(0);
+      expect(supabase.tables.credit_transactions).toHaveLength(0);
+      expect(loggerState.error).toHaveBeenCalledWith(
+        'billing',
+        'stripe_fulfillment_stage_failed',
+        expect.objectContaining({
+          stage: 'refund_subscription_order_missing',
+        }),
+      );
+    }
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_order_missing');
+  });
+
+  it('resolves subscription refund invoices through payment intents when Charge.invoice is absent', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-payment-intent-invoice',
+        user_id: 'user-webhook-payment-intent-invoice',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_payment_intent_invoice',
+        stripe_invoice_id: 'in_webhook_payment_intent_invoice',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-payment-intent-invoice',
+        user_id: 'user-webhook-payment-intent-invoice',
+        membership_plan_id: 'plan-webhook-payment-intent-invoice',
+        stripe_subscription_id: 'sub_webhook_payment_intent_invoice',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_payment_intent_invoice' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-payment-intent-invoice',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-payment-intent-invoice',
+        credits: 100,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-webhook-payment-intent-invoice-1',
+        user_id: 'user-webhook-payment-intent-invoice',
+        membership_plan_id: 'plan-webhook-payment-intent-invoice',
+        stripe_subscription_id: 'sub_webhook_payment_intent_invoice',
+        stripe_invoice_id: 'in_webhook_payment_intent_invoice',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'sub_webhook_payment_intent_invoice:2026-01:01',
+        period_index: 1,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      }],
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_payment_intent_invoice',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      payment_intent: 'pi_webhook_payment_intent_invoice',
+    } as Stripe.Charge);
+    const retrievePaymentIntent = vi.fn().mockResolvedValue({
+      id: 'pi_webhook_payment_intent_invoice',
+      invoice: 'in_webhook_payment_intent_invoice',
+    } as Stripe.PaymentIntent);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_payment_intent_invoice',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_payment_intent_invoice_full',
+            amount: 9900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_payment_intent_invoice',
+            payment_intent: 'pi_webhook_payment_intent_invoice',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-02-01T00:00:00.000Z',
+        retrieveCharge,
+        retrievePaymentIntent,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_payment_intent_invoice');
+    expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_payment_intent_invoice');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 1,
+      clawbackAmount: 10,
+      appliedClawbackAmount: 10,
+      shortfallAmount: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_payment_intent_invoice_full',
+          invoiceId: 'in_webhook_payment_intent_invoice',
+          fullRefund: true,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      status: 'reversed',
+      metadata: {
+        reversal: expect.objectContaining({
+          invoiceId: 'in_webhook_payment_intent_invoice',
+        }),
+      },
+    });
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -10,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_refund_id: 're_webhook_payment_intent_invoice_full',
+    });
+  });
+
+  it('throws retryable errors when subscription refund invoices cannot be resolved', async () => {
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_invoice_unresolved',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      payment_intent: 'pi_webhook_invoice_unresolved',
+    } as Stripe.Charge);
+    const retrievePaymentIntent = vi.fn().mockResolvedValue({
+      id: 'pi_webhook_invoice_unresolved',
+    } as Stripe.PaymentIntent);
+    const supabase = createRefundWebhookSupabase();
+
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_invoice_unresolved',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_invoice_unresolved_full',
+            amount: 9900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_invoice_unresolved',
+            payment_intent: 'pi_webhook_invoice_unresolved',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        retrieveCharge,
+        retrievePaymentIntent,
+      },
+    )).rejects.toMatchObject({
+      stage: 'refund_subscription_invoice_missing',
+    });
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_invoice_unresolved');
+    expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_unresolved');
+    expect(supabase.tables.payment_orders).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'stripe_fulfillment_stage_failed',
+      expect.objectContaining({
+        stage: 'refund_subscription_invoice_missing',
+      }),
+    );
+  });
+
+  it.each(['pending', 'failed', 'canceled'])(
+    'audits %s subscription refunds without clawback or grant reversal',
+    async (refundStatus) => {
+      const supabase = createRefundWebhookSupabase({
+        payment_orders: [{
+          id: `order-webhook-${refundStatus}-refund`,
+          user_id: `user-webhook-${refundStatus}-refund`,
+          item_id: `plan-webhook-${refundStatus}-refund`,
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: `sub_webhook_${refundStatus}_refund`,
+          stripe_invoice_id: `in_webhook_${refundStatus}_refund`,
+          amount_total: 9900,
+          currency: 'usd',
+          status: 'completed',
+          payment_status: 'paid',
+          metadata: { source: 'invoice.payment_succeeded' },
+        }],
+        user_subscriptions: [{
+          id: `subscription-webhook-${refundStatus}-refund`,
+          user_id: `user-webhook-${refundStatus}-refund`,
+          membership_plan_id: `plan-webhook-${refundStatus}-refund`,
+          stripe_subscription_id: `sub_webhook_${refundStatus}_refund`,
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          current_period_start: '2026-01-01T00:00:00.000Z',
+          current_period_end: '2027-01-01T00:00:00.000Z',
+          metadata: { lastInvoiceId: `in_webhook_${refundStatus}_refund` },
+        }],
+        membership_plans: [{
+          id: `plan-webhook-${refundStatus}-refund`,
+          name: 'Gold',
+          level: 'gold',
+          yearly_credits: 120,
+        }],
+        profiles: [{
+          id: `user-webhook-${refundStatus}-refund`,
+          membership_level: 'gold',
+          credits: 100,
+        }],
+      });
+      const retrieveCharge = vi.fn().mockResolvedValue({
+        id: `ch_webhook_${refundStatus}_refund`,
+        amount: 9900,
+        amount_refunded: 9900,
+        currency: 'usd',
+        refunded: true,
+        status: 'succeeded',
+        invoice: `in_webhook_${refundStatus}_refund`,
+        payment_intent: `pi_webhook_${refundStatus}_refund`,
+      } as Stripe.Charge);
+
+      const result = await reconcileSubscriptionRefundFromStripeWebhook(
+        supabase,
+        {
+          id: `evt_webhook_${refundStatus}_refund`,
+          type: 'refund.created',
+          data: {
+            object: {
+              id: `re_webhook_${refundStatus}_refund`,
+              amount: 9900,
+              currency: 'usd',
+              status: refundStatus,
+              charge: `ch_webhook_${refundStatus}_refund`,
+              payment_intent: `pi_webhook_${refundStatus}_refund`,
+              metadata: {},
+            } as Stripe.Refund,
+          },
+        } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+        {
+          now: '2026-02-01T00:00:00.000Z',
+          retrieveCharge,
+        },
+      );
+
+      expect(result).toMatchObject({
+        reconciled: false,
+        reason: 'refund_not_successful',
+        orderId: `order-webhook-${refundStatus}-refund`,
+        subscriptionId: `sub_webhook_${refundStatus}_refund`,
+        refundId: `re_webhook_${refundStatus}_refund`,
+        refundStatus,
+      });
+      expect(supabase.tables.payment_orders[0]).toMatchObject({
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: {
+          source: 'invoice.payment_succeeded',
+          stripeRefundWebhookAudit: expect.objectContaining({
+            refundId: `re_webhook_${refundStatus}_refund`,
+            refundStatus,
+            invoiceId: `in_webhook_${refundStatus}_refund`,
+            creditClawbackApplied: false,
+            grantReversalApplied: false,
+          }),
+        },
+      });
+      expect(supabase.tables.payment_orders[0].metadata).not.toHaveProperty('subscriptionCreditGrantReversal');
+      expect(supabase.tables.credit_transactions).toHaveLength(0);
+      expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+
+      const releaseAfterNonSuccessfulRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+        now: new Date('2026-02-15T00:00:00.000Z'),
+      });
+      expect(releaseAfterNonSuccessfulRefund).toMatchObject({
+        releasedGrantCount: 2,
+        releasedCredits: 20,
+        skippedSubscriptions: 0,
+      });
+      expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+        stripe_invoice_id: `in_webhook_${refundStatus}_refund`,
+        status: 'granted',
+        credits_granted: 10,
+      });
+      expect(supabase.tables.credit_transactions.map((transaction) => transaction.ledger_type))
+        .toEqual(['grant', 'grant']);
+      expect(supabase.tables.credit_transactions.every((transaction) =>
+        transaction.counts_as_spend === false,
+      )).toBe(true);
+    },
+  );
+
+  it.each([
+    {
+      label: 'missing-status',
+      refundStatus: null,
+      reconciliationStatus: 'waiting_for_successful_refund_status',
+    },
+    {
+      label: 'pending',
+      refundStatus: 'pending',
+      reconciliationStatus: 'waiting_for_successful_refund',
+    },
+    {
+      label: 'failed',
+      refundStatus: 'failed',
+      reconciliationStatus: 'ignored_non_successful_refund',
+    },
+    {
+      label: 'canceled',
+      refundStatus: 'canceled',
+      reconciliationStatus: 'ignored_non_successful_refund',
+    },
+  ])(
+    'audits charge.refunded %s refunds without clawback or grant reversal',
+    async ({ label, refundStatus, reconciliationStatus }) => {
+      const supabase = createRefundWebhookSupabase({
+        payment_orders: [{
+          id: `order-webhook-charge-${label}`,
+          user_id: `user-webhook-charge-${label}`,
+          item_id: `plan-webhook-charge-${label}`,
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: `sub_webhook_charge_${label}`,
+          stripe_invoice_id: `in_webhook_charge_${label}`,
+          amount_total: 9900,
+          currency: 'usd',
+          status: 'completed',
+          payment_status: 'paid',
+          metadata: { source: 'invoice.payment_succeeded' },
+        }],
+        user_subscriptions: [{
+          id: `subscription-webhook-charge-${label}`,
+          user_id: `user-webhook-charge-${label}`,
+          membership_plan_id: `plan-webhook-charge-${label}`,
+          stripe_subscription_id: `sub_webhook_charge_${label}`,
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          current_period_start: '2026-01-01T00:00:00.000Z',
+          current_period_end: '2027-01-01T00:00:00.000Z',
+          metadata: { lastInvoiceId: `in_webhook_charge_${label}` },
+        }],
+        membership_plans: [{
+          id: `plan-webhook-charge-${label}`,
+          name: 'Gold',
+          level: 'gold',
+          yearly_credits: 120,
+        }],
+        profiles: [{
+          id: `user-webhook-charge-${label}`,
+          membership_level: 'gold',
+          credits: 100,
+        }],
+        subscription_credit_grants: [{
+          id: `grant-webhook-charge-${label}-1`,
+          user_id: `user-webhook-charge-${label}`,
+          membership_plan_id: `plan-webhook-charge-${label}`,
+          stripe_subscription_id: `sub_webhook_charge_${label}`,
+          stripe_invoice_id: `in_webhook_charge_${label}`,
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_webhook_charge_${label}:2026-01:01`,
+          period_index: 1,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice' },
+        }],
+      });
+      const refundObject = {
+        id: `re_webhook_charge_${label}`,
+        ...(refundStatus ? { status: refundStatus } : {}),
+      };
+
+      const result = await reconcileSubscriptionRefundFromStripeWebhook(
+        supabase,
+        {
+          id: `evt_webhook_charge_${label}`,
+          type: 'charge.refunded',
+          data: {
+            object: {
+              id: `ch_webhook_charge_${label}`,
+              amount: 9900,
+              amount_refunded: 9900,
+              currency: 'usd',
+              refunded: true,
+              status: 'succeeded',
+              invoice: `in_webhook_charge_${label}`,
+              payment_intent: `pi_webhook_charge_${label}`,
+              refunds: {
+                data: [refundObject],
+              },
+            } as Stripe.Charge,
+          },
+        } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+        { now: '2026-02-01T00:00:00.000Z' },
+      );
+
+      expect(result).toMatchObject({
+        reconciled: false,
+        reason: 'refund_not_successful',
+        orderId: `order-webhook-charge-${label}`,
+        subscriptionId: `sub_webhook_charge_${label}`,
+        refundId: `re_webhook_charge_${label}`,
+        refundStatus,
+      });
+      expect(supabase.tables.payment_orders[0]).toMatchObject({
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: {
+          source: 'invoice.payment_succeeded',
+          stripeRefundWebhookAudit: expect.objectContaining({
+            refundId: `re_webhook_charge_${label}`,
+            eventType: 'charge.refunded',
+            refundStatus,
+            invoiceId: `in_webhook_charge_${label}`,
+            reconciliationStatus,
+            creditClawbackApplied: false,
+            grantReversalApplied: false,
+          }),
+        },
+      });
+      expect(supabase.tables.payment_orders[0].metadata).not.toHaveProperty('subscriptionCreditGrantReversal');
+      expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+        status: 'granted',
+      });
+      expect(supabase.tables.credit_transactions).toHaveLength(0);
+
+      const releaseAfterChargeAudit = await releaseDueAnnualSubscriptionCredits(supabase, {
+        now: new Date('2026-02-15T00:00:00.000Z'),
+      });
+      expect(releaseAfterChargeAudit).toMatchObject({
+        releasedGrantCount: 2,
+        releasedCredits: 20,
+        skippedSubscriptions: 0,
+      });
+      expect(supabase.tables.credit_transactions.map((transaction) => transaction.ledger_type))
+        .toEqual(['grant', 'grant']);
+      expect(supabase.tables.credit_transactions.every((transaction) =>
+        transaction.counts_as_spend === false,
+      )).toBe(true);
+    },
+  );
+
+  it('reconciles charge.refunded subscription webhooks into invoice-scoped grant reversal markers', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-charge-refund',
+        user_id: 'user-webhook-charge-refund',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_charge_refund',
+        stripe_invoice_id: 'in_webhook_charge_refund_2027',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-charge-refund',
+        user_id: 'user-webhook-charge-refund',
+        membership_plan_id: 'plan-webhook-charge-refund',
+        stripe_subscription_id: 'sub_webhook_charge_refund',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_charge_refund_2027' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-charge-refund',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-charge-refund',
+        credits: 100,
+      }],
+      subscription_credit_grants: [
+        ...[1, 2].map((periodIndex) => ({
+          id: `grant-webhook-charge-2026-${periodIndex}`,
+          user_id: 'user-webhook-charge-refund',
+          membership_plan_id: 'plan-webhook-charge-refund',
+          stripe_subscription_id: 'sub_webhook_charge_refund',
+          stripe_invoice_id: 'in_webhook_charge_refund_2026',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_webhook_charge_refund:2026-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2026' },
+        })),
+        ...[1, 2].map((periodIndex) => ({
+          id: `grant-webhook-charge-2027-${periodIndex}`,
+          user_id: 'user-webhook-charge-refund',
+          membership_plan_id: 'plan-webhook-charge-refund',
+          stripe_subscription_id: 'sub_webhook_charge_refund',
+          stripe_invoice_id: 'in_webhook_charge_refund_2027',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: `sub_webhook_charge_refund:2027-0${periodIndex}:0${periodIndex}`,
+          period_index: periodIndex,
+          credits_granted: 10,
+          status: 'granted',
+          metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2027' },
+        })),
+      ],
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_charge_refund',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_charge_refund_2027',
+            payment_intent: 'pi_webhook_charge_refund',
+            refunds: {
+              data: [{
+                id: 're_webhook_charge_refund_pending',
+                status: 'pending',
+              }, {
+                id: 're_webhook_charge_refund_full',
+                status: 'succeeded',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2027-03-01T00:00:00.000Z' },
+    );
+
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_charge_refund_full',
+          eventType: 'charge.refunded',
+          invoiceId: 'in_webhook_charge_refund_2027',
+          fullRefund: true,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+          reversedGrantCount: 2,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_webhook_charge_refund_2026')
+      .map((grant) => grant.status)).toEqual(['granted', 'granted']);
+    expect(supabase.tables.subscription_credit_grants
+      .filter((grant) => grant.stripe_invoice_id === 'in_webhook_charge_refund_2027')
+      .map((grant) => grant.status)).toEqual(['reversed', 'reversed']);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -20,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_type: 'stripe_refund',
+      source_refund_id: 're_webhook_charge_refund_full',
+    });
+
+    const releaseAfterRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2027-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const replay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded_replay',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_charge_refund',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_charge_refund_2027',
+            payment_intent: 'pi_webhook_charge_refund',
+            refunds: {
+              data: [{
+                id: 're_webhook_charge_refund_pending',
+                status: 'pending',
+              }, {
+                id: 're_webhook_charge_refund_full',
+                status: 'succeeded',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2027-03-01T00:05:00.000Z' },
+    );
+
+    expect(replay).toMatchObject({
+      reconciled: true,
+      alreadyReconciled: true,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('reconciles refund.created subscription webhooks into auditable shortfall markers', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-refund-created',
+        user_id: 'user-webhook-refund-created',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        stripe_invoice_id: 'in_webhook_refund_created',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-refund-created',
+        user_id: 'user-webhook-refund-created',
+        membership_plan_id: 'plan-webhook-refund-created',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_refund_created' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-refund-created',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-refund-created',
+        credits: 5,
+      }],
+      subscription_credit_grants: [1, 2, 3].map((periodIndex) => ({
+        id: `grant-webhook-refund-created-${periodIndex}`,
+        user_id: 'user-webhook-refund-created',
+        membership_plan_id: 'plan-webhook-refund-created',
+        stripe_subscription_id: 'sub_webhook_refund_created',
+        stripe_invoice_id: 'in_webhook_refund_created',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_webhook_refund_created:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_refund_created',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_refund_created',
+      payment_intent: 'pi_webhook_refund_created',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_refund_created',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_refund_created_full',
+            amount: 9900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_refund_created',
+            payment_intent: 'pi_webhook_refund_created',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-04-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_refund_created');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_refund_created_full',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_refund_created',
+          fullRefund: true,
+          reviewRequired: true,
+          clawbackAmount: 30,
+          appliedClawbackAmount: 5,
+          shortfallAmount: 25,
+          shortfallReason: 'insufficient_balance',
+          reversalStatus: 'shortfall_review_required',
+          reversedGrantCount: 3,
+          creditTransactionId: 'txn-refund-webhook-1',
+        }),
+      },
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -5,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 30,
+        shortfallAmount: 25,
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+      'reversed',
+    ]);
+
+    const releaseAfterShortfall = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterShortfall).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const chargeRefundedReplay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_refund_created_charge_replay',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_refund_created',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            status: 'succeeded',
+            invoice: 'in_webhook_refund_created',
+            payment_intent: 'pi_webhook_refund_created',
+            refunds: {
+              data: [{
+                id: 're_webhook_refund_created_charge_later',
+                status: 'succeeded',
+              }],
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { now: '2026-04-01T00:05:00.000Z' },
+    );
+
+    expect(chargeRefundedReplay).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reversedGrantCount: 3,
+      clawbackAmount: 30,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 25,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_webhook_refund_created_full',
+      eventType: 'refund.created',
+      invoiceId: 'in_webhook_refund_created',
+      reviewRequired: true,
+      shortfallAmount: 25,
+      reversalStatus: 'shortfall_review_required',
+      reversedGrantCount: 3,
+    });
+  });
+
+  it('treats cumulative partial refunds that reach the order total as full subscription refunds', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-cumulative-full',
+        user_id: 'user-webhook-cumulative-full',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        stripe_invoice_id: 'in_webhook_cumulative_full',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-cumulative-full',
+        user_id: 'user-webhook-cumulative-full',
+        membership_plan_id: 'plan-webhook-cumulative-full',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_cumulative_full' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-cumulative-full',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-cumulative-full',
+        credits: 100,
+      }],
+      subscription_credit_grants: [1, 2].map((periodIndex) => ({
+        id: `grant-webhook-cumulative-full-${periodIndex}`,
+        user_id: 'user-webhook-cumulative-full',
+        membership_plan_id: 'plan-webhook-cumulative-full',
+        stripe_subscription_id: 'sub_webhook_cumulative_full',
+        stripe_invoice_id: 'in_webhook_cumulative_full',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_webhook_cumulative_full:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      })),
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_cumulative_full',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_cumulative_full',
+      payment_intent: 'pi_webhook_cumulative_full',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_full',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_full_second',
+            amount: 4900,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_full',
+            payment_intent: 'pi_webhook_cumulative_full',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-03-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_cumulative_full');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_cumulative_full_second',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_cumulative_full',
+          amountRefunded: 4900,
+          fullRefund: true,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+          reversedGrantCount: 2,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
+      'reversed',
+      'reversed',
+    ]);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -20,
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_refund_id: 're_webhook_cumulative_full_second',
+      idempotency_key: 'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) =>
+      grant.metadata.reversal.idempotencyKey,
+    )).toEqual([
+      'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+      'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
+    ]);
+
+    const refundUpdatedReplay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_full_update',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_full_update',
+            amount: 100,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_full',
+            payment_intent: 'pi_webhook_cumulative_full',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.updated'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-03-01T00:05:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(refundUpdatedReplay).toMatchObject({
+      reconciled: true,
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: false,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 20,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-refund-webhook-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_webhook_cumulative_full_second',
+      eventType: 'refund.created',
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      reviewRequired: false,
+    });
+
+    const releaseAfterCumulativeFullRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-04-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterCumulativeFullRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+  });
+
+  it('keeps cumulative partial refunds below the order total in review without clawback', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-cumulative-partial',
+        user_id: 'user-webhook-cumulative-partial',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        stripe_invoice_id: 'in_webhook_cumulative_partial',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-cumulative-partial',
+        user_id: 'user-webhook-cumulative-partial',
+        membership_plan_id: 'plan-webhook-cumulative-partial',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_cumulative_partial' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-cumulative-partial',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-cumulative-partial',
+        credits: 100,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-webhook-cumulative-partial-1',
+        user_id: 'user-webhook-cumulative-partial',
+        membership_plan_id: 'plan-webhook-cumulative-partial',
+        stripe_subscription_id: 'sub_webhook_cumulative_partial',
+        stripe_invoice_id: 'in_webhook_cumulative_partial',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'sub_webhook_cumulative_partial:2026-01:01',
+        period_index: 1,
+        credits_granted: 10,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      }],
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_cumulative_partial',
+      amount: 9900,
+      amount_refunded: 4000,
+      currency: 'usd',
+      refunded: false,
+      status: 'succeeded',
+      invoice: 'in_webhook_cumulative_partial',
+      payment_intent: 'pi_webhook_cumulative_partial',
+    } as Stripe.Charge);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_cumulative_partial',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_cumulative_partial_second',
+            amount: 2500,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_cumulative_partial',
+            payment_intent: 'pi_webhook_cumulative_partial',
+            metadata: {},
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-02-01T00:00:00.000Z',
+        retrieveCharge,
+      },
+    );
+
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_cumulative_partial');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: false,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_cumulative_partial_second',
+          eventType: 'refund.created',
+          invoiceId: 'in_webhook_cumulative_partial',
+          amountRefunded: 2500,
+          fullRefund: false,
+          reviewRequired: true,
+          reversalStatus: 'partial_refund_review_required',
+          reversedGrantCount: 0,
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+  });
+
   it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 
@@ -1640,6 +3099,257 @@ describe('stripe fulfillment helpers', () => {
         sourceOrderId: 'order-co...g-plan',
         sourceOrderStatus: 'completed',
         missingFields: ['item_id'],
+      }),
+    );
+  });
+
+  it('skips invoice payment replay when the invoice order is already blocked by a full-refund marker', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-refunded-replay',
+        user_id: 'user-webhook-invoice-refunded-replay',
+        item_id: 'plan-webhook-invoice-refunded-replay',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_invoice_refunded_replay',
+        stripe_subscription_id: 'sub_webhook_invoice_refunded_replay',
+        stripe_customer_id: 'cus_webhook_invoice_refunded_replay',
+        stripe_price_id: 'price_webhook_invoice_refunded_replay',
+        status: 'refunded',
+        payment_status: 'refunded',
+        metadata: {
+          source: 'invoice.payment_succeeded',
+          subscriptionCreditGrantReversal: {
+            refundId: 're_webhook_invoice_refunded_replay_full',
+            fullRefund: true,
+            reviewRequired: false,
+            reversalStatus: 'complete',
+          },
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-invoice-refunded-replay',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-invoice-refunded-replay',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_invoice_refunded_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_invoice_refunded_replay',
+        created: 1_780_291_200,
+        period_start: 1_780_291_200,
+        period_end: 1_811_827_200,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_invoice_refunded_replay',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        source: 'invoice.payment_succeeded',
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_invoice_refunded_replay_full',
+          fullRefund: true,
+          reversalStatus: 'complete',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...replay',
+        orderId: 'order-we...replay',
+        reason: 'refunded_status',
+      }),
+    );
+  });
+
+  it('skips invoice payment replay when the invoice order is under partial refund review', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-partial-review-replay',
+        user_id: 'user-webhook-invoice-partial-review-replay',
+        item_id: 'plan-webhook-invoice-partial-review-replay',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_invoice_partial_review_replay',
+        stripe_subscription_id: 'sub_webhook_invoice_partial_review_replay',
+        stripe_customer_id: 'cus_webhook_invoice_partial_review_replay',
+        stripe_price_id: 'price_webhook_invoice_partial_review_replay',
+        status: 'partially_refunded',
+        payment_status: 'partially_refunded',
+        metadata: {
+          source: 'subscription_credit_grants_refund_reconciliation',
+          subscriptionCreditGrantReversal: {
+            refundId: 're_webhook_invoice_partial_review_replay',
+            fullRefund: false,
+            reviewRequired: true,
+            clawbackAmount: 0,
+            appliedClawbackAmount: 0,
+            shortfallAmount: 0,
+            reversalStatus: 'partial_refund_review_required',
+          },
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-invoice-partial-review-replay',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-invoice-partial-review-replay',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_invoice_partial_review_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_invoice_partial_review_replay',
+        created: 1_780_291_200,
+        period_start: 1_780_291_200,
+        period_end: 1_811_827_200,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_invoice_partial_review_replay',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        source: 'subscription_credit_grants_refund_reconciliation',
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_invoice_partial_review_replay',
+          fullRefund: false,
+          reviewRequired: true,
+          clawbackAmount: 0,
+          appliedClawbackAmount: 0,
+          shortfallAmount: 0,
+          reversalStatus: 'partial_refund_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...replay',
+        orderId: 'order-we...replay',
+        reason: 'grant_reversal_partial_review_required',
+      }),
+    );
+  });
+
+  it('skips invoice payment fulfillment when only legacy partial-refund source orders exist', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-source-partial-review-only',
+        user_id: 'user-webhook-source-partial-review-only',
+        item_id: 'plan-webhook-source-partial-review-only',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_source_partial_review_old',
+        stripe_subscription_id: 'sub_webhook_source_partial_review_only',
+        stripe_customer_id: 'cus_webhook_source_partial_review_only',
+        stripe_price_id: 'price_webhook_source_partial_review_only',
+        status: 'partial_refunded',
+        payment_status: 'partial_refunded',
+        created_at: '2026-06-01T00:00:00.000Z',
+        metadata: { source: 'legacy_refund_marker' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-source-partial-review-only',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-source-partial-review-only',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_source_partial_review_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_source_partial_review_only',
+        created: 1_780_291_203,
+        period_start: 1_780_291_203,
+        period_end: 1_811_827_203,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_source_partial_review_only',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.payment_orders).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partial_refunded',
+      payment_status: 'partial_refunded',
+      metadata: { source: 'legacy_refund_marker' },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_source_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...w_only',
+        orderId: 'order-we...w-only',
+        reason: 'partial_refund_status',
       }),
     );
   });
