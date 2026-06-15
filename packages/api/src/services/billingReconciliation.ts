@@ -326,15 +326,17 @@ async function readLimitedRows<T>(
 ): Promise<{ rows: T[]; truncated: boolean }> {
   const result = await supabase
     .from(table)
-    .select(columns)
+    .select(columns, { count: 'planned' })
     .limit(rowLimit + 1);
 
   if (result.error) throw result.error;
 
-  const rows = (result.data ?? []) as T[];
+  const fetchedRows = (result.data ?? []) as T[];
+  const rows = fetchedRows.slice(0, rowLimit);
+  const count = typeof result.count === 'number' ? result.count : null;
   return {
-    rows: rows.slice(0, rowLimit),
-    truncated: rows.length > rowLimit,
+    rows,
+    truncated: count !== null ? count > rows.length : fetchedRows.length > rowLimit,
   };
 }
 

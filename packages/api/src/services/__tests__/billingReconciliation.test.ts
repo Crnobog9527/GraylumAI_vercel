@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildBillingEngineV15ReadinessAudit,
   runDailyBillingReconciliation,
+  runBillingEngineV15ReadinessAudit,
 } from '../billingReconciliation';
 
 function createMockSupabase(data: {
@@ -319,6 +320,65 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
     ...overrides,
   };
 }
+
+function createReadinessAuditSupabase(
+  rows: Parameters<typeof buildBillingEngineV15ReadinessAudit>[0],
+  serverCaps: Record<string, number> = {},
+) {
+  const tables: Record<string, Array<Record<string, unknown>>> = {
+    profiles: rows.profiles as Array<Record<string, unknown>>,
+    credit_transactions: rows.creditTransactions as Array<Record<string, unknown>>,
+    payment_orders: rows.paymentOrders as Array<Record<string, unknown>>,
+    subscription_credit_grants: rows.subscriptionCreditGrants as Array<Record<string, unknown>>,
+    user_subscriptions: rows.subscriptions as Array<Record<string, unknown>>,
+  };
+
+  return {
+    from: (table: string) => ({
+      select: (_columns: string, _options?: Record<string, unknown>) => ({
+        limit: async (limit: number) => {
+          const allRows = tables[table] ?? [];
+          const serverCap = serverCaps[table] ?? limit;
+          return {
+            data: allRows.slice(0, Math.min(limit, serverCap)),
+            count: allRows.length,
+            error: null,
+          };
+        },
+      }),
+    }),
+  } as any;
+}
+
+describe('runBillingEngineV15ReadinessAudit', () => {
+  it('detects server-capped readiness scans from planned counts', async () => {
+    const result = await runBillingEngineV15ReadinessAudit(
+      createReadinessAuditSupabase(createReadinessRows(), {
+        credit_transactions: 0,
+      }),
+      {
+        now: new Date('2026-06-15T12:00:00.000Z'),
+        rowLimit: 10,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        code: 'readiness_scan_truncated',
+        severity: 'warning',
+        entityType: 'credit_transactions',
+      }),
+    ]);
+    expect(result.findings.map((finding) => finding.code)).not.toEqual(expect.arrayContaining([
+      'profile_ledger_balance_mismatch',
+      'subscription_grant_missing_credit_transaction',
+      'subscription_grant_credit_transaction_mismatch',
+    ]));
+    expect(result.summary.truncatedTables).toEqual(['credit_transactions']);
+    expect(result.summary.grantLedgerMismatches).toBe(0);
+  });
+});
 
 describe('buildBillingEngineV15ReadinessAudit', () => {
   it('passes a clean PR7 source-code readiness snapshot', () => {
