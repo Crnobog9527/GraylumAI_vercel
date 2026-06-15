@@ -534,6 +534,114 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
   });
 
+  it('does not grant credits or complete an invoice order under partial refund review', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-invoice-partial-review-block',
+        user_id: 'user-invoice-partial-review-block',
+        item_id: 'plan-invoice-partial-review-block',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_invoice_partial_review_block',
+        stripe_subscription_id: 'sub_invoice_partial_review_block',
+        stripe_customer_id: 'cus_invoice_partial_review_block',
+        stripe_price_id: 'price_invoice_partial_review_block',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { source: 'invoice.payment_succeeded' },
+      }],
+      membership_plans: [{
+        id: 'plan-invoice-partial-review-block',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-invoice-partial-review-block',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    const partialRefund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-invoice-partial-review-block',
+      subscriptionId: 'sub_invoice_partial_review_block',
+      refundId: 're_invoice_partial_review_block',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 2500,
+      refundCurrency: 'usd',
+      invoiceId: 'in_invoice_partial_review_block',
+      isFullRefund: false,
+      now: '2026-06-01T00:00:02.000Z',
+    });
+
+    expect(partialRefund).toMatchObject({
+      fullRefund: false,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_invoice_partial_review_block',
+          fullRefund: false,
+          reviewRequired: true,
+          reversalStatus: 'partial_refund_review_required',
+        }),
+      },
+    });
+
+    const replay = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 9900,
+      currency: 'usd',
+      invoiceId: 'in_invoice_partial_review_block',
+      invoiceCreatedAt: '2026-06-01T00:00:00.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-06-01T00:00:00.000Z',
+      periodEnd: '2027-06-01T00:00:00.000Z',
+      stripeCustomerId: 'cus_invoice_partial_review_block',
+      subscriptionId: 'sub_invoice_partial_review_block',
+      now: '2026-06-01T00:00:03.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+      invoiceOrderId: 'order-invoice-partial-review-block',
+      skippedReason: 'blocked_by_refund_marker',
+      refundBlockReason: 'grant_reversal_partial_review_required',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: false,
+          reviewRequired: true,
+          clawbackAmount: 0,
+          appliedClawbackAmount: 0,
+          shortfallAmount: 0,
+          reversalStatus: 'partial_refund_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+  });
+
   it('grants monthly credits plus monthly bonus for a paid monthly invoice', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{

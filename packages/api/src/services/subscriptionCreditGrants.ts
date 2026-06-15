@@ -437,7 +437,7 @@ function isUsableMembershipSourceOrder(
   );
 }
 
-function getInvoiceOrderFullRefundBlockReason(order: PaymentOrderRow | null | undefined) {
+function getInvoiceOrderRefundBlockReason(order: PaymentOrderRow | null | undefined) {
   if (!order?.id) {
     return null;
   }
@@ -454,13 +454,28 @@ function getInvoiceOrderFullRefundBlockReason(order: PaymentOrderRow | null | un
 
   const metadata = asRecord(order.metadata);
   const stripeRefund = asRecord(metadata.stripeRefundReconciliation);
-  if (stripeRefund.fullRefund === true) {
-    return stripeRefund.reviewRequired === true
+  if (stripeRefund.reviewRequired === true) {
+    return stripeRefund.fullRefund === true
       ? 'stripe_refund_review_required'
-      : 'stripe_refund_full_refund_marker';
+      : 'stripe_refund_partial_review_required';
+  }
+  if (stripeRefund.fullRefund === true) {
+    return 'stripe_refund_full_refund_marker';
   }
 
   const grantReversal = asRecord(metadata.subscriptionCreditGrantReversal);
+  if (grantReversal.reviewRequired === true) {
+    const reversalStatus = typeof grantReversal.reversalStatus === 'string'
+      ? grantReversal.reversalStatus
+      : '';
+    if (reversalStatus.includes('shortfall')) {
+      return 'grant_reversal_shortfall';
+    }
+
+    return grantReversal.fullRefund === true
+      ? 'grant_reversal_review_required'
+      : 'grant_reversal_partial_review_required';
+  }
   if (grantReversal.fullRefund === true) {
     const reversalStatus = typeof grantReversal.reversalStatus === 'string'
       ? grantReversal.reversalStatus
@@ -469,9 +484,11 @@ function getInvoiceOrderFullRefundBlockReason(order: PaymentOrderRow | null | un
       return 'grant_reversal_shortfall';
     }
 
-    return grantReversal.reviewRequired === true
-      ? 'grant_reversal_review_required'
-      : 'grant_reversal_full_refund_marker';
+    return 'grant_reversal_full_refund_marker';
+  }
+
+  if (status === 'partially_refunded' || paymentStatus === 'partially_refunded') {
+    return 'partial_refund_status';
   }
 
   return null;
@@ -2075,7 +2092,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
-  const refundBlockReason = getInvoiceOrderFullRefundBlockReason(existingInvoiceOrder);
+  const refundBlockReason = getInvoiceOrderRefundBlockReason(existingInvoiceOrder);
   if (refundBlockReason) {
     logger.warn('billing', 'subscription_invoice_fulfillment_refund_blocked', {
       invoiceId: maskIdentifier(input.invoiceId),

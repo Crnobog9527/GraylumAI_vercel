@@ -2722,6 +2722,100 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('skips invoice payment replay when the invoice order is under partial refund review', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-partial-review-replay',
+        user_id: 'user-webhook-invoice-partial-review-replay',
+        item_id: 'plan-webhook-invoice-partial-review-replay',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_invoice_partial_review_replay',
+        stripe_subscription_id: 'sub_webhook_invoice_partial_review_replay',
+        stripe_customer_id: 'cus_webhook_invoice_partial_review_replay',
+        stripe_price_id: 'price_webhook_invoice_partial_review_replay',
+        status: 'partially_refunded',
+        payment_status: 'partially_refunded',
+        metadata: {
+          source: 'subscription_credit_grants_refund_reconciliation',
+          subscriptionCreditGrantReversal: {
+            refundId: 're_webhook_invoice_partial_review_replay',
+            fullRefund: false,
+            reviewRequired: true,
+            clawbackAmount: 0,
+            appliedClawbackAmount: 0,
+            shortfallAmount: 0,
+            reversalStatus: 'partial_refund_review_required',
+          },
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-invoice-partial-review-replay',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-invoice-partial-review-replay',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_invoice_partial_review_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_invoice_partial_review_replay',
+        created: 1_780_291_200,
+        period_start: 1_780_291_200,
+        period_end: 1_811_827_200,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_invoice_partial_review_replay',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        source: 'subscription_credit_grants_refund_reconciliation',
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_invoice_partial_review_replay',
+          fullRefund: false,
+          reviewRequired: true,
+          clawbackAmount: 0,
+          appliedClawbackAmount: 0,
+          shortfallAmount: 0,
+          reversalStatus: 'partial_refund_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...replay',
+        orderId: 'order-we...replay',
+        reason: 'grant_reversal_partial_review_required',
+      }),
+    );
+  });
+
   it('parses subscription id from the legacy invoice.subscription shape', async () => {
     const updates: Array<Record<string, unknown>> = [];
     const tables: Record<string, Array<Record<string, any>>> = {
