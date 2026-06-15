@@ -277,6 +277,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
             fullRefund: true,
             reviewRequired: false,
             refundId: 're-ready',
+            reversalStatus: 'complete',
             idempotencyKey: 'stripe_refund:subscription_grants:invoice:in-refunded:sub-ready',
           },
         },
@@ -411,6 +412,41 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       refundAuditGaps: 1,
       duplicateActiveSubscriptionGroups: 1,
     });
+  });
+
+  it('flags pending subscription refund reversal metadata as an audit gap', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      paymentOrders: [
+        {
+          id: 'order-refund-pending-reversal',
+          user_id: 'user-ready',
+          item_type: 'membership_plan',
+          mode: 'subscription',
+          status: 'partially_refunded',
+          payment_status: 'partially_refunded',
+          created_at: '2026-06-10T00:00:00.000Z',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-pending-refund-audit',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              fullRefund: true,
+              reviewRequired: true,
+              refundId: 're-pending',
+              reversalStatus: 'pending',
+              idempotencyKey: 'stripe_refund:subscription_grants:invoice:in-pending-refund-audit:sub-ready',
+            },
+          },
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      'subscription_refund_audit_metadata_missing',
+    );
+    expect(result.summary.refundAuditGaps).toBe(1);
   });
 
   it('flags subscription grant ledger mismatches, annual duplicates, refund clawback spend flags, and duplicate idempotency keys', () => {

@@ -189,28 +189,43 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function hasTruthyRefundAuditSignal(value: unknown): boolean {
+function hasGenericRefundAuditSignal(value: unknown): boolean {
   const record = asRecord(value);
+  const reversalStatus = normalizeText(record.reversalStatus);
+  const reconciliationStatus = normalizeText(record.reconciliationStatus);
   return (
     record.fullRefund === true
     || record.reviewRequired === true
     || typeof record.refundId === 'string'
-    || typeof record.reversalStatus === 'string'
-    || typeof record.reconciliationStatus === 'string'
+    || Boolean(reversalStatus && reversalStatus !== 'pending')
+    || Boolean(reconciliationStatus && reconciliationStatus !== 'pending')
     || typeof record.idempotencyKey === 'string'
     || typeof record.status === 'string'
   );
 }
 
+function hasSubscriptionGrantReversalAuditSignal(value: unknown): boolean {
+  const record = asRecord(value);
+  const reversalStatus = normalizeText(record.reversalStatus);
+  if (!reversalStatus || reversalStatus === 'pending') {
+    return false;
+  }
+  return (
+    reversalStatus === 'complete'
+    || reversalStatus === 'review_required'
+    || reversalStatus.endsWith('_review_required')
+  );
+}
+
 function hasRefundAuditMetadata(order: PaymentOrderRow) {
   const metadata = asRecord(order.metadata);
-  return [
-    metadata.stripeRefundReconciliation,
-    metadata.subscriptionCreditGrantReversal,
-    metadata.stripeRefundWebhookAudit,
-    metadata.refundReconciliation,
-    metadata.refund,
-  ].some(hasTruthyRefundAuditSignal);
+  return (
+    hasGenericRefundAuditSignal(metadata.stripeRefundReconciliation)
+    || hasSubscriptionGrantReversalAuditSignal(metadata.subscriptionCreditGrantReversal)
+    || hasGenericRefundAuditSignal(metadata.stripeRefundWebhookAudit)
+    || hasGenericRefundAuditSignal(metadata.refundReconciliation)
+    || hasGenericRefundAuditSignal(metadata.refund)
+  );
 }
 
 function getRawPaymentOrderStatus(value: unknown) {
