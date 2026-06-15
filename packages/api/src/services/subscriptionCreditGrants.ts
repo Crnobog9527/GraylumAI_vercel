@@ -494,6 +494,48 @@ function getInvoiceOrderRefundBlockReason(order: PaymentOrderRow | null | undefi
   return null;
 }
 
+type SubscriptionSourceOrderLookupResult = {
+  order: PaymentOrderRow | null;
+  blockedOrder: PaymentOrderRow | null;
+  blockedReason: string | null;
+};
+
+function pickSubscriptionSourceOrder(
+  orders: PaymentOrderRow[],
+  options: {
+    invoiceCreatedAt?: string | null;
+    periodStart?: string | null;
+  },
+): SubscriptionSourceOrderLookupResult {
+  let blockedOrder: PaymentOrderRow | null = null;
+  let blockedReason: string | null = null;
+
+  for (const order of orders) {
+    if (order.status === 'failed' || !isUsableSourceForInvoice(order, options)) {
+      continue;
+    }
+
+    const refundBlockReason = getInvoiceOrderRefundBlockReason(order);
+    if (refundBlockReason) {
+      blockedOrder ??= order;
+      blockedReason ??= refundBlockReason;
+      continue;
+    }
+
+    return {
+      order,
+      blockedOrder: null,
+      blockedReason: null,
+    };
+  }
+
+  return {
+    order: null,
+    blockedOrder,
+    blockedReason,
+  };
+}
+
 async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
@@ -501,7 +543,7 @@ async function getLatestSubscriptionOrder(
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
   } = {},
-): Promise<PaymentOrderRow | null> {
+): Promise<SubscriptionSourceOrderLookupResult> {
   const sourceCutoff = getInvoiceSourceQueryCutoff(options);
   const query = supabase
     .from('payment_orders')
@@ -533,13 +575,11 @@ async function getLatestSubscriptionOrder(
   }
 
   if (Array.isArray(result.data)) {
-    return (result.data as PaymentOrderRow[]).find((order: PaymentOrderRow) =>
-      order.status !== 'failed' && isUsableSourceForInvoice(order, options),
-    ) ?? null;
+    return pickSubscriptionSourceOrder(result.data as PaymentOrderRow[], options);
   }
 
   const order = result.data as PaymentOrderRow | null;
-  return isUsableSourceForInvoice(order, options) ? order : null;
+  return pickSubscriptionSourceOrder(order ? [order] : [], options);
 }
 
 function isCreatedNoLaterThanWithTolerance(
@@ -2135,13 +2175,38 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     };
   }
 
-  const sourceOrder = isUsableMembershipSourceOrder(existingInvoiceOrder)
-    ? existingInvoiceOrder
+  const sourceLookup = isUsableMembershipSourceOrder(existingInvoiceOrder)
+    ? {
+      order: existingInvoiceOrder,
+      blockedOrder: null,
+      blockedReason: null,
+    }
     : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
       invoiceCreatedAt: input.invoiceCreatedAt,
       periodStart: input.periodStart,
     });
+  const sourceOrder = sourceLookup.order;
   if (!isUsableMembershipSourceOrder(sourceOrder)) {
+    if (sourceLookup.blockedOrder?.id && sourceLookup.blockedReason) {
+      logger.warn('billing', 'subscription_invoice_fulfillment_refund_source_blocked', {
+        invoiceId: maskIdentifier(input.invoiceId),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        orderId: maskIdentifier(sourceLookup.blockedOrder.id),
+        reason: sourceLookup.blockedReason,
+      });
+
+      return {
+        fulfilledAt: null,
+        alreadyFulfilled: true,
+        grantedCredits: 0,
+        creditTransactionId: null,
+        invoiceOrderId: null,
+        blockedSourceOrderId: sourceLookup.blockedOrder.id,
+        skippedReason: 'blocked_by_refund_marker',
+        refundBlockReason: sourceLookup.blockedReason,
+      };
+    }
+
     throwGrantError(
       'subscription_source_order_missing',
       SUBSCRIPTION_GRANT_ERRORS.missingSubscriptionOrder,

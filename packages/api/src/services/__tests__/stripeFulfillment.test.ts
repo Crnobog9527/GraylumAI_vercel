@@ -2816,6 +2816,91 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('skips invoice payment fulfillment when only refund-review source orders exist', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-source-partial-review-only',
+        user_id: 'user-webhook-source-partial-review-only',
+        item_id: 'plan-webhook-source-partial-review-only',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_source_partial_review_old',
+        stripe_subscription_id: 'sub_webhook_source_partial_review_only',
+        stripe_customer_id: 'cus_webhook_source_partial_review_only',
+        stripe_price_id: 'price_webhook_source_partial_review_only',
+        status: 'partially_refunded',
+        payment_status: 'partially_refunded',
+        created_at: '2026-06-01T00:00:00.000Z',
+        metadata: {
+          source: 'subscription_credit_grants_refund_reconciliation',
+          subscriptionCreditGrantReversal: {
+            refundId: 're_webhook_source_partial_review_only',
+            fullRefund: false,
+            reviewRequired: true,
+            reversalStatus: 'partial_refund_review_required',
+          },
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-source-partial-review-only',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-source-partial-review-only',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_source_partial_review_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_source_partial_review_only',
+        created: 1_780_291_203,
+        period_start: 1_780_291_203,
+        period_end: 1_811_827_203,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_source_partial_review_only',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.payment_orders).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+      metadata: {
+        source: 'subscription_credit_grants_refund_reconciliation',
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: false,
+          reviewRequired: true,
+          reversalStatus: 'partial_refund_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_source_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...w_only',
+        orderId: 'order-we...w-only',
+        reason: 'grant_reversal_partial_review_required',
+      }),
+    );
+  });
+
   it('parses subscription id from the legacy invoice.subscription shape', async () => {
     const updates: Array<Record<string, unknown>> = [];
     const tables: Record<string, Array<Record<string, any>>> = {
