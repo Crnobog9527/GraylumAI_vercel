@@ -311,6 +311,9 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         cancel_at_period_end: false,
         current_period_start: '2026-06-15T00:00:00.000Z',
         current_period_end: '2027-06-15T00:00:00.000Z',
+        metadata: {
+          lastInvoiceId: 'in-ready',
+        },
       },
     ],
     truncatedTables: [],
@@ -684,6 +687,9 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
           cancel_at_period_end: false,
           current_period_start: '2026-06-15T00:00:00.000Z',
           current_period_end: '2027-06-15T00:00:00.000Z',
+          metadata: {
+            lastInvoiceId: 'in-ready',
+          },
         },
       ],
     }), {
@@ -698,6 +704,37 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         metadata: expect.objectContaining({
           dueGrantPeriodCount: 3,
           missingGrantPeriodKeys: ['sub-ready:2026-07:02'],
+        }),
+      }),
+    ]));
+    expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
+
+  it('flags active annual subscriptions missing current invoice scope', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      subscriptions: [
+        {
+          id: 'subscription-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: false,
+          current_period_start: '2026-06-15T00:00:00.000Z',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'annual_monthly_release_invoice_scope_missing',
+        entityId: 'subscription-ready',
+        metadata: expect.objectContaining({
+          stripeSubscriptionId: 'sub-ready',
         }),
       }),
     ]));

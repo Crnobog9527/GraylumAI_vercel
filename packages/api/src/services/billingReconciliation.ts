@@ -276,14 +276,14 @@ function isFullRefundedSubscriptionOrder(order: PaymentOrderRow) {
   );
 }
 
-function isFullRefundedSubscriptionOrderForInvoice(order: PaymentOrderRow, invoiceId: string | null) {
+function isFullRefundedSubscriptionOrderForInvoice(order: PaymentOrderRow, invoiceId: string) {
   if (!isMembershipSubscriptionOrder(order)) {
     return false;
   }
 
   const scopedInvoiceId = getInvoiceId(invoiceId);
   if (!scopedInvoiceId) {
-    return isFullRefundedSubscriptionOrder(order);
+    return false;
   }
 
   const orderInvoiceId = getInvoiceId(order.stripe_invoice_id);
@@ -794,6 +794,20 @@ export function buildBillingEngineV15ReadinessAudit(
       }
 
       const invoiceId = getAnnualReleaseInvoiceId(subscription);
+      if (!invoiceId) {
+        addFinding(findings, {
+          code: 'annual_monthly_release_invoice_scope_missing',
+          severity: 'error',
+          message: 'Active annual subscription is missing current invoice scope for monthly release readiness audit',
+          entityType: 'user_subscriptions',
+          entityId: subscription.id ?? undefined,
+          metadata: {
+            stripeSubscriptionId: subscriptionId,
+          },
+        });
+        continue;
+      }
+
       const hasFullRefund = rows.paymentOrders.some((order) => (
         order.stripe_subscription_id === subscriptionId
         && isFullRefundedSubscriptionOrderForInvoice(order, invoiceId)
@@ -854,7 +868,8 @@ export function buildBillingEngineV15ReadinessAudit(
       + countFindings('subscription_grant_credit_transaction_mismatch')
       + countFindings('subscription_grant_transaction_orphaned')
       + countFindings('annual_monthly_release_period_missing')
-      + countFindings('annual_monthly_release_period_invalid'),
+      + countFindings('annual_monthly_release_period_invalid')
+      + countFindings('annual_monthly_release_invoice_scope_missing'),
     duplicateActiveSubscriptionGroups: countFindings('duplicate_active_subscription'),
     duplicateAnnualGrantPeriods: countFindings('duplicate_annual_grant_period'),
     invalidPaymentOrderStatuses: countFindings('invalid_payment_order_status'),
