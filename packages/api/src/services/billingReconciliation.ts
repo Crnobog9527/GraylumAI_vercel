@@ -153,6 +153,11 @@ const CANONICAL_PAYMENT_ORDER_STATUS_SET = new Set<string>(PAYMENT_ORDER_STATUSE
 const LEGACY_PAYMENT_ORDER_STATUS_SET = new Set<string>(['cancelled', 'partial_refunded']);
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<string>(['active', 'trialing']);
 const PAYMENT_ATTENTION_SUBSCRIPTION_STATUSES = new Set<string>(['past_due', 'incomplete', 'unpaid']);
+const ANNUAL_RELEASE_REFUND_BLOCKING_STATUSES = new Set<string>([
+  'refunded',
+  'partially_refunded',
+  'partial_refunded',
+]);
 
 function sumInteger(values: Array<number | string | null | undefined>) {
   return values.reduce<number>((sum, value) => {
@@ -276,7 +281,7 @@ function isFullRefundedSubscriptionOrder(order: PaymentOrderRow) {
   );
 }
 
-function isFullRefundedSubscriptionOrderForInvoice(order: PaymentOrderRow, invoiceId: string) {
+function isAnnualReleaseRefundBlockedOrderForInvoice(order: PaymentOrderRow, invoiceId: string) {
   if (!isMembershipSubscriptionOrder(order)) {
     return false;
   }
@@ -289,7 +294,13 @@ function isFullRefundedSubscriptionOrderForInvoice(order: PaymentOrderRow, invoi
   const orderInvoiceId = getInvoiceId(order.stripe_invoice_id);
   const status = getRawPaymentOrderStatus(order.status);
   const paymentStatus = getRawPaymentOrderStatus(order.payment_status);
-  if (orderInvoiceId === scopedInvoiceId && (status === 'refunded' || paymentStatus === 'refunded')) {
+  if (
+    orderInvoiceId === scopedInvoiceId
+    && (
+      ANNUAL_RELEASE_REFUND_BLOCKING_STATUSES.has(status)
+      || ANNUAL_RELEASE_REFUND_BLOCKING_STATUSES.has(paymentStatus)
+    )
+  ) {
     return true;
   }
 
@@ -626,12 +637,15 @@ export function buildBillingEngineV15ReadinessAudit(
         const transactionReasonCode = transaction.reason_code ?? '';
         const grantPeriodKey = grant.grant_period_key?.trim() ?? '';
         const transactionGrantPeriodKey = transaction.grant_period_key?.trim() ?? '';
+        const grantUserId = grant.user_id?.trim() ?? '';
+        const transactionUserId = transaction.user_id?.trim() ?? '';
         if (
           transactionAmount !== grantCredits
           || transactionLedgerType !== 'grant'
           || transaction.counts_as_spend === true
           || (transactionReasonCode !== 'subscription_grant' && transactionReasonCode !== 'annual_monthly_release')
           || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
+          || (grantUserId && transactionUserId !== grantUserId)
         ) {
           addFinding(findings, {
             code: 'subscription_grant_credit_transaction_mismatch',
@@ -647,6 +661,8 @@ export function buildBillingEngineV15ReadinessAudit(
               reasonCode: transactionReasonCode,
               grantPeriodKey: grantPeriodKey || null,
               transactionGrantPeriodKey: transactionGrantPeriodKey || null,
+              grantUserId: grantUserId || null,
+              transactionUserId: transactionUserId || null,
             },
           });
         }
@@ -748,7 +764,7 @@ export function buildBillingEngineV15ReadinessAudit(
   }
 
   const activeAnnualGrantPeriods = new Map<string, SubscriptionCreditGrantRow[]>();
-  const annualGrantKeysBySubscription = new Map<string, Set<string>>();
+  const annualGrantKeysBySubscriptionInvoice = new Map<string, Set<string>>();
   for (const grant of rows.subscriptionCreditGrants) {
     if (
       normalizeText(grant.status) !== 'granted'
@@ -761,9 +777,13 @@ export function buildBillingEngineV15ReadinessAudit(
 
     const key = `${grant.stripe_subscription_id}:${grant.grant_period_key}`;
     activeAnnualGrantPeriods.set(key, [...(activeAnnualGrantPeriods.get(key) ?? []), grant]);
-    const subscriptionKeys = annualGrantKeysBySubscription.get(grant.stripe_subscription_id) ?? new Set<string>();
-    subscriptionKeys.add(grant.grant_period_key);
-    annualGrantKeysBySubscription.set(grant.stripe_subscription_id, subscriptionKeys);
+    const invoiceId = getInvoiceId(grant.stripe_invoice_id);
+    if (invoiceId) {
+      const invoiceKey = `${grant.stripe_subscription_id}:${invoiceId}`;
+      const subscriptionInvoiceKeys = annualGrantKeysBySubscriptionInvoice.get(invoiceKey) ?? new Set<string>();
+      subscriptionInvoiceKeys.add(grant.grant_period_key);
+      annualGrantKeysBySubscriptionInvoice.set(invoiceKey, subscriptionInvoiceKeys);
+    }
   }
 
   for (const [key, grants] of activeAnnualGrantPeriods.entries()) {
@@ -808,11 +828,11 @@ export function buildBillingEngineV15ReadinessAudit(
         continue;
       }
 
-      const hasFullRefund = rows.paymentOrders.some((order) => (
+      const hasRefundBlocker = rows.paymentOrders.some((order) => (
         order.stripe_subscription_id === subscriptionId
-        && isFullRefundedSubscriptionOrderForInvoice(order, invoiceId)
+        && isAnnualReleaseRefundBlockedOrderForInvoice(order, invoiceId)
       ));
-      if (hasFullRefund) {
+      if (hasRefundBlocker) {
         continue;
       }
 
@@ -821,7 +841,7 @@ export function buildBillingEngineV15ReadinessAudit(
         continue;
       }
 
-      const grantedPeriodKeys = annualGrantKeysBySubscription.get(subscriptionId) ?? new Set<string>();
+      const grantedPeriodKeys = annualGrantKeysBySubscriptionInvoice.get(`${subscriptionId}:${invoiceId}`) ?? new Set<string>();
       const missingGrantPeriodKeys = dueGrantPeriodKeys.filter((key) => !grantedPeriodKeys.has(key));
       if (missingGrantPeriodKeys.length === 0) {
         continue;

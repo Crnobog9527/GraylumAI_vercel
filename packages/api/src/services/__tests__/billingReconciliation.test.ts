@@ -604,6 +604,83 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
     });
   });
 
+  it('flags subscription grant credit transactions for different users', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [],
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant',
+          user_id: 'user-other',
+          amount: 100,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-06:01',
+        },
+      ],
+      paymentOrders: [
+        {
+          id: 'order-completed',
+          user_id: 'user-ready',
+          item_type: 'membership_plan',
+          mode: 'subscription',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-15T00:00:00.000Z',
+          created_at: '2026-06-15T00:00:00.000Z',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+        },
+      ],
+      subscriptionCreditGrants: [
+        {
+          id: 'grant-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-06:01',
+          period_index: 1,
+          total_periods: 12,
+          credits_granted: 100,
+          status: 'granted',
+          credit_transaction_id: 'txn-subscription-grant',
+        },
+      ],
+      subscriptions: [
+        {
+          id: 'subscription-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: false,
+          current_period_start: '2026-06-15T00:00:00.000Z',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+          metadata: {
+            lastInvoiceId: 'in-ready',
+          },
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'subscription_grant_credit_transaction_mismatch',
+        entityId: 'grant-ready',
+        metadata: expect.objectContaining({
+          grantUserId: 'user-ready',
+          transactionUserId: 'user-other',
+        }),
+      }),
+    ]));
+    expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
+
   it('flags active annual subscriptions with missing due monthly release periods', () => {
     const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
       profiles: [
@@ -710,6 +787,82 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
     expect(result.summary.grantLedgerMismatches).toBe(1);
   });
 
+  it('requires due annual release grants to match the current invoice scope', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [],
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant',
+          user_id: 'user-ready',
+          amount: 100,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-06:01',
+        },
+      ],
+      paymentOrders: [
+        {
+          id: 'order-current',
+          user_id: 'user-ready',
+          item_type: 'membership_plan',
+          mode: 'subscription',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-15T00:00:00.000Z',
+          created_at: '2026-06-15T00:00:00.000Z',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-current',
+        },
+      ],
+      subscriptionCreditGrants: [
+        {
+          id: 'grant-old-invoice',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-old',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-06:01',
+          period_index: 1,
+          total_periods: 12,
+          credits_granted: 100,
+          status: 'granted',
+          credit_transaction_id: 'txn-subscription-grant',
+        },
+      ],
+      subscriptions: [
+        {
+          id: 'subscription-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: false,
+          current_period_start: '2026-06-15T00:00:00.000Z',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+          metadata: {
+            lastInvoiceId: 'in-current',
+          },
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'annual_monthly_release_period_missing',
+        entityId: 'subscription-ready',
+        metadata: expect.objectContaining({
+          missingGrantPeriodKeys: ['sub-ready:2026-06:01'],
+        }),
+      }),
+    ]));
+    expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
+
   it('flags active annual subscriptions missing current invoice scope', () => {
     const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
       subscriptions: [
@@ -739,6 +892,56 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       }),
     ]));
     expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
+
+  it('does not require annual release periods while the current invoice is partially refunded', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [],
+      creditTransactions: [],
+      paymentOrders: [
+        {
+          id: 'order-current-partial-refund',
+          user_id: 'user-ready',
+          item_type: 'membership_plan',
+          mode: 'subscription',
+          status: 'partially_refunded',
+          payment_status: 'partially_refunded',
+          fulfilled_at: '2026-06-15T00:00:00.000Z',
+          created_at: '2026-06-15T00:00:00.000Z',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-current',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              reviewRequired: true,
+              reversalStatus: 'review_required',
+            },
+          },
+        },
+      ],
+      subscriptionCreditGrants: [],
+      subscriptions: [
+        {
+          id: 'subscription-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: false,
+          current_period_start: '2026-06-15T00:00:00.000Z',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+          metadata: {
+            lastInvoiceId: 'in-current',
+          },
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.findings.map((finding) => finding.code)).not.toContain(
+      'annual_monthly_release_period_missing',
+    );
   });
 
   it('does not let a historical refunded invoice suppress missing annual release audit', () => {
