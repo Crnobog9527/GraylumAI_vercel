@@ -133,6 +133,7 @@ type SubscriptionRow = {
   status?: string | null;
   cancel_at_period_end?: string | boolean | null;
   billing_cycle?: string | null;
+  current_period_start?: string | null;
   current_period_end?: string | null;
   metadata?: unknown;
 };
@@ -237,6 +238,30 @@ function hasRefundAuditMetadata(order: PaymentOrderRow) {
   );
 }
 
+function hasFullRefundSignal(value: unknown): boolean {
+  return asRecord(value).fullRefund === true;
+}
+
+function isFullRefundedSubscriptionOrder(order: PaymentOrderRow) {
+  if (!isMembershipSubscriptionOrder(order)) {
+    return false;
+  }
+
+  const status = getRawPaymentOrderStatus(order.status);
+  const paymentStatus = getRawPaymentOrderStatus(order.payment_status);
+  if (status === 'refunded' || paymentStatus === 'refunded') {
+    return true;
+  }
+
+  const metadata = asRecord(order.metadata);
+  return (
+    hasFullRefundSignal(metadata.stripeRefundReconciliation)
+    || hasFullRefundSignal(metadata.subscriptionCreditGrantReversal)
+    || hasFullRefundSignal(metadata.refundReconciliation)
+    || hasFullRefundSignal(metadata.refund)
+  );
+}
+
 function getRawPaymentOrderStatus(value: unknown) {
   return normalizeText(value);
 }
@@ -270,6 +295,48 @@ function isActiveSubscription(row: SubscriptionRow, now: Date) {
   }
 
   return false;
+}
+
+function isAnnualReleaseEligibleSubscription(row: SubscriptionRow) {
+  return (
+    row.billing_cycle === 'yearly'
+    && Boolean(row.stripe_subscription_id)
+    && ACTIVE_SUBSCRIPTION_STATUSES.has(normalizeText(row.status))
+  );
+}
+
+function getTimestamp(value?: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildAnnualGrantPeriodKey(subscriptionId: string, periodStartMs: number, periodIndex: number) {
+  return `${subscriptionId}:${new Date(periodStartMs).toISOString().slice(0, 7)}:${String(periodIndex).padStart(2, '0')}`;
+}
+
+function getDueAnnualGrantPeriodKeys(subscription: SubscriptionRow, now: Date) {
+  const subscriptionId = subscription.stripe_subscription_id;
+  const startMs = getTimestamp(subscription.current_period_start);
+  const endMs = getTimestamp(subscription.current_period_end);
+  if (!subscriptionId || startMs === null || endMs === null || endMs <= startMs) {
+    return [];
+  }
+
+  const nowMs = now.getTime();
+  if (nowMs < startMs) {
+    return [];
+  }
+
+  const periodMs = (endMs - startMs) / 12;
+  const dueCount = Math.min(12, Math.floor((Math.min(nowMs, endMs) - startMs) / periodMs) + 1);
+  return Array.from({ length: dueCount }, (_, index) => {
+    const periodIndex = index + 1;
+    const periodStartMs = Math.round(startMs + periodMs * index);
+    return buildAnnualGrantPeriodKey(subscriptionId, periodStartMs, periodIndex);
+  });
 }
 
 function addFinding(
@@ -353,6 +420,11 @@ export function buildBillingEngineV15ReadinessAudit(
   const hasTruncatedGrantCrossTableInput = (
     truncatedTables.includes('credit_transactions')
     || truncatedTables.includes('subscription_credit_grants')
+  );
+  const hasTruncatedAnnualReleaseInput = (
+    truncatedTables.includes('payment_orders')
+    || truncatedTables.includes('subscription_credit_grants')
+    || truncatedTables.includes('user_subscriptions')
   );
   const findings: BillingReadinessFinding[] = [];
   const creditTransactionsById = new Map(
@@ -632,6 +704,7 @@ export function buildBillingEngineV15ReadinessAudit(
   }
 
   const activeAnnualGrantPeriods = new Map<string, SubscriptionCreditGrantRow[]>();
+  const annualGrantKeysBySubscription = new Map<string, Set<string>>();
   for (const grant of rows.subscriptionCreditGrants) {
     if (
       normalizeText(grant.status) !== 'granted'
@@ -644,6 +717,9 @@ export function buildBillingEngineV15ReadinessAudit(
 
     const key = `${grant.stripe_subscription_id}:${grant.grant_period_key}`;
     activeAnnualGrantPeriods.set(key, [...(activeAnnualGrantPeriods.get(key) ?? []), grant]);
+    const subscriptionKeys = annualGrantKeysBySubscription.get(grant.stripe_subscription_id) ?? new Set<string>();
+    subscriptionKeys.add(grant.grant_period_key);
+    annualGrantKeysBySubscription.set(grant.stripe_subscription_id, subscriptionKeys);
   }
 
   for (const [key, grants] of activeAnnualGrantPeriods.entries()) {
@@ -661,6 +737,49 @@ export function buildBillingEngineV15ReadinessAudit(
         grantIds: grants.map((grant) => grant.id ?? null),
       },
     });
+  }
+
+  if (!hasTruncatedAnnualReleaseInput) {
+    const fullRefundedSubscriptionIds = new Set(
+      rows.paymentOrders
+        .filter((order) => order.stripe_subscription_id && isFullRefundedSubscriptionOrder(order))
+        .map((order) => order.stripe_subscription_id as string),
+    );
+
+    for (const subscription of rows.subscriptions) {
+      const subscriptionId = subscription.stripe_subscription_id;
+      if (
+        !subscriptionId
+        || !isAnnualReleaseEligibleSubscription(subscription)
+        || fullRefundedSubscriptionIds.has(subscriptionId)
+      ) {
+        continue;
+      }
+
+      const dueGrantPeriodKeys = getDueAnnualGrantPeriodKeys(subscription, now);
+      if (dueGrantPeriodKeys.length === 0) {
+        continue;
+      }
+
+      const grantedPeriodKeys = annualGrantKeysBySubscription.get(subscriptionId) ?? new Set<string>();
+      const missingGrantPeriodKeys = dueGrantPeriodKeys.filter((key) => !grantedPeriodKeys.has(key));
+      if (missingGrantPeriodKeys.length === 0) {
+        continue;
+      }
+
+      addFinding(findings, {
+        code: 'annual_monthly_release_period_missing',
+        severity: 'error',
+        message: 'Active annual subscription is missing due monthly release grant periods',
+        entityType: 'user_subscriptions',
+        entityId: subscription.id ?? undefined,
+        metadata: {
+          stripeSubscriptionId: subscriptionId,
+          dueGrantPeriodCount: dueGrantPeriodKeys.length,
+          missingGrantPeriodKeys,
+        },
+      });
+    }
   }
 
   addDuplicateIdempotencyFindings(
@@ -688,6 +807,7 @@ export function buildBillingEngineV15ReadinessAudit(
     grantLedgerMismatches: countFindings('subscription_grant_missing_credit_transaction')
       + countFindings('subscription_grant_credit_transaction_mismatch')
       + countFindings('subscription_grant_transaction_orphaned')
+      + countFindings('annual_monthly_release_period_missing')
       + countFindings('annual_monthly_release_period_invalid'),
     duplicateActiveSubscriptionGroups: countFindings('duplicate_active_subscription'),
     duplicateAnnualGrantPeriods: countFindings('duplicate_annual_grant_period'),
@@ -745,7 +865,7 @@ export async function runBillingEngineV15ReadinessAudit(
     readLimitedRows<SubscriptionRow>(
       supabase,
       'user_subscriptions',
-      'id, user_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_end, metadata',
+      'id, user_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, metadata',
       rowLimit,
     ),
   ]);

@@ -309,6 +309,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         status: 'active',
         billing_cycle: 'yearly',
         cancel_at_period_end: false,
+        current_period_start: '2026-06-15T00:00:00.000Z',
         current_period_end: '2027-06-15T00:00:00.000Z',
       },
     ],
@@ -598,6 +599,109 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       refundAuditGaps: 1,
       duplicateIdempotencyKeys: 2,
     });
+  });
+
+  it('flags active annual subscriptions with missing due monthly release periods', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 20 },
+      ],
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant-1',
+          user_id: 'user-ready',
+          amount: 10,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-06:01',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+        },
+        {
+          id: 'txn-subscription-grant-3',
+          user_id: 'user-ready',
+          amount: 10,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-08:03',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-08:03',
+        },
+      ],
+      paymentOrders: [
+        {
+          id: 'order-completed',
+          user_id: 'user-ready',
+          item_type: 'membership_plan',
+          mode: 'subscription',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-06-15T00:00:00.000Z',
+          created_at: '2026-06-15T00:00:00.000Z',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+        },
+      ],
+      subscriptionCreditGrants: [
+        {
+          id: 'grant-ready-1',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-06:01',
+          period_index: 1,
+          total_periods: 12,
+          credits_granted: 10,
+          status: 'granted',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+          credit_transaction_id: 'txn-subscription-grant-1',
+        },
+        {
+          id: 'grant-ready-3',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-08:03',
+          period_index: 3,
+          total_periods: 12,
+          credits_granted: 10,
+          status: 'granted',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-08:03',
+          credit_transaction_id: 'txn-subscription-grant-3',
+        },
+      ],
+      subscriptions: [
+        {
+          id: 'subscription-ready',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: false,
+          current_period_start: '2026-06-15T00:00:00.000Z',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+        },
+      ],
+    }), {
+      now: new Date('2026-08-20T00:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'annual_monthly_release_period_missing',
+        entityId: 'subscription-ready',
+        metadata: expect.objectContaining({
+          dueGrantPeriodCount: 3,
+          missingGrantPeriodKeys: ['sub-ready:2026-07:02'],
+        }),
+      }),
+    ]));
+    expect(result.summary.grantLedgerMismatches).toBe(1);
   });
 
   it('does not emit profile balance errors when ledger or profile scans are truncated', () => {
