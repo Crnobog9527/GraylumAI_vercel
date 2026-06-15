@@ -577,4 +577,107 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
     ]));
     expect(result.summary.grantLedgerMismatches).toBe(1);
   });
+
+  it('counts payment-attention subscription rows when detecting duplicate managed subscriptions', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      subscriptions: [
+        {
+          id: 'subscription-active',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-active',
+          status: 'active',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+        },
+        {
+          id: 'subscription-past-due',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-past-due',
+          status: 'past_due',
+          current_period_end: '2027-06-15T00:00:00.000Z',
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'duplicate_active_subscription',
+        entityId: 'user-ready',
+        metadata: expect.objectContaining({
+          stripeSubscriptionIds: ['sub-active', 'sub-past-due'],
+        }),
+      }),
+    ]));
+    expect(result.summary.duplicateActiveSubscriptionGroups).toBe(1);
+  });
+
+  it('scopes credit transaction idempotency duplicate checks by user', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 120 },
+        { id: 'user-other', credits: 5 },
+      ],
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant',
+          user_id: 'user-ready',
+          amount: 100,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-06:01',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+        },
+        {
+          id: 'txn-ai-spend',
+          user_id: 'user-ready',
+          amount: -10,
+          ledger_type: 'spend',
+          reason_code: 'ai_task_spend',
+          counts_as_spend: true,
+        },
+        {
+          id: 'txn-refund-clawback',
+          user_id: 'user-ready',
+          amount: -20,
+          ledger_type: 'refund_clawback',
+          reason_code: 'refund_clawback',
+          counts_as_spend: false,
+        },
+        {
+          id: 'txn-topup',
+          user_id: 'user-ready',
+          amount: 50,
+          ledger_type: 'grant',
+          reason_code: 'topup_purchase',
+          source_type: 'stripe_checkout',
+          counts_as_spend: false,
+          idempotency_key: 'shared-cross-user-key',
+        },
+        {
+          id: 'txn-other-user-topup',
+          user_id: 'user-other',
+          amount: 5,
+          ledger_type: 'grant',
+          reason_code: 'topup_purchase',
+          source_type: 'stripe_checkout',
+          counts_as_spend: false,
+          idempotency_key: 'shared-cross-user-key',
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.summary.duplicateIdempotencyKeys).toBe(0);
+    expect(result.findings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'duplicate_idempotency_key',
+        entityType: 'credit_transactions',
+      }),
+    ]));
+  });
 });

@@ -237,7 +237,7 @@ function isActiveSubscription(row: SubscriptionRow, now: Date) {
   }
 
   if (PAYMENT_ATTENTION_SUBSCRIPTION_STATUSES.has(status)) {
-    return false;
+    return true;
   }
 
   if ((row.cancel_at_period_end === true || row.cancel_at_period_end === 'true') && row.current_period_end) {
@@ -260,28 +260,36 @@ function addDuplicateIdempotencyFindings<T>(
   rows: T[],
   getKey: (row: T) => string | null | undefined,
   entityType: string,
+  getScope?: (row: T) => string | null | undefined,
 ) {
   const grouped = new Map<string, T[]>();
+  const groupMetadata = new Map<string, { key: string; scope: string | null }>();
   for (const row of rows) {
     const key = getKey(row)?.trim();
     if (!key) {
       continue;
     }
 
-    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+    const scope = getScope?.(row)?.trim() || null;
+    const groupKey = scope ? `${scope}:${key}` : key;
+    grouped.set(groupKey, [...(grouped.get(groupKey) ?? []), row]);
+    groupMetadata.set(groupKey, { key, scope });
   }
 
-  for (const [key, duplicates] of grouped.entries()) {
+  for (const [groupKey, duplicates] of grouped.entries()) {
     if (duplicates.length <= 1) {
       continue;
     }
 
+    const metadata = groupMetadata.get(groupKey) ?? { key: groupKey, scope: null };
     addFinding(findings, {
       code: 'duplicate_idempotency_key',
       severity: 'error',
-      message: `${entityType} idempotency key ${key} appears ${duplicates.length} times`,
+      message: metadata.scope
+        ? `${entityType} idempotency key ${metadata.key} appears ${duplicates.length} times for ${metadata.scope}`
+        : `${entityType} idempotency key ${metadata.key} appears ${duplicates.length} times`,
       entityType,
-      metadata: { idempotencyKey: key, count: duplicates.length },
+      metadata: { idempotencyKey: metadata.key, scope: metadata.scope, count: duplicates.length },
     });
   }
 }
@@ -612,6 +620,7 @@ export function buildBillingEngineV15ReadinessAudit(
     rows.creditTransactions,
     (transaction) => transaction.idempotency_key,
     'credit_transactions',
+    (transaction) => transaction.user_id,
   );
   addDuplicateIdempotencyFindings(
     findings,
