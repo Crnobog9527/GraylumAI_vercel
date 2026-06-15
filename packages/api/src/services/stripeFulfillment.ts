@@ -1065,6 +1065,10 @@ export async function fulfillMembershipInvoice(
     subscriptionId,
   });
 
+  if (result?.skippedReason === 'blocked_by_refund_marker') {
+    return;
+  }
+
   if (!result?.fulfilledAt) {
     throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
   }

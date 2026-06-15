@@ -1694,6 +1694,70 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - block refunded invoice fulfillment replay
+
+- 时间：2026-06-15 13:10 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`a113cae5289286f69e396eadc977b868be18a7a1`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Honor refunded invoice orders before granting credits`.
+- Subscription invoice fulfillment now checks the invoice-scoped `payment_orders` row before resolving it as a source order.
+- If the invoice order is already `refunded`, has `payment_status = refunded`, or has full-refund metadata under `stripeRefundReconciliation` / `subscriptionCreditGrantReversal`, fulfillment returns a deterministic skipped result and does not grant subscription credits.
+- Full-refund review-required / shortfall markers also block invoice fulfillment replay before profile sync, grant insertion, credit ledger writes, invoice order completion, or plan-change lock release can run.
+- `fulfillMembershipInvoice` treats this refund-blocked result as a handled replay and does not call checkout-order backfill, so refunded / partially_refunded / shortfall metadata is not overwritten.
+- Kept scope limited to subscription invoice fulfillment / replay guard; no payment/refund logic outside this P1 was expanded.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscriptionCreditGrants tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；1 file / 29 tests passed。
+- Targeted stripeFulfillment / invoice replay tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts` 通过；1 file / 23 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts -t "refund|replay|plan-change|source"` 通过；2 files / 28 tests passed / 24 skipped。
+- `pnpm test:api`：通过；48 files / 584 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- Full refund reconciliation can mark an invoice order refunded before fulfillment; a later invoice replay returns `skippedReason = blocked_by_refund_marker`, grants 0 credits, creates no credit transaction, and does not overwrite the refunded order.
+- Pending full-refund shortfall / review-required metadata blocks invoice fulfillment replay and preserves shortfall audit metadata.
+- Real Stripe fulfillment wrapper skips invoice replay when the invoice order has a full-refund marker, without doing checkout backfill or completion writes.
+- Normal paid active annual invoice behavior remains covered by existing tests and still releases only the current monthly slice.
+- Current invoice full refund still blocks annual monthly release; old invoice refund still does not block a later paid renewal invoice release.
+- `refund_clawback` remains non-spend.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - retry missing refund orders and legacy refund keys
 
 - 时间：2026-06-15 12:15 CST。

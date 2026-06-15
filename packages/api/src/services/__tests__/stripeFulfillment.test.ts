@@ -2635,6 +2635,93 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('skips invoice payment replay when the invoice order is already blocked by a full-refund marker', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-refunded-replay',
+        user_id: 'user-webhook-invoice-refunded-replay',
+        item_id: 'plan-webhook-invoice-refunded-replay',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_webhook_invoice_refunded_replay',
+        stripe_subscription_id: 'sub_webhook_invoice_refunded_replay',
+        stripe_customer_id: 'cus_webhook_invoice_refunded_replay',
+        stripe_price_id: 'price_webhook_invoice_refunded_replay',
+        status: 'refunded',
+        payment_status: 'refunded',
+        metadata: {
+          source: 'invoice.payment_succeeded',
+          subscriptionCreditGrantReversal: {
+            refundId: 're_webhook_invoice_refunded_replay_full',
+            fullRefund: true,
+            reviewRequired: false,
+            reversalStatus: 'complete',
+          },
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-invoice-refunded-replay',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-webhook-invoice-refunded-replay',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_invoice_refunded_replay',
+        amount_paid: 9900,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_invoice_refunded_replay',
+        created: 1_780_291_200,
+        period_start: 1_780_291_200,
+        period_end: 1_811_827_200,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_invoice_refunded_replay',
+          },
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'free',
+      credits: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        source: 'invoice.payment_succeeded',
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_webhook_invoice_refunded_replay_full',
+          fullRefund: true,
+          reversalStatus: 'complete',
+        }),
+      },
+    });
+    expect(supabase.tables.payment_orders[0]).not.toHaveProperty('fulfilled_at');
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_invoice_fulfillment_refund_blocked',
+      expect.objectContaining({
+        invoiceId: 'in_webho...replay',
+        subscriptionId: 'sub_webh...replay',
+        orderId: 'order-we...replay',
+        reason: 'refunded_status',
+      }),
+    );
+  });
+
   it('parses subscription id from the legacy invoice.subscription shape', async () => {
     const updates: Array<Record<string, unknown>> = [];
     const tables: Record<string, Array<Record<string, any>>> = {

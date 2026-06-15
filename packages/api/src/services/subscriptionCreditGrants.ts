@@ -437,6 +437,46 @@ function isUsableMembershipSourceOrder(
   );
 }
 
+function getInvoiceOrderFullRefundBlockReason(order: PaymentOrderRow | null | undefined) {
+  if (!order?.id) {
+    return null;
+  }
+
+  const status = (order.status ?? '').trim().toLowerCase();
+  if (status === 'refunded') {
+    return 'refunded_status';
+  }
+
+  const paymentStatus = (order.payment_status ?? '').trim().toLowerCase();
+  if (paymentStatus === 'refunded') {
+    return 'refunded_payment_status';
+  }
+
+  const metadata = asRecord(order.metadata);
+  const stripeRefund = asRecord(metadata.stripeRefundReconciliation);
+  if (stripeRefund.fullRefund === true) {
+    return stripeRefund.reviewRequired === true
+      ? 'stripe_refund_review_required'
+      : 'stripe_refund_full_refund_marker';
+  }
+
+  const grantReversal = asRecord(metadata.subscriptionCreditGrantReversal);
+  if (grantReversal.fullRefund === true) {
+    const reversalStatus = typeof grantReversal.reversalStatus === 'string'
+      ? grantReversal.reversalStatus
+      : '';
+    if (reversalStatus.includes('shortfall')) {
+      return 'grant_reversal_shortfall';
+    }
+
+    return grantReversal.reviewRequired === true
+      ? 'grant_reversal_review_required'
+      : 'grant_reversal_full_refund_marker';
+  }
+
+  return null;
+}
+
 async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
@@ -2035,6 +2075,26 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   input: FulfillMembershipInvoiceWithCreditGrantsInput,
 ) {
   const existingInvoiceOrder = await getExistingInvoiceOrder(supabase, input.invoiceId);
+  const refundBlockReason = getInvoiceOrderFullRefundBlockReason(existingInvoiceOrder);
+  if (refundBlockReason) {
+    logger.warn('billing', 'subscription_invoice_fulfillment_refund_blocked', {
+      invoiceId: maskIdentifier(input.invoiceId),
+      subscriptionId: maskIdentifier(input.subscriptionId),
+      orderId: maskIdentifier(existingInvoiceOrder?.id),
+      reason: refundBlockReason,
+    });
+
+    return {
+      fulfilledAt: existingInvoiceOrder?.fulfilled_at ?? null,
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+      invoiceOrderId: existingInvoiceOrder?.id ?? null,
+      skippedReason: 'blocked_by_refund_marker',
+      refundBlockReason,
+    };
+  }
+
   if (existingInvoiceOrder?.fulfilled_at) {
     const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
       supabase,
