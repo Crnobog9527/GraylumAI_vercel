@@ -498,4 +498,83 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       duplicateIdempotencyKeys: 2,
     });
   });
+
+  it('does not emit profile balance errors when ledger or profile scans are truncated', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 999 },
+      ],
+      truncatedTables: ['credit_transactions'],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      rowLimit: 1,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        code: 'readiness_scan_truncated',
+        severity: 'warning',
+        entityType: 'credit_transactions',
+      }),
+    ]);
+    expect(result.summary.profileLedgerMismatches).toBe(0);
+    expect(result.summary.truncatedTables).toEqual(['credit_transactions']);
+  });
+
+  it('requires subscription grant credit transactions to preserve the grant period key', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant',
+          user_id: 'user-ready',
+          amount: 100,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+        },
+        {
+          id: 'txn-ai-spend',
+          user_id: 'user-ready',
+          amount: -10,
+          ledger_type: 'spend',
+          reason_code: 'ai_task_spend',
+          counts_as_spend: true,
+        },
+        {
+          id: 'txn-refund-clawback',
+          user_id: 'user-ready',
+          amount: -20,
+          ledger_type: 'refund_clawback',
+          reason_code: 'refund_clawback',
+          counts_as_spend: false,
+        },
+        {
+          id: 'txn-topup',
+          user_id: 'user-ready',
+          amount: 50,
+          ledger_type: 'grant',
+          reason_code: 'topup_purchase',
+          source_type: 'stripe_checkout',
+          counts_as_spend: false,
+        },
+      ],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'subscription_grant_credit_transaction_mismatch',
+        entityId: 'grant-ready',
+        metadata: expect.objectContaining({
+          grantPeriodKey: 'sub-ready:2026-06:01',
+          transactionGrantPeriodKey: null,
+        }),
+      }),
+    ]));
+    expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
 });

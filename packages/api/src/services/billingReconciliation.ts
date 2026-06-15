@@ -314,6 +314,8 @@ export function buildBillingEngineV15ReadinessAudit(
   const pendingOrderMaxAgeHours = options.pendingOrderMaxAgeHours ?? DEFAULT_READINESS_PENDING_MAX_AGE_HOURS;
   const rowLimit = options.rowLimit ?? DEFAULT_READINESS_ROW_LIMIT;
   const stalePendingBeforeMs = now.getTime() - pendingOrderMaxAgeHours * 60 * 60 * 1000;
+  const truncatedTables = rows.truncatedTables ?? [];
+  const hasTruncatedBalanceInput = truncatedTables.includes('profiles') || truncatedTables.includes('credit_transactions');
   const findings: BillingReadinessFinding[] = [];
   const creditTransactionsById = new Map(
     rows.creditTransactions
@@ -321,7 +323,7 @@ export function buildBillingEngineV15ReadinessAudit(
       .map((transaction) => [transaction.id as string, transaction]),
   );
 
-  for (const table of rows.truncatedTables ?? []) {
+  for (const table of truncatedTables) {
     addFinding(findings, {
       code: 'readiness_scan_truncated',
       severity: 'warning',
@@ -343,22 +345,24 @@ export function buildBillingEngineV15ReadinessAudit(
     );
   }
 
-  for (const profile of rows.profiles) {
-    if (!profile.id) {
-      continue;
-    }
+  if (!hasTruncatedBalanceInput) {
+    for (const profile of rows.profiles) {
+      if (!profile.id) {
+        continue;
+      }
 
-    const profileCredits = toInteger(profile.credits);
-    const ledgerCredits = ledgerTotalsByUser.get(profile.id) ?? 0;
-    if (profileCredits !== ledgerCredits) {
-      addFinding(findings, {
-        code: 'profile_ledger_balance_mismatch',
-        severity: 'error',
-        message: `Profile credits (${profileCredits}) do not match credit ledger sum (${ledgerCredits})`,
-        entityType: 'profiles',
-        entityId: profile.id,
-        metadata: { profileCredits, ledgerCredits },
-      });
+      const profileCredits = toInteger(profile.credits);
+      const ledgerCredits = ledgerTotalsByUser.get(profile.id) ?? 0;
+      if (profileCredits !== ledgerCredits) {
+        addFinding(findings, {
+          code: 'profile_ledger_balance_mismatch',
+          severity: 'error',
+          message: `Profile credits (${profileCredits}) do not match credit ledger sum (${ledgerCredits})`,
+          entityType: 'profiles',
+          entityId: profile.id,
+          metadata: { profileCredits, ledgerCredits },
+        });
+      }
     }
   }
 
@@ -454,12 +458,14 @@ export function buildBillingEngineV15ReadinessAudit(
     const transactionAmount = toInteger(transaction.amount);
     const transactionLedgerType = normalizeCreditLedgerType(transaction);
     const transactionReasonCode = transaction.reason_code ?? '';
+    const grantPeriodKey = grant.grant_period_key?.trim() ?? '';
+    const transactionGrantPeriodKey = transaction.grant_period_key?.trim() ?? '';
     if (
       transactionAmount !== grantCredits
       || transactionLedgerType !== 'grant'
       || transaction.counts_as_spend === true
       || (transactionReasonCode !== 'subscription_grant' && transactionReasonCode !== 'annual_monthly_release')
-      || (transaction.grant_period_key && grant.grant_period_key && transaction.grant_period_key !== grant.grant_period_key)
+      || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
     ) {
       addFinding(findings, {
         code: 'subscription_grant_credit_transaction_mismatch',
@@ -473,8 +479,8 @@ export function buildBillingEngineV15ReadinessAudit(
           transactionAmount,
           ledgerType: transactionLedgerType,
           reasonCode: transactionReasonCode,
-          grantPeriodKey: grant.grant_period_key ?? null,
-          transactionGrantPeriodKey: transaction.grant_period_key ?? null,
+          grantPeriodKey: grantPeriodKey || null,
+          transactionGrantPeriodKey: transactionGrantPeriodKey || null,
         },
       });
     }
@@ -633,7 +639,7 @@ export function buildBillingEngineV15ReadinessAudit(
     refundAuditGaps: countFindings('subscription_refund_audit_metadata_missing')
       + countFindings('refund_clawback_counts_as_spend'),
     duplicateIdempotencyKeys: countFindings('duplicate_idempotency_key'),
-    truncatedTables: rows.truncatedTables ?? [],
+    truncatedTables,
   };
 
   return {

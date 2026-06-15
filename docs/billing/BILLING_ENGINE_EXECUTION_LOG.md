@@ -2459,3 +2459,53 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - Continue PR7 only inside source-code / tests / docs / draft PR / issue #225 control-plane updates.
 - Before owner audit, still required: `git diff --check`, final PR body, issue #225 update, latest-head Codex review clean, and Vercel checks success.
+
+## PR 7 latest-head review follow-up - truncated ledger scans and grant period keys
+
+- 时间：2026-06-15 23:12 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`4e27f71fa60ed4e56d96132c8ed1fa81f56f87fb`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4498629485`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Do not compare balances from truncated scans`: when `profiles` or `credit_transactions` is truncated by the PR7 readiness row limit, the audit now emits the existing partial-scan warning but skips `profiles.credits` vs partial ledger totals instead of producing a false error.
+- Fixed P2 `Require missing grant period keys to fail the audit`: when a `subscription_credit_grants` row has `grant_period_key`, the matching credit transaction must now preserve the same key; null / empty / mismatched transaction keys fail the readiness audit.
+- Added regression tests for both P2 cases.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 11 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 147 tests.
+- `pnpm test:api` passed；48 files / 606 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
