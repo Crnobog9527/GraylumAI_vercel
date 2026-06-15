@@ -1694,6 +1694,68 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 merge record
+
+- 时间：2026-06-15 21:41 CST / `2026-06-15T13:41:12Z`。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- PR head SHA：`10147e0083c4feca7b21fda3e9d1443058a42810`。
+- Squash merge commit / current `origin/staging` SHA：`e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`。
+- 状态：PR6 `merged / #237`；PR7 remains `not_started`；stop after merge gate；not PR7。
+
+### Merge Gate Evidence
+
+- `git fetch --all --prune` completed before merge gate.
+- PR #237 current head matched audited head `10147e0083c4feca7b21fda3e9d1443058a42810`.
+- Base was `staging`; merge state was `CLEAN`.
+- Latest-head Codex review returned clean on reviewed commit `10147e0083`, matching the current PR head.
+- Clean review content：`Codex Review: Didn't find any major issues. You're on a roll.`
+- Review/comment URL：https://github.com/Crnobog9527/GraylumAI_vercel/pull/237#issuecomment-4706260991
+- Vercel checks on the audited head were all success:
+  - `Vercel Preview Comments`
+  - `Vercel - graylum-ai-vercel-v1`
+  - `Vercel - graylumai-staging`
+- Issue #225 showed PR6 `ready_for_owner_audit / #237` before merge.
+- No newer PR commit, newer review, newer inline review comment, or failed check was found before merge.
+
+### Validation Recorded Before Merge
+
+- Targeted PR6 tests passed:
+  - `pnpm --filter @repo/api test:run -- src/services/__tests__/stripeFulfillment.test.ts`
+  - `pnpm --filter @repo/api test:run -- src/services/__tests__/subscriptionCreditGrants.test.ts`
+  - `pnpm --filter @repo/api test:run -- src/services/__tests__/stripeWebhookRoute.test.ts`
+  - `pnpm --filter @repo/api test:run -- src/services/__tests__/membershipEligibility.test.ts`
+- `pnpm test:api`：passed；48 files / 601 tests.
+- `pnpm lint`：passed.
+- `pnpm --filter web typecheck`：passed.
+- `git diff --check`：passed.
+
+### Merge Actions
+
+- Marked PR #237 ready for review from draft after all merge-gate checks passed.
+- Squash-merged PR #237 into `staging`.
+- Recorded merge commit：`e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`.
+- Updated issue #225：PR6 `merged / #237`; PR7 `not_started`.
+
+### Forbidden Actions Confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未关闭 issue #225。
+- 未进入 PR7。
+
+### Stop Point
+
+- PR6 merge gate complete.
+- PR7 remains `not_started`.
+- Stop here; do not start PR7 without separate owner authorization.
+
 ## PR 6 latest-head review follow-up - require successful charge refund status
 
 - 时间：2026-06-15 16:54 CST。
