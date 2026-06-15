@@ -328,6 +328,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
 function createReadinessAuditSupabase(
   rows: Parameters<typeof buildBillingEngineV15ReadinessAudit>[0],
   serverCaps: Record<string, number> = {},
+  plannedCounts: Record<string, number> = {},
 ) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
     profiles: rows.profiles as Array<Record<string, unknown>>,
@@ -345,7 +346,7 @@ function createReadinessAuditSupabase(
           const serverCap = serverCaps[table] ?? limit;
           return {
             data: allRows.slice(0, Math.min(limit, serverCap)),
-            count: allRows.length,
+            count: plannedCounts[table] ?? allRows.length,
             error: null,
           };
         },
@@ -381,6 +382,41 @@ describe('runBillingEngineV15ReadinessAudit', () => {
     ]));
     expect(result.summary.truncatedTables).toEqual(['credit_transactions']);
     expect(result.summary.grantLedgerMismatches).toBe(0);
+  });
+
+  it('prefers sentinel rows over underestimated planned counts', async () => {
+    const result = await runBillingEngineV15ReadinessAudit(
+      createReadinessAuditSupabase(
+        createReadinessRows({
+          profiles: [],
+          creditTransactions: [
+            { id: 'txn-a', user_id: 'user-a', amount: 10 },
+            { id: 'txn-b', user_id: 'user-b', amount: 20 },
+          ],
+          paymentOrders: [],
+          subscriptionCreditGrants: [],
+          subscriptions: [],
+        }),
+        {},
+        {
+          credit_transactions: 1,
+        },
+      ),
+      {
+        now: new Date('2026-06-15T12:00:00.000Z'),
+        rowLimit: 1,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        code: 'readiness_scan_truncated',
+        severity: 'warning',
+        entityType: 'credit_transactions',
+      }),
+    ]);
+    expect(result.summary.truncatedTables).toEqual(['credit_transactions']);
   });
 });
 

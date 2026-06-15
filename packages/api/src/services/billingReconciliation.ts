@@ -458,7 +458,7 @@ async function readLimitedRows<T>(
   const count = typeof result.count === 'number' ? result.count : null;
   return {
     rows,
-    truncated: count !== null ? count > rows.length : fetchedRows.length > rowLimit,
+    truncated: fetchedRows.length > rowLimit || (count !== null && count > rows.length),
   };
 }
 
