@@ -435,6 +435,11 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
               reversalStatus: 'pending',
               idempotencyKey: 'stripe_refund:subscription_grants:invoice:in-pending-refund-audit:sub-ready',
             },
+            stripeRefundWebhookAudit: {
+              refundId: 're-pending',
+              refundStatus: 'pending',
+              reconciliationStatus: 'waiting_for_successful_refund',
+            },
           },
         },
       ],
@@ -556,6 +561,60 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
     ]);
     expect(result.summary.profileLedgerMismatches).toBe(0);
     expect(result.summary.truncatedTables).toEqual(['credit_transactions']);
+  });
+
+  it('does not emit grant cross-table errors when ledger or grant scans are truncated', () => {
+    const truncatedLedgerResult = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      creditTransactions: [
+        {
+          id: 'txn-ai-spend',
+          user_id: 'user-ready',
+          amount: -10,
+          ledger_type: 'spend',
+          reason_code: 'ai_task_spend',
+          counts_as_spend: true,
+        },
+        {
+          id: 'txn-refund-clawback',
+          user_id: 'user-ready',
+          amount: -20,
+          ledger_type: 'refund_clawback',
+          reason_code: 'refund_clawback',
+          counts_as_spend: false,
+        },
+        {
+          id: 'txn-topup',
+          user_id: 'user-ready',
+          amount: 50,
+          ledger_type: 'grant',
+          reason_code: 'topup_purchase',
+          source_type: 'stripe_checkout',
+          counts_as_spend: false,
+        },
+      ],
+      truncatedTables: ['credit_transactions'],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      rowLimit: 1,
+    });
+    const truncatedGrantResult = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      subscriptionCreditGrants: [],
+      truncatedTables: ['subscription_credit_grants'],
+    }), {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+      rowLimit: 1,
+    });
+
+    expect(truncatedLedgerResult.success).toBe(true);
+    expect(truncatedLedgerResult.findings.map((finding) => finding.code)).not.toContain(
+      'subscription_grant_missing_credit_transaction',
+    );
+    expect(truncatedLedgerResult.summary.grantLedgerMismatches).toBe(0);
+    expect(truncatedGrantResult.success).toBe(true);
+    expect(truncatedGrantResult.findings.map((finding) => finding.code)).not.toContain(
+      'subscription_grant_transaction_orphaned',
+    );
+    expect(truncatedGrantResult.summary.grantLedgerMismatches).toBe(0);
   });
 
   it('requires subscription grant credit transactions to preserve the grant period key', () => {

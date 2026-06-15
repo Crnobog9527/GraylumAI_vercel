@@ -217,11 +217,20 @@ function hasSubscriptionGrantReversalAuditSignal(value: unknown): boolean {
   );
 }
 
+function hasPendingSubscriptionGrantReversal(value: unknown): boolean {
+  return normalizeText(asRecord(value).reversalStatus) === 'pending';
+}
+
 function hasRefundAuditMetadata(order: PaymentOrderRow) {
   const metadata = asRecord(order.metadata);
+  const subscriptionGrantReversal = metadata.subscriptionCreditGrantReversal;
+  if (hasPendingSubscriptionGrantReversal(subscriptionGrantReversal)) {
+    return false;
+  }
+
   return (
     hasGenericRefundAuditSignal(metadata.stripeRefundReconciliation)
-    || hasSubscriptionGrantReversalAuditSignal(metadata.subscriptionCreditGrantReversal)
+    || hasSubscriptionGrantReversalAuditSignal(subscriptionGrantReversal)
     || hasGenericRefundAuditSignal(metadata.stripeRefundWebhookAudit)
     || hasGenericRefundAuditSignal(metadata.refundReconciliation)
     || hasGenericRefundAuditSignal(metadata.refund)
@@ -339,6 +348,10 @@ export function buildBillingEngineV15ReadinessAudit(
   const stalePendingBeforeMs = now.getTime() - pendingOrderMaxAgeHours * 60 * 60 * 1000;
   const truncatedTables = rows.truncatedTables ?? [];
   const hasTruncatedBalanceInput = truncatedTables.includes('profiles') || truncatedTables.includes('credit_transactions');
+  const hasTruncatedGrantCrossTableInput = (
+    truncatedTables.includes('credit_transactions')
+    || truncatedTables.includes('subscription_credit_grants')
+  );
   const findings: BillingReadinessFinding[] = [];
   const creditTransactionsById = new Map(
     rows.creditTransactions
@@ -459,10 +472,7 @@ export function buildBillingEngineV15ReadinessAudit(
       continue;
     }
 
-    const transaction = grant.credit_transaction_id
-      ? creditTransactionsById.get(grant.credit_transaction_id)
-      : null;
-    if (!grant.credit_transaction_id || !transaction) {
+    if (!grant.credit_transaction_id) {
       addFinding(findings, {
         code: 'subscription_grant_missing_credit_transaction',
         severity: 'error',
@@ -477,35 +487,52 @@ export function buildBillingEngineV15ReadinessAudit(
       continue;
     }
 
-    const grantCredits = toInteger(grant.credits_granted);
-    const transactionAmount = toInteger(transaction.amount);
-    const transactionLedgerType = normalizeCreditLedgerType(transaction);
-    const transactionReasonCode = transaction.reason_code ?? '';
-    const grantPeriodKey = grant.grant_period_key?.trim() ?? '';
-    const transactionGrantPeriodKey = transaction.grant_period_key?.trim() ?? '';
-    if (
-      transactionAmount !== grantCredits
-      || transactionLedgerType !== 'grant'
-      || transaction.counts_as_spend === true
-      || (transactionReasonCode !== 'subscription_grant' && transactionReasonCode !== 'annual_monthly_release')
-      || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
-    ) {
-      addFinding(findings, {
-        code: 'subscription_grant_credit_transaction_mismatch',
-        severity: 'error',
-        message: 'Granted subscription_credit_grants row does not match its credit transaction semantics',
-        entityType: 'subscription_credit_grants',
-        entityId: grant.id ?? undefined,
-        metadata: {
-          creditTransactionId: grant.credit_transaction_id,
-          grantCredits,
-          transactionAmount,
-          ledgerType: transactionLedgerType,
-          reasonCode: transactionReasonCode,
-          grantPeriodKey: grantPeriodKey || null,
-          transactionGrantPeriodKey: transactionGrantPeriodKey || null,
-        },
-      });
+    if (!hasTruncatedGrantCrossTableInput) {
+      const transaction = creditTransactionsById.get(grant.credit_transaction_id);
+      if (!transaction) {
+        addFinding(findings, {
+          code: 'subscription_grant_missing_credit_transaction',
+          severity: 'error',
+          message: 'Granted subscription_credit_grants row has no matching credit transaction',
+          entityType: 'subscription_credit_grants',
+          entityId: grant.id ?? undefined,
+          metadata: {
+            creditTransactionId: grant.credit_transaction_id,
+            grantPeriodKey: grant.grant_period_key ?? null,
+          },
+        });
+      } else {
+        const grantCredits = toInteger(grant.credits_granted);
+        const transactionAmount = toInteger(transaction.amount);
+        const transactionLedgerType = normalizeCreditLedgerType(transaction);
+        const transactionReasonCode = transaction.reason_code ?? '';
+        const grantPeriodKey = grant.grant_period_key?.trim() ?? '';
+        const transactionGrantPeriodKey = transaction.grant_period_key?.trim() ?? '';
+        if (
+          transactionAmount !== grantCredits
+          || transactionLedgerType !== 'grant'
+          || transaction.counts_as_spend === true
+          || (transactionReasonCode !== 'subscription_grant' && transactionReasonCode !== 'annual_monthly_release')
+          || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
+        ) {
+          addFinding(findings, {
+            code: 'subscription_grant_credit_transaction_mismatch',
+            severity: 'error',
+            message: 'Granted subscription_credit_grants row does not match its credit transaction semantics',
+            entityType: 'subscription_credit_grants',
+            entityId: grant.id ?? undefined,
+            metadata: {
+              creditTransactionId: grant.credit_transaction_id,
+              grantCredits,
+              transactionAmount,
+              ledgerType: transactionLedgerType,
+              reasonCode: transactionReasonCode,
+              grantPeriodKey: grantPeriodKey || null,
+              transactionGrantPeriodKey: transactionGrantPeriodKey || null,
+            },
+          });
+        }
+      }
     }
 
     if (grant.grant_type === 'annual_monthly_release') {
@@ -546,6 +573,10 @@ export function buildBillingEngineV15ReadinessAudit(
       || transaction.idempotency_key?.startsWith('subscription_grant:')
     );
     if (!isSubscriptionGrantTransaction) {
+      continue;
+    }
+
+    if (hasTruncatedGrantCrossTableInput) {
       continue;
     }
 
