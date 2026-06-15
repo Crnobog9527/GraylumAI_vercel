@@ -1684,6 +1684,145 @@ describe('subscription credit grants', () => {
     ]);
   });
 
+  it('reuses legacy refund-id keyed clawback when invoice-scoped replay completes a pending full refund', async () => {
+    const invoiceScopedKey = 'stripe_refund:subscription_grants:invoice:in_subscription_refund_legacy:sub_subscription_refund_legacy';
+    const legacyRefundKey = 'stripe_refund:subscription_grants:re_subscription_refund_legacy_original:sub_subscription_refund_legacy';
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-legacy',
+        user_id: 'user-subscription-refund-legacy',
+        stripe_subscription_id: 'sub_subscription_refund_legacy',
+        stripe_invoice_id: 'in_subscription_refund_legacy',
+        status: 'partially_refunded',
+        payment_status: 'partially_refunded',
+        metadata: {
+          subscriptionCreditGrantReversal: {
+            refundId: 're_subscription_refund_legacy_original',
+            eventType: 'refund.created',
+            fullRefund: true,
+            invoiceId: 'in_subscription_refund_legacy',
+            reviewRequired: true,
+            clawbackAmount: 20,
+            appliedClawbackAmount: 5,
+            shortfallAmount: 15,
+            shortfallReason: 'insufficient_balance',
+            creditTransactionId: 'txn-existing-legacy-refund',
+            idempotencyKey: legacyRefundKey,
+            reversalStatus: 'pending',
+          },
+        },
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-legacy',
+        credits: 80,
+      }],
+      credit_transactions: [{
+        id: 'txn-existing-legacy-refund',
+        user_id: 'user-subscription-refund-legacy',
+        amount: -5,
+        idempotency_key: legacyRefundKey,
+        ledger_type: 'refund_clawback',
+        reason_code: 'refund_clawback',
+        counts_as_spend: false,
+        source_type: 'stripe_refund',
+        source_refund_id: 're_subscription_refund_legacy_original',
+        metadata: {
+          idempotencyKey: legacyRefundKey,
+          refundId: 're_subscription_refund_legacy_original',
+          requiredClawbackAmount: 20,
+          shortfallAmount: 15,
+          reviewRequired: true,
+        },
+      }],
+      subscription_credit_grants: [1, 2].map((periodIndex) => ({
+        id: `grant-refund-legacy-${periodIndex}`,
+        user_id: 'user-subscription-refund-legacy',
+        membership_plan_id: 'plan-subscription-refund-legacy',
+        stripe_subscription_id: 'sub_subscription_refund_legacy',
+        stripe_invoice_id: 'in_subscription_refund_legacy',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: `sub_subscription_refund_legacy:2026-0${periodIndex}:0${periodIndex}`,
+        period_index: periodIndex,
+        credits_granted: 10,
+        status: 'reversed',
+        metadata: {
+          sourceType: 'stripe_invoice',
+          reversal: {
+            invoiceId: 'in_subscription_refund_legacy',
+            idempotencyKey: legacyRefundKey,
+            creditTransactionId: 'txn-existing-legacy-refund',
+            reviewRequired: true,
+            shortfallAmount: 15,
+            shortfallReason: 'insufficient_balance',
+            source: 'subscription_refund',
+          },
+        },
+      })),
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-legacy',
+      subscriptionId: 'sub_subscription_refund_legacy',
+      refundId: 're_subscription_refund_legacy_later_event',
+      refundEventType: 'charge.refunded',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_legacy',
+      isFullRefund: true,
+      now: '2026-04-01T00:05:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reversedGrantCount: 2,
+      clawbackAmount: 20,
+      appliedClawbackAmount: 5,
+      shortfallAmount: 15,
+      creditTransactionId: 'txn-existing-legacy-refund',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      id: 'txn-existing-legacy-refund',
+      amount: -5,
+      idempotency_key: legacyRefundKey,
+      source_refund_id: 're_subscription_refund_legacy_original',
+      metadata: expect.objectContaining({
+        idempotencyKey: legacyRefundKey,
+        refundId: 're_subscription_refund_legacy_original',
+        shortfallAmount: 15,
+        reviewRequired: true,
+      }),
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(80);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          refundId: 're_subscription_refund_legacy_later_event',
+          eventType: 'charge.refunded',
+          fullRefund: true,
+          reviewRequired: true,
+          clawbackAmount: 20,
+          appliedClawbackAmount: 5,
+          shortfallAmount: 15,
+          shortfallReason: 'insufficient_balance',
+          creditTransactionId: 'txn-existing-legacy-refund',
+          idempotencyKey: invoiceScopedKey,
+          alreadyReconciled: true,
+          reversalStatus: 'shortfall_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.subscription_credit_grants.map((grant) =>
+      grant.metadata.reversal.idempotencyKey,
+    )).toEqual([legacyRefundKey, legacyRefundKey]);
+  });
+
   it('limits full-refund reversal to grants from the refunded invoice', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{

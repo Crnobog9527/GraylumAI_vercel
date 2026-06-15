@@ -964,6 +964,21 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     eventType: event.type,
   });
 
+  if (!order?.id) {
+    throwFulfillmentError(
+      'refund_subscription_order_missing',
+      STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+      new Error('subscription refund invoice payment order missing; retry webhook'),
+      {
+        eventType: event.type,
+        refundId: maskIdentifier(refundId),
+        invoiceId: maskIdentifier(invoiceId),
+        chargeId: maskIdentifier(chargeId),
+        paymentIntentId: maskIdentifier(paymentIntentId),
+      },
+    );
+  }
+
   if (!isSubscriptionRefundOrder(order)) {
     logger.info('billing', 'stripe_refund_subscription_order_skipped', {
       eventType: event.type,

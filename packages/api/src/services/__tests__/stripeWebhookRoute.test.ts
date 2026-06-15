@@ -60,4 +60,25 @@ describe('stripe webhook route', () => {
       expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
     },
   );
+
+  it('propagates subscription refund reconciliation failures so webhook delivery can retry', async () => {
+    const supabase = { source: 'service-role-client' };
+    const event = {
+      id: 'evt_refund_created_retry_order_missing',
+      type: 'refund.created',
+      data: {
+        object: {
+          id: 're_test_retry_order_missing',
+        },
+      },
+    };
+    const retryError = new Error('subscription refund invoice payment order missing; retry webhook');
+
+    stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook
+      .mockRejectedValueOnce(retryError);
+
+    await expect(handleStripeWebhookEvent(supabase, event as any)).rejects.toThrow(retryError);
+    expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook)
+      .toHaveBeenCalledWith(supabase, event);
+  });
 });

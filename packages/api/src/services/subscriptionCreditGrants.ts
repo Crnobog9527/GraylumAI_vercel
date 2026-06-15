@@ -772,6 +772,21 @@ function buildSubscriptionRefundIdempotencyKey(
   return `stripe_refund:subscription_grants:${refundToken}:${input.subscriptionId}`;
 }
 
+function buildLegacySubscriptionRefundIdempotencyKey(
+  input: ReconcileSubscriptionRefundCreditGrantsInput,
+) {
+  if (!input.isFullRefund) {
+    return null;
+  }
+
+  const refundToken = input.refundId?.trim();
+  if (!refundToken) {
+    return null;
+  }
+
+  return `stripe_refund:subscription_grants:${refundToken}:${input.subscriptionId}`;
+}
+
 function getRefundClawbackDescription(input: {
   subscriptionId: string;
   refundId?: string | null;
@@ -1053,6 +1068,26 @@ async function getExistingRefundClawbackTransaction(
   return result.data ?? null;
 }
 
+async function getExistingRefundClawbackTransactionForKeys(
+  supabase: SupabaseLikeClient,
+  input: { userId: string; idempotencyKeys: string[] },
+): Promise<{ transaction: CreditTransactionRow | null; idempotencyKey: string | null }> {
+  const uniqueKeys = [...new Set(input.idempotencyKeys.filter(Boolean))];
+
+  for (const idempotencyKey of uniqueKeys) {
+    const transaction = await getExistingRefundClawbackTransaction(supabase, {
+      userId: input.userId,
+      idempotencyKey,
+    });
+
+    if (transaction?.id) {
+      return { transaction, idempotencyKey };
+    }
+  }
+
+  return { transaction: null, idempotencyKey: null };
+}
+
 async function loadSubscriptionCreditGrantsForRefund(
   supabase: SupabaseLikeClient,
   input: { subscriptionId: string; invoiceId: string },
@@ -1124,6 +1159,36 @@ function isRefundableGrantForReconciliation(
       reversal.idempotencyKey === input.idempotencyKey
       || Boolean(invoiceId && reversalInvoiceId === invoiceId)
     );
+}
+
+function collectSubscriptionRefundIdempotencyKeys(input: {
+  order: PaymentOrderRow;
+  grants: SubscriptionCreditGrantRow[];
+  idempotencyKey: string;
+  legacyIdempotencyKey?: string | null;
+  existingReversalIdempotencyKey?: string | null;
+}) {
+  const idempotencyKeys = [
+    input.idempotencyKey,
+    input.legacyIdempotencyKey,
+    input.existingReversalIdempotencyKey,
+  ];
+  const orderReversalKey = asRecord(
+    asRecord(input.order.metadata).subscriptionCreditGrantReversal,
+  ).idempotencyKey;
+
+  if (typeof orderReversalKey === 'string' && orderReversalKey.trim()) {
+    idempotencyKeys.push(orderReversalKey.trim());
+  }
+
+  input.grants.forEach((grant) => {
+    const reversalKey = asRecord(asRecord(grant.metadata).reversal).idempotencyKey;
+    if (typeof reversalKey === 'string' && reversalKey.trim()) {
+      idempotencyKeys.push(reversalKey.trim());
+    }
+  });
+
+  return [...new Set(idempotencyKeys.filter((value): value is string => Boolean(value)))];
 }
 
 async function applySubscriptionRefundClawback(input: {
@@ -1282,6 +1347,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const idempotencyKey = buildSubscriptionRefundIdempotencyKey(scopedRefund, {
     invoiceId: invoiceScope.invoiceId,
   });
+  const legacyIdempotencyKey = buildLegacySubscriptionRefundIdempotencyKey(scopedRefund);
 
   if (!input.isFullRefund) {
     await updateSubscriptionRefundOrder({
@@ -1328,6 +1394,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
       alreadyReconciled: true,
     };
   }
+
+  const existingReversalMetadata = asRecord(
+    asRecord(order.metadata).subscriptionCreditGrantReversal,
+  );
+  const existingReversalIdempotencyKey = typeof existingReversalMetadata.idempotencyKey === 'string'
+    ? existingReversalMetadata.idempotencyKey.trim()
+    : null;
+  const existingShortfallReason = typeof existingReversalMetadata.shortfallReason === 'string'
+    ? existingReversalMetadata.shortfallReason
+    : null;
 
   await updateSubscriptionRefundOrder({
     supabase,
@@ -1393,18 +1469,31 @@ export async function reconcileSubscriptionRefundCreditGrants(
   let shortfallReason: string | null = clawbackAmount > 0 ? 'clawback_not_applied' : null;
 
   if (userId) {
-    const existingTransaction = await getExistingRefundClawbackTransaction(supabase, {
-      userId,
+    const refundIdempotencyKeys = collectSubscriptionRefundIdempotencyKeys({
+      order,
+      grants: refundableGrants,
       idempotencyKey,
+      legacyIdempotencyKey,
+      existingReversalIdempotencyKey,
     });
+    const existingTransactionResult = await getExistingRefundClawbackTransactionForKeys(supabase, {
+      userId,
+      idempotencyKeys: refundIdempotencyKeys,
+    });
+    const existingTransaction = existingTransactionResult.transaction;
 
     if (existingTransaction?.id) {
       creditTransactionId = existingTransaction.id;
       alreadyReconciled = true;
       appliedClawbackAmount = getTransactionAmount(existingTransaction);
       shortfallAmount = Math.max(clawbackAmount - appliedClawbackAmount, 0);
-      shortfallReason = shortfallAmount > 0 ? 'existing_clawback_shortfall' : null;
-      if (appliedClawbackAmount > 0) {
+      shortfallReason = shortfallAmount > 0
+        ? existingShortfallReason ?? 'existing_clawback_shortfall'
+        : null;
+      if (
+        appliedClawbackAmount > 0
+        && existingTransactionResult.idempotencyKey === idempotencyKey
+      ) {
         await updateRefundClawbackTransactionSemantics({
           supabase,
           transactionId: creditTransactionId,

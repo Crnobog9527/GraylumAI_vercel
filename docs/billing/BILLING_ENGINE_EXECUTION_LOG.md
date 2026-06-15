@@ -1694,6 +1694,71 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
 
+## PR 6 latest-head review follow-up - retry missing refund orders and legacy refund keys
+
+- 时间：2026-06-15 12:15 CST。
+- PR：[#237](https://github.com/Crnobog9527/GraylumAI_vercel/pull/237)。
+- Base：`staging`。
+- Head before fix：`e8eb85c39d18433fdb04553c162dc58bc85ad204`。
+- 状态：PR remains draft；PR6 remains `in_progress` until latest-head review confirms no P1/P2；not ready；not merged；not PR7。
+
+### Scope
+
+- Fixed latest-head P1 `Retry refund webhooks when invoice order is missing`: subscription refund webhook reconciliation now throws a retryable fulfillment error when the invoice-scoped `payment_orders` row is not visible yet, so the real webhook route returns 500 instead of silently acknowledging `order_missing`.
+- Kept non-subscription / non-membership invoice orders as skipped successes; only the missing invoice order path now retries.
+- Added route-level coverage proving refund reconciliation errors propagate from `handleStripeWebhookEvent`, allowing the existing `POST` catch path to return `Webhook handler failed` with status 500.
+- Fixed latest-head P2 `Preserve legacy refund keys before invoice-key replay`: full-refund reconciliation now checks invoice-scoped key plus legacy refund-id keys discovered from the current event, existing order reversal metadata, and same-invoice reversed grant metadata before applying a new clawback.
+- If a legacy refund-id keyed clawback transaction already exists, invoice-key replay reuses it, preserves the old transaction audit metadata, keeps prior shortfall/review-required reason metadata, and does not apply a duplicate clawback.
+- Kept PR6 / PR5 guardrails in place: current invoice full refund still blocks future annual monthly release, old invoice refund does not block later paid renewal release, `refund_clawback` remains non-spend, and subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Changed files
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/services/__tests__/stripeWebhookRoute.test.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscriptionCreditGrants tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts` 通过；1 file / 27 tests passed。
+- Targeted webhook / stripeFulfillment refund tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts` 通过；2 files / 26 tests passed。
+- Targeted PR6 + PR5 replay/source-order tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts -t "refund|replay|plan-change|source"` 通过；2 files / 25 tests passed / 24 skipped。
+- `pnpm test:api`：通过；48 files / 581 tests passed。
+- `pnpm lint`：通过。
+- `pnpm --filter web typecheck`：通过。
+- `git diff --check`：通过。
+
+### Test matrix covered
+
+- `refund.created` and `charge.refunded` webhooks arriving before the invoice order exists now reject with `stage = refund_subscription_order_missing`, leaving no fake success, no payment-order mutation, and no clawback transaction.
+- Webhook route handler propagates subscription refund reconciliation failures so the existing `POST` error path can return a retryable 500.
+- A pre-deploy refund-id keyed full-refund clawback / reversed-grant state is recognized during later invoice-scoped replay even when the new event has a different refund id.
+- Legacy shortfall / review-required transaction metadata remains intact and no duplicate clawback transaction is created.
+- Current invoice full refund still blocks annual monthly release; old invoice refund still does not block a later paid renewal invoice's valid release.
+- `refund_clawback` remains `counts_as_spend = false`.
+- PR5 subscription upgrade source-order / invoice replay protections remain covered by targeted tests.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未进入 PR7。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR6 `in_progress`.
+- If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
 ## PR 6 latest-head review follow-up - invoice-scoped full-refund reconciliation key
 
 - 时间：2026-06-14 17:05 CST。

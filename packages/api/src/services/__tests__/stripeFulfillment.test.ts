@@ -1284,6 +1284,77 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('throws retryable errors for subscription refund webhooks when the invoice order is not visible yet', async () => {
+    const charge = {
+      id: 'ch_webhook_order_missing',
+      amount: 9900,
+      amount_refunded: 9900,
+      currency: 'usd',
+      refunded: true,
+      status: 'succeeded',
+      invoice: 'in_webhook_order_missing',
+      payment_intent: 'pi_webhook_order_missing',
+      refunds: {
+        data: [{
+          id: 're_webhook_order_missing_full',
+        }],
+      },
+    } as Stripe.Charge;
+    const retrieveCharge = vi.fn().mockResolvedValue(charge);
+    const webhookCases = [
+      {
+        event: {
+          id: 'evt_webhook_refund_created_order_missing',
+          type: 'refund.created',
+          data: {
+            object: {
+              id: 're_webhook_order_missing_full',
+              amount: 9900,
+              currency: 'usd',
+              status: 'succeeded',
+              charge: 'ch_webhook_order_missing',
+              payment_intent: 'pi_webhook_order_missing',
+              metadata: {},
+            } as Stripe.Refund,
+          },
+        } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+        options: { retrieveCharge },
+      },
+      {
+        event: {
+          id: 'evt_webhook_charge_refunded_order_missing',
+          type: 'charge.refunded',
+          data: {
+            object: charge,
+          },
+        } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+        options: {},
+      },
+    ];
+
+    for (const webhookCase of webhookCases) {
+      const supabase = createRefundWebhookSupabase();
+
+      await expect(reconcileSubscriptionRefundFromStripeWebhook(
+        supabase,
+        webhookCase.event,
+        webhookCase.options,
+      )).rejects.toMatchObject({
+        stage: 'refund_subscription_order_missing',
+      });
+      expect(supabase.tables.payment_orders).toHaveLength(0);
+      expect(supabase.tables.credit_transactions).toHaveLength(0);
+      expect(loggerState.error).toHaveBeenCalledWith(
+        'billing',
+        'stripe_fulfillment_stage_failed',
+        expect.objectContaining({
+          stage: 'refund_subscription_order_missing',
+        }),
+      );
+    }
+    expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_order_missing');
+  });
+
   it('reconciles charge.refunded subscription webhooks into invoice-scoped grant reversal markers', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{
