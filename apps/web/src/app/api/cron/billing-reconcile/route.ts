@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { runDailyBillingReconciliation } from '@repo/api/src/services/billingReconciliation';
+import {
+  runBillingEngineV15ReadinessAudit,
+  runDailyBillingReconciliation,
+} from '@repo/api/src/services/billingReconciliation';
 import { logger } from '@repo/api/src/services';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -28,15 +31,27 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const result = await runDailyBillingReconciliation(supabase);
+    const [result, readinessAudit] = await Promise.all([
+      runDailyBillingReconciliation(supabase),
+      runBillingEngineV15ReadinessAudit(supabase),
+    ]);
+    const success = result.success && readinessAudit.success;
 
-    if (!result.success) {
+    if (!success) {
       logger.system.cronJob(
         'billing-reconcile',
         'failed',
         Date.now() - startedAt,
-        result.mismatches.join(' | '),
-        { mismatches: result.mismatches, summary: result.summary },
+        [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message)].join(' | '),
+        {
+          mismatches: result.mismatches,
+          summary: result.summary,
+          readinessAudit: {
+            checkedAt: readinessAudit.checkedAt,
+            summary: readinessAudit.summary,
+            findings: readinessAudit.findings,
+          },
+        },
       );
     } else {
       logger.system.cronJob(
@@ -44,18 +59,25 @@ export async function GET(request: Request) {
         'completed',
         Date.now() - startedAt,
         undefined,
-        { summary: result.summary },
+        {
+          summary: result.summary,
+          readinessAudit: {
+            checkedAt: readinessAudit.checkedAt,
+            summary: readinessAudit.summary,
+          },
+        },
       );
     }
 
     return NextResponse.json({
-      success: result.success,
+      success,
       periodStart: result.periodStart,
       periodEnd: result.periodEnd,
       mismatches: result.mismatches,
       summary: result.summary,
+      readinessAudit,
       timestamp: new Date().toISOString(),
-    }, { status: result.success ? 200 : 500 });
+    }, { status: success ? 200 : 500 });
   } catch (error) {
     logger.system.cronJob(
       'billing-reconcile',

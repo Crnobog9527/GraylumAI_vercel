@@ -2398,3 +2398,674 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Next action after push：request latest-head Codex review on the new PR #237 head while keeping the PR draft.
 - If latest-head review still has P1/P2, keep PR6 `in_progress`.
 - If latest-head review is clean, PR6 may move to `ready_for_owner_audit / #237`; still no merge without owner authorization.
+
+## PR 7 start checkpoint - reconciliation, monitoring, and final source-code validation
+
+- 时间：2026-06-15 22:55 CST。
+- 阶段：PR7 / reconciliation, monitoring, and final source-code validation。
+- Base：`staging`。
+- Base SHA：`c708fa01775f48baba17f1537b4184aae23cb870`。
+- Branch：`codex/billing-v1-pr7-reconciliation-monitoring`。
+- 状态：PR7 implementation in progress；draft PR pending；not merged；not production。
+- Previous stage：PR6 `merged / #237`；PR6 head `10147e0083c4feca7b21fda3e9d1443058a42810`；squash merge commit `e6dc6d790ebfd2f7c88f807f2e4da34c8c02e54b`。
+
+### Scope
+
+- Added a source-code-only Billing Engine v1.5 readiness audit in `billingReconciliation`.
+- The audit is read-only and checks:
+  - `profiles.credits` against summed `credit_transactions`;
+  - `subscription_credit_grants` against matching subscription grant credit transactions;
+  - canonical / legacy `payment_orders` status vocabulary and stale pending orders;
+  - refunded subscription order audit metadata;
+  - refund clawback entries that must not count as spend;
+  - duplicate active subscription rows per user;
+  - duplicate annual monthly release grant periods;
+  - duplicate idempotency keys.
+- The existing `billing-reconcile` route now runs daily reconciliation and the PR7 readiness audit together, returns both results, and logs readiness findings in the existing cron log context.
+- Added structured refund reconciliation outcome logs for successful and review-required subscription refund reconciliations.
+
+### Changed files so far
+
+- `apps/web/src/app/api/cron/billing-reconcile/route.ts`
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation so far
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 9 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 145 tests.
+- Targeted refund / webhook / PR7 tests after observability patch：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts` passed；3 files / 47 tests.
+- `pnpm test:api` passed；48 files / 604 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Continue PR7 only inside source-code / tests / docs / draft PR / issue #225 control-plane updates.
+- Before owner audit, still required: `git diff --check`, final PR body, issue #225 update, latest-head Codex review clean, and Vercel checks success.
+
+## PR 7 latest-head review follow-up - truncated ledger scans and grant period keys
+
+- 时间：2026-06-15 23:12 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`4e27f71fa60ed4e56d96132c8ed1fa81f56f87fb`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4498629485`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Do not compare balances from truncated scans`: when `profiles` or `credit_transactions` is truncated by the PR7 readiness row limit, the audit now emits the existing partial-scan warning but skips `profiles.credits` vs partial ledger totals instead of producing a false error.
+- Fixed P2 `Require missing grant period keys to fail the audit`: when a `subscription_credit_grants` row has `grant_period_key`, the matching credit transaction must now preserve the same key; null / empty / mismatched transaction keys fail the readiness audit.
+- Added regression tests for both P2 cases.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 11 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 147 tests.
+- `pnpm test:api` passed；48 files / 606 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - missing annual release periods
+
+- 时间：2026-06-16 00:29 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`ecd91479c3ba86020fea4ae8a8f14053feb66cf9`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4499193241`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Detect missing annual release periods`: PR7 readiness audit now derives due annual monthly release period keys from active yearly `user_subscriptions.current_period_start/current_period_end` and compares them with granted `subscription_credit_grants`.
+- Added `annual_monthly_release_period_missing` finding for due annual release periods that are absent, while skipping the check when payment orders, grants, or subscriptions are partial scans.
+- Added regression coverage for an active yearly subscription with periods 1 and 3 granted but period 2 missing.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 17 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 153 tests.
+- `pnpm test:api` passed；48 files / 612 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - invoice-scoped annual refund skip
+
+- 时间：2026-06-16 00:43 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`059faf9e0e643a6597e9997b1eccc9efe779228c`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4499282307`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Scope refunded orders by invoice when skipping releases`: PR7 readiness audit now checks whether annual monthly release should be skipped using the subscription's current `metadata.lastInvoiceId`, matching the production annual release path.
+- Historical full-refunded invoices for the same Stripe subscription no longer suppress missing-release findings for the current invoice period.
+- Added regression coverage for a historical refunded invoice plus a current active annual invoice that is missing a due monthly release period.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 18 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 154 tests.
+- `pnpm test:api` passed；48 files / 613 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - annual invoice scope gap
+
+- 时间：2026-06-16 00:59 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`831be5321922554938b0ab40c55a9cbaa87fc324`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4499389371`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Keep annual refund checks invoice-scoped`: active annual subscriptions without current `metadata.lastInvoiceId` now produce an `annual_monthly_release_invoice_scope_missing` readiness error.
+- Removed the subscription-wide full-refund fallback from invoice-scoped annual-release audit checks so historical refunds cannot suppress current-period readiness.
+- Added regression coverage for active annual subscriptions missing current invoice scope and updated clean annual fixtures to include the current invoice id.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 19 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 155 tests.
+- `pnpm test:api` passed；48 files / 614 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - invoice-scoped grants, partial blockers, and grant user scope
+
+- 时间：2026-06-16 01:13 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`8120736a73e9129b9f02df64bd644d26e3481d3b`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4499483532`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Require annual release grants to match the invoice scope`: due annual monthly release periods now count only grant rows whose `stripe_invoice_id` matches the subscription's current `metadata.lastInvoiceId`.
+- Fixed P2 `Honor partial-refund blockers when auditing releases`: current invoice orders in `refunded`, `partially_refunded`, or legacy `partial_refunded` state now skip missing-release findings, matching the production release blocker behavior.
+- Fixed P2 `Verify grant transactions use the same user`: subscription grant rows now require their linked credit transaction to belong to the same `user_id`.
+- Added regression coverage for invoice-mis-scoped annual grants, current partial-refund release blockers, and grant/transaction user mismatches.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 22 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 158 tests.
+- `pnpm test:api` passed；48 files / 617 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - sentinel row truncation precedence
+
+- 时间：2026-06-16 01:30 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`0eebe6100898cfcbaa62956e36781004d47bec27`。
+- Codex review/thread：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#discussion_r3415320049`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Prefer the sentinel row over planned counts`: PR7 readiness scans now mark a table truncated whenever `limit(rowLimit + 1)` returns the extra sentinel row, even if the PostgREST planned count is stale or underestimated.
+- Preserved planned-count truncation detection for server-capped scans where the sentinel row is not returned.
+- Added regression coverage for underestimated planned counts with a sentinel row.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 23 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 159 tests.
+- `pnpm test:api` passed；48 files / 618 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - exact count truncation metadata
+
+- 时间：2026-06-16 01:39 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`d41cc8617688cb959e14da66253fba9a8c599bd1`。
+- Codex review/thread：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#discussion_r3415372596`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Do not use planned counts to mark truncation`: `readLimitedRows` now requests PostgREST `count: 'exact'` instead of estimated `planned` counts.
+- Kept sentinel-row precedence for `rowLimit + 1` responses and exact-count fallback for server-side caps that return fewer than the requested sentinel rows.
+- Renamed test fixtures to reflect exact/count metadata rather than planned estimates.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 23 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 159 tests.
+- `pnpm test:api` passed；48 files / 618 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - server-capped readiness scans
+
+- 时间：2026-06-16 00:15 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`7d095ab84403183aee5ea690f3887f118c2bffa8`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4499121410`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P1 `Detect server-side truncation before treating scans as complete`: `readLimitedRows` now requests a planned count and marks readiness scans truncated when the table count exceeds the fetched row count, even if PostgREST server-side max rows cap the response below the requested `rowLimit + 1`.
+- Preserved the fallback `rowLimit + 1` behavior when count metadata is unavailable.
+- Added regression coverage for server-capped `credit_transactions` scans so partial scans emit only the readiness warning instead of hard profile / grant cross-table failures.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 16 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 152 tests.
+- `pnpm test:api` passed；48 files / 611 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - pending reversal precedence and truncated grant joins
+
+- 时间：2026-06-15 23:50 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`94645c47167a5e9e9995872796da864235ec1765`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4498907308`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Don't let webhook audit mask pending reversals`: a pending `subscriptionCreditGrantReversal` now takes precedence and keeps the refunded subscription order in audit-gap state even if older webhook audit metadata exists.
+- Fixed P1 `Don't treat truncated ledger scans as exhaustive`: PR7 readiness cross-table checks between `subscription_credit_grants` and `credit_transactions` are skipped when either side exceeded the scan row limit, leaving the existing partial-scan warning instead of false hard failures.
+- Added regression coverage for pending reversal metadata plus webhook audit metadata, truncated credit transaction samples, and truncated grant samples.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 15 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 151 tests.
+- `pnpm test:api` passed；48 files / 610 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - pending refund reversal audit state
+
+- 时间：2026-06-15 23:36 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`ed6a01fb323f6a5df1b38ed9dceac844fbd96436`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4498824367`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Reject pending refund audit metadata`: refunded / partially refunded subscription orders no longer treat `subscriptionCreditGrantReversal.reversalStatus = pending` as completed audit metadata.
+- The readiness audit now accepts subscription grant reversal metadata only when its reversal status is terminal (`complete`) or explicitly review-required (`review_required`, `*_review_required`).
+- Added regression coverage for pending subscription refund reversal metadata.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 14 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 150 tests.
+- `pnpm test:api` passed；48 files / 609 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 latest-head review follow-up - payment-attention duplicates and idempotency scope
+
+- 时间：2026-06-15 23:24 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Reviewed head before fix：`5e664fd59b5edb89d283b585af44260a3337cd42`。
+- Codex review：`https://github.com/Crnobog9527/GraylumAI_vercel/pull/239#pullrequestreview-4498734170`。
+- 状态：PR remains draft；PR7 remains `in_progress` until latest-head review is clean；not ready；not merged；not production。
+
+### Scope
+
+- Fixed P2 `Include payment-attention subscriptions in the audit`: `past_due`, `incomplete`, and `unpaid` Stripe-managed subscriptions now participate in duplicate managed-subscription detection, matching membership eligibility guard semantics.
+- Fixed P2 `Scope credit idempotency duplicates by user`: `credit_transactions` duplicate idempotency checks are now scoped by `(user_id, idempotency_key)`, while `subscription_credit_grants` idempotency remains globally unique.
+- Added regression tests for both P2 cases.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- PR7 targeted reconciliation tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts` passed；1 file / 13 tests.
+- Targeted PR1-PR6 regression tests：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 149 tests.
+- `pnpm test:api` passed；48 files / 608 tests.
+- `pnpm lint` passed.
+- `pnpm --filter web typecheck` passed.
+- `git diff --check` passed.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
+- If latest-head review still has P1/P2, keep PR7 `in_progress`.
+- If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 owner audit review-thread reconciliation
+
+- 时间：2026-06-16 13:20 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Current head：`792a7687275cff9e38fd3b3815b498fe0f84e603`。
+- 状态：PR remains draft/open；not merged；not production；PR7 stop point remains owner audit only。
+
+### Live review_threads reconciliation
+
+- GitHub live review_threads still reports 16 unresolved Codex P1/P2 threads.
+- Outdated fixed/residual threads：10。
+- Current-line fixed/residual threads：6。
+- Current-head still-actionable P1/P2 after source-code inspection：0。
+- No source-code fix was required in this reconciliation pass; the remaining unresolved threads are reviewer-disposition residue, not current-head defects.
+
+### Current-line fixed/residual evidence
+
+- `Include payment-attention subscriptions in the audit`：current code includes `past_due`, `incomplete`, and `unpaid` in managed subscription duplicate detection via `PAYMENT_ATTENTION_SUBSCRIPTION_STATUSES`; regression test `counts payment-attention subscription rows when detecting duplicate managed subscriptions` covers the case.
+- `Scope credit idempotency duplicates by user`：current code scopes `credit_transactions` duplicate idempotency by `user_id`; regression test `scopes credit transaction idempotency duplicate checks by user` covers cross-user shared keys.
+- `Don't let webhook audit mask pending reversals`：current code rejects pending `subscriptionCreditGrantReversal` before considering webhook audit metadata; regression test `flags pending subscription refund reversal metadata as an audit gap` covers the masking case.
+- `Detect missing annual release periods`：current code derives due annual release period keys and compares them against granted periods; regression test `flags active annual subscriptions with missing due monthly release periods` covers missing period 2.
+- `Keep annual refund checks invoice-scoped`：current code treats missing current invoice scope as `annual_monthly_release_invoice_scope_missing` and does not fall back to subscription-wide historical refunds; regression tests `flags active annual subscriptions missing current invoice scope` and `does not let a historical refunded invoice suppress missing annual release audit` cover it.
+- `Verify grant transactions use the same user`：current code compares grant `user_id` and credit transaction `user_id`; regression test `flags subscription grant credit transactions for different users` covers it.
+
+### Outdated fixed/residual evidence
+
+- Truncated balance scans skip profile/ledger hard mismatch checks when `profiles` or `credit_transactions` input is truncated.
+- Missing grant period keys now fail grant/ledger matching when the grant has a period key and the credit transaction key is absent or different.
+- Pending refund audit metadata requires terminal or review-required reversal state.
+- Truncated grant/ledger cross-table checks are skipped when `credit_transactions` or `subscription_credit_grants` input is truncated.
+- Server-capped scans use exact count metadata and sentinel rows to mark partial readiness scans.
+- Annual refund / release checks are invoice-scoped, require grant invoice scope, honor partial-refund blockers, and preserve grant transaction user scope.
+- Sentinel-row truncation takes precedence; exact counts are used instead of planned estimates.
+
+### Validation status for this reconciliation pass
+
+- Required validation will be rerun after this docs-only reconciliation record.
+- Latest-head Codex review will be requested again on `792a7687275cff9e38fd3b3815b498fe0f84e603` after validation.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- PR7 can only return to `ready_for_owner_audit / #239` after validation, Vercel checks, latest-head Codex review, and live thread reconciliation are recorded consistently.
+- Stop at owner audit gate; do not merge, do not promote to production, and do not enter PR8 without owner authorization。
