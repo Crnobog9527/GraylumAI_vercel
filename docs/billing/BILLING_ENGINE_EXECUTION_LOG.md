@@ -3010,3 +3010,62 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Next action after push：request latest-head Codex review on the new PR #239 head while keeping the PR draft.
 - If latest-head review still has P1/P2, keep PR7 `in_progress`.
 - If latest-head review is clean and Vercel checks pass, PR7 may move to `ready_for_owner_audit / #239`; still no merge without owner authorization.
+
+## PR 7 owner audit review-thread reconciliation
+
+- 时间：2026-06-16 13:20 CST。
+- PR：[#239](https://github.com/Crnobog9527/GraylumAI_vercel/pull/239)。
+- Base：`staging`。
+- Current head：`792a7687275cff9e38fd3b3815b498fe0f84e603`。
+- 状态：PR remains draft/open；not merged；not production；PR7 stop point remains owner audit only。
+
+### Live review_threads reconciliation
+
+- GitHub live review_threads still reports 16 unresolved Codex P1/P2 threads.
+- Outdated fixed/residual threads：10。
+- Current-line fixed/residual threads：6。
+- Current-head still-actionable P1/P2 after source-code inspection：0。
+- No source-code fix was required in this reconciliation pass; the remaining unresolved threads are reviewer-disposition residue, not current-head defects.
+
+### Current-line fixed/residual evidence
+
+- `Include payment-attention subscriptions in the audit`：current code includes `past_due`, `incomplete`, and `unpaid` in managed subscription duplicate detection via `PAYMENT_ATTENTION_SUBSCRIPTION_STATUSES`; regression test `counts payment-attention subscription rows when detecting duplicate managed subscriptions` covers the case.
+- `Scope credit idempotency duplicates by user`：current code scopes `credit_transactions` duplicate idempotency by `user_id`; regression test `scopes credit transaction idempotency duplicate checks by user` covers cross-user shared keys.
+- `Don't let webhook audit mask pending reversals`：current code rejects pending `subscriptionCreditGrantReversal` before considering webhook audit metadata; regression test `flags pending subscription refund reversal metadata as an audit gap` covers the masking case.
+- `Detect missing annual release periods`：current code derives due annual release period keys and compares them against granted periods; regression test `flags active annual subscriptions with missing due monthly release periods` covers missing period 2.
+- `Keep annual refund checks invoice-scoped`：current code treats missing current invoice scope as `annual_monthly_release_invoice_scope_missing` and does not fall back to subscription-wide historical refunds; regression tests `flags active annual subscriptions missing current invoice scope` and `does not let a historical refunded invoice suppress missing annual release audit` cover it.
+- `Verify grant transactions use the same user`：current code compares grant `user_id` and credit transaction `user_id`; regression test `flags subscription grant credit transactions for different users` covers it.
+
+### Outdated fixed/residual evidence
+
+- Truncated balance scans skip profile/ledger hard mismatch checks when `profiles` or `credit_transactions` input is truncated.
+- Missing grant period keys now fail grant/ledger matching when the grant has a period key and the credit transaction key is absent or different.
+- Pending refund audit metadata requires terminal or review-required reversal state.
+- Truncated grant/ledger cross-table checks are skipped when `credit_transactions` or `subscription_credit_grants` input is truncated.
+- Server-capped scans use exact count metadata and sentinel rows to mark partial readiness scans.
+- Annual refund / release checks are invoice-scoped, require grant invoice scope, honor partial-refund blockers, and preserve grant transaction user scope.
+- Sentinel-row truncation takes precedence; exact counts are used instead of planned estimates.
+
+### Validation status for this reconciliation pass
+
+- Required validation will be rerun after this docs-only reconciliation record.
+- Latest-head Codex review will be requested again on `792a7687275cff9e38fd3b3815b498fe0f84e603` after validation.
+
+### Forbidden actions confirmation
+
+- 未访问 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration；未修改 DB schema / RLS / grants。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未使用 Stripe live。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未 merge。
+- 未关闭 issue #225。
+- 未进入 PR8。
+
+### Stop point
+
+- PR7 can only return to `ready_for_owner_audit / #239` after validation, Vercel checks, latest-head Codex review, and live thread reconciliation are recorded consistently.
+- Stop at owner audit gate; do not merge, do not promote to production, and do not enter PR8 without owner authorization。
