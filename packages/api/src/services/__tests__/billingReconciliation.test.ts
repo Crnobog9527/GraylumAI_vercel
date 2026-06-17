@@ -305,6 +305,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
       {
         id: 'subscription-ready',
         user_id: 'user-ready',
+        membership_plan_id: 'plan-ready',
         stripe_subscription_id: 'sub-ready',
         status: 'active',
         billing_cycle: 'yearly',
@@ -314,6 +315,12 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         metadata: {
           lastInvoiceId: 'in-ready',
         },
+      },
+    ],
+    membershipPlans: [
+      {
+        id: 'plan-ready',
+        yearly_credits: 120,
       },
     ],
     truncatedTables: [],
@@ -336,6 +343,7 @@ function createReadinessAuditSupabase(
     payment_orders: rows.paymentOrders as Array<Record<string, unknown>>,
     subscription_credit_grants: rows.subscriptionCreditGrants as Array<Record<string, unknown>>,
     user_subscriptions: rows.subscriptions as Array<Record<string, unknown>>,
+    membership_plans: (rows.membershipPlans ?? []) as Array<Record<string, unknown>>,
   };
 
   return {
@@ -688,6 +696,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
@@ -794,6 +803,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
@@ -821,6 +831,136 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       }),
     ]));
     expect(result.summary.grantLedgerMismatches).toBe(1);
+  });
+
+  it('does not require zero-credit annual release periods for small yearly credit schedules', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 2 },
+      ],
+      creditTransactions: [
+        {
+          id: 'txn-subscription-grant-1',
+          user_id: 'user-ready',
+          amount: 1,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-06:01',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+        },
+        {
+          id: 'txn-subscription-grant-2',
+          user_id: 'user-ready',
+          amount: 1,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          grant_period_key: 'sub-ready:2026-07:02',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-07:02',
+        },
+      ],
+      subscriptionCreditGrants: [
+        {
+          id: 'grant-ready-1',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-06:01',
+          period_index: 1,
+          total_periods: 12,
+          credits_granted: 1,
+          status: 'granted',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-06:01',
+          credit_transaction_id: 'txn-subscription-grant-1',
+        },
+        {
+          id: 'grant-ready-2',
+          user_id: 'user-ready',
+          stripe_subscription_id: 'sub-ready',
+          stripe_invoice_id: 'in-ready',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: 'sub-ready:2026-07:02',
+          period_index: 2,
+          total_periods: 12,
+          credits_granted: 1,
+          status: 'granted',
+          idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:sub-ready:2026-07:02',
+          credit_transaction_id: 'txn-subscription-grant-2',
+        },
+      ],
+      membershipPlans: [
+        {
+          id: 'plan-ready',
+          yearly_credits: 2,
+        },
+      ],
+    }), {
+      now: new Date('2026-08-20T00:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.findings.map((finding) => finding.code)).not.toContain(
+      'annual_monthly_release_period_missing',
+    );
+  });
+
+  it('does not require annual release grants for zero-credit yearly plans', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 0 },
+      ],
+      creditTransactions: [],
+      subscriptionCreditGrants: [],
+      membershipPlans: [
+        {
+          id: 'plan-ready',
+          yearly_credits: 0,
+        },
+      ],
+    }), {
+      now: new Date('2026-08-20T00:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.findings.map((finding) => finding.code)).not.toContain(
+      'annual_monthly_release_period_missing',
+    );
+  });
+
+  it('reports invalid negative yearly credit schedules instead of treating them as zero', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 0 },
+      ],
+      creditTransactions: [],
+      subscriptionCreditGrants: [],
+      membershipPlans: [
+        {
+          id: 'plan-ready',
+          yearly_credits: -1,
+        },
+      ],
+    }), {
+      now: new Date('2026-08-20T00:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'annual_monthly_release_plan_schedule_invalid',
+          severity: 'error',
+          metadata: expect.objectContaining({
+            membershipPlanId: 'plan-ready',
+            yearlyCredits: -1,
+          }),
+        }),
+      ]),
+    );
   });
 
   it('requires due annual release grants to match the current invoice scope', () => {
@@ -871,6 +1011,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
@@ -905,6 +1046,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
@@ -959,6 +1101,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
@@ -1077,6 +1220,7 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         {
           id: 'subscription-ready',
           user_id: 'user-ready',
+          membership_plan_id: 'plan-ready',
           stripe_subscription_id: 'sub-ready',
           status: 'active',
           billing_cycle: 'yearly',
