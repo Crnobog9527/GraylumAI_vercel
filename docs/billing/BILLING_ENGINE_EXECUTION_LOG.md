@@ -3077,7 +3077,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Branch：`codex/billing-v1-pr8-release-readiness`。
 - Base：`staging`。
 - Base SHA：`bf90d2a646f161d0460e7addb1138df1b8b7eb42`。
-- 状态：PR8 `ready_for_owner_audit`；draft PR #240；latest-head Codex review clean。
+- 状态：PR8 `merged / #240`；squash-merged into `staging`；latest-head Codex review clean。
 
 ### Live checkpoint
 
@@ -3183,7 +3183,7 @@ Latest-head Codex review：
 
 ### 禁止动作确认
 
-- 未 merge。
+- 已按 owner 授权仅 squash merge PR #240 into `staging`。
 - 未 production。
 - 未访问 Supabase production DB。
 - 未执行 DB migration / RPC migration / RLS / schema / grant 修改。
@@ -3197,6 +3197,39 @@ Latest-head Codex review：
 
 ### Stop point
 
-- PR8 is `ready_for_owner_audit / #240` after validation, draft PR creation, Vercel checks, issue #225 update, and latest-head Codex review。
-- Stop at owner audit gate。
+- PR8 is `merged / #240` into `staging` only。
+- Stop at PR8 merge-record cleanup gate。
 - Do not merge, do not production, do not PR9, and do not close issue #225。
+
+## PR 8 merge record
+
+- 时间：2026-06-17 CST。
+- PR8 status：`merged / #240`。
+- PR #240：MERGED into `staging` by squash merge。
+- PR head SHA：`86b2f9535de88fdb2bc672195bc1ac44fc75d0a4`。
+- Squash merge commit：`1abb1123ecce1ea0a0ff0ad00dc0c465d8400050`。
+- Merged at：`2026-06-17T09:39:25Z`。
+- Changed files：
+  - `packages/api/src/services/billingReconciliation.ts`
+  - `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+  - `docs/billing/BILLING_ENGINE_PR8_RELEASE_READINESS_AUDIT.md`
+  - `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- Scope：post-PR7 release-readiness / staging-to-main preparation audit。
+- Fixed P2 `Skip zero-credit annual periods in readiness`：readiness annual-release audit uses `membership_plans.yearly_credits`, reuses the production annual grant schedule helper, and only requires due periods where `creditsGranted > 0`。
+- Fixed P2 `Do not clamp invalid yearly credit schedules`：readiness preserves the plan schedule integer value and reports `annual_monthly_release_plan_schedule_invalid` for negative yearly-credit schedules。
+- Validation recorded before merge：
+  - `pnpm install --frozen-lockfile`：passed。
+  - `pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts`：passed；1 file / 26 tests。
+  - PR1-PR7 targeted billing regression suite：passed；8 files / 162 tests。
+  - `pnpm test:api`：passed；48 files / 621 tests。
+  - `pnpm lint`：passed。
+  - `pnpm --filter web typecheck`：passed。
+  - `git diff --check`：passed。
+  - Vercel `graylum-ai-vercel-v1`：success。
+  - Vercel `graylumai-staging`：success。
+- Latest-head Codex review：clean on `86b2f9535d`。
+- Known current-head unresolved actionable P1/P2：0。
+- Main/staging status：still diverged；future staging -> main release still requires separate owner authorization and explicit conflict resolution。
+- Issue #225 remains open。
+- Stop point：PR8 merged into `staging` only；do not production；do not PR9；do not close issue #225；wait for owner audit。
+- 禁止动作确认：未 production；未访问 Supabase production DB；未执行 DB migration / RPC / RLS / schema / grant 修改；未访问 Stripe live；未触发真实 checkout / payment / refund / cancel / webhook replay；未修改 Vercel / Supabase / Stripe env 或 Project Settings；未修改 `apps/web/vercel.json`；未启用 cron；未进入 PR9；未关闭 issue #225。
