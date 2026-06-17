@@ -8,6 +8,7 @@ import {
   PAYMENT_ORDER_STATUSES,
   normalizePaymentOrderStatus,
 } from './paymentOrderStatus';
+import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
 
 export interface BillingReconciliationSummary {
   successfulAiRequests: number;
@@ -129,6 +130,7 @@ type SubscriptionCreditGrantRow = {
 type SubscriptionRow = {
   id?: string | null;
   user_id?: string | null;
+  membership_plan_id?: string | null;
   stripe_subscription_id?: string | null;
   status?: string | null;
   cancel_at_period_end?: string | boolean | null;
@@ -138,12 +140,18 @@ type SubscriptionRow = {
   metadata?: unknown;
 };
 
+type MembershipPlanRow = {
+  id?: string | null;
+  yearly_credits?: number | string | null;
+};
+
 type BillingReadinessRows = {
   profiles: ProfileRow[];
   creditTransactions: CreditTransactionRow[];
   paymentOrders: PaymentOrderRow[];
   subscriptionCreditGrants: SubscriptionCreditGrantRow[];
   subscriptions: SubscriptionRow[];
+  membershipPlans?: MembershipPlanRow[];
   truncatedTables?: string[];
 };
 
@@ -356,42 +364,20 @@ function isAnnualReleaseEligibleSubscription(row: SubscriptionRow) {
   );
 }
 
-function getTimestamp(value?: string | null): number | null {
-  if (!value) {
-    return null;
-  }
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function buildAnnualGrantPeriodKey(subscriptionId: string, periodStartMs: number, periodIndex: number) {
-  return `${subscriptionId}:${new Date(periodStartMs).toISOString().slice(0, 7)}:${String(periodIndex).padStart(2, '0')}`;
-}
-
-function getDueAnnualGrantPeriodKeys(subscription: SubscriptionRow, now: Date) {
-  const subscriptionId = subscription.stripe_subscription_id;
-  const startMs = getTimestamp(subscription.current_period_start);
-  const endMs = getTimestamp(subscription.current_period_end);
-  if (!subscriptionId || startMs === null || endMs === null || endMs <= startMs) {
-    return [];
-  }
-
-  const nowMs = now.getTime();
-  if (nowMs < startMs) {
-    return [];
-  }
-
-  const periodMs = (endMs - startMs) / 12;
-  const dueCount = Math.min(12, Math.floor((Math.min(nowMs, endMs) - startMs) / periodMs) + 1);
-  return Array.from({ length: dueCount }, (_, index) => {
-    const periodIndex = index + 1;
-    const periodStartMs = Math.round(startMs + periodMs * index);
-    return buildAnnualGrantPeriodKey(subscriptionId, periodStartMs, periodIndex);
-  });
-}
-
 function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
   return getInvoiceId(asRecord(subscription.metadata).lastInvoiceId);
+}
+
+function getAnnualSubscriptionYearlyCredits(
+  subscription: SubscriptionRow,
+  yearlyCreditsByPlanId: Map<string, number>,
+): number | null {
+  const planId = subscription.membership_plan_id?.trim();
+  if (!planId) {
+    return null;
+  }
+
+  return yearlyCreditsByPlanId.get(planId) ?? null;
 }
 
 function addFinding(
@@ -478,6 +464,7 @@ export function buildBillingEngineV15ReadinessAudit(
   );
   const hasTruncatedAnnualReleaseInput = (
     truncatedTables.includes('payment_orders')
+    || truncatedTables.includes('membership_plans')
     || truncatedTables.includes('subscription_credit_grants')
     || truncatedTables.includes('user_subscriptions')
   );
@@ -486,6 +473,11 @@ export function buildBillingEngineV15ReadinessAudit(
     rows.creditTransactions
       .filter((transaction) => transaction.id)
       .map((transaction) => [transaction.id as string, transaction]),
+  );
+  const yearlyCreditsByPlanId = new Map(
+    (rows.membershipPlans ?? [])
+      .filter((plan) => plan.id)
+      .map((plan) => [plan.id as string, Math.max(0, toInteger(plan.yearly_credits))]),
   );
 
   for (const table of truncatedTables) {
@@ -836,7 +828,31 @@ export function buildBillingEngineV15ReadinessAudit(
         continue;
       }
 
-      const dueGrantPeriodKeys = getDueAnnualGrantPeriodKeys(subscription, now);
+      const yearlyCredits = getAnnualSubscriptionYearlyCredits(subscription, yearlyCreditsByPlanId);
+      if (yearlyCredits === null) {
+        addFinding(findings, {
+          code: 'annual_monthly_release_plan_scope_missing',
+          severity: 'error',
+          message: 'Active annual subscription is missing membership plan credit schedule for monthly release readiness audit',
+          entityType: 'user_subscriptions',
+          entityId: subscription.id ?? undefined,
+          metadata: {
+            stripeSubscriptionId: subscriptionId,
+            membershipPlanId: subscription.membership_plan_id ?? null,
+          },
+        });
+        continue;
+      }
+
+      const dueGrantPeriodKeys = getDueAnnualGrantPeriods({
+          yearlyCredits,
+          stripeSubscriptionId: subscriptionId,
+          currentPeriodStart: subscription.current_period_start ?? '',
+          currentPeriodEnd: subscription.current_period_end ?? '',
+          now,
+        })
+        .filter((period) => period.creditsGranted > 0)
+        .map((period) => period.grantPeriodKey);
       if (dueGrantPeriodKeys.length === 0) {
         continue;
       }
@@ -889,7 +905,8 @@ export function buildBillingEngineV15ReadinessAudit(
       + countFindings('subscription_grant_transaction_orphaned')
       + countFindings('annual_monthly_release_period_missing')
       + countFindings('annual_monthly_release_period_invalid')
-      + countFindings('annual_monthly_release_invoice_scope_missing'),
+      + countFindings('annual_monthly_release_invoice_scope_missing')
+      + countFindings('annual_monthly_release_plan_scope_missing'),
     duplicateActiveSubscriptionGroups: countFindings('duplicate_active_subscription'),
     duplicateAnnualGrantPeriods: countFindings('duplicate_annual_grant_period'),
     invalidPaymentOrderStatuses: countFindings('invalid_payment_order_status'),
@@ -923,6 +940,7 @@ export async function runBillingEngineV15ReadinessAudit(
     paymentOrdersResult,
     subscriptionCreditGrantsResult,
     subscriptionsResult,
+    membershipPlansResult,
   ] = await Promise.all([
     readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits', rowLimit),
     readLimitedRows<CreditTransactionRow>(
@@ -946,7 +964,13 @@ export async function runBillingEngineV15ReadinessAudit(
     readLimitedRows<SubscriptionRow>(
       supabase,
       'user_subscriptions',
-      'id, user_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, metadata',
+      'id, user_id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, metadata',
+      rowLimit,
+    ),
+    readLimitedRows<MembershipPlanRow>(
+      supabase,
+      'membership_plans',
+      'id, yearly_credits',
       rowLimit,
     ),
   ]);
@@ -957,6 +981,7 @@ export async function runBillingEngineV15ReadinessAudit(
     paymentOrdersResult.truncated ? 'payment_orders' : null,
     subscriptionCreditGrantsResult.truncated ? 'subscription_credit_grants' : null,
     subscriptionsResult.truncated ? 'user_subscriptions' : null,
+    membershipPlansResult.truncated ? 'membership_plans' : null,
   ].filter((table): table is string => Boolean(table));
 
   return buildBillingEngineV15ReadinessAudit({
@@ -965,6 +990,7 @@ export async function runBillingEngineV15ReadinessAudit(
     paymentOrders: paymentOrdersResult.rows,
     subscriptionCreditGrants: subscriptionCreditGrantsResult.rows,
     subscriptions: subscriptionsResult.rows,
+    membershipPlans: membershipPlansResult.rows,
     truncatedTables,
   }, {
     ...options,

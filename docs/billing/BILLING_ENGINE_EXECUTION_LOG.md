@@ -3069,3 +3069,120 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 
 - PR7 can only return to `ready_for_owner_audit / #239` after validation, Vercel checks, latest-head Codex review, and live thread reconciliation are recorded consistently.
 - Stop at owner audit gate; do not merge, do not promote to production, and do not enter PR8 without owner authorization。
+
+## PR 8 - post-PR7 release-readiness / staging-to-main preparation audit
+
+- 时间：2026-06-17 CST。
+- 阶段：PR8 / post-PR7 release-readiness and staging-to-main preparation audit。
+- Branch：`codex/billing-v1-pr8-release-readiness`。
+- Base：`staging`。
+- Base SHA：`bf90d2a646f161d0460e7addb1138df1b8b7eb42`。
+- 状态：PR8 `in_progress`；draft PR / latest-head review pending。
+
+### Live checkpoint
+
+- 已执行：`git fetch --all --prune`。
+- PR #239：live state = `MERGED` into `staging`。
+- PR #239 merge commit：`bf90d2a646f161d0460e7addb1138df1b8b7eb42`。
+- Issue #225：open；已记录 PR7 `merged / #239`。
+- 既有 PR8 branch / PR：未发现。
+- `origin/main`：`e831609fcd06f714640df9099645bb1d5363790a`。
+- `origin/staging`：`bf90d2a646f161d0460e7addb1138df1b8b7eb42`。
+- merge-base：`5368f65bd512acb5ac2759930ee49334ce41e77d`。
+- `origin/main...origin/staging` ahead/behind：main-only `5`，staging-only `35`。
+- 状态判断：`origin/main` 与 `origin/staging` 已 diverged。
+
+### PR7 residual review-thread reconciliation
+
+- PR #239 live review threads 仍存在 unresolved residual comments。
+- 多数 current-line residual 已由 PR7 merged code 覆盖：payment-attention subscription duplicate detection、credit idempotency per-user scope、pending reversal audit metadata、annual release invoice scope、grant transaction user match、truncated scan cross-table safety。
+- 当前 live still-actionable P2：`Skip zero-credit annual periods in readiness`。
+- PR8 修复：`billingReconciliation` readiness audit 读取 `membership_plans.yearly_credits`，复用 production annual release schedule helper，并只要求 `creditsGranted > 0` 的 due periods 存在 grant。
+- 追加回归测试：`yearly_credits < 12` 和 `yearly_credits = 0` 不应触发 `annual_monthly_release_period_missing`。
+
+### Main / staging divergence audit
+
+Main-only commits：
+
+- `e831609` `[codex] Release #221 monitoring tunnel proxy fix to main`
+- `3745865` `[codex] Release #218 membership eligibility guard to main`
+- `68793ef` `fix(billing): reconcile Stripe refunds and subscription cancellations (#206)`
+- `a732e40` `fix(web): initialize Sentry for main App Router`
+- `cedaf71` `release: promote staging logo refresh`
+
+Staging-only billing phases：
+
+- PR7 / #239：`bf90d2a`
+- PR6 / #237：`e6dc6d7`
+- PR5 / #236：`0c982e2`
+- PR4 / #235：`e45e090`
+- PR3 / #232 and PR3.x records：`4d0cc1c`、`37798c8`、`395976b`
+- PR2 / #230 and PR2.x records：`7084969`、`c5495e1`、`a61da58`
+- PR1 / #227：`8beed4c`
+- Control-plane / blueprint / baseline：#223、#224、#226、#229
+
+Read-only future release conflict check：
+
+```bash
+git merge-tree --write-tree origin/main origin/staging
+```
+
+Result：failed with conflicts；未执行 merge。
+
+Predicted conflict files：
+
+- `apps/web/src/app/api/stripe/webhook/route.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/services/__tests__/membershipEligibility.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/services/index.ts`
+- `packages/api/src/services/membershipEligibility.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/db/schema.ts`
+- `packages/db/tests/atomic_reconcile_stripe_refund.sql`
+
+Conclusion：future staging -> main release is blocked until a separately authorized main release PR resolves these conflicts explicitly. PR8 does not merge, sync, or promote.
+
+### Changed files
+
+- `packages/api/src/services/billingReconciliation.ts`
+- `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+- `docs/billing/BILLING_ENGINE_PR8_RELEASE_READINESS_AUDIT.md`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+Completed：
+
+- `pnpm install --frozen-lockfile`：passed；lockfile unchanged。
+- `pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts`：passed；1 file / 25 tests。
+- `git diff --check`：passed。
+- PR1-PR7 targeted billing regression suite：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 161 tests。
+- `pnpm test:api`：passed；48 files / 620 tests。
+- `pnpm lint`：passed。
+- `pnpm --filter web typecheck`：passed。
+
+Pending before owner audit：
+
+- latest-head Codex review on PR8 draft PR
+
+### 禁止动作确认
+
+- 未 merge。
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 DB migration / RPC migration / RLS / schema / grant 修改。
+- 未访问 Stripe live。
+- 未触发真实 checkout / payment / refund / cancel / webhook replay。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未修改 `apps/web/vercel.json`。
+- 未启用 cron。
+- 未进入 PR9。
+- 未关闭 issue #225。
+
+### Stop point
+
+- PR8 remains `in_progress` until validation, draft PR creation, issue #225 update, and latest-head Codex review complete。
+- Stop at `ready_for_owner_audit` or `blocked`。
+- Do not merge, do not production, do not PR9, and do not close issue #225。
