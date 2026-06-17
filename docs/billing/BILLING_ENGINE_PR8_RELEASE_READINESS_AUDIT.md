@@ -15,6 +15,8 @@
 - Existing PR8 branch before this run: not found.
 - Existing PR8 PR before this run: not found.
 - Current PR8 branch: `codex/billing-v1-pr8-release-readiness`.
+- Current PR8 PR: #240 / draft.
+- PR8 stage: `ready_for_owner_audit`.
 
 ## Allowed Scope
 
@@ -67,7 +69,7 @@ One latest current-line P2 remained actionable:
 - PR8 fix: readiness now loads `membership_plans.yearly_credits`, uses the same annual release schedule helper as production, and filters due periods to `creditsGranted > 0`.
 - Regression coverage: added tests for `yearly_credits < 12` and `yearly_credits = 0`.
 
-Current PR8 conclusion: no known current-head PR7 residual P1/P2 remains after this PR8 fix, pending latest-head Codex review on the PR8 branch.
+Current PR8 conclusion: no known current-head PR7 residual P1/P2 remains after this PR8 fix. The final latest-head Codex review result is tracked in PR #240 live metadata to avoid creating an extra metadata-only commit after the reviewed head.
 
 ## Main / Staging Divergence
 
@@ -167,15 +169,20 @@ Completed:
 - `pnpm test:api`: passed; 48 files / 620 tests.
 - `pnpm lint`: passed.
 - `pnpm --filter web typecheck`: passed.
+- Vercel Preview Comments: success.
+- Vercel `graylum-ai-vercel-v1`: success.
+- Vercel `graylumai-staging`: success.
 
-Pending before owner audit:
+Latest-head Codex review:
 
-- Latest-head Codex review on the PR8 draft PR
+- Review result at finalization: clean; no major issues found.
+- Exact reviewed commit and review/comment URL: recorded in PR #240 body and issue #225 live update.
+- Unresolved actionable P1/P2 count after latest-head review: `0` known.
 
 ## Staging Verification
 
-No browser or staging runtime verification was performed in this checkpoint. PR8 has not enabled cron, has not modified Vercel settings, and has not performed production or payment actions.
+Vercel preview/staging deployment checks passed for PR #240. No manual browser smoke or runtime cron/payment verification was performed in this checkpoint. PR8 has not enabled cron, has not modified Vercel settings, and has not performed production or payment actions.
 
 ## Stop Point
 
-PR8 remains `in_progress` until validation, draft PR creation, issue #225 update, and latest-head Codex review are complete. Stop at `ready_for_owner_audit` or `blocked`; do not merge, do not promote to production, do not enter PR9, and do not close issue #225.
+PR8 is `ready_for_owner_audit` on draft PR #240. Stop here; do not merge, do not promote to production, do not enter PR9, and do not close issue #225.

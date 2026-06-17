@@ -3077,7 +3077,7 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - Branch：`codex/billing-v1-pr8-release-readiness`。
 - Base：`staging`。
 - Base SHA：`bf90d2a646f161d0460e7addb1138df1b8b7eb42`。
-- 状态：PR8 `in_progress`；draft PR / latest-head review pending。
+- 状态：PR8 `ready_for_owner_audit`；draft PR #240；latest-head Codex review clean。
 
 ### Live checkpoint
 
@@ -3162,10 +3162,16 @@ Completed：
 - `pnpm test:api`：passed；48 files / 620 tests。
 - `pnpm lint`：passed。
 - `pnpm --filter web typecheck`：passed。
+- Vercel Preview Comments：success。
+- Vercel `graylum-ai-vercel-v1`：success。
+- Vercel `graylumai-staging`：success。
 
-Pending before owner audit：
+Latest-head Codex review：
 
-- latest-head Codex review on PR8 draft PR
+- PR：#240 draft。
+- Result at finalization：clean；no major issues found。
+- Exact reviewed commit and review/comment URL：recorded in PR #240 body and issue #225 live update to avoid creating an extra metadata-only commit after the reviewed head。
+- Known unresolved actionable P1/P2 after latest-head review：0。
 
 ### 禁止动作确认
 
@@ -3183,6 +3189,6 @@ Pending before owner audit：
 
 ### Stop point
 
-- PR8 remains `in_progress` until validation, draft PR creation, issue #225 update, and latest-head Codex review complete。
-- Stop at `ready_for_owner_audit` or `blocked`。
+- PR8 is `ready_for_owner_audit / #240` after validation, draft PR creation, Vercel checks, issue #225 update, and latest-head Codex review。
+- Stop at owner audit gate。
 - Do not merge, do not production, do not PR9, and do not close issue #225。
