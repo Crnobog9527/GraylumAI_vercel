@@ -91,6 +91,7 @@ const STRIPE_FULFILLMENT_ERRORS = {
   invoicePaymentFailedInsert: 'Failed to insert failed invoice payment order',
   refundChargeLookup: 'Failed to retrieve Stripe refund charge',
   refundPaymentIntentLookup: 'Failed to retrieve Stripe refund payment intent',
+  refundInvoicePaymentLookup: 'Failed to retrieve Stripe refund invoice payment',
   refundInvoiceLookup: 'Failed to resolve subscription refund invoice',
   refundOrderLookup: 'Failed to look up subscription refund order',
   refundOrderUpdate: 'Failed to update subscription refund order',
@@ -306,6 +307,10 @@ function getPaymentIntentInvoiceId(paymentIntent: Stripe.PaymentIntent | null | 
   }) | null | undefined;
 
   return getExpandableId(paymentIntentRecord?.invoice);
+}
+
+function getInvoicePaymentInvoiceId(invoicePayment: Stripe.InvoicePayment | null | undefined) {
+  return getExpandableId(invoicePayment?.invoice);
 }
 
 function getRefundPaymentIntentId(refund: Stripe.Refund) {
@@ -741,7 +746,7 @@ function isFullRefundForOrder(input: {
 async function retrieveStripeCharge(chargeId: string) {
   try {
     return await getStripeClient().charges.retrieve(chargeId, {
-      expand: ['invoice', 'payment_intent'],
+      expand: ['payment_intent'],
     });
   } catch (error) {
     throwFulfillmentError(
@@ -755,13 +760,32 @@ async function retrieveStripeCharge(chargeId: string) {
 
 async function retrieveStripePaymentIntent(paymentIntentId: string) {
   try {
-    return await getStripeClient().paymentIntents.retrieve(paymentIntentId, {
-      expand: ['invoice'],
-    });
+    return await getStripeClient().paymentIntents.retrieve(paymentIntentId);
   } catch (error) {
     throwFulfillmentError(
       'refund_payment_intent_lookup',
       STRIPE_FULFILLMENT_ERRORS.refundPaymentIntentLookup,
+      error,
+      { paymentIntentId: maskIdentifier(paymentIntentId) },
+    );
+  }
+}
+
+async function retrieveStripeInvoiceIdForPaymentIntent(paymentIntentId: string) {
+  try {
+    const invoicePayments = await getStripeClient().invoicePayments.list({
+      limit: 1,
+      payment: {
+        type: 'payment_intent',
+        payment_intent: paymentIntentId,
+      },
+    });
+
+    return getInvoicePaymentInvoiceId(invoicePayments.data[0] ?? null);
+  } catch (error) {
+    throwFulfillmentError(
+      'refund_invoice_payment_lookup',
+      STRIPE_FULFILLMENT_ERRORS.refundInvoicePaymentLookup,
       error,
       { paymentIntentId: maskIdentifier(paymentIntentId) },
     );
@@ -893,7 +917,7 @@ async function resolveSubscriptionRefundInvoice(input: {
   charge: Stripe.Charge | null;
   chargeId: string | null;
   paymentIntentId: string | null;
-  retrievePaymentIntent: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+  retrieveInvoiceIdForPaymentIntent: (paymentIntentId: string) => Promise<string | null>;
 }): Promise<{ invoiceId: string | null; order: SubscriptionRefundOrderRow | null }> {
   const invoiceIdFromMetadata = getMetadataInvoiceId(input.refundMetadata)
     ?? getMetadataInvoiceId(input.charge?.metadata);
@@ -931,8 +955,7 @@ async function resolveSubscriptionRefundInvoice(input: {
       };
     }
 
-    const paymentIntent = await input.retrievePaymentIntent(input.paymentIntentId);
-    invoiceIdFromRetrievedPaymentIntent = getPaymentIntentInvoiceId(paymentIntent);
+    invoiceIdFromRetrievedPaymentIntent = await input.retrieveInvoiceIdForPaymentIntent(input.paymentIntentId);
   }
 
   const invoiceId = invoiceIdFromMetadata
@@ -1632,11 +1655,18 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   options: {
     now?: string;
     retrieveCharge?: (chargeId: string) => Promise<Stripe.Charge>;
+    retrieveInvoiceIdForPaymentIntent?: (paymentIntentId: string) => Promise<string | null>;
     retrievePaymentIntent?: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
   } = {},
 ) {
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
   const retrievePaymentIntent = options.retrievePaymentIntent ?? retrieveStripePaymentIntent;
+  const retrieveInvoiceIdForPaymentIntent = options.retrieveInvoiceIdForPaymentIntent
+    ?? (
+      options.retrievePaymentIntent
+        ? async (paymentIntentId: string) => getPaymentIntentInvoiceId(await retrievePaymentIntent(paymentIntentId))
+        : retrieveStripeInvoiceIdForPaymentIntent
+    );
   const now = options.now ?? new Date().toISOString();
   let charge: Stripe.Charge | null = null;
   let refundId: string | null = null;
@@ -1682,7 +1712,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     charge,
     chargeId: resolvedChargeId,
     paymentIntentId,
-    retrievePaymentIntent,
+    retrieveInvoiceIdForPaymentIntent,
   });
   const invoiceId = resolvedInvoice.invoiceId;
 
