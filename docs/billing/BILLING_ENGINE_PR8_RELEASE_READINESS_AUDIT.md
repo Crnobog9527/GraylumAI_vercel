@@ -8,15 +8,17 @@
 
 ## Status
 
-- PR8 stage: `in_progress`.
 - PR7 status: `merged / #239`.
 - PR #239 merge commit: `bf90d2a646f161d0460e7addb1138df1b8b7eb42`.
 - Issue #225 status: open.
 - Existing PR8 branch before this run: not found.
 - Existing PR8 PR before this run: not found.
 - Current PR8 branch: `codex/billing-v1-pr8-release-readiness`.
-- Current PR8 PR: #240 / draft.
-- PR8 stage: `ready_for_owner_audit`.
+- Current PR8 PR: #240 / merged.
+- PR8 stage: `merged / #240`.
+- PR8 head SHA: `86b2f9535de88fdb2bc672195bc1ac44fc75d0a4`.
+- PR8 squash merge commit: `1abb1123ecce1ea0a0ff0ad00dc0c465d8400050`.
+- PR8 merged at: `2026-06-17T09:39:25Z`.
 
 ## Allowed Scope
 
@@ -29,7 +31,7 @@
 
 ## Forbidden Scope
 
-- No merge.
+- No merge beyond the owner-authorized PR #240 squash merge into `staging`.
 - No production release or production smoke.
 - No Supabase production DB access.
 - No DB migration, RPC migration, RLS, schema, or grant changes.
@@ -49,6 +51,20 @@
 - Merge base: `5368f65bd512acb5ac2759930ee49334ce41e77d`.
 - Ahead / behind: main-only `5`, staging-only `35`.
 - State: `origin/main` and `origin/staging` are diverged.
+
+## PR8 Merge Record
+
+- PR8 status: `merged / #240`.
+- PR #240: MERGED into `staging` by squash merge.
+- PR head SHA: `86b2f9535de88fdb2bc672195bc1ac44fc75d0a4`.
+- Squash merge commit: `1abb1123ecce1ea0a0ff0ad00dc0c465d8400050`.
+- Merged at: `2026-06-17T09:39:25Z`.
+- Changed files:
+  - `packages/api/src/services/billingReconciliation.ts`
+  - `packages/api/src/services/__tests__/billingReconciliation.test.ts`
+  - `docs/billing/BILLING_ENGINE_PR8_RELEASE_READINESS_AUDIT.md`
+  - `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+- Issue #225 remains open.
 
 ## PR7 Residual Review Reconciliation
 
@@ -193,4 +209,4 @@ Vercel preview/staging deployment checks passed for PR #240. No manual browser s
 
 ## Stop Point
 
-PR8 is `ready_for_owner_audit` on draft PR #240. Stop here; do not merge, do not promote to production, do not enter PR9, and do not close issue #225.
+PR8 is `merged / #240` into `staging` only. Stop here; do not promote to production, do not enter PR9, and do not close issue #225.
