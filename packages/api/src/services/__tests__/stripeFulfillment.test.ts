@@ -1581,7 +1581,24 @@ describe('stripe fulfillment helpers', () => {
     const retrievePaymentIntent = vi.fn().mockResolvedValue({
       id: 'pi_webhook_invoice_unresolved',
     } as Stripe.PaymentIntent);
-    const supabase = createRefundWebhookSupabase();
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-unresolved',
+        user_id: 'user-webhook-invoice-unresolved',
+        item_id: 'plan-webhook-invoice-unresolved',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: null,
+        stripe_subscription_id: 'sub_webhook_invoice_unresolved',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: {
+          paymentIntentId: 'pi_webhook_invoice_unresolved',
+        },
+      }],
+    });
 
     await expect(reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
@@ -1609,7 +1626,7 @@ describe('stripe fulfillment helpers', () => {
     });
     expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_invoice_unresolved');
     expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_unresolved');
-    expect(supabase.tables.payment_orders).toHaveLength(0);
+    expect(supabase.tables.payment_orders).toHaveLength(1);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(loggerState.error).toHaveBeenCalledWith(
@@ -3594,6 +3611,47 @@ describe('stripe fulfillment helpers', () => {
       p_order_id: '00000000-0000-4000-8000-000000000320',
       p_refund_id: 're_test_checkout_metadata_refund',
     }));
+  });
+
+  it('returns unreconciled for non-invoice refund webhooks that have no generic order match', async () => {
+    const supabase = createRefundWebhookSupabase();
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_test_unknown_checkout_refund',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_test_unknown_checkout_refund',
+            amount: 500,
+            charge: null,
+            created: 1_742_646_400,
+            currency: 'usd',
+            metadata: {
+              checkoutSessionId: 'cs_test_unknown_checkout_refund',
+            },
+            payment_intent: null,
+            reason: 'requested_by_customer',
+            status: 'succeeded',
+          } as unknown as Stripe.Refund,
+        },
+      } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+    );
+
+    expect(result).toMatchObject({
+      reconciled: false,
+      reason: 'non_subscription_order_not_found',
+      orderId: null,
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'stripe_refund_order_not_found',
+      expect.objectContaining({
+        checkoutSessionId: 'cs_test_...refund',
+        refundId: 're_test_...refund',
+      }),
+    );
   });
 
   it('uses the atomic canceled-subscription profile downgrade RPC after syncing subscription state', async () => {

@@ -1696,15 +1696,15 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
         buildGenericRefundInputFromWebhookEvent(event, charge),
       );
 
-      if (reconciliation) {
-        return {
-          reconciled: true,
-          reason: 'non_subscription_order_reconciled',
-          orderId: resolvedInvoice.order?.id ?? null,
-          subscriptionId: resolvedInvoice.order?.stripe_subscription_id ?? null,
-          refundId,
-        };
-      }
+      return {
+        reconciled: Boolean(reconciliation),
+        reason: reconciliation
+          ? 'non_subscription_order_reconciled'
+          : 'non_subscription_order_not_found',
+        orderId: resolvedInvoice.order?.id ?? null,
+        subscriptionId: resolvedInvoice.order?.stripe_subscription_id ?? null,
+        refundId,
+      };
     }
 
     throwFulfillmentError(
