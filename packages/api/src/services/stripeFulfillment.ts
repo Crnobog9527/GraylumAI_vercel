@@ -212,6 +212,18 @@ function getCheckoutSessionSubscriptionId(session: Stripe.Checkout.Session) {
     : session.subscription?.id ?? null;
 }
 
+function getCheckoutSessionPaymentIntentId(session: Stripe.Checkout.Session) {
+  return getExpandableId(session.payment_intent);
+}
+
+function getCheckoutSessionChargeId(session: Stripe.Checkout.Session) {
+  const paymentIntent = typeof session.payment_intent === 'object' && session.payment_intent
+    ? session.payment_intent
+    : null;
+
+  return getExpandableId(paymentIntent?.latest_charge);
+}
+
 function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   const invoiceRecord = invoice as Stripe.Invoice & {
     subscription?: string | Stripe.Subscription | null;
@@ -1111,9 +1123,13 @@ export async function upsertPaymentOrderBySession(
     }),
   });
   const now = options.now ?? new Date().toISOString();
+  const paymentIntentId = getCheckoutSessionPaymentIntentId(session);
+  const chargeId = getCheckoutSessionChargeId(session);
   const orderMetadata = {
     ...asRecord(existing.data?.metadata),
     ...metadata,
+    ...(paymentIntentId ? { paymentIntentId } : {}),
+    ...(chargeId ? { chargeId } : {}),
     checkoutStatus: session.status ?? null,
     paymentStatus: session.payment_status ?? null,
     lastPaymentOrderStatus: nextStatus,

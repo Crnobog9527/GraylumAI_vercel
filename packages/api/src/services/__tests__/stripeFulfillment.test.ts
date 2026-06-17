@@ -547,6 +547,10 @@ describe('stripe fulfillment helpers', () => {
         amount_total: 1000,
         currency: 'usd',
         mode: 'payment',
+        payment_intent: {
+          id: 'pi_test_replay_completed',
+          latest_charge: 'ch_test_replay_completed',
+        },
         payment_status: 'paid',
       } as Stripe.Checkout.Session,
       {
@@ -562,6 +566,8 @@ describe('stripe fulfillment helpers', () => {
         metadata: expect.objectContaining({
           transactionId: 'txn-1',
           grantedCredits: 100,
+          paymentIntentId: 'pi_test_replay_completed',
+          chargeId: 'ch_test_replay_completed',
           lastPaymentOrderStatus: 'completed',
           lastPaymentOrderStatusSource: 'checkout.session.completed',
         }),

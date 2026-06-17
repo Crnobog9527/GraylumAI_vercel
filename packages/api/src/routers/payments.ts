@@ -870,6 +870,7 @@ export const paymentsRouter = router({
             },
           ],
           proration_behavior: 'always_invoice',
+          payment_behavior: 'error_if_incomplete',
           cancel_at_period_end: false,
           metadata,
         });

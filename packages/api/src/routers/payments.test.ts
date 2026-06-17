@@ -1106,6 +1106,7 @@ describe('paymentsRouter error sanitization', () => {
     expect(subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
       items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
       proration_behavior: 'always_invoice',
+      payment_behavior: 'error_if_incomplete',
       cancel_at_period_end: false,
     }));
     expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, updatedSubscription);
