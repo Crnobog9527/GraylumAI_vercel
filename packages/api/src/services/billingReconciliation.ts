@@ -477,7 +477,7 @@ export function buildBillingEngineV15ReadinessAudit(
   const yearlyCreditsByPlanId = new Map(
     (rows.membershipPlans ?? [])
       .filter((plan) => plan.id)
-      .map((plan) => [plan.id as string, Math.max(0, toInteger(plan.yearly_credits))]),
+      .map((plan) => [plan.id as string, toInteger(plan.yearly_credits)]),
   );
 
   for (const table of truncatedTables) {
@@ -843,6 +843,21 @@ export function buildBillingEngineV15ReadinessAudit(
         });
         continue;
       }
+      if (yearlyCredits < 0) {
+        addFinding(findings, {
+          code: 'annual_monthly_release_plan_schedule_invalid',
+          severity: 'error',
+          message: 'Active annual subscription has an invalid negative membership plan credit schedule for monthly release readiness audit',
+          entityType: 'user_subscriptions',
+          entityId: subscription.id ?? undefined,
+          metadata: {
+            stripeSubscriptionId: subscriptionId,
+            membershipPlanId: subscription.membership_plan_id ?? null,
+            yearlyCredits,
+          },
+        });
+        continue;
+      }
 
       const dueGrantPeriodKeys = getDueAnnualGrantPeriods({
           yearlyCredits,
@@ -906,7 +921,8 @@ export function buildBillingEngineV15ReadinessAudit(
       + countFindings('annual_monthly_release_period_missing')
       + countFindings('annual_monthly_release_period_invalid')
       + countFindings('annual_monthly_release_invoice_scope_missing')
-      + countFindings('annual_monthly_release_plan_scope_missing'),
+      + countFindings('annual_monthly_release_plan_scope_missing')
+      + countFindings('annual_monthly_release_plan_schedule_invalid'),
     duplicateActiveSubscriptionGroups: countFindings('duplicate_active_subscription'),
     duplicateAnnualGrantPeriods: countFindings('duplicate_annual_grant_period'),
     invalidPaymentOrderStatuses: countFindings('invalid_payment_order_status'),

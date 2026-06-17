@@ -3100,6 +3100,13 @@ Autopilot paused: owner decision required on checkpoint ambiguity.
 - PR8 修复：`billingReconciliation` readiness audit 读取 `membership_plans.yearly_credits`，复用 production annual release schedule helper，并只要求 `creditsGranted > 0` 的 due periods 存在 grant。
 - 追加回归测试：`yearly_credits < 12` 和 `yearly_credits = 0` 不应触发 `annual_monthly_release_period_missing`。
 
+Latest-head review follow-up：
+
+- P2：`Do not clamp invalid yearly credit schedules`。
+- Finding：readiness audit 曾把负数 `yearly_credits` clamp 成 `0`，但 production annual release helper 会拒绝负数 schedule。
+- PR8 修复：readiness 保留 plan schedule 的整数值；对 active yearly subscription + negative `yearly_credits` 记录 `annual_monthly_release_plan_schedule_invalid` error，而不是静默当作 0。
+- 追加回归测试：negative yearly-credit schedule reports readiness error。
+
 ### Main / staging divergence audit
 
 Main-only commits：
@@ -3156,15 +3163,16 @@ Conclusion：future staging -> main release is blocked until a separately author
 Completed：
 
 - `pnpm install --frozen-lockfile`：passed；lockfile unchanged。
-- `pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts`：passed；1 file / 25 tests。
+- `pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts`：passed；1 file / 26 tests。
 - `git diff --check`：passed。
-- PR1-PR7 targeted billing regression suite：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 161 tests。
-- `pnpm test:api`：passed；48 files / 620 tests。
+- PR1-PR7 targeted billing regression suite：`pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/paymentOrderStatus.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；8 files / 162 tests。
+- `pnpm test:api`：passed；48 files / 621 tests。
 - `pnpm lint`：passed。
 - `pnpm --filter web typecheck`：passed。
 - Vercel Preview Comments：success。
 - Vercel `graylum-ai-vercel-v1`：success。
 - Vercel `graylumai-staging`：success。
+- P2 follow-up targeted readiness test after negative schedule fix：passed。
 
 Latest-head Codex review：
 

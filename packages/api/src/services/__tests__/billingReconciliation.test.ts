@@ -931,6 +931,38 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
     );
   });
 
+  it('reports invalid negative yearly credit schedules instead of treating them as zero', () => {
+    const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+      profiles: [
+        { id: 'user-ready', credits: 0 },
+      ],
+      creditTransactions: [],
+      subscriptionCreditGrants: [],
+      membershipPlans: [
+        {
+          id: 'plan-ready',
+          yearly_credits: -1,
+        },
+      ],
+    }), {
+      now: new Date('2026-08-20T00:00:00.000Z'),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'annual_monthly_release_plan_schedule_invalid',
+          severity: 'error',
+          metadata: expect.objectContaining({
+            membershipPlanId: 'plan-ready',
+            yearlyCredits: -1,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('requires due annual release grants to match the current invoice scope', () => {
     const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
       profiles: [],
