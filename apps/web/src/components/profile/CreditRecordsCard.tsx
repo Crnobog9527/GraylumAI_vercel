@@ -3,6 +3,12 @@
 import { memo, useMemo } from 'react';
 import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import {
+  countsAsCreditSpend,
+  getCreditLedgerLabel,
+  normalizeCreditLedgerType,
+  type CreditLedgerType,
+} from './creditLedgerPresentation';
 
 interface MockUser {
   email?: string;
@@ -13,6 +19,10 @@ interface MockUser {
 interface Transaction {
   id: string;
   type: string;
+  ledger_type?: CreditLedgerType | string | null;
+  counts_as_spend?: boolean | null;
+  source_type?: string | null;
+  idempotency_key?: string | null;
   amount: number;
   balance_after: number | null;
   description?: string;
@@ -33,7 +43,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
     // 按日期分组统计消耗
     const usageByDate: Record<string, number> = {};
     transactions.forEach(tx => {
-      if (tx.amount < 0) { // 只统计消耗
+      if (countsAsCreditSpend(tx)) {
         const txDate = new Date(tx.created_date);
         const dateKey = `${txDate.getFullYear()}-${txDate.getMonth() + 1}-${txDate.getDate()}`;
         usageByDate[dateKey] = (usageByDate[dateKey] || 0) + Math.abs(tx.amount);
@@ -146,6 +156,10 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     return transactionsData.items.map((tx: any) => ({
       id: tx.id,
       type: tx.type,
+      ledger_type: tx.ledger_type ?? null,
+      counts_as_spend: tx.counts_as_spend ?? null,
+      source_type: tx.source_type ?? null,
+      idempotency_key: tx.idempotency_key ?? null,
       amount: tx.amount,
       balance_after: tx.balance_after ?? null,
       description: tx.reason ?? tx.description ?? '',
@@ -168,6 +182,9 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     transfer_in: '积分转入',
     transfer_out: '积分转出',
     expiration: '积分过期',
+    grant: '积分到账',
+    spend: 'AI 使用消耗',
+    refund_clawback: '退款扣回',
   };
 
   const typeIcons: Record<string, { icon: typeof Package; color: string }> = {
@@ -185,6 +202,9 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
     transfer_in: { icon: Package, color: 'var(--success)' },
     transfer_out: { icon: Package, color: 'var(--error)' },
     expiration: { icon: Zap, color: 'var(--text-disabled)' },
+    grant: { icon: Crown, color: 'var(--success)' },
+    spend: { icon: Zap, color: 'var(--color-primary)' },
+    refund_clawback: { icon: RefreshCw, color: 'rgba(245, 158, 11, 1)' },
   };
 
   return (
@@ -271,7 +291,8 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
         ) : (
         <div className="space-y-4">
           {transactions.map((tx) => {
-            const typeConfig = typeIcons[tx.type] || typeIcons.deduction;
+            const ledgerType = normalizeCreditLedgerType(tx);
+            const typeConfig = typeIcons[ledgerType] || typeIcons[tx.type] || typeIcons.deduction;
             const Icon = typeConfig.icon;
             const txDate = new Date(tx.created_date);
 
@@ -293,7 +314,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                   </div>
                   <div>
                     <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                      {typeLabels[tx.type] || tx.type}
+                      {typeLabels[ledgerType] || getCreditLedgerLabel(tx)}
                     </div>
                     <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
                       {tx.description || '-'}

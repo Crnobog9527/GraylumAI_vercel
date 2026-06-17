@@ -23,6 +23,7 @@ DECLARE
   v_result RECORD;
   v_credits INTEGER;
   v_transaction_count INTEGER;
+  v_transaction RECORD;
   v_order RECORD;
   v_has_privilege BOOLEAN;
 BEGIN
@@ -136,6 +137,20 @@ BEGIN
 
   IF v_transaction_count <> 1 THEN
     RAISE EXCEPTION 'duplicate full refund wrote transaction count: %', v_transaction_count;
+  END IF;
+
+  SELECT ledger_type, reason_code, counts_as_spend, source_type, source_refund_id
+  INTO v_transaction
+  FROM credit_transactions
+  WHERE user_id = v_user_id
+    AND idempotency_key = 'stripe_refund:re_full';
+
+  IF v_transaction.ledger_type <> 'refund_clawback'
+    OR v_transaction.reason_code <> 'refund_clawback'
+    OR v_transaction.counts_as_spend IS NOT FALSE
+    OR v_transaction.source_type <> 'stripe_refund'
+    OR v_transaction.source_refund_id <> 're_full' THEN
+    RAISE EXCEPTION 'full refund clawback v2 ledger assertion failed: %', row_to_json(v_transaction);
   END IF;
 
   SELECT credits INTO v_credits FROM profiles WHERE id = v_user_id;

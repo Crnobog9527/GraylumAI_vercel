@@ -89,8 +89,10 @@ function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> =
 
 function createAdminMutationSupabase(options: { startingCredits?: number } = {}) {
   const startingCredits = options.startingCredits ?? 100;
+  const creditTransactionInserts: Array<Record<string, unknown>> = [];
 
   return {
+    creditTransactionInserts,
     from(table: string) {
       if (table === 'profiles') {
         return {
@@ -114,7 +116,20 @@ function createAdminMutationSupabase(options: { startingCredits?: number } = {})
 
       if (table === 'credit_transactions') {
         return {
-          insert(payload: { amount: number }) {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle() {
+            return Promise.resolve({
+              data: null,
+              error: null,
+            });
+          },
+          insert(payload: { amount: number } & Record<string, unknown>) {
+            creditTransactionInserts.push(payload);
             return {
               select() {
                 return this;
@@ -209,6 +224,36 @@ describe('creditsRouter permissions', () => {
       newCredits: 75,
       amountDeducted: 25,
     });
+    expect(adminSupabase.creditTransactionInserts).toEqual([
+      expect.objectContaining({
+        type: 'deduction',
+        amount: -25,
+        description: 'Admin deduction',
+      }),
+    ]);
+  });
+
+  it('writes a stable admin adjustment signal for default deductCredits reasons', async () => {
+    const adminSupabase = createAdminMutationSupabase({ startingCredits: 100 });
+    const caller = createCreditsCaller({
+      role: 'admin',
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(caller.deductCredits({ amount: 25, idempotencyKey: 'manual-1' })).resolves.toMatchObject({
+      success: true,
+      previousCredits: 100,
+      newCredits: 75,
+      amountDeducted: 25,
+    });
+    expect(adminSupabase.creditTransactionInserts).toEqual([
+      expect.objectContaining({
+        type: 'deduction',
+        amount: -25,
+        description: '[Admin] 积分消费',
+        idempotency_key: 'admin_credit_deduction:admin-1:manual-1',
+      }),
+    ]);
   });
 
   it('allows ordinary users to read their balance', async () => {
@@ -226,7 +271,21 @@ describe('creditsRouter permissions', () => {
           return createProfileSupabase('user').from(table);
         }
         return createCreditTransactionsSupabase([
-          { id: 'txn-1', amount: -5, type: 'deduction', created_at: '2026-05-09T00:00:00.000Z' },
+          {
+            id: 'txn-1',
+            amount: -5,
+            type: 'deduction',
+            description: 'AI 对话消费',
+            created_at: '2026-05-09T00:00:00.000Z',
+          },
+          {
+            id: 'txn-2',
+            amount: -20,
+            type: 'deduction',
+            description: 'Stripe refund credit clawback [refund:re_test]',
+            idempotency_key: 'stripe_refund:re_test',
+            created_at: '2026-05-10T00:00:00.000Z',
+          },
         ]).from(table);
       },
     };
@@ -238,9 +297,62 @@ describe('creditsRouter permissions', () => {
           id: 'txn-1',
           amount: -5,
           type: 'deduction',
+          ledger_type: 'spend',
+          counts_as_spend: true,
+        },
+        {
+          id: 'txn-2',
+          amount: -20,
+          type: 'deduction',
+          ledger_type: 'refund_clawback',
+          counts_as_spend: false,
         },
       ],
-      totalCount: 1,
+      totalCount: 2,
+    });
+  });
+
+  it('summarizes monthly spend with credit ledger v2 semantics', async () => {
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createProfileSupabase('user').from(table);
+        }
+        return createCreditTransactionsSupabase([
+          { id: 'txn-grant', amount: 100, type: 'purchase', ledger_type: 'grant', counts_as_spend: false },
+          { id: 'txn-spend', amount: -40, type: 'deduction', ledger_type: 'spend', counts_as_spend: true },
+          { id: 'txn-refund-clawback', amount: -25, type: 'deduction', ledger_type: 'refund_clawback', counts_as_spend: false },
+          { id: 'txn-adjustment', amount: -5, type: 'deduction', ledger_type: 'adjustment', counts_as_spend: false },
+          {
+            id: 'txn-positive-admin-adjustment',
+            amount: 25,
+            type: 'addition',
+            description: '[Admin] manual top-up',
+            idempotency_key: 'admin_adjustment:admin-1:user-1:request-1',
+          },
+          { id: 'txn-legacy-spend', amount: -10, type: 'deduction', description: 'AI 对话消费' },
+          {
+            id: 'txn-legacy-refund-clawback',
+            amount: -50,
+            type: 'deduction',
+            description: 'Stripe refund credit clawback [refund:re_legacy]',
+            idempotency_key: 'stripe_refund:re_legacy',
+          },
+        ]).from(table);
+      },
+    };
+    const caller = createCreditsCaller({ role: 'user', supabase });
+
+    await expect(caller.getCreditsSummary({ period: 'month' })).resolves.toMatchObject({
+      totalEarned: 100,
+      totalSpent: 50,
+      transactionCount: 7,
+      byLedgerType: {
+        grant: { count: 1, amount: 100 },
+        spend: { count: 2, amount: -50 },
+        refund_clawback: { count: 2, amount: -75 },
+        adjustment: { count: 2, amount: 20 },
+      },
     });
   });
 });

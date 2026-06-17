@@ -327,6 +327,9 @@ test.describe('Authentication', () => {
         const yearlyCycleButton = page.getByRole('button', { name: /按年|年付/ });
         await expect(yearlyCycleButton).toBeVisible({ timeout: 30000 });
         await yearlyCycleButton.click();
+        await expect(page.getByText('年付积分按月释放', { exact: false })).toBeVisible();
+        await expect(page.getByText('未使用积分可累积', { exact: false })).toBeVisible();
+        await expect(page.getByText('不按月清零', { exact: false })).toBeVisible();
         await expect(page.getByText('年付共', { exact: false })).toHaveCount(0);
 
         const warmHighlightCard = page.locator('[data-highlight-tone="warm"]').first();

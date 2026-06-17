@@ -47,10 +47,19 @@ export const creditTransactions = pgTable('credit_transactions', {
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   amount: integer('amount').notNull(),
   type: text('type', { enum: ['deduction', 'addition', 'purchase', 'refund'] }).notNull(),
+  ledgerType: text('ledger_type', { enum: ['grant', 'spend', 'refund_clawback', 'adjustment', 'expiration'] }),
+  reasonCode: text('reason_code'),
+  countsAsSpend: boolean('counts_as_spend').default(false).notNull(),
+  sourceType: text('source_type', { enum: ['stripe_invoice', 'stripe_checkout', 'stripe_refund', 'ai_task', 'admin', 'system'] }),
+  sourceId: text('source_id'),
+  sourceOrderId: uuid('source_order_id'),
+  sourceRefundId: text('source_refund_id'),
+  grantPeriodKey: text('grant_period_key'),
   description: text('description'),
   idempotencyKey: text('idempotency_key'),
   balanceBefore: integer('balance_before'),
   balanceAfter: integer('balance_after'),
+  metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   userIdempotencyKeyUnique: uniqueIndex('idx_credit_transactions_user_idempotency_key')
@@ -331,7 +340,19 @@ export const paymentOrders = pgTable('payment_orders', {
   amountTotal: integer('amount_total'),
   currency: text('currency').default('usd').notNull(),
   mode: text('mode', { enum: ['payment', 'subscription'] }).notNull(),
-  status: text('status', { enum: ['pending', 'completed', 'failed', 'cancelled', 'refunded', 'partial_refunded'] }).default('pending').notNull(),
+  status: text('status', {
+    enum: [
+      'pending',
+      'completed',
+      'failed',
+      'canceled',
+      'expired',
+      'refunded',
+      'partially_refunded',
+      'cancelled',
+      'partial_refunded',
+    ],
+  }).default('pending').notNull(),
   paymentStatus: text('payment_status'),
   metadata: jsonb('metadata').default({}).notNull(),
   fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
@@ -355,6 +376,33 @@ export const userSubscriptions = pgTable('user_subscriptions', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
+  membershipPlanId: uuid('membership_plan_id').references(() => membershipPlans.id, { onDelete: 'set null' }),
+  stripeSubscriptionId: text('stripe_subscription_id').notNull(),
+  stripeInvoiceId: text('stripe_invoice_id'),
+  billingCycle: text('billing_cycle', { enum: ['monthly', 'yearly'] }).notNull(),
+  grantType: text('grant_type', {
+    enum: ['monthly_invoice', 'annual_monthly_release', 'upgrade', 'manual', 'reversal'],
+  }).notNull(),
+  grantPeriodKey: text('grant_period_key').notNull(),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  periodIndex: integer('period_index'),
+  totalPeriods: integer('total_periods'),
+  creditsGranted: integer('credits_granted').notNull(),
+  status: text('status', { enum: ['granted', 'skipped', 'reversed', 'failed'] }).default('granted').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  creditTransactionId: uuid('credit_transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
+  metadata: jsonb('metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  idempotencyKeyUnique: uniqueIndex('subscription_credit_grants_idempotency_key_key')
+    .on(table.idempotencyKey),
+}));
 
 /**
  * 计费历史表 - 记录三段式计费的每一步操作

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, startTransition, useEffect, useRef, useState } from 'react';
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Crown, Zap, CheckCircle2, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,12 @@ import {
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import {
+  getMembershipPlanButtonState,
+  getPlanEligibilityKey,
+  type MembershipPlanEligibilityEntry,
+} from './subscriptionPlanButtonState';
+import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -225,7 +231,7 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
 });
 
 // 会员订阅卡片
-export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user: MockUser }) {
+export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: { user: MockUser }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const utils = trpc.useUtils();
@@ -235,8 +241,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
   const [checkoutNotice, setCheckoutNotice] = useState<CheckoutNotice | null>(null);
   const syncedCheckoutSessionRef = useRef<string | null>(null);
 
-  const subscriptionTier = user?.subscription_tier || 'free';
   const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
+  const changeSubscriptionPlan = trpc.payments.changeSubscriptionPlan.useMutation();
   const syncCheckoutSession = trpc.payments.syncCheckoutSession.useMutation();
   const syncCheckoutSessionMutation = syncCheckoutSession.mutateAsync;
   const checkoutState = searchParams.get('checkout');
@@ -260,6 +266,20 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 
   // 从 API 获取会员等级数据
   const { data: apiPlans = [], isLoading: plansLoading } = trpc.settings.getMembershipPlans.useQuery();
+  const {
+    data: eligibilityMatrix,
+    isLoading: eligibilityLoading,
+  } = trpc.payments.getMembershipEligibilityMatrix.useQuery();
+
+  const eligibilityByPlanCycle = useMemo(() => {
+    const entries = new Map<string, MembershipPlanEligibilityEntry>();
+
+    for (const entry of eligibilityMatrix?.entries ?? []) {
+      entries.set(getPlanEligibilityKey(entry.planId, entry.billingCycle), entry);
+    }
+
+    return entries;
+  }, [eligibilityMatrix?.entries]);
 
   useEffect(() => {
     if (checkoutState !== 'success' || !checkoutSessionId) {
@@ -278,11 +298,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
 
     void syncCheckoutSessionMutation({ sessionId: checkoutSessionId })
       .then(async (result) => {
-        void Promise.allSettled([
-          utils.user.getUserProfile.invalidate(),
-          utils.credits.getBalance.invalidate(),
-          utils.credits.getCreditsSummary.invalidate(),
-        ]);
+        void invalidatePostCheckoutMembershipQueries(utils);
 
         if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
@@ -308,16 +324,49 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
   }, [checkoutSessionId, checkoutState, router, syncCheckoutSessionMutation, utils]);
 
   useEffect(() => {
-    if (checkoutState !== 'cancelled') {
+    if (checkoutState !== 'canceled' && checkoutState !== 'cancelled') {
       return;
     }
 
+    if (!checkoutSessionId) {
+      setCheckoutNotice({
+        tone: 'cancelled',
+        message: '你已取消本次支付，没有发生扣费。',
+      });
+      clearCheckoutParams();
+      return;
+    }
+
+    if (syncedCheckoutSessionRef.current === checkoutSessionId) {
+      return;
+    }
+
+    syncedCheckoutSessionRef.current = checkoutSessionId;
     setCheckoutNotice({
-      tone: 'cancelled',
-      message: '你已取消本次支付，没有发生扣费。',
+      tone: 'syncing',
+      message: '正在记录这笔已取消的支付会话...',
     });
-    clearCheckoutParams();
-  }, [checkoutState]);
+
+    void syncCheckoutSessionMutation({
+      sessionId: checkoutSessionId,
+      checkoutState: 'canceled',
+    })
+      .then(async () => {
+        void utils.payments.listBillingRecords.invalidate();
+        setCheckoutNotice({
+          tone: 'cancelled',
+          message: '你已取消本次支付，没有发生扣费。',
+        });
+        clearCheckoutParams();
+      })
+      .catch(() => {
+        syncedCheckoutSessionRef.current = null;
+        setCheckoutNotice({
+          tone: 'cancelled',
+          message: '你已取消本次支付，没有发生扣费。账单状态稍后会自动同步。',
+        });
+      });
+  }, [checkoutSessionId, checkoutState, syncCheckoutSessionMutation, utils]);
 
   // 将 API 数据转换为 PlanConfig 格式
   const displayPlans: PlanConfig[] = apiPlans.map(plan => ({
@@ -352,25 +401,69 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
   const handleSelectPlan = async (plan: PlanConfig) => {
     const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
     const unit = billingCycle === 'monthly' ? '/月' : '/年';
+    const eligibility = eligibilityByPlanCycle.get(getPlanEligibilityKey(plan.id, billingCycle));
+    const ready = billingCycle === 'monthly'
+      ? plan.checkoutReady?.monthly
+      : plan.checkoutReady?.yearly;
+    const buttonState = getMembershipPlanButtonState({
+      eligibility,
+      eligibilityLoading,
+      checkoutReady: Boolean(ready),
+      pending: pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`,
+    });
+
+    if (!buttonState.canCreateCheckout && !buttonState.canChangeSubscriptionPlan) {
+      const summary = eligibility?.action === 'createCheckoutSession' && !ready
+        ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会按最新配置协助你完成开通。`
+        : eligibility?.action === 'changeSubscriptionPlan' && !ready
+          ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会协助处理升级。`
+        : buttonState.message ?? '正在确认当前会员状态，请稍后再试。';
+
+      setPurchaseIntent({
+        kind: 'plan',
+        title: plan.name,
+        summary,
+      });
+      return;
+    }
+
+    if (buttonState.canChangeSubscriptionPlan) {
+      const checkoutKey = `plan:${plan.id}:${billingCycle}`;
+      setPendingCheckoutKey(checkoutKey);
+
+      try {
+        const result = await changeSubscriptionPlan.mutateAsync({
+          planId: plan.id,
+          billingCycle,
+        });
+
+        await Promise.all([
+          utils.user.getUserProfile.invalidate(),
+          utils.payments.getMembershipEligibilityMatrix.invalidate(),
+          utils.payments.listBillingRecords.invalidate(),
+        ]);
+
+        setCheckoutNotice({
+          tone: 'success',
+          message: `${plan.name} 升级请求已提交，当前订阅状态为 ${result.status}。`,
+        });
+      } catch (error) {
+        setPurchaseIntent({
+          kind: 'plan',
+          title: plan.name,
+          summary: getSafeErrorMessage(error, '切换订阅套餐失败，请稍后重试。'),
+        });
+      } finally {
+        setPendingCheckoutKey(null);
+      }
+      return;
+    }
 
     if (price <= 0 || plan.level === 'free') {
       setPurchaseIntent({
         kind: 'plan',
         title: plan.name,
         summary: '当前是免费方案，无需额外购买即可使用基础功能。',
-      });
-      return;
-    }
-
-    const ready = billingCycle === 'monthly'
-      ? plan.checkoutReady?.monthly
-      : plan.checkoutReady?.yearly;
-
-    if (!ready) {
-      setPurchaseIntent({
-        kind: 'plan',
-        title: plan.name,
-        summary: `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会按最新配置协助你完成开通。`,
       });
       return;
     }
@@ -449,6 +542,10 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
         </div>
         </div>
 
+        <div className="mb-6 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+          年付积分按月释放，未使用积分可累积，不按月清零。
+        </div>
+
         {checkoutNotice && (
           <div
             className="mb-6 rounded-xl border px-4 py-3 text-sm"
@@ -495,13 +592,24 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
             </div>
           </div>
         ) : displayPlans.map((plan) => {
-          const isCurrentPlan = plan.level === subscriptionTier || (plan.level === 'free' && subscriptionTier === 'free');
           const isHighlight = plan.recommended || plan.highlight;
           const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
           const warmHighlightBackground = 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(249, 115, 22, 0.14) 100%)';
           const warmHighlightBorder = '2px solid rgba(245, 158, 11, 0.45)';
           const warmHighlightShadow = '0 0 30px rgba(249, 115, 22, 0.16)';
           const warmHighlightText = 'linear-gradient(135deg, #FBBF24 0%, #FB923C 100%)';
+          const checkoutKey = `plan:${plan.id}:${billingCycle}`;
+          const eligibility = eligibilityByPlanCycle.get(getPlanEligibilityKey(plan.id, billingCycle));
+          const isPendingPlan = pendingCheckoutKey === checkoutKey;
+          const ready = billingCycle === 'monthly'
+            ? plan.checkoutReady?.monthly
+            : plan.checkoutReady?.yearly;
+          const buttonState = getMembershipPlanButtonState({
+            eligibility,
+            eligibilityLoading,
+            checkoutReady: Boolean(ready),
+            pending: isPendingPlan,
+          });
 
           return (
             <div
@@ -607,16 +715,16 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user }: { user:
               <Button
                 onClick={() => handleSelectPlan(plan)}
                 className="w-full"
-                disabled={isCurrentPlan || pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`}
+                disabled={buttonState.disabled}
                 style={{
-                  background: isCurrentPlan
+                  background: buttonState.disabled
                     ? 'var(--bg-tertiary)'
                     : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  color: isCurrentPlan ? 'var(--text-tertiary)' : 'var(--bg-primary)',
-                  cursor: isCurrentPlan ? 'default' : 'pointer'
+                  color: buttonState.disabled ? 'var(--text-tertiary)' : 'var(--bg-primary)',
+                  cursor: buttonState.disabled ? 'default' : 'pointer'
                 }}
               >
-                {isCurrentPlan ? '当前套餐' : pendingCheckoutKey === `plan:${plan.id}:${billingCycle}` ? '跳转中...' : '选择'}
+                {buttonState.label}
               </Button>
             </div>
           );
