@@ -38,6 +38,7 @@ vi.mock('../services/stripeFulfillment', () => ({
 
 import { paymentsRouter } from './payments';
 import {
+  fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
@@ -225,6 +226,7 @@ describe('paymentsRouter error sanitization', () => {
     loggerState.error.mockReset();
     loggerState.info.mockReset();
     loggerState.warn.mockReset();
+    vi.mocked(fulfillCreditPackageOrder).mockReset();
     vi.mocked(fulfillMembershipInvoice).mockReset();
     vi.mocked(syncSubscriptionState).mockReset();
     vi.mocked(upsertPaymentOrderBySession).mockReset();
@@ -2514,6 +2516,111 @@ describe('paymentsRouter error sanitization', () => {
       orderStatus: 'canceled',
       eventType: 'checkout.return.canceled',
     });
+    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(syncSubscriptionState).not.toHaveBeenCalled();
+  });
+
+  it('does not let canceled return state override paid checkout sessions', async () => {
+    const session = {
+      id: 'cs_test_paid_cancel_return',
+      mode: 'payment',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'credit_package',
+        itemId: 'package-1',
+        billingCycle: 'one_time',
+        priceId: 'price_test_package',
+      },
+      customer: 'cus_test_paid_cancel',
+    };
+
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillCreditPackageOrder).mockResolvedValue(undefined);
+    vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
+    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                status: 'completed',
+                payment_status: 'paid',
+                fulfilled_at: '2026-05-22T16:20:00.000Z',
+                stripe_subscription_id: null,
+                stripe_invoice_id: null,
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.syncCheckoutSession({
+        sessionId: 'cs_test_paid_cancel_return',
+        checkoutState: 'canceled',
+      }),
+    ).resolves.toEqual({
+      sessionId: 'cs_test_paid_cancel_return',
+      mode: 'payment',
+      checkoutStatus: 'complete',
+      paymentStatus: 'paid',
+      orderStatus: 'completed',
+      fulfilledAt: '2026-05-22T16:20:00.000Z',
+      stripeSubscriptionId: null,
+      stripeInvoiceId: null,
+    });
+
+    expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
+      eventType: 'checkout.session.sync',
+    });
+    expect(fulfillCreditPackageOrder).toHaveBeenCalledWith(adminSupabase, session);
     expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(syncSubscriptionState).not.toHaveBeenCalled();
   });

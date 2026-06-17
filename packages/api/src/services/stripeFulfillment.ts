@@ -1687,19 +1687,24 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   const invoiceId = resolvedInvoice.invoiceId;
 
   if (!invoiceId) {
-    if (resolvedInvoice.order && !isSubscriptionRefundOrder(resolvedInvoice.order)) {
+    const shouldTryGenericRefundReconciliation = !resolvedInvoice.order
+      || !isSubscriptionRefundOrder(resolvedInvoice.order);
+
+    if (shouldTryGenericRefundReconciliation) {
       const reconciliation = await reconcileStripeRefund(
         supabase,
         buildGenericRefundInputFromWebhookEvent(event, charge),
       );
 
-      return {
-        reconciled: Boolean(reconciliation),
-        reason: 'non_subscription_order_reconciled',
-        orderId: resolvedInvoice.order.id ?? null,
-        subscriptionId: resolvedInvoice.order.stripe_subscription_id ?? null,
-        refundId,
-      };
+      if (reconciliation) {
+        return {
+          reconciled: true,
+          reason: 'non_subscription_order_reconciled',
+          orderId: resolvedInvoice.order?.id ?? null,
+          subscriptionId: resolvedInvoice.order?.stripe_subscription_id ?? null,
+          refundId,
+        };
+      }
     }
 
     throwFulfillmentError(

@@ -262,6 +262,10 @@ function isCanceledCheckoutState(checkoutState: z.infer<typeof syncCheckoutInput
   return checkoutState === 'canceled' || checkoutState === 'cancelled';
 }
 
+function canApplyCanceledCheckoutReturn(session: Stripe.Checkout.Session) {
+  return session.status !== 'complete' && session.payment_status !== 'paid';
+}
+
 function logSyncCheckoutStage(
   stage: string,
   input: z.infer<typeof syncCheckoutInput>,
@@ -1306,10 +1310,12 @@ export const paymentsRouter = router({
         subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(session)),
         invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(session)),
       };
+      const shouldRecordCanceledCheckoutReturn = isCanceledCheckoutState(input.checkoutState)
+        && canApplyCanceledCheckoutReturn(session);
 
       try {
         logSyncCheckoutStage(syncStage, input, syncStageContext);
-        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, isCanceledCheckoutState(input.checkoutState)
+        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, shouldRecordCanceledCheckoutReturn
           ? {
               orderStatus: 'canceled',
               eventType: 'checkout.return.canceled',
@@ -1318,7 +1324,7 @@ export const paymentsRouter = router({
               eventType: 'checkout.session.sync',
             });
 
-        if (isCanceledCheckoutState(input.checkoutState)) {
+        if (shouldRecordCanceledCheckoutReturn) {
           syncStage = 'canceled_return_recorded';
           logSyncCheckoutStage(syncStage, input, syncStageContext);
         } else {

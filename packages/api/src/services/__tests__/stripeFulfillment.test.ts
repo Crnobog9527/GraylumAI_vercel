@@ -3542,6 +3542,60 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
+  it('falls back to generic refund reconciliation for checkout-session refund metadata without an invoice', async () => {
+    const { lookups, rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'stripe_checkout_session_id', value: 'cs_test_checkout_metadata_refund' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000320',
+        amount_total: 500,
+        metadata: {
+          itemType: 'credit_package',
+          grantedCredits: 50,
+        },
+      },
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_test_checkout_metadata_refund',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_test_checkout_metadata_refund',
+            amount: 500,
+            charge: null,
+            created: 1_742_646_400,
+            currency: 'usd',
+            metadata: {
+              checkoutSessionId: 'cs_test_checkout_metadata_refund',
+            },
+            payment_intent: null,
+            reason: 'requested_by_customer',
+            status: 'succeeded',
+          } as unknown as Stripe.Refund,
+        },
+      } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+    );
+
+    expect(lookups).toContainEqual(
+      {
+        table: 'payment_orders',
+        column: 'stripe_checkout_session_id',
+        value: 'cs_test_checkout_metadata_refund',
+      },
+    );
+    expect(result).toMatchObject({
+      reconciled: true,
+      reason: 'non_subscription_order_reconciled',
+      orderId: null,
+    });
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: '00000000-0000-4000-8000-000000000320',
+      p_refund_id: 're_test_checkout_metadata_refund',
+    }));
+  });
+
   it('uses the atomic canceled-subscription profile downgrade RPC after syncing subscription state', async () => {
     const subscriptionUpdates: unknown[] = [];
     const rpc = vi.fn().mockResolvedValue({
