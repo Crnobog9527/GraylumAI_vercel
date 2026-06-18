@@ -1657,6 +1657,58 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.profiles[0].credits).toBe(120);
   });
 
+  it('does not compare legacy full-year grants against later plan credit increases', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-legacy-full-year-plan-increase',
+        user_id: 'user-legacy-full-year-plan-increase',
+        item_id: 'plan-legacy-full-year-plan-increase',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_legacy_full_year_plan_increase',
+        stripe_subscription_id: 'sub_legacy_full_year_plan_increase',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 120 },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-legacy-full-year-plan-increase',
+        user_id: 'user-legacy-full-year-plan-increase',
+        membership_plan_id: 'plan-legacy-full-year-plan-increase',
+        stripe_subscription_id: 'sub_legacy_full_year_plan_increase',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_legacy_full_year_plan_increase' },
+      }],
+      membership_plans: [{
+        id: 'plan-legacy-full-year-plan-increase',
+        name: 'Gold',
+        yearly_credits: 240,
+      }],
+      profiles: [{
+        id: 'user-legacy-full-year-plan-increase',
+        credits: 120,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(120);
+  });
+
   it('uses the purchased annual credit snapshot for scheduled releases after plan edits', async () => {
     const supabase = createMockSupabase({
       user_subscriptions: [{

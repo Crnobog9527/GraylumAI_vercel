@@ -18,8 +18,21 @@ export type PostCheckoutInvalidationUtils = {
   };
   payments: {
     getMembershipEligibilityMatrix: InvalidateQuery;
+    listBillingRecords: InvalidateQuery;
   };
 };
+
+export type CheckoutSyncResultSummary = {
+  fulfilledAt?: string | null;
+  orderStatus?: string | null;
+  paymentStatus?: string | null;
+};
+
+export function isFulfilledCheckoutSyncResult(result: CheckoutSyncResultSummary) {
+  return Boolean(result.fulfilledAt)
+    || result.orderStatus === 'completed'
+    || result.paymentStatus === 'paid';
+}
 
 export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInvalidationUtils) {
   return Promise.allSettled([
@@ -27,5 +40,6 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
     utils.credits.getBalance.invalidate(),
     utils.credits.getCreditsSummary.invalidate(),
     utils.payments.getMembershipEligibilityMatrix.invalidate(),
+    utils.payments.listBillingRecords.invalidate(),
   ]);
 }

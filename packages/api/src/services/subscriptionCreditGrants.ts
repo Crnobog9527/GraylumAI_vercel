@@ -2604,7 +2604,7 @@ async function hasLegacyFullYearAnnualGrant(supabase: SupabaseLikeClient, input:
     ? getLegacyGrantedCreditsFromOrderMetadata(invoiceOrder)
     : { amount: 0, metadataGap: 'missing_grantedCredits' };
 
-  return legacyGrantedCredits.amount >= input.yearlyCredits;
+  return legacyGrantedCredits.amount > 0;
 }
 
 export async function releaseDueAnnualSubscriptionCredits(
