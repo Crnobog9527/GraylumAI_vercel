@@ -2527,6 +2527,11 @@ export async function releaseDueAnnualSubscriptionCredits(
     }
 
     const invoiceId = getAnnualReleaseInvoiceId(subscription);
+    if (!invoiceId) {
+      summary.skippedSubscriptions += 1;
+      continue;
+    }
+
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
       subscriptionId,
       invoiceId,
@@ -2561,8 +2566,8 @@ export async function releaseDueAnnualSubscriptionCredits(
         stripeInvoiceId: invoiceId,
         billingCycle: 'yearly',
         grantType: 'annual_monthly_release',
-        sourceType: invoiceId ? 'stripe_invoice' : 'system',
-        sourceId: invoiceId ?? subscriptionId,
+        sourceType: 'stripe_invoice',
+        sourceId: invoiceId,
         planName: plan.name,
         now: now.toISOString(),
       });

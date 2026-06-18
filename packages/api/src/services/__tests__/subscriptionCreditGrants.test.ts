@@ -1629,6 +1629,36 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('skips annual release when the subscription has no invoice scope', async () => {
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-missing-invoice-scope',
+        user_id: 'user-missing-invoice-scope',
+        membership_plan_id: 'plan-missing-invoice-scope',
+        stripe_subscription_id: 'sub_missing_invoice_scope',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: {},
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
   it('continues annual release before current_period_end when cancel_at_period_end is true', () => {
     expect(shouldReleaseAnnualSubscriptionCredits({
       billingCycle: 'yearly',
