@@ -2024,6 +2024,103 @@ describe('subscription credit grants', () => {
     ]);
   });
 
+  it('claws back legacy grantedCredits when subscription refund has no grant rows', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-legacy-no-grants',
+        user_id: 'user-subscription-refund-legacy-no-grants',
+        stripe_subscription_id: 'sub_subscription_refund_legacy_no_grants',
+        stripe_invoice_id: 'in_subscription_refund_legacy_no_grants',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 25 },
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-legacy-no-grants',
+        credits: 100,
+      }],
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-legacy-no-grants',
+      subscriptionId: 'sub_subscription_refund_legacy_no_grants',
+      refundId: 're_subscription_legacy_no_grants',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_legacy_no_grants',
+      isFullRefund: true,
+      now: '2026-04-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 25,
+      appliedClawbackAmount: 25,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-1',
+      alreadyReconciled: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(75);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: true,
+          reviewRequired: true,
+          legacyGrantRowsMissing: true,
+          clawbackAmount: 25,
+          appliedClawbackAmount: 25,
+          shortfallAmount: 0,
+          shortfallReason: 'legacy_subscription_grant_rows_missing',
+          reversedGrantCount: 0,
+          creditTransactionId: 'txn-1',
+          idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund_legacy_no_grants:sub_subscription_refund_legacy_no_grants',
+          reversalStatus: 'legacy_grant_rows_missing_review_required',
+        }),
+      },
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -25,
+      type: 'deduction',
+      ledger_type: 'refund_clawback',
+      reason_code: 'refund_clawback',
+      counts_as_spend: false,
+      source_type: 'stripe_refund',
+      source_refund_id: 're_subscription_legacy_no_grants',
+      source_order_id: 'order-subscription-refund-legacy-no-grants',
+      idempotency_key: 'stripe_refund:subscription_grants:invoice:in_subscription_refund_legacy_no_grants:sub_subscription_refund_legacy_no_grants',
+    });
+    expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-legacy-no-grants',
+      subscriptionId: 'sub_subscription_refund_legacy_no_grants',
+      refundId: 're_subscription_legacy_no_grants_later_event',
+      refundEventType: 'refund.updated',
+      refundStatus: 'succeeded',
+      isFullRefund: true,
+      now: '2026-04-01T00:05:00.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      clawbackAmount: 25,
+      appliedClawbackAmount: 25,
+      shortfallAmount: 0,
+      creditTransactionId: 'txn-1',
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(75);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
   it('records an auditable full-refund shortfall when the current balance cannot cover clawback', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{

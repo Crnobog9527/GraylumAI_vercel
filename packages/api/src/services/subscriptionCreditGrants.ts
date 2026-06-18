@@ -918,6 +918,35 @@ function toPositiveInteger(value: unknown) {
   return 0;
 }
 
+function getLegacyGrantedCreditsFromOrderMetadata(order: PaymentOrderRow) {
+  const metadata = asRecord(order.metadata);
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'grantedCredits')) {
+    return {
+      amount: 0,
+      metadataGap: 'missing_grantedCredits',
+    };
+  }
+
+  const grantedCredits = metadata.grantedCredits;
+  if (typeof grantedCredits === 'number') {
+    return Number.isFinite(grantedCredits)
+      ? { amount: Math.max(Math.floor(grantedCredits), 0), metadataGap: null }
+      : { amount: 0, metadataGap: 'invalid_grantedCredits' };
+  }
+
+  if (typeof grantedCredits === 'string' && /^-?\d+$/.test(grantedCredits)) {
+    return {
+      amount: Math.max(Number(grantedCredits), 0),
+      metadataGap: null,
+    };
+  }
+
+  return {
+    amount: 0,
+    metadataGap: 'invalid_grantedCredits',
+  };
+}
+
 function toNonNegativeInteger(value: unknown) {
   if (typeof value === 'number') {
     return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
@@ -955,6 +984,8 @@ function buildSubscriptionRefundMetadata(input: {
   reversedGrantCount?: number;
   creditTransactionId?: string | null;
   alreadyReconciled?: boolean;
+  legacyGrantRowsMissing?: boolean;
+  grantedCreditsMetadataGap?: string | null;
 }) {
   return {
     ...asRecord(input.existingMetadata),
@@ -975,6 +1006,8 @@ function buildSubscriptionRefundMetadata(input: {
       reversedGrantCount: input.reversedGrantCount ?? 0,
       creditTransactionId: input.creditTransactionId ?? null,
       alreadyReconciled: input.alreadyReconciled ?? false,
+      ...(input.legacyGrantRowsMissing ? { legacyGrantRowsMissing: true } : {}),
+      ...(input.grantedCreditsMetadataGap ? { grantedCreditsMetadataGap: input.grantedCreditsMetadataGap } : {}),
       idempotencyKey: input.idempotencyKey,
       reversalStatus: input.reversalStatus ?? (input.reviewRequired ? 'review_required' : 'complete'),
       reconciledAt: input.now,
@@ -1090,6 +1123,8 @@ async function updateSubscriptionRefundOrder(input: {
   reversedGrantCount?: number;
   creditTransactionId?: string | null;
   alreadyReconciled?: boolean;
+  legacyGrantRowsMissing?: boolean;
+  grantedCreditsMetadataGap?: string | null;
   orderStatus?: string;
   paymentStatus?: string;
 }) {
@@ -1114,6 +1149,8 @@ async function updateSubscriptionRefundOrder(input: {
         reversedGrantCount: input.reversedGrantCount,
         creditTransactionId: input.creditTransactionId,
         alreadyReconciled: input.alreadyReconciled,
+        legacyGrantRowsMissing: input.legacyGrantRowsMissing,
+        grantedCreditsMetadataGap: input.grantedCreditsMetadataGap,
       }),
     })
     .eq('id', input.order.id);
@@ -1566,6 +1603,112 @@ export async function reconcileSubscriptionRefundCreditGrants(
       invoiceId: invoiceScope.invoiceId,
     }),
   );
+  const legacyGrantedCredits = getLegacyGrantedCreditsFromOrderMetadata(order);
+  const shouldApplyLegacyGrantFallback = refundableGrants.length === 0
+    && (
+      legacyGrantedCredits.amount > 0
+      || legacyGrantedCredits.metadataGap === 'invalid_grantedCredits'
+    );
+
+  if (shouldApplyLegacyGrantFallback) {
+    const clawbackAmount = legacyGrantedCredits.amount;
+    const userId = order.user_id ?? null;
+    let creditTransactionId: string | null = null;
+    let alreadyReconciled = false;
+    let appliedClawbackAmount = 0;
+    let shortfallAmount = clawbackAmount;
+    let shortfallReason: string | null = legacyGrantedCredits.metadataGap
+      ?? 'legacy_subscription_grant_rows_missing';
+
+    if (userId && clawbackAmount > 0) {
+      const refundIdempotencyKeys = collectSubscriptionRefundIdempotencyKeys({
+        order,
+        grants: [],
+        idempotencyKey,
+        legacyIdempotencyKey,
+        existingReversalIdempotencyKey,
+      });
+      const existingTransactionResult = await getExistingRefundClawbackTransactionForKeys(supabase, {
+        userId,
+        idempotencyKeys: refundIdempotencyKeys,
+      });
+      const existingTransaction = existingTransactionResult.transaction;
+
+      if (existingTransaction?.id) {
+        creditTransactionId = existingTransaction.id;
+        alreadyReconciled = true;
+        appliedClawbackAmount = getTransactionAmount(existingTransaction);
+        shortfallAmount = Math.max(clawbackAmount - appliedClawbackAmount, 0);
+      } else {
+        const currentBalance = await getProfileCreditBalance(supabase, userId);
+        appliedClawbackAmount = Math.min(clawbackAmount, currentBalance ?? 0);
+        shortfallAmount = clawbackAmount - appliedClawbackAmount;
+        shortfallReason = currentBalance === null
+          ? 'profile_missing'
+          : 'legacy_subscription_grant_rows_missing';
+
+        if (appliedClawbackAmount > 0) {
+          creditTransactionId = await applySubscriptionRefundClawback({
+            supabase,
+            userId,
+            amount: appliedClawbackAmount,
+            refund: scopedRefund,
+            idempotencyKey,
+            reversedGrantCount: 0,
+          });
+          await updateRefundClawbackTransactionSemantics({
+            supabase,
+            transactionId: creditTransactionId,
+            refund: scopedRefund,
+            idempotencyKey,
+            amount: appliedClawbackAmount,
+            requiredAmount: clawbackAmount,
+            shortfallAmount,
+            reversedGrantCount: 0,
+            reversedGrantPeriodKeys: [],
+          });
+        }
+      }
+    } else if (clawbackAmount > 0) {
+      shortfallReason = 'user_missing';
+    } else {
+      shortfallAmount = 0;
+    }
+
+    await updateSubscriptionRefundOrder({
+      supabase,
+      order,
+      refund: scopedRefund,
+      now,
+      idempotencyKey,
+      reviewRequired: true,
+      clawbackAmount,
+      appliedClawbackAmount,
+      shortfallAmount,
+      shortfallReason,
+      reversalStatus: 'legacy_grant_rows_missing_review_required',
+      reversedGrantCount: 0,
+      creditTransactionId,
+      alreadyReconciled,
+      legacyGrantRowsMissing: true,
+      grantedCreditsMetadataGap: legacyGrantedCredits.metadataGap,
+    });
+
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount,
+      appliedClawbackAmount,
+      shortfallAmount,
+      creditTransactionId,
+      alreadyReconciled,
+    };
+  }
+
   const grantsToReverse = refundableGrants.filter((grant) => grant.status === 'granted');
   const userId = order.user_id ?? refundableGrants[0]?.user_id ?? null;
   const clawbackAmount = refundableGrants.reduce(
