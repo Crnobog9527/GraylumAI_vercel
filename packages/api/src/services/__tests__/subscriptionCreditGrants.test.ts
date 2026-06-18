@@ -397,7 +397,7 @@ describe('subscription credit grants', () => {
 
     expect(reconciliation).toMatchObject({
       fullRefund: true,
-      reviewRequired: false,
+      reviewRequired: true,
       reversedGrantCount: 0,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
@@ -409,7 +409,10 @@ describe('subscription credit grants', () => {
       metadata: {
         subscriptionCreditGrantReversal: expect.objectContaining({
           fullRefund: true,
-          reversalStatus: 'complete',
+          reviewRequired: true,
+          legacyGrantRowsMissing: true,
+          grantedCreditsMetadataGap: 'missing_grantedCredits',
+          reversalStatus: 'legacy_grant_rows_missing_review_required',
         }),
       },
     });
@@ -448,7 +451,10 @@ describe('subscription credit grants', () => {
         subscriptionCreditGrantReversal: expect.objectContaining({
           refundId: 're_invoice_refund_race_full',
           fullRefund: true,
-          reversalStatus: 'complete',
+          reviewRequired: true,
+          legacyGrantRowsMissing: true,
+          grantedCreditsMetadataGap: 'missing_grantedCredits',
+          reversalStatus: 'legacy_grant_rows_missing_review_required',
         }),
       },
     });
@@ -2149,6 +2155,65 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.profiles[0].credits).toBe(75);
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('keeps legacy subscription refunds without grant metadata in manual review', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-subscription-refund-legacy-missing-metadata',
+        user_id: 'user-subscription-refund-legacy-missing-metadata',
+        stripe_subscription_id: 'sub_subscription_refund_legacy_missing_metadata',
+        stripe_invoice_id: 'in_subscription_refund_legacy_missing_metadata',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: {},
+      }],
+      profiles: [{
+        id: 'user-subscription-refund-legacy-missing-metadata',
+        credits: 100,
+      }],
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-subscription-refund-legacy-missing-metadata',
+      subscriptionId: 'sub_subscription_refund_legacy_missing_metadata',
+      refundId: 're_subscription_legacy_missing_metadata',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_subscription_refund_legacy_missing_metadata',
+      isFullRefund: true,
+      now: '2026-04-01T00:00:00.000Z',
+    });
+
+    expect(result).toMatchObject({
+      fullRefund: true,
+      reviewRequired: true,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'refunded',
+      payment_status: 'refunded',
+      metadata: {
+        subscriptionCreditGrantReversal: expect.objectContaining({
+          fullRefund: true,
+          reviewRequired: true,
+          legacyGrantRowsMissing: true,
+          grantedCreditsMetadataGap: 'missing_grantedCredits',
+          shortfallReason: 'missing_grantedCredits',
+          reversalStatus: 'legacy_grant_rows_missing_review_required',
+        }),
+      },
+    });
   });
 
   it('records an auditable full-refund shortfall when the current balance cannot cover clawback', async () => {

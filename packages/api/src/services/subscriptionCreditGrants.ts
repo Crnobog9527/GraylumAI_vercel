@@ -1607,7 +1607,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const shouldApplyLegacyGrantFallback = refundableGrants.length === 0
     && (
       legacyGrantedCredits.amount > 0
-      || legacyGrantedCredits.metadataGap === 'invalid_grantedCredits'
+      || legacyGrantedCredits.metadataGap !== null
     );
 
   if (shouldApplyLegacyGrantFallback) {
