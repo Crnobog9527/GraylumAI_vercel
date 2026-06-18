@@ -2506,6 +2506,73 @@ async function loadAnnualSubscriptions(supabase: SupabaseLikeClient): Promise<Su
   return result.data ?? [];
 }
 
+async function hasAnnualReleaseGrantRows(supabase: SupabaseLikeClient, input: {
+  subscriptionId: string;
+  invoiceId: string;
+}) {
+  const result = await supabase
+    .from('subscription_credit_grants')
+    .select('id')
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('stripe_invoice_id', input.invoiceId)
+    .limit(1);
+
+  if (result.error) {
+    throwGrantError(
+      'annual_release_credit_grant_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantLookup,
+      result.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId), invoiceId: maskIdentifier(input.invoiceId) },
+    );
+  }
+
+  return (result.data ?? []).length > 0;
+}
+
+async function getAnnualReleaseInvoiceOrder(supabase: SupabaseLikeClient, input: {
+  subscriptionId: string;
+  invoiceId: string;
+}) {
+  const result = await supabase
+    .from('payment_orders')
+    .select('id, metadata')
+    .eq('stripe_subscription_id', input.subscriptionId)
+    .eq('stripe_invoice_id', input.invoiceId)
+    .maybeSingle();
+
+  if (result.error) {
+    throwGrantError(
+      'annual_release_invoice_order_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.invoiceOrderLookup,
+      result.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId), invoiceId: maskIdentifier(input.invoiceId) },
+    );
+  }
+
+  return result.data ?? null;
+}
+
+async function hasLegacyFullYearAnnualGrant(supabase: SupabaseLikeClient, input: {
+  subscriptionId: string;
+  invoiceId: string;
+  yearlyCredits: number;
+}) {
+  if (input.yearlyCredits <= 0) {
+    return false;
+  }
+
+  if (await hasAnnualReleaseGrantRows(supabase, input)) {
+    return false;
+  }
+
+  const invoiceOrder = await getAnnualReleaseInvoiceOrder(supabase, input);
+  const legacyGrantedCredits = invoiceOrder
+    ? getLegacyGrantedCreditsFromOrderMetadata(invoiceOrder)
+    : { amount: 0, metadataGap: 'missing_grantedCredits' };
+
+  return legacyGrantedCredits.amount >= input.yearlyCredits;
+}
+
 export async function releaseDueAnnualSubscriptionCredits(
   supabase: SupabaseLikeClient,
   options: { now?: Date } = {},
@@ -2549,6 +2616,15 @@ export async function releaseDueAnnualSubscriptionCredits(
     }
 
     const plan = await getMembershipPlan(supabase, subscription.membership_plan_id);
+    if (await hasLegacyFullYearAnnualGrant(supabase, {
+      subscriptionId,
+      invoiceId,
+      yearlyCredits: plan.yearly_credits ?? 0,
+    })) {
+      summary.skippedSubscriptions += 1;
+      continue;
+    }
+
     const periods = getDueAnnualGrantPeriods({
       yearlyCredits: plan.yearly_credits ?? 0,
       stripeSubscriptionId: subscriptionId,

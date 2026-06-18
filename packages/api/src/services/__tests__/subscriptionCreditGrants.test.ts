@@ -1595,6 +1595,58 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants.map((row) => row.period_index)).toEqual([1, 2, 3]);
   });
 
+  it('does not catch up annual months for legacy full-year grants without grant rows', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-legacy-full-year-annual-grant',
+        user_id: 'user-legacy-full-year-annual-grant',
+        item_id: 'plan-legacy-full-year-annual-grant',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_invoice_id: 'in_legacy_full_year_annual_grant',
+        stripe_subscription_id: 'sub_legacy_full_year_annual_grant',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: { grantedCredits: 120 },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-legacy-full-year-annual-grant',
+        user_id: 'user-legacy-full-year-annual-grant',
+        membership_plan_id: 'plan-legacy-full-year-annual-grant',
+        stripe_subscription_id: 'sub_legacy_full_year_annual_grant',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_legacy_full_year_annual_grant' },
+      }],
+      membership_plans: [{
+        id: 'plan-legacy-full-year-annual-grant',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-legacy-full-year-annual-grant',
+        credits: 120,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(120);
+  });
+
   it('releases only the currently due annual month for a normal paid active subscription', async () => {
     const supabase = createMockSupabase({
       user_subscriptions: [{
