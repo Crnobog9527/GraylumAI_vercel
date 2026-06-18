@@ -14,9 +14,10 @@ const routeMocks = vi.hoisted(() => {
     createServiceRoleSupabaseClient: vi.fn(() => supabaseClient),
     fulfillCreditPackageOrder: vi.fn(),
     fulfillMembershipInvoice: vi.fn(),
+    markMembershipInvoicePaymentFailed: vi.fn(),
     getStripeWebhookSecret: vi.fn(() => 'whsec_test_secret'),
     logServerError: vi.fn(),
-    reconcileStripeRefund: vi.fn(),
+    reconcileSubscriptionRefundFromStripeWebhook: vi.fn(),
     listInvoicePayments: vi.fn(),
     retrieveCharge: vi.fn(),
     retrieveRefund: vi.fn(),
@@ -52,7 +53,8 @@ vi.mock('@repo/api/src/services/stripe', () => ({
 vi.mock('@repo/api/src/services/stripeFulfillment', () => ({
   fulfillCreditPackageOrder: routeMocks.fulfillCreditPackageOrder,
   fulfillMembershipInvoice: routeMocks.fulfillMembershipInvoice,
-  reconcileStripeRefund: routeMocks.reconcileStripeRefund,
+  markMembershipInvoicePaymentFailed: routeMocks.markMembershipInvoicePaymentFailed,
+  reconcileSubscriptionRefundFromStripeWebhook: routeMocks.reconcileSubscriptionRefundFromStripeWebhook,
   syncSubscriptionState: routeMocks.syncSubscriptionState,
   upsertPaymentOrderBySession: routeMocks.upsertPaymentOrderBySession,
 }));
@@ -97,238 +99,42 @@ describe('stripe webhook route refund routing', () => {
     );
   });
 
-  it('routes charge.refunded to refund reconciliation with the charge payload', async () => {
-    const charge = { id: 'ch_test_refunded', object: 'charge' };
-    routeMocks.constructEvent.mockReturnValue({
-      id: 'evt_test_charge_refunded',
-      type: 'charge.refunded',
-      data: { object: charge },
-    });
-
-    const response = await POST(makeWebhookRequest());
-
-    expect(response.status).toBe(200);
-    expect(routeMocks.retrieveCharge).toHaveBeenCalledWith(
-      'ch_test_refunded',
-      {
-        expand: expect.arrayContaining([
-          'payment_intent',
-        ]),
-      },
-    );
-    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
-      routeMocks.supabaseClient,
-      {
-        eventId: 'evt_test_charge_refunded',
-        eventType: 'charge.refunded',
-        charge,
-      },
-    );
-  });
-
   it.each([
+    'charge.refunded',
     'charge.refund.updated',
     'refund.created',
     'refund.updated',
     'refund.failed',
-  ] as const)('routes %s to refund reconciliation with the refund payload', async (eventType) => {
-    const refund = { id: `re_test_${eventType.replaceAll('.', '_')}`, object: 'refund' };
-    routeMocks.retrieveRefund.mockResolvedValue(refund);
-    routeMocks.constructEvent.mockReturnValue({
+  ] as const)('routes %s to subscription refund reconciliation with the full event', async (eventType) => {
+    const stripeObject = eventType === 'charge.refunded'
+      ? { id: 'ch_test_refunded', object: 'charge' }
+      : { id: `re_test_${eventType.replaceAll('.', '_')}`, object: 'refund' };
+    const event = {
       id: `evt_test_${eventType.replaceAll('.', '_')}`,
       type: eventType,
-      data: { object: refund },
-    });
+      data: { object: stripeObject },
+    };
+    routeMocks.constructEvent.mockReturnValue(event);
 
     const response = await POST(makeWebhookRequest());
 
     expect(response.status).toBe(200);
-    expect(routeMocks.retrieveRefund).toHaveBeenCalledWith(
-      refund.id,
-      {
-        expand: expect.arrayContaining([
-          'charge',
-          'charge.payment_intent',
-          'payment_intent',
-        ]),
-      },
-    );
-    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
+    expect(routeMocks.reconcileSubscriptionRefundFromStripeWebhook).toHaveBeenCalledWith(
       routeMocks.supabaseClient,
-      {
-        eventId: `evt_test_${eventType.replaceAll('.', '_')}`,
-        eventType,
-        refund,
-      },
+      event,
     );
+    expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 
-  it('enriches charge.refunded payloads with payment intent invoice lookup details', async () => {
-    const charge = { id: 'ch_test_subscription_refunded', object: 'charge' };
-    const enrichedCharge = {
-      ...charge,
-      amount: 990,
-      amount_refunded: 990,
-      payment_intent: {
-        id: 'pi_test_subscription_refunded',
-      },
-      refunded: true,
-    };
-    routeMocks.constructEvent.mockReturnValue({
-      id: 'evt_test_subscription_charge_refunded',
-      type: 'charge.refunded',
-      data: { object: charge },
-    });
-    routeMocks.retrieveCharge.mockResolvedValue(enrichedCharge);
-    routeMocks.listInvoicePayments.mockResolvedValue({
-      data: [
-        {
-          invoice: 'in_test_subscription_refunded',
-        },
-      ],
-    });
-
-    const response = await POST(makeWebhookRequest());
-
-    expect(response.status).toBe(200);
-    expect(routeMocks.listInvoicePayments).toHaveBeenCalledWith({
-      limit: 1,
-      payment: {
-        type: 'payment_intent',
-        payment_intent: 'pi_test_subscription_refunded',
-      },
-      expand: expect.arrayContaining(['data.invoice']),
-    });
-    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
-      routeMocks.supabaseClient,
-      {
-        eventId: 'evt_test_subscription_charge_refunded',
-        eventType: 'charge.refunded',
-        charge: expect.objectContaining({
-          id: 'ch_test_subscription_refunded',
-          payment_intent: expect.objectContaining({
-            id: 'pi_test_subscription_refunded',
-            invoice: 'in_test_subscription_refunded',
-          }),
-        }),
-      },
-    );
-  });
-
-  it('enriches refund payloads with expanded charge payment intent invoice lookup details', async () => {
-    const refund = {
-      id: 're_test_subscription_refund_created',
-      object: 'refund',
-      charge: 'ch_test_subscription_refund_created',
-    };
-    const enrichedRefund = {
-      ...refund,
-      payment_intent: 'pi_test_subscription_refund_created',
-    };
-    routeMocks.constructEvent.mockReturnValue({
-      id: 'evt_test_subscription_refund_created',
-      type: 'refund.created',
-      data: { object: refund },
-    });
-    routeMocks.retrieveRefund.mockResolvedValue(enrichedRefund);
-    routeMocks.retrieveCharge.mockResolvedValue({
-      id: 'ch_test_subscription_refund_created',
-      payment_intent: {
-        id: 'pi_test_subscription_refund_created',
-      },
-    });
-    routeMocks.listInvoicePayments.mockResolvedValue({
-      data: [
-        {
-          invoice: 'in_test_subscription_refund_created',
-        },
-      ],
-    });
-
-    const response = await POST(makeWebhookRequest());
-
-    expect(response.status).toBe(200);
-    expect(routeMocks.retrieveCharge).toHaveBeenCalledWith(
-      'ch_test_subscription_refund_created',
-      {
-        expand: expect.arrayContaining([
-          'payment_intent',
-        ]),
-      },
-    );
-    expect(routeMocks.reconcileStripeRefund).toHaveBeenCalledWith(
-      routeMocks.supabaseClient,
-      {
-        eventId: 'evt_test_subscription_refund_created',
-        eventType: 'refund.created',
-        refund: expect.objectContaining({
-          id: 're_test_subscription_refund_created',
-          charge: expect.objectContaining({
-            id: 'ch_test_subscription_refund_created',
-            payment_intent: expect.objectContaining({
-              invoice: 'in_test_subscription_refund_created',
-            }),
-          }),
-          payment_intent: expect.objectContaining({
-            invoice: 'in_test_subscription_refund_created',
-          }),
-        }),
-      },
-    );
-  });
-
-  it('retrieves invoice.payment_succeeded with invoice payment expansions before fulfillment', async () => {
+  it('routes invoice.payment_succeeded to membership invoice fulfillment', async () => {
     const invoice = { id: 'in_test_invoice_payment_succeeded', object: 'invoice' };
-    const expandedInvoice = {
-      ...invoice,
-      payments: {
-        data: [
-          {
-            payment: {
-              payment_intent: {
-                id: 'pi_test_invoice_payment_succeeded',
-                latest_charge: 'ch_test_invoice_payment_succeeded',
-              },
-            },
-          },
-        ],
-      },
-    };
     routeMocks.constructEvent.mockReturnValue({
       id: 'evt_test_invoice_payment_succeeded',
       type: 'invoice.payment_succeeded',
       data: { object: invoice },
     });
-    routeMocks.retrieveInvoice.mockResolvedValue(expandedInvoice);
-
-    const response = await POST(makeWebhookRequest());
-
-    expect(response.status).toBe(200);
-    expect(routeMocks.retrieveInvoice).toHaveBeenCalledWith(
-      'in_test_invoice_payment_succeeded',
-      {
-        expand: expect.arrayContaining([
-          'payments',
-          'payments.data.payment.charge',
-          'payments.data.payment.payment_intent',
-          'payments.data.payment.payment_intent.latest_charge',
-        ]),
-      },
-    );
-    expect(routeMocks.fulfillMembershipInvoice).toHaveBeenCalledWith(
-      routeMocks.supabaseClient,
-      expandedInvoice,
-    );
-  });
-
-  it('continues invoice fulfillment with the webhook invoice when lookup expansion fails', async () => {
-    const invoice = { id: 'in_test_invoice_retrieve_failure', object: 'invoice' };
-    routeMocks.constructEvent.mockReturnValue({
-      id: 'evt_test_invoice_retrieve_failure',
-      type: 'invoice.payment_succeeded',
-      data: { object: invoice },
-    });
-    routeMocks.retrieveInvoice.mockRejectedValue(new Error('Stripe retrieve unavailable'));
 
     const response = await POST(makeWebhookRequest());
 
@@ -337,11 +143,23 @@ describe('stripe webhook route refund routing', () => {
       routeMocks.supabaseClient,
       invoice,
     );
-    expect(routeMocks.logServerError).toHaveBeenCalledWith(
-      'billing',
-      'stripe_invoice_refund_lookup_retrieve_failed',
-      { invoiceId: 'in_test_...ailure' },
+  });
+
+  it('routes invoice.payment_failed to failed membership invoice handling', async () => {
+    const invoice = { id: 'in_test_invoice_payment_failed', object: 'invoice' };
+    routeMocks.constructEvent.mockReturnValue({
+      id: 'evt_test_invoice_payment_failed',
+      type: 'invoice.payment_failed',
+      data: { object: invoice },
+    });
+
+    const response = await POST(makeWebhookRequest());
+
+    expect(routeMocks.markMembershipInvoicePaymentFailed).toHaveBeenCalledWith(
+      routeMocks.supabaseClient,
+      invoice,
     );
+    expect(response.status).toBe(200);
   });
 
   it.each([
@@ -367,7 +185,7 @@ describe('stripe webhook route refund routing', () => {
       routeMocks.supabaseClient,
       subscription,
     );
-    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
     expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
     expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
@@ -394,7 +212,7 @@ describe('stripe webhook route refund routing', () => {
       routeMocks.supabaseClient,
       subscription,
     );
-    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
     expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
     expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(routeMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
@@ -415,7 +233,7 @@ describe('stripe webhook route refund routing', () => {
     const response = await POST(makeWebhookRequest());
 
     expect(response.status).toBe(200);
-    expect(routeMocks.reconcileStripeRefund).not.toHaveBeenCalled();
+    expect(routeMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
     expect(routeMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
     expect(routeMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(routeMocks.syncSubscriptionState).not.toHaveBeenCalled();
@@ -428,7 +246,7 @@ describe('stripe webhook route refund routing', () => {
       type: 'refund.created',
       data: { object: { id: 're_test_handler_failure' } },
     });
-    routeMocks.reconcileStripeRefund.mockRejectedValue(new Error('rpc failure'));
+    routeMocks.reconcileSubscriptionRefundFromStripeWebhook.mockRejectedValue(new Error('rpc failure'));
 
     const response = await POST(makeWebhookRequest());
 

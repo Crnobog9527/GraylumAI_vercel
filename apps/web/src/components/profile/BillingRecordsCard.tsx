@@ -2,6 +2,7 @@
 
 import { ExternalLink, FileText, Receipt, ScrollText } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { getBillingRecordStatusPresentation } from './billingRecordStatus';
 
 function formatMoney(amount: number, currency: string) {
   return new Intl.NumberFormat('en-US', {
@@ -45,7 +46,7 @@ export default function BillingRecordsCard() {
             账单记录
           </h3>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            查看 Stripe 已开具的发票 PDF、在线发票和收据链接。
+            查看 Stripe 订单状态、发票 PDF、在线发票和收据链接。
           </p>
         </div>
       </div>
@@ -59,91 +60,101 @@ export default function BillingRecordsCard() {
           className="rounded-xl border px-4 py-6 text-center text-sm"
           style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)', color: 'var(--text-tertiary)' }}
         >
-          暂无可展示的 Stripe 账单记录。支付成功后，这里会自动同步发票和收据入口。
+          暂无可展示的 Stripe 账单记录。创建支付会话后，这里会自动同步订单状态。
         </div>
       ) : (
         <div className="space-y-4">
-          {records.map((record) => (
-            <div
-              key={record.id}
-              className="rounded-xl border p-4"
-              style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)' }}
-            >
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {record.title}
-                    </span>
-                    <span
-                      className="rounded-full px-2.5 py-1 text-xs font-medium"
-                      style={{
-                        background: record.itemType === 'membership_plan' ? 'rgba(255,215,0,0.12)' : 'rgba(59,130,246,0.12)',
-                        color: record.itemType === 'membership_plan' ? '#facc15' : '#60a5fa',
-                      }}
-                    >
-                      {record.itemType === 'membership_plan' ? '订阅账单' : '一次性支付'}
-                    </span>
-                    <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
-                      {record.status}
-                    </span>
+          {records.map((record) => {
+            const statusPresentation = getBillingRecordStatusPresentation(record.status);
+
+            return (
+              <div
+                key={record.id}
+                className="rounded-xl border p-4"
+                style={{ background: 'var(--bg-primary)', borderColor: 'rgba(255,255,255,0.08)' }}
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+                        {record.title}
+                      </span>
+                      <span
+                        className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{
+                          background: record.itemType === 'membership_plan' ? 'rgba(255,215,0,0.12)' : 'rgba(59,130,246,0.12)',
+                          color: record.itemType === 'membership_plan' ? '#facc15' : '#60a5fa',
+                        }}
+                      >
+                        {record.itemType === 'membership_plan' ? '订阅账单' : '一次性支付'}
+                      </span>
+                      <span
+                        className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{
+                          background: statusPresentation.background,
+                          color: statusPresentation.color,
+                        }}
+                      >
+                        {statusPresentation.label}
+                      </span>
+                    </div>
+
+                    <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      {record.description}
+                    </div>
+
+                    <div className="flex flex-wrap gap-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                      <span>{formatMoney(record.amountTotal, record.currency)}</span>
+                      <span>{formatDate(record.fulfilledAt ?? record.createdAt)}</span>
+                      {record.invoiceNumber && <span>发票号 {record.invoiceNumber}</span>}
+                    </div>
                   </div>
 
-                  <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    {record.description}
+                  <div className="flex flex-wrap gap-2">
+                    {record.invoicePdfUrl && (
+                      <a
+                        href={record.invoicePdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
+                        style={{ background: 'rgba(255,215,0,0.12)', color: '#facc15' }}
+                      >
+                        <FileText className="h-4 w-4" />
+                        PDF 发票
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                    {record.hostedInvoiceUrl && (
+                      <a
+                        href={record.hostedInvoiceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
+                        style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}
+                      >
+                        <ScrollText className="h-4 w-4" />
+                        在线发票
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                    {record.receiptUrl && (
+                      <a
+                        href={record.receiptUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
+                        style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}
+                      >
+                        <Receipt className="h-4 w-4" />
+                        Stripe 收据
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
                   </div>
-
-                  <div className="flex flex-wrap gap-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    <span>{formatMoney(record.amountTotal, record.currency)}</span>
-                    <span>{formatDate(record.fulfilledAt ?? record.createdAt)}</span>
-                    {record.invoiceNumber && <span>发票号 {record.invoiceNumber}</span>}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {record.invoicePdfUrl && (
-                    <a
-                      href={record.invoicePdfUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                      style={{ background: 'rgba(255,215,0,0.12)', color: '#facc15' }}
-                    >
-                      <FileText className="h-4 w-4" />
-                      PDF 发票
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                  )}
-                  {record.hostedInvoiceUrl && (
-                    <a
-                      href={record.hostedInvoiceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                      style={{ background: 'rgba(59,130,246,0.12)', color: '#60a5fa' }}
-                    >
-                      <ScrollText className="h-4 w-4" />
-                      在线发票
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                  )}
-                  {record.receiptUrl && (
-                    <a
-                      href={record.receiptUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-                      style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80' }}
-                    >
-                      <Receipt className="h-4 w-4" />
-                      Stripe 收据
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

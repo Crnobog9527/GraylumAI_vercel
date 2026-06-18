@@ -168,7 +168,7 @@ export default function PricingSection({ plans }: { plans?: MembershipPlan[] }) 
                   )}
                   <div className="text-sm text-[#B0B0B0]">
                     月度积分 {formatCreditAmount(monthlyCredits)}
-                    {yearlyCredits > 0 ? `，年付总积分 ${formatCreditAmount(yearlyCredits)}` : ''}
+                    {yearlyCredits > 0 ? `，年付积分按月释放，总额度 ${formatCreditAmount(yearlyCredits)}` : ''}
                   </div>
                 </div>
 
@@ -203,7 +203,7 @@ export default function PricingSection({ plans }: { plans?: MembershipPlan[] }) 
         </div>
 
         <p className="mt-12 text-center text-sm text-[#808080]">
-          页面展示价格与权益来自后台会员配置。实际可购买周期和 Stripe 结算能力以当前套餐配置为准。
+          年付积分按月释放，未使用积分可累积，不按月清零。页面展示价格与权益来自后台会员配置。
         </p>
       </div>
     </section>

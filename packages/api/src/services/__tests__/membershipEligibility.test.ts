@@ -62,14 +62,37 @@ describe('resolveMembershipEligibility', () => {
       profile: { membership_level: 'free' },
       action: 'create_membership_checkout',
       targetPlan: { id: 'plan-pro', level: 'pro' },
+      targetBillingCycle: 'monthly',
     });
 
     expect(result).toMatchObject({
       allowed: true,
       state: 'free',
       level: 'free',
+      action: 'createCheckoutSession',
       reasonCode: 'ALLOWED',
     });
+  });
+
+  it('allows free users to create checkout for Pro or Gold plans', async () => {
+    for (const targetLevel of ['pro', 'gold'] as const) {
+      const result = await resolveMembershipEligibility({
+        supabase: createEligibilitySupabase({}),
+        userId: 'user-1',
+        profile: { membership_level: 'free' },
+        action: 'create_membership_checkout',
+        targetPlan: { id: `plan-${targetLevel}`, level: targetLevel },
+        targetBillingCycle: 'yearly',
+      });
+
+      expect(result).toMatchObject({
+        allowed: true,
+        state: 'free',
+        level: 'free',
+        action: 'createCheckoutSession',
+        reasonCode: 'ALLOWED',
+      });
+    }
   });
 
   it.each([
@@ -131,7 +154,131 @@ describe('resolveMembershipEligibility', () => {
       state: 'active',
       level: 'pro',
       source: 'stripe_subscription',
+      action: 'none',
       reasonCode: 'CURRENT_PLAN',
+    });
+  });
+
+  it.each(['monthly', 'yearly'] as const)(
+    'marks Pro monthly to Gold %s as an upgrade that must use changeSubscriptionPlan',
+    async (targetBillingCycle) => {
+      const result = await resolveMembershipEligibility({
+        supabase: createEligibilitySupabase({
+          subscription: {
+            id: 'sub-row-1',
+            membership_plan_id: 'plan-pro',
+            stripe_subscription_id: 'sub_test_active',
+            status: 'active',
+            billing_cycle: 'monthly',
+            cancel_at_period_end: 'false',
+          },
+        }),
+        userId: 'user-1',
+        profile: { membership_level: 'pro' },
+        action: 'create_membership_checkout',
+        targetPlan: { id: 'plan-gold', level: 'gold' },
+        targetBillingCycle,
+      });
+
+      expect(result).toMatchObject({
+        allowed: false,
+        state: 'active',
+        level: 'pro',
+        action: 'changeSubscriptionPlan',
+        reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+      });
+      expect(result.safeMessage).toContain('changeSubscriptionPlan');
+    },
+  );
+
+  it('blocks Pro monthly to Pro yearly checkout as an upgrade that must use changeSubscriptionPlan', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-1',
+          membership_plan_id: 'plan-pro',
+          stripe_subscription_id: 'sub_test_active',
+          status: 'active',
+          billing_cycle: 'monthly',
+          cancel_at_period_end: 'false',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+      targetBillingCycle: 'yearly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'active',
+      level: 'pro',
+      action: 'changeSubscriptionPlan',
+      reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+    });
+  });
+
+  it('blocks Gold to Pro as a downgrade', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-1',
+          membership_plan_id: 'plan-gold',
+          stripe_subscription_id: 'sub_test_active',
+          status: 'active',
+          billing_cycle: 'monthly',
+          cancel_at_period_end: 'false',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'gold' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+      targetBillingCycle: 'monthly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'active',
+      level: 'gold',
+      action: 'none',
+      reasonCode: 'DOWNGRADE_NOT_ALLOWED',
+    });
+  });
+
+  it.each([
+    ['Pro monthly', 'pro', 'monthly'],
+    ['Pro yearly', 'pro', 'yearly'],
+    ['Gold monthly', 'gold', 'monthly'],
+    ['Gold yearly', 'gold', 'yearly'],
+  ] as const)('blocks Gold yearly to %s checkout', async (_caseName, targetLevel, targetBillingCycle) => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-1',
+          membership_plan_id: 'plan-gold',
+          stripe_subscription_id: 'sub_test_active',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: 'false',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'gold' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: `plan-${targetLevel}`, level: targetLevel },
+      targetBillingCycle,
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'active',
+      level: 'gold',
+      action: 'none',
+      reasonCode: targetLevel === 'gold' && targetBillingCycle === 'yearly'
+        ? 'CURRENT_PLAN'
+        : 'DOWNGRADE_NOT_ALLOWED',
     });
   });
 
@@ -261,7 +408,66 @@ describe('resolveMembershipEligibility', () => {
       state: 'cancel_at_period_end',
       level: 'pro',
       source: 'stripe_subscription',
+      action: 'none',
       reasonCode: 'CURRENT_PLAN',
+    });
+  });
+
+  it('treats cancel-at-period-end before period end as active and only exposes upgrade action', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-canceling',
+          membership_plan_id: 'plan-pro',
+          stripe_subscription_id: 'sub_test_canceling',
+          status: 'active',
+          billing_cycle: 'monthly',
+          cancel_at_period_end: 'true',
+          current_period_end: '2099-01-01T00:00:00.000Z',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-gold', level: 'gold' },
+      targetBillingCycle: 'monthly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'cancel_at_period_end',
+      level: 'pro',
+      action: 'changeSubscriptionPlan',
+      reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+    });
+  });
+
+  it('fails closed when a cancel-at-period-end subscription is past the current period but profile is still paid', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-expired-canceling',
+          membership_plan_id: 'plan-pro',
+          stripe_subscription_id: 'sub_test_canceling',
+          status: 'active',
+          billing_cycle: 'monthly',
+          cancel_at_period_end: 'true',
+          current_period_end: '2000-01-01T00:00:00.000Z',
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-gold', level: 'gold' },
+      targetBillingCycle: 'monthly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'inconsistent',
+      level: 'pro',
+      action: 'contactSupport',
+      reasonCode: 'ENTITLEMENT_CONFLICT',
     });
   });
 
@@ -334,9 +540,41 @@ describe('resolveMembershipEligibility', () => {
       allowed: false,
       state: 'payment_attention',
       level: 'pro',
-      reasonCode: 'UPGRADE_DOWNGRADE_UNSUPPORTED',
+      action: 'resolvePaymentIssue',
+      reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
     });
   });
+
+  it.each(['past_due', 'incomplete', 'unpaid'] as const)(
+    'blocks %s subscriptions until the payment issue is resolved',
+    async (status) => {
+      const result = await resolveMembershipEligibility({
+        supabase: createEligibilitySupabase({
+          subscription: {
+            id: `sub-row-${status}`,
+            membership_plan_id: 'plan-pro',
+            stripe_subscription_id: `sub_test_${status}`,
+            status,
+            billing_cycle: 'monthly',
+            cancel_at_period_end: 'false',
+          },
+        }),
+        userId: 'user-1',
+        profile: { membership_level: 'pro' },
+        action: 'create_membership_checkout',
+        targetPlan: { id: 'plan-gold', level: 'gold' },
+        targetBillingCycle: 'yearly',
+      });
+
+      expect(result).toMatchObject({
+        allowed: false,
+        state: 'payment_attention',
+        level: 'pro',
+        action: 'resolvePaymentIssue',
+        reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
+      });
+    },
+  );
 
   it('prefers payment-attention subscriptions over newer canceled history rows', async () => {
     const result = await resolveMembershipEligibility({
@@ -367,7 +605,8 @@ describe('resolveMembershipEligibility', () => {
       state: 'payment_attention',
       level: 'pro',
       source: 'stripe_subscription',
-      reasonCode: 'UPGRADE_DOWNGRADE_UNSUPPORTED',
+      action: 'resolvePaymentIssue',
+      reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
     });
   });
 
@@ -391,6 +630,82 @@ describe('resolveMembershipEligibility', () => {
       state: 'refunded_requires_policy',
       level: 'gold',
       source: 'payment_order',
+      reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY',
+    });
+  });
+
+  it('returns refunded_requires_policy for legacy partial_refunded order statuses', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-legacy-partial-refund',
+          membership_plan_id: 'plan-gold',
+          stripe_subscription_id: 'sub_test_legacy_partial_refund',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: 'false',
+        },
+        order: {
+          id: 'order-legacy-partial-refund',
+          status: 'completed',
+          payment_status: 'partial_refunded',
+          metadata: { source: 'legacy_refund_marker' },
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'gold' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-gold', level: 'gold' },
+      targetBillingCycle: 'yearly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'refunded_requires_policy',
+      level: 'gold',
+      source: 'payment_order',
+      action: 'contactSupport',
+      reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY',
+    });
+  });
+
+  it('returns refunded_requires_policy for pending subscription grant full-refund markers', async () => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase({
+        subscription: {
+          id: 'sub-row-pending-refund',
+          membership_plan_id: 'plan-gold',
+          stripe_subscription_id: 'sub_test_pending_refund',
+          status: 'active',
+          billing_cycle: 'yearly',
+          cancel_at_period_end: 'false',
+        },
+        order: {
+          id: 'order-pending-full-refund',
+          status: 'partially_refunded',
+          payment_status: 'partially_refunded',
+          metadata: {
+            subscriptionCreditGrantReversal: {
+              fullRefund: true,
+              reviewRequired: true,
+              reversalStatus: 'pending',
+            },
+          },
+        },
+      }),
+      userId: 'user-1',
+      profile: { membership_level: 'gold' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-gold', level: 'gold' },
+      targetBillingCycle: 'yearly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'refunded_requires_policy',
+      level: 'gold',
+      source: 'payment_order',
+      action: 'contactSupport',
       reasonCode: 'REFUNDED_ORDER_REQUIRES_POLICY',
     });
   });

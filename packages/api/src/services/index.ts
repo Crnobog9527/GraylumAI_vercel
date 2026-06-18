@@ -30,6 +30,7 @@ export * from './promptCacheBuilder';
 export * from './contextManager';
 export * from './subscriptionOverrides';
 export * from './membershipEligibility';
+export * from './subscriptionCreditGrants';
 
 // 流式响应处理器
 export * from './streamHandler';
