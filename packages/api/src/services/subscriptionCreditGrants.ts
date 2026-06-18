@@ -960,6 +960,19 @@ function toNonNegativeInteger(value: unknown) {
   return 0;
 }
 
+function parseNonNegativeIntegerSnapshot(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+  }
+
+  return null;
+}
+
 function getTransactionAmount(value: CreditTransactionRow | null | undefined) {
   if (!value) return 0;
   if (typeof value.amount === 'number') return Math.abs(value.amount);
@@ -2114,6 +2127,9 @@ async function upsertSubscriptionMirror(input: {
       lastInvoicePaymentStatus: input.paymentStatus ?? 'paid',
       transactionId: input.transactionId ?? null,
       fulfillmentSource: 'subscription_credit_grants',
+      ...(input.billingCycle === 'yearly'
+        ? { annualGrantYearlyCredits: input.plan.yearly_credits ?? 0 }
+        : {}),
     },
     updated_at: input.now,
   };
@@ -2191,6 +2207,9 @@ async function writeCompletedInvoiceOrder(input: {
     subscriptionCreditGrantId: input.grantId,
     grantedCredits: input.grantedCredits,
     fulfillmentSource: 'subscription_credit_grants',
+    ...(input.billingCycle === 'yearly'
+      ? { annualGrantYearlyCredits: input.plan.yearly_credits ?? 0 }
+      : {}),
   };
 
   const payload = {
@@ -2552,10 +2571,25 @@ async function getAnnualReleaseInvoiceOrder(supabase: SupabaseLikeClient, input:
   return result.data ?? null;
 }
 
+function getAnnualReleaseYearlyCredits(input: {
+  subscription: SubscriptionRow;
+  invoiceOrder: PaymentOrderRow | null;
+  plan: MembershipPlanRow;
+}) {
+  const subscriptionMetadata = asRecord(input.subscription.metadata);
+  const invoiceMetadata = asRecord(input.invoiceOrder?.metadata);
+  return parseNonNegativeIntegerSnapshot(subscriptionMetadata.annualGrantYearlyCredits)
+    ?? parseNonNegativeIntegerSnapshot(subscriptionMetadata.annualGrantTotalCredits)
+    ?? parseNonNegativeIntegerSnapshot(invoiceMetadata.annualGrantYearlyCredits)
+    ?? parseNonNegativeIntegerSnapshot(invoiceMetadata.annualGrantTotalCredits)
+    ?? toPositiveInteger(input.plan.yearly_credits);
+}
+
 async function hasLegacyFullYearAnnualGrant(supabase: SupabaseLikeClient, input: {
   subscriptionId: string;
   invoiceId: string;
   yearlyCredits: number;
+  invoiceOrder?: PaymentOrderRow | null;
 }) {
   if (input.yearlyCredits <= 0) {
     return false;
@@ -2565,7 +2599,7 @@ async function hasLegacyFullYearAnnualGrant(supabase: SupabaseLikeClient, input:
     return false;
   }
 
-  const invoiceOrder = await getAnnualReleaseInvoiceOrder(supabase, input);
+  const invoiceOrder = input.invoiceOrder ?? await getAnnualReleaseInvoiceOrder(supabase, input);
   const legacyGrantedCredits = invoiceOrder
     ? getLegacyGrantedCreditsFromOrderMetadata(invoiceOrder)
     : { amount: 0, metadataGap: 'missing_grantedCredits' };
@@ -2616,17 +2650,27 @@ export async function releaseDueAnnualSubscriptionCredits(
     }
 
     const plan = await getMembershipPlan(supabase, subscription.membership_plan_id);
+    const invoiceOrder = await getAnnualReleaseInvoiceOrder(supabase, {
+      subscriptionId,
+      invoiceId,
+    });
+    const yearlyCredits = getAnnualReleaseYearlyCredits({
+      subscription,
+      invoiceOrder,
+      plan,
+    });
     if (await hasLegacyFullYearAnnualGrant(supabase, {
       subscriptionId,
       invoiceId,
-      yearlyCredits: plan.yearly_credits ?? 0,
+      yearlyCredits,
+      invoiceOrder,
     })) {
       summary.skippedSubscriptions += 1;
       continue;
     }
 
     const periods = getDueAnnualGrantPeriods({
-      yearlyCredits: plan.yearly_credits ?? 0,
+      yearlyCredits,
       stripeSubscriptionId: subscriptionId,
       currentPeriodStart: subscription.current_period_start ?? '',
       currentPeriodEnd: subscription.current_period_end ?? '',

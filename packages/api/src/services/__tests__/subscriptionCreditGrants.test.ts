@@ -351,6 +351,16 @@ describe('subscription credit grants', () => {
       payment_status: 'paid',
       fulfilled_at: '2026-06-01T00:00:01.000Z',
     });
+    const invoiceOrder = supabase.tables.payment_orders.find((row) => row.stripe_invoice_id === 'in_yearly_1');
+    expect(invoiceOrder?.metadata).toMatchObject({
+      annualGrantYearlyCredits: 20_000,
+      fulfillmentSource: 'subscription_credit_grants',
+      grantedCredits: 1667,
+    });
+    expect(supabase.tables.user_subscriptions[0].metadata).toMatchObject({
+      annualGrantYearlyCredits: 20_000,
+      lastInvoiceId: 'in_yearly_1',
+    });
   });
 
   it('does not grant credits or complete an invoice order after full refund reconciliation wins the replay race', async () => {
@@ -1645,6 +1655,43 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(supabase.tables.profiles[0].credits).toBe(120);
+  });
+
+  it('uses the purchased annual credit snapshot for scheduled releases after plan edits', async () => {
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-annual-snapshot',
+        user_id: 'user-annual-snapshot',
+        membership_plan_id: 'plan-annual-snapshot',
+        stripe_subscription_id: 'sub_annual_snapshot',
+        billing_cycle: 'yearly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: {
+          lastInvoiceId: 'in_annual_snapshot',
+          annualGrantYearlyCredits: 120,
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-annual-snapshot',
+        name: 'Gold',
+        yearly_credits: 240,
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 3,
+      releasedCredits: 30,
+      skippedSubscriptions: 0,
+    });
+    expect(supabase.tables.subscription_credit_grants.map((row) => row.credits_granted)).toEqual([10, 10, 10]);
   });
 
   it('releases only the currently due annual month for a normal paid active subscription', async () => {
