@@ -8,8 +8,9 @@
 -- Description:
 --   Forward-only posture repair for PR #250 server-side ensureProfile.
 --   Restores the service_role grants required to create a missing safe
---   bootstrap profile row, run the ledger-backed opening grant, and delete the
---   just-created empty profile if that grant fails. Source only: do not apply
+--   bootstrap profile row, run the ledger-backed opening grant, verify the
+--   opening-grant ledger idempotency state, and delete the just-created empty
+--   profile only when that ledger row does not exist. Source only: do not apply
 --   to staging or production without separate owner approval.
 
 DO $$
@@ -66,7 +67,8 @@ DROP POLICY IF EXISTS "profiles_insert_own_zero_credits" ON public.profiles;
 -- Service-role bootstrap needs to:
 -- 1. SELECT profile state by id.
 -- 2. INSERT only the safe fields written by PR #250 ensureProfile.
--- 3. DELETE the just-created empty profile when the opening grant RPC fails.
+-- 3. SELECT opening-grant ledger state before any cleanup delete.
+-- 4. DELETE the just-created empty profile only when no opening grant exists.
 GRANT SELECT ON TABLE public.profiles TO service_role;
 GRANT INSERT (
   id,
@@ -78,6 +80,7 @@ GRANT INSERT (
   credits
 ) ON TABLE public.profiles TO service_role;
 GRANT DELETE ON TABLE public.profiles TO service_role;
+GRANT SELECT ON TABLE public.credit_transactions TO service_role;
 
 -- Opening credits must still be written through the atomic ledger RPC, not by a
 -- direct profile credit grant or client-callable function.

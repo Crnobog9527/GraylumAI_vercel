@@ -100,6 +100,10 @@ export const publicProcedure = t.procedure;
 
 const OPENING_GRANT_CREDITS = 100;
 
+function getOpeningGrantIdempotencyKey(userId: string) {
+  return `opening_grant:${userId}`;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -138,12 +142,13 @@ function createProfileBootstrapError(reason: ProfileBootstrapFailureReason) {
 }
 
 async function applyOpeningGrant(ctx: ApiContext, userId: string) {
+  const idempotencyKey = getOpeningGrantIdempotencyKey(userId);
   const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
     p_user_id: userId,
     p_amount: OPENING_GRANT_CREDITS,
     p_type: 'addition',
     p_description: 'Opening grant for new user profile bootstrap',
-    p_idempotency_key: `opening_grant:${userId}`,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (error) {
@@ -154,6 +159,15 @@ async function applyOpeningGrant(ctx: ApiContext, userId: string) {
   if (!ledgerEntry) {
     throw new Error('atomic opening grant ledger RPC returned no rows');
   }
+}
+
+async function findOpeningGrantLedgerEntry(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('credit_transactions')
+    .select('id, amount, balance_after, idempotency_key')
+    .eq('user_id', userId)
+    .eq('idempotency_key', getOpeningGrantIdempotencyKey(userId))
+    .maybeSingle();
 }
 
 async function fetchProfileById(client: ApiSupabaseClient, userId: string) {
@@ -266,6 +280,32 @@ async function ensureProfile(ctx: ApiContext) {
       userId,
       error: getErrorMessage(openingGrantError),
     });
+
+    const { data: existingOpeningGrant, error: openingGrantLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (existingOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      });
+
+      return {
+        profileId: newProfile.id,
+        userRole: normalizeUserRole(newProfile.role),
+        userStatus: normalizeUserStatus(newProfile.status),
+        userScopedSupabase,
+      };
+    }
+
+    if (openingGrantLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(openingGrantLookupError),
+      });
+
+      throw createProfileBootstrapError('opening_grant_failed');
+    }
 
     const { error: cleanupError } = await ctx.supabaseAdmin
       .from('profiles')

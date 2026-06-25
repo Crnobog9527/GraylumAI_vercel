@@ -128,19 +128,19 @@ describe('protectedProcedure profile bootstrap', () => {
     conflictProfile?: Record<string, unknown> | null;
     createError?: { code?: string; message?: string } | null;
     rpcError?: { message: string } | null;
+    rpcErrorSequence?: Array<{ message: string } | null>;
+    committedOpeningGrantAfterRpcError?: boolean;
   } = {}) {
     let storedProfile = options.existingProfile
       ? { ...options.existingProfile }
       : null;
+    let rpcCallIndex = 0;
     const profileInserts: unknown[] = [];
     const userProfileInserts: unknown[] = [];
     const profileUpdates: unknown[] = [];
     const profileDeletes: Array<{ field: string; value: unknown }> = [];
-    const rpc = vi.fn().mockImplementation(async (_functionName: string, args: { p_amount?: number }) => {
-      if (options.rpcError) {
-        return { data: null, error: options.rpcError };
-      }
-
+    const creditTransactions: Array<Record<string, unknown>> = [];
+    const writeOpeningGrantLedger = (args: { p_user_id?: string; p_amount?: number; p_idempotency_key?: string }) => {
       const amount = args.p_amount ?? 0;
       const balanceBefore = Number(storedProfile?.credits ?? 0);
       const balanceAfter = balanceBefore + amount;
@@ -151,12 +151,43 @@ describe('protectedProcedure profile bootstrap', () => {
         };
       }
 
+      const transaction = {
+        id: `txn-opening-grant-${creditTransactions.length + 1}`,
+        user_id: args.p_user_id,
+        amount,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+        idempotency_key: args.p_idempotency_key,
+      };
+      creditTransactions.push(transaction);
+
+      return transaction;
+    };
+    const rpc = vi.fn().mockImplementation(async (_functionName: string, args: {
+      p_user_id?: string;
+      p_amount?: number;
+      p_idempotency_key?: string;
+    }) => {
+      const sequencedError = options.rpcErrorSequence?.[rpcCallIndex];
+      rpcCallIndex += 1;
+      const rpcError = sequencedError === undefined ? options.rpcError : sequencedError;
+
+      if (rpcError) {
+        if (options.committedOpeningGrantAfterRpcError) {
+          writeOpeningGrantLedger(args);
+        }
+
+        return { data: null, error: rpcError };
+      }
+
+      const transaction = writeOpeningGrantLedger(args);
+
       return {
         data: [{
-          transaction_id: '00000000-0000-4000-8000-0000000000aa',
-          balance_before: balanceBefore,
-          balance_after: balanceAfter,
-          amount,
+          transaction_id: transaction.id,
+          balance_before: transaction.balance_before,
+          balance_after: transaction.balance_after,
+          amount: transaction.amount,
           is_idempotent: false,
         }],
         error: null,
@@ -213,12 +244,13 @@ describe('protectedProcedure profile bootstrap', () => {
     const adminSupabase = {
       rpc,
       from(table: string) {
-        expect(table).toBe('profiles');
+        expect(['profiles', 'credit_transactions']).toContain(table);
         const state: {
           operation: 'select' | 'insert' | 'delete';
           eq?: { field: string; value: unknown };
+          filters: Array<{ field: string; value: unknown }>;
           payload?: Record<string, unknown>;
-        } = { operation: 'select' };
+        } = { operation: 'select', filters: [] };
 
         const builder = {
           select() {
@@ -236,13 +268,31 @@ describe('protectedProcedure profile bootstrap', () => {
           },
           eq(field: string, value: unknown) {
             state.eq = { field, value };
+            state.filters.push(state.eq);
             if (state.operation === 'delete') {
               profileDeletes.push(state.eq);
               storedProfile = null;
             }
             return builder;
           },
+          async maybeSingle() {
+            if (table !== 'credit_transactions') {
+              return { data: null, error: { message: 'maybeSingle is only mocked for credit_transactions' } };
+            }
+
+            const transaction = creditTransactions.find((row) =>
+              state.filters.every((filter) => row[filter.field] === filter.value)
+            );
+
+            return transaction
+              ? { data: transaction, error: null }
+              : { data: null, error: null };
+          },
           async single() {
+            if (table !== 'profiles') {
+              return { data: null, error: { code: 'PGRST116', message: 'Not found' } };
+            }
+
             if (state.operation === 'insert') {
               if (options.createError) {
                 if (options.createError.code === '23505' && options.conflictProfile) {
@@ -283,6 +333,8 @@ describe('protectedProcedure profile bootstrap', () => {
       userProfileInserts,
       profileUpdates,
       profileDeletes,
+      creditTransactions,
+      getStoredProfile: () => storedProfile,
     };
   }
 
@@ -425,6 +477,79 @@ describe('protectedProcedure profile bootstrap', () => {
       p_idempotency_key: `opening_grant:${user.id}`,
     }));
     expect(supabaseMocks.profileDeletes).toEqual([{ field: 'id', value: user.id }]);
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toBeNull();
+  });
+
+  it('keeps the profile when the opening grant ledger exists after an RPC response error', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      rpcError: { message: 'postgrest response failed after commit' },
+      committedOpeningGrantAfterRpcError: true,
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+    });
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+    });
+
+    expect(supabaseMocks.profileDeletes).toEqual([]);
+    expect(supabaseMocks.profileInserts).toHaveLength(1);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMocks.creditTransactions).toEqual([
+      expect.objectContaining({
+        user_id: user.id,
+        amount: 100,
+        balance_before: 0,
+        balance_after: 100,
+        idempotency_key: `opening_grant:${user.id}`,
+      }),
+    ]);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 100,
+    });
+  });
+
+  it('cleans up only when no opening grant ledger exists and lets retry grant once', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      rpcErrorSequence: [
+        { message: 'permission denied before commit' },
+        null,
+      ],
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: expect.stringContaining('profile_bootstrap_failed'),
+    });
+    expect(supabaseMocks.profileDeletes).toEqual([{ field: 'id', value: user.id }]);
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toBeNull();
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+    });
+
+    expect(supabaseMocks.profileInserts).toHaveLength(2);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(2);
+    expect(supabaseMocks.creditTransactions).toEqual([
+      expect.objectContaining({
+        user_id: user.id,
+        amount: 100,
+        balance_before: 0,
+        balance_after: 100,
+        idempotency_key: `opening_grant:${user.id}`,
+      }),
+    ]);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 100,
+    });
   });
 
   it('does not duplicate profile creation or opening grants on repeated bootstrap calls', async () => {
@@ -442,6 +567,11 @@ describe('protectedProcedure profile bootstrap', () => {
     expect(supabaseMocks.profileInserts).toHaveLength(1);
     expect(supabaseMocks.userProfileInserts).toEqual([]);
     expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMocks.creditTransactions).toHaveLength(1);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 100,
+    });
   });
 
   it('ignores user metadata role, membership, and credits while bootstrapping a missing profile', async () => {

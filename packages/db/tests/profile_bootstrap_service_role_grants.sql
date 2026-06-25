@@ -34,6 +34,10 @@ BEGIN
     RAISE EXCEPTION 'service_role cannot delete profiles for bootstrap cleanup';
   END IF;
 
+  IF NOT has_table_privilege('service_role', 'public.credit_transactions', 'SELECT') THEN
+    RAISE EXCEPTION 'service_role cannot select credit_transactions for cleanup safety checks';
+  END IF;
+
   FOREACH v_column IN ARRAY v_bootstrap_columns LOOP
     IF NOT has_column_privilege('service_role', 'public.profiles', v_column, 'INSERT') THEN
       RAISE EXCEPTION 'service_role cannot insert profiles.%', v_column;
@@ -101,6 +105,12 @@ END;
 $$;
 
 SET LOCAL ROLE service_role;
+
+SELECT 1
+FROM public.credit_transactions
+WHERE user_id = current_setting('profile_bootstrap.user_id')::UUID
+  AND idempotency_key = 'opening_grant:' || current_setting('profile_bootstrap.user_id')
+LIMIT 1;
 
 INSERT INTO public.profiles (
   id,
