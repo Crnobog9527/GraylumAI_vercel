@@ -3233,3 +3233,105 @@ Latest-head Codex review：
 - Issue #225 remains open。
 - Stop point：PR8 merged into `staging` only；do not production；do not PR9；do not close issue #225；wait for owner audit。
 - 禁止动作确认：未 production；未访问 Supabase production DB；未执行 DB migration / RPC / RLS / schema / grant 修改；未访问 Stripe live；未触发真实 checkout / payment / refund / cancel / webhook replay；未修改 Vercel / Supabase / Stripe env 或 Project Settings；未修改 `apps/web/vercel.json`；未启用 cron；未进入 PR9；未关闭 issue #225。
+
+## PR 251 - DB posture repair draft PR
+
+- 时间：2026-06-25 23:50 CST。
+- 当前阶段：independent PR #251 DB migration / staging DB posture repair gate。
+- Base：`origin/staging` at `61dfd60108c8fee49186ca60a3797285677349a6`（PR #250 merge commit）。
+- Branch：`codex/pr251-db-profile-bootstrap-grants`。
+- Main/staging divergence at kickoff：`origin/staging...origin/main = 38/6`；本轮不做 staging -> main sync，不做 production。
+- Scope：source-only DB posture repair migration、SQL smoke source、migration static test、execution log。
+
+### Problem
+
+- PR #250 已将 missing profile bootstrap 移到 server-side `ensureProfile` 路径。
+- Staging runtime 仍在 `user.getUserProfile` / `credits.getBalance` 返回 500。
+- Observed server marker：`profile_create_failed`。
+- Observed Postgres error code：`42501`。
+- DB posture evidence：`service_role` 可 SELECT `public.profiles`，但缺 INSERT / DELETE，且 PR250 bootstrap insert fields 的 column INSERT 缺失。
+
+### Root cause
+
+- Root cause classification：`SERVICE_ROLE_PROFILE_GRANT_MISSING`。
+- PR250 server-side bootstrap 需要 `service_role` 在 `public.profiles` 上执行：
+  - SELECT profile by id。
+  - INSERT safe bootstrap fields：`id`、`email`、`nickname`、`role`、`status`、`membership_level`、`credits`。
+  - DELETE just-created empty profile if opening grant fails。
+- 当前 staging DB posture 缺少上述 INSERT/DELETE grants，导致 server-side profile create path 在 DB 层被拒绝。
+
+### Migration design
+
+- 新增 forward-only migration：`packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`。
+- 不改写旧 migration，不伪造旧 migration ledger，不重写 0027。
+- 明确 REVOKE `anon` / `authenticated` / `PUBLIC` 对 `public.profiles` 的 INSERT / DELETE。
+- 删除 legacy `profiles_insert_own_zero_credits` policy，不恢复 authenticated insert product path。
+- 仅给 `service_role`：
+  - table SELECT on `public.profiles`。
+  - column INSERT on safe bootstrap fields。
+  - table DELETE for cleanup path。
+- 重申 `atomic_apply_credit_ledger_entry(...)` 仍只允许 `service_role` EXECUTE；opening grant 继续 ledger-backed / idempotent。
+
+### Authenticated insert decision
+
+- Decision：不恢复 authenticated profile insert policy。
+- Reason：PR #250 已将普通 signup 后的 missing profile bootstrap 收敛到 server-side service-role `ensureProfile`，产品路径不再要求 browser/authenticated client 直接 INSERT `public.profiles`。
+- Impact on normal signup：Auth user 登录后进入 protected tRPC；`ensureProfile` 先查 own profile，缺失时由 server-side admin client 创建 zero-credit safe profile，再通过 `atomic_apply_credit_ledger_entry` 发放 opening grant。普通用户不需要直接获得 profile INSERT 权限。
+- If restored in a future migration：必须使用 `TO authenticated` + `WITH CHECK ((select auth.uid()) = id AND role = 'user' AND credits = 0 AND membership_level = 'free')`，且不能允许 admin role、paid membership、arbitrary credits、cross-user insert。
+
+### Safety posture
+
+- 不信任 `user_metadata` 创建 admin / paid membership / arbitrary credits。
+- 不直接给 profile credits 非 ledger 增量。
+- Opening grant 仍通过 `atomic_apply_credit_ledger_entry`，idempotency key 仍为 `opening_grant:<user_id>`。
+- `service_role` DELETE 仅支持 PR250 cleanup path：opening grant RPC 失败时删除刚创建的 empty profile，避免留下 profile_count=1 / opening_grant_count=0 的半初始化状态。
+- 0045 `subscription_credit_grants` admin policy shape 是相邻 posture risk，但不属于本轮 PR251 最小 profile bootstrap grant repair。
+
+### Changed files
+
+- `packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`
+- `packages/db/tests/profile_bootstrap_service_role_grants.sql`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：passed；lockfile unchanged。
+- Targeted migration/profile policy static test：`pnpm --filter @repo/api exec vitest run src/profileBootstrapMigration.test.ts` passed；1 file / 4 tests。
+- Targeted PR250 profile bootstrap + user/profile + credits + credit ledger tests：`pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；5 files / 63 tests。
+- `pnpm test:api`：passed；49 files / 630 tests。
+- `pnpm lint`：passed。
+- `pnpm --filter web typecheck`：passed。
+- SQL smoke against staging DB：not run；owner has not authorized staging DB migration execution or staging DB SQL smoke execution for PR251.
+
+### Remaining gates
+
+- Open draft PR to `staging` for owner audit。
+- Owner must separately authorize staging DB migration execution。
+- After migration execution, rerun PR250 staging runtime verification:
+  - confirm `test03` pre-state if still used；
+  - call `user.getUserProfile` and `credits.getBalance`；
+  - verify exactly one `public.profiles` row；
+  - verify exactly one opening-grant ledger row / amount / idempotency key；
+  - repeat calls and confirm no duplicate grant / no credit delta。
+- Annual functional write test remains blocked until PR251 migration execution plus PR250 runtime verification pass。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 staging DB migration。
+- 未手动修 staging data。
+- 未手动插入 `public.profiles` row。
+- 未修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders` live data。
+- 未访问 Stripe live。
+- 未触发 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 PR10。
+- 未关闭 issue #225。
