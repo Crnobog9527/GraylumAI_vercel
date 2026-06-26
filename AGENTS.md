@@ -17,6 +17,43 @@ Default workflow for all code changes:
 
 Do not open feature, dependency, database, billing, auth, Stripe, or UI pull requests directly into `main` unless the owner explicitly says this is an emergency hotfix.
 
+## Agent Harness Automation Policy
+
+The Agent Harness is a GitHub issue driven development loop:
+
+1. Planner reads the issue and repository context, then produces a sprint contract.
+2. Generator implements only the approved contract and writes or updates tests.
+3. Evaluator verifies the contract with machine evidence and does not edit code.
+4. Release Auditor checks branch, SHA, changed files, CI/Security, forbidden actions, and merge eligibility.
+
+Branch rules for the harness:
+
+- `main` is the production branch.
+- `staging` is the pre-production integration branch.
+- Agents default to creating branches from the latest `origin/staging`.
+- Agent pull requests default to `staging`.
+- `staging` may be used for automated development, testing, and repair after a contract and evaluator gate define the allowed scope.
+- Promotion from `staging` to `main` is always a separate release gate and is never bundled into feature automation.
+
+Permanent unattended-action guardrails:
+
+- No unattended production deploy.
+- No unattended production smoke test.
+- No unattended Supabase production database access, write, migration, RPC, RLS, schema, or grant operation.
+- No unattended Stripe live action, including checkout, payment, refund, cancel, or webhook replay.
+- No unattended Vercel, Supabase, or Stripe environment variable or Project Settings modification.
+- No unattended closure of high-risk issues.
+
+High-risk task classes require a sprint contract and an evaluator pass before any staging merge is considered:
+
+- billing
+- Stripe
+- Supabase
+- cron
+- migration
+
+The owner is responsible for business goals and production release decisions. The owner is not expected to perform code review for Agent Harness PRs; machine gates and release-auditor evidence must carry that responsibility before staging automation proceeds.
+
 ## Required Validation Before Main
 
 Before any `staging` to `main` promotion, verify and report:
