@@ -3411,6 +3411,81 @@ Latest-head Codex review：
 - 未 PR10。
 - 未关闭 issue #225。
 
+## PR 251 - P2 conflict recovery fix
+
+- 时间：2026-06-26 15:10 CST。
+- 当前阶段：PR #251 current-head Codex review P2 conflict recovery repair。
+- P2：`Recover conflicted bootstrap profiles before returning`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke；no live DB SQL。
+
+### Risk
+
+- The normal existing-profile path recovered recent safe zero-credit bootstrap profiles before returning.
+- The concurrent bootstrap conflict path did not use that recovery path：initial profile fetch could miss, another request could insert a recent zero-credit bootstrap profile, and the current insert could fail with `23505`.
+- The `23505` handler refetched the profile and returned it directly, bypassing `recoverOpeningGrantForExistingBootstrapProfile`.
+- A protected call could therefore return a recent safe zero-credit bootstrap profile with no opening grant.
+
+### Fix design
+
+- Added a shared `recoverOpeningGrantIfRecoverableBootstrapProfile` helper.
+- The initial existing-profile path and the `23505` conflict/refetch path now call the same helper before returning.
+- Recovery still only runs when `ctx.hasSupabaseAdminPrivileges` is true.
+- Recovery remains limited to recent safe zero-credit bootstrap profiles and continues to use the `opening_grant:<user_id>` idempotency key.
+- Existing opening-grant ledger rows are treated as already granted, so recovery does not duplicate credits.
+- Historical zero-credit profiles are excluded from recovery.
+- When service-role/admin privileges are unavailable, the conflict recovery path cannot use an anon fallback to query ledger state or call the opening-grant RPC.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 81 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 644 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Current-head Codex review still needs to run after this pushed fix.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit and next current-head review gate.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未执行 live DB SQL。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。
+
 ## PR 251 - P2 retry path fix
 
 - 时间：2026-06-26 13:06 CST。

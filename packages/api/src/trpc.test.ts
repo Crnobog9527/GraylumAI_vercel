@@ -464,7 +464,7 @@ describe('protectedProcedure profile bootstrap', () => {
     expect(supabaseMocks.userProfileInserts).toEqual([]);
   });
 
-  it('handles profile insert conflicts by refetching the existing profile without another opening grant', async () => {
+  it('handles profile insert conflicts by refetching an already-granted profile without another opening grant', async () => {
     const supabaseMocks = createProfilesSupabase({
       createError: { code: '23505', message: 'duplicate key value violates unique constraint profiles_pkey' },
       conflictProfile: {
@@ -492,6 +492,150 @@ describe('protectedProcedure profile bootstrap', () => {
       }),
     ]);
     expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('recovers a missing opening grant after a concurrent profile insert conflict', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      createError: { code: '23505', message: 'duplicate key value violates unique constraint profiles_pkey' },
+      conflictProfile: {
+        id: user.id,
+        role: 'user',
+        credits: 0,
+        status: 'active',
+        nickname: 'New User',
+        email: user.email,
+        membership_level: 'free',
+        created_at: recentBootstrapCreatedAt,
+      },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+      userStatus: 'active',
+    });
+
+    expect(supabaseMocks.profileInserts).toEqual([
+      expect.objectContaining({
+        id: user.id,
+        credits: 0,
+        role: 'user',
+        membership_level: 'free',
+      }),
+    ]);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_user_id: user.id,
+      p_idempotency_key: `opening_grant:${user.id}`,
+    }));
+    expect(supabaseMocks.creditTransactions).toEqual([
+      expect.objectContaining({
+        user_id: user.id,
+        amount: 100,
+        balance_before: 0,
+        balance_after: 100,
+        idempotency_key: `opening_grant:${user.id}`,
+      }),
+    ]);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 100,
+    });
+  });
+
+  it('does not duplicate an existing opening grant after a concurrent profile insert conflict', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      createError: { code: '23505', message: 'duplicate key value violates unique constraint profiles_pkey' },
+      conflictProfile: {
+        id: user.id,
+        role: 'user',
+        credits: 0,
+        status: 'active',
+        nickname: 'New User',
+        email: user.email,
+        membership_level: 'free',
+        created_at: recentBootstrapCreatedAt,
+      },
+      creditTransactions: [{
+        id: 'txn-existing-opening-grant',
+        user_id: user.id,
+        amount: 100,
+        balance_before: 0,
+        balance_after: 100,
+        idempotency_key: `opening_grant:${user.id}`,
+      }],
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+      userStatus: 'active',
+    });
+
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+    expect(supabaseMocks.creditTransactions).toHaveLength(1);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 0,
+    });
+  });
+
+  it('does not recover historical zero-credit profiles after a concurrent profile insert conflict', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      createError: { code: '23505', message: 'duplicate key value violates unique constraint profiles_pkey' },
+      conflictProfile: {
+        id: user.id,
+        role: 'user',
+        credits: 0,
+        status: 'active',
+        nickname: 'Existing User',
+        email: user.email,
+        membership_level: 'free',
+        created_at: legacyProfileCreatedAt,
+      },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+      userStatus: 'active',
+    });
+
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 0,
+    });
+  });
+
+  it('does not reach conflict recovery through an anon fallback when service role privileges are unavailable', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      createError: { code: '23505', message: 'duplicate key value violates unique constraint profiles_pkey' },
+      conflictProfile: {
+        id: user.id,
+        role: 'user',
+        credits: 0,
+        status: 'active',
+        nickname: 'New User',
+        email: user.email,
+        membership_level: 'free',
+        created_at: recentBootstrapCreatedAt,
+      },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks, {
+      hasSupabaseAdminPrivileges: false,
+    })).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: expect.stringContaining('profile_bootstrap_failed'),
+    });
+
+    expect(supabaseMocks.adminTableCalls).toEqual([]);
+    expect(supabaseMocks.profileInserts).toEqual([]);
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toBeNull();
   });
 
   it('fails profile bootstrap clearly and removes the empty profile when opening grant ledger RPC fails', async () => {

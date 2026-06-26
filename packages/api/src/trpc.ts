@@ -250,6 +250,17 @@ async function recoverOpeningGrantForExistingBootstrapProfile(ctx: ApiContext, u
   }
 }
 
+async function recoverOpeningGrantIfRecoverableBootstrapProfile(
+  ctx: ApiContext,
+  userId: string,
+  profile: Record<string, unknown>,
+  normalizedEmail: string | null,
+) {
+  if (ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile(profile, normalizedEmail)) {
+    await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
+  }
+}
+
 async function fetchProfileById(client: ApiSupabaseClient, userId: string) {
   return client
     .from('profiles')
@@ -274,9 +285,7 @@ async function ensureProfile(ctx: ApiContext) {
   const { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
   if (profile && !profileError) {
-    if (ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile(profile, normalizedEmail)) {
-      await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
-    }
+    await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
 
     const shouldBackfillNickname = !profile.nickname?.trim();
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
@@ -340,6 +349,8 @@ async function ensureProfile(ctx: ApiContext) {
       const { data: existingProfile } = await fetchProfileById(ctx.supabaseAdmin, userId);
 
       if (existingProfile) {
+        await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, existingProfile, normalizedEmail);
+
         return {
           profileId: existingProfile.id,
           userRole: normalizeUserRole(existingProfile.role),
