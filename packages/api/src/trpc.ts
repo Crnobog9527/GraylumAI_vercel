@@ -274,7 +274,7 @@ async function ensureProfile(ctx: ApiContext) {
   const { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
   if (profile && !profileError) {
-    if (isRecoverableBootstrapProfile(profile, normalizedEmail)) {
+    if (ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile(profile, normalizedEmail)) {
       await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
     }
 

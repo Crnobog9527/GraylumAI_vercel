@@ -143,6 +143,7 @@ describe('protectedProcedure profile bootstrap', () => {
     const profileInserts: unknown[] = [];
     const userProfileInserts: unknown[] = [];
     const profileUpdates: unknown[] = [];
+    const adminTableCalls: string[] = [];
     const profileDeletes: Array<{
       filters: Array<{ field: string; value: unknown }>;
       deleted: boolean;
@@ -254,6 +255,7 @@ describe('protectedProcedure profile bootstrap', () => {
     const adminSupabase = {
       rpc,
       from(table: string) {
+        adminTableCalls.push(table);
         expect(['profiles', 'credit_transactions']).toContain(table);
         const state: {
           operation: 'select' | 'insert' | 'delete';
@@ -357,13 +359,17 @@ describe('protectedProcedure profile bootstrap', () => {
       profileInserts,
       userProfileInserts,
       profileUpdates,
+      adminTableCalls,
       profileDeletes,
       creditTransactions,
       getStoredProfile: () => storedProfile,
     };
   }
 
-  async function callProtectedProcedure(supabaseMocks: ReturnType<typeof createProfilesSupabase>) {
+  async function callProtectedProcedure(
+    supabaseMocks: ReturnType<typeof createProfilesSupabase>,
+    options: { hasSupabaseAdminPrivileges?: boolean } = {},
+  ) {
     const { router, protectedProcedure } = await import('./trpc');
     const testRouter = router({
       readProfileContext: protectedProcedure.query(({ ctx }) => ({
@@ -380,7 +386,7 @@ describe('protectedProcedure profile bootstrap', () => {
       supabasePublic: supabaseMocks.userSupabase as any,
       supabaseAdmin: supabaseMocks.adminSupabase as any,
       supabaseAuth: supabaseMocks.userSupabase as any,
-      hasSupabaseAdminPrivileges: true,
+      hasSupabaseAdminPrivileges: options.hasSupabaseAdminPrivileges ?? true,
       user: user as any,
       authProvider: 'email',
       isEmailVerified: true,
@@ -701,6 +707,56 @@ describe('protectedProcedure profile bootstrap', () => {
     expect(supabaseMocks.rpc).not.toHaveBeenCalled();
     expect(supabaseMocks.creditTransactions).toHaveLength(1);
     expect(supabaseMocks.profileDeletes).toEqual([]);
+  });
+
+  it('skips existing-profile recovery when service role privileges are unavailable', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      existingProfile: {
+        id: user.id,
+        role: 'user',
+        credits: 0,
+        status: 'active',
+        nickname: 'New User',
+        email: user.email,
+        membership_level: 'free',
+        created_at: recentBootstrapCreatedAt,
+      },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks, {
+      hasSupabaseAdminPrivileges: false,
+    })).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+    });
+
+    expect(supabaseMocks.adminTableCalls).toEqual([]);
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.profileInserts).toEqual([]);
+    expect(supabaseMocks.profileDeletes).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toMatchObject({
+      id: user.id,
+      credits: 0,
+    });
+  });
+
+  it('keeps missing-profile bootstrap strict when service role privileges are unavailable', async () => {
+    const supabaseMocks = createProfilesSupabase();
+
+    await expect(callProtectedProcedure(supabaseMocks, {
+      hasSupabaseAdminPrivileges: false,
+    })).rejects.toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: expect.stringContaining('profile_bootstrap_failed'),
+    });
+
+    expect(supabaseMocks.adminTableCalls).toEqual([]);
+    expect(supabaseMocks.profileInserts).toEqual([]);
+    expect(supabaseMocks.userProfileInserts).toEqual([]);
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+    expect(supabaseMocks.creditTransactions).toEqual([]);
+    expect(supabaseMocks.getStoredProfile()).toBeNull();
   });
 
   it('does not grant historical zero-credit profiles that are outside the bootstrap recovery window', async () => {

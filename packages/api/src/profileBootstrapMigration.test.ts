@@ -94,6 +94,10 @@ describe('profile bootstrap service-role grants migration', () => {
     expect(migrationSql).toContain('GRANT SELECT ON TABLE public.credit_transactions TO service_role;');
     expect(trpcSource).toContain("from('credit_transactions')");
     expect(trpcSource).toContain("eq('idempotency_key', getOpeningGrantIdempotencyKey(userId))");
+    expect(trpcSource).toContain('ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile');
+    expect(trpcSource.indexOf('ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile')).toBeLessThan(
+      trpcSource.indexOf('await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId)'),
+    );
     expect(trpcSource).toContain(".eq('role', 'user')");
     expect(trpcSource).toContain(".eq('status', 'active')");
     expect(trpcSource).toContain(".eq('membership_level', 'free')");
