@@ -11,7 +11,8 @@ type ProfileBootstrapFailureReason =
   | 'opening_grant_failed'
   | 'service_role_unavailable';
 
-const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level';
+const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at';
+const PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS = Date.parse('2026-06-25T00:00:00.000Z');
 
 function deriveProfileNickname(user: User): string {
   const metadata = user.user_metadata ?? {};
@@ -141,6 +142,20 @@ function createProfileBootstrapError(reason: ProfileBootstrapFailureReason) {
   });
 }
 
+function isRecoverableBootstrapProfile(profile: Record<string, unknown>, normalizedEmail: string | null) {
+  const createdAtMs = typeof profile.created_at === 'string'
+    ? Date.parse(profile.created_at)
+    : NaN;
+
+  return Number.isFinite(createdAtMs)
+    && createdAtMs >= PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS
+    && profile.role === 'user'
+    && profile.status === 'active'
+    && profile.membership_level === 'free'
+    && Number(profile.credits) === 0
+    && (!normalizedEmail || profile.email === normalizedEmail);
+}
+
 async function applyOpeningGrant(ctx: ApiContext, userId: string) {
   const idempotencyKey = getOpeningGrantIdempotencyKey(userId);
   const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
@@ -181,6 +196,60 @@ async function cleanupSafeBootstrapProfile(ctx: ApiContext, userId: string) {
     .eq('credits', 0);
 }
 
+async function recoverOpeningGrantForExistingBootstrapProfile(ctx: ApiContext, userId: string) {
+  const { data: existingOpeningGrant, error: openingGrantLookupError } =
+    await findOpeningGrantLedgerEntry(ctx, userId);
+
+  if (existingOpeningGrant) {
+    logger.warn('auth', 'profile_opening_grant_already_recorded', {
+      userId,
+      idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      recovery: true,
+    });
+    return;
+  }
+
+  if (openingGrantLookupError) {
+    logger.error('auth', 'profile_opening_grant_lookup_failed', {
+      userId,
+      error: getErrorMessage(openingGrantLookupError),
+      recovery: true,
+    });
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+
+  try {
+    await applyOpeningGrant(ctx, userId);
+  } catch (openingGrantError) {
+    logger.error('auth', 'profile_opening_grant_recovery_failed', {
+      userId,
+      error: getErrorMessage(openingGrantError),
+    });
+
+    const { data: recoveredOpeningGrant, error: recoveryLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (recoveredOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+        recovery: true,
+      });
+      return;
+    }
+
+    if (recoveryLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(recoveryLookupError),
+        recovery: true,
+      });
+    }
+
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+}
+
 async function fetchProfileById(client: ApiSupabaseClient, userId: string) {
   return client
     .from('profiles')
@@ -205,6 +274,10 @@ async function ensureProfile(ctx: ApiContext) {
   const { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
   if (profile && !profileError) {
+    if (isRecoverableBootstrapProfile(profile, normalizedEmail)) {
+      await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
+    }
+
     const shouldBackfillNickname = !profile.nickname?.trim();
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
 
@@ -314,15 +387,6 @@ async function ensureProfile(ctx: ApiContext) {
         userId,
         error: getErrorMessage(openingGrantLookupError),
       });
-
-      const { error: cleanupError } = await cleanupSafeBootstrapProfile(ctx, userId);
-
-      if (cleanupError) {
-        logger.error('auth', 'profile_opening_grant_cleanup_failed', {
-          userId,
-          error: getErrorMessage(cleanupError),
-        });
-      }
 
       throw createProfileBootstrapError('opening_grant_failed');
     }

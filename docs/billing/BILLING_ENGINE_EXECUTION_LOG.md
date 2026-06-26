@@ -3427,15 +3427,20 @@ Latest-head Codex review：
 
 ### Fix design
 
-- Selected scheme：C, keep cleanup recoverable when ledger lookup errors by making cleanup conditional on the safe bootstrap row shape。
-- Cleanup now deletes only a profile matching:
+- Selected scheme：B/C hybrid。
+- If the ledger lookup fails, cleanup is skipped so the code never deletes a profile without proving the `opening_grant:<user_id>` ledger row is absent。
+- The existing-profile path now recognizes recent safe zero-credit bootstrap profiles and retries the opening grant through the same idempotency key。
+- A profile is recoverable only when it matches:
   - `id = user_id`
   - `role = 'user'`
   - `status = 'active'`
   - `membership_level = 'free'`
   - `credits = 0`
-- If the opening grant committed, `atomic_apply_credit_ledger_entry` atomically updates `profiles.credits` to 100 before inserting the ledger row, so the conditional zero-credit delete does not match and cannot orphan the grant.
-- If the opening grant did not commit, the profile remains the safe zero-credit bootstrap row, so conditional cleanup removes it and a retry can create the profile and issue exactly one opening grant.
+- `created_at >= 2026-06-25T00:00:00.000Z`
+- matching auth email when available。
+- If the opening grant committed, `atomic_apply_credit_ledger_entry` atomically updates `profiles.credits` and writes the ledger row, so recovery sees either credits > 0 or the existing idempotency row and does not duplicate the grant.
+- If the opening grant did not commit and lookup was unavailable, the zero-credit bootstrap profile remains recoverable on the next protected call instead of permanently bypassing `applyOpeningGrant`.
+- Cleanup still deletes only safe zero-credit bootstrap rows, and only after a successful ledger lookup proves the opening grant row is absent.
 - Existing ledger/idempotency check still preserves the success path when `opening_grant:<user_id>` is visible after an RPC response error.
 
 ### Changed files
@@ -3449,8 +3454,8 @@ Latest-head Codex review：
 
 ### Validation
 
-- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 72 tests。
-- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 635 tests。
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 75 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 638 tests。
 - `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
 - `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
 - `git diff --check`：passed。
