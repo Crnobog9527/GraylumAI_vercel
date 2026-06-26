@@ -68,7 +68,8 @@ DROP POLICY IF EXISTS "profiles_insert_own_zero_credits" ON public.profiles;
 -- 1. SELECT profile state by id.
 -- 2. INSERT only the safe fields written by PR #250 ensureProfile.
 -- 3. SELECT opening-grant ledger state before any cleanup delete.
--- 4. DELETE the just-created empty profile only when no opening grant exists.
+-- 4. DELETE only a still-safe zero-credit bootstrap profile, so a committed
+--    opening grant that already moved credits to 100 is not orphaned.
 GRANT SELECT ON TABLE public.profiles TO service_role;
 GRANT INSERT (
   id,

@@ -90,12 +90,16 @@ describe('profile bootstrap service-role grants migration', () => {
     const trpcSource = readFileSync(new URL('./trpc.ts', import.meta.url), 'utf8');
 
     expect(migrationSql).toContain('SELECT opening-grant ledger state before any cleanup delete');
-    expect(migrationSql).toContain('DELETE the just-created empty profile only when no opening grant exists');
+    expect(migrationSql).toContain('DELETE only a still-safe zero-credit bootstrap profile');
     expect(migrationSql).toContain('GRANT SELECT ON TABLE public.credit_transactions TO service_role;');
     expect(trpcSource).toContain("from('credit_transactions')");
     expect(trpcSource).toContain("eq('idempotency_key', getOpeningGrantIdempotencyKey(userId))");
-    expect(trpcSource.indexOf("from('credit_transactions')")).toBeLessThan(
-      trpcSource.indexOf(".from('profiles')\n      .delete()"),
+    expect(trpcSource).toContain(".eq('role', 'user')");
+    expect(trpcSource).toContain(".eq('status', 'active')");
+    expect(trpcSource).toContain(".eq('membership_level', 'free')");
+    expect(trpcSource).toContain(".eq('credits', 0)");
+    expect(trpcSource.indexOf('await findOpeningGrantLedgerEntry(ctx, userId)')).toBeLessThan(
+      trpcSource.indexOf('await cleanupSafeBootstrapProfile(ctx, userId)'),
     );
     expect(trpcSource).toContain('profile_opening_grant_already_recorded');
   });
@@ -116,6 +120,10 @@ describe('profile bootstrap service-role grants migration', () => {
     expect(smokeSql).toContain('authenticated arbitrary credits profile insert unexpectedly succeeded');
     expect(smokeSql).toContain('authenticated cross-user profile insert unexpectedly succeeded');
     expect(smokeSql).toContain("idempotency_key = 'opening_grant:' || current_setting('profile_bootstrap.user_id')");
+    expect(smokeSql).toContain("AND role = 'user'");
+    expect(smokeSql).toContain("AND status = 'active'");
+    expect(smokeSql).toContain("AND membership_level = 'free'");
+    expect(smokeSql).toContain('AND credits = 0');
     expect(smokeSql).toContain('ROLLBACK;');
   });
 });

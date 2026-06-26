@@ -3410,3 +3410,82 @@ Latest-head Codex review：
 - 未 merge PR #251。
 - 未 PR10。
 - 未关闭 issue #225。
+
+## PR 251 - P2 retry path fix
+
+- 时间：2026-06-26 13:06 CST。
+- 当前阶段：PR #251 current-head Codex review P2 retry-path repair。
+- P2：`Preserve retry path after ledger lookup errors`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke；no live DB SQL。
+
+### Risk
+
+- Previous P2 fix made cleanup depend on checking `credit_transactions` for `opening_grant:<user_id>`.
+- If the opening grant RPC truly failed before commit and that ledger lookup also failed, the code skipped cleanup and left the just-created zero-credit profile.
+- On the next protected call, `ensureProfile` saw the existing profile and returned early, so opening grant was not retried.
+- That could permanently leave a new user with profile_count=1 but no 100-credit opening grant.
+
+### Fix design
+
+- Selected scheme：C, keep cleanup recoverable when ledger lookup errors by making cleanup conditional on the safe bootstrap row shape。
+- Cleanup now deletes only a profile matching:
+  - `id = user_id`
+  - `role = 'user'`
+  - `status = 'active'`
+  - `membership_level = 'free'`
+  - `credits = 0`
+- If the opening grant committed, `atomic_apply_credit_ledger_entry` atomically updates `profiles.credits` to 100 before inserting the ledger row, so the conditional zero-credit delete does not match and cannot orphan the grant.
+- If the opening grant did not commit, the profile remains the safe zero-credit bootstrap row, so conditional cleanup removes it and a retry can create the profile and issue exactly one opening grant.
+- Existing ledger/idempotency check still preserves the success path when `opening_grant:<user_id>` is visible after an RPC response error.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`
+- `packages/db/tests/profile_bootstrap_service_role_grants.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 72 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 635 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit and current-head review gate.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未执行 live DB SQL。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。

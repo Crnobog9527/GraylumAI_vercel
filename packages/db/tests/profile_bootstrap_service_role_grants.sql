@@ -131,7 +131,11 @@ INSERT INTO public.profiles (
 );
 
 DELETE FROM public.profiles
-WHERE id = current_setting('profile_bootstrap.user_id')::UUID;
+WHERE id = current_setting('profile_bootstrap.user_id')::UUID
+  AND role = 'user'
+  AND status = 'active'
+  AND membership_level = 'free'
+  AND credits = 0;
 
 RESET ROLE;
 SET LOCAL ROLE authenticated;

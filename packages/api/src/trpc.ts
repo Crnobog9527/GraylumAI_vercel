@@ -170,6 +170,17 @@ async function findOpeningGrantLedgerEntry(ctx: ApiContext, userId: string) {
     .maybeSingle();
 }
 
+async function cleanupSafeBootstrapProfile(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('profiles')
+    .delete()
+    .eq('id', userId)
+    .eq('role', 'user')
+    .eq('status', 'active')
+    .eq('membership_level', 'free')
+    .eq('credits', 0);
+}
+
 async function fetchProfileById(client: ApiSupabaseClient, userId: string) {
   return client
     .from('profiles')
@@ -304,13 +315,19 @@ async function ensureProfile(ctx: ApiContext) {
         error: getErrorMessage(openingGrantLookupError),
       });
 
+      const { error: cleanupError } = await cleanupSafeBootstrapProfile(ctx, userId);
+
+      if (cleanupError) {
+        logger.error('auth', 'profile_opening_grant_cleanup_failed', {
+          userId,
+          error: getErrorMessage(cleanupError),
+        });
+      }
+
       throw createProfileBootstrapError('opening_grant_failed');
     }
 
-    const { error: cleanupError } = await ctx.supabaseAdmin
-      .from('profiles')
-      .delete()
-      .eq('id', userId);
+    const { error: cleanupError } = await cleanupSafeBootstrapProfile(ctx, userId);
 
     if (cleanupError) {
       logger.error('auth', 'profile_opening_grant_cleanup_failed', {
