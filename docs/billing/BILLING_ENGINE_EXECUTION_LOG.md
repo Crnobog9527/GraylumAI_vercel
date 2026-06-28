@@ -3701,3 +3701,65 @@ Latest-head Codex review：
 - 未 PR10。
 - 未关闭 issue #225。
 - 未关闭 PR #251。
+
+## PR255 syncCheckoutSession fulfillment completion repair
+
+- 时间：2026-06-28 23:06 CST。
+- 当前阶段：PR255 syncCheckoutSession fulfillment code fix PR gate。
+- Base：`staging` at `5ff569891ff9b8427aac8c072a94ca02e6f8be63`。
+- Scope：source-code PR only；no production；no Stripe write；no webhook replay；no manual DB write。
+
+### Failure context
+
+- PR #254 reached `checkout.session.sync` and updated the checkout order metadata.
+- The existing paid annual membership order still stayed `pending` / unfulfilled.
+- No `user_subscriptions`, `subscription_credit_grants`, or subscription grant `credit_transactions` rows were created.
+- Profile membership and credits stayed `free` / `100`.
+- The order had no auditable fulfillment error metadata.
+
+### Fix design
+
+- Paid checkout invoice resolution now reports whether the failure was `paid_invoice_missing` or `paid_invoice_unpaid`.
+- Invoice paid detection now also handles invoice objects that expose a paid boolean without a populated status string.
+- Expanded subscription objects missing `latest_invoice` are refreshed with `expand: ['latest_invoice']` before falling back to invoice listing.
+- When a paid checkout cannot resolve a paid invoice, the checkout order is updated with `syncCheckoutSessionFulfillment` and `lastFulfillmentError` metadata before a staged error is thrown.
+- `payments.syncCheckoutSession` now fails closed if a paid subscription checkout ever returns `fulfilled=false`, so the final response cannot silently accept a paid-but-pending order.
+- The successful invoice fulfillment path still reuses existing subscription credit grant idempotency and checkout-order backfill.
+
+### Changed files
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted sync checkout fulfillment tests：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` passed；2 files / 63 tests。
+- `corepack pnpm test:api`：passed；49 files / 655 tests。
+- `corepack pnpm --filter web typecheck`：passed。
+- `corepack pnpm lint`：blocked by tooling in the temporary tarball workspace because the turbo child process invoked a different pnpm runtime and failed frozen install with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; no lint rule failures were produced.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 Phase H refund/clawback。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未执行 live DB SQL。
+- 未 DB migration。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 push 到 `main`。
+- 未 merge PR。
+- 未 PR10。
+- 未关闭 issue #225。
+- 未关闭 PR #251。

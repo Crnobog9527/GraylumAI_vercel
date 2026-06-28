@@ -2430,6 +2430,103 @@ describe('paymentsRouter error sanitization', () => {
     );
   });
 
+  it('does not silently accept an unfulfilled paid subscription checkout sync', async () => {
+    const session = {
+      id: 'cs_test_unfulfilled_paid_subscription',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
+      },
+      customer: 'cus_test_sync',
+      subscription: 'sub_test_unfulfilled_paid_subscription',
+      invoice: null,
+    };
+
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: false,
+      reason: 'paid_invoice_missing',
+      invoiceId: null,
+      subscriptionId: 'sub_test_unfulfilled_paid_subscription',
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: {
+        from(table: string) {
+          throw new Error(`Unexpected admin table ${table}`);
+        },
+      },
+    });
+
+    await expect(
+      caller.syncCheckoutSession({ sessionId: 'cs_test_unfulfilled_paid_subscription' }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '同步支付会话失败，请稍后重试',
+    });
+
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_unfulfilled_paid_subscription',
+      expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        checkoutSessionId: 'cs_test_...iption',
+        subscriptionId: 'sub_test...iption',
+        reason: 'paid_invoice_missing',
+      }),
+    );
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_stage_failed',
+      expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        checkoutSessionId: 'cs_test_...iption',
+      }),
+    );
+  });
+
   it('records a canceled checkout return without attempting fulfillment', async () => {
     const session = {
       id: 'cs_test_canceled_return',
