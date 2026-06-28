@@ -11,7 +11,8 @@ type ProfileBootstrapFailureReason =
   | 'opening_grant_failed'
   | 'service_role_unavailable';
 
-const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level';
+const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at';
+const PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS = Date.parse('2026-06-25T00:00:00.000Z');
 
 function deriveProfileNickname(user: User): string {
   const metadata = user.user_metadata ?? {};
@@ -100,6 +101,10 @@ export const publicProcedure = t.procedure;
 
 const OPENING_GRANT_CREDITS = 100;
 
+function getOpeningGrantIdempotencyKey(userId: string) {
+  return `opening_grant:${userId}`;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -137,13 +142,28 @@ function createProfileBootstrapError(reason: ProfileBootstrapFailureReason) {
   });
 }
 
+function isRecoverableBootstrapProfile(profile: Record<string, unknown>, normalizedEmail: string | null) {
+  const createdAtMs = typeof profile.created_at === 'string'
+    ? Date.parse(profile.created_at)
+    : NaN;
+
+  return Number.isFinite(createdAtMs)
+    && createdAtMs >= PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS
+    && profile.role === 'user'
+    && profile.status === 'active'
+    && profile.membership_level === 'free'
+    && Number(profile.credits) === 0
+    && (!normalizedEmail || profile.email === normalizedEmail);
+}
+
 async function applyOpeningGrant(ctx: ApiContext, userId: string) {
+  const idempotencyKey = getOpeningGrantIdempotencyKey(userId);
   const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
     p_user_id: userId,
     p_amount: OPENING_GRANT_CREDITS,
     p_type: 'addition',
     p_description: 'Opening grant for new user profile bootstrap',
-    p_idempotency_key: `opening_grant:${userId}`,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (error) {
@@ -153,6 +173,91 @@ async function applyOpeningGrant(ctx: ApiContext, userId: string) {
   const ledgerEntry = data?.[0];
   if (!ledgerEntry) {
     throw new Error('atomic opening grant ledger RPC returned no rows');
+  }
+}
+
+async function findOpeningGrantLedgerEntry(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('credit_transactions')
+    .select('id, amount, balance_after, idempotency_key')
+    .eq('user_id', userId)
+    .eq('idempotency_key', getOpeningGrantIdempotencyKey(userId))
+    .maybeSingle();
+}
+
+async function cleanupSafeBootstrapProfile(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('profiles')
+    .delete()
+    .eq('id', userId)
+    .eq('role', 'user')
+    .eq('status', 'active')
+    .eq('membership_level', 'free')
+    .eq('credits', 0);
+}
+
+async function recoverOpeningGrantForExistingBootstrapProfile(ctx: ApiContext, userId: string) {
+  const { data: existingOpeningGrant, error: openingGrantLookupError } =
+    await findOpeningGrantLedgerEntry(ctx, userId);
+
+  if (existingOpeningGrant) {
+    logger.warn('auth', 'profile_opening_grant_already_recorded', {
+      userId,
+      idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      recovery: true,
+    });
+    return;
+  }
+
+  if (openingGrantLookupError) {
+    logger.error('auth', 'profile_opening_grant_lookup_failed', {
+      userId,
+      error: getErrorMessage(openingGrantLookupError),
+      recovery: true,
+    });
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+
+  try {
+    await applyOpeningGrant(ctx, userId);
+  } catch (openingGrantError) {
+    logger.error('auth', 'profile_opening_grant_recovery_failed', {
+      userId,
+      error: getErrorMessage(openingGrantError),
+    });
+
+    const { data: recoveredOpeningGrant, error: recoveryLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (recoveredOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+        recovery: true,
+      });
+      return;
+    }
+
+    if (recoveryLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(recoveryLookupError),
+        recovery: true,
+      });
+    }
+
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+}
+
+async function recoverOpeningGrantIfRecoverableBootstrapProfile(
+  ctx: ApiContext,
+  userId: string,
+  profile: Record<string, unknown>,
+  normalizedEmail: string | null,
+) {
+  if (ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile(profile, normalizedEmail)) {
+    await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
   }
 }
 
@@ -180,6 +285,8 @@ async function ensureProfile(ctx: ApiContext) {
   const { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
   if (profile && !profileError) {
+    await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
+
     const shouldBackfillNickname = !profile.nickname?.trim();
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
 
@@ -242,6 +349,8 @@ async function ensureProfile(ctx: ApiContext) {
       const { data: existingProfile } = await fetchProfileById(ctx.supabaseAdmin, userId);
 
       if (existingProfile) {
+        await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, existingProfile, normalizedEmail);
+
         return {
           profileId: existingProfile.id,
           userRole: normalizeUserRole(existingProfile.role),
@@ -267,10 +376,33 @@ async function ensureProfile(ctx: ApiContext) {
       error: getErrorMessage(openingGrantError),
     });
 
-    const { error: cleanupError } = await ctx.supabaseAdmin
-      .from('profiles')
-      .delete()
-      .eq('id', userId);
+    const { data: existingOpeningGrant, error: openingGrantLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (existingOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      });
+
+      return {
+        profileId: newProfile.id,
+        userRole: normalizeUserRole(newProfile.role),
+        userStatus: normalizeUserStatus(newProfile.status),
+        userScopedSupabase,
+      };
+    }
+
+    if (openingGrantLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(openingGrantLookupError),
+      });
+
+      throw createProfileBootstrapError('opening_grant_failed');
+    }
+
+    const { error: cleanupError } = await cleanupSafeBootstrapProfile(ctx, userId);
 
     if (cleanupError) {
       logger.error('auth', 'profile_opening_grant_cleanup_failed', {
