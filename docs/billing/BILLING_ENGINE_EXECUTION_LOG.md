@@ -3640,3 +3640,64 @@ Latest-head Codex review：
 - 未 merge PR #251。
 - 未 PR10。
 - 未关闭 issue #225。
+
+## Subscription fulfillment paid checkout repair
+
+- 时间：2026-06-28 16:44 CST。
+- 当前阶段：subscription fulfillment code fix PR gate。
+- Scope：source-code PR only；no production；no Stripe test-mode write；no webhook replay；no manual DB write。
+
+### Failure context
+
+- Annual membership checkout reached paid state, but the staging `payment_orders` row stayed `pending` / unfulfilled.
+- No `user_subscriptions` row, `subscription_credit_grants` row, or subscription grant `credit_transactions` row was created.
+- Profile membership and credits stayed at the opening-grant-only state.
+
+### Fix design
+
+- Paid subscription `checkout.session.completed` now records the checkout order and immediately attempts safe paid invoice fulfillment through a shared helper.
+- The checkout return sync path now uses the same helper instead of duplicating partial subscription / invoice lookup logic.
+- The helper retrieves the subscription with `latest_invoice`, resolves a paid invoice from the checkout session, subscription latest invoice, or invoice list fallback, syncs subscription state, and then reuses the existing `fulfillMembershipInvoice` / subscription credit grant idempotency path.
+- `invoice.paid` now routes to the same membership invoice fulfillment handler as `invoice.payment_succeeded`.
+- `customer.subscription.created` now routes to the existing subscription mirror sync handler.
+- Duplicate grants remain blocked by the existing subscription credit grant idempotency keys and invoice fulfillment replay protections.
+
+### Changed files
+
+- `apps/web/src/app/api/stripe/webhook/route.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/services/__tests__/stripeWebhookRoute.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscription fulfillment tests：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；3 files / 67 tests。
+- `corepack pnpm test:api`：passed；49 files / 650 tests。
+- `corepack pnpm lint`：passed。
+- `corepack pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 Phase H refund/clawback。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未执行 live DB SQL。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 push 到 `main`。
+- 未 merge PR。
+- 未 PR10。
+- 未关闭 issue #225。
+- 未关闭 PR #251。

@@ -43,6 +43,9 @@ const STRIPE_FULFILLMENT_ERRORS = {
   checkoutOrderUpdate: 'Failed to update checkout order from session',
   checkoutOrderInsert: 'Failed to insert checkout order from session',
   missingCheckoutMetadata: 'Checkout session is missing fulfillment metadata',
+  checkoutSubscriptionMissing: 'Stripe checkout session is missing subscription id',
+  checkoutSubscriptionLookup: 'Failed to retrieve checkout subscription',
+  checkoutInvoiceLookup: 'Failed to retrieve checkout subscription invoice',
   creditOrderLookup: 'Failed to look up credit package order',
   backfillCheckoutOrder: 'Failed to backfill checkout order fulfillment',
   fulfillCreditPackage: 'Failed to fulfill credit package order',
@@ -173,6 +176,113 @@ function getCheckoutSessionSubscriptionId(session: Stripe.Checkout.Session) {
   return typeof session.subscription === 'string'
     ? session.subscription
     : session.subscription?.id ?? null;
+}
+
+function getCheckoutSessionInvoice(session: Stripe.Checkout.Session) {
+  const sessionRecord = session as Stripe.Checkout.Session & {
+    invoice?: string | Stripe.Invoice | null;
+  };
+
+  return sessionRecord.invoice ?? null;
+}
+
+function getCheckoutSessionInvoiceId(session: Stripe.Checkout.Session) {
+  return getExpandableId(getCheckoutSessionInvoice(session));
+}
+
+function getSubscriptionLatestInvoice(subscription: Stripe.Subscription | null | undefined) {
+  const subscriptionRecord = subscription as (Stripe.Subscription & {
+    latest_invoice?: string | Stripe.Invoice | null;
+  }) | null | undefined;
+
+  return subscriptionRecord?.latest_invoice ?? null;
+}
+
+function isPaidInvoice(invoice: Stripe.Invoice | null | undefined): invoice is Stripe.Invoice {
+  return Boolean(invoice?.id && invoice.status === 'paid');
+}
+
+async function retrieveStripeInvoice(input: {
+  stripe: ReturnType<typeof getStripeClient>;
+  invoiceId: string;
+  subscriptionId: string;
+  source: string;
+}) {
+  try {
+    return await input.stripe.invoices.retrieve(input.invoiceId);
+  } catch (error) {
+    throwFulfillmentError(
+      'checkout_invoice_lookup',
+      STRIPE_FULFILLMENT_ERRORS.checkoutInvoiceLookup,
+      error,
+      {
+        invoiceId: maskIdentifier(input.invoiceId),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        source: input.source,
+      },
+    );
+  }
+}
+
+async function resolvePaidCheckoutInvoice(input: {
+  stripe: ReturnType<typeof getStripeClient>;
+  session: Stripe.Checkout.Session;
+  subscription: Stripe.Subscription;
+  subscriptionId: string;
+}) {
+  const sessionInvoice = getCheckoutSessionInvoice(input.session);
+  if (isPaidInvoice(sessionInvoice as Stripe.Invoice | null)) {
+    return sessionInvoice as Stripe.Invoice;
+  }
+
+  const sessionInvoiceId = getCheckoutSessionInvoiceId(input.session);
+  if (sessionInvoiceId) {
+    const invoice = await retrieveStripeInvoice({
+      stripe: input.stripe,
+      invoiceId: sessionInvoiceId,
+      subscriptionId: input.subscriptionId,
+      source: 'checkout_session_invoice',
+    });
+    if (isPaidInvoice(invoice)) {
+      return invoice;
+    }
+  }
+
+  const latestInvoice = getSubscriptionLatestInvoice(input.subscription);
+  if (isPaidInvoice(latestInvoice as Stripe.Invoice | null)) {
+    return latestInvoice as Stripe.Invoice;
+  }
+
+  const latestInvoiceId = getExpandableId(latestInvoice);
+  if (latestInvoiceId) {
+    const invoice = await retrieveStripeInvoice({
+      stripe: input.stripe,
+      invoiceId: latestInvoiceId,
+      subscriptionId: input.subscriptionId,
+      source: 'subscription_latest_invoice',
+    });
+    if (isPaidInvoice(invoice)) {
+      return invoice;
+    }
+  }
+
+  try {
+    return (await input.stripe.invoices.list({
+      subscription: input.subscriptionId,
+      limit: 10,
+    })).data.find((invoice) => isPaidInvoice(invoice)) ?? null;
+  } catch (error) {
+    throwFulfillmentError(
+      'checkout_invoice_lookup',
+      STRIPE_FULFILLMENT_ERRORS.checkoutInvoiceLookup,
+      error,
+      {
+        checkoutSessionId: maskIdentifier(input.session.id),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        source: 'subscription_invoice_list',
+      },
+    );
+  }
 }
 
 function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
@@ -1454,6 +1564,96 @@ export async function fulfillMembershipInvoice(
   }
 
   await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilledAt);
+}
+
+export async function fulfillPaidMembershipCheckoutSession(
+  supabase: SupabaseLikeClient,
+  stripe: ReturnType<typeof getStripeClient>,
+  session: Stripe.Checkout.Session,
+) {
+  if (session.mode !== 'subscription' || session.payment_status !== 'paid') {
+    return {
+      fulfilled: false,
+      reason: 'not_paid_subscription_checkout',
+      invoiceId: null,
+      subscriptionId: getCheckoutSessionSubscriptionId(session),
+    };
+  }
+
+  const subscriptionId = getCheckoutSessionSubscriptionId(session);
+  if (!subscriptionId) {
+    throwFulfillmentError(
+      'checkout_subscription_parse',
+      STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionMissing,
+      new Error('checkout session subscription id missing'),
+      { checkoutSessionId: maskIdentifier(session.id) },
+    );
+  }
+
+  let subscription: Stripe.Subscription;
+  try {
+    subscription = typeof session.subscription === 'string'
+      ? await stripe.subscriptions.retrieve(subscriptionId, {
+          expand: ['latest_invoice'],
+        })
+      : session.subscription as Stripe.Subscription;
+  } catch (error) {
+    throwFulfillmentError(
+      'checkout_subscription_lookup',
+      STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionLookup,
+      error,
+      {
+        checkoutSessionId: maskIdentifier(session.id),
+        subscriptionId: maskIdentifier(subscriptionId),
+      },
+    );
+  }
+
+  if (!subscription) {
+    throwFulfillmentError(
+      'checkout_subscription_lookup',
+      STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionLookup,
+      new Error('Stripe subscription unavailable'),
+      {
+        checkoutSessionId: maskIdentifier(session.id),
+        subscriptionId: maskIdentifier(subscriptionId),
+      },
+    );
+  }
+
+  await syncSubscriptionState(supabase, subscription);
+
+  const paidInvoice = await resolvePaidCheckoutInvoice({
+    stripe,
+    session,
+    subscription,
+    subscriptionId,
+  });
+
+  if (!paidInvoice) {
+    logger.warn('billing', 'paid_membership_checkout_invoice_missing', {
+      checkoutSessionId: maskIdentifier(session.id),
+      subscriptionId: maskIdentifier(subscriptionId),
+      sessionInvoiceId: maskIdentifier(getCheckoutSessionInvoiceId(session)),
+      latestInvoiceId: maskIdentifier(getExpandableId(getSubscriptionLatestInvoice(subscription))),
+    });
+
+    return {
+      fulfilled: false,
+      reason: 'paid_invoice_missing',
+      invoiceId: null,
+      subscriptionId,
+    };
+  }
+
+  await fulfillMembershipInvoice(supabase, paidInvoice);
+
+  return {
+    fulfilled: true,
+    reason: null,
+    invoiceId: paidInvoice.id,
+    subscriptionId,
+  };
 }
 
 export async function syncSubscriptionState(
