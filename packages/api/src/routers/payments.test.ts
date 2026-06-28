@@ -32,6 +32,7 @@ vi.mock('../lib/logger', () => ({
 vi.mock('../services/stripeFulfillment', () => ({
   fulfillCreditPackageOrder: vi.fn(),
   fulfillMembershipInvoice: vi.fn(),
+  fulfillPaidMembershipCheckoutSession: vi.fn(),
   syncSubscriptionState: vi.fn(),
   upsertPaymentOrderBySession: vi.fn(),
 }));
@@ -39,6 +40,7 @@ vi.mock('../services/stripeFulfillment', () => ({
 import { paymentsRouter } from './payments';
 import {
   fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
@@ -226,6 +228,7 @@ describe('paymentsRouter error sanitization', () => {
     loggerState.info.mockReset();
     loggerState.warn.mockReset();
     vi.mocked(fulfillMembershipInvoice).mockReset();
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockReset();
     vi.mocked(syncSubscriptionState).mockReset();
     vi.mocked(upsertPaymentOrderBySession).mockReset();
     stripeState.getOrCreateStripeCustomerId.mockResolvedValue('cus_123');
@@ -2336,8 +2339,12 @@ describe('paymentsRouter error sanitization', () => {
       },
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
-    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
-    vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: true,
+      reason: null,
+      invoiceId: 'in_test_sync_paid',
+      subscriptionId: 'sub_test_sync',
+    });
 
     const userSupabase = {
       from(table: string) {
@@ -2400,8 +2407,17 @@ describe('paymentsRouter error sanitization', () => {
     expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
       eventType: 'checkout.session.sync',
     });
-    expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, subscription);
-    expect(fulfillMembershipInvoice).toHaveBeenCalledWith(adminSupabase, paidInvoice);
+    expect(fulfillPaidMembershipCheckoutSession).toHaveBeenCalledWith(
+      adminSupabase,
+      expect.objectContaining({
+        checkout: expect.any(Object),
+        invoices: expect.any(Object),
+        subscriptions: expect.any(Object),
+      }),
+      session,
+    );
+    expect(syncSubscriptionState).not.toHaveBeenCalled();
+    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(loggerState.info).toHaveBeenCalledWith(
       'billing',
       'payments_sync_checkout_stage',
@@ -2514,6 +2530,7 @@ describe('paymentsRouter error sanitization', () => {
       orderStatus: 'canceled',
       eventType: 'checkout.return.canceled',
     });
+    expect(fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
     expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(syncSubscriptionState).not.toHaveBeenCalled();
   });
@@ -2570,8 +2587,7 @@ describe('paymentsRouter error sanitization', () => {
       },
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
-    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
-    vi.mocked(fulfillMembershipInvoice).mockRejectedValue(
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
       Object.assign(new Error('Failed to fulfill membership invoice'), {
         stage: 'fulfill_membership_invoice_rpc',
         safeContext: {
@@ -2622,7 +2638,7 @@ describe('paymentsRouter error sanitization', () => {
       'billing',
       'payments_sync_checkout_stage_failed',
       expect.objectContaining({
-        stage: 'fulfill_membership_invoice',
+        stage: 'fulfill_paid_membership_checkout_session',
         checkoutSessionId: 'cs_test_...ailure',
         error: expect.objectContaining({
           stage: 'fulfill_membership_invoice_rpc',

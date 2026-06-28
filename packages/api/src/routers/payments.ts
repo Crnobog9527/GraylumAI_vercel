@@ -20,7 +20,7 @@ import {
 } from '../services/stripe';
 import {
   fulfillCreditPackageOrder,
-  fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
@@ -1329,69 +1329,27 @@ export const paymentsRouter = router({
           }
 
           if (session.mode === 'subscription') {
-            const subscriptionId = getCheckoutSessionSubscriptionId(session);
+            syncStage = 'fulfill_paid_membership_checkout_session';
+            logSyncCheckoutStage(syncStage, input, syncStageContext);
+            const fulfillment = await fulfillPaidMembershipCheckoutSession(
+              ctx.supabaseAdmin,
+              stripe,
+              session,
+            );
+            syncStageContext = {
+              ...syncStageContext,
+              subscriptionId: maskIdentifier(fulfillment.subscriptionId),
+              invoiceId: maskIdentifier(fulfillment.invoiceId),
+              fulfillmentReason: fulfillment.reason,
+            };
 
-            if (subscriptionId) {
-              syncStageContext = {
-                ...syncStageContext,
-                subscriptionId: maskIdentifier(subscriptionId),
-              };
-              syncStage = 'subscription_retrieve';
-              logSyncCheckoutStage(syncStage, input, syncStageContext);
-              const subscription =
-                typeof session.subscription === 'string'
-                  ? await stripe.subscriptions.retrieve(subscriptionId)
-                  : session.subscription;
-
-              if (!subscription) {
-                throw new Error('Stripe subscription unavailable');
-              }
-
-              syncStage = 'sync_subscription_state';
-              logSyncCheckoutStage(syncStage, input, {
-                ...syncStageContext,
-                subscriptionStatus: subscription.status,
-              });
-              await syncSubscriptionState(ctx.supabaseAdmin, subscription);
-
-              syncStage = 'invoice_lookup';
-              logSyncCheckoutStage(syncStage, input, syncStageContext);
-              const expandedInvoice =
-                typeof session.invoice === 'string'
-                  ? await stripe.invoices.retrieve(session.invoice)
-                  : session.invoice ?? null;
-
-              const paidInvoice = expandedInvoice?.status === 'paid'
-                ? expandedInvoice
-                : (await stripe.invoices.list({
-                    subscription: subscriptionId,
-                    limit: 10,
-                  })).data.find((invoice) => invoice.status === 'paid') ?? null;
-
-              if (paidInvoice) {
-                syncStage = 'fulfill_membership_invoice';
-                syncStageContext = {
-                  ...syncStageContext,
-                  invoiceId: maskIdentifier(paidInvoice.id),
-                  invoiceStatus: paidInvoice.status ?? null,
-                };
-                logSyncCheckoutStage(syncStage, input, syncStageContext);
-                await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
-              } else {
-                logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
-                  stage: syncStage,
-                  checkoutSessionId: maskIdentifier(input.sessionId),
-                  subscriptionId: maskIdentifier(subscriptionId),
-                  expandedInvoiceId: maskIdentifier(expandedInvoice?.id),
-                  expandedInvoiceStatus: expandedInvoice?.status ?? null,
-                });
-              }
-            } else {
-              logger.warn('billing', 'payments_sync_checkout_missing_subscription', {
-                stage: 'subscription_id_parse',
+            if (fulfillment.fulfilled) {
+              logSyncCheckoutStage('fulfill_membership_invoice', input, syncStageContext);
+            } else if (fulfillment.reason === 'paid_invoice_missing') {
+              logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
+                stage: syncStage,
                 checkoutSessionId: maskIdentifier(input.sessionId),
-                mode: session.mode,
-                paymentStatus: session.payment_status,
+                subscriptionId: maskIdentifier(fulfillment.subscriptionId),
               });
             }
           }

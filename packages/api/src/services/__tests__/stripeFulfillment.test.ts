@@ -20,6 +20,7 @@ vi.mock('../../lib/logger', () => ({
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   markMembershipInvoicePaymentFailed,
   reconcileSubscriptionRefundFromStripeWebhook,
   upsertPaymentOrderBySession,
@@ -36,7 +37,7 @@ type RefundWebhookTableName =
 type RefundWebhookRow = Record<string, any>;
 
 class RefundWebhookMockQuery {
-  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' | 'like' | 'is' }> = [];
   private containsFilters: Array<{ column: string; value: unknown }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: RefundWebhookRow | null = null;
@@ -64,6 +65,16 @@ class RefundWebhookMockQuery {
 
   lte(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  like(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'like' });
+    return this;
+  }
+
+  is(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'is' });
     return this;
   }
 
@@ -156,7 +167,16 @@ class RefundWebhookMockQuery {
           return row[column] !== value;
         }
 
-        return row[column] <= value;
+        if (operator === 'lte') {
+          return row[column] <= value;
+        }
+
+        if (operator === 'like') {
+          const pattern = String(value).replace(/%/g, '');
+          return typeof row[column] === 'string' && row[column].startsWith(pattern);
+        }
+
+        return row[column] === value;
       })
       && this.containsFilters.every(({ column, value }) =>
         refundWebhookContainsValue(row[column], value),
@@ -407,6 +427,179 @@ describe('stripe fulfillment helpers', () => {
         payment_status: 'paid',
       }),
     );
+  });
+
+  it('fulfills a paid yearly membership checkout through subscription latest_invoice exactly once', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-source-paid-yearly-checkout',
+        user_id: 'user-paid-yearly-checkout',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_paid_yearly_checkout',
+        stripe_checkout_session_id: 'cs_test_paid_yearly_checkout',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_paid_yearly_checkout',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {
+          source: 'checkout.session.sync',
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-pro-yearly',
+        name: 'Pro',
+        level: 'pro',
+        yearly_credits: 1200,
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-paid-yearly-checkout',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_paid_yearly_checkout',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_paid_yearly_checkout',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_paid_yearly_checkout',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_paid_yearly_checkout',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: 'in_paid_yearly_checkout',
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(subscription),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+        list: vi.fn(),
+      },
+    };
+    const session = {
+      id: 'cs_test_paid_yearly_checkout',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-paid-yearly-checkout',
+      metadata: {
+        userId: 'user-paid-yearly-checkout',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_paid_yearly_checkout',
+      subscription: 'sub_paid_yearly_checkout',
+      invoice: null,
+    } as Stripe.Checkout.Session;
+
+    const firstResult = await fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session);
+    const replayResult = await fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session);
+
+    expect(firstResult).toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_paid_yearly_checkout',
+      subscriptionId: 'sub_paid_yearly_checkout',
+    });
+    expect(replayResult).toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_paid_yearly_checkout',
+      subscriptionId: 'sub_paid_yearly_checkout',
+    });
+    expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith('sub_paid_yearly_checkout', {
+      expand: ['latest_invoice'],
+    });
+    expect(stripe.invoices.retrieve).toHaveBeenCalledWith('in_paid_yearly_checkout');
+    expect(stripe.invoices.list).not.toHaveBeenCalled();
+
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      membership_plan_id: 'plan-pro-yearly',
+      stripe_subscription_id: 'sub_paid_yearly_checkout',
+      billing_cycle: 'yearly',
+      status: 'active',
+      metadata: expect.objectContaining({
+        lastInvoiceId: 'in_paid_yearly_checkout',
+        fulfillmentSource: 'subscription_credit_grants',
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      membership_plan_id: 'plan-pro-yearly',
+      stripe_subscription_id: 'sub_paid_yearly_checkout',
+      stripe_invoice_id: 'in_paid_yearly_checkout',
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 100,
+      status: 'granted',
+      idempotency_key: expect.stringContaining(
+        'subscription_grant:annual_monthly_release:sub_paid_yearly_checkout:',
+      ),
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      amount: 100,
+      ledger_type: 'grant',
+      reason_code: 'annual_monthly_release',
+      source_type: 'stripe_invoice',
+      source_id: 'in_paid_yearly_checkout',
+    });
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-paid-yearly-checkout',
+      membership_level: 'pro',
+      credits: 200,
+    });
+
+    const checkoutOrder = supabase.tables.payment_orders.find((row) =>
+      row.id === 'order-source-paid-yearly-checkout');
+    expect(checkoutOrder).toMatchObject({
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: expect.any(String),
+    });
+    const invoiceOrders = supabase.tables.payment_orders.filter((row) =>
+      row.stripe_invoice_id === 'in_paid_yearly_checkout');
+    expect(invoiceOrders).toHaveLength(1);
+    expect(invoiceOrders[0]).toMatchObject({
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: expect.any(String),
+      metadata: expect.objectContaining({
+        source: 'invoice.payment_succeeded',
+        grantedCredits: 100,
+      }),
+    });
   });
 
   it('preserves completed fulfilled checkout orders during paid session replay', async () => {
