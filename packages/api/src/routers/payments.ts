@@ -1345,6 +1345,14 @@ export const paymentsRouter = router({
 
             if (fulfillment.fulfilled) {
               logSyncCheckoutStage('fulfill_membership_invoice', input, syncStageContext);
+            } else if (session.payment_status === 'paid') {
+              logger.warn('billing', 'payments_sync_checkout_unfulfilled_paid_subscription', {
+                stage: syncStage,
+                checkoutSessionId: maskIdentifier(input.sessionId),
+                subscriptionId: maskIdentifier(fulfillment.subscriptionId),
+                reason: fulfillment.reason,
+              });
+              throw new Error('Paid subscription checkout did not complete fulfillment');
             } else if (fulfillment.reason === 'paid_invoice_missing') {
               logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
                 stage: syncStage,
