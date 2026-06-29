@@ -282,7 +282,17 @@ async function ensureProfile(ctx: ApiContext) {
   const derivedNickname = deriveProfileNickname(ctx.user);
   const normalizedEmail = ctx.user.email ?? null;
 
-  const { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
+  let { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
+
+  if (!profile && profileError?.code !== 'PGRST116' && ctx.hasSupabaseAdminPrivileges) {
+    logger.warn('auth', 'profile_user_scoped_lookup_failed_using_service_role', {
+      code: profileError?.code ?? null,
+    });
+
+    const adminLookup = await fetchProfileById(ctx.supabaseAdmin, userId);
+    profile = adminLookup.data;
+    profileError = adminLookup.error;
+  }
 
   if (profile && !profileError) {
     await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
@@ -430,14 +440,14 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     });
   }
 
+  const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
+
   if (!ctx.isEmailVerified) {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: 'EMAIL_NOT_VERIFIED',
     });
   }
-
-  const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
 
   if (userStatus === 'disabled') {
     throw new TRPCError({

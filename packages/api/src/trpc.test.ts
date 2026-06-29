@@ -134,6 +134,7 @@ describe('protectedProcedure profile bootstrap', () => {
     committedOpeningGrantAfterRpcError?: boolean;
     ledgerLookupErrorSequence?: Array<{ message: string } | null>;
     creditTransactions?: Array<Record<string, unknown>>;
+    userSelectError?: { code?: string; message?: string } | null;
   } = {}) {
     let storedProfile = options.existingProfile
       ? { ...options.existingProfile }
@@ -142,6 +143,7 @@ describe('protectedProcedure profile bootstrap', () => {
     let ledgerLookupCallIndex = 0;
     const profileInserts: unknown[] = [];
     const userProfileInserts: unknown[] = [];
+    const userProfileSelects: Array<{ field: string; value: unknown } | undefined> = [];
     const profileUpdates: unknown[] = [];
     const adminTableCalls: string[] = [];
     const profileDeletes: Array<{
@@ -240,6 +242,11 @@ describe('protectedProcedure profile bootstrap', () => {
           async single() {
             if (state.operation === 'insert') {
               return { data: null, error: { code: '42501', message: 'client insert should not be used' } };
+            }
+
+            userProfileSelects.push(state.eq);
+            if (options.userSelectError) {
+              return { data: null, error: options.userSelectError };
             }
 
             return storedProfile
@@ -358,6 +365,7 @@ describe('protectedProcedure profile bootstrap', () => {
       rpc,
       profileInserts,
       userProfileInserts,
+      userProfileSelects,
       profileUpdates,
       adminTableCalls,
       profileDeletes,
@@ -368,7 +376,11 @@ describe('protectedProcedure profile bootstrap', () => {
 
   async function callProtectedProcedure(
     supabaseMocks: ReturnType<typeof createProfilesSupabase>,
-    options: { hasSupabaseAdminPrivileges?: boolean } = {},
+    options: {
+      hasSupabaseAdminPrivileges?: boolean;
+      isEmailVerified?: boolean;
+      userOverride?: unknown;
+    } = {},
   ) {
     const { router, protectedProcedure } = await import('./trpc');
     const testRouter = router({
@@ -387,9 +399,9 @@ describe('protectedProcedure profile bootstrap', () => {
       supabaseAdmin: supabaseMocks.adminSupabase as any,
       supabaseAuth: supabaseMocks.userSupabase as any,
       hasSupabaseAdminPrivileges: options.hasSupabaseAdminPrivileges ?? true,
-      user: user as any,
+      user: (options.userOverride ?? user) as any,
       authProvider: 'email',
-      isEmailVerified: true,
+      isEmailVerified: options.isEmailVerified ?? true,
     });
 
     return caller.readProfileContext();
@@ -425,6 +437,60 @@ describe('protectedProcedure profile bootstrap', () => {
       userStatus: 'active',
       supabaseIsUserScoped: true,
     });
+  });
+
+  it('falls back to the server-side bootstrap client when user-scoped profile reads are unavailable', async () => {
+    const supabaseMocks = createProfilesSupabase({
+      userSelectError: { code: '42501', message: 'permission denied for table profiles' },
+    });
+
+    await expect(callProtectedProcedure(supabaseMocks)).resolves.toMatchObject({
+      profileId: user.id,
+      userRole: 'user',
+      userStatus: 'active',
+      supabaseIsUserScoped: true,
+    });
+
+    expect(supabaseMocks.adminTableCalls.slice(0, 2)).toEqual(['profiles', 'profiles']);
+    expect(supabaseMocks.userProfileSelects).toEqual([{ field: 'id', value: user.id }]);
+    expect(supabaseMocks.userProfileInserts).toEqual([]);
+    expect(supabaseMocks.profileInserts).toHaveLength(1);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('bootstraps a logged-in dashboard-created auth user before the email verification gate', async () => {
+    const supabaseMocks = createProfilesSupabase();
+    const dashboardCreatedUser = {
+      ...user,
+      email_confirmed_at: null,
+      identities: [],
+      user_metadata: { name: 'Dashboard User' },
+    };
+
+    await expect(callProtectedProcedure(supabaseMocks, {
+      isEmailVerified: false,
+      userOverride: dashboardCreatedUser,
+    })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'EMAIL_NOT_VERIFIED',
+    });
+
+    expect(supabaseMocks.profileInserts).toEqual([
+      expect.objectContaining({
+        id: user.id,
+        email: user.email,
+        nickname: 'Dashboard User',
+        role: 'user',
+        status: 'active',
+        membership_level: 'free',
+        credits: 0,
+      }),
+    ]);
+    expect(supabaseMocks.userProfileInserts).toEqual([]);
+    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
+      p_user_id: user.id,
+      p_idempotency_key: `opening_grant:${user.id}`,
+    }));
   });
 
   it('does not issue another opening grant when the profile already exists', async () => {
@@ -1009,6 +1075,7 @@ describe('protectedProcedure profile bootstrap', () => {
       user_metadata: {
         ...user.user_metadata,
         role: 'admin',
+        status: 'banned',
         membership_level: 'gold',
         credits: 999999,
       },
