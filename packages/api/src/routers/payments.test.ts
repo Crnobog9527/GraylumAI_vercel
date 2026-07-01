@@ -2632,6 +2632,187 @@ describe('paymentsRouter error sanitization', () => {
     expect(syncSubscriptionState).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'paid_invoice_missing',
+    'paid_invoice_unpaid',
+  ])('preserves existing blocked invoice audit for %s when router catch records context', async (blockedReason) => {
+    const session = {
+      id: `cs_test_blocked_${blockedReason}`,
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
+      },
+      customer: 'cus_test_blocked_invoice',
+      subscription: `sub_test_blocked_${blockedReason}`,
+      invoice: null,
+    };
+    const existingInvoiceResolutionAudit = {
+      sessionInvoicePresent: blockedReason === 'paid_invoice_unpaid',
+      sessionInvoiceId: 'in_test...locked',
+      sessionInvoiceStatus: blockedReason === 'paid_invoice_unpaid' ? 'open' : null,
+      latestInvoicePresent: false,
+      latestInvoiceId: null,
+      latestInvoiceStatus: null,
+      invoiceListCount: 99,
+      invoiceListStatuses: blockedReason === 'paid_invoice_unpaid' ? ['open'] : [],
+      paidInvoiceFound: false,
+      reason: blockedReason,
+    };
+
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
+      Object.assign(new Error(`invoice audit already blocked for user@example.com ${session.id}`), {
+        stage: 'checkout_paid_invoice_resolution',
+        safeContext: {
+          reason: blockedReason,
+          sessionInvoiceId: 'in_test_...newer',
+          sessionInvoiceStatus: 'paid',
+          latestInvoiceId: 'in_test_...newer',
+          latestInvoiceStatus: 'paid',
+          invoiceListCount: 1,
+          invoiceListStatuses: ['paid'],
+        },
+      }),
+    );
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const paymentOrderUpdates: Array<Record<string, any>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: `order-blocked-${blockedReason}`,
+                  metadata: {
+                    source: 'checkout.session.sync',
+                    invoiceResolutionAudit: existingInvoiceResolutionAudit,
+                    syncCheckoutSessionFulfillment: {
+                      status: 'blocked',
+                      stage: 'checkout_paid_invoice_resolution',
+                      reason: blockedReason,
+                      checkoutStatus: 'complete',
+                      paymentStatus: 'paid',
+                      subscriptionId: 'sub_test...locked',
+                      invoiceResolutionAudit: existingInvoiceResolutionAudit,
+                      updatedAt: '2026-07-01T00:00:00.000Z',
+                    },
+                    lastFulfillmentError: {
+                      stage: 'checkout_paid_invoice_resolution',
+                      reason: blockedReason,
+                      updatedAt: '2026-07-01T00:00:00.000Z',
+                    },
+                  },
+                },
+                error: null,
+              });
+            },
+            update(payload: Record<string, any>) {
+              paymentOrderUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.syncCheckoutSession({ sessionId: session.id }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '同步支付会话失败，请稍后重试',
+    });
+
+    expect(paymentOrderUpdates).toHaveLength(1);
+    expect(paymentOrderUpdates[0].metadata).toMatchObject({
+      source: 'checkout.session.sync',
+      invoiceResolutionAudit: existingInvoiceResolutionAudit,
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
+        reason: blockedReason,
+        invoiceResolutionAudit: existingInvoiceResolutionAudit,
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'checkout_paid_invoice_resolution',
+        reason: blockedReason,
+        routerCatch: expect.objectContaining({
+          stage: 'fulfill_paid_membership_checkout_session',
+          reason: 'checkout_paid_invoice_resolution',
+          errorStage: 'checkout_paid_invoice_resolution',
+          message: expect.stringContaining('[masked-email]'),
+        }),
+      }),
+    });
+    expect(paymentOrderUpdates[0].metadata.syncCheckoutSessionFulfillment).not.toMatchObject({
+      status: 'failed',
+    });
+    const metadataJson = JSON.stringify(paymentOrderUpdates[0].metadata);
+    expect(metadataJson).not.toContain(session.id);
+    expect(metadataJson).not.toContain(`sub_test_blocked_${blockedReason}`);
+    expect(metadataJson).not.toContain('in_test_blocked');
+    expect(metadataJson).not.toContain('cus_test_blocked_invoice');
+    expect(metadataJson).not.toContain('user@example.com');
+    expect(metadataJson).not.toContain('payment_method');
+  });
+
   it('logs the failing sync stage while returning a safe frontend message', async () => {
     const paidInvoice = {
       id: 'in_test_rpc_failure',

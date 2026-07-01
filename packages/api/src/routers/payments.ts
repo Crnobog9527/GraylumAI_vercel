@@ -349,6 +349,31 @@ function buildSyncCheckoutInvoiceResolutionAudit(error: unknown) {
   };
 }
 
+function isBlockedInvoiceResolutionAudit(metadata: Record<string, unknown>) {
+  const fulfillment = asRecord(metadata.syncCheckoutSessionFulfillment);
+  return fulfillment.status === 'blocked'
+    && (fulfillment.reason === 'paid_invoice_missing' || fulfillment.reason === 'paid_invoice_unpaid');
+}
+
+function buildSyncCheckoutRouterFailureAudit(input: {
+  stage: string;
+  reason: string;
+  errorSummary: ReturnType<typeof summarizePaymentError>;
+  updatedAt: string;
+}) {
+  return {
+    stage: input.stage,
+    reason: input.reason,
+    errorStage: input.errorSummary.stage,
+    errorName: input.errorSummary.name,
+    errorType: input.errorSummary.type,
+    errorCode: input.errorSummary.code,
+    statusCode: input.errorSummary.statusCode,
+    message: input.errorSummary.message,
+    updatedAt: input.updatedAt,
+  };
+}
+
 async function recordSyncCheckoutFailureAudit(input: {
   supabase: any;
   session: any;
@@ -380,32 +405,37 @@ async function recordSyncCheckoutFailureAudit(input: {
       return;
     }
 
-    const metadata = {
-      ...asRecord(lookup.data.metadata),
-      ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
-      syncCheckoutSessionFulfillment: {
-        status: 'failed',
-        stage: input.stage,
-        reason,
-        checkoutStatus: input.session.status ?? null,
-        paymentStatus: input.session.payment_status ?? null,
-        subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(input.session)),
-        invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(input.session)),
-        ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
-        updatedAt: now,
-      },
-      lastFulfillmentError: {
-        stage: input.stage,
-        reason,
-        errorStage: errorSummary.stage,
-        errorName: errorSummary.name,
-        errorType: errorSummary.type,
-        errorCode: errorSummary.code,
-        statusCode: errorSummary.statusCode,
-        message: errorSummary.message,
-        updatedAt: now,
-      },
-    };
+    const existingMetadata = asRecord(lookup.data.metadata);
+    const routerFailure = buildSyncCheckoutRouterFailureAudit({
+      stage: input.stage,
+      reason,
+      errorSummary,
+      updatedAt: now,
+    });
+    const metadata = isBlockedInvoiceResolutionAudit(existingMetadata)
+      ? {
+          ...existingMetadata,
+          lastFulfillmentError: {
+            ...asRecord(existingMetadata.lastFulfillmentError),
+            routerCatch: routerFailure,
+          },
+        }
+      : {
+          ...existingMetadata,
+          ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+          syncCheckoutSessionFulfillment: {
+            status: 'failed',
+            stage: input.stage,
+            reason,
+            checkoutStatus: input.session.status ?? null,
+            paymentStatus: input.session.payment_status ?? null,
+            subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(input.session)),
+            invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(input.session)),
+            ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+            updatedAt: now,
+          },
+          lastFulfillmentError: routerFailure,
+        };
 
     const update = await input.supabase
       .from('payment_orders')
