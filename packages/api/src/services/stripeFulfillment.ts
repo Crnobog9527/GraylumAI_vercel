@@ -117,6 +117,10 @@ function maskKnownIdentifiers(message: string | null | undefined) {
       (value) => maskIdentifier(value) ?? value,
     )
     .replace(
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+      '[masked-email]',
+    )
+    .replace(
       /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
       (value) => maskIdentifier(value) ?? value,
     );
@@ -255,6 +259,48 @@ type PaidMembershipCheckoutFulfillmentResult = {
   subscriptionId: string | null;
 };
 
+function summarizeFulfillmentAuditError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return {
+      name: null,
+      stage: null,
+      code: null,
+      message: typeof error === 'string' ? maskKnownIdentifiers(error.slice(0, 240)) : null,
+    };
+  }
+
+  const errorRecord = error as {
+    name?: unknown;
+    stage?: unknown;
+    code?: unknown;
+    message?: unknown;
+  };
+
+  return {
+    name: typeof errorRecord.name === 'string' ? errorRecord.name : null,
+    stage: typeof errorRecord.stage === 'string' ? errorRecord.stage : null,
+    code: typeof errorRecord.code === 'string' ? errorRecord.code : null,
+    message: typeof errorRecord.message === 'string'
+      ? maskKnownIdentifiers(errorRecord.message.slice(0, 240))
+      : null,
+  };
+}
+
+function buildInvoiceResolutionAudit(resolution: PaidCheckoutInvoiceResolution) {
+  return {
+    sessionInvoicePresent: Boolean(resolution.sessionInvoiceId || resolution.sessionInvoiceStatus),
+    sessionInvoiceId: maskIdentifier(resolution.sessionInvoiceId),
+    sessionInvoiceStatus: resolution.sessionInvoiceStatus,
+    latestInvoicePresent: Boolean(resolution.latestInvoiceId || resolution.latestInvoiceStatus),
+    latestInvoiceId: maskIdentifier(resolution.latestInvoiceId),
+    latestInvoiceStatus: resolution.latestInvoiceStatus,
+    invoiceListCount: resolution.invoiceListCount,
+    invoiceListStatuses: resolution.invoiceListStatuses,
+    paidInvoiceFound: Boolean(resolution.invoice?.id),
+    reason: resolution.reason,
+  };
+}
+
 async function resolvePaidCheckoutInvoice(input: {
   stripe: ReturnType<typeof getStripeClient>;
   session: Stripe.Checkout.Session;
@@ -351,6 +397,106 @@ async function resolvePaidCheckoutInvoice(input: {
   }
 }
 
+async function recordCheckoutFulfillmentAudit(input: {
+  supabase: SupabaseLikeClient;
+  session: Stripe.Checkout.Session;
+  subscriptionId?: string | null;
+  stage: string;
+  reason: string | null;
+  status?: 'blocked' | 'failed';
+  resolution?: PaidCheckoutInvoiceResolution | null;
+  error?: unknown;
+  now?: string;
+}) {
+  try {
+    const lookup = await input.supabase
+      .from('payment_orders')
+      .select('id, metadata')
+      .eq('stripe_checkout_session_id', input.session.id)
+      .maybeSingle();
+
+    if (lookup.error) {
+      logger.error('billing', 'checkout_fulfillment_audit_write_failed', {
+        stage: input.stage,
+        reason: input.reason,
+        auditStage: 'lookup',
+        checkoutSessionId: maskIdentifier(input.session.id),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        supabaseError: summarizeSupabaseError(lookup.error),
+      });
+      return;
+    }
+
+    if (!lookup.data?.id) {
+      logger.warn('billing', 'checkout_fulfillment_audit_order_missing', {
+        stage: input.stage,
+        reason: input.reason,
+        checkoutSessionId: maskIdentifier(input.session.id),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+      });
+      return;
+    }
+
+    const now = input.now ?? new Date().toISOString();
+    const errorSummary = summarizeFulfillmentAuditError(input.error);
+    const invoiceResolutionAudit = input.resolution
+      ? buildInvoiceResolutionAudit(input.resolution)
+      : undefined;
+    const metadata = {
+      ...asRecord(lookup.data.metadata),
+      ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+      syncCheckoutSessionFulfillment: {
+        status: input.status ?? 'failed',
+        stage: input.stage,
+        reason: input.reason,
+        checkoutStatus: input.session.status ?? null,
+        paymentStatus: input.session.payment_status ?? null,
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+        updatedAt: now,
+      },
+      lastFulfillmentError: {
+        stage: input.stage,
+        reason: input.reason,
+        errorStage: errorSummary.stage,
+        errorName: errorSummary.name,
+        errorCode: errorSummary.code,
+        message: errorSummary.message,
+        updatedAt: now,
+      },
+    };
+
+    const update = await input.supabase
+      .from('payment_orders')
+      .update({
+        metadata,
+        updated_at: now,
+      })
+      .eq('id', lookup.data.id);
+
+    if (update.error) {
+      logger.error('billing', 'checkout_fulfillment_audit_write_failed', {
+        stage: input.stage,
+        reason: input.reason,
+        auditStage: 'update',
+        checkoutSessionId: maskIdentifier(input.session.id),
+        subscriptionId: maskIdentifier(input.subscriptionId),
+        orderId: maskIdentifier(lookup.data.id),
+        supabaseError: summarizeSupabaseError(update.error),
+      });
+    }
+  } catch (auditError) {
+    logger.error('billing', 'checkout_fulfillment_audit_write_failed', {
+      stage: input.stage,
+      reason: input.reason,
+      auditStage: 'unexpected',
+      checkoutSessionId: maskIdentifier(input.session.id),
+      subscriptionId: maskIdentifier(input.subscriptionId),
+      error: summarizeFulfillmentAuditError(auditError),
+    });
+  }
+}
+
 async function recordCheckoutFulfillmentFailure(input: {
   supabase: SupabaseLikeClient;
   session: Stripe.Checkout.Session;
@@ -358,80 +504,37 @@ async function recordCheckoutFulfillmentFailure(input: {
   resolution: PaidCheckoutInvoiceResolution;
   now?: string;
 }) {
-  const lookup = await input.supabase
-    .from('payment_orders')
-    .select('id, metadata')
-    .eq('stripe_checkout_session_id', input.session.id)
-    .maybeSingle();
+  await recordCheckoutFulfillmentAudit({
+    supabase: input.supabase,
+    session: input.session,
+    subscriptionId: input.subscriptionId,
+    stage: 'checkout_paid_invoice_resolution',
+    reason: input.resolution.reason,
+    status: 'blocked',
+    resolution: input.resolution,
+    now: input.now,
+  });
+}
 
-  if (lookup.error) {
-    throwFulfillmentError(
-      'checkout_fulfillment_audit_lookup',
-      STRIPE_FULFILLMENT_ERRORS.checkoutOrderLookup,
-      lookup.error,
-      {
-        checkoutSessionId: maskIdentifier(input.session.id),
-        subscriptionId: maskIdentifier(input.subscriptionId),
-      },
-    );
-  }
-
-  if (!lookup.data?.id) {
-    throwFulfillmentError(
-      'checkout_fulfillment_audit_lookup',
-      STRIPE_FULFILLMENT_ERRORS.checkoutOrderLookup,
-      new Error('checkout payment order missing for fulfillment audit'),
-      {
-        checkoutSessionId: maskIdentifier(input.session.id),
-        subscriptionId: maskIdentifier(input.subscriptionId),
-      },
-    );
-  }
-
-  const now = input.now ?? new Date().toISOString();
-  const metadata = {
-    ...asRecord(lookup.data.metadata),
-    syncCheckoutSessionFulfillment: {
-      status: 'blocked',
-      reason: input.resolution.reason,
-      checkoutStatus: input.session.status ?? null,
-      paymentStatus: input.session.payment_status ?? null,
-      subscriptionId: input.subscriptionId,
-      sessionInvoiceId: input.resolution.sessionInvoiceId,
-      sessionInvoiceStatus: input.resolution.sessionInvoiceStatus,
-      latestInvoiceId: input.resolution.latestInvoiceId,
-      latestInvoiceStatus: input.resolution.latestInvoiceStatus,
-      invoiceListCount: input.resolution.invoiceListCount,
-      invoiceListStatuses: input.resolution.invoiceListStatuses,
-      updatedAt: now,
-    },
-    lastFulfillmentError: {
-      stage: 'paid_membership_checkout_invoice_resolution',
-      reason: input.resolution.reason,
-      updatedAt: now,
-    },
-  };
-
-  const update = await input.supabase
-    .from('payment_orders')
-    .update({
-      metadata,
-      updated_at: now,
-    })
-    .eq('id', lookup.data.id);
-
-  if (update.error) {
-    throwFulfillmentError(
-      'checkout_fulfillment_audit_update',
-      STRIPE_FULFILLMENT_ERRORS.checkoutOrderUpdate,
-      update.error,
-      {
-        checkoutSessionId: maskIdentifier(input.session.id),
-        subscriptionId: maskIdentifier(input.subscriptionId),
-        orderId: maskIdentifier(lookup.data.id),
-      },
-    );
-  }
+async function recordCheckoutFulfillmentException(input: {
+  supabase: SupabaseLikeClient;
+  session: Stripe.Checkout.Session;
+  subscriptionId?: string | null;
+  stage: string;
+  reason: string;
+  error: unknown;
+  resolution?: PaidCheckoutInvoiceResolution | null;
+}) {
+  await recordCheckoutFulfillmentAudit({
+    supabase: input.supabase,
+    session: input.session,
+    subscriptionId: input.subscriptionId,
+    stage: input.stage,
+    reason: input.reason,
+    status: 'failed',
+    error: input.error,
+    resolution: input.resolution,
+  });
 }
 
 function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
@@ -1709,7 +1812,15 @@ export async function fulfillMembershipInvoice(
   }
 
   if (!result?.fulfilledAt) {
-    throw new Error(STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt);
+    throwFulfillmentError(
+      'fulfill_membership_invoice_missing_fulfilled_at',
+      STRIPE_FULFILLMENT_ERRORS.missingMembershipFulfilledAt,
+      new Error('membership invoice fulfillment returned no fulfilled_at'),
+      {
+        invoiceId: maskIdentifier(invoiceId),
+        subscriptionId: maskIdentifier(subscriptionId),
+      },
+    );
   }
 
   await backfillCheckoutOrderFulfillment(supabase, subscriptionId, result.fulfilledAt);
@@ -1731,6 +1842,14 @@ export async function fulfillPaidMembershipCheckoutSession(
 
   const subscriptionId = getCheckoutSessionSubscriptionId(session);
   if (!subscriptionId) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId: null,
+      stage: 'checkout_subscription_parse',
+      reason: 'checkout_subscription_missing',
+      error: new Error('checkout session subscription id missing'),
+    });
     throwFulfillmentError(
       'checkout_subscription_parse',
       STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionMissing,
@@ -1753,6 +1872,14 @@ export async function fulfillPaidMembershipCheckoutSession(
       });
     }
   } catch (error) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'checkout_subscription_lookup',
+      reason: 'subscription_retrieve_failed',
+      error,
+    });
     throwFulfillmentError(
       'checkout_subscription_lookup',
       STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionLookup,
@@ -1765,6 +1892,14 @@ export async function fulfillPaidMembershipCheckoutSession(
   }
 
   if (!subscription) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'checkout_subscription_lookup',
+      reason: 'subscription_unavailable',
+      error: new Error('Stripe subscription unavailable'),
+    });
     throwFulfillmentError(
       'checkout_subscription_lookup',
       STRIPE_FULFILLMENT_ERRORS.checkoutSubscriptionLookup,
@@ -1776,14 +1911,39 @@ export async function fulfillPaidMembershipCheckoutSession(
     );
   }
 
-  await syncSubscriptionState(supabase, subscription);
+  try {
+    await syncSubscriptionState(supabase, subscription);
+  } catch (error) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'sync_subscription_state',
+      reason: 'subscription_state_sync_failed',
+      error,
+    });
+    throw error;
+  }
 
-  const invoiceResolution = await resolvePaidCheckoutInvoice({
-    stripe,
-    session,
-    subscription,
-    subscriptionId,
-  });
+  let invoiceResolution: PaidCheckoutInvoiceResolution;
+  try {
+    invoiceResolution = await resolvePaidCheckoutInvoice({
+      stripe,
+      session,
+      subscription,
+      subscriptionId,
+    });
+  } catch (error) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'invoice_resolution_fallback',
+      reason: 'invoice_resolution_failed',
+      error,
+    });
+    throw error;
+  }
   const paidInvoice = invoiceResolution.invoice;
 
   if (!paidInvoice) {
@@ -1824,7 +1984,20 @@ export async function fulfillPaidMembershipCheckoutSession(
     );
   }
 
-  await fulfillMembershipInvoice(supabase, paidInvoice);
+  try {
+    await fulfillMembershipInvoice(supabase, paidInvoice);
+  } catch (error) {
+    await recordCheckoutFulfillmentException({
+      supabase,
+      session,
+      subscriptionId,
+      stage: 'fulfill_membership_invoice',
+      reason: 'membership_invoice_fulfillment_failed',
+      error,
+      resolution: invoiceResolution,
+    });
+    throw error;
+  }
 
   return {
     fulfilled: true,

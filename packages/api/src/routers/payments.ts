@@ -138,6 +138,10 @@ function maskKnownIdentifiers(message: string | null | undefined) {
       (value) => maskIdentifier(value) ?? value,
     )
     .replace(
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+      '[masked-email]',
+    )
+    .replace(
       /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
       (value) => maskIdentifier(value) ?? value,
     );
@@ -286,6 +290,149 @@ function logSyncCheckoutStageFailure(
     ...extra,
     error: summarizePaymentError(error),
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function getAuditString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' ? maskKnownIdentifiers(value.slice(0, 160)) : null;
+}
+
+function getAuditNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getAuditStringArray(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => maskKnownIdentifiers(item.slice(0, 80)) ?? item.slice(0, 80));
+}
+
+function buildSyncCheckoutInvoiceResolutionAudit(error: unknown) {
+  const summary = summarizePaymentError(error);
+  const safeContext = asRecord(summary.safeContext);
+  const hasResolutionEvidence = [
+    'sessionInvoiceId',
+    'sessionInvoiceStatus',
+    'latestInvoiceId',
+    'latestInvoiceStatus',
+    'invoiceListCount',
+    'invoiceListStatuses',
+  ].some((key) => safeContext[key] !== undefined && safeContext[key] !== null);
+
+  if (!hasResolutionEvidence) {
+    return null;
+  }
+
+  return {
+    sessionInvoicePresent: Boolean(safeContext.sessionInvoiceId || safeContext.sessionInvoiceStatus),
+    sessionInvoiceId: getAuditString(safeContext, 'sessionInvoiceId'),
+    sessionInvoiceStatus: getAuditString(safeContext, 'sessionInvoiceStatus'),
+    latestInvoicePresent: Boolean(safeContext.latestInvoiceId || safeContext.latestInvoiceStatus),
+    latestInvoiceId: getAuditString(safeContext, 'latestInvoiceId'),
+    latestInvoiceStatus: getAuditString(safeContext, 'latestInvoiceStatus'),
+    invoiceListCount: getAuditNumber(safeContext, 'invoiceListCount') ?? 0,
+    invoiceListStatuses: getAuditStringArray(safeContext, 'invoiceListStatuses'),
+    paidInvoiceFound: false,
+    reason: getAuditString(safeContext, 'reason') ?? summary.stage ?? summary.code ?? null,
+  };
+}
+
+async function recordSyncCheckoutFailureAudit(input: {
+  supabase: any;
+  session: any;
+  syncInput: z.infer<typeof syncCheckoutInput>;
+  stage: string;
+  error: unknown;
+}) {
+  try {
+    const now = new Date().toISOString();
+    const errorSummary = summarizePaymentError(input.error);
+    const invoiceResolutionAudit = buildSyncCheckoutInvoiceResolutionAudit(input.error);
+    const reason = errorSummary.stage ?? errorSummary.code ?? errorSummary.message ?? 'sync_checkout_failed';
+
+    const lookup = await input.supabase
+      .from('payment_orders')
+      .select('id, metadata')
+      .eq('stripe_checkout_session_id', input.session.id)
+      .maybeSingle();
+
+    if (lookup.error || !lookup.data?.id) {
+      logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+        stage: input.stage,
+        auditStage: 'lookup',
+        checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+        reason,
+        supabaseError: lookup.error ? summarizePaymentError(lookup.error) : null,
+        orderFound: Boolean(lookup.data?.id),
+      });
+      return;
+    }
+
+    const metadata = {
+      ...asRecord(lookup.data.metadata),
+      ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+      syncCheckoutSessionFulfillment: {
+        status: 'failed',
+        stage: input.stage,
+        reason,
+        checkoutStatus: input.session.status ?? null,
+        paymentStatus: input.session.payment_status ?? null,
+        subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(input.session)),
+        invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(input.session)),
+        ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+        updatedAt: now,
+      },
+      lastFulfillmentError: {
+        stage: input.stage,
+        reason,
+        errorStage: errorSummary.stage,
+        errorName: errorSummary.name,
+        errorType: errorSummary.type,
+        errorCode: errorSummary.code,
+        statusCode: errorSummary.statusCode,
+        message: errorSummary.message,
+        updatedAt: now,
+      },
+    };
+
+    const update = await input.supabase
+      .from('payment_orders')
+      .update({
+        metadata,
+        updated_at: now,
+      })
+      .eq('id', lookup.data.id);
+
+    if (update.error) {
+      logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+        stage: input.stage,
+        auditStage: 'update',
+        checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+        orderId: maskIdentifier(lookup.data.id),
+        reason,
+        supabaseError: summarizePaymentError(update.error),
+      });
+    }
+  } catch (auditError) {
+    logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+      stage: input.stage,
+      auditStage: 'unexpected',
+      checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+      error: summarizePaymentError(auditError),
+    });
+  }
 }
 
 function toCheckoutUnavailableError() {
@@ -1366,6 +1513,13 @@ export const paymentsRouter = router({
         if (error instanceof TRPCError) {
           throw error;
         }
+        await recordSyncCheckoutFailureAudit({
+          supabase: ctx.supabaseAdmin,
+          session,
+          syncInput: input,
+          stage: syncStage,
+          error,
+        });
         logSyncCheckoutStageFailure(syncStage, input, error, syncStageContext);
         throw createPaymentOperationError('同步支付会话', error);
       }

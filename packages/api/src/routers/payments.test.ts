@@ -2685,9 +2685,16 @@ describe('paymentsRouter error sanitization', () => {
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
     vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
-      Object.assign(new Error('Failed to fulfill membership invoice'), {
+      Object.assign(new Error('Failed to fulfill membership invoice for user@example.com in cs_test_sync_rpc_failure'), {
         stage: 'fulfill_membership_invoice_rpc',
         safeContext: {
+          sessionInvoiceId: 'in_test_...ailure',
+          sessionInvoiceStatus: 'paid',
+          latestInvoiceId: 'in_test_...ailure',
+          latestInvoiceStatus: 'paid',
+          invoiceListCount: 1,
+          invoiceListStatuses: ['paid'],
+          reason: 'membership_invoice_fulfillment_failed',
           invoiceId: 'in_test_...ailure',
           subscriptionId: 'sub_test...ailure',
           supabaseError: { code: 'P0001', message: 'subscription order not found' },
@@ -2715,13 +2722,45 @@ describe('paymentsRouter error sanitization', () => {
         throw new Error(`Unexpected user table ${table}`);
       },
     };
+    const paymentOrderUpdates: Array<Record<string, any>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: 'order-sync-rpc-failure',
+                  metadata: {
+                    source: 'checkout.session.sync',
+                  },
+                },
+                error: null,
+              });
+            },
+            update(payload: Record<string, any>) {
+              paymentOrderUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
     const caller = createProtectedCaller({
       supabase: userSupabase,
-      supabaseAdmin: {
-        from(table: string) {
-          throw new Error(`Unexpected admin table ${table}`);
-        },
-      },
+      supabaseAdmin: adminSupabase,
     });
 
     await expect(
@@ -2746,5 +2785,40 @@ describe('paymentsRouter error sanitization', () => {
         }),
       }),
     );
+    expect(paymentOrderUpdates).toHaveLength(1);
+    expect(paymentOrderUpdates[0].metadata).toMatchObject({
+      source: 'checkout.session.sync',
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: true,
+        sessionInvoiceStatus: 'paid',
+        latestInvoicePresent: true,
+        latestInvoiceStatus: 'paid',
+        invoiceListCount: 1,
+        invoiceListStatuses: ['paid'],
+        paidInvoiceFound: false,
+        reason: 'membership_invoice_fulfillment_failed',
+      }),
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'failed',
+        stage: 'fulfill_paid_membership_checkout_session',
+        reason: 'fulfill_membership_invoice_rpc',
+        checkoutStatus: 'complete',
+        paymentStatus: 'paid',
+        subscriptionId: 'sub_test...ailure',
+        invoiceId: 'in_test_...ailure',
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        reason: 'fulfill_membership_invoice_rpc',
+        errorStage: 'fulfill_membership_invoice_rpc',
+        message: expect.stringContaining('[masked-email]'),
+      }),
+    });
+    const metadataJson = JSON.stringify(paymentOrderUpdates[0].metadata);
+    expect(metadataJson).not.toContain('cs_test_sync_rpc_failure');
+    expect(metadataJson).not.toContain('sub_test_rpc_failure');
+    expect(metadataJson).not.toContain('in_test_rpc_failure');
+    expect(metadataJson).not.toContain('cus_test_sync');
+    expect(metadataJson).not.toContain('user@example.com');
   });
 });

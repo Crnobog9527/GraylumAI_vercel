@@ -897,19 +897,35 @@ describe('stripe fulfillment helpers', () => {
 
     expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
       source: 'checkout.session.sync',
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: false,
+        latestInvoicePresent: false,
+        invoiceListCount: 0,
+        invoiceListStatuses: [],
+        paidInvoiceFound: false,
+        reason: 'paid_invoice_missing',
+      }),
       syncCheckoutSessionFulfillment: expect.objectContaining({
         status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
         reason: 'paid_invoice_missing',
         checkoutStatus: 'complete',
         paymentStatus: 'paid',
-        subscriptionId: 'sub_missing_paid_invoice',
-        invoiceListCount: 0,
+        subscriptionId: expect.stringContaining('...'),
+        invoiceResolutionAudit: expect.objectContaining({
+          invoiceListCount: 0,
+          paidInvoiceFound: false,
+        }),
       }),
       lastFulfillmentError: expect.objectContaining({
-        stage: 'paid_membership_checkout_invoice_resolution',
+        stage: 'checkout_paid_invoice_resolution',
         reason: 'paid_invoice_missing',
       }),
     });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_missing_paid_invoice');
+    expect(metadataJson).not.toContain('cs_test_missing_paid_invoice');
+    expect(metadataJson).not.toContain('cus_missing_paid_invoice');
     expect(supabase.tables.user_subscriptions).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
@@ -1004,20 +1020,147 @@ describe('stripe fulfillment helpers', () => {
     });
 
     expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: true,
+        sessionInvoiceId: expect.stringContaining('...'),
+        sessionInvoiceStatus: 'open',
+        latestInvoicePresent: false,
+        invoiceListCount: 1,
+        invoiceListStatuses: ['open'],
+        paidInvoiceFound: false,
+        reason: 'paid_invoice_unpaid',
+      }),
       syncCheckoutSessionFulfillment: expect.objectContaining({
         status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
         reason: 'paid_invoice_unpaid',
-        sessionInvoiceId: 'in_unpaid_invoice',
-        sessionInvoiceStatus: 'open',
-        invoiceListStatuses: ['open'],
+        subscriptionId: expect.stringContaining('...'),
+        invoiceResolutionAudit: expect.objectContaining({
+          sessionInvoiceStatus: 'open',
+          invoiceListStatuses: ['open'],
+        }),
       }),
       lastFulfillmentError: expect.objectContaining({
+        stage: 'checkout_paid_invoice_resolution',
         reason: 'paid_invoice_unpaid',
       }),
     });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_unpaid_invoice');
+    expect(metadataJson).not.toContain('in_unpaid_invoice');
+    expect(metadataJson).not.toContain('cus_unpaid_invoice');
     expect(supabase.tables.user_subscriptions).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('records safe checkout audit metadata when invoice fulfillment fails', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-rpc-failure-audit',
+        user_id: 'user-rpc-failure-audit',
+        item_id: 'plan-missing',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_rpc_failure_audit',
+        stripe_checkout_session_id: 'cs_test_rpc_failure_audit',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_rpc_failure_audit',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {},
+      }],
+      profiles: [{
+        id: 'user-rpc-failure-audit',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_rpc_failure_audit',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_rpc_failure_audit',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_rpc_failure_audit',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_rpc_failure_audit',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: paidInvoice,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+    };
+    const session = {
+      id: 'cs_test_rpc_failure_audit',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-rpc-failure-audit',
+      metadata: {
+        userId: 'user-rpc-failure-audit',
+        itemType: 'membership_plan',
+        itemId: 'plan-missing',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_rpc_failure_audit',
+      subscription,
+      invoice: paidInvoice,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).rejects.toMatchObject({
+      stage: 'subscription_membership_plan_missing',
+    });
+
+    expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'failed',
+        stage: 'fulfill_membership_invoice',
+        reason: 'membership_invoice_fulfillment_failed',
+        subscriptionId: expect.stringContaining('...'),
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'fulfill_membership_invoice',
+        reason: 'membership_invoice_fulfillment_failed',
+        errorStage: 'subscription_membership_plan_missing',
+      }),
+      invoiceResolutionAudit: expect.objectContaining({
+        paidInvoiceFound: true,
+      }),
+    });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_rpc_failure_audit');
+    expect(metadataJson).not.toContain('in_rpc_failure_audit');
+    expect(metadataJson).not.toContain('cus_rpc_failure_audit');
+    expect(metadataJson).not.toContain('cs_test_rpc_failure_audit');
   });
 
   it('preserves completed fulfilled checkout orders during paid session replay', async () => {
