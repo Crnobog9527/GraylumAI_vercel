@@ -3763,3 +3763,69 @@ Latest-head Codex review：
 - 未 PR10。
 - 未关闭 issue #225。
 - 未关闭 PR #251。
+
+## PR258 staging DB posture fix for PR255 fulfillment
+
+- 时间：2026-07-02 16:37 CST。
+- 当前阶段：PR258 staging DB posture source-only PR gate。
+- Base：`staging` at `6bcbba9a24c72f6285a067634d0783fc5c39df78`。
+- Scope：forward-only DB migration source + static/SQL smoke tests only；no migration execution；no staging SQL execution；no DB write；no `payments.syncCheckoutSession` retry。
+
+### Failure context
+
+- PR257 diagnostic runtime verification passed, but PR255 fulfillment remained blocked.
+- Owner audit packet identified deterministic DB posture blockers: `service_role` lacked `profiles.membership_level` update posture and lacked `subscription_credit_grants` read/write posture.
+- The observed target paid order remained `pending` / `paid` / `fulfilled_at=null`; `user_subscriptions=0`; `subscription_credit_grants=0`; only the existing opening-grant `credit_transactions=1` row was present.
+- PR251 remains separate and only covers profile bootstrap grants; PR258 does not expand or close PR251.
+
+### Fix design
+
+- Added forward-only migration `0047_subscription_fulfillment_service_role_grants.sql`.
+- `profiles` repair grants `service_role` only `SELECT (id)` and `UPDATE (membership_level)`.
+- `profiles.credits` remains excluded from direct service-role update; credits continue through `atomic_apply_credit_ledger_entry`.
+- `profiles.updated_at` is not granted or referenced because the current fulfillment code path does not write it and the local schema does not declare it as a stable profile column.
+- `subscription_credit_grants` grants are column-scoped: `SELECT` / `INSERT` for idempotency and grant rows, and `UPDATE (status, updated_at, metadata)` only for existing refund/reversal lifecycle metadata.
+- `payment_orders` and `user_subscriptions` are conditionally repaired only if an environment is missing the established 0034 service-role `SELECT, INSERT, UPDATE` posture.
+- `credit_transactions` direct `INSERT` remains closed; service-role receives only semantic `UPDATE` columns for RPC-created ledger rows plus required read columns.
+- `atomic_apply_credit_ledger_entry` remains service-role executable only; `PUBLIC`, `anon`, and `authenticated` execute privileges are revoked.
+
+### Changed files
+
+- `packages/db/migrations/0047_subscription_fulfillment_service_role_grants.sql`
+- `packages/db/tests/subscription_fulfillment_service_role_grants.sql`
+- `packages/api/src/subscriptionFulfillmentDbPostureMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted static migration test：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/subscriptionFulfillmentDbPostureMigration.test.ts` passed；1 file / 6 tests。
+- Full API test：`corepack pnpm test:api` passed；50 files / 666 tests。
+- Whitespace check：`git diff --check` passed。
+- `corepack pnpm lint` and `CI=true corepack pnpm lint` were blocked in `web#lint` before lint rules ran because the turbo child process invoked a separate pnpm runtime and failed frozen install with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; no ESLint rule failure was produced.
+- SQL smoke file was added as owner-gated rollback-only source coverage, but was not run.
+- Migration was not executed.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual functional write test。
+- 未 Phase H。
+- 未 PR10。
+- 未执行 migration。
+- 未执行 staging SQL。
+- 未执行 DB write。
+- 未手动插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未请求 owner cookie / token / session / localStorage / auth header / password。
+- 未 retry `payments.syncCheckoutSession`。
+- 未标记 PR255 pass verification。
+- 未关闭 issue #225。
+- 未关闭 PR #251。
+- 未 merge。
