@@ -68,6 +68,67 @@ REVOKE ALL ON FUNCTION public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TE
 REVOKE ALL ON FUNCTION public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM anon;
 REVOKE ALL ON FUNCTION public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM authenticated;
 
+-- PostgreSQL grants are additive: if a previous staging posture left
+-- service_role with table-level permissions, later column grants would not
+-- narrow that access. Clear the broad service_role surface first, then grant
+-- back only the approved PR258 runtime permissions below.
+REVOKE ALL PRIVILEGES ON TABLE public.profiles FROM service_role;
+REVOKE INSERT (
+  id,
+  email,
+  nickname,
+  role,
+  status,
+  membership_level,
+  credits
+) ON TABLE public.profiles FROM service_role;
+REVOKE UPDATE (
+  membership_level,
+  credits
+) ON TABLE public.profiles FROM service_role;
+
+REVOKE ALL PRIVILEGES ON TABLE public.subscription_credit_grants FROM service_role;
+REVOKE INSERT (
+  id,
+  created_at,
+  updated_at
+) ON TABLE public.subscription_credit_grants FROM service_role;
+REVOKE UPDATE (
+  credits_granted,
+  credit_transaction_id
+) ON TABLE public.subscription_credit_grants FROM service_role;
+
+REVOKE ALL PRIVILEGES ON TABLE public.credit_transactions FROM service_role;
+REVOKE INSERT (
+  user_id,
+  amount,
+  type,
+  description,
+  balance_after,
+  idempotency_key,
+  ledger_type,
+  reason_code,
+  counts_as_spend,
+  source_type,
+  source_id,
+  source_order_id,
+  source_refund_id,
+  grant_period_key,
+  metadata
+) ON TABLE public.credit_transactions FROM service_role;
+REVOKE UPDATE (
+  amount,
+  balance_after
+) ON TABLE public.credit_transactions FROM service_role;
+
+-- payment_orders and user_subscriptions keep the established 0034 runtime
+-- table posture (SELECT/INSERT/UPDATE) because fulfillment code needs it, but
+-- service_role must not retain broader table privileges such as DELETE.
+REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.payment_orders FROM service_role;
+REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.user_subscriptions FROM service_role;
+
+REVOKE ALL ON FUNCTION public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM service_role;
+
 -- PR #255 / subscriptionCreditGrants.ts syncs only the membership level on the
 -- profile. It does not update profiles.updated_at, and it must not directly
 -- update profiles.credits.

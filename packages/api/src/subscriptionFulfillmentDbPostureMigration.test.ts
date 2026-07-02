@@ -96,6 +96,15 @@ function extractColumnGrant(sql: string, privilege: string, table: string) {
     .filter(Boolean);
 }
 
+function expectBefore(sql: string, before: string, after: string) {
+  const beforeIndex = sql.indexOf(before);
+  const afterIndex = sql.indexOf(after);
+
+  expect(beforeIndex).toBeGreaterThanOrEqual(0);
+  expect(afterIndex).toBeGreaterThanOrEqual(0);
+  expect(beforeIndex).toBeLessThan(afterIndex);
+}
+
 describe('subscription fulfillment service-role grants migration', () => {
   it('is a forward-only grant posture migration without data writes or ledger spoofing', () => {
     const migrationSql = readMigrationSql();
@@ -108,6 +117,39 @@ describe('subscription fulfillment service-role grants migration', () => {
     expect(migrationSql).not.toMatch(/\bDELETE\s+FROM\b/i);
     expect(migrationSql).not.toMatch(/\bschema_migrations\b/i);
     expect(migrationSql).not.toMatch(/\bsupabase_migrations\b/i);
+  });
+
+  it('revokes stale broad service_role grants before re-granting the least-privilege surface', () => {
+    const migrationSql = readMigrationSql();
+    const functionSignature = 'public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT)';
+
+    expectBefore(
+      migrationSql,
+      'REVOKE ALL PRIVILEGES ON TABLE public.profiles FROM service_role;',
+      'GRANT SELECT (id) ON TABLE public.profiles TO service_role;',
+    );
+    expectBefore(
+      migrationSql,
+      'REVOKE ALL PRIVILEGES ON TABLE public.subscription_credit_grants FROM service_role;',
+      'GRANT SELECT (\n  id,\n  user_id,\n  membership_plan_id,',
+    );
+    expectBefore(
+      migrationSql,
+      'REVOKE ALL PRIVILEGES ON TABLE public.credit_transactions FROM service_role;',
+      'GRANT SELECT (\n  id,\n  amount,\n  user_id,',
+    );
+    expectBefore(
+      migrationSql,
+      `REVOKE ALL ON FUNCTION ${functionSignature} FROM service_role;`,
+      `GRANT EXECUTE ON FUNCTION ${functionSignature} TO service_role;`,
+    );
+
+    expect(migrationSql).toContain('REVOKE UPDATE (\n  membership_level,\n  credits\n) ON TABLE public.profiles FROM service_role;');
+    expect(migrationSql).toContain('REVOKE UPDATE (\n  credits_granted,\n  credit_transaction_id\n) ON TABLE public.subscription_credit_grants FROM service_role;');
+    expect(migrationSql).toContain('REVOKE ALL PRIVILEGES ON TABLE public.credit_transactions FROM service_role;');
+    expect(migrationSql).toContain('REVOKE UPDATE (\n  amount,\n  balance_after\n) ON TABLE public.credit_transactions FROM service_role;');
+    expect(migrationSql).toContain('REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.payment_orders FROM service_role;');
+    expect(migrationSql).toContain('REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.user_subscriptions FROM service_role;');
   });
 
   it('grants service_role only the profile membership update surface required by fulfillment', () => {
@@ -188,6 +230,9 @@ describe('subscription fulfillment service-role grants migration', () => {
 
     expect(smokeSql).toContain('Smoke test for 0047_subscription_fulfillment_service_role_grants.sql');
     expect(smokeSql).toContain('must not be run by Codex in this gate');
+    expect(smokeSql).toContain("service_role retained table-level INSERT on profiles");
+    expect(smokeSql).toContain("service_role retained table-level % on subscription_credit_grants");
+    expect(smokeSql).toContain("service_role retained table-level % on credit_transactions");
     expect(smokeSql).toContain("has_column_privilege('service_role', 'public.profiles', 'membership_level', 'UPDATE')");
     expect(smokeSql).toContain("service_role can directly update profiles.credits");
     expect(smokeSql).toContain("service_role can directly insert credit_transactions");

@@ -84,6 +84,18 @@ BEGIN
     RAISE EXCEPTION 'service_role can directly update profiles.credits';
   END IF;
 
+  IF has_table_privilege('service_role', 'public.profiles', 'SELECT') THEN
+    RAISE EXCEPTION 'service_role retained table-level SELECT on profiles';
+  END IF;
+
+  IF has_table_privilege('service_role', 'public.profiles', 'INSERT') THEN
+    RAISE EXCEPTION 'service_role retained table-level INSERT on profiles';
+  END IF;
+
+  IF has_table_privilege('service_role', 'public.profiles', 'UPDATE') THEN
+    RAISE EXCEPTION 'service_role retained table-level UPDATE on profiles';
+  END IF;
+
   IF has_column_privilege('anon', 'public.profiles', 'membership_level', 'UPDATE')
     OR has_column_privilege('authenticated', 'public.profiles', 'membership_level', 'UPDATE') THEN
     RAISE EXCEPTION 'client role can update profiles.membership_level';
@@ -104,6 +116,11 @@ BEGIN
     OR NOT has_table_privilege('service_role', 'public.user_subscriptions', 'INSERT')
     OR NOT has_table_privilege('service_role', 'public.user_subscriptions', 'UPDATE') THEN
     RAISE EXCEPTION 'service_role user_subscriptions SELECT/INSERT/UPDATE posture is incomplete';
+  END IF;
+
+  IF has_table_privilege('service_role', 'public.payment_orders', 'DELETE')
+    OR has_table_privilege('service_role', 'public.user_subscriptions', 'DELETE') THEN
+    RAISE EXCEPTION 'service_role retained payment/subscription DELETE posture';
   END IF;
 
   FOREACH v_column IN ARRAY v_subscription_credit_grant_select_columns LOOP
@@ -133,6 +150,16 @@ BEGIN
   FOREACH v_column IN ARRAY v_credit_transaction_update_columns LOOP
     IF NOT has_column_privilege('service_role', 'public.credit_transactions', v_column, 'UPDATE') THEN
       RAISE EXCEPTION 'service_role cannot update credit_transactions.%', v_column;
+    END IF;
+  END LOOP;
+
+  FOREACH v_column IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE'] LOOP
+    IF has_table_privilege('service_role', 'public.subscription_credit_grants', v_column) THEN
+      RAISE EXCEPTION 'service_role retained table-level % on subscription_credit_grants', v_column;
+    END IF;
+
+    IF has_table_privilege('service_role', 'public.credit_transactions', v_column) THEN
+      RAISE EXCEPTION 'service_role retained table-level % on credit_transactions', v_column;
     END IF;
   END LOOP;
 
