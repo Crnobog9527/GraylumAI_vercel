@@ -19,6 +19,7 @@ const SUBSCRIPTION_CREDIT_GRANT_SELECT_COLUMNS = [
   'period_index',
   'credits_granted',
   'status',
+  'idempotency_key',
   'credit_transaction_id',
   'metadata',
 ];

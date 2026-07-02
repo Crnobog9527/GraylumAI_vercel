@@ -26,6 +26,7 @@ DECLARE
     'period_index',
     'credits_granted',
     'status',
+    'idempotency_key',
     'credit_transaction_id',
     'metadata'
   ];

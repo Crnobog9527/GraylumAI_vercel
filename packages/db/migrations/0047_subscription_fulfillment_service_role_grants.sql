@@ -110,6 +110,7 @@ GRANT SELECT (
   period_index,
   credits_granted,
   status,
+  idempotency_key,
   credit_transaction_id,
   metadata
 ) ON TABLE public.subscription_credit_grants TO service_role;
