@@ -7,6 +7,27 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+const PROFILE_BOOTSTRAP_SELECT_COLUMNS = [
+  'id',
+  'role',
+  'credits',
+  'status',
+  'nickname',
+  'email',
+  'membership_level',
+  'created_at',
+];
+
+const PROFILE_BOOTSTRAP_INSERT_COLUMNS = [
+  'id',
+  'email',
+  'nickname',
+  'role',
+  'status',
+  'membership_level',
+  'credits',
+];
+
 const SUBSCRIPTION_CREDIT_GRANT_SELECT_COLUMNS = [
   'id',
   'user_id',
@@ -126,7 +147,7 @@ describe('subscription fulfillment service-role grants migration', () => {
     expectBefore(
       migrationSql,
       'REVOKE ALL PRIVILEGES ON TABLE public.profiles FROM service_role;',
-      'GRANT SELECT (id) ON TABLE public.profiles TO service_role;',
+      'GRANT SELECT (\n  id,\n  role,\n  credits,',
     );
     expectBefore(
       migrationSql,
@@ -152,11 +173,22 @@ describe('subscription fulfillment service-role grants migration', () => {
     expect(migrationSql).toContain('REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.user_subscriptions FROM service_role;');
   });
 
-  it('grants service_role only the profile membership update surface required by fulfillment', () => {
+  it('preserves the service_role profile bootstrap surface while restricting direct credit updates', () => {
     const migrationSql = readMigrationSql();
+    const trpcSource = readFileSync(new URL('./trpc.ts', import.meta.url), 'utf8');
 
-    expect(migrationSql).toContain('GRANT SELECT (id) ON TABLE public.profiles TO service_role;');
+    expect(extractColumnGrant(migrationSql, 'SELECT', 'profiles')).toEqual(
+      PROFILE_BOOTSTRAP_SELECT_COLUMNS,
+    );
+    expect(extractColumnGrant(migrationSql, 'INSERT', 'profiles')).toEqual(
+      PROFILE_BOOTSTRAP_INSERT_COLUMNS,
+    );
+    expect(migrationSql).toContain('GRANT DELETE ON TABLE public.profiles TO service_role;');
     expect(migrationSql).toContain('GRANT UPDATE (membership_level) ON TABLE public.profiles TO service_role;');
+    expect(trpcSource).toContain("const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at'");
+    expect(trpcSource).toContain(".from('profiles')\n    .insert({");
+    expect(trpcSource).toContain('await cleanupSafeBootstrapProfile(ctx, userId)');
+    expect(trpcSource).toContain(".eq('credits', 0)");
     expect(migrationSql).not.toMatch(/GRANT\s+UPDATE\s+\([^)]*credits[^)]*\) ON TABLE public\.profiles TO service_role/i);
     expect(migrationSql).not.toMatch(/GRANT\s+UPDATE\s+\([^)]*updated_at[^)]*\) ON TABLE public\.profiles TO service_role/i);
     expect(migrationSql).not.toMatch(/GRANT\s+UPDATE\s+ON TABLE public\.profiles TO service_role/i);
@@ -230,7 +262,8 @@ describe('subscription fulfillment service-role grants migration', () => {
 
     expect(smokeSql).toContain('Smoke test for 0047_subscription_fulfillment_service_role_grants.sql');
     expect(smokeSql).toContain('must not be run by Codex in this gate');
-    expect(smokeSql).toContain("service_role retained table-level INSERT on profiles");
+    expect(smokeSql).toContain("service_role cannot insert profiles.%");
+    expect(smokeSql).toContain("service_role cannot delete guarded bootstrap profiles");
     expect(smokeSql).toContain("service_role retained table-level % on subscription_credit_grants");
     expect(smokeSql).toContain("service_role retained table-level % on credit_transactions");
     expect(smokeSql).toContain("has_column_privilege('service_role', 'public.profiles', 'membership_level', 'UPDATE')");

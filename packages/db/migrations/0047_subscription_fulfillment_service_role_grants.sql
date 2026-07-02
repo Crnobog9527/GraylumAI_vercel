@@ -129,10 +129,31 @@ REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.user_subscriptions 
 
 REVOKE ALL ON FUNCTION public.atomic_apply_credit_ledger_entry(UUID, INTEGER, TEXT, TEXT, TEXT) FROM service_role;
 
--- PR #255 / subscriptionCreditGrants.ts syncs only the membership level on the
--- profile. It does not update profiles.updated_at, and it must not directly
--- update profiles.credits.
-GRANT SELECT (id) ON TABLE public.profiles TO service_role;
+-- PR #256 / ensureProfile still needs service_role profile bootstrap access
+-- after the broad revoke above: column-scoped SELECT for PROFILE_SELECT,
+-- column-scoped INSERT for the safe bootstrap row, and table-level DELETE for
+-- the guarded cleanup path. PR #255 fulfillment additionally needs
+-- UPDATE(membership_level). profiles.credits must not be directly updated.
+GRANT SELECT (
+  id,
+  role,
+  credits,
+  status,
+  nickname,
+  email,
+  membership_level,
+  created_at
+) ON TABLE public.profiles TO service_role;
+GRANT INSERT (
+  id,
+  email,
+  nickname,
+  role,
+  status,
+  membership_level,
+  credits
+) ON TABLE public.profiles TO service_role;
+GRANT DELETE ON TABLE public.profiles TO service_role;
 GRANT UPDATE (membership_level) ON TABLE public.profiles TO service_role;
 
 -- The existing checkout posture migration already grants service_role

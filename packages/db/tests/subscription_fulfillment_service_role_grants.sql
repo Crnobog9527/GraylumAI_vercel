@@ -14,6 +14,25 @@ BEGIN;
 DO $$
 DECLARE
   v_column TEXT;
+  v_profile_select_columns TEXT[] := ARRAY[
+    'id',
+    'role',
+    'credits',
+    'status',
+    'nickname',
+    'email',
+    'membership_level',
+    'created_at'
+  ];
+  v_profile_insert_columns TEXT[] := ARRAY[
+    'id',
+    'email',
+    'nickname',
+    'role',
+    'status',
+    'membership_level',
+    'credits'
+  ];
   v_subscription_credit_grant_select_columns TEXT[] := ARRAY[
     'id',
     'user_id',
@@ -72,8 +91,20 @@ DECLARE
     'metadata'
   ];
 BEGIN
-  IF NOT has_column_privilege('service_role', 'public.profiles', 'id', 'SELECT') THEN
-    RAISE EXCEPTION 'service_role cannot select profiles.id';
+  FOREACH v_column IN ARRAY v_profile_select_columns LOOP
+    IF NOT has_column_privilege('service_role', 'public.profiles', v_column, 'SELECT') THEN
+      RAISE EXCEPTION 'service_role cannot select profiles.%', v_column;
+    END IF;
+  END LOOP;
+
+  FOREACH v_column IN ARRAY v_profile_insert_columns LOOP
+    IF NOT has_column_privilege('service_role', 'public.profiles', v_column, 'INSERT') THEN
+      RAISE EXCEPTION 'service_role cannot insert profiles.%', v_column;
+    END IF;
+  END LOOP;
+
+  IF NOT has_table_privilege('service_role', 'public.profiles', 'DELETE') THEN
+    RAISE EXCEPTION 'service_role cannot delete guarded bootstrap profiles';
   END IF;
 
   IF NOT has_column_privilege('service_role', 'public.profiles', 'membership_level', 'UPDATE') THEN
@@ -94,6 +125,16 @@ BEGIN
 
   IF has_table_privilege('service_role', 'public.profiles', 'UPDATE') THEN
     RAISE EXCEPTION 'service_role retained table-level UPDATE on profiles';
+  END IF;
+
+  IF has_table_privilege('anon', 'public.profiles', 'INSERT')
+    OR has_table_privilege('authenticated', 'public.profiles', 'INSERT') THEN
+    RAISE EXCEPTION 'client role can insert profiles';
+  END IF;
+
+  IF has_table_privilege('anon', 'public.profiles', 'DELETE')
+    OR has_table_privilege('authenticated', 'public.profiles', 'DELETE') THEN
+    RAISE EXCEPTION 'client role can delete profiles';
   END IF;
 
   IF has_column_privilege('anon', 'public.profiles', 'membership_level', 'UPDATE')
