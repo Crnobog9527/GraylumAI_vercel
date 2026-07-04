@@ -2017,11 +2017,20 @@ export async function syncSubscriptionState(
   const currentPeriodEnd = asIsoTimestamp(primaryItem?.current_period_end ?? null);
   const cancelAtPeriodEnd = subscription.cancel_at_period_end ? 'true' : 'false';
 
-  const { data: existingSubscription, error: existingSubscriptionError } = await supabase
+  const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
-    .select('user_id, membership_plan_id')
-    .eq('stripe_subscription_id', subscriptionId)
-    .maybeSingle();
+    .select('id, user_id, membership_plan_id, status, created_at')
+    .eq('stripe_subscription_id', subscriptionId);
+  const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
+    ? existingSubscriptionQuery.order('created_at', { ascending: true })
+    : existingSubscriptionQuery;
+  const limitedExistingSubscriptionQuery = typeof orderedExistingSubscriptionQuery.limit === 'function'
+    ? orderedExistingSubscriptionQuery.limit(10)
+    : orderedExistingSubscriptionQuery;
+  const { data: existingSubscriptionData, error: existingSubscriptionError } =
+    typeof limitedExistingSubscriptionQuery.then === 'function'
+      ? await limitedExistingSubscriptionQuery
+      : await limitedExistingSubscriptionQuery.maybeSingle();
 
   if (existingSubscriptionError) {
     throwFulfillmentError(
@@ -2030,6 +2039,20 @@ export async function syncSubscriptionState(
       existingSubscriptionError,
       { subscriptionId: maskIdentifier(subscriptionId) },
     );
+  }
+
+  const existingSubscriptions = Array.isArray(existingSubscriptionData)
+    ? existingSubscriptionData
+    : existingSubscriptionData
+      ? [existingSubscriptionData]
+      : [];
+  const existingSubscription = existingSubscriptions[0] ?? null;
+  if (existingSubscriptions.length > 1) {
+    logger.warn('billing', 'subscription_state_duplicate_mirror_detected', {
+      subscriptionId: maskIdentifier(subscriptionId),
+      subscriptionCount: existingSubscriptions.length,
+      canonicalSubscriptionId: maskIdentifier(existingSubscription?.id),
+    });
   }
 
   const updateResult = await supabase

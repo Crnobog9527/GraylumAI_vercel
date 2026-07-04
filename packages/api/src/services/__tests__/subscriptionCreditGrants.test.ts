@@ -1304,6 +1304,286 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('converges webhook and return-sync replays onto one invoice-backed checkout order', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-checkout-once',
+        user_id: 'user-checkout-once',
+        item_id: 'plan-gold-yearly-once',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_checkout_once',
+        stripe_checkout_session_id: 'cs_test_checkout_once',
+        stripe_customer_id: 'cus_checkout_once',
+        stripe_price_id: 'price_gold_yearly_once',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-gold-yearly-once',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-checkout-once',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+
+    const input = {
+      amountTotal: 9900,
+      currency: 'usd',
+      invoiceId: 'in_checkout_once',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2027-07-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_checkout_once',
+      subscriptionId: 'sub_checkout_once',
+      now: '2026-07-04T00:00:02.000Z',
+    };
+
+    const first = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+    const replay = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      ...input,
+      now: '2026-07-04T00:00:03.000Z',
+    });
+
+    expect(first).toMatchObject({
+      alreadyFulfilled: false,
+      invoiceOrderId: 'order-checkout-once',
+      grantedCredits: 10,
+    });
+    expect(replay).toMatchObject({
+      alreadyFulfilled: true,
+      invoiceOrderId: 'order-checkout-once',
+      grantedCredits: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.payment_orders).toHaveLength(1);
+    expect(supabase.tables.payment_orders.filter((order) => order.stripe_invoice_id === 'in_checkout_once')).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      id: 'order-checkout-once',
+      stripe_checkout_session_id: 'cs_test_checkout_once',
+      stripe_invoice_id: 'in_checkout_once',
+      stripe_subscription_id: 'sub_checkout_once',
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: '2026-07-04T00:00:02.000Z',
+    });
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      stripe_subscription_id: 'sub_checkout_once',
+      status: 'active',
+      billing_cycle: 'yearly',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    const ledgerDelta = supabase.tables.credit_transactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+    expect(ledgerDelta).toBe(10);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'gold',
+      credits: 110,
+    });
+    expect(supabase.tables.profiles[0].credits - 100).toBe(ledgerDelta);
+  });
+
+  it('updates one subscription mirror across invoices for the same Stripe subscription', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-checkout-subscription-once',
+        user_id: 'user-subscription-once',
+        item_id: 'plan-pro-monthly-once',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_subscription_once',
+        stripe_checkout_session_id: 'cs_test_subscription_once',
+        stripe_customer_id: 'cus_subscription_once',
+        stripe_price_id: 'price_pro_monthly_once',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-pro-monthly-once',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-subscription-once',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_subscription_once_1',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2026-08-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_subscription_once',
+      subscriptionId: 'sub_subscription_once',
+      now: '2026-07-04T00:00:02.000Z',
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_subscription_once_2',
+      invoiceCreatedAt: '2026-08-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-08-04T00:00:00.000Z',
+      periodEnd: '2026-09-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_subscription_once',
+      subscriptionId: 'sub_subscription_once',
+      now: '2026-08-04T00:00:02.000Z',
+    });
+
+    expect(supabase.tables.payment_orders.filter((order) => order.stripe_invoice_id)).toHaveLength(2);
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      stripe_subscription_id: 'sub_subscription_once',
+      status: 'active',
+      metadata: expect.objectContaining({
+        lastInvoiceId: 'in_subscription_once_2',
+      }),
+    });
+  });
+
+  it('does not expand existing duplicate invoice or subscription mirror state', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [
+        {
+          id: 'order-checkout-duplicate-state',
+          user_id: 'user-duplicate-state',
+          item_id: 'plan-gold-duplicate-state',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_subscription_id: 'sub_duplicate_state',
+          stripe_checkout_session_id: 'cs_test_duplicate_state',
+          stripe_customer_id: 'cus_duplicate_state',
+          stripe_price_id: 'price_gold_duplicate_state',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-07-04T00:00:02.000Z',
+          created_at: '2026-07-04T00:00:00.000Z',
+        },
+        {
+          id: 'order-invoice-duplicate-state-a',
+          user_id: 'user-duplicate-state',
+          item_id: 'plan-gold-duplicate-state',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_invoice_id: 'in_duplicate_state',
+          stripe_subscription_id: 'sub_duplicate_state',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-07-04T00:00:02.000Z',
+          created_at: '2026-07-04T00:00:01.000Z',
+        },
+        {
+          id: 'order-invoice-duplicate-state-b',
+          user_id: 'user-duplicate-state',
+          item_id: 'plan-gold-duplicate-state',
+          item_type: 'membership_plan',
+          billing_cycle: 'yearly',
+          stripe_invoice_id: 'in_duplicate_state',
+          stripe_subscription_id: 'sub_duplicate_state',
+          status: 'completed',
+          payment_status: 'paid',
+          fulfilled_at: '2026-07-04T00:00:02.500Z',
+          created_at: '2026-07-04T00:00:01.500Z',
+        },
+      ],
+      user_subscriptions: [
+        {
+          id: 'subscription-duplicate-state-a',
+          user_id: 'user-duplicate-state',
+          membership_plan_id: 'plan-gold-duplicate-state',
+          stripe_subscription_id: 'sub_duplicate_state',
+          billing_cycle: 'yearly',
+          status: 'active',
+          created_at: '2026-07-04T00:00:02.000Z',
+        },
+        {
+          id: 'subscription-duplicate-state-b',
+          user_id: 'user-duplicate-state',
+          membership_plan_id: 'plan-gold-duplicate-state',
+          stripe_subscription_id: 'sub_duplicate_state',
+          billing_cycle: 'yearly',
+          status: 'active',
+          created_at: '2026-07-04T00:00:02.500Z',
+        },
+      ],
+      subscription_credit_grants: [{
+        id: 'grant-duplicate-state',
+        user_id: 'user-duplicate-state',
+        membership_plan_id: 'plan-gold-duplicate-state',
+        stripe_subscription_id: 'sub_duplicate_state',
+        stripe_invoice_id: 'in_duplicate_state',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        period_index: 1,
+        credits_granted: 10,
+        credit_transaction_id: 'txn-duplicate-state',
+        status: 'granted',
+      }],
+      credit_transactions: [{
+        id: 'txn-duplicate-state',
+        user_id: 'user-duplicate-state',
+        amount: 10,
+      }],
+      membership_plans: [{
+        id: 'plan-gold-duplicate-state',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-duplicate-state',
+        membership_level: 'gold',
+        credits: 110,
+      }],
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 9900,
+      currency: 'usd',
+      invoiceId: 'in_duplicate_state',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2027-07-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_duplicate_state',
+      subscriptionId: 'sub_duplicate_state',
+      now: '2026-07-04T00:00:04.000Z',
+    });
+
+    expect(result).toMatchObject({
+      alreadyFulfilled: true,
+      grantedCredits: 0,
+      creditTransactionId: null,
+      invoiceOrderId: 'order-invoice-duplicate-state-a',
+    });
+    expect(supabase.tables.payment_orders).toHaveLength(3);
+    expect(supabase.tables.payment_orders.filter((order) => order.stripe_invoice_id === 'in_duplicate_state')).toHaveLength(2);
+    expect(supabase.tables.user_subscriptions).toHaveLength(2);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'gold',
+      credits: 110,
+    });
+  });
+
   it('releases a residual plan-change lock on already fulfilled invoice replay', async () => {
     const supabase = createMockSupabase({
       payment_orders: [

@@ -58,6 +58,7 @@ interface SubscriptionRow {
   current_period_start?: string | null;
   current_period_end?: string | null;
   metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
   updated_at?: string | null;
 }
 
@@ -409,12 +410,46 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
   return status === 'active' || status === 'trialing';
 }
 
+function asPaymentOrderRows(data: PaymentOrderRow | PaymentOrderRow[] | null | undefined): PaymentOrderRow[] {
+  if (!data) {
+    return [];
+  }
+
+  return Array.isArray(data) ? data : [data];
+}
+
+function asSubscriptionRows(data: SubscriptionRow | SubscriptionRow[] | null | undefined): SubscriptionRow[] {
+  if (!data) {
+    return [];
+  }
+
+  return Array.isArray(data) ? data : [data];
+}
+
+function preferCanonicalInvoiceOrder(orders: PaymentOrderRow[]) {
+  return orders.find((order) => Boolean(order.fulfilled_at))
+    ?? orders.find((order) => Boolean(order.id))
+    ?? null;
+}
+
+function preferCanonicalSubscriptionMirror(subscriptions: SubscriptionRow[]) {
+  return subscriptions.find((subscription) => subscription.status === 'active')
+    ?? subscriptions.find((subscription) => Boolean(subscription.id))
+    ?? null;
+}
+
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
-  const result = await supabase
+  const query = supabase
     .from('payment_orders')
-    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, fulfilled_at, created_at, metadata')
-    .eq('stripe_invoice_id', invoiceId)
-    .maybeSingle();
+    .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, stripe_invoice_id, stripe_subscription_id, payment_status, fulfilled_at, created_at, metadata')
+    .eq('stripe_invoice_id', invoiceId);
+  const orderedQuery = typeof query.order === 'function'
+    ? query.order('created_at', { ascending: true })
+    : query;
+  const limitedQuery = typeof orderedQuery.limit === 'function' ? orderedQuery.limit(10) : orderedQuery;
+  const result = typeof limitedQuery.then === 'function'
+    ? await limitedQuery
+    : await limitedQuery.maybeSingle();
 
   if (result.error) {
     throwGrantError(
@@ -425,7 +460,16 @@ async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: 
     );
   }
 
-  return result.data ?? null;
+  const rows = asPaymentOrderRows(result.data);
+  if (rows.length > 1) {
+    logger.warn('billing', 'subscription_invoice_order_duplicate_detected', {
+      invoiceId: maskIdentifier(invoiceId),
+      orderCount: rows.length,
+      canonicalOrderId: maskIdentifier(preferCanonicalInvoiceOrder(rows)?.id),
+    });
+  }
+
+  return preferCanonicalInvoiceOrder(rows);
 }
 
 function isUsableMembershipSourceOrder(
@@ -1941,11 +1985,19 @@ async function upsertSubscriptionMirror(input: {
   invoiceId: string;
   paymentStatus?: string | null;
 }) {
-  const existingResult = await input.supabase
+  const existingQuery = input.supabase
     .from('user_subscriptions')
-    .select('id, status, cancel_at_period_end, metadata')
-    .eq('stripe_subscription_id', input.subscriptionId)
-    .maybeSingle();
+    .select('id, status, cancel_at_period_end, metadata, created_at')
+    .eq('stripe_subscription_id', input.subscriptionId);
+  const orderedExistingQuery = typeof existingQuery.order === 'function'
+    ? existingQuery.order('created_at', { ascending: true })
+    : existingQuery;
+  const limitedExistingQuery = typeof orderedExistingQuery.limit === 'function'
+    ? orderedExistingQuery.limit(10)
+    : orderedExistingQuery;
+  const existingResult = typeof limitedExistingQuery.then === 'function'
+    ? await limitedExistingQuery
+    : await limitedExistingQuery.maybeSingle();
 
   if (existingResult.error) {
     throwGrantError(
@@ -1956,7 +2008,16 @@ async function upsertSubscriptionMirror(input: {
     );
   }
 
-  const existingSubscription = existingResult.data as SubscriptionRow | null;
+  const existingSubscriptions = asSubscriptionRows(existingResult.data as SubscriptionRow | SubscriptionRow[] | null);
+  if (existingSubscriptions.length > 1) {
+    logger.warn('billing', 'subscription_mirror_duplicate_detected', {
+      subscriptionId: maskIdentifier(input.subscriptionId),
+      subscriptionCount: existingSubscriptions.length,
+      canonicalSubscriptionId: maskIdentifier(preferCanonicalSubscriptionMirror(existingSubscriptions)?.id),
+    });
+  }
+
+  const existingSubscription = preferCanonicalSubscriptionMirror(existingSubscriptions);
   const payload: SubscriptionRow = {
     user_id: input.sourceOrder.user_id,
     membership_plan_id: input.plan.id,
@@ -2041,8 +2102,14 @@ async function writeCompletedInvoiceOrder(input: {
   creditTransactionId: string | null;
   grantId: string | null;
 }) {
+  const canPromoteCheckoutOrder = Boolean(
+    input.sourceOrder.id
+    && input.sourceOrder.stripe_checkout_session_id
+    && !input.sourceOrder.stripe_invoice_id
+    && !isSubscriptionPlanChangeOrder(input.sourceOrder),
+  );
   const metadata = {
-    ...asRecord(input.existingInvoiceOrder?.metadata),
+    ...asRecord(input.existingInvoiceOrder?.metadata ?? (canPromoteCheckoutOrder ? input.sourceOrder.metadata : null)),
     source: 'invoice.payment_succeeded',
     transactionId: input.creditTransactionId,
     subscriptionCreditGrantId: input.grantId,
@@ -2064,6 +2131,7 @@ async function writeCompletedInvoiceOrder(input: {
     status: 'completed',
     payment_status: input.paymentStatus ?? 'paid',
     fulfilled_at: input.fulfilledAt,
+    stripe_invoice_id: input.invoiceId,
     metadata,
     updated_at: input.fulfilledAt,
   };
@@ -2088,12 +2156,60 @@ async function writeCompletedInvoiceOrder(input: {
     return updateResult.data?.id ?? input.existingInvoiceOrder.id;
   }
 
+  const recheckedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
+  if (recheckedInvoiceOrder?.id) {
+    const updateResult = await input.supabase
+      .from('payment_orders')
+      .update({
+        ...payload,
+        metadata: {
+          ...asRecord(recheckedInvoiceOrder.metadata),
+          source: 'invoice.payment_succeeded',
+          transactionId: input.creditTransactionId,
+          subscriptionCreditGrantId: input.grantId,
+          grantedCredits: input.grantedCredits,
+          fulfillmentSource: 'subscription_credit_grants',
+        },
+      })
+      .eq('id', recheckedInvoiceOrder.id)
+      .select('id')
+      .maybeSingle();
+
+    if (updateResult.error) {
+      throwGrantError(
+        'subscription_invoice_order_update',
+        SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+        updateResult.error,
+        { invoiceId: maskIdentifier(input.invoiceId) },
+      );
+    }
+
+    return updateResult.data?.id ?? recheckedInvoiceOrder.id;
+  }
+
+  if (canPromoteCheckoutOrder && input.sourceOrder.id) {
+    const updateResult = await input.supabase
+      .from('payment_orders')
+      .update(payload)
+      .eq('id', input.sourceOrder.id)
+      .select('id')
+      .maybeSingle();
+
+    if (updateResult.error) {
+      throwGrantError(
+        'subscription_invoice_order_update',
+        SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+        updateResult.error,
+        { invoiceId: maskIdentifier(input.invoiceId) },
+      );
+    }
+
+    return updateResult.data?.id ?? input.sourceOrder.id;
+  }
+
   const insertResult = await input.supabase
     .from('payment_orders')
-    .insert({
-      ...payload,
-      stripe_invoice_id: input.invoiceId,
-    })
+    .insert(payload)
     .select('id')
     .maybeSingle();
 
@@ -2185,6 +2301,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       alreadyFulfilled: true,
       grantedCredits: 0,
       creditTransactionId: null,
+      invoiceOrderId: existingInvoiceOrder.id ?? null,
     };
   }
 

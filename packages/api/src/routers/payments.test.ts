@@ -2430,6 +2430,121 @@ describe('paymentsRouter error sanitization', () => {
     );
   });
 
+  it('returns deterministic sync state when duplicate checkout payment orders already exist', async () => {
+    const session = {
+      id: 'cs_test_sync_duplicate_orders',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
+      },
+      subscription: {
+        id: 'sub_test_sync_duplicate',
+      },
+      invoice: {
+        id: 'in_test_sync_duplicate',
+        status: 'paid',
+      },
+    };
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {},
+      subscriptions: {},
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: true,
+      reason: null,
+      invoiceId: 'in_test_sync_duplicate',
+      subscriptionId: 'sub_test_sync_duplicate',
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createListQueryBuilder(
+            Promise.resolve({
+              data: [
+                {
+                  status: 'completed',
+                  payment_status: 'paid',
+                  fulfilled_at: '2026-07-04T00:00:02.000Z',
+                  stripe_subscription_id: 'sub_test_sync_duplicate',
+                  stripe_invoice_id: 'in_test_sync_duplicate',
+                },
+                {
+                  status: 'completed',
+                  payment_status: 'paid',
+                  fulfilled_at: '2026-07-04T00:00:03.000Z',
+                  stripe_subscription_id: 'sub_test_sync_duplicate',
+                  stripe_invoice_id: 'in_test_sync_duplicate',
+                },
+              ],
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.syncCheckoutSession({ sessionId: 'cs_test_sync_duplicate_orders' }),
+    ).resolves.toEqual({
+      sessionId: 'cs_test_sync_duplicate_orders',
+      mode: 'subscription',
+      checkoutStatus: 'complete',
+      paymentStatus: 'paid',
+      orderStatus: 'completed',
+      fulfilledAt: '2026-07-04T00:00:02.000Z',
+      stripeSubscriptionId: 'sub_test_sync_duplicate',
+      stripeInvoiceId: 'in_test_sync_duplicate',
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_duplicate_order_detected',
+      expect.objectContaining({
+        checkoutSessionId: 'cs_test_...orders',
+        orderCount: 2,
+      }),
+    );
+  });
+
   it('does not silently accept an unfulfilled paid subscription checkout sync', async () => {
     const session = {
       id: 'cs_test_unfulfilled_paid_subscription',

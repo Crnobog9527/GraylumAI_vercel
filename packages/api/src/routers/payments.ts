@@ -1554,17 +1554,40 @@ export const paymentsRouter = router({
         throw createPaymentOperationError('同步支付会话', error);
       }
 
-      const { data: syncedOrder, error: syncedOrderError } = await ctx.supabaseAdmin
+      const syncedOrderQuery = ctx.supabaseAdmin
         .from('payment_orders')
         .select('status, payment_status, fulfilled_at, stripe_subscription_id, stripe_invoice_id')
-        .eq('stripe_checkout_session_id', session.id)
-        .maybeSingle();
+        .eq('stripe_checkout_session_id', session.id);
+      const orderedSyncedOrderQuery = typeof syncedOrderQuery.order === 'function'
+        ? syncedOrderQuery.order('created_at', { ascending: true })
+        : syncedOrderQuery;
+      const limitedSyncedOrderQuery = typeof orderedSyncedOrderQuery.limit === 'function'
+        ? orderedSyncedOrderQuery.limit(10)
+        : orderedSyncedOrderQuery;
+      const { data: syncedOrderData, error: syncedOrderError } =
+        typeof limitedSyncedOrderQuery.then === 'function'
+          ? await limitedSyncedOrderQuery
+          : await limitedSyncedOrderQuery.maybeSingle();
 
       if (syncedOrderError) {
         logSyncCheckoutStageFailure('final_order_read', input, syncedOrderError, {
           profileId: maskIdentifier(ctx.profileId),
         });
         throw createPaymentOperationError('读取支付同步结果', syncedOrderError);
+      }
+
+      const syncedOrders = Array.isArray(syncedOrderData)
+        ? syncedOrderData
+        : syncedOrderData
+          ? [syncedOrderData]
+          : [];
+      const syncedOrder = syncedOrders[0] ?? null;
+      if (syncedOrders.length > 1) {
+        logger.warn('billing', 'payments_sync_checkout_duplicate_order_detected', {
+          checkoutSessionId: maskIdentifier(session.id),
+          profileId: maskIdentifier(ctx.profileId),
+          orderCount: syncedOrders.length,
+        });
       }
 
       logSyncCheckoutStage('final_order_read', input, {

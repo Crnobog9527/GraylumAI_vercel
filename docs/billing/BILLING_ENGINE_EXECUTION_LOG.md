@@ -3829,3 +3829,70 @@ Latest-head Codex review：
 - 未关闭 issue #225。
 - 未关闭 PR #251。
 - 未 merge。
+
+## PR259 billing record dedupe / idempotency fix
+
+- 时间：2026-07-04 16:24 UTC。
+- 当前阶段：PR259 source-code PR gate for billing mirror dedupe after annual functional write test postflight.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Scope：code-level idempotency and regression tests only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### Failure context
+
+- Owner completed exactly one staging Stripe test-mode yearly checkout for `test04@qq.com`.
+- Runtime evidence showed one `payments.createCheckoutSession` 200, two Stripe webhook POSTs 200, and one `payments.syncCheckoutSession` 500.
+- Postflight showed duplicated billing mirror rows: `payment_orders +3` with two invoice-backed rows for the same masked invoice, and `user_subscriptions +2` active yearly rows for the same masked Stripe subscription.
+- The grant and ledger paths remained idempotent: `subscription_credit_grants +1`, `credit_transactions +1`, and profile credit delta equaled the ledger delta.
+- Root cause classification: webhook + return-sync concurrency/idempotency gap in billing mirror writes and duplicate-state reads, not owner double checkout and not duplicate grant/ledger.
+
+### Fix design
+
+- `getExistingInvoiceOrder` now reads bounded invoice-order candidates instead of `maybeSingle()`, logs duplicate invoice mirror state, and chooses a deterministic canonical row.
+- `writeCompletedInvoiceOrder` now rechecks invoice order state immediately before writing and promotes the original checkout order into the invoice-backed completed order when possible, so webhook and return-sync converge on the same row for the initial checkout invoice.
+- `upsertSubscriptionMirror` now reads bounded subscription candidates instead of `maybeSingle()`, logs duplicate mirror state, and updates a deterministic canonical subscription rather than inserting another row.
+- `syncSubscriptionState` now tolerates existing duplicate subscription mirror rows and does not fail before fulfillment when duplicates already exist.
+- `payments.syncCheckoutSession` final order read now tolerates duplicate checkout-order state and returns a deterministic sync result rather than surfacing a final-read 500.
+- The fix does not modify `subscription_credit_grants`, `credit_transactions`, or direct profile credit writes.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 105 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 672 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Root-level Vitest without the API package config was not used as a pass/fail signal because it incorrectly collected Playwright e2e specs and failed before e2e execution.
+- Direct ESLint invocation was blocked because the tarball workspace has no `eslint.config.(js|mjs|cjs)` file; no lint rule failures were produced.
+- Whitespace check：`git diff --no-index --check` against the clean `90bc34820c418e94b29ada713d3eabf1fd4560a8` snapshot produced no whitespace/conflict-marker output for all changed files.
+- `pnpm --filter @repo/api test:run ...` was blocked before tests by pnpm 11 deps-status install approval (`ERR_PNPM_IGNORED_BUILDS`) in the temporary tarball workspace; direct local `vitest` was used after dependencies were present.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。
