@@ -6,10 +6,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  invalidatePostCheckoutMembershipQueries,
-  isFulfilledCheckoutSyncResult,
-} from '../../../../../apps/web/src/components/profile/checkoutSyncInvalidations';
+import { invalidatePostCheckoutMembershipQueries } from '../../../../../apps/web/src/components/profile/checkoutSyncInvalidations';
 
 function createInvalidationUtils() {
   return {
@@ -48,39 +45,5 @@ describe('invalidatePostCheckoutMembershipQueries', () => {
     expect(utils.credits.getCreditsSummary.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.getMembershipEligibilityMatrix.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.listBillingRecords.invalidate).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('isFulfilledCheckoutSyncResult', () => {
-  it('treats paid canceled-return sync results as fulfilled', () => {
-    expect(isFulfilledCheckoutSyncResult({
-      paymentStatus: 'paid',
-      orderStatus: 'pending',
-      fulfilledAt: null,
-    })).toBe(true);
-  });
-
-  it('treats completed orders as fulfilled', () => {
-    expect(isFulfilledCheckoutSyncResult({
-      paymentStatus: 'unpaid',
-      orderStatus: 'completed',
-      fulfilledAt: null,
-    })).toBe(true);
-  });
-
-  it('treats fulfilled timestamps as fulfilled', () => {
-    expect(isFulfilledCheckoutSyncResult({
-      paymentStatus: 'unpaid',
-      orderStatus: 'pending',
-      fulfilledAt: '2026-06-18T08:00:00.000Z',
-    })).toBe(true);
-  });
-
-  it('does not treat open unpaid canceled returns as fulfilled', () => {
-    expect(isFulfilledCheckoutSyncResult({
-      paymentStatus: 'unpaid',
-      orderStatus: 'canceled',
-      fulfilledAt: null,
-    })).toBe(false);
   });
 });

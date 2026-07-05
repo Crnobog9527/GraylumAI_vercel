@@ -20,6 +20,7 @@ vi.mock('../../lib/logger', () => ({
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   markMembershipInvoicePaymentFailed,
   reconcileStripeRefund,
   reconcileSubscriptionRefundFromStripeWebhook,
@@ -38,7 +39,7 @@ type RefundWebhookTableName =
 type RefundWebhookRow = Record<string, any>;
 
 class RefundWebhookMockQuery {
-  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' | 'like' | 'is' }> = [];
   private containsFilters: Array<{ column: string; value: unknown }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: RefundWebhookRow | null = null;
@@ -66,6 +67,16 @@ class RefundWebhookMockQuery {
 
   lte(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  like(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'like' });
+    return this;
+  }
+
+  is(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'is' });
     return this;
   }
 
@@ -158,7 +169,16 @@ class RefundWebhookMockQuery {
           return row[column] !== value;
         }
 
-        return row[column] <= value;
+        if (operator === 'lte') {
+          return row[column] <= value;
+        }
+
+        if (operator === 'like') {
+          const pattern = String(value).replace(/%/g, '');
+          return typeof row[column] === 'string' && row[column].startsWith(pattern);
+        }
+
+        return row[column] === value;
       })
       && this.containsFilters.every(({ column, value }) =>
         refundWebhookContainsValue(row[column], value),
@@ -365,6 +385,73 @@ describe('stripe fulfillment helpers', () => {
     loggerState.warn.mockReset();
   });
 
+  it('syncs subscription state deterministically when duplicate mirrors already exist', async () => {
+    const supabase = createRefundWebhookSupabase({
+      user_subscriptions: [
+        {
+          id: 'subscription-duplicate-a',
+          user_id: 'user-duplicate-subscription',
+          membership_plan_id: 'plan-duplicate-subscription',
+          stripe_subscription_id: 'sub_duplicate_subscription',
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          created_at: '2026-07-04T00:00:01.000Z',
+        },
+        {
+          id: 'subscription-duplicate-b',
+          user_id: 'user-duplicate-subscription',
+          membership_plan_id: 'plan-duplicate-subscription',
+          stripe_subscription_id: 'sub_duplicate_subscription',
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          created_at: '2026-07-04T00:00:02.000Z',
+        },
+      ],
+      profiles: [{
+        id: 'user-duplicate-subscription',
+        membership_level: 'gold',
+      }],
+    });
+    const subscription = {
+      id: 'sub_duplicate_subscription',
+      status: 'active',
+      cancel_at_period_end: true,
+      items: {
+        data: [{
+          current_period_start: 1783123200,
+          current_period_end: 1814659200,
+        }],
+      },
+    } as unknown as Stripe.Subscription;
+
+    await expect(syncSubscriptionState(supabase, subscription)).resolves.toBeUndefined();
+
+    expect(supabase.tables.user_subscriptions).toHaveLength(2);
+    expect(supabase.tables.user_subscriptions).toEqual([
+      expect.objectContaining({
+        id: 'subscription-duplicate-a',
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }),
+      expect.objectContaining({
+        id: 'subscription-duplicate-b',
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }),
+    ]);
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_state_duplicate_mirror_detected',
+      expect.objectContaining({
+        subscriptionId: 'sub_dupl...iption',
+        subscriptionCount: 2,
+        canonicalSubscriptionId: 'subscrip...cate-a',
+      }),
+    );
+  });
+
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
     const updates: Array<{ table: string; payload: unknown }> = [];
 
@@ -491,6 +578,740 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('fulfills a paid yearly membership checkout through subscription latest_invoice exactly once', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-source-paid-yearly-checkout',
+        user_id: 'user-paid-yearly-checkout',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_paid_yearly_checkout',
+        stripe_checkout_session_id: 'cs_test_paid_yearly_checkout',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_paid_yearly_checkout',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {
+          source: 'checkout.session.sync',
+        },
+      }],
+      membership_plans: [{
+        id: 'plan-pro-yearly',
+        name: 'Pro',
+        level: 'pro',
+        yearly_credits: 1200,
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-paid-yearly-checkout',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_paid_yearly_checkout',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_paid_yearly_checkout',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_paid_yearly_checkout',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_paid_yearly_checkout',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: 'in_paid_yearly_checkout',
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(subscription),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+        list: vi.fn(),
+      },
+    };
+    const session = {
+      id: 'cs_test_paid_yearly_checkout',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-paid-yearly-checkout',
+      metadata: {
+        userId: 'user-paid-yearly-checkout',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_paid_yearly_checkout',
+      subscription: 'sub_paid_yearly_checkout',
+      invoice: null,
+    } as Stripe.Checkout.Session;
+
+    const firstResult = await fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session);
+    const replayResult = await fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session);
+
+    expect(firstResult).toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_paid_yearly_checkout',
+      subscriptionId: 'sub_paid_yearly_checkout',
+    });
+    expect(replayResult).toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_paid_yearly_checkout',
+      subscriptionId: 'sub_paid_yearly_checkout',
+    });
+    expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith('sub_paid_yearly_checkout', {
+      expand: ['latest_invoice'],
+    });
+    expect(stripe.invoices.retrieve).toHaveBeenCalledWith('in_paid_yearly_checkout');
+    expect(stripe.invoices.list).not.toHaveBeenCalled();
+
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      membership_plan_id: 'plan-pro-yearly',
+      stripe_subscription_id: 'sub_paid_yearly_checkout',
+      billing_cycle: 'yearly',
+      status: 'active',
+      metadata: expect.objectContaining({
+        lastInvoiceId: 'in_paid_yearly_checkout',
+        fulfillmentSource: 'subscription_credit_grants',
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      membership_plan_id: 'plan-pro-yearly',
+      stripe_subscription_id: 'sub_paid_yearly_checkout',
+      stripe_invoice_id: 'in_paid_yearly_checkout',
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 100,
+      status: 'granted',
+      idempotency_key: expect.stringContaining(
+        'subscription_grant:annual_monthly_release:sub_paid_yearly_checkout:',
+      ),
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      user_id: 'user-paid-yearly-checkout',
+      amount: 100,
+      ledger_type: 'grant',
+      reason_code: 'annual_monthly_release',
+      source_type: 'stripe_invoice',
+      source_id: 'in_paid_yearly_checkout',
+    });
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      id: 'user-paid-yearly-checkout',
+      membership_level: 'pro',
+      credits: 200,
+    });
+
+    const checkoutOrder = supabase.tables.payment_orders.find((row) =>
+      row.id === 'order-source-paid-yearly-checkout');
+    expect(checkoutOrder).toMatchObject({
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: expect.any(String),
+    });
+    const invoiceOrders = supabase.tables.payment_orders.filter((row) =>
+      row.stripe_invoice_id === 'in_paid_yearly_checkout');
+    expect(invoiceOrders).toHaveLength(1);
+    expect(invoiceOrders[0]).toMatchObject({
+      status: 'completed',
+      payment_status: 'paid',
+      fulfilled_at: expect.any(String),
+      metadata: expect.objectContaining({
+        source: 'invoice.payment_succeeded',
+        grantedCredits: 100,
+      }),
+    });
+  });
+
+  it('fulfills a paid yearly membership checkout through expanded subscription latest_invoice', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-expanded-latest-invoice',
+        user_id: 'user-expanded-latest-invoice',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_expanded_latest_invoice',
+        stripe_checkout_session_id: 'cs_test_expanded_latest_invoice',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_expanded_latest_invoice',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {},
+      }],
+      membership_plans: [{
+        id: 'plan-pro-yearly',
+        name: 'Pro',
+        level: 'pro',
+        yearly_credits: 1200,
+      }],
+      profiles: [{
+        id: 'user-expanded-latest-invoice',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_expanded_latest_invoice',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_expanded_latest_invoice',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_expanded_latest_invoice',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_expanded_latest_invoice',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: paidInvoice,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+    };
+    const session = {
+      id: 'cs_test_expanded_latest_invoice',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-expanded-latest-invoice',
+      metadata: {
+        userId: 'user-expanded-latest-invoice',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_expanded_latest_invoice',
+      subscription,
+      invoice: null,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).resolves.toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_expanded_latest_invoice',
+      subscriptionId: 'sub_expanded_latest_invoice',
+    });
+
+    expect(stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(stripe.invoices.retrieve).not.toHaveBeenCalled();
+    expect(stripe.invoices.list).not.toHaveBeenCalled();
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0]).toMatchObject({
+      membership_level: 'pro',
+      credits: 200,
+    });
+  });
+
+  it('fulfills a paid yearly membership checkout through invoice list fallback', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-invoice-list-fallback',
+        user_id: 'user-invoice-list-fallback',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_invoice_list_fallback',
+        stripe_checkout_session_id: 'cs_test_invoice_list_fallback',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_invoice_list_fallback',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {},
+      }],
+      membership_plans: [{
+        id: 'plan-pro-yearly',
+        name: 'Pro',
+        level: 'pro',
+        yearly_credits: 1200,
+      }],
+      profiles: [{
+        id: 'user-invoice-list-fallback',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_invoice_list_fallback',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_invoice_list_fallback',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_invoice_list_fallback',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_invoice_list_fallback',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: null,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(subscription),
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn().mockResolvedValue({
+          data: [
+            { id: 'in_open_invoice_list_fallback', status: 'open' },
+            paidInvoice,
+          ],
+        }),
+      },
+    };
+    const session = {
+      id: 'cs_test_invoice_list_fallback',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-invoice-list-fallback',
+      metadata: {
+        userId: 'user-invoice-list-fallback',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_invoice_list_fallback',
+      subscription: 'sub_invoice_list_fallback',
+      invoice: null,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).resolves.toMatchObject({
+      fulfilled: true,
+      invoiceId: 'in_invoice_list_fallback',
+      subscriptionId: 'sub_invoice_list_fallback',
+    });
+
+    expect(stripe.invoices.list).toHaveBeenCalledWith({
+      subscription: 'sub_invoice_list_fallback',
+      limit: 10,
+    });
+    expect(supabase.tables.payment_orders.find((row) =>
+      row.id === 'order-invoice-list-fallback')).toMatchObject({
+      status: 'completed',
+      fulfilled_at: expect.any(String),
+    });
+  });
+
+  it('records an auditable reason when a paid checkout has no invoice to fulfill', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-missing-paid-invoice',
+        user_id: 'user-missing-paid-invoice',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_missing_paid_invoice',
+        stripe_checkout_session_id: 'cs_test_missing_paid_invoice',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_missing_paid_invoice',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {
+          source: 'checkout.session.sync',
+        },
+      }],
+      profiles: [{
+        id: 'user-missing-paid-invoice',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const subscription = {
+      id: 'sub_missing_paid_invoice',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: null,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(subscription),
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn().mockResolvedValue({ data: [] }),
+      },
+    };
+    const session = {
+      id: 'cs_test_missing_paid_invoice',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-missing-paid-invoice',
+      metadata: {
+        userId: 'user-missing-paid-invoice',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_missing_paid_invoice',
+      subscription: 'sub_missing_paid_invoice',
+      invoice: null,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).rejects.toMatchObject({
+      stage: 'checkout_paid_invoice_resolution',
+      safeContext: expect.objectContaining({
+        reason: 'paid_invoice_missing',
+        invoiceListCount: 0,
+      }),
+    });
+
+    expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
+      source: 'checkout.session.sync',
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: false,
+        latestInvoicePresent: false,
+        invoiceListCount: 0,
+        invoiceListStatuses: [],
+        paidInvoiceFound: false,
+        reason: 'paid_invoice_missing',
+      }),
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
+        reason: 'paid_invoice_missing',
+        checkoutStatus: 'complete',
+        paymentStatus: 'paid',
+        subscriptionId: expect.stringContaining('...'),
+        invoiceResolutionAudit: expect.objectContaining({
+          invoiceListCount: 0,
+          paidInvoiceFound: false,
+        }),
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'checkout_paid_invoice_resolution',
+        reason: 'paid_invoice_missing',
+      }),
+    });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_missing_paid_invoice');
+    expect(metadataJson).not.toContain('cs_test_missing_paid_invoice');
+    expect(metadataJson).not.toContain('cus_missing_paid_invoice');
+    expect(supabase.tables.user_subscriptions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('records an auditable reason when resolved checkout invoices are not paid', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-unpaid-invoice',
+        user_id: 'user-unpaid-invoice',
+        item_id: 'plan-pro-yearly',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_unpaid_invoice',
+        stripe_checkout_session_id: 'cs_test_unpaid_invoice',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_unpaid_invoice',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {},
+      }],
+      profiles: [{
+        id: 'user-unpaid-invoice',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const openInvoice = {
+      id: 'in_unpaid_invoice',
+      status: 'open',
+      amount_paid: 0,
+      currency: 'usd',
+      customer: 'cus_unpaid_invoice',
+      parent: {
+        subscription_details: {
+          subscription: 'sub_unpaid_invoice',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_unpaid_invoice',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: null,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(subscription),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(openInvoice),
+        list: vi.fn().mockResolvedValue({ data: [openInvoice] }),
+      },
+    };
+    const session = {
+      id: 'cs_test_unpaid_invoice',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-unpaid-invoice',
+      metadata: {
+        userId: 'user-unpaid-invoice',
+        itemType: 'membership_plan',
+        itemId: 'plan-pro-yearly',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_unpaid_invoice',
+      subscription: 'sub_unpaid_invoice',
+      invoice: openInvoice,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).rejects.toMatchObject({
+      stage: 'checkout_paid_invoice_resolution',
+      safeContext: expect.objectContaining({
+        reason: 'paid_invoice_unpaid',
+        sessionInvoiceStatus: 'open',
+        invoiceListStatuses: ['open'],
+      }),
+    });
+
+    expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: true,
+        sessionInvoiceId: expect.stringContaining('...'),
+        sessionInvoiceStatus: 'open',
+        latestInvoicePresent: false,
+        invoiceListCount: 1,
+        invoiceListStatuses: ['open'],
+        paidInvoiceFound: false,
+        reason: 'paid_invoice_unpaid',
+      }),
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
+        reason: 'paid_invoice_unpaid',
+        subscriptionId: expect.stringContaining('...'),
+        invoiceResolutionAudit: expect.objectContaining({
+          sessionInvoiceStatus: 'open',
+          invoiceListStatuses: ['open'],
+        }),
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'checkout_paid_invoice_resolution',
+        reason: 'paid_invoice_unpaid',
+      }),
+    });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_unpaid_invoice');
+    expect(metadataJson).not.toContain('in_unpaid_invoice');
+    expect(metadataJson).not.toContain('cus_unpaid_invoice');
+    expect(supabase.tables.user_subscriptions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('records safe checkout audit metadata when invoice fulfillment fails', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-rpc-failure-audit',
+        user_id: 'user-rpc-failure-audit',
+        item_id: 'plan-missing',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_rpc_failure_audit',
+        stripe_checkout_session_id: 'cs_test_rpc_failure_audit',
+        stripe_invoice_id: null,
+        stripe_customer_id: 'cus_rpc_failure_audit',
+        stripe_price_id: 'price_pro_yearly',
+        amount_total: 9900,
+        currency: 'usd',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-06-28T06:19:36.000Z',
+        metadata: {},
+      }],
+      profiles: [{
+        id: 'user-rpc-failure-audit',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    });
+    const paidInvoice = {
+      id: 'in_rpc_failure_audit',
+      status: 'paid',
+      created: 1782627600,
+      amount_paid: 9900,
+      currency: 'usd',
+      customer: 'cus_rpc_failure_audit',
+      period_start: 1782627600,
+      period_end: 1814163600,
+      parent: {
+        subscription_details: {
+          subscription: 'sub_rpc_failure_audit',
+        },
+      },
+    } as Stripe.Invoice;
+    const subscription = {
+      id: 'sub_rpc_failure_audit',
+      status: 'active',
+      cancel_at_period_end: false,
+      latest_invoice: paidInvoice,
+      items: {
+        data: [{
+          current_period_start: 1782627600,
+          current_period_end: 1814163600,
+        }],
+      },
+    } as Stripe.Subscription;
+    const stripe = {
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+    };
+    const session = {
+      id: 'cs_test_rpc_failure_audit',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-rpc-failure-audit',
+      metadata: {
+        userId: 'user-rpc-failure-audit',
+        itemType: 'membership_plan',
+        itemId: 'plan-missing',
+        billingCycle: 'yearly',
+        priceId: 'price_pro_yearly',
+      },
+      customer: 'cus_rpc_failure_audit',
+      subscription,
+      invoice: paidInvoice,
+    } as Stripe.Checkout.Session;
+
+    await expect(
+      fulfillPaidMembershipCheckoutSession(supabase, stripe as any, session),
+    ).rejects.toMatchObject({
+      stage: 'subscription_membership_plan_missing',
+    });
+
+    expect(supabase.tables.payment_orders[0].metadata).toMatchObject({
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'failed',
+        stage: 'fulfill_membership_invoice',
+        reason: 'membership_invoice_fulfillment_failed',
+        subscriptionId: expect.stringContaining('...'),
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'fulfill_membership_invoice',
+        reason: 'membership_invoice_fulfillment_failed',
+        errorStage: 'subscription_membership_plan_missing',
+      }),
+      invoiceResolutionAudit: expect.objectContaining({
+        paidInvoiceFound: true,
+      }),
+    });
+    const metadataJson = JSON.stringify(supabase.tables.payment_orders[0].metadata);
+    expect(metadataJson).not.toContain('sub_rpc_failure_audit');
+    expect(metadataJson).not.toContain('in_rpc_failure_audit');
+    expect(metadataJson).not.toContain('cus_rpc_failure_audit');
+    expect(metadataJson).not.toContain('cs_test_rpc_failure_audit');
+  });
+
   it('preserves completed fulfilled checkout orders during paid session replay', async () => {
     const updates: unknown[] = [];
 
@@ -547,10 +1368,6 @@ describe('stripe fulfillment helpers', () => {
         amount_total: 1000,
         currency: 'usd',
         mode: 'payment',
-        payment_intent: {
-          id: 'pi_test_replay_completed',
-          latest_charge: 'ch_test_replay_completed',
-        },
         payment_status: 'paid',
       } as Stripe.Checkout.Session,
       {
@@ -566,8 +1383,6 @@ describe('stripe fulfillment helpers', () => {
         metadata: expect.objectContaining({
           transactionId: 'txn-1',
           grantedCredits: 100,
-          paymentIntentId: 'pi_test_replay_completed',
-          chargeId: 'ch_test_replay_completed',
           lastPaymentOrderStatus: 'completed',
           lastPaymentOrderStatusSource: 'checkout.session.completed',
         }),
@@ -1587,24 +2402,7 @@ describe('stripe fulfillment helpers', () => {
     const retrievePaymentIntent = vi.fn().mockResolvedValue({
       id: 'pi_webhook_invoice_unresolved',
     } as Stripe.PaymentIntent);
-    const supabase = createRefundWebhookSupabase({
-      payment_orders: [{
-        id: 'order-webhook-invoice-unresolved',
-        user_id: 'user-webhook-invoice-unresolved',
-        item_id: 'plan-webhook-invoice-unresolved',
-        item_type: 'membership_plan',
-        billing_cycle: 'yearly',
-        stripe_invoice_id: null,
-        stripe_subscription_id: 'sub_webhook_invoice_unresolved',
-        amount_total: 9900,
-        currency: 'usd',
-        status: 'completed',
-        payment_status: 'paid',
-        metadata: {
-          paymentIntentId: 'pi_webhook_invoice_unresolved',
-        },
-      }],
-    });
+    const supabase = createRefundWebhookSupabase();
 
     await expect(reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
@@ -1632,7 +2430,7 @@ describe('stripe fulfillment helpers', () => {
     });
     expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_invoice_unresolved');
     expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_unresolved');
-    expect(supabase.tables.payment_orders).toHaveLength(1);
+    expect(supabase.tables.payment_orders).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(loggerState.error).toHaveBeenCalledWith(
@@ -3658,77 +4456,6 @@ describe('stripe fulfillment helpers', () => {
         refundId: 're_test_...refund',
       }),
     );
-  });
-
-  it('uses the atomic canceled-subscription profile downgrade RPC after syncing subscription state', async () => {
-    const subscriptionUpdates: unknown[] = [];
-    const rpc = vi.fn().mockResolvedValue({
-      data: [
-        {
-          subscription_found: true,
-          new_membership_level: 'free',
-        },
-      ],
-      error: null,
-    });
-    const supabase = {
-      rpc,
-      from(table: string) {
-        if (table !== 'user_subscriptions') {
-          throw new Error(`cancel-only should not touch ${table}`);
-        }
-
-        return {
-          select() {
-            return this;
-          },
-          eq() {
-            return this;
-          },
-          maybeSingle() {
-            return Promise.resolve({
-              data: {
-                user_id: '00000000-0000-4000-8000-000000000200',
-                membership_plan_id: 'plan-pro',
-              },
-              error: null,
-            });
-          },
-          update(payload: unknown) {
-            subscriptionUpdates.push(payload);
-            return {
-              eq() {
-                return Promise.resolve({ error: null });
-              },
-            };
-          },
-        };
-      },
-    };
-
-    await syncSubscriptionState(supabase, {
-      id: 'sub_test_cancel_only',
-      cancel_at_period_end: false,
-      status: 'canceled',
-      items: {
-        data: [
-          {
-            current_period_start: 1_742_646_400,
-            current_period_end: 1_745_238_400,
-          },
-        ],
-      },
-    } as unknown as Stripe.Subscription);
-
-    expect(subscriptionUpdates).toEqual([
-      expect.objectContaining({
-        status: 'canceled',
-        cancel_at_period_end: 'false',
-      }),
-    ]);
-    expect(rpc).toHaveBeenCalledWith('atomic_downgrade_canceled_subscription_profile', {
-      p_stripe_subscription_id: 'sub_test_cancel_only',
-    });
   });
 
   it('parses subscription id from the legacy invoice.subscription shape', async () => {

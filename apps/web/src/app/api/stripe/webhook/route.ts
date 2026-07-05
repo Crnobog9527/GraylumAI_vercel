@@ -8,6 +8,7 @@ import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecre
 import {
   fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   markMembershipInvoicePaymentFailed,
   reconcileSubscriptionRefundFromStripeWebhook,
   syncSubscriptionState,
@@ -34,6 +35,9 @@ export async function handleStripeWebhookEvent(
       if (session.mode === 'payment' && session.payment_status === 'paid') {
         await fulfillCreditPackageOrder(supabase, session);
       }
+      if (session.mode === 'subscription' && session.payment_status === 'paid') {
+        await fulfillPaidMembershipCheckoutSession(supabase, getStripeClient(), session);
+      }
       break;
     }
     case 'checkout.session.async_payment_succeeded': {
@@ -58,7 +62,8 @@ export async function handleStripeWebhookEvent(
       });
       break;
     }
-    case 'invoice.payment_succeeded': {
+    case 'invoice.payment_succeeded':
+    case 'invoice.paid': {
       await fulfillMembershipInvoice(supabase, event.data.object);
       break;
     }
@@ -74,6 +79,7 @@ export async function handleStripeWebhookEvent(
       await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
       break;
     }
+    case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
       await syncSubscriptionState(supabase, event.data.object);
