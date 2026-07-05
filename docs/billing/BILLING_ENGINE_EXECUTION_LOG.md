@@ -3897,6 +3897,71 @@ Latest-head Codex review：
 - 未 merge。
 - 未 production release。
 
+## PR259 P1 atomic idempotency follow-up
+
+- 时间：2026-07-05 06:35 UTC。
+- 当前阶段：PR259 owner-audit P1 return fix for atomic billing mirror idempotency.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Previous PR259 head：`e28680ebad9e57ec1f8433ab8c46500feb156a80`。
+- Scope：code-level deterministic primary-key conflict handling and regression tests only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### P1 addressed
+
+- `upsertSubscriptionMirror` no longer relies only on read/read/insert timing. New `user_subscriptions` mirror inserts use a deterministic UUID primary key derived from `stripe_subscription_id`, so simultaneous webhook and return-sync inserts contend on the existing `id` primary key.
+- On `23505` duplicate-key / unique-violation, `upsertSubscriptionMirror` logs the conflict, re-reads bounded subscription mirror candidates by `stripe_subscription_id`, and updates the canonical row.
+- Non-promotion invoice-backed `payment_orders` inserts now use a deterministic UUID primary key derived from `stripe_invoice_id`, so simultaneous inserts for the same invoice contend on the existing `id` primary key.
+- On `23505` duplicate-key / unique-violation, `writeCompletedInvoiceOrder` logs the conflict, re-reads bounded invoice-order candidates by `stripe_invoice_id`, and updates the canonical row.
+- Existing duplicate state remains tolerated and is not cleaned up in this gate.
+- `subscription_credit_grants`, `credit_transactions`, and direct profile credit writes were not widened or replaced.
+
+### Tests added / updated
+
+- Concurrent fulfill paths that both pass the second subscription mirror read and then simultaneously attempt `user_subscriptions` insert now converge to one active mirror.
+- Same `stripe_subscription_id` concurrent webhook / return-sync-style fulfillment does not create duplicate active mirrors.
+- Same `stripe_invoice_id` concurrent non-checkout-promotion invoice-order inserts converge to one invoice-backed `payment_orders` row.
+- Duplicate-key conflict paths re-read and update canonical rows safely.
+- Existing duplicate invoice/subscription state remains non-expanding.
+- Grant and ledger exact-once assertions remain in place, including profile credit delta matching ledger delta.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Focused subscription credit grants test：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts` passed；1 file / 41 tests。
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 109 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 676 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Direct web ESLint：`cd apps/web && node_modules/.bin/eslint` passed。
+- Whitespace check：`git diff --check` passed。
+- Root `corepack pnpm lint` remained blocked before lint rules by the Codex runtime invoking pnpm 11 internally during `web:lint` deps-status install, causing `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; direct ESLint passed after restoring dependencies with pnpm 10.28.1.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。
+
 ## PR259 latest-head review follow-up
 
 - 时间：2026-07-05 00:57 UTC。

@@ -33,7 +33,7 @@ type MockSupabaseHooks = {
     mode: 'select' | 'insert' | 'update';
     filters: MockFilter[];
     tables: Record<TableName, Row[]>;
-  }) => void;
+  }) => void | Promise<void>;
 };
 
 class MockQuery {
@@ -102,15 +102,10 @@ class MockQuery {
   }
 
   async maybeSingle() {
-    this.runBeforeExecute();
+    await this.runBeforeExecute();
 
     if (this.mode === 'insert') {
-      const inserted = {
-        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
-        ...this.payload,
-      };
-      this.tables[this.table].push(inserted);
-      return { data: inserted, error: null };
+      return this.insertOne();
     }
 
     if (this.mode === 'update') {
@@ -131,15 +126,13 @@ class MockQuery {
   }
 
   private async execute() {
-    this.runBeforeExecute();
+    await this.runBeforeExecute();
 
     if (this.mode === 'insert') {
-      const inserted = {
-        id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
-        ...this.payload,
-      };
-      this.tables[this.table].push(inserted);
-      return { data: [inserted], error: null };
+      const result = this.insertOne();
+      return result.error
+        ? result
+        : { data: [result.data], error: null };
     }
 
     if (this.mode === 'update') {
@@ -156,13 +149,51 @@ class MockQuery {
     };
   }
 
-  private runBeforeExecute() {
-    this.hooks.beforeExecute?.({
+  private async runBeforeExecute() {
+    await this.hooks.beforeExecute?.({
       table: this.table,
       mode: this.mode,
       filters: this.filters.map((filter) => ({ ...filter })),
       tables: this.tables,
     });
+  }
+
+  private insertOne() {
+    const inserted = {
+      id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
+      ...this.payload,
+    };
+    const uniqueViolation = this.getUniqueViolation(inserted);
+    if (uniqueViolation) {
+      return { data: null, error: uniqueViolation };
+    }
+
+    this.tables[this.table].push(inserted);
+    return { data: inserted, error: null };
+  }
+
+  private getUniqueViolation(inserted: Row) {
+    const duplicateId = inserted.id
+      && this.tables[this.table].some((row) => row.id === inserted.id);
+    if (duplicateId) {
+      return {
+        code: '23505',
+        message: `duplicate key value violates unique constraint "${this.table}_pkey"`,
+      };
+    }
+
+    if (
+      this.table === 'subscription_credit_grants'
+      && inserted.idempotency_key
+      && this.tables.subscription_credit_grants.some((row) => row.idempotency_key === inserted.idempotency_key)
+    ) {
+      return {
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "subscription_credit_grants_idempotency_key_key"',
+      };
+    }
+
+    return null;
   }
 
   private matchingRows() {
@@ -308,6 +339,33 @@ function createMockSupabase(
   };
 
   return supabase;
+}
+
+function createAsyncBarrier(expectedArrivals: number) {
+  let arrivals = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    get arrivals() {
+      return arrivals;
+    },
+    async wait() {
+      arrivals += 1;
+      if (arrivals >= expectedArrivals) {
+        release();
+      }
+
+      await Promise.race([
+        released,
+        new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error(`Timed out waiting for ${expectedArrivals} barrier arrivals`)), 1000);
+        }),
+      ]);
+    },
+  };
 }
 
 describe('subscription credit grants', () => {
@@ -1517,6 +1575,165 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.credit_transactions).toHaveLength(1);
   });
 
+  it('converges simultaneous subscription mirror inserts onto one deterministic row', async () => {
+    const subscriptionInsertBarrier = createAsyncBarrier(2);
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-atomic-mirror-source',
+        user_id: 'user-atomic-mirror',
+        item_id: 'plan-atomic-mirror',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_atomic_mirror',
+        stripe_customer_id: 'cus_atomic_mirror',
+        stripe_price_id: 'price_atomic_mirror',
+        status: 'completed',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-atomic-mirror',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-atomic-mirror',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    }, {
+      async beforeExecute(context) {
+        if (context.table === 'user_subscriptions' && context.mode === 'insert') {
+          await subscriptionInsertBarrier.wait();
+        }
+      },
+    });
+
+    const webhookInput = {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_atomic_mirror_webhook',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2026-08-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_atomic_mirror',
+      subscriptionId: 'sub_atomic_mirror',
+      now: '2026-07-04T00:00:02.000Z',
+    };
+    const returnSyncInput = {
+      ...webhookInput,
+      invoiceId: 'in_atomic_mirror_return_sync',
+      invoiceCreatedAt: '2026-07-04T00:00:02.000Z',
+      now: '2026-07-04T00:00:03.000Z',
+    };
+
+    await Promise.all([
+      fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, webhookInput),
+      fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, returnSyncInput),
+    ]);
+
+    expect(subscriptionInsertBarrier.arrivals).toBe(2);
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      stripe_subscription_id: 'sub_atomic_mirror',
+      status: 'active',
+      billing_cycle: 'monthly',
+    });
+    expect([
+      'in_atomic_mirror_webhook',
+      'in_atomic_mirror_return_sync',
+    ]).toContain(supabase.tables.user_subscriptions[0].metadata.lastInvoiceId);
+    expect(supabase.tables.payment_orders.filter((order) => order.stripe_invoice_id)).toHaveLength(2);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(2);
+    expect(new Set(supabase.tables.subscription_credit_grants.map((grant) => grant.idempotency_key)).size).toBe(2);
+    expect(supabase.tables.credit_transactions).toHaveLength(2);
+    const ledgerDelta = supabase.tables.credit_transactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+    expect(supabase.tables.profiles[0].credits).toBe(ledgerDelta);
+  });
+
+  it('converges simultaneous non-promotion invoice order inserts onto one deterministic row', async () => {
+    const grantInsertBarrier = createAsyncBarrier(2);
+    const invoiceOrderInsertBarrier = createAsyncBarrier(2);
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-atomic-invoice-source',
+        user_id: 'user-atomic-invoice',
+        item_id: 'plan-atomic-invoice',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_atomic_invoice',
+        stripe_customer_id: 'cus_atomic_invoice',
+        stripe_price_id: 'price_atomic_invoice',
+        status: 'completed',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-atomic-invoice',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-atomic-invoice',
+        membership_level: 'free',
+        credits: 100,
+      }],
+    }, {
+      async beforeExecute(context) {
+        if (context.table === 'subscription_credit_grants' && context.mode === 'insert') {
+          await grantInsertBarrier.wait();
+        }
+
+        if (context.table === 'payment_orders' && context.mode === 'insert') {
+          await invoiceOrderInsertBarrier.wait();
+        }
+      },
+    });
+
+    const input = {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_atomic_invoice',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2026-08-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_atomic_invoice',
+      subscriptionId: 'sub_atomic_invoice',
+      now: '2026-07-04T00:00:02.000Z',
+    };
+
+    const [webhookResult, returnSyncResult] = await Promise.all([
+      fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input),
+      fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+        ...input,
+        now: '2026-07-04T00:00:03.000Z',
+      }),
+    ]);
+
+    const invoiceOrders = supabase.tables.payment_orders.filter((order) => order.stripe_invoice_id === 'in_atomic_invoice');
+    expect(grantInsertBarrier.arrivals).toBe(2);
+    expect(invoiceOrderInsertBarrier.arrivals).toBe(2);
+    expect(invoiceOrders).toHaveLength(1);
+    expect(webhookResult.invoiceOrderId).toBe(invoiceOrders[0].id);
+    expect(returnSyncResult.invoiceOrderId).toBe(invoiceOrders[0].id);
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      stripe_subscription_id: 'sub_atomic_invoice',
+      status: 'active',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    const ledgerDelta = supabase.tables.credit_transactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+    expect(ledgerDelta).toBe(100);
+    expect(supabase.tables.profiles[0].credits - 100).toBe(ledgerDelta);
+  });
+
   it('does not overwrite checkout row when promotion sees a stale invoice claim', async () => {
     let promotionUpdates = 0;
     const supabase = createMockSupabase({
@@ -1587,14 +1804,14 @@ describe('subscription credit grants', () => {
     });
 
     expect(promotionUpdates).toBe(1);
-    expect(result.invoiceOrderId).toBe('payment_orders-2');
+    const insertedOrder = supabase.tables.payment_orders.find((order) => order.stripe_invoice_id === 'in_stale_promotion');
+    expect(result.invoiceOrderId).toBe(insertedOrder?.id);
     expect(supabase.tables.payment_orders).toHaveLength(2);
     expect(supabase.tables.payment_orders.find((order) => order.id === 'order-stale-promotion')).toMatchObject({
       stripe_invoice_id: 'in_already_claimed',
       metadata: { source: 'concurrent_invoice' },
     });
     expect(supabase.tables.payment_orders.find((order) => order.stripe_invoice_id === 'in_stale_promotion')).toMatchObject({
-      id: 'payment_orders-2',
       status: 'completed',
       payment_status: 'paid',
       stripe_subscription_id: 'sub_stale_promotion',

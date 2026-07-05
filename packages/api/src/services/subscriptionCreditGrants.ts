@@ -4,6 +4,7 @@
  * This code is proprietary and confidential.
  */
 
+import { createHash } from 'crypto';
 import { logger } from '../lib/logger';
 import { normalizePaymentOrderStatus } from './paymentOrderStatus';
 import {
@@ -13,6 +14,10 @@ import {
 
 type SupabaseLikeClient = any;
 const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
+const DETERMINISTIC_UUID_NAMESPACES = {
+  subscriptionMirror: 'graylum:user_subscriptions:stripe_subscription_id:v1',
+  invoicePaymentOrder: 'graylum:payment_orders:stripe_invoice_id:v1',
+} as const;
 
 export type SubscriptionBillingCycle = 'monthly' | 'yearly';
 export type SubscriptionGrantType = 'monthly_invoice' | 'annual_monthly_release';
@@ -416,6 +421,35 @@ function asPaymentOrderRows(data: PaymentOrderRow | PaymentOrderRow[] | null | u
   }
 
   return Array.isArray(data) ? data : [data];
+}
+
+function buildDeterministicUuid(namespace: string, value: string) {
+  const bytes = Uint8Array.from(createHash('sha256').update(`${namespace}:${value}`).digest().subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-');
+}
+
+function buildSubscriptionMirrorId(subscriptionId: string) {
+  return buildDeterministicUuid(DETERMINISTIC_UUID_NAMESPACES.subscriptionMirror, subscriptionId);
+}
+
+function buildInvoicePaymentOrderId(invoiceId: string) {
+  return buildDeterministicUuid(DETERMINISTIC_UUID_NAMESPACES.invoicePaymentOrder, invoiceId);
+}
+
+function isUniqueViolationError(error: { code?: unknown; message?: unknown } | null | undefined) {
+  return error?.code === '23505'
+    || /duplicate key value violates unique constraint/i.test(String(error?.message ?? ''));
 }
 
 function asSubscriptionRows(data: SubscriptionRow | SubscriptionRow[] | null | undefined): SubscriptionRow[] {
@@ -2094,6 +2128,7 @@ async function upsertSubscriptionMirror(input: {
   const insertResult = await input.supabase
     .from('user_subscriptions')
     .insert({
+      id: buildSubscriptionMirrorId(input.subscriptionId),
       ...buildPayload(null),
       stripe_subscription_id: input.subscriptionId,
       status: 'active',
@@ -2103,6 +2138,21 @@ async function upsertSubscriptionMirror(input: {
     .maybeSingle();
 
   if (insertResult.error) {
+    if (isUniqueViolationError(insertResult.error)) {
+      logger.warn('billing', 'subscription_mirror_insert_conflict', {
+        subscriptionId: maskIdentifier(input.subscriptionId),
+      });
+
+      const conflictedSubscriptions = await readSubscriptionMirrorCandidates();
+      logDuplicateSubscriptionMirrors(input.subscriptionId, conflictedSubscriptions);
+      const conflictedSubscription = preferCanonicalSubscriptionMirror(conflictedSubscriptions);
+      if (conflictedSubscription?.id) {
+        await updateExistingSubscription(conflictedSubscription);
+
+        return;
+      }
+    }
+
     throwGrantError(
       'subscription_mirror_insert',
       SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
@@ -2280,11 +2330,51 @@ async function writeCompletedInvoiceOrder(input: {
 
   const insertResult = await input.supabase
     .from('payment_orders')
-    .insert(payload)
+    .insert({
+      id: buildInvoicePaymentOrderId(input.invoiceId),
+      ...payload,
+    })
     .select('id')
     .maybeSingle();
 
   if (insertResult.error) {
+    if (isUniqueViolationError(insertResult.error)) {
+      logger.warn('billing', 'subscription_invoice_order_insert_conflict', {
+        invoiceId: maskIdentifier(input.invoiceId),
+      });
+
+      const conflictedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
+      if (conflictedInvoiceOrder?.id) {
+        const conflictUpdateResult = await input.supabase
+          .from('payment_orders')
+          .update({
+            ...payload,
+            metadata: {
+              ...asRecord(conflictedInvoiceOrder.metadata),
+              source: 'invoice.payment_succeeded',
+              transactionId: input.creditTransactionId,
+              subscriptionCreditGrantId: input.grantId,
+              grantedCredits: input.grantedCredits,
+              fulfillmentSource: 'subscription_credit_grants',
+            },
+          })
+          .eq('id', conflictedInvoiceOrder.id)
+          .select('id')
+          .maybeSingle();
+
+        if (conflictUpdateResult.error) {
+          throwGrantError(
+            'subscription_invoice_order_update',
+            SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+            conflictUpdateResult.error,
+            { invoiceId: maskIdentifier(input.invoiceId) },
+          );
+        }
+
+        return conflictUpdateResult.data?.id ?? conflictedInvoiceOrder.id;
+      }
+    }
+
     throwGrantError(
       'subscription_invoice_order_insert',
       SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
