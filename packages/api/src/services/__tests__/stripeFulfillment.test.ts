@@ -23,6 +23,7 @@ import {
   fulfillPaidMembershipCheckoutSession,
   markMembershipInvoicePaymentFailed,
   reconcileSubscriptionRefundFromStripeWebhook,
+  syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
 import { releaseDueAnnualSubscriptionCredits } from '../subscriptionCreditGrants';
@@ -301,6 +302,73 @@ describe('stripe fulfillment helpers', () => {
     loggerState.error.mockReset();
     loggerState.info.mockReset();
     loggerState.warn.mockReset();
+  });
+
+  it('syncs subscription state deterministically when duplicate mirrors already exist', async () => {
+    const supabase = createRefundWebhookSupabase({
+      user_subscriptions: [
+        {
+          id: 'subscription-duplicate-a',
+          user_id: 'user-duplicate-subscription',
+          membership_plan_id: 'plan-duplicate-subscription',
+          stripe_subscription_id: 'sub_duplicate_subscription',
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          created_at: '2026-07-04T00:00:01.000Z',
+        },
+        {
+          id: 'subscription-duplicate-b',
+          user_id: 'user-duplicate-subscription',
+          membership_plan_id: 'plan-duplicate-subscription',
+          stripe_subscription_id: 'sub_duplicate_subscription',
+          billing_cycle: 'yearly',
+          status: 'active',
+          cancel_at_period_end: 'false',
+          created_at: '2026-07-04T00:00:02.000Z',
+        },
+      ],
+      profiles: [{
+        id: 'user-duplicate-subscription',
+        membership_level: 'gold',
+      }],
+    });
+    const subscription = {
+      id: 'sub_duplicate_subscription',
+      status: 'active',
+      cancel_at_period_end: true,
+      items: {
+        data: [{
+          current_period_start: 1783123200,
+          current_period_end: 1814659200,
+        }],
+      },
+    } as unknown as Stripe.Subscription;
+
+    await expect(syncSubscriptionState(supabase, subscription)).resolves.toBeUndefined();
+
+    expect(supabase.tables.user_subscriptions).toHaveLength(2);
+    expect(supabase.tables.user_subscriptions).toEqual([
+      expect.objectContaining({
+        id: 'subscription-duplicate-a',
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }),
+      expect.objectContaining({
+        id: 'subscription-duplicate-b',
+        status: 'active',
+        cancel_at_period_end: 'true',
+      }),
+    ]);
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_state_duplicate_mirror_detected',
+      expect.objectContaining({
+        subscriptionId: 'sub_dupl...iption',
+        subscriptionCount: 2,
+        canonicalSubscriptionId: 'subscrip...cate-a',
+      }),
+    );
   });
 
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
