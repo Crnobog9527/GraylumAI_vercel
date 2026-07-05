@@ -3896,3 +3896,55 @@ Latest-head Codex review：
 - 未关闭 issue #225。
 - 未 merge。
 - 未 production release。
+
+## PR259 latest-head review follow-up
+
+- 时间：2026-07-05 00:57 UTC。
+- 当前阶段：PR259 review feedback fix for billing mirror dedupe / idempotency.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Previous PR259 head：`8028c5b35a64ec290f7e9ab2043c4e403830ce57`。
+- Scope：address latest-head review feedback only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### Review feedback addressed
+
+- P1 `Recheck subscription mirrors before inserting`: `upsertSubscriptionMirror` now performs a second bounded read immediately before inserting a `user_subscriptions` mirror. If a concurrent webhook or return-sync path inserted the mirror after the first read, the second path updates the canonical row instead of inserting a duplicate active subscription mirror.
+- P2 `Guard checkout-row promotion against stale claims`: `writeCompletedInvoiceOrder` now guards checkout-row promotion with `stripe_invoice_id IS NULL` semantics. If the original checkout row was already claimed by another invoice, the current invoice rechecks for an existing invoice row and otherwise inserts its own invoice-backed order instead of overwriting another invoice's durable order fields.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Focused subscription credit grants test：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts` passed；1 file / 39 tests。
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 107 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 674 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Whitespace check：`git diff --no-index --check` for the follow-up changed source/test files produced no whitespace/conflict-marker output。
+- `pnpm lint` was blocked before lint rules ran because pnpm 11 attempted a deps-status install and aborted module purge in non-TTY mode (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`)；no lint rule failure was produced。
+- Direct ESLint from root was blocked by missing root `eslint.config.(js|mjs|cjs)`；direct ESLint with `apps/web/eslint.config.mjs` ignored the API files as outside the config base path and produced warnings only。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。

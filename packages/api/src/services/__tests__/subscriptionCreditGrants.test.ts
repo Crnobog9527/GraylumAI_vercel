@@ -25,8 +25,19 @@ type TableName =
 
 type Row = Record<string, any>;
 
+type MockFilter = { column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' | 'is' };
+
+type MockSupabaseHooks = {
+  beforeExecute?: (context: {
+    table: TableName;
+    mode: 'select' | 'insert' | 'update';
+    filters: MockFilter[];
+    tables: Record<TableName, Row[]>;
+  }) => void;
+};
+
 class MockQuery {
-  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' }> = [];
+  private filters: MockFilter[] = [];
   private containsFilters: Array<{ column: string; value: unknown }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: Row | null = null;
@@ -36,6 +47,7 @@ class MockQuery {
   constructor(
     private readonly tables: Record<TableName, Row[]>,
     private readonly table: TableName,
+    private readonly hooks: MockSupabaseHooks = {},
   ) {}
 
   select() {
@@ -54,6 +66,11 @@ class MockQuery {
 
   lte(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'lte' });
+    return this;
+  }
+
+  is(column: string, value: unknown) {
+    this.filters.push({ column, value, operator: 'is' });
     return this;
   }
 
@@ -85,6 +102,8 @@ class MockQuery {
   }
 
   async maybeSingle() {
+    this.runBeforeExecute();
+
     if (this.mode === 'insert') {
       const inserted = {
         id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
@@ -112,6 +131,8 @@ class MockQuery {
   }
 
   private async execute() {
+    this.runBeforeExecute();
+
     if (this.mode === 'insert') {
       const inserted = {
         id: this.payload?.id ?? `${this.table}-${this.tables[this.table].length + 1}`,
@@ -135,6 +156,15 @@ class MockQuery {
     };
   }
 
+  private runBeforeExecute() {
+    this.hooks.beforeExecute?.({
+      table: this.table,
+      mode: this.mode,
+      filters: this.filters.map((filter) => ({ ...filter })),
+      tables: this.tables,
+    });
+  }
+
   private matchingRows() {
     const rows = this.tables[this.table].filter((row) =>
       this.filters.every(({ column, value, operator }) => {
@@ -146,7 +176,15 @@ class MockQuery {
           return row[column] !== value;
         }
 
-        return row[column] <= value;
+        if (operator === 'lte') {
+          return row[column] <= value;
+        }
+
+        if (value === null) {
+          return row[column] === null || row[column] === undefined;
+        }
+
+        return row[column] === value;
       })
       && this.containsFilters.every(({ column, value }) =>
         containsValue(row[column], value),
@@ -191,7 +229,10 @@ function containsValue(actual: unknown, expected: unknown): boolean {
   return actual === expected;
 }
 
-function createMockSupabase(seed: Partial<Record<TableName, Row[]>> = {}) {
+function createMockSupabase(
+  seed: Partial<Record<TableName, Row[]>> = {},
+  hooks: MockSupabaseHooks = {},
+) {
   const tables: Record<TableName, Row[]> = {
     payment_orders: seed.payment_orders ?? [],
     membership_plans: seed.membership_plans ?? [],
@@ -204,7 +245,7 @@ function createMockSupabase(seed: Partial<Record<TableName, Row[]>> = {}) {
   const supabase = {
     tables,
     from(table: TableName) {
-      return new MockQuery(tables, table);
+      return new MockQuery(tables, table, hooks);
     },
     async rpc(name: string, payload: Row) {
       expect(name).toBe('atomic_apply_credit_ledger_entry');
@@ -1389,6 +1430,177 @@ describe('subscription credit grants', () => {
       credits: 110,
     });
     expect(supabase.tables.profiles[0].credits - 100).toBe(ledgerDelta);
+  });
+
+  it('rechecks subscription mirrors before insert when a concurrent path inserts first', async () => {
+    let subscriptionSelects = 0;
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-concurrent-mirror',
+        user_id: 'user-concurrent-mirror',
+        item_id: 'plan-concurrent-mirror',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_concurrent_mirror',
+        stripe_checkout_session_id: 'cs_test_concurrent_mirror',
+        stripe_customer_id: 'cus_concurrent_mirror',
+        stripe_price_id: 'price_concurrent_mirror',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-concurrent-mirror',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-concurrent-mirror',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    }, {
+      beforeExecute(context) {
+        if (
+          context.table === 'user_subscriptions'
+          && context.mode === 'select'
+          && context.filters.some((filter) =>
+            filter.column === 'stripe_subscription_id'
+            && filter.value === 'sub_concurrent_mirror'
+          )
+        ) {
+          subscriptionSelects += 1;
+
+          if (subscriptionSelects === 2 && context.tables.user_subscriptions.length === 0) {
+            context.tables.user_subscriptions.push({
+              id: 'subscription-concurrent-mirror',
+              user_id: 'user-concurrent-mirror',
+              membership_plan_id: 'plan-concurrent-mirror',
+              stripe_subscription_id: 'sub_concurrent_mirror',
+              status: 'active',
+              cancel_at_period_end: 'false',
+              created_at: '2026-07-04T00:00:01.500Z',
+              metadata: { source: 'concurrent_path' },
+            });
+          }
+        }
+      },
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_concurrent_mirror',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2026-08-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_concurrent_mirror',
+      subscriptionId: 'sub_concurrent_mirror',
+      now: '2026-07-04T00:00:02.000Z',
+    });
+
+    expect(subscriptionSelects).toBeGreaterThanOrEqual(2);
+    expect(supabase.tables.user_subscriptions).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      id: 'subscription-concurrent-mirror',
+      stripe_subscription_id: 'sub_concurrent_mirror',
+      status: 'active',
+      metadata: expect.objectContaining({
+        source: 'concurrent_path',
+        lastInvoiceId: 'in_concurrent_mirror',
+      }),
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
+  it('does not overwrite checkout row when promotion sees a stale invoice claim', async () => {
+    let promotionUpdates = 0;
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-stale-promotion',
+        user_id: 'user-stale-promotion',
+        item_id: 'plan-stale-promotion',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_stale_promotion',
+        stripe_checkout_session_id: 'cs_test_stale_promotion',
+        stripe_customer_id: 'cus_stale_promotion',
+        stripe_price_id: 'price_stale_promotion',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-07-04T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-stale-promotion',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 100,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-stale-promotion',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    }, {
+      beforeExecute(context) {
+        if (
+          context.table === 'payment_orders'
+          && context.mode === 'update'
+          && context.filters.some((filter) => filter.column === 'id' && filter.value === 'order-stale-promotion')
+          && context.filters.some((filter) =>
+            filter.column === 'stripe_invoice_id'
+            && filter.operator === 'is'
+            && filter.value === null
+          )
+        ) {
+          promotionUpdates += 1;
+          const row = context.tables.payment_orders.find((order) => order.id === 'order-stale-promotion');
+          if (row && !row.stripe_invoice_id) {
+            Object.assign(row, {
+              stripe_invoice_id: 'in_already_claimed',
+              status: 'completed',
+              payment_status: 'paid',
+              fulfilled_at: '2026-07-04T00:00:01.500Z',
+              metadata: { source: 'concurrent_invoice' },
+            });
+          }
+        }
+      },
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 990,
+      currency: 'usd',
+      invoiceId: 'in_stale_promotion',
+      invoiceCreatedAt: '2026-07-04T00:00:01.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-07-04T00:00:00.000Z',
+      periodEnd: '2026-08-04T00:00:00.000Z',
+      stripeCustomerId: 'cus_stale_promotion',
+      subscriptionId: 'sub_stale_promotion',
+      now: '2026-07-04T00:00:02.000Z',
+    });
+
+    expect(promotionUpdates).toBe(1);
+    expect(result.invoiceOrderId).toBe('payment_orders-2');
+    expect(supabase.tables.payment_orders).toHaveLength(2);
+    expect(supabase.tables.payment_orders.find((order) => order.id === 'order-stale-promotion')).toMatchObject({
+      stripe_invoice_id: 'in_already_claimed',
+      metadata: { source: 'concurrent_invoice' },
+    });
+    expect(supabase.tables.payment_orders.find((order) => order.stripe_invoice_id === 'in_stale_promotion')).toMatchObject({
+      id: 'payment_orders-2',
+      status: 'completed',
+      payment_status: 'paid',
+      stripe_subscription_id: 'sub_stale_promotion',
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
   });
 
   it('updates one subscription mirror across invoices for the same Stripe subscription', async () => {

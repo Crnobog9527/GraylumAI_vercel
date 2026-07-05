@@ -438,6 +438,18 @@ function preferCanonicalSubscriptionMirror(subscriptions: SubscriptionRow[]) {
     ?? null;
 }
 
+function logDuplicateSubscriptionMirrors(subscriptionId: string, subscriptions: SubscriptionRow[]) {
+  if (subscriptions.length <= 1) {
+    return;
+  }
+
+  logger.warn('billing', 'subscription_mirror_duplicate_detected', {
+    subscriptionId: maskIdentifier(subscriptionId),
+    subscriptionCount: subscriptions.length,
+    canonicalSubscriptionId: maskIdentifier(preferCanonicalSubscriptionMirror(subscriptions)?.id),
+  });
+}
+
 async function getExistingInvoiceOrder(supabase: SupabaseLikeClient, invoiceId: string): Promise<PaymentOrderRow | null> {
   const query = supabase
     .from('payment_orders')
@@ -1985,70 +1997,68 @@ async function upsertSubscriptionMirror(input: {
   invoiceId: string;
   paymentStatus?: string | null;
 }) {
-  const existingQuery = input.supabase
-    .from('user_subscriptions')
-    .select('id, status, cancel_at_period_end, metadata, created_at')
-    .eq('stripe_subscription_id', input.subscriptionId);
-  const orderedExistingQuery = typeof existingQuery.order === 'function'
-    ? existingQuery.order('created_at', { ascending: true })
-    : existingQuery;
-  const limitedExistingQuery = typeof orderedExistingQuery.limit === 'function'
-    ? orderedExistingQuery.limit(10)
-    : orderedExistingQuery;
-  const existingResult = typeof limitedExistingQuery.then === 'function'
-    ? await limitedExistingQuery
-    : await limitedExistingQuery.maybeSingle();
+  const readSubscriptionMirrorCandidates = async () => {
+    const existingQuery = input.supabase
+      .from('user_subscriptions')
+      .select('id, status, cancel_at_period_end, metadata, created_at')
+      .eq('stripe_subscription_id', input.subscriptionId);
+    const orderedExistingQuery = typeof existingQuery.order === 'function'
+      ? existingQuery.order('created_at', { ascending: true })
+      : existingQuery;
+    const limitedExistingQuery = typeof orderedExistingQuery.limit === 'function'
+      ? orderedExistingQuery.limit(10)
+      : orderedExistingQuery;
+    const existingResult = typeof limitedExistingQuery.then === 'function'
+      ? await limitedExistingQuery
+      : await limitedExistingQuery.maybeSingle();
 
-  if (existingResult.error) {
-    throwGrantError(
-      'subscription_mirror_lookup',
-      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-      existingResult.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
-  }
+    if (existingResult.error) {
+      throwGrantError(
+        'subscription_mirror_lookup',
+        SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
+        existingResult.error,
+        { subscriptionId: maskIdentifier(input.subscriptionId) },
+      );
+    }
 
-  const existingSubscriptions = asSubscriptionRows(existingResult.data as SubscriptionRow | SubscriptionRow[] | null);
-  if (existingSubscriptions.length > 1) {
-    logger.warn('billing', 'subscription_mirror_duplicate_detected', {
-      subscriptionId: maskIdentifier(input.subscriptionId),
-      subscriptionCount: existingSubscriptions.length,
-      canonicalSubscriptionId: maskIdentifier(preferCanonicalSubscriptionMirror(existingSubscriptions)?.id),
-    });
-  }
-
-  const existingSubscription = preferCanonicalSubscriptionMirror(existingSubscriptions);
-  const payload: SubscriptionRow = {
-    user_id: input.sourceOrder.user_id,
-    membership_plan_id: input.plan.id,
-    stripe_customer_id: input.sourceOrder.stripe_customer_id ?? input.stripeCustomerId ?? null,
-    stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
-    billing_cycle: input.billingCycle,
-    current_period_start: input.periodStart ?? null,
-    current_period_end: input.periodEnd ?? null,
-    metadata: {
-      ...asRecord(existingSubscription?.metadata),
-      lastInvoiceId: input.invoiceId,
-      lastInvoicePaymentStatus: input.paymentStatus ?? 'paid',
-      transactionId: input.transactionId ?? null,
-      fulfillmentSource: 'subscription_credit_grants',
-    },
-    updated_at: input.now,
+    return asSubscriptionRows(existingResult.data as SubscriptionRow | SubscriptionRow[] | null);
   };
 
-  if (existingSubscription?.id) {
-    if (shouldInitializeMirrorStatus(existingSubscription.status)) {
+  const buildPayload = (subscription: SubscriptionRow | null): SubscriptionRow => {
+    const payload: SubscriptionRow = {
+      user_id: input.sourceOrder.user_id,
+      membership_plan_id: input.plan.id,
+      stripe_customer_id: input.sourceOrder.stripe_customer_id ?? input.stripeCustomerId ?? null,
+      stripe_price_id: input.sourceOrder.stripe_price_id ?? null,
+      billing_cycle: input.billingCycle,
+      current_period_start: input.periodStart ?? null,
+      current_period_end: input.periodEnd ?? null,
+      metadata: {
+        ...asRecord(subscription?.metadata),
+        lastInvoiceId: input.invoiceId,
+        lastInvoicePaymentStatus: input.paymentStatus ?? 'paid',
+        transactionId: input.transactionId ?? null,
+        fulfillmentSource: 'subscription_credit_grants',
+      },
+      updated_at: input.now,
+    };
+
+    if (subscription?.id && shouldInitializeMirrorStatus(subscription.status)) {
       payload.status = 'active';
     }
 
-    if (shouldInitializeCancelAtPeriodEnd(existingSubscription.cancel_at_period_end)) {
+    if (subscription?.id && shouldInitializeCancelAtPeriodEnd(subscription.cancel_at_period_end)) {
       payload.cancel_at_period_end = 'false';
     }
 
+    return payload;
+  };
+
+  const updateExistingSubscription = async (subscription: SubscriptionRow) => {
     const updateResult = await input.supabase
       .from('user_subscriptions')
-      .update(payload)
-      .eq('id', existingSubscription.id)
+      .update(buildPayload(subscription))
+      .eq('id', subscription.id)
       .select('id')
       .maybeSingle();
 
@@ -2060,6 +2070,23 @@ async function upsertSubscriptionMirror(input: {
         { subscriptionId: maskIdentifier(input.subscriptionId) },
       );
     }
+  };
+
+  const existingSubscriptions = await readSubscriptionMirrorCandidates();
+  logDuplicateSubscriptionMirrors(input.subscriptionId, existingSubscriptions);
+
+  const existingSubscription = preferCanonicalSubscriptionMirror(existingSubscriptions);
+  if (existingSubscription?.id) {
+    await updateExistingSubscription(existingSubscription);
+
+    return;
+  }
+
+  const recheckedSubscriptions = await readSubscriptionMirrorCandidates();
+  logDuplicateSubscriptionMirrors(input.subscriptionId, recheckedSubscriptions);
+  const recheckedSubscription = preferCanonicalSubscriptionMirror(recheckedSubscriptions);
+  if (recheckedSubscription?.id) {
+    await updateExistingSubscription(recheckedSubscription);
 
     return;
   }
@@ -2067,7 +2094,7 @@ async function upsertSubscriptionMirror(input: {
   const insertResult = await input.supabase
     .from('user_subscriptions')
     .insert({
-      ...payload,
+      ...buildPayload(null),
       stripe_subscription_id: input.subscriptionId,
       status: 'active',
       cancel_at_period_end: 'false',
@@ -2188,12 +2215,18 @@ async function writeCompletedInvoiceOrder(input: {
   }
 
   if (canPromoteCheckoutOrder && input.sourceOrder.id) {
-    const updateResult = await input.supabase
+    const promotionQuery = input.supabase
       .from('payment_orders')
       .update(payload)
-      .eq('id', input.sourceOrder.id)
-      .select('id')
-      .maybeSingle();
+      .eq('id', input.sourceOrder.id);
+    const guardedPromotionQuery = typeof promotionQuery.is === 'function'
+      ? promotionQuery.is('stripe_invoice_id', null)
+      : promotionQuery.eq('stripe_invoice_id', null);
+    const updateResult = typeof guardedPromotionQuery?.select === 'function'
+      ? await guardedPromotionQuery
+        .select('id')
+        .maybeSingle()
+      : await guardedPromotionQuery;
 
     if (updateResult.error) {
       throwGrantError(
@@ -2204,7 +2237,45 @@ async function writeCompletedInvoiceOrder(input: {
       );
     }
 
-    return updateResult.data?.id ?? input.sourceOrder.id;
+    if (updateResult.data?.id) {
+      return updateResult.data.id;
+    }
+
+    logger.warn('billing', 'subscription_invoice_order_checkout_promotion_stale', {
+      invoiceId: maskIdentifier(input.invoiceId),
+      sourceOrderId: maskIdentifier(input.sourceOrder.id),
+    });
+
+    const claimedInvoiceOrder = await getExistingInvoiceOrder(input.supabase, input.invoiceId);
+    if (claimedInvoiceOrder?.id) {
+      const claimedUpdateResult = await input.supabase
+        .from('payment_orders')
+        .update({
+          ...payload,
+          metadata: {
+            ...asRecord(claimedInvoiceOrder.metadata),
+            source: 'invoice.payment_succeeded',
+            transactionId: input.creditTransactionId,
+            subscriptionCreditGrantId: input.grantId,
+            grantedCredits: input.grantedCredits,
+            fulfillmentSource: 'subscription_credit_grants',
+          },
+        })
+        .eq('id', claimedInvoiceOrder.id)
+        .select('id')
+        .maybeSingle();
+
+      if (claimedUpdateResult.error) {
+        throwGrantError(
+          'subscription_invoice_order_update',
+          SUBSCRIPTION_GRANT_ERRORS.paymentOrderWrite,
+          claimedUpdateResult.error,
+          { invoiceId: maskIdentifier(input.invoiceId) },
+        );
+      }
+
+      return claimedUpdateResult.data?.id ?? claimedInvoiceOrder.id;
+    }
   }
 
   const insertResult = await input.supabase
