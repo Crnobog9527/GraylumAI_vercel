@@ -32,14 +32,15 @@ vi.mock('../lib/logger', () => ({
 vi.mock('../services/stripeFulfillment', () => ({
   fulfillCreditPackageOrder: vi.fn(),
   fulfillMembershipInvoice: vi.fn(),
+  fulfillPaidMembershipCheckoutSession: vi.fn(),
   syncSubscriptionState: vi.fn(),
   upsertPaymentOrderBySession: vi.fn(),
 }));
 
 import { paymentsRouter } from './payments';
 import {
-  fulfillCreditPackageOrder,
   fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
@@ -226,8 +227,8 @@ describe('paymentsRouter error sanitization', () => {
     loggerState.error.mockReset();
     loggerState.info.mockReset();
     loggerState.warn.mockReset();
-    vi.mocked(fulfillCreditPackageOrder).mockReset();
     vi.mocked(fulfillMembershipInvoice).mockReset();
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockReset();
     vi.mocked(syncSubscriptionState).mockReset();
     vi.mocked(upsertPaymentOrderBySession).mockReset();
     stripeState.getOrCreateStripeCustomerId.mockResolvedValue('cus_123');
@@ -1106,7 +1107,6 @@ describe('paymentsRouter error sanitization', () => {
     expect(subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
       items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
       proration_behavior: 'always_invoice',
-      payment_behavior: 'error_if_incomplete',
       cancel_at_period_end: false,
     }));
     expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, updatedSubscription);
@@ -2339,8 +2339,12 @@ describe('paymentsRouter error sanitization', () => {
       },
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
-    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
-    vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: true,
+      reason: null,
+      invoiceId: 'in_test_sync_paid',
+      subscriptionId: 'sub_test_sync',
+    });
 
     const userSupabase = {
       from(table: string) {
@@ -2403,8 +2407,17 @@ describe('paymentsRouter error sanitization', () => {
     expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
       eventType: 'checkout.session.sync',
     });
-    expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, subscription);
-    expect(fulfillMembershipInvoice).toHaveBeenCalledWith(adminSupabase, paidInvoice);
+    expect(fulfillPaidMembershipCheckoutSession).toHaveBeenCalledWith(
+      adminSupabase,
+      expect.objectContaining({
+        checkout: expect.any(Object),
+        invoices: expect.any(Object),
+        subscriptions: expect.any(Object),
+      }),
+      session,
+    );
+    expect(syncSubscriptionState).not.toHaveBeenCalled();
+    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(loggerState.info).toHaveBeenCalledWith(
       'billing',
       'payments_sync_checkout_stage',
@@ -2413,6 +2426,218 @@ describe('paymentsRouter error sanitization', () => {
         checkoutSessionId: 'cs_test_...iption',
         subscriptionId: 'sub_test...t_sync',
         invoiceId: 'in_test_...c_paid',
+      }),
+    );
+  });
+
+  it('returns deterministic sync state when duplicate checkout payment orders already exist', async () => {
+    const session = {
+      id: 'cs_test_sync_duplicate_orders',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
+      },
+      subscription: {
+        id: 'sub_test_sync_duplicate',
+      },
+      invoice: {
+        id: 'in_test_sync_duplicate',
+        status: 'paid',
+      },
+    };
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {},
+      subscriptions: {},
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: true,
+      reason: null,
+      invoiceId: 'in_test_sync_duplicate',
+      subscriptionId: 'sub_test_sync_duplicate',
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return createListQueryBuilder(
+            Promise.resolve({
+              data: [
+                {
+                  status: 'completed',
+                  payment_status: 'paid',
+                  fulfilled_at: '2026-07-04T00:00:02.000Z',
+                  stripe_subscription_id: 'sub_test_sync_duplicate',
+                  stripe_invoice_id: 'in_test_sync_duplicate',
+                },
+                {
+                  status: 'completed',
+                  payment_status: 'paid',
+                  fulfilled_at: '2026-07-04T00:00:03.000Z',
+                  stripe_subscription_id: 'sub_test_sync_duplicate',
+                  stripe_invoice_id: 'in_test_sync_duplicate',
+                },
+              ],
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    });
+
+    await expect(
+      caller.syncCheckoutSession({ sessionId: 'cs_test_sync_duplicate_orders' }),
+    ).resolves.toEqual({
+      sessionId: 'cs_test_sync_duplicate_orders',
+      mode: 'subscription',
+      checkoutStatus: 'complete',
+      paymentStatus: 'paid',
+      orderStatus: 'completed',
+      fulfilledAt: '2026-07-04T00:00:02.000Z',
+      stripeSubscriptionId: 'sub_test_sync_duplicate',
+      stripeInvoiceId: 'in_test_sync_duplicate',
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_duplicate_order_detected',
+      expect.objectContaining({
+        checkoutSessionId: 'cs_test_...orders',
+        orderCount: 2,
+      }),
+    );
+  });
+
+  it('does not silently accept an unfulfilled paid subscription checkout sync', async () => {
+    const session = {
+      id: 'cs_test_unfulfilled_paid_subscription',
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      client_reference_id: 'user-1',
+      metadata: {
+        userId: 'user-1',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
+      },
+      customer: 'cus_test_sync',
+      subscription: 'sub_test_unfulfilled_paid_subscription',
+      invoice: null,
+    };
+
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: {
+        sessions: {
+          retrieve: vi.fn().mockResolvedValue(session),
+        },
+      },
+      invoices: {
+        retrieve: vi.fn(),
+        list: vi.fn(),
+      },
+      subscriptions: {
+        retrieve: vi.fn(),
+      },
+    });
+    vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockResolvedValue({
+      fulfilled: false,
+      reason: 'paid_invoice_missing',
+      invoiceId: null,
+      subscriptionId: 'sub_test_unfulfilled_paid_subscription',
+    });
+
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+              },
+              error: null,
+            }),
+          );
+        }
+
+        throw new Error(`Unexpected user table ${table}`);
+      },
+    };
+    const caller = createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: {
+        from(table: string) {
+          throw new Error(`Unexpected admin table ${table}`);
+        },
+      },
+    });
+
+    await expect(
+      caller.syncCheckoutSession({ sessionId: 'cs_test_unfulfilled_paid_subscription' }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '同步支付会话失败，请稍后重试',
+    });
+
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_unfulfilled_paid_subscription',
+      expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        checkoutSessionId: 'cs_test_...iption',
+        subscriptionId: 'sub_test...iption',
+        reason: 'paid_invoice_missing',
+      }),
+    );
+    expect(loggerState.error).toHaveBeenCalledWith(
+      'billing',
+      'payments_sync_checkout_stage_failed',
+      expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        checkoutSessionId: 'cs_test_...iption',
       }),
     );
   });
@@ -2517,25 +2742,43 @@ describe('paymentsRouter error sanitization', () => {
       orderStatus: 'canceled',
       eventType: 'checkout.return.canceled',
     });
+    expect(fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
     expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
     expect(syncSubscriptionState).not.toHaveBeenCalled();
   });
 
-  it('does not let canceled return state override paid checkout sessions', async () => {
+  it.each([
+    'paid_invoice_missing',
+    'paid_invoice_unpaid',
+  ])('preserves existing blocked invoice audit for %s when router catch records context', async (blockedReason) => {
     const session = {
-      id: 'cs_test_paid_cancel_return',
-      mode: 'payment',
+      id: `cs_test_blocked_${blockedReason}`,
+      mode: 'subscription',
       status: 'complete',
       payment_status: 'paid',
       client_reference_id: 'user-1',
       metadata: {
         userId: 'user-1',
-        itemType: 'credit_package',
-        itemId: 'package-1',
-        billingCycle: 'one_time',
-        priceId: 'price_test_package',
+        itemType: 'membership_plan',
+        itemId: 'plan-1',
+        billingCycle: 'yearly',
+        priceId: 'price_test_yearly',
       },
-      customer: 'cus_test_paid_cancel',
+      customer: 'cus_test_blocked_invoice',
+      subscription: `sub_test_blocked_${blockedReason}`,
+      invoice: null,
+    };
+    const existingInvoiceResolutionAudit = {
+      sessionInvoicePresent: blockedReason === 'paid_invoice_unpaid',
+      sessionInvoiceId: 'in_test...locked',
+      sessionInvoiceStatus: blockedReason === 'paid_invoice_unpaid' ? 'open' : null,
+      latestInvoicePresent: false,
+      latestInvoiceId: null,
+      latestInvoiceStatus: null,
+      invoiceListCount: 99,
+      invoiceListStatuses: blockedReason === 'paid_invoice_unpaid' ? ['open'] : [],
+      paidInvoiceFound: false,
+      reason: blockedReason,
     };
 
     stripeState.getStripeClient.mockReturnValue({
@@ -2553,9 +2796,20 @@ describe('paymentsRouter error sanitization', () => {
       },
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
-    vi.mocked(fulfillCreditPackageOrder).mockResolvedValue(undefined);
-    vi.mocked(fulfillMembershipInvoice).mockResolvedValue(undefined);
-    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
+      Object.assign(new Error(`invoice audit already blocked for user@example.com ${session.id}`), {
+        stage: 'checkout_paid_invoice_resolution',
+        safeContext: {
+          reason: blockedReason,
+          sessionInvoiceId: 'in_test_...newer',
+          sessionInvoiceStatus: 'paid',
+          latestInvoiceId: 'in_test_...newer',
+          latestInvoiceStatus: 'paid',
+          invoiceListCount: 1,
+          invoiceListStatuses: ['paid'],
+        },
+      }),
+    );
 
     const userSupabase = {
       from(table: string) {
@@ -2577,21 +2831,53 @@ describe('paymentsRouter error sanitization', () => {
         throw new Error(`Unexpected user table ${table}`);
       },
     };
+    const paymentOrderUpdates: Array<Record<string, any>> = [];
     const adminSupabase = {
       from(table: string) {
         if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                status: 'completed',
-                payment_status: 'paid',
-                fulfilled_at: '2026-05-22T16:20:00.000Z',
-                stripe_subscription_id: null,
-                stripe_invoice_id: null,
-              },
-              error: null,
-            }),
-          );
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: `order-blocked-${blockedReason}`,
+                  metadata: {
+                    source: 'checkout.session.sync',
+                    invoiceResolutionAudit: existingInvoiceResolutionAudit,
+                    syncCheckoutSessionFulfillment: {
+                      status: 'blocked',
+                      stage: 'checkout_paid_invoice_resolution',
+                      reason: blockedReason,
+                      checkoutStatus: 'complete',
+                      paymentStatus: 'paid',
+                      subscriptionId: 'sub_test...locked',
+                      invoiceResolutionAudit: existingInvoiceResolutionAudit,
+                      updatedAt: '2026-07-01T00:00:00.000Z',
+                    },
+                    lastFulfillmentError: {
+                      stage: 'checkout_paid_invoice_resolution',
+                      reason: blockedReason,
+                      updatedAt: '2026-07-01T00:00:00.000Z',
+                    },
+                  },
+                },
+                error: null,
+              });
+            },
+            update(payload: Record<string, any>) {
+              paymentOrderUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
         }
 
         throw new Error(`Unexpected admin table ${table}`);
@@ -2603,27 +2889,43 @@ describe('paymentsRouter error sanitization', () => {
     });
 
     await expect(
-      caller.syncCheckoutSession({
-        sessionId: 'cs_test_paid_cancel_return',
-        checkoutState: 'canceled',
-      }),
-    ).resolves.toEqual({
-      sessionId: 'cs_test_paid_cancel_return',
-      mode: 'payment',
-      checkoutStatus: 'complete',
-      paymentStatus: 'paid',
-      orderStatus: 'completed',
-      fulfilledAt: '2026-05-22T16:20:00.000Z',
-      stripeSubscriptionId: null,
-      stripeInvoiceId: null,
+      caller.syncCheckoutSession({ sessionId: session.id }),
+    ).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '同步支付会话失败，请稍后重试',
     });
 
-    expect(upsertPaymentOrderBySession).toHaveBeenCalledWith(adminSupabase, session, {
-      eventType: 'checkout.session.sync',
+    expect(paymentOrderUpdates).toHaveLength(1);
+    expect(paymentOrderUpdates[0].metadata).toMatchObject({
+      source: 'checkout.session.sync',
+      invoiceResolutionAudit: existingInvoiceResolutionAudit,
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'blocked',
+        stage: 'checkout_paid_invoice_resolution',
+        reason: blockedReason,
+        invoiceResolutionAudit: existingInvoiceResolutionAudit,
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'checkout_paid_invoice_resolution',
+        reason: blockedReason,
+        routerCatch: expect.objectContaining({
+          stage: 'fulfill_paid_membership_checkout_session',
+          reason: 'checkout_paid_invoice_resolution',
+          errorStage: 'checkout_paid_invoice_resolution',
+          message: expect.stringContaining('[masked-email]'),
+        }),
+      }),
     });
-    expect(fulfillCreditPackageOrder).toHaveBeenCalledWith(adminSupabase, session);
-    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
-    expect(syncSubscriptionState).not.toHaveBeenCalled();
+    expect(paymentOrderUpdates[0].metadata.syncCheckoutSessionFulfillment).not.toMatchObject({
+      status: 'failed',
+    });
+    const metadataJson = JSON.stringify(paymentOrderUpdates[0].metadata);
+    expect(metadataJson).not.toContain(session.id);
+    expect(metadataJson).not.toContain(`sub_test_blocked_${blockedReason}`);
+    expect(metadataJson).not.toContain('in_test_blocked');
+    expect(metadataJson).not.toContain('cus_test_blocked_invoice');
+    expect(metadataJson).not.toContain('user@example.com');
+    expect(metadataJson).not.toContain('payment_method');
   });
 
   it('logs the failing sync stage while returning a safe frontend message', async () => {
@@ -2678,11 +2980,17 @@ describe('paymentsRouter error sanitization', () => {
       },
     });
     vi.mocked(upsertPaymentOrderBySession).mockResolvedValue(undefined);
-    vi.mocked(syncSubscriptionState).mockResolvedValue(undefined);
-    vi.mocked(fulfillMembershipInvoice).mockRejectedValue(
-      Object.assign(new Error('Failed to fulfill membership invoice'), {
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockRejectedValue(
+      Object.assign(new Error('Failed to fulfill membership invoice for user@example.com in cs_test_sync_rpc_failure'), {
         stage: 'fulfill_membership_invoice_rpc',
         safeContext: {
+          sessionInvoiceId: 'in_test_...ailure',
+          sessionInvoiceStatus: 'paid',
+          latestInvoiceId: 'in_test_...ailure',
+          latestInvoiceStatus: 'paid',
+          invoiceListCount: 1,
+          invoiceListStatuses: ['paid'],
+          reason: 'membership_invoice_fulfillment_failed',
           invoiceId: 'in_test_...ailure',
           subscriptionId: 'sub_test...ailure',
           supabaseError: { code: 'P0001', message: 'subscription order not found' },
@@ -2710,13 +3018,45 @@ describe('paymentsRouter error sanitization', () => {
         throw new Error(`Unexpected user table ${table}`);
       },
     };
+    const paymentOrderUpdates: Array<Record<string, any>> = [];
+    const adminSupabase = {
+      from(table: string) {
+        if (table === 'payment_orders') {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            maybeSingle() {
+              return Promise.resolve({
+                data: {
+                  id: 'order-sync-rpc-failure',
+                  metadata: {
+                    source: 'checkout.session.sync',
+                  },
+                },
+                error: null,
+              });
+            },
+            update(payload: Record<string, any>) {
+              paymentOrderUpdates.push(payload);
+              return {
+                eq() {
+                  return Promise.resolve({ error: null });
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected admin table ${table}`);
+      },
+    };
     const caller = createProtectedCaller({
       supabase: userSupabase,
-      supabaseAdmin: {
-        from(table: string) {
-          throw new Error(`Unexpected admin table ${table}`);
-        },
-      },
+      supabaseAdmin: adminSupabase,
     });
 
     await expect(
@@ -2730,7 +3070,7 @@ describe('paymentsRouter error sanitization', () => {
       'billing',
       'payments_sync_checkout_stage_failed',
       expect.objectContaining({
-        stage: 'fulfill_membership_invoice',
+        stage: 'fulfill_paid_membership_checkout_session',
         checkoutSessionId: 'cs_test_...ailure',
         error: expect.objectContaining({
           stage: 'fulfill_membership_invoice_rpc',
@@ -2741,5 +3081,40 @@ describe('paymentsRouter error sanitization', () => {
         }),
       }),
     );
+    expect(paymentOrderUpdates).toHaveLength(1);
+    expect(paymentOrderUpdates[0].metadata).toMatchObject({
+      source: 'checkout.session.sync',
+      invoiceResolutionAudit: expect.objectContaining({
+        sessionInvoicePresent: true,
+        sessionInvoiceStatus: 'paid',
+        latestInvoicePresent: true,
+        latestInvoiceStatus: 'paid',
+        invoiceListCount: 1,
+        invoiceListStatuses: ['paid'],
+        paidInvoiceFound: false,
+        reason: 'membership_invoice_fulfillment_failed',
+      }),
+      syncCheckoutSessionFulfillment: expect.objectContaining({
+        status: 'failed',
+        stage: 'fulfill_paid_membership_checkout_session',
+        reason: 'fulfill_membership_invoice_rpc',
+        checkoutStatus: 'complete',
+        paymentStatus: 'paid',
+        subscriptionId: 'sub_test...ailure',
+        invoiceId: 'in_test_...ailure',
+      }),
+      lastFulfillmentError: expect.objectContaining({
+        stage: 'fulfill_paid_membership_checkout_session',
+        reason: 'fulfill_membership_invoice_rpc',
+        errorStage: 'fulfill_membership_invoice_rpc',
+        message: expect.stringContaining('[masked-email]'),
+      }),
+    });
+    const metadataJson = JSON.stringify(paymentOrderUpdates[0].metadata);
+    expect(metadataJson).not.toContain('cs_test_sync_rpc_failure');
+    expect(metadataJson).not.toContain('sub_test_rpc_failure');
+    expect(metadataJson).not.toContain('in_test_rpc_failure');
+    expect(metadataJson).not.toContain('cus_test_sync');
+    expect(metadataJson).not.toContain('user@example.com');
   });
 });

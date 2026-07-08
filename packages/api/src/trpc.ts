@@ -5,6 +5,14 @@ import { ensureWorkspaceServerEnv } from './lib/serverEnv';
 import { logger } from './lib/logger';
 
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
+type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
+type ProfileBootstrapFailureReason =
+  | 'profile_create_failed'
+  | 'opening_grant_failed'
+  | 'service_role_unavailable';
+
+const PROFILE_SELECT = 'id, role, credits, status, nickname, email, membership_level, created_at';
+const PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS = Date.parse('2026-06-25T00:00:00.000Z');
 
 function deriveProfileNickname(user: User): string {
   const metadata = user.user_metadata ?? {};
@@ -93,6 +101,10 @@ export const publicProcedure = t.procedure;
 
 const OPENING_GRANT_CREDITS = 100;
 
+function getOpeningGrantIdempotencyKey(userId: string) {
+  return `opening_grant:${userId}`;
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -105,13 +117,53 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-async function applyOpeningGrant(ctx: Awaited<ReturnType<typeof createTRPCContext>>, userId: string) {
+function normalizeUserRole(role: unknown): 'user' | 'admin' {
+  return role === 'admin' ? 'admin' : 'user';
+}
+
+function normalizeUserStatus(status: unknown): 'active' | 'disabled' | 'banned' {
+  if (status === 'disabled' || status === 'banned') {
+    return status;
+  }
+
+  return 'active';
+}
+
+function createProfileBootstrapError(reason: ProfileBootstrapFailureReason) {
+  const messageByReason: Record<ProfileBootstrapFailureReason, string> = {
+    profile_create_failed: 'profile_bootstrap_failed: 创建用户资料失败，请联系客服',
+    opening_grant_failed: 'profile_bootstrap_failed: 初始化用户积分失败，请联系客服',
+    service_role_unavailable: 'profile_bootstrap_failed: 服务端资料初始化未配置',
+  };
+
+  return new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: messageByReason[reason],
+  });
+}
+
+function isRecoverableBootstrapProfile(profile: Record<string, unknown>, normalizedEmail: string | null) {
+  const createdAtMs = typeof profile.created_at === 'string'
+    ? Date.parse(profile.created_at)
+    : NaN;
+
+  return Number.isFinite(createdAtMs)
+    && createdAtMs >= PROFILE_BOOTSTRAP_RECOVERY_CUTOFF_MS
+    && profile.role === 'user'
+    && profile.status === 'active'
+    && profile.membership_level === 'free'
+    && Number(profile.credits) === 0
+    && (!normalizedEmail || profile.email === normalizedEmail);
+}
+
+async function applyOpeningGrant(ctx: ApiContext, userId: string) {
+  const idempotencyKey = getOpeningGrantIdempotencyKey(userId);
   const { data, error } = await ctx.supabaseAdmin.rpc('atomic_apply_credit_ledger_entry', {
     p_user_id: userId,
     p_amount: OPENING_GRANT_CREDITS,
     p_type: 'addition',
     p_description: 'Opening grant for new user profile bootstrap',
-    p_idempotency_key: `opening_grant:${userId}`,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (error) {
@@ -124,7 +176,100 @@ async function applyOpeningGrant(ctx: Awaited<ReturnType<typeof createTRPCContex
   }
 }
 
-export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
+async function findOpeningGrantLedgerEntry(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('credit_transactions')
+    .select('id, amount, balance_after, idempotency_key')
+    .eq('user_id', userId)
+    .eq('idempotency_key', getOpeningGrantIdempotencyKey(userId))
+    .maybeSingle();
+}
+
+async function cleanupSafeBootstrapProfile(ctx: ApiContext, userId: string) {
+  return ctx.supabaseAdmin
+    .from('profiles')
+    .delete()
+    .eq('id', userId)
+    .eq('role', 'user')
+    .eq('status', 'active')
+    .eq('membership_level', 'free')
+    .eq('credits', 0);
+}
+
+async function recoverOpeningGrantForExistingBootstrapProfile(ctx: ApiContext, userId: string) {
+  const { data: existingOpeningGrant, error: openingGrantLookupError } =
+    await findOpeningGrantLedgerEntry(ctx, userId);
+
+  if (existingOpeningGrant) {
+    logger.warn('auth', 'profile_opening_grant_already_recorded', {
+      userId,
+      idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      recovery: true,
+    });
+    return;
+  }
+
+  if (openingGrantLookupError) {
+    logger.error('auth', 'profile_opening_grant_lookup_failed', {
+      userId,
+      error: getErrorMessage(openingGrantLookupError),
+      recovery: true,
+    });
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+
+  try {
+    await applyOpeningGrant(ctx, userId);
+  } catch (openingGrantError) {
+    logger.error('auth', 'profile_opening_grant_recovery_failed', {
+      userId,
+      error: getErrorMessage(openingGrantError),
+    });
+
+    const { data: recoveredOpeningGrant, error: recoveryLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (recoveredOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+        recovery: true,
+      });
+      return;
+    }
+
+    if (recoveryLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(recoveryLookupError),
+        recovery: true,
+      });
+    }
+
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+}
+
+async function recoverOpeningGrantIfRecoverableBootstrapProfile(
+  ctx: ApiContext,
+  userId: string,
+  profile: Record<string, unknown>,
+  normalizedEmail: string | null,
+) {
+  if (ctx.hasSupabaseAdminPrivileges && isRecoverableBootstrapProfile(profile, normalizedEmail)) {
+    await recoverOpeningGrantForExistingBootstrapProfile(ctx, userId);
+  }
+}
+
+async function fetchProfileById(client: ApiSupabaseClient, userId: string) {
+  return client
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .eq('id', userId)
+    .single();
+}
+
+async function ensureProfile(ctx: ApiContext) {
   if (!ctx.user) {
     throw new TRPCError({
       code: 'UNAUTHORIZED',
@@ -132,121 +277,25 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     });
   }
 
-  if (!ctx.isEmailVerified) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'EMAIL_NOT_VERIFIED',
-    });
-  }
-
-  // Try to get user profile (foreign keys reference profiles.id)
-  let profileId = ctx.user.id;
-  let userRole: 'user' | 'admin' = 'user';
-  let userStatus: 'active' | 'disabled' | 'banned' = 'active';
   const userScopedSupabase = ctx.supabaseAuth ?? ctx.supabase;
+  const userId = ctx.user.id;
   const derivedNickname = deriveProfileNickname(ctx.user);
   const normalizedEmail = ctx.user.email ?? null;
 
-  const { data: profile, error: profileError } = await userScopedSupabase
-    .from('profiles')
-    .select('id, role, credits, status, nickname, email')
-    .eq('id', ctx.user.id)
-    .single();
+  let { data: profile, error: profileError } = await fetchProfileById(userScopedSupabase, userId);
 
-  if (!profile || profileError) {
-    // Profile doesn't exist, create one with id and email
-    // First check if it's a "not found" error vs other errors
-    const isNotFound = profileError?.code === 'PGRST116';
+  if (!profile && profileError?.code !== 'PGRST116' && ctx.hasSupabaseAdminPrivileges) {
+    logger.warn('auth', 'profile_user_scoped_lookup_failed_using_service_role', {
+      code: profileError?.code ?? null,
+    });
 
-    if (isNotFound) {
-      // Profile doesn't exist, try to create one
-      const { data: newProfile, error: createError } = await userScopedSupabase
-        .from('profiles')
-        .insert({
-          id: ctx.user.id,
-          email: normalizedEmail,
-          nickname: derivedNickname,
-          role: 'user',
-          credits: 0,
-        })
-        .select('id, role, credits, status, nickname, email')
-        .single();
+    const adminLookup = await fetchProfileById(ctx.supabaseAdmin, userId);
+    profile = adminLookup.data;
+    profileError = adminLookup.error;
+  }
 
-      if (createError) {
-        logger.error('auth', 'profile_create_failed', {
-          code: createError.code,
-          conflict: createError.code === '23505',
-        });
-
-        // If insert failed due to conflict (profile already exists), try to fetch again
-        if (createError.code === '23505') {
-          const { data: existingProfile } = await userScopedSupabase
-              .from('profiles')
-              .select('id, role, credits, status, nickname, email')
-              .eq('id', ctx.user.id)
-              .single();
-
-          if (existingProfile) {
-            profileId = existingProfile.id;
-            userRole = existingProfile.role || 'user';
-            userStatus = existingProfile.status || 'active';
-          } else {
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: '无法获取用户资料，请稍后重试',
-            });
-          }
-        } else {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: '创建用户资料失败，请联系客服',
-          });
-        }
-      } else if (newProfile) {
-        try {
-          await applyOpeningGrant(ctx, ctx.user.id);
-        } catch (openingGrantError) {
-          logger.error('auth', 'profile_opening_grant_failed', {
-            userId: ctx.user.id,
-            error: getErrorMessage(openingGrantError),
-          });
-
-          const { error: cleanupError } = await ctx.supabaseAdmin
-            .from('profiles')
-            .delete()
-            .eq('id', ctx.user.id);
-
-          if (cleanupError) {
-            logger.error('auth', 'profile_opening_grant_cleanup_failed', {
-              userId: ctx.user.id,
-              error: getErrorMessage(cleanupError),
-            });
-          }
-
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: '创建用户资料失败，请联系客服',
-          });
-        }
-
-        profileId = newProfile.id;
-        userRole = newProfile.role || 'user';
-        userStatus = newProfile.status || 'active';
-      }
-    } else {
-      // Other database error
-      logger.error('auth', 'profile_query_failed', {
-        code: profileError?.code ?? null,
-      });
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: '获取用户资料失败，请稍后重试',
-      });
-    }
-  } else {
-    profileId = profile.id;
-    userRole = profile.role || 'user';
-    userStatus = profile.status || 'active';
+  if (profile && !profileError) {
+    await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, profile, normalizedEmail);
 
     const shouldBackfillNickname = !profile.nickname?.trim();
     const shouldSyncEmail = normalizedEmail && profile.email !== normalizedEmail;
@@ -258,8 +307,146 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
           ...(shouldBackfillNickname ? { nickname: derivedNickname } : {}),
           ...(shouldSyncEmail ? { email: normalizedEmail } : {}),
         })
-        .eq('id', ctx.user.id);
+        .eq('id', userId);
     }
+
+    return {
+      profileId: profile.id,
+      userRole: normalizeUserRole(profile.role),
+      userStatus: normalizeUserStatus(profile.status),
+      userScopedSupabase,
+    };
+  }
+
+  const isNotFound = profileError?.code === 'PGRST116';
+
+  if (!isNotFound) {
+    logger.error('auth', 'profile_query_failed', {
+      code: profileError?.code ?? null,
+    });
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '获取用户资料失败，请稍后重试',
+    });
+  }
+
+  if (!ctx.hasSupabaseAdminPrivileges) {
+    logger.error('auth', 'profile_bootstrap_service_role_unavailable');
+    throw createProfileBootstrapError('service_role_unavailable');
+  }
+
+  const { data: newProfile, error: createError } = await ctx.supabaseAdmin
+    .from('profiles')
+    .insert({
+      id: userId,
+      email: normalizedEmail,
+      nickname: derivedNickname,
+      role: 'user',
+      status: 'active',
+      membership_level: 'free',
+      credits: 0,
+    })
+    .select(PROFILE_SELECT)
+    .single();
+
+  if (createError) {
+    logger.error('auth', 'profile_create_failed', {
+      code: createError.code,
+      conflict: createError.code === '23505',
+    });
+
+    if (createError.code === '23505') {
+      const { data: existingProfile } = await fetchProfileById(ctx.supabaseAdmin, userId);
+
+      if (existingProfile) {
+        await recoverOpeningGrantIfRecoverableBootstrapProfile(ctx, userId, existingProfile, normalizedEmail);
+
+        return {
+          profileId: existingProfile.id,
+          userRole: normalizeUserRole(existingProfile.role),
+          userStatus: normalizeUserStatus(existingProfile.status),
+          userScopedSupabase,
+        };
+      }
+    }
+
+    throw createProfileBootstrapError('profile_create_failed');
+  }
+
+  if (!newProfile) {
+    logger.error('auth', 'profile_create_returned_no_rows');
+    throw createProfileBootstrapError('profile_create_failed');
+  }
+
+  try {
+    await applyOpeningGrant(ctx, userId);
+  } catch (openingGrantError) {
+    logger.error('auth', 'profile_opening_grant_failed', {
+      userId,
+      error: getErrorMessage(openingGrantError),
+    });
+
+    const { data: existingOpeningGrant, error: openingGrantLookupError } =
+      await findOpeningGrantLedgerEntry(ctx, userId);
+
+    if (existingOpeningGrant) {
+      logger.warn('auth', 'profile_opening_grant_already_recorded', {
+        userId,
+        idempotencyKey: getOpeningGrantIdempotencyKey(userId),
+      });
+
+      return {
+        profileId: newProfile.id,
+        userRole: normalizeUserRole(newProfile.role),
+        userStatus: normalizeUserStatus(newProfile.status),
+        userScopedSupabase,
+      };
+    }
+
+    if (openingGrantLookupError) {
+      logger.error('auth', 'profile_opening_grant_lookup_failed', {
+        userId,
+        error: getErrorMessage(openingGrantLookupError),
+      });
+
+      throw createProfileBootstrapError('opening_grant_failed');
+    }
+
+    const { error: cleanupError } = await cleanupSafeBootstrapProfile(ctx, userId);
+
+    if (cleanupError) {
+      logger.error('auth', 'profile_opening_grant_cleanup_failed', {
+        userId,
+        error: getErrorMessage(cleanupError),
+      });
+    }
+
+    throw createProfileBootstrapError('opening_grant_failed');
+  }
+
+  return {
+    profileId: newProfile.id,
+    userRole: normalizeUserRole(newProfile.role),
+    userStatus: normalizeUserStatus(newProfile.status),
+    userScopedSupabase,
+  };
+}
+
+export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'You must be logged in to access this resource',
+    });
+  }
+
+  const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
+
+  if (!ctx.isEmailVerified) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'EMAIL_NOT_VERIFIED',
+    });
   }
 
   if (userStatus === 'disabled') {

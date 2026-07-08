@@ -19,10 +19,7 @@ import {
   getPlanEligibilityKey,
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
-import {
-  invalidatePostCheckoutMembershipQueries,
-  isFulfilledCheckoutSyncResult,
-} from './checkoutSyncInvalidations';
+import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -303,7 +300,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       .then(async (result) => {
         void invalidatePostCheckoutMembershipQueries(utils);
 
-        if (isFulfilledCheckoutSyncResult(result)) {
+        if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
             tone: 'success',
             message: '支付已确认，订单状态已同步到账。',
@@ -354,17 +351,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       sessionId: checkoutSessionId,
       checkoutState: 'canceled',
     })
-      .then(async (result) => {
-        if (isFulfilledCheckoutSyncResult(result)) {
-          void invalidatePostCheckoutMembershipQueries(utils);
-          setCheckoutNotice({
-            tone: 'success',
-            message: '支付已确认，订单状态已同步到账。',
-          });
-          clearCheckoutParams();
-          return;
-        }
-
+      .then(async () => {
         void utils.payments.listBillingRecords.invalidate();
         setCheckoutNotice({
           tone: 'cancelled',

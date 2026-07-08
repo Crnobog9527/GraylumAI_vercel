@@ -3233,3 +3233,783 @@ Latest-head Codex review：
 - Issue #225 remains open。
 - Stop point：PR8 merged into `staging` only；do not production；do not PR9；do not close issue #225；wait for owner audit。
 - 禁止动作确认：未 production；未访问 Supabase production DB；未执行 DB migration / RPC / RLS / schema / grant 修改；未访问 Stripe live；未触发真实 checkout / payment / refund / cancel / webhook replay；未修改 Vercel / Supabase / Stripe env 或 Project Settings；未修改 `apps/web/vercel.json`；未启用 cron；未进入 PR9；未关闭 issue #225。
+
+## PR 251 - DB posture repair draft PR
+
+- 时间：2026-06-25 23:50 CST。
+- 当前阶段：independent PR #251 DB migration / staging DB posture repair gate。
+- Base：`origin/staging` at `61dfd60108c8fee49186ca60a3797285677349a6`（PR #250 merge commit）。
+- Branch：`codex/pr251-db-profile-bootstrap-grants`。
+- Main/staging divergence at kickoff：`origin/staging...origin/main = 38/6`；本轮不做 staging -> main sync，不做 production。
+- Scope：source-only DB posture repair migration、SQL smoke source、migration static test、execution log。
+
+### Problem
+
+- PR #250 已将 missing profile bootstrap 移到 server-side `ensureProfile` 路径。
+- Staging runtime 仍在 `user.getUserProfile` / `credits.getBalance` 返回 500。
+- Observed server marker：`profile_create_failed`。
+- Observed Postgres error code：`42501`。
+- DB posture evidence：`service_role` 可 SELECT `public.profiles`，但缺 INSERT / DELETE，且 PR250 bootstrap insert fields 的 column INSERT 缺失。
+
+### Root cause
+
+- Root cause classification：`SERVICE_ROLE_PROFILE_GRANT_MISSING`。
+- PR250 server-side bootstrap 需要 `service_role` 在 `public.profiles` 上执行：
+  - SELECT profile by id。
+  - INSERT safe bootstrap fields：`id`、`email`、`nickname`、`role`、`status`、`membership_level`、`credits`。
+  - DELETE just-created empty profile if opening grant fails。
+- 当前 staging DB posture 缺少上述 INSERT/DELETE grants，导致 server-side profile create path 在 DB 层被拒绝。
+
+### Migration design
+
+- 新增 forward-only migration：`packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`。
+- 不改写旧 migration，不伪造旧 migration ledger，不重写 0027。
+- 明确 REVOKE `anon` / `authenticated` / `PUBLIC` 对 `public.profiles` 的 INSERT / DELETE。
+- 删除 legacy `profiles_insert_own_zero_credits` policy，不恢复 authenticated insert product path。
+- 仅给 `service_role`：
+  - table SELECT on `public.profiles`。
+  - column INSERT on safe bootstrap fields。
+  - table DELETE for cleanup path。
+- 重申 `atomic_apply_credit_ledger_entry(...)` 仍只允许 `service_role` EXECUTE；opening grant 继续 ledger-backed / idempotent。
+
+### Authenticated insert decision
+
+- Decision：不恢复 authenticated profile insert policy。
+- Reason：PR #250 已将普通 signup 后的 missing profile bootstrap 收敛到 server-side service-role `ensureProfile`，产品路径不再要求 browser/authenticated client 直接 INSERT `public.profiles`。
+- Impact on normal signup：Auth user 登录后进入 protected tRPC；`ensureProfile` 先查 own profile，缺失时由 server-side admin client 创建 zero-credit safe profile，再通过 `atomic_apply_credit_ledger_entry` 发放 opening grant。普通用户不需要直接获得 profile INSERT 权限。
+- If restored in a future migration：必须使用 `TO authenticated` + `WITH CHECK ((select auth.uid()) = id AND role = 'user' AND credits = 0 AND membership_level = 'free')`，且不能允许 admin role、paid membership、arbitrary credits、cross-user insert。
+
+### Safety posture
+
+- 不信任 `user_metadata` 创建 admin / paid membership / arbitrary credits。
+- 不直接给 profile credits 非 ledger 增量。
+- Opening grant 仍通过 `atomic_apply_credit_ledger_entry`，idempotency key 仍为 `opening_grant:<user_id>`。
+- `service_role` DELETE 仅支持 PR250 cleanup path：opening grant RPC 失败时删除刚创建的 empty profile，避免留下 profile_count=1 / opening_grant_count=0 的半初始化状态。
+- 0045 `subscription_credit_grants` admin policy shape 是相邻 posture risk，但不属于本轮 PR251 最小 profile bootstrap grant repair。
+
+### Changed files
+
+- `packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`
+- `packages/db/tests/profile_bootstrap_service_role_grants.sql`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- `pnpm install --frozen-lockfile`：passed；lockfile unchanged。
+- Targeted migration/profile policy static test：`pnpm --filter @repo/api exec vitest run src/profileBootstrapMigration.test.ts` passed；1 file / 4 tests。
+- Targeted PR250 profile bootstrap + user/profile + credits + credit ledger tests：`pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；5 files / 63 tests。
+- `pnpm test:api`：passed；49 files / 630 tests。
+- `pnpm lint`：passed。
+- `pnpm --filter web typecheck`：passed。
+- SQL smoke against staging DB：not run；owner has not authorized staging DB migration execution or staging DB SQL smoke execution for PR251.
+
+### Remaining gates
+
+- Open draft PR to `staging` for owner audit。
+- Owner must separately authorize staging DB migration execution。
+- After migration execution, rerun PR250 staging runtime verification:
+  - confirm `test03` pre-state if still used；
+  - call `user.getUserProfile` and `credits.getBalance`；
+  - verify exactly one `public.profiles` row；
+  - verify exactly one opening-grant ledger row / amount / idempotency key；
+  - repeat calls and confirm no duplicate grant / no credit delta。
+- Annual functional write test remains blocked until PR251 migration execution plus PR250 runtime verification pass。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 staging DB migration。
+- 未手动修 staging data。
+- 未手动插入 `public.profiles` row。
+- 未修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders` live data。
+- 未访问 Stripe live。
+- 未触发 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 PR10。
+- 未关闭 issue #225。
+
+## PR 251 - P2 cleanup atomicity fix
+
+- 时间：2026-06-26 00:39 CST。
+- 当前阶段：PR #251 latest-head Codex review P2 repair。
+- P2：`Make profile cleanup atomic before granting DELETE`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke。
+
+### Risk
+
+- PR #251 restores `service_role` DELETE on `public.profiles` so PR #250 `ensureProfile` cleanup can run.
+- If `atomic_apply_credit_ledger_entry` commits the opening grant but the client observes a transport / PostgREST / response error, the catch block could delete the just-created profile.
+- Because `credit_transactions.user_id` is nullable / ON DELETE SET NULL, that delete can orphan the opening-grant ledger row.
+- A retry could then create a new profile and issue another 100-credit opening grant.
+
+### Fix design
+
+- Selected scheme：B, keep `service_role` DELETE but guard cleanup with ledger/idempotency safety checks。
+- `ensureProfile` now uses one shared idempotency key helper：`opening_grant:<user_id>`。
+- After an opening-grant RPC error, `ensureProfile` queries `credit_transactions` for the current user and that idempotency key before cleanup.
+- If the ledger row exists, the profile is kept and bootstrap returns success without another opening grant.
+- If the ledger lookup fails, cleanup is skipped and the request fails closed with `opening_grant_failed`.
+- If no ledger row exists, cleanup may delete the empty profile so retry can safely create one profile and one opening grant.
+- Migration 0046 now grants `service_role` SELECT on `public.credit_transactions` so the safety check can run.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`
+- `packages/db/tests/profile_bootstrap_service_role_grants.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 70 tests。
+- `pnpm test:api`：passed；49 files / 633 tests。
+- `pnpm lint`：passed。
+- `pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。
+
+## PR 251 - P2 conflict recovery fix
+
+- 时间：2026-06-26 15:10 CST。
+- 当前阶段：PR #251 current-head Codex review P2 conflict recovery repair。
+- P2：`Recover conflicted bootstrap profiles before returning`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke；no live DB SQL。
+
+### Risk
+
+- The normal existing-profile path recovered recent safe zero-credit bootstrap profiles before returning.
+- The concurrent bootstrap conflict path did not use that recovery path：initial profile fetch could miss, another request could insert a recent zero-credit bootstrap profile, and the current insert could fail with `23505`.
+- The `23505` handler refetched the profile and returned it directly, bypassing `recoverOpeningGrantForExistingBootstrapProfile`.
+- A protected call could therefore return a recent safe zero-credit bootstrap profile with no opening grant.
+
+### Fix design
+
+- Added a shared `recoverOpeningGrantIfRecoverableBootstrapProfile` helper.
+- The initial existing-profile path and the `23505` conflict/refetch path now call the same helper before returning.
+- Recovery still only runs when `ctx.hasSupabaseAdminPrivileges` is true.
+- Recovery remains limited to recent safe zero-credit bootstrap profiles and continues to use the `opening_grant:<user_id>` idempotency key.
+- Existing opening-grant ledger rows are treated as already granted, so recovery does not duplicate credits.
+- Historical zero-credit profiles are excluded from recovery.
+- When service-role/admin privileges are unavailable, the conflict recovery path cannot use an anon fallback to query ledger state or call the opening-grant RPC.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 81 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 644 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Current-head Codex review still needs to run after this pushed fix.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit and next current-head review gate.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未执行 live DB SQL。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。
+
+## PR 251 - P2 retry path fix
+
+- 时间：2026-06-26 13:06 CST。
+- 当前阶段：PR #251 current-head Codex review P2 retry-path repair。
+- P2：`Preserve retry path after ledger lookup errors`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke；no live DB SQL。
+
+### Risk
+
+- Previous P2 fix made cleanup depend on checking `credit_transactions` for `opening_grant:<user_id>`.
+- If the opening grant RPC truly failed before commit and that ledger lookup also failed, the code skipped cleanup and left the just-created zero-credit profile.
+- On the next protected call, `ensureProfile` saw the existing profile and returned early, so opening grant was not retried.
+- That could permanently leave a new user with profile_count=1 but no 100-credit opening grant.
+
+### Fix design
+
+- Selected scheme：B/C hybrid。
+- If the ledger lookup fails, cleanup is skipped so the code never deletes a profile without proving the `opening_grant:<user_id>` ledger row is absent。
+- The existing-profile path now recognizes recent safe zero-credit bootstrap profiles and retries the opening grant through the same idempotency key。
+- A profile is recoverable only when it matches:
+  - `id = user_id`
+  - `role = 'user'`
+  - `status = 'active'`
+  - `membership_level = 'free'`
+  - `credits = 0`
+- `created_at >= 2026-06-25T00:00:00.000Z`
+- matching auth email when available。
+- If the opening grant committed, `atomic_apply_credit_ledger_entry` atomically updates `profiles.credits` and writes the ledger row, so recovery sees either credits > 0 or the existing idempotency row and does not duplicate the grant.
+- If the opening grant did not commit and lookup was unavailable, the zero-credit bootstrap profile remains recoverable on the next protected call instead of permanently bypassing `applyOpeningGrant`.
+- Cleanup still deletes only safe zero-credit bootstrap rows, and only after a successful ledger lookup proves the opening grant row is absent.
+- Existing ledger/idempotency check still preserves the success path when `opening_grant:<user_id>` is visible after an RPC response error.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `packages/db/migrations/0046_profile_bootstrap_service_role_grants.sql`
+- `packages/db/tests/profile_bootstrap_service_role_grants.sql`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 75 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 638 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit and current-head review gate.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未执行 live DB SQL。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。
+
+## PR 251 - P2 service-role recovery gate fix
+
+- 时间：2026-06-26 14:30 CST。
+- 当前阶段：PR #251 current-head Codex review P2 service-role recovery gate repair。
+- P2：`Skip recovery without service-role credentials`。
+- Scope：source-only fix in PR #251 branch；no staging DB migration execution；no staging SQL smoke；no live DB SQL。
+
+### Risk
+
+- When `SUPABASE_SERVICE_ROLE_KEY` is missing, `createTRPCContext` falls back to an anon-key client for `ctx.supabaseAdmin` and sets `hasSupabaseAdminPrivileges = false`.
+- The existing-profile recovery path ran before the missing-profile service-role availability check.
+- A recent zero-credit bootstrap profile could therefore trigger recovery through the anon fallback, causing a `credit_transactions` lookup or opening-grant RPC attempt without admin privileges.
+- That could fail with `profile_bootstrap_failed` and lock an existing profile user out of protected routes instead of letting the existing profile continue.
+
+### Fix design
+
+- Existing-profile recovery now runs only when `ctx.hasSupabaseAdminPrivileges` is true.
+- If service-role/admin privileges are unavailable and the profile already exists, `ensureProfile` returns the existing profile context without querying `credit_transactions` or calling the opening-grant RPC.
+- Missing-profile bootstrap remains strict：if the profile is missing and service-role/admin privileges are unavailable, the request still fails with `service_role_unavailable` / `profile_bootstrap_failed` before any profile insert or opening grant.
+- Duplicate grants remain prevented by the existing ledger/idempotency checks and `opening_grant:<user_id>` key whenever recovery is allowed to run.
+
+### Changed files
+
+- `packages/api/src/trpc.ts`
+- `packages/api/src/trpc.test.ts`
+- `packages/api/src/profileBootstrapMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted PR250/PR251 profile bootstrap, migration static, user/profile, credits, and credit ledger tests：`corepack pnpm --filter @repo/api exec vitest run src/trpc.test.ts src/profileBootstrapMigration.test.ts src/routers/user.test.ts src/routers/credits.test.ts src/services/__tests__/creditLedger.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts` passed；6 files / 77 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm test:api`：passed；49 files / 640 tests。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm lint`：passed。
+- `PATH=/Users/simon/.nvm/versions/node/v24.14.0/bin:/Users/simon/.local/bin:$PATH pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### Remaining gates
+
+- PR #251 still cannot be merged by Codex.
+- 0046 migration still cannot be executed by Codex.
+- Staging DB SQL smoke still cannot be run by Codex.
+- PR250 runtime verification still cannot be run by Codex.
+- Annual functional write test remains blocked.
+- Production remains blocked.
+- PR10 remains blocked.
+- Issue #225 remains open.
+- Wait for owner audit and current-head review gate.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未执行 0046 migration。
+- 未运行 staging DB SQL smoke。
+- 未执行 live DB SQL。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未 checkout / subscription / customer / invoice / payment / test clock。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 refund / cancel。
+- 未 annual functional write test Phase A-G。
+- 未 Phase H refund/clawback。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 merge PR #251。
+- 未 PR10。
+- 未关闭 issue #225。
+
+## Subscription fulfillment paid checkout repair
+
+- 时间：2026-06-28 16:44 CST。
+- 当前阶段：subscription fulfillment code fix PR gate。
+- Scope：source-code PR only；no production；no Stripe test-mode write；no webhook replay；no manual DB write。
+
+### Failure context
+
+- Annual membership checkout reached paid state, but the staging `payment_orders` row stayed `pending` / unfulfilled.
+- No `user_subscriptions` row, `subscription_credit_grants` row, or subscription grant `credit_transactions` row was created.
+- Profile membership and credits stayed at the opening-grant-only state.
+
+### Fix design
+
+- Paid subscription `checkout.session.completed` now records the checkout order and immediately attempts safe paid invoice fulfillment through a shared helper.
+- The checkout return sync path now uses the same helper instead of duplicating partial subscription / invoice lookup logic.
+- The helper retrieves the subscription with `latest_invoice`, resolves a paid invoice from the checkout session, subscription latest invoice, or invoice list fallback, syncs subscription state, and then reuses the existing `fulfillMembershipInvoice` / subscription credit grant idempotency path.
+- `invoice.paid` now routes to the same membership invoice fulfillment handler as `invoice.payment_succeeded`.
+- `customer.subscription.created` now routes to the existing subscription mirror sync handler.
+- Duplicate grants remain blocked by the existing subscription credit grant idempotency keys and invoice fulfillment replay protections.
+
+### Changed files
+
+- `apps/web/src/app/api/stripe/webhook/route.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/services/__tests__/stripeWebhookRoute.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted subscription fulfillment tests：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/stripeWebhookRoute.test.ts src/routers/payments.test.ts` passed；3 files / 67 tests。
+- `corepack pnpm test:api`：passed；49 files / 650 tests。
+- `corepack pnpm lint`：passed。
+- `corepack pnpm --filter web typecheck`：passed。
+- `git diff --check`：passed。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 Phase H refund/clawback。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未执行 live DB SQL。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 push 到 `main`。
+- 未 merge PR。
+- 未 PR10。
+- 未关闭 issue #225。
+- 未关闭 PR #251。
+
+## PR255 syncCheckoutSession fulfillment completion repair
+
+- 时间：2026-06-28 23:06 CST。
+- 当前阶段：PR255 syncCheckoutSession fulfillment code fix PR gate。
+- Base：`staging` at `5ff569891ff9b8427aac8c072a94ca02e6f8be63`。
+- Scope：source-code PR only；no production；no Stripe write；no webhook replay；no manual DB write。
+
+### Failure context
+
+- PR #254 reached `checkout.session.sync` and updated the checkout order metadata.
+- The existing paid annual membership order still stayed `pending` / unfulfilled.
+- No `user_subscriptions`, `subscription_credit_grants`, or subscription grant `credit_transactions` rows were created.
+- Profile membership and credits stayed `free` / `100`.
+- The order had no auditable fulfillment error metadata.
+
+### Fix design
+
+- Paid checkout invoice resolution now reports whether the failure was `paid_invoice_missing` or `paid_invoice_unpaid`.
+- Invoice paid detection now also handles invoice objects that expose a paid boolean without a populated status string.
+- Expanded subscription objects missing `latest_invoice` are refreshed with `expand: ['latest_invoice']` before falling back to invoice listing.
+- When a paid checkout cannot resolve a paid invoice, the checkout order is updated with `syncCheckoutSessionFulfillment` and `lastFulfillmentError` metadata before a staged error is thrown.
+- `payments.syncCheckoutSession` now fails closed if a paid subscription checkout ever returns `fulfilled=false`, so the final response cannot silently accept a paid-but-pending order.
+- The successful invoice fulfillment path still reuses existing subscription credit grant idempotency and checkout-order backfill.
+
+### Changed files
+
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted sync checkout fulfillment tests：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/services/__tests__/stripeFulfillment.test.ts src/routers/payments.test.ts` passed；2 files / 63 tests。
+- `corepack pnpm test:api`：passed；49 files / 655 tests。
+- `corepack pnpm --filter web typecheck`：passed。
+- `corepack pnpm lint`：blocked by tooling in the temporary tarball workspace because the turbo child process invoked a different pnpm runtime and failed frozen install with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; no lint rule failures were produced.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual release cron。
+- 未 Phase H refund/clawback。
+- 未手动插入 `public.profiles` row。
+- 未手动修改 `profiles` / `credit_transactions` / `user_subscriptions` / `payment_orders`。
+- 未执行 live DB SQL。
+- 未 DB migration。
+- 未 0043 ledger repair。
+- 未修改 Vercel alias / env / project settings。
+- 未 push 到 `main`。
+- 未 merge PR。
+- 未 PR10。
+- 未关闭 issue #225。
+- 未关闭 PR #251。
+
+## PR258 staging DB posture fix for PR255 fulfillment
+
+- 时间：2026-07-02 16:37 CST。
+- 当前阶段：PR258 staging DB posture source-only PR gate。
+- Base：`staging` at `6bcbba9a24c72f6285a067634d0783fc5c39df78`。
+- Scope：forward-only DB migration source + static/SQL smoke tests only；no migration execution；no staging SQL execution；no DB write；no `payments.syncCheckoutSession` retry。
+
+### Failure context
+
+- PR257 diagnostic runtime verification passed, but PR255 fulfillment remained blocked.
+- Owner audit packet identified deterministic DB posture blockers: `service_role` lacked `profiles.membership_level` update posture and lacked `subscription_credit_grants` read/write posture.
+- The observed target paid order remained `pending` / `paid` / `fulfilled_at=null`; `user_subscriptions=0`; `subscription_credit_grants=0`; only the existing opening-grant `credit_transactions=1` row was present.
+- PR251 remains separate and only covers profile bootstrap grants; PR258 does not expand or close PR251.
+
+### Fix design
+
+- Added forward-only migration `0047_subscription_fulfillment_service_role_grants.sql`.
+- `profiles` repair grants `service_role` only `SELECT (id)` and `UPDATE (membership_level)`.
+- `profiles.credits` remains excluded from direct service-role update; credits continue through `atomic_apply_credit_ledger_entry`.
+- `profiles.updated_at` is not granted or referenced because the current fulfillment code path does not write it and the local schema does not declare it as a stable profile column.
+- `subscription_credit_grants` grants are column-scoped: `SELECT` / `INSERT` for idempotency and grant rows, and `UPDATE (status, updated_at, metadata)` only for existing refund/reversal lifecycle metadata.
+- `payment_orders` and `user_subscriptions` are conditionally repaired only if an environment is missing the established 0034 service-role `SELECT, INSERT, UPDATE` posture.
+- `credit_transactions` direct `INSERT` remains closed; service-role receives only semantic `UPDATE` columns for RPC-created ledger rows plus required read columns.
+- `atomic_apply_credit_ledger_entry` remains service-role executable only; `PUBLIC`, `anon`, and `authenticated` execute privileges are revoked.
+
+### Changed files
+
+- `packages/db/migrations/0047_subscription_fulfillment_service_role_grants.sql`
+- `packages/db/tests/subscription_fulfillment_service_role_grants.sql`
+- `packages/api/src/subscriptionFulfillmentDbPostureMigration.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted static migration test：`corepack pnpm --config.dangerouslyAllowAllBuilds=true --filter @repo/api exec vitest run src/subscriptionFulfillmentDbPostureMigration.test.ts` passed；1 file / 6 tests。
+- Full API test：`corepack pnpm test:api` passed；50 files / 666 tests。
+- Whitespace check：`git diff --check` passed。
+- `corepack pnpm lint` and `CI=true corepack pnpm lint` were blocked in `web#lint` before lint rules ran because the turbo child process invoked a separate pnpm runtime and failed frozen install with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; no ESLint rule failure was produced.
+- SQL smoke file was added as owner-gated rollback-only source coverage, but was not run.
+- Migration was not executed.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未触发 Stripe test-mode 写入。
+- 未新建 checkout / subscription。
+- 未 refund / cancel。
+- 未 webhook replay。
+- 未 annual functional write test。
+- 未 Phase H。
+- 未 PR10。
+- 未执行 migration。
+- 未执行 staging SQL。
+- 未执行 DB write。
+- 未手动插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未请求 owner cookie / token / session / localStorage / auth header / password。
+- 未 retry `payments.syncCheckoutSession`。
+- 未标记 PR255 pass verification。
+- 未关闭 issue #225。
+- 未关闭 PR #251。
+- 未 merge。
+
+## PR259 billing record dedupe / idempotency fix
+
+- 时间：2026-07-04 16:24 UTC。
+- 当前阶段：PR259 source-code PR gate for billing mirror dedupe after annual functional write test postflight.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Scope：code-level idempotency and regression tests only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### Failure context
+
+- Owner completed exactly one staging Stripe test-mode yearly checkout for `test04@qq.com`.
+- Runtime evidence showed one `payments.createCheckoutSession` 200, two Stripe webhook POSTs 200, and one `payments.syncCheckoutSession` 500.
+- Postflight showed duplicated billing mirror rows: `payment_orders +3` with two invoice-backed rows for the same masked invoice, and `user_subscriptions +2` active yearly rows for the same masked Stripe subscription.
+- The grant and ledger paths remained idempotent: `subscription_credit_grants +1`, `credit_transactions +1`, and profile credit delta equaled the ledger delta.
+- Root cause classification: webhook + return-sync concurrency/idempotency gap in billing mirror writes and duplicate-state reads, not owner double checkout and not duplicate grant/ledger.
+
+### Fix design
+
+- `getExistingInvoiceOrder` now reads bounded invoice-order candidates instead of `maybeSingle()`, logs duplicate invoice mirror state, and chooses a deterministic canonical row.
+- `writeCompletedInvoiceOrder` now rechecks invoice order state immediately before writing and promotes the original checkout order into the invoice-backed completed order when possible, so webhook and return-sync converge on the same row for the initial checkout invoice.
+- `upsertSubscriptionMirror` now reads bounded subscription candidates instead of `maybeSingle()`, logs duplicate mirror state, and updates a deterministic canonical subscription rather than inserting another row.
+- `syncSubscriptionState` now tolerates existing duplicate subscription mirror rows and does not fail before fulfillment when duplicates already exist.
+- `payments.syncCheckoutSession` final order read now tolerates duplicate checkout-order state and returns a deterministic sync result rather than surfacing a final-read 500.
+- The fix does not modify `subscription_credit_grants`, `credit_transactions`, or direct profile credit writes.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/stripeFulfillment.ts`
+- `packages/api/src/routers/payments.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `packages/api/src/services/__tests__/stripeFulfillment.test.ts`
+- `packages/api/src/routers/payments.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 105 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 672 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Root-level Vitest without the API package config was not used as a pass/fail signal because it incorrectly collected Playwright e2e specs and failed before e2e execution.
+- Direct ESLint invocation was blocked because the tarball workspace has no `eslint.config.(js|mjs|cjs)` file; no lint rule failures were produced.
+- Whitespace check：`git diff --no-index --check` against the clean `90bc34820c418e94b29ada713d3eabf1fd4560a8` snapshot produced no whitespace/conflict-marker output for all changed files.
+- `pnpm --filter @repo/api test:run ...` was blocked before tests by pnpm 11 deps-status install approval (`ERR_PNPM_IGNORED_BUILDS`) in the temporary tarball workspace; direct local `vitest` was used after dependencies were present.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。
+
+## PR259 P1 atomic idempotency follow-up
+
+- 时间：2026-07-05 06:35 UTC。
+- 当前阶段：PR259 owner-audit P1 return fix for atomic billing mirror idempotency.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Previous PR259 head：`e28680ebad9e57ec1f8433ab8c46500feb156a80`。
+- Scope：code-level deterministic primary-key conflict handling and regression tests only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### P1 addressed
+
+- `upsertSubscriptionMirror` no longer relies only on read/read/insert timing. New `user_subscriptions` mirror inserts use a deterministic UUID primary key derived from `stripe_subscription_id`, so simultaneous webhook and return-sync inserts contend on the existing `id` primary key.
+- On `23505` duplicate-key / unique-violation, `upsertSubscriptionMirror` logs the conflict, re-reads bounded subscription mirror candidates by `stripe_subscription_id`, and updates the canonical row.
+- Non-promotion invoice-backed `payment_orders` inserts now use a deterministic UUID primary key derived from `stripe_invoice_id`, so simultaneous inserts for the same invoice contend on the existing `id` primary key.
+- On `23505` duplicate-key / unique-violation, `writeCompletedInvoiceOrder` logs the conflict, re-reads bounded invoice-order candidates by `stripe_invoice_id`, and updates the canonical row.
+- Existing duplicate state remains tolerated and is not cleaned up in this gate.
+- `subscription_credit_grants`, `credit_transactions`, and direct profile credit writes were not widened or replaced.
+
+### Tests added / updated
+
+- Concurrent fulfill paths that both pass the second subscription mirror read and then simultaneously attempt `user_subscriptions` insert now converge to one active mirror.
+- Same `stripe_subscription_id` concurrent webhook / return-sync-style fulfillment does not create duplicate active mirrors.
+- Same `stripe_invoice_id` concurrent non-checkout-promotion invoice-order inserts converge to one invoice-backed `payment_orders` row.
+- Duplicate-key conflict paths re-read and update canonical rows safely.
+- Existing duplicate invoice/subscription state remains non-expanding.
+- Grant and ledger exact-once assertions remain in place, including profile credit delta matching ledger delta.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Focused subscription credit grants test：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts` passed；1 file / 41 tests。
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 109 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 676 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Direct web ESLint：`cd apps/web && node_modules/.bin/eslint` passed。
+- Whitespace check：`git diff --check` passed。
+- Root `corepack pnpm lint` remained blocked before lint rules by the Codex runtime invoking pnpm 11 internally during `web:lint` deps-status install, causing `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; direct ESLint passed after restoring dependencies with pnpm 10.28.1.
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。
+
+## PR259 latest-head review follow-up
+
+- 时间：2026-07-05 00:57 UTC。
+- 当前阶段：PR259 review feedback fix for billing mirror dedupe / idempotency.
+- Base：`staging` at `90bc34820c418e94b29ada713d3eabf1fd4560a8`。
+- Previous PR259 head：`8028c5b35a64ec290f7e9ab2043c4e403830ce57`。
+- Scope：address latest-head review feedback only；no SQL execution；no migration execution；no staging duplicate cleanup；no `payments.syncCheckoutSession` retry；no checkout / subscription / invoice / customer / payment creation。
+
+### Review feedback addressed
+
+- P1 `Recheck subscription mirrors before inserting`: `upsertSubscriptionMirror` now performs a second bounded read immediately before inserting a `user_subscriptions` mirror. If a concurrent webhook or return-sync path inserted the mirror after the first read, the second path updates the canonical row instead of inserting a duplicate active subscription mirror.
+- P2 `Guard checkout-row promotion against stale claims`: `writeCompletedInvoiceOrder` now guards checkout-row promotion with `stripe_invoice_id IS NULL` semantics. If the original checkout row was already claimed by another invoice, the current invoice rechecks for an existing invoice row and otherwise inserts its own invoice-backed order instead of overwriting another invoice's durable order fields.
+
+### Changed files
+
+- `packages/api/src/services/subscriptionCreditGrants.ts`
+- `packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts`
+- `docs/billing/BILLING_ENGINE_EXECUTION_LOG.md`
+
+### Validation
+
+- Focused subscription credit grants test：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts` passed；1 file / 39 tests。
+- Targeted billing mirror idempotency tests：`packages/api/node_modules/.bin/vitest run packages/api/src/services/__tests__/subscriptionCreditGrants.test.ts packages/api/src/services/__tests__/stripeFulfillment.test.ts packages/api/src/routers/payments.test.ts` passed；3 files / 107 tests。
+- Full API test：`cd packages/api && node_modules/.bin/vitest run` passed；50 files / 674 tests。
+- Typecheck：`apps/web/node_modules/.bin/tsc --noEmit --project apps/web/tsconfig.json` passed。
+- Whitespace check：`git diff --no-index --check` for the follow-up changed source/test files produced no whitespace/conflict-marker output。
+- `pnpm lint` was blocked before lint rules ran because pnpm 11 attempted a deps-status install and aborted module purge in non-TTY mode (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`)；no lint rule failure was produced。
+- Direct ESLint from root was blocked by missing root `eslint.config.(js|mjs|cjs)`；direct ESLint with `apps/web/eslint.config.mjs` ignored the API files as outside the config base path and produced warnings only。
+
+### 禁止动作确认
+
+- 未 production。
+- 未访问 Supabase production DB。
+- 未访问 Stripe live。
+- 未输出 Stripe / Supabase / Vercel secret value。
+- 未创建 checkout / subscription / invoice / customer / payment。
+- 未 webhook replay。
+- 未 refund / cancel。
+- 未 Phase H。
+- 未 PR10。
+- 未 retry `payments.syncCheckoutSession`。
+- 未 second checkout。
+- 未执行 SQL。
+- 未执行 migration。
+- 未手工插入或修改 `profiles` / `credit_transactions` / `payment_orders` / `user_subscriptions` / `subscription_credit_grants`。
+- 未清理 duplicate rows。
+- 未 fake ledger。
+- 未修改 Vercel / Supabase / Stripe env 或 Project Settings。
+- 未关闭 issue #225。
+- 未 merge。
+- 未 production release。

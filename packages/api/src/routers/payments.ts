@@ -20,7 +20,7 @@ import {
 } from '../services/stripe';
 import {
   fulfillCreditPackageOrder,
-  fulfillMembershipInvoice,
+  fulfillPaidMembershipCheckoutSession,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../services/stripeFulfillment';
@@ -136,6 +136,10 @@ function maskKnownIdentifiers(message: string | null | undefined) {
     .replace(
       /\b(?:cs_(?:test|live)|sub|in|cus|price|pi|ch)_[A-Za-z0-9_]+\b/g,
       (value) => maskIdentifier(value) ?? value,
+    )
+    .replace(
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+      '[masked-email]',
     )
     .replace(
       /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
@@ -262,10 +266,6 @@ function isCanceledCheckoutState(checkoutState: z.infer<typeof syncCheckoutInput
   return checkoutState === 'canceled' || checkoutState === 'cancelled';
 }
 
-function canApplyCanceledCheckoutReturn(session: Stripe.Checkout.Session) {
-  return session.status !== 'complete' && session.payment_status !== 'paid';
-}
-
 function logSyncCheckoutStage(
   stage: string,
   input: z.infer<typeof syncCheckoutInput>,
@@ -290,6 +290,179 @@ function logSyncCheckoutStageFailure(
     ...extra,
     error: summarizePaymentError(error),
   });
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function getAuditString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' ? maskKnownIdentifiers(value.slice(0, 160)) : null;
+}
+
+function getAuditNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getAuditStringArray(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => maskKnownIdentifiers(item.slice(0, 80)) ?? item.slice(0, 80));
+}
+
+function buildSyncCheckoutInvoiceResolutionAudit(error: unknown) {
+  const summary = summarizePaymentError(error);
+  const safeContext = asRecord(summary.safeContext);
+  const hasResolutionEvidence = [
+    'sessionInvoiceId',
+    'sessionInvoiceStatus',
+    'latestInvoiceId',
+    'latestInvoiceStatus',
+    'invoiceListCount',
+    'invoiceListStatuses',
+  ].some((key) => safeContext[key] !== undefined && safeContext[key] !== null);
+
+  if (!hasResolutionEvidence) {
+    return null;
+  }
+
+  return {
+    sessionInvoicePresent: Boolean(safeContext.sessionInvoiceId || safeContext.sessionInvoiceStatus),
+    sessionInvoiceId: getAuditString(safeContext, 'sessionInvoiceId'),
+    sessionInvoiceStatus: getAuditString(safeContext, 'sessionInvoiceStatus'),
+    latestInvoicePresent: Boolean(safeContext.latestInvoiceId || safeContext.latestInvoiceStatus),
+    latestInvoiceId: getAuditString(safeContext, 'latestInvoiceId'),
+    latestInvoiceStatus: getAuditString(safeContext, 'latestInvoiceStatus'),
+    invoiceListCount: getAuditNumber(safeContext, 'invoiceListCount') ?? 0,
+    invoiceListStatuses: getAuditStringArray(safeContext, 'invoiceListStatuses'),
+    paidInvoiceFound: false,
+    reason: getAuditString(safeContext, 'reason') ?? summary.stage ?? summary.code ?? null,
+  };
+}
+
+function isBlockedInvoiceResolutionAudit(metadata: Record<string, unknown>) {
+  const fulfillment = asRecord(metadata.syncCheckoutSessionFulfillment);
+  return fulfillment.status === 'blocked'
+    && (fulfillment.reason === 'paid_invoice_missing' || fulfillment.reason === 'paid_invoice_unpaid');
+}
+
+function buildSyncCheckoutRouterFailureAudit(input: {
+  stage: string;
+  reason: string;
+  errorSummary: ReturnType<typeof summarizePaymentError>;
+  updatedAt: string;
+}) {
+  return {
+    stage: input.stage,
+    reason: input.reason,
+    errorStage: input.errorSummary.stage,
+    errorName: input.errorSummary.name,
+    errorType: input.errorSummary.type,
+    errorCode: input.errorSummary.code,
+    statusCode: input.errorSummary.statusCode,
+    message: input.errorSummary.message,
+    updatedAt: input.updatedAt,
+  };
+}
+
+async function recordSyncCheckoutFailureAudit(input: {
+  supabase: any;
+  session: any;
+  syncInput: z.infer<typeof syncCheckoutInput>;
+  stage: string;
+  error: unknown;
+}) {
+  try {
+    const now = new Date().toISOString();
+    const errorSummary = summarizePaymentError(input.error);
+    const invoiceResolutionAudit = buildSyncCheckoutInvoiceResolutionAudit(input.error);
+    const reason = errorSummary.stage ?? errorSummary.code ?? errorSummary.message ?? 'sync_checkout_failed';
+
+    const lookup = await input.supabase
+      .from('payment_orders')
+      .select('id, metadata')
+      .eq('stripe_checkout_session_id', input.session.id)
+      .maybeSingle();
+
+    if (lookup.error || !lookup.data?.id) {
+      logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+        stage: input.stage,
+        auditStage: 'lookup',
+        checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+        reason,
+        supabaseError: lookup.error ? summarizePaymentError(lookup.error) : null,
+        orderFound: Boolean(lookup.data?.id),
+      });
+      return;
+    }
+
+    const existingMetadata = asRecord(lookup.data.metadata);
+    const routerFailure = buildSyncCheckoutRouterFailureAudit({
+      stage: input.stage,
+      reason,
+      errorSummary,
+      updatedAt: now,
+    });
+    const metadata = isBlockedInvoiceResolutionAudit(existingMetadata)
+      ? {
+          ...existingMetadata,
+          lastFulfillmentError: {
+            ...asRecord(existingMetadata.lastFulfillmentError),
+            routerCatch: routerFailure,
+          },
+        }
+      : {
+          ...existingMetadata,
+          ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+          syncCheckoutSessionFulfillment: {
+            status: 'failed',
+            stage: input.stage,
+            reason,
+            checkoutStatus: input.session.status ?? null,
+            paymentStatus: input.session.payment_status ?? null,
+            subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(input.session)),
+            invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(input.session)),
+            ...(invoiceResolutionAudit ? { invoiceResolutionAudit } : {}),
+            updatedAt: now,
+          },
+          lastFulfillmentError: routerFailure,
+        };
+
+    const update = await input.supabase
+      .from('payment_orders')
+      .update({
+        metadata,
+        updated_at: now,
+      })
+      .eq('id', lookup.data.id);
+
+    if (update.error) {
+      logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+        stage: input.stage,
+        auditStage: 'update',
+        checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+        orderId: maskIdentifier(lookup.data.id),
+        reason,
+        supabaseError: summarizePaymentError(update.error),
+      });
+    }
+  } catch (auditError) {
+    logger.error('billing', 'payments_sync_checkout_audit_write_failed', {
+      stage: input.stage,
+      auditStage: 'unexpected',
+      checkoutSessionId: maskIdentifier(input.syncInput.sessionId),
+      error: summarizePaymentError(auditError),
+    });
+  }
 }
 
 function toCheckoutUnavailableError() {
@@ -870,7 +1043,6 @@ export const paymentsRouter = router({
             },
           ],
           proration_behavior: 'always_invoice',
-          payment_behavior: 'error_if_incomplete',
           cancel_at_period_end: false,
           metadata,
         });
@@ -1311,12 +1483,10 @@ export const paymentsRouter = router({
         subscriptionId: maskIdentifier(getCheckoutSessionSubscriptionId(session)),
         invoiceId: maskIdentifier(getCheckoutSessionInvoiceId(session)),
       };
-      const shouldRecordCanceledCheckoutReturn = isCanceledCheckoutState(input.checkoutState)
-        && canApplyCanceledCheckoutReturn(session);
 
       try {
         logSyncCheckoutStage(syncStage, input, syncStageContext);
-        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, shouldRecordCanceledCheckoutReturn
+        await upsertPaymentOrderBySession(ctx.supabaseAdmin, session, isCanceledCheckoutState(input.checkoutState)
           ? {
               orderStatus: 'canceled',
               eventType: 'checkout.return.canceled',
@@ -1325,7 +1495,7 @@ export const paymentsRouter = router({
               eventType: 'checkout.session.sync',
             });
 
-        if (shouldRecordCanceledCheckoutReturn) {
+        if (isCanceledCheckoutState(input.checkoutState)) {
           syncStage = 'canceled_return_recorded';
           logSyncCheckoutStage(syncStage, input, syncStageContext);
         } else {
@@ -1336,69 +1506,35 @@ export const paymentsRouter = router({
           }
 
           if (session.mode === 'subscription') {
-            const subscriptionId = getCheckoutSessionSubscriptionId(session);
+            syncStage = 'fulfill_paid_membership_checkout_session';
+            logSyncCheckoutStage(syncStage, input, syncStageContext);
+            const fulfillment = await fulfillPaidMembershipCheckoutSession(
+              ctx.supabaseAdmin,
+              stripe,
+              session,
+            );
+            syncStageContext = {
+              ...syncStageContext,
+              subscriptionId: maskIdentifier(fulfillment.subscriptionId),
+              invoiceId: maskIdentifier(fulfillment.invoiceId),
+              fulfillmentReason: fulfillment.reason,
+            };
 
-            if (subscriptionId) {
-              syncStageContext = {
-                ...syncStageContext,
-                subscriptionId: maskIdentifier(subscriptionId),
-              };
-              syncStage = 'subscription_retrieve';
-              logSyncCheckoutStage(syncStage, input, syncStageContext);
-              const subscription =
-                typeof session.subscription === 'string'
-                  ? await stripe.subscriptions.retrieve(subscriptionId)
-                  : session.subscription;
-
-              if (!subscription) {
-                throw new Error('Stripe subscription unavailable');
-              }
-
-              syncStage = 'sync_subscription_state';
-              logSyncCheckoutStage(syncStage, input, {
-                ...syncStageContext,
-                subscriptionStatus: subscription.status,
-              });
-              await syncSubscriptionState(ctx.supabaseAdmin, subscription);
-
-              syncStage = 'invoice_lookup';
-              logSyncCheckoutStage(syncStage, input, syncStageContext);
-              const expandedInvoice =
-                typeof session.invoice === 'string'
-                  ? await stripe.invoices.retrieve(session.invoice)
-                  : session.invoice ?? null;
-
-              const paidInvoice = expandedInvoice?.status === 'paid'
-                ? expandedInvoice
-                : (await stripe.invoices.list({
-                    subscription: subscriptionId,
-                    limit: 10,
-                  })).data.find((invoice) => invoice.status === 'paid') ?? null;
-
-              if (paidInvoice) {
-                syncStage = 'fulfill_membership_invoice';
-                syncStageContext = {
-                  ...syncStageContext,
-                  invoiceId: maskIdentifier(paidInvoice.id),
-                  invoiceStatus: paidInvoice.status ?? null,
-                };
-                logSyncCheckoutStage(syncStage, input, syncStageContext);
-                await fulfillMembershipInvoice(ctx.supabaseAdmin, paidInvoice);
-              } else {
-                logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
-                  stage: syncStage,
-                  checkoutSessionId: maskIdentifier(input.sessionId),
-                  subscriptionId: maskIdentifier(subscriptionId),
-                  expandedInvoiceId: maskIdentifier(expandedInvoice?.id),
-                  expandedInvoiceStatus: expandedInvoice?.status ?? null,
-                });
-              }
-            } else {
-              logger.warn('billing', 'payments_sync_checkout_missing_subscription', {
-                stage: 'subscription_id_parse',
+            if (fulfillment.fulfilled) {
+              logSyncCheckoutStage('fulfill_membership_invoice', input, syncStageContext);
+            } else if (session.payment_status === 'paid') {
+              logger.warn('billing', 'payments_sync_checkout_unfulfilled_paid_subscription', {
+                stage: syncStage,
                 checkoutSessionId: maskIdentifier(input.sessionId),
-                mode: session.mode,
-                paymentStatus: session.payment_status,
+                subscriptionId: maskIdentifier(fulfillment.subscriptionId),
+                reason: fulfillment.reason,
+              });
+              throw new Error('Paid subscription checkout did not complete fulfillment');
+            } else if (fulfillment.reason === 'paid_invoice_missing') {
+              logger.warn('billing', 'payments_sync_checkout_no_paid_invoice', {
+                stage: syncStage,
+                checkoutSessionId: maskIdentifier(input.sessionId),
+                subscriptionId: maskIdentifier(fulfillment.subscriptionId),
               });
             }
           }
@@ -1407,21 +1543,51 @@ export const paymentsRouter = router({
         if (error instanceof TRPCError) {
           throw error;
         }
+        await recordSyncCheckoutFailureAudit({
+          supabase: ctx.supabaseAdmin,
+          session,
+          syncInput: input,
+          stage: syncStage,
+          error,
+        });
         logSyncCheckoutStageFailure(syncStage, input, error, syncStageContext);
         throw createPaymentOperationError('同步支付会话', error);
       }
 
-      const { data: syncedOrder, error: syncedOrderError } = await ctx.supabaseAdmin
+      const syncedOrderQuery = ctx.supabaseAdmin
         .from('payment_orders')
         .select('status, payment_status, fulfilled_at, stripe_subscription_id, stripe_invoice_id')
-        .eq('stripe_checkout_session_id', session.id)
-        .maybeSingle();
+        .eq('stripe_checkout_session_id', session.id);
+      const orderedSyncedOrderQuery = typeof syncedOrderQuery.order === 'function'
+        ? syncedOrderQuery.order('created_at', { ascending: true })
+        : syncedOrderQuery;
+      const limitedSyncedOrderQuery = typeof orderedSyncedOrderQuery.limit === 'function'
+        ? orderedSyncedOrderQuery.limit(10)
+        : orderedSyncedOrderQuery;
+      const { data: syncedOrderData, error: syncedOrderError } =
+        typeof limitedSyncedOrderQuery.then === 'function'
+          ? await limitedSyncedOrderQuery
+          : await limitedSyncedOrderQuery.maybeSingle();
 
       if (syncedOrderError) {
         logSyncCheckoutStageFailure('final_order_read', input, syncedOrderError, {
           profileId: maskIdentifier(ctx.profileId),
         });
         throw createPaymentOperationError('读取支付同步结果', syncedOrderError);
+      }
+
+      const syncedOrders = Array.isArray(syncedOrderData)
+        ? syncedOrderData
+        : syncedOrderData
+          ? [syncedOrderData]
+          : [];
+      const syncedOrder = syncedOrders[0] ?? null;
+      if (syncedOrders.length > 1) {
+        logger.warn('billing', 'payments_sync_checkout_duplicate_order_detected', {
+          checkoutSessionId: maskIdentifier(session.id),
+          profileId: maskIdentifier(ctx.profileId),
+          orderCount: syncedOrders.length,
+        });
       }
 
       logSyncCheckoutStage('final_order_read', input, {
