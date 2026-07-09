@@ -36,7 +36,7 @@ describe('stripe webhook route', () => {
     Object.values(stripeFulfillmentMocks).forEach((mock) => mock.mockReset());
   });
 
-  it.each(['refund.created', 'refund.updated', 'charge.refunded'])(
+  it.each(['refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded'])(
     'routes %s to subscription refund grant reconciliation',
     async (eventType) => {
       const supabase = { source: 'service-role-client' };

@@ -73,6 +73,8 @@ export async function handleStripeWebhookEvent(
     }
     case 'refund.created':
     case 'refund.updated':
+    case 'refund.failed':
+    case 'charge.refund.updated':
     case 'charge.refunded': {
       await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
       break;

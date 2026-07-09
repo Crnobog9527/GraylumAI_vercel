@@ -18,6 +18,7 @@ export type PostCheckoutInvalidationUtils = {
   };
   payments: {
     getMembershipEligibilityMatrix: InvalidateQuery;
+    listBillingRecords: InvalidateQuery;
   };
 };
 
@@ -27,5 +28,6 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
     utils.credits.getBalance.invalidate(),
     utils.credits.getCreditsSummary.invalidate(),
     utils.payments.getMembershipEligibilityMatrix.invalidate(),
+    utils.payments.listBillingRecords.invalidate(),
   ]);
 }

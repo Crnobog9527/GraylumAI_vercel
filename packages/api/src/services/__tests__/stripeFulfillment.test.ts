@@ -22,6 +22,7 @@ import {
   fulfillMembershipInvoice,
   fulfillPaidMembershipCheckoutSession,
   markMembershipInvoicePaymentFailed,
+  reconcileStripeRefund,
   reconcileSubscriptionRefundFromStripeWebhook,
   syncSubscriptionState,
   upsertPaymentOrderBySession,
@@ -295,6 +296,86 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
   };
 
   return supabase;
+}
+
+function makeGenericRefundSupabase(options: {
+  match: { column: string; value: string };
+  order?: { id: string; amount_total: number | string | null; metadata: Record<string, unknown> | null };
+  rpcData?: unknown[];
+}) {
+  const order = options.order ?? {
+    id: '00000000-0000-4000-8000-000000000100',
+    amount_total: 990,
+    metadata: { grantedCredits: 100 },
+  };
+  const lookups: Array<{ table: string; column: string; value: unknown }> = [];
+  const rpc = vi.fn().mockResolvedValue({
+    data: options.rpcData ?? [
+      {
+        order_id: order.id,
+        user_id: '00000000-0000-4000-8000-000000000101',
+        order_status: 'refunded',
+        clawback_amount: 100,
+        shortfall_amount: 0,
+        transaction_id: '00000000-0000-4000-8000-000000000102',
+        already_reconciled: false,
+      },
+    ],
+    error: null,
+  });
+
+  const matchesMetadata = (marker: Record<string, unknown>) =>
+    Object.entries(marker).every(([key, value]) => order.metadata?.[key] === value);
+
+  const supabase = {
+    rpc,
+    from(table: string) {
+      if (table !== 'payment_orders') {
+        throw new Error(`Refund reconciliation should not touch ${table}`);
+      }
+
+      let lookup: { column: string; value: unknown } | null = null;
+      let marker: Record<string, unknown> | null = null;
+
+      const match = () => {
+        if (marker) {
+          return matchesMetadata(marker);
+        }
+
+        return lookup?.column === options.match.column && lookup.value === options.match.value;
+      };
+
+      return {
+        select() {
+          return this;
+        },
+        eq(column: string, value: unknown) {
+          lookup = { column, value };
+          lookups.push({ table, column, value });
+          return this;
+        },
+        contains(column: string, value: Record<string, unknown>) {
+          marker = value;
+          lookups.push({ table, column, value });
+          return this;
+        },
+        limit() {
+          return Promise.resolve({
+            data: match() ? [order] : [],
+            error: null,
+          });
+        },
+        maybeSingle() {
+          return Promise.resolve({
+            data: match() ? order : null,
+            error: null,
+          });
+        },
+      };
+    },
+  };
+
+  return { lookups, order, rpc, supabase };
 }
 
 describe('stripe fulfillment helpers', () => {
@@ -4172,6 +4253,207 @@ describe('stripe fulfillment helpers', () => {
         subscriptionId: 'sub_webh...w_only',
         orderId: 'order-we...w-only',
         reason: 'partial_refund_status',
+      }),
+    );
+  });
+
+  it('preserves generic credit package refund reconciliation through the atomic refund RPC', async () => {
+    const { lookups, rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_refund' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000300',
+        amount_total: 500,
+        metadata: {
+          checkoutSessionId: 'cs_test_credit_package_refund',
+          grantedCredits: 50,
+          paymentIntentId: 'pi_test_credit_package_refund',
+        },
+      },
+      rpcData: [
+        {
+          order_id: '00000000-0000-4000-8000-000000000300',
+          user_id: '00000000-0000-4000-8000-000000000101',
+          order_status: 'refunded',
+          clawback_amount: 50,
+          shortfall_amount: 0,
+          transaction_id: '00000000-0000-4000-8000-000000000301',
+          already_reconciled: false,
+        },
+      ],
+    });
+
+    const result = await reconcileStripeRefund(supabase, {
+      eventId: 'evt_test_credit_package_refund',
+      eventType: 'refund.created',
+      refund: {
+        id: 're_test_credit_package_refund',
+        amount: 500,
+        charge: 'ch_test_credit_package_refund',
+        created: 1_742_646_400,
+        currency: 'usd',
+        metadata: {},
+        payment_intent: 'pi_test_credit_package_refund',
+        reason: 'requested_by_customer',
+        status: 'succeeded',
+      } as unknown as Stripe.Refund,
+    });
+
+    expect(lookups).toEqual([
+      {
+        table: 'payment_orders',
+        column: 'metadata->>paymentIntentId',
+        value: 'pi_test_credit_package_refund',
+      },
+    ]);
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_is_full_refund: true,
+      p_order_id: '00000000-0000-4000-8000-000000000300',
+      p_payment_intent_id: 'pi_test_credit_package_refund',
+      p_refund_id: 're_test_credit_package_refund',
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      order_status: 'refunded',
+      clawback_amount: 50,
+      shortfall_amount: 0,
+    }));
+  });
+
+  it('falls back from subscription refund webhook handling to generic refund reconciliation for credit package orders', async () => {
+    const { rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_webhook_refund' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000310',
+        amount_total: 500,
+        metadata: {
+          itemType: 'credit_package',
+          paymentIntentId: 'pi_test_credit_package_webhook_refund',
+        },
+      },
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_test_credit_package_webhook_refund',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_test_credit_package_webhook_refund',
+            amount: 500,
+            charge: null,
+            created: 1_742_646_400,
+            currency: 'usd',
+            metadata: {},
+            payment_intent: 'pi_test_credit_package_webhook_refund',
+            reason: 'requested_by_customer',
+            status: 'succeeded',
+          },
+        },
+      } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+    );
+
+    expect(result).toMatchObject({
+      reconciled: true,
+      reason: 'non_subscription_order_reconciled',
+      orderId: '00000000-0000-4000-8000-000000000310',
+    });
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: '00000000-0000-4000-8000-000000000310',
+      p_refund_id: 're_test_credit_package_webhook_refund',
+    }));
+  });
+
+  it('falls back to generic refund reconciliation for checkout-session refund metadata without an invoice', async () => {
+    const { lookups, rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'stripe_checkout_session_id', value: 'cs_test_checkout_metadata_refund' },
+      order: {
+        id: '00000000-0000-4000-8000-000000000320',
+        amount_total: 500,
+        metadata: {
+          itemType: 'credit_package',
+          grantedCredits: 50,
+        },
+      },
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_test_checkout_metadata_refund',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_test_checkout_metadata_refund',
+            amount: 500,
+            charge: null,
+            created: 1_742_646_400,
+            currency: 'usd',
+            metadata: {
+              checkoutSessionId: 'cs_test_checkout_metadata_refund',
+            },
+            payment_intent: null,
+            reason: 'requested_by_customer',
+            status: 'succeeded',
+          } as unknown as Stripe.Refund,
+        },
+      } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+    );
+
+    expect(lookups).toContainEqual(
+      {
+        table: 'payment_orders',
+        column: 'stripe_checkout_session_id',
+        value: 'cs_test_checkout_metadata_refund',
+      },
+    );
+    expect(result).toMatchObject({
+      reconciled: true,
+      reason: 'non_subscription_order_reconciled',
+      orderId: null,
+    });
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: '00000000-0000-4000-8000-000000000320',
+      p_refund_id: 're_test_checkout_metadata_refund',
+    }));
+  });
+
+  it('returns unreconciled for non-invoice refund webhooks that have no generic order match', async () => {
+    const supabase = createRefundWebhookSupabase();
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_test_unknown_checkout_refund',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_test_unknown_checkout_refund',
+            amount: 500,
+            charge: null,
+            created: 1_742_646_400,
+            currency: 'usd',
+            metadata: {
+              checkoutSessionId: 'cs_test_unknown_checkout_refund',
+            },
+            payment_intent: null,
+            reason: 'requested_by_customer',
+            status: 'succeeded',
+          } as unknown as Stripe.Refund,
+        },
+      } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+    );
+
+    expect(result).toMatchObject({
+      reconciled: false,
+      reason: 'non_subscription_order_not_found',
+      orderId: null,
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'stripe_refund_order_not_found',
+      expect.objectContaining({
+        checkoutSessionId: 'cs_test_...refund',
+        refundId: 're_test_...refund',
       }),
     );
   });
