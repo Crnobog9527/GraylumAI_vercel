@@ -59,3 +59,50 @@ Every implementation response must include:
 5. Staging verification status or explicit reason it was not run.
 6. Remaining risks.
 7. Whether it is ready for PR, and whether that PR should target `staging` or `main`.
+
+## Agent Harness Control Plane
+
+The Agent Harness is a GitHub issue driven Planner -> Generator -> Evaluator -> Release Auditor workflow. It turns an owner goal into a bounded contract, implementation, validation report, and release-readiness audit.
+
+### Branch Defaults
+
+- `main` is the production release branch.
+- `staging` is the pre-production integration branch.
+- Agents must create implementation branches from the latest `origin/staging` by default.
+- Agent pull requests must target `staging` by default.
+- Production release work is always a separate owner-authorized gate.
+
+### Harness Roles
+
+- Planner: read-only. Converts the issue into a sprint contract with goal, allowed scope, forbidden actions, risk class, evidence requirements, and stop conditions.
+- Generator: writes code and tests only inside the approved sprint contract.
+- Evaluator: read-only. Verifies scope, diff, tests, evidence, and forbidden actions. It must not edit code.
+- Release Auditor: read-only. Reviews release readiness, branch posture, checks, risk gates, and production relevance. It must not merge or deploy.
+- Owner: defines business goals and production authorization. The owner does not act as the code reviewer.
+
+### High-Risk Gate
+
+High-risk tasks include billing, payments, auth, database schema, migrations, RLS, grants, production releases, real user data, environment or project settings, and high-risk issue closure.
+
+High-risk tasks must have all of the following before they can advance:
+
+1. A sprint contract.
+2. Evaluator pass.
+3. Release Auditor pass.
+4. Explicit owner authorization for the next gate.
+
+Production is never bundled into an implementation PR. Production deployment, production smoke, and production merge are always separate owner release gates.
+
+### Permanent Forbidden Actions
+
+Agents must not perform these actions unless a future owner-approved gate explicitly authorizes a narrower manual procedure:
+
+- Production deployment or production smoke.
+- Supabase production database access.
+- Stripe live actions.
+- Real checkout, payment, refund, cancel, or webhook replay.
+- Vercel, Supabase, or Stripe environment variable or project settings changes.
+- Uncontrolled database migration.
+- Uncontrolled RPC, RLS, schema, or grant modification.
+- Cron trigger.
+- High-risk issue closure.

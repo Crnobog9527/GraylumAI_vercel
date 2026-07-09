@@ -1,0 +1,48 @@
+# Graylum Agent Harness
+
+The Graylum Agent Harness is a GitHub issue driven control plane for bounded engineering work. It separates planning, implementation, validation, and release readiness into distinct roles:
+
+1. Planner
+2. Generator
+3. Evaluator
+4. Release Auditor
+
+The harness does not make production decisions. Owner authorization remains required for production releases and high-risk gates.
+
+## Branch Model
+
+- `main` is the production release branch.
+- `staging` is the pre-production integration branch.
+- Agent branches start from the latest `origin/staging` by default.
+- Agent pull requests target `staging` by default.
+- Production promotion is a separate owner-authorized release gate.
+
+## Role Model
+
+Planner is read-only and writes a sprint contract.
+
+Generator implements only the approved sprint contract.
+
+Evaluator is read-only and verifies the PR against the contract.
+
+Release Auditor is read-only and checks release readiness, branch posture, checks, and production relevance.
+
+Owner defines business goals and production authorization. Owner does not act as the code reviewer.
+
+## Permanent Forbidden Actions
+
+The harness must not perform:
+
+- Production deployment or production smoke.
+- Supabase production DB access.
+- Stripe live action.
+- Real checkout, payment, refund, cancel, or webhook replay.
+- Vercel, Supabase, or Stripe env/project settings changes.
+- Uncontrolled DB migration.
+- Uncontrolled RPC, RLS, schema, or grant modification.
+- Cron trigger.
+- High-risk issue closure.
+
+## Phase 0 Boundary
+
+Phase 0 only creates the control-plane foundation: rules, prompts, schemas, templates, documentation, and workflow trigger coverage. It is not automatic development and it is not automatic merge.
