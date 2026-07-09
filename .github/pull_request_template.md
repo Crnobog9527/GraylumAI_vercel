@@ -24,6 +24,24 @@
 - Tests/checks run:
 - Not run:
 
+## Owner Summary
+
+- One-line Chinese summary:
+
+## Machine Decision
+
+- `machine_decision`: `PASS` / `FAIL` / `BLOCKED`
+- `risk_level`: `low` / `medium` / `high` / `production`
+- `can_merge_to_staging`: `true` / `false`
+- `can_release_to_production`: `true` / `false`
+- `forbidden_actions_observed`: `true` / `false`
+- `required_human_authorization`: `none` / `owner` / `production_owner_gate`
+- `stop_reason`:
+
+## Owner Next Action
+
+- One-line Chinese next action:
+
 ## Evaluator Result
 
 - Evaluator report path or link:

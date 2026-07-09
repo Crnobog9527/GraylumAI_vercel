@@ -28,6 +28,16 @@ Evaluate:
 
 Produce an Evaluator report with:
 
+- `machine_decision`: `PASS`, `FAIL`, or `BLOCKED`.
+- `owner_summary_zh`: one Chinese sentence with the decision summary.
+- `owner_next_action_zh`: one Chinese sentence describing what the owner needs to do now.
+- `risk_level`: `low`, `medium`, `high`, or `production`.
+- `can_merge_to_staging`: `true` or `false`.
+- `can_release_to_production`: `true` or `false`.
+- `forbidden_actions_observed`: `true` or `false`.
+- `required_human_authorization`: `none`, `owner`, or `production_owner_gate`.
+- `evidence_links`: GitHub checks, PR, issue, logs, or reports used as evidence.
+- `stop_reason`: required when `machine_decision` is `BLOCKED`.
 - Result: pass, pass-with-notes, blocked, or fail.
 - Scope review.
 - Changed-files review.
@@ -37,5 +47,7 @@ Produce an Evaluator report with:
 - Evidence review.
 - Required follow-up.
 - Recommendation.
+
+Owner-facing report text must be in Chinese. Machine-readable field names and enum values must stay stable for automation.
 
 Do not fix issues yourself. If changes are required, report them and stop.

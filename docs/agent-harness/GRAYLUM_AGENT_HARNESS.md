@@ -29,6 +29,26 @@ Release Auditor is read-only and checks release readiness, branch posture, check
 
 Owner defines business goals and production authorization. Owner does not act as the code reviewer.
 
+## Report Contract
+
+Evaluator and Release Auditor reports must be both owner-readable and machine-readable.
+
+Owner-facing fields must be in Chinese and include:
+
+- `owner_summary_zh`: one sentence with the decision summary.
+- `owner_next_action_zh`: one sentence describing what the owner needs to do now.
+
+Machine-readable fields must remain stable for automation:
+
+- `machine_decision`: `PASS`, `FAIL`, or `BLOCKED`.
+- `risk_level`: `low`, `medium`, `high`, or `production`.
+- `can_merge_to_staging`: boolean.
+- `can_release_to_production`: boolean.
+- `forbidden_actions_observed`: boolean.
+- `required_human_authorization`: `none`, `owner`, or `production_owner_gate`.
+- `evidence_links`: GitHub checks, PR, issue, logs, and reports.
+- `stop_reason`: required when blocked.
+
 ## Permanent Forbidden Actions
 
 The harness must not perform:

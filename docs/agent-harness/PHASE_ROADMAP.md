@@ -21,6 +21,8 @@ Enable read-only Evaluator use on existing PRs.
 
 Evaluator checks contract compliance, changed files, validation evidence, forbidden actions, and risk classification. It does not edit code.
 
+Evaluator reports must include stable machine-readable decision fields and Chinese owner-facing summary fields. A blocked report must include a concrete `stop_reason`.
+
 ## Phase 2: Generator Low-risk
 
 Allow Generator to implement low-risk tasks with a Planner contract.
@@ -39,6 +41,8 @@ Consider staging auto-merge only for low-risk tasks after:
 - No production relevance or production gate remains separate and blocked.
 
 Production never auto-merges.
+
+Release Auditor reports must include stable machine-readable decision fields and Chinese owner-facing summary fields. `can_release_to_production` must remain `false` unless a separate production owner gate is explicitly authorized.
 
 ## Phase 4: High-risk Semi-automation
 

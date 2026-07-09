@@ -80,6 +80,8 @@ The Agent Harness is a GitHub issue driven Planner -> Generator -> Evaluator -> 
 - Release Auditor: read-only. Reviews release readiness, branch posture, checks, risk gates, and production relevance. It must not merge or deploy.
 - Owner: defines business goals and production authorization. The owner does not act as the code reviewer.
 
+Owner-facing reports must be in Chinese and must include a one-line decision summary and next action. Machine-readable fields must remain stable for automation.
+
 ### High-Risk Gate
 
 High-risk tasks include billing, payments, auth, database schema, migrations, RLS, grants, production releases, real user data, environment or project settings, and high-risk issue closure.
