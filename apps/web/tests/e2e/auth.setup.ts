@@ -132,7 +132,9 @@ async function authenticateRole(page: Page, role: E2ERole) {
 
 setup('authenticate user', async ({ page }) => {
   await ensureAuthStateDirectory();
-  await ensureMaintenanceModeDisabled();
+  if (process.env.E2E_ALLOW_DATABASE_FIXTURES === 'true') {
+    await ensureMaintenanceModeDisabled();
+  }
   if (!hasCredentials('user')) {
     await saveEmptyState(page, authStatePaths.user);
     return;
@@ -142,7 +144,9 @@ setup('authenticate user', async ({ page }) => {
 
 setup('authenticate admin', async ({ page }) => {
   await ensureAuthStateDirectory();
-  await ensureMaintenanceModeDisabled();
+  if (process.env.E2E_ALLOW_DATABASE_FIXTURES === 'true') {
+    await ensureMaintenanceModeDisabled();
+  }
   if (!hasCredentials('admin')) {
     await saveEmptyState(page, authStatePaths.admin);
     return;

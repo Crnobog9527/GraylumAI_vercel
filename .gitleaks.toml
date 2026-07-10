@@ -1,0 +1,60 @@
+title = "Graylum secret scanning policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "graylum-openai-key"
+description = "OpenAI API key"
+regex = '''sk-(?:proj|svc|admin)?-[A-Za-z0-9_-]{20,}'''
+keywords = ["openai", "sk-"]
+
+[[rules]]
+id = "graylum-anthropic-key"
+description = "Anthropic API key"
+regex = '''sk-ant-[A-Za-z0-9_-]{20,}'''
+keywords = ["anthropic", "sk-ant-"]
+
+[[rules]]
+id = "graylum-stripe-secret"
+description = "Stripe secret or restricted key"
+regex = '''(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}'''
+keywords = ["stripe", "sk_live_", "rk_live_", "sk_test_", "rk_test_"]
+
+[[rules]]
+id = "graylum-supabase-service-role"
+description = "Supabase service-role JWT"
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{20,}'''
+keywords = ["supabase", "service_role"]
+
+[[rules]]
+id = "graylum-vercel-token"
+description = "Vercel token"
+regex = '''(?:vercel|vcel)[A-Za-z0-9_-]{20,}'''
+keywords = ["vercel", "vcel"]
+
+[[rules]]
+id = "graylum-github-token"
+description = "GitHub token"
+regex = '''gh[pousr]_[A-Za-z0-9]{20,}'''
+keywords = ["github", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+
+[[rules]]
+id = "graylum-private-key"
+description = "Private key block"
+regex = '''-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----'''
+keywords = ["private key"]
+
+[[rules]]
+id = "graylum-database-url"
+description = "Database connection URL with password"
+regex = '''(?:postgres|postgresql|mysql|mongodb(?:\+srv)?):\/\/[^\s:@/]+:[^\s@/]+@[^\s/]+'''
+keywords = ["database_url", "postgres", "postgresql", "mysql", "mongodb"]
+
+[allowlist]
+description = "Documented placeholders and test-only fixtures are not credentials."
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/).*\.test\.(ts|tsx|js|jsx)$''',
+  '''(^|/)docs/''',
+]

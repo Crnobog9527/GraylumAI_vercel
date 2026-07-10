@@ -66,3 +66,7 @@ The harness must not perform:
 ## Phase 0 Boundary
 
 Phase 0 only creates the control-plane foundation: rules, prompts, schemas, templates, documentation, and workflow trigger coverage. It is not automatic development and it is not automatic merge.
+
+## Phase 0.5 Boundary
+
+Phase 0.5 establishes trusted automation boundaries before any Evaluator-only rollout. See `TRUST_BOUNDARIES.md`, `THREAT_MODEL.md`, `MODEL_POLICY_GPT56.md`, `GOLDEN_EVALS.md`, and `SECURITY_BASELINE.md`. Phase 1 must remain blocked until the owner resolves the documented GitHub branch-protection and Vercel Preview credential-scope risks.

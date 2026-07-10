@@ -1,0 +1,55 @@
+# Trusted-only staging E2E. It is never available to pull_request code.
+name: Trusted Staging E2E
+
+on:
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-staging-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-staging-e2e:
+    name: Trusted Staging E2E (synthetic accounts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ vars.STAGING_E2E_BASE_URL || 'https://graylumai-staging.vercel.app' }}
+      E2E_TEST_EMAIL: ${{ secrets.STAGING_E2E_TEST_EMAIL }}
+      E2E_TEST_PASSWORD: ${{ secrets.STAGING_E2E_TEST_PASSWORD }}
+      E2E_ADMIN_EMAIL: ${{ secrets.STAGING_E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.STAGING_E2E_ADMIN_PASSWORD }}
+      E2E_ALLOW_DATABASE_FIXTURES: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f3d73ada1fa6e5c0c19973ff70a3f5cabf225cc5 # v6.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: cd apps/web && npx playwright install --with-deps chromium
+
+      - name: Run trusted staging E2E
+        run: cd apps/web && npx playwright test security.spec.ts --project=chromium --reporter=line
+        env:
+          CI: true
+
+      # No Playwright report, trace, video, or storage-state artifact is uploaded.
