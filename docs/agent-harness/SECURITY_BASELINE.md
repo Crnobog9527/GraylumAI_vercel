@@ -27,3 +27,5 @@ This is a `BLOCKED` external configuration risk. Preview must not receive live S
 ### Code scanning
 
 GitHub CodeQL/code scanning is currently disabled for this private repository. This PR does not add a CodeQL workflow that would fail result ingestion. Alternative baseline controls are pinned workflow policy checks, dependency review, `pnpm audit`, and gitleaks. After the owner enables CodeQL/code scanning, add a SHA-pinned JavaScript/TypeScript workflow in a separate PR and verify alert ingestion.
+
+Dependency Review also requires Dependency Graph plus GitHub Advanced Security on this private repository. Its workflow definition is present but guarded by the owner-managed `DEPENDENCY_REVIEW_ENABLED` repository variable, so unsupported repositories remain green without pretending the review ran.
