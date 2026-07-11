@@ -15,22 +15,45 @@ concurrency:
 jobs:
   trusted-staging-e2e:
     name: Trusted Staging E2E (synthetic accounts)
+    if: vars.TRUSTED_STAGING_E2E_ENABLED == 'true'
+    environment: staging-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
     env:
-      PLAYWRIGHT_BASE_URL: ${{ vars.STAGING_E2E_BASE_URL || 'https://graylumai-staging.vercel.app' }}
+      PLAYWRIGHT_BASE_URL: ${{ vars.STAGING_E2E_BASE_URL }}
       E2E_TEST_EMAIL: ${{ secrets.STAGING_E2E_TEST_EMAIL }}
       E2E_TEST_PASSWORD: ${{ secrets.STAGING_E2E_TEST_PASSWORD }}
       E2E_ADMIN_EMAIL: ${{ secrets.STAGING_E2E_ADMIN_EMAIL }}
       E2E_ADMIN_PASSWORD: ${{ secrets.STAGING_E2E_ADMIN_PASSWORD }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_E2E_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_E2E_SUPABASE_ANON_KEY }}
       E2E_ALLOW_DATABASE_FIXTURES: 'false'
+      TRUSTED_STAGING_E2E: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+
+      - name: Validate trusted staging boundary
+        shell: bash
+        run: |
+          expected_url='https://graylumai-staging.vercel.app'
+          if [ "$PLAYWRIGHT_BASE_URL" != "$expected_url" ]; then
+            echo 'Trusted staging E2E base URL is not allowlisted.'
+            exit 1
+          fi
+          for name in \
+            E2E_TEST_EMAIL E2E_TEST_PASSWORD \
+            E2E_ADMIN_EMAIL E2E_ADMIN_PASSWORD \
+            NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "Required staging-e2e credential is missing: $name"
+              exit 1
+            fi
+          done
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -48,7 +71,15 @@ jobs:
         run: cd apps/web && npx playwright install --with-deps chromium
 
       - name: Run trusted staging E2E
-        run: cd apps/web && npx playwright test security.spec.ts --project=chromium --reporter=line
+        run: |
+          set +e
+          cd apps/web
+          npx playwright test security.spec.ts --project=chromium --reporter=json > /tmp/trusted-staging-e2e-results.json
+          test_status=$?
+          cd ../..
+          set -e
+          node .github/scripts/check-playwright-results.cjs /tmp/trusted-staging-e2e-results.json
+          exit "$test_status"
         env:
           CI: true
 

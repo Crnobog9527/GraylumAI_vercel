@@ -1,31 +1,39 @@
 # Security Baseline
 
-## Phase 0.5 baseline (2026-07-10)
+## Phase 0.5 public-repository baseline (2026-07-11)
 
-This is a metadata-only audit. No secret values were read, copied, or written.
+This record contains metadata only. No secret value was read, copied, logged, or written.
 
 ### GitHub controls
 
-- `main` and `staging` currently report `protected: false`; no classic branch-protection rules were returned.
-- Detailed rulesets and branch-protection settings are not readable through the current private-repository plan API. Force-push, deletion, strict-up-to-date, conversation-resolution, and bypass-actor settings must be owner-verified in GitHub settings.
-- Merge commit, squash, and rebase are all enabled; auto-merge is disabled.
-- Default workflow token permission is read-only, but repository-wide SHA pinning is not required and all Actions are allowed.
-- GitHub environment records have no protection rules.
+- Repository visibility is public.
+- `main` and `staging` require pull requests, strict up-to-date status checks, and conversation resolution.
+- Direct pushes are blocked by the pull-request requirement. Force pushes and branch deletion are disabled, and administrators cannot bypass the protection.
+- Required checks use stable, unique CI and Security job names. No human approval count is required because the owner is not the code reviewer.
+- Secret scanning, push protection, dependency graph, Dependabot alerts/security updates, and private vulnerability reporting are enabled.
+- Dependency Review runs on pull requests without a skip variable.
+- CodeQL JavaScript/TypeScript is defined for trusted pushes to `main` and `staging` plus a scheduled scan. It is not a PR workflow because PR workflows may not receive write permissions.
 
-### GitHub Actions secrets and usage
+### Trusted policy bootstrap
 
-Repository secret names observed: `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_SUPABASE_URL`.
+PR policy evaluation must load the workflow checker and `.gitleaks.toml` from the pull request's exact base SHA. It must never execute either policy from PR head. The current `staging` base predates these files, so the gate intentionally fails closed until an independently reviewed trusted-policy bootstrap is merged and PR #265 is updated onto that base.
 
-Before Phase 0.5, `Security E2E Tests` exposed the E2E credentials to `pull_request`. Phase 0.5 removes these references from PR-triggered workflows. Trusted staging E2E expects separately scoped `STAGING_E2E_*` synthetic-account secrets; it does not receive Stripe, database, service-role, or production secrets.
+The same rule applies to future Evaluator prompts and deterministic policy: exact trusted base only, with missing or unverifiable policy reported as `BLOCKED`.
 
-### Vercel Preview exposure requiring owner remediation
+### GitHub Actions credentials
 
-Both Vercel projects, `graylum-ai-vercel-v1` and `graylumai-staging`, currently scope `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, and `OPENROUTER_API_KEY` to Preview. The production project also scopes `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`, and `CRON_SECRET` to Preview.
+PR-triggered workflows are secretless and read-only. Trusted staging E2E is bound to the protected `staging-e2e` Environment, uses only staging synthetic-account credentials, and is disabled unless `TRUSTED_STAGING_E2E_ENABLED=true` is set by an authorized owner.
 
-This is a `BLOCKED` external configuration risk. Preview must not receive live Stripe, production Supabase, service-role, database, provider, or cron credentials. No Phase 1 work may rely on Preview as a trusted runner until the owner remediates this in Vercel settings.
+When enabled, trusted staging E2E requires the allowlisted staging URL, both synthetic roles, and staging public Supabase runtime configuration. Missing inputs, wrong URL, zero executed tests, or skipped critical tests fail the job. No browser report, trace, screenshot, video, storage state, token, cookie, or user-data artifact is uploaded.
 
-### Code scanning
+### Vercel Preview isolation
 
-GitHub CodeQL/code scanning is currently disabled for this private repository. This PR does not add a CodeQL workflow that would fail result ingestion. Alternative baseline controls are pinned workflow policy checks, dependency review, `pnpm audit`, and gitleaks. After the owner enables CodeQL/code scanning, add a SHA-pinned JavaScript/TypeScript workflow in a separate PR and verify alert ingestion.
+Ordinary Preview scope no longer includes Stripe secret/webhook credentials, Supabase service-role credentials, database/admin URLs, cron credentials, privileged provider keys, or production Supabase runtime variables in either audited Vercel project. Production credentials remain Production-only; staging-specific variables must remain branch-specific or in the protected GitHub Environment.
 
-Dependency Review also requires Dependency Graph plus GitHub Advanced Security on this private repository. Its workflow definition is present but guarded by the owner-managed `DEPENDENCY_REVIEW_ENABLED` repository variable, so unsupported repositories remain green without pretending the review ran.
+### Exposure and rotation status
+
+The public-history audit found credential-shaped records in historical examples/tests and two open provider-key secret-scanning alert types. Locations and commit SHAs are recorded in Issue #263 without values. Provider-side rotation or invalidation confirmation remains required before Phase 0.5 can exit.
+
+### Phase 0.5 exit gate
+
+Phase 1 remains unauthorized until rotation disposition, trusted-policy bootstrap, exact-head CI/Security/Dependency Review/secret scan, trusted CodeQL evidence, and independent current-head review are complete. PR #265 remains draft and cannot authorize merge, Phase 1, staging auto-merge, or production.

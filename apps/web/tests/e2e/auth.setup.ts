@@ -17,10 +17,6 @@ import { gotoWithBypass } from './support/deploymentProtection';
 setup.describe.configure({ mode: 'serial' });
 setup.setTimeout(90000);
 
-async function saveEmptyState(page: Page, authFile: string) {
-  await page.context().storageState({ path: authFile });
-}
-
 function getProtectedPath(role: E2ERole) {
   return role === 'admin' ? '/admin' : '/profile';
 }
@@ -76,9 +72,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
   const credentials = getCredentials(role);
 
   if (!credentials.email || !credentials.password) {
-    console.log(`Skipping ${role} auth setup: missing credentials`);
-    await saveEmptyState(page, authStatePaths[role]);
-    return;
+    throw new Error(`E2E ${role} credentials are required; empty auth state is forbidden.`);
   }
 
   await gotoWithBypass(page, '/login');
@@ -136,8 +130,7 @@ setup('authenticate user', async ({ page }) => {
     await ensureMaintenanceModeDisabled();
   }
   if (!hasCredentials('user')) {
-    await saveEmptyState(page, authStatePaths.user);
-    return;
+    throw new Error('E2E user credentials are required; empty auth state is forbidden.');
   }
   await authenticateRole(page, 'user');
 });
@@ -148,8 +141,7 @@ setup('authenticate admin', async ({ page }) => {
     await ensureMaintenanceModeDisabled();
   }
   if (!hasCredentials('admin')) {
-    await saveEmptyState(page, authStatePaths.admin);
-    return;
+    throw new Error('E2E admin credentials are required; empty auth state is forbidden.');
   }
   await authenticateRole(page, 'admin');
 });

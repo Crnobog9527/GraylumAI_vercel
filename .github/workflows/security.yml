@@ -46,7 +46,7 @@ jobs:
 
   dependency-review:
     name: Dependency Review
-    if: github.event_name == 'pull_request' && vars.DEPENDENCY_REVIEW_ENABLED == 'true'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -68,13 +68,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Run workflow policy tests
-        run: node .github/scripts/test-workflow-policy.cjs
+      - name: Resolve exact trusted base SHA
+        id: trusted-base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            trusted_sha="$PR_BASE_SHA"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            trusted_sha="$PUSH_BEFORE_SHA"
+          else
+            trusted_sha="${{ github.sha }}"
+          fi
+          if ! printf '%s' "$trusted_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo 'Exact trusted base SHA is unavailable.'
+            exit 1
+          fi
+          echo "sha=$trusted_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Check repository workflows
-        run: node .github/scripts/check-workflow-policy.cjs .github/workflows
+      - name: Checkout trusted policy source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ steps.trusted-base.outputs.sha }}
+          path: .trusted-base-policy
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/check-workflow-policy.rb
+            .github/scripts/test-workflow-policy.rb
+
+      - name: Require trusted policy source
+        run: |
+          test -f .trusted-base-policy/.github/scripts/check-workflow-policy.rb
+          test -f .trusted-base-policy/.github/scripts/test-workflow-policy.rb
+
+      - name: Run trusted workflow policy tests
+        run: ruby .trusted-base-policy/.github/scripts/test-workflow-policy.rb
+
+      - name: Check candidate workflows with trusted policy
+        run: ruby .trusted-base-policy/.github/scripts/check-workflow-policy.rb .github/workflows
 
   secret-scan:
     name: Secret Scan
@@ -90,10 +125,81 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve exact trusted base SHA
+        id: trusted-base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            trusted_sha="$PR_BASE_SHA"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            trusted_sha="$PUSH_BEFORE_SHA"
+          else
+            trusted_sha="${{ github.sha }}"
+          fi
+          if ! printf '%s' "$trusted_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo 'Exact trusted base SHA is unavailable.'
+            exit 1
+          fi
+          echo "sha=$trusted_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted Gitleaks policy
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ steps.trusted-base.outputs.sha }}
+          path: .trusted-base-gitleaks
+          persist-credentials: false
+          sparse-checkout: .gitleaks.toml
+
+      - name: Require trusted Gitleaks policy
+        run: test -f .trusted-base-gitleaks/.gitleaks.toml
+
+      - name: Create scanner regression fixtures
+        run: bash .github/scripts/create-secret-scan-regression-fixtures.sh .secret-scan-regression
+
+      - name: Install checksum-pinned Gitleaks regression scanner
+        run: |
+          archive=/tmp/gitleaks_8.24.3_linux_x64.tar.gz
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            --output "$archive"
+          echo '9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  /tmp/gitleaks_8.24.3_linux_x64.tar.gz' | sha256sum --check
+          mkdir -p /tmp/gitleaks-bin
+          tar -xzf "$archive" -C /tmp/gitleaks-bin gitleaks
+
+      - name: Require scanner to reject docs and test fixtures
+        run: |
+          set +e
+          /tmp/gitleaks-bin/gitleaks detect \
+            --no-git \
+            --source .secret-scan-regression \
+            --config .trusted-base-gitleaks/.gitleaks.toml \
+            --redact=100 \
+            --report-format json \
+            --report-path /tmp/secret-scan-regression.json
+          scan_status=$?
+          set -e
+          if [ "$scan_status" -eq 0 ]; then
+            echo 'Secret scanner failed to reject generated docs/test fixtures.'
+            exit 1
+          fi
+          finding_count="$(jq 'length' /tmp/secret-scan-regression.json)"
+          if [ "$finding_count" -lt 2 ]; then
+            echo 'Secret scanner did not detect both generated regression fixtures.'
+            exit 1
+          fi
+          echo "Secret scanner regression passed: rejected findings=$finding_count"
+
+      - name: Remove scanner regression fixtures
+        run: rm -rf .secret-scan-regression
+
       - name: Scan for exposed secrets
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_CONFIG: .trusted-base-gitleaks/.gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
 
   code-scan:
     name: Code Security Scan
@@ -220,7 +326,15 @@ jobs:
           exit 1
 
       - name: Run secretless local E2E
-        run: cd apps/web && npx playwright test security.spec.ts --project=chromium --reporter=line
+        run: |
+          set +e
+          cd apps/web
+          npx playwright test security.spec.ts --project=chromium --reporter=json > /tmp/security-e2e-results.json
+          test_status=$?
+          cd ../..
+          set -e
+          node .github/scripts/check-playwright-results.cjs /tmp/security-e2e-results.json --allow-skipped
+          exit "$test_status"
         env:
           CI: true
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000

@@ -283,8 +283,7 @@ test.describe('Security', () => {
       // Check the input is truncated or handled
       const emailValue = await page.locator('input[type="email"], input[name="email"]').inputValue();
 
-      // Either truncated or full value - just ensure page doesn't crash
-      expect(emailValue.length).toBeGreaterThan(0);
+      expect(emailValue.length).toBeLessThanOrEqual(320);
     });
   });
 
@@ -296,20 +295,16 @@ test.describe('Security', () => {
       const response = await gotoWithBypass(page, '/');
 
       const xFrameOptions = response?.headers()['x-frame-options'];
-      // Should be set (DENY or SAMEORIGIN)
-      // Note: May be set by Vercel middleware or Next.js
-      if (xFrameOptions) {
-        expect(['DENY', 'SAMEORIGIN', 'deny', 'sameorigin']).toContain(xFrameOptions);
-      }
+      expect(xFrameOptions).toBeDefined();
+      expect(['deny', 'sameorigin']).toContain(xFrameOptions?.toLowerCase());
     });
 
     test('should have X-Content-Type-Options header', async ({ page }) => {
       const response = await gotoWithBypass(page, '/');
 
       const xContentType = response?.headers()['x-content-type-options'];
-      if (xContentType) {
-        expect(xContentType.toLowerCase()).toBe('nosniff');
-      }
+      expect(xContentType).toBeDefined();
+      expect(xContentType?.toLowerCase()).toBe('nosniff');
     });
 
     test('should have X-XSS-Protection header or CSP', async ({ page }) => {
@@ -320,9 +315,7 @@ test.describe('Security', () => {
       const hasXSSProtection = headers['x-xss-protection'] !== undefined;
       const hasCSP = headers['content-security-policy'] !== undefined;
 
-      // At least one protection should be enabled
-      // Note: Modern browsers rely more on CSP than X-XSS-Protection
-      expect(hasXSSProtection || hasCSP || true).toBe(true); // Soft check
+      expect(hasXSSProtection || hasCSP).toBe(true);
     });
 
     test('should not expose server version in headers', async ({ page }) => {
@@ -336,56 +329,6 @@ test.describe('Security', () => {
       // Should not contain version numbers
       expect(server).not.toMatch(/\d+\.\d+\.\d+/);
       expect(xPoweredBy).not.toMatch(/\d+\.\d+\.\d+/);
-    });
-  });
-
-  // ============================================
-  // Cookie Security Tests
-  // ============================================
-  test.describe('Cookie Security', () => {
-    test('should set secure cookies on HTTPS', async ({ page, context }) => {
-      await gotoWithBypass(page, '/login');
-
-      // Get cookies
-      const cookies = await context.cookies();
-
-      // Filter for auth-related cookies
-      const sessionCookies = cookies.filter(
-        (c) =>
-          c.name.toLowerCase().includes('session') ||
-          c.name.toLowerCase().includes('auth') ||
-          c.name.toLowerCase().includes('token')
-      );
-
-      // Note: On localhost, secure flag may not be set
-      // This test is more relevant for production
-      for (const cookie of sessionCookies) {
-        // HttpOnly should be set for session cookies
-        if (cookie.httpOnly !== undefined) {
-          expect(cookie.httpOnly).toBe(true);
-        }
-      }
-    });
-
-    test('should set HttpOnly flag on session cookies', async ({ page, context }) => {
-      await gotoWithBypass(page, '/');
-
-      const cookies = await context.cookies();
-
-      // Check Supabase auth cookies
-      const authCookies = cookies.filter(
-        (c) =>
-          c.name.includes('sb-') || // Supabase cookie prefix
-          c.name.includes('auth')
-      );
-
-      // Session cookies should be HttpOnly (not accessible via JavaScript)
-      for (const cookie of authCookies) {
-        if (cookie.name.includes('token')) {
-          // Token cookies should be HttpOnly
-          // Note: Some Supabase cookies may not be HttpOnly by design
-        }
-      }
     });
   });
 
@@ -428,18 +371,6 @@ test.describe('Security', () => {
     });
   });
 
-  // ============================================
-  // HTTPS Redirect Test
-  // ============================================
-  test.describe('HTTPS', () => {
-    test.skip('should redirect HTTP to HTTPS in production', async ({ page }) => {
-      // This test only works in production environment
-      // Skip for local development
-
-      // In production, accessing http:// should redirect to https://
-      // This is handled by Vercel/hosting provider
-    });
-  });
 });
 
 // ============================================
@@ -452,6 +383,17 @@ test.describe('Authenticated Security', () => {
   );
 
   test.use({ storageState: authStatePaths.user });
+
+  test('should protect authenticated cookies on trusted HTTPS staging', async ({ context }) => {
+    const cookies = await context.cookies(getBaseUrl());
+    const authCookies = cookies.filter((cookie) => cookie.name.startsWith('sb-') || cookie.name.includes('auth'));
+
+    expect(authCookies.length).toBeGreaterThan(0);
+    for (const cookie of authCookies) {
+      expect(cookie.secure).toBe(true);
+      expect(['Lax', 'Strict']).toContain(cookie.sameSite);
+    }
+  });
 
   test('should reject representative admin write procedures for authenticated non-admin users', async () => {
     const userClient = await createAuthedTrpcClient(authStatePaths.user);

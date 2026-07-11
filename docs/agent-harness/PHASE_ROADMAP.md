@@ -15,11 +15,11 @@ Create the control-plane foundation:
 
 Phase 0 does not add auto-merge, Codex Action workflows, `.codex/hooks.json`, business-code changes, DB migrations, Stripe actions, cron triggers, or external service settings changes.
 
-## Phase 0.5: Trusted Automation Boundary + GPT-5.6 Calibration
+## Phase 0.5: Trusted Automation Boundary + GPT-5.6 Calibration Baseline
 
-Phase 0.5 precedes Phase 1. It hardens the workflow supply chain, keeps PR workflows secretless, separates trusted staging E2E from PR E2E, defines prompt-injection and model-calibration policy, and records Golden Evals.
+Phase 0.5 precedes Phase 1. It hardens the workflow supply chain, keeps PR workflows secretless, separates trusted staging E2E from PR E2E, defines prompt-injection and model-calibration policy, and records Golden Eval cases. It does not claim that live GPT-5.6 calibration has been completed.
 
-Phase 1 remains blocked until the owner resolves the external baseline risks documented in `SECURITY_BASELINE.md`: GitHub branch protection/rulesets must protect `staging`, and Vercel Preview must not receive live or privileged credentials.
+Phase 1 remains blocked until all exit criteria in `SECURITY_BASELINE.md` are satisfied, including credential rotation disposition, trusted-base policy bootstrap, exact-head checks, and owner authorization.
 
 ## Phase 1: Evaluator-only
 

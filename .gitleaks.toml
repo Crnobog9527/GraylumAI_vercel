@@ -50,11 +50,3 @@ id = "graylum-database-url"
 description = "Database connection URL with password"
 regex = '''(?:postgres|postgresql|mysql|mongodb(?:\+srv)?):\/\/[^\s:@/]+:[^\s@/]+@[^\s/]+'''
 keywords = ["database_url", "postgres", "postgresql", "mysql", "mongodb"]
-
-[allowlist]
-description = "Documented placeholders and test-only fixtures are not credentials."
-paths = [
-  '''(^|/)\.env\.example$''',
-  '''(^|/).*\.test\.(ts|tsx|js|jsx)$''',
-  '''(^|/)docs/''',
-]

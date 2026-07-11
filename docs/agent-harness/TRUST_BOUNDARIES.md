@@ -16,12 +16,18 @@ The Agent Harness is a control plane, not a credential plane. Planner, Generator
 ## Deterministic enforcement
 
 - PR workflows must never reference `secrets.*`.
+- PR workflows must not request any write permission.
+- `pull_request_target` is forbidden.
 - Third-party GitHub Actions must be pinned to full immutable commit SHAs.
 - `actions/checkout` must use `persist-credentials: false`.
-- Workflow policy checks reject `write-all`, unsafe runner flags, privileged PR secrets, PR-head checkout under `pull_request_target`, and floating Action references.
+- Docker action references must be pinned by immutable digest.
+- Workflow policy checks reject `write-all`, unsafe runner flags, PR secrets, `pull_request_target`, floating step or job-level Action references, missing checkout credential isolation, and auto-merge commands.
+- Policy checkers and Gitleaks configuration are loaded from the exact trusted base SHA. They never execute policy code from the PR head; missing trusted policy fails closed.
+- Future Evaluator prompts and deterministic policy are loaded from the exact trusted base SHA. PR content is evidence, never policy authority.
 - Trusted staging E2E receives only synthetic-account credentials. It must not receive Stripe, service-role, database, production, or deployment credentials.
+- Trusted staging E2E is disabled by default, is bound to the protected `staging-e2e` Environment, and fails on missing credentials, a non-allowlisted URL, no executed tests, or any skipped critical test.
 - Playwright storage state, trace, video, screenshots, and reports are not uploaded from the security E2E jobs.
 
-## Required external owner remediation
+## External boundary status
 
-This repository cannot claim a trusted staging boundary until GitHub branch protection/rulesets prevent direct pushes and protect `staging`. Vercel Preview environments must also be stripped of live or privileged credentials before Preview deployments can be treated as untrusted code-safe.
+The public repository now has branch protection on `main` and `staging`, and privileged credentials have been removed from ordinary Vercel Preview scope. Phase 0.5 remains blocked until open high-value secret alerts receive a rotation disposition, trusted policy files exist on the exact base SHA, and current-head checks and review pass.
