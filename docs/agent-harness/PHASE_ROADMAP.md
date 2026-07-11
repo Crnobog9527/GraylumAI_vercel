@@ -17,9 +17,11 @@ Phase 0 does not add auto-merge, Codex Action workflows, `.codex/hooks.json`, bu
 
 ## Phase 0.5: Trusted Automation Boundary + GPT-5.6 Calibration Baseline
 
-Phase 0.5 precedes Phase 1. It hardens the workflow supply chain, keeps PR workflows secretless, separates trusted staging E2E from PR E2E, defines prompt-injection and model-calibration policy, and records Golden Eval cases. It does not claim that live GPT-5.6 calibration has been completed.
+Phase 0.5 precedes Phase 1. Its Security Core hardens the workflow supply chain, keeps PR workflows secretless, defines prompt-injection and model-calibration policy, and records Golden Eval cases. It does not claim that live GPT-5.6 calibration has been completed.
 
-Phase 1 remains blocked until all exit criteria in `SECURITY_BASELINE.md` are satisfied, including credential rotation disposition, trusted-base policy bootstrap, exact-head checks, and owner authorization.
+Trusted Staging E2E, Executable Golden Evals, and Public Repository Governance are separate follow-up workstreams. They are not implemented by PR #265 and do not belong to its Security Core exit criteria.
+
+Phase 1 remains unauthorized until the Security Core exit criteria in `SECURITY_BASELINE.md` are satisfied and the owner separately authorizes the next phase.
 
 ## Phase 1: Evaluator-only
 

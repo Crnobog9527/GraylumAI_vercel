@@ -32,7 +32,7 @@ if (executed === 0) {
   process.exit(1);
 }
 if (!allowSkipped && counts.skipped > 0) {
-  console.error('Critical Playwright test skips are forbidden in trusted staging E2E.');
+  console.error('Critical Playwright test skips are forbidden for this run.');
   process.exit(1);
 }
 if (counts.failed > 0 || counts.interrupted > 0 || counts.other > 0) process.exit(1);

@@ -69,4 +69,6 @@ Phase 0 only creates the control-plane foundation: rules, prompts, schemas, temp
 
 ## Phase 0.5 Boundary
 
-Phase 0.5 establishes trusted automation boundaries before any Evaluator-only rollout. See `TRUST_BOUNDARIES.md`, `THREAT_MODEL.md`, `MODEL_POLICY_GPT56.md`, `GOLDEN_EVALS.md`, and `SECURITY_BASELINE.md`. Phase 1 must remain blocked until the owner resolves the documented GitHub branch-protection and Vercel Preview credential-scope risks.
+Phase 0.5 establishes repository-side Security Core boundaries before any Evaluator-only rollout. See `TRUST_BOUNDARIES.md`, `THREAT_MODEL.md`, `MODEL_POLICY_GPT56.md`, `GOLDEN_EVALS.md`, and `SECURITY_BASELINE.md`.
+
+Trusted Staging E2E, Executable Golden Evals, and Public Repository Governance are independent follow-up workstreams. PR #265 does not implement them, and external Vercel/GitHub settings are not used to expand or block its Security Core code scope. Phase 1 remains unauthorized until a later owner gate.

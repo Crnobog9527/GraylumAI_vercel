@@ -332,45 +332,6 @@ test.describe('Security', () => {
     });
   });
 
-  // ============================================
-  // Rate Limiting UI Effects Tests
-  // ============================================
-  test.describe('Rate Limiting', () => {
-    test.skip(!hasAuthRuntime, 'Rate limiting checks require a live Supabase runtime');
-
-    test('should show appropriate message when rate limited', async ({ page }) => {
-      await gotoWithBypass(page, '/login');
-      await waitForLoginFormReady(page);
-
-      // Rapidly submit login attempts
-      for (let i = 0; i < 15; i++) {
-        if (!page.url().includes('/login')) {
-          break;
-        }
-        await page.fill('input[type="email"], input[name="email"]', `test${i}@example.com`);
-        await page.fill('input[type="password"], input[name="password"]', 'password');
-        const submitButton = page.locator('button[type="submit"]');
-        if (!(await submitButton.isEnabled())) {
-          break;
-        }
-        await submitButton.click();
-        await page.waitForTimeout(100);
-      }
-
-      // Wait for rate limit message
-      await page.waitForTimeout(1000);
-
-      // Check for rate limit indication (may or may not trigger depending on server config).
-      // The auth flow may now redirect to verify-email after repeated attempts, so
-      // the main assertion is that the auth surface remains in a valid state.
-      if (page.url().includes('/verify-email')) {
-        await expect(page.getByRole('heading', { name: /验证|verify/i })).toBeVisible();
-      } else {
-        await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
-      }
-    });
-  });
-
 });
 
 // ============================================

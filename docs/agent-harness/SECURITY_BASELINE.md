@@ -1,39 +1,44 @@
 # Security Baseline
 
-## Phase 0.5 public-repository baseline (2026-07-11)
+## Phase 0.5 Security Core baseline (2026-07-12)
 
-This record contains metadata only. No secret value was read, copied, logged, or written.
+This baseline covers repository code, pull-request workflows, deterministic policy, secret scanning policy, and calibration documentation. It contains metadata only. No secret value was read, copied, logged, or written.
 
-### GitHub controls
+### Public repository controls
 
 - Repository visibility is public.
-- `main` and `staging` require pull requests, strict up-to-date status checks, and conversation resolution.
-- Direct pushes are blocked by the pull-request requirement. Force pushes and branch deletion are disabled, and administrators cannot bypass the protection.
-- Required checks use stable, unique CI and Security job names. No human approval count is required because the owner is not the code reviewer.
-- Secret scanning, push protection, dependency graph, Dependabot alerts/security updates, and private vulnerability reporting are enabled.
-- Dependency Review runs on pull requests without a skip variable.
-- CodeQL JavaScript/TypeScript is defined for trusted pushes to `main` and `staging` plus a scheduled scan. It is not a PR workflow because PR workflows may not receive write permissions.
+- `main` and `staging` require pull requests, strict up-to-date checks, and conversation resolution; force pushes, deletion, and administrator bypass are disabled.
+- PR workflows are secretless and read-only. Third-party Actions are pinned to immutable commit SHAs, checkout persistence is disabled, jobs have timeouts, and stale PR runs are cancelled.
+- Dependency Review runs on pull requests without an owner-managed skip switch.
+- CodeQL JavaScript/TypeScript is defined only for trusted pushes and schedules because PR workflows are prohibited from write permissions.
 
-### Trusted policy bootstrap
+External GitHub or Vercel settings are recorded in Issue #263, but they are not Security Core code-exit criteria for PR #265.
 
-PR policy evaluation must load the workflow checker and `.gitleaks.toml` from the pull request's exact base SHA. It must never execute either policy from PR head. The current `staging` base predates these files, so the gate intentionally fails closed until an independently reviewed trusted-policy bootstrap is merged and PR #265 is updated onto that base.
+### Trusted policy provenance
 
-The same rule applies to future Evaluator prompts and deterministic policy: exact trusted base only, with missing or unverifiable policy reported as `BLOCKED`.
+The workflow policy checker, Gitleaks configuration, and future Evaluator policy must be loaded from the pull request's exact trusted base SHA. PR-head policy must never approve the same PR that supplied it. Missing, unverifiable, or drifted trusted policy returns `REQUEST_CHANGES`; there is no fallback to PR head.
 
-### GitHub Actions credentials
+The current `staging` base predates the checker and `.gitleaks.toml`. PR #265 therefore cannot use its own copies as merge approval evidence. A separately reviewed trusted-policy bootstrap is required before these controls can become an approving required check.
 
-PR-triggered workflows are secretless and read-only. Trusted staging E2E is bound to the protected `staging-e2e` Environment, uses only staging synthetic-account credentials, and is disabled unless `TRUSTED_STAGING_E2E_ENABLED=true` is set by an authorized owner.
+### Security Core controls
 
-When enabled, trusted staging E2E requires the allowlisted staging URL, both synthetic roles, and staging public Supabase runtime configuration. Missing inputs, wrong URL, zero executed tests, or skipped critical tests fail the job. No browser report, trace, screenshot, video, storage state, token, cookie, or user-data artifact is uploaded.
+- Workflow policy uses a structured YAML parser rather than line-oriented matching.
+- Policy regression coverage includes at least 15 bypass attempts across permissions, checkout credentials, PR secrets, `pull_request_target`, step and job-level `uses`, Docker digests, unsafe flags, and auto-merge commands.
+- Gitleaks extends the default rules without blanket allowlists for docs or tests.
+- Generated docs/test fixtures prove credential-shaped content is rejected without committing reusable secret values.
+- `security.spec.ts` contains no `|| true`, soft assertion, empty assertion loop, or test whose success permits both the security control and its absence.
+- GPT-5.6 documentation is a Calibration Baseline only; it does not claim an executed calibration or authority grant.
 
-### Vercel Preview isolation
+### Independent follow-up workstreams
 
-Ordinary Preview scope no longer includes Stripe secret/webhook credentials, Supabase service-role credentials, database/admin URLs, cron credentials, privileged provider keys, or production Supabase runtime variables in either audited Vercel project. Production credentials remain Production-only; staging-specific variables must remain branch-specific or in the protected GitHub Environment.
+The following are explicitly outside PR #265 Security Core exit criteria:
 
-### Exposure and rotation status
+1. **Trusted Staging E2E**: protected Environment, synthetic credentials, staging URL allowlist, fail-closed auth/skip behavior, and artifact hygiene.
+2. **Executable Golden Evals**: executable cases bound to exact model, prompt, policy, and expected decision versions.
+3. **Public Repository Governance**: owner licensing decision, LICENSE/NOTICE, SECURITY.md, CONTRIBUTING.md, README authorization language, and public disclosure rules.
 
-The public-history audit found credential-shaped records in historical examples/tests and two open provider-key secret-scanning alert types. Locations and commit SHAs are recorded in Issue #263 without values. Provider-side rotation or invalidation confirmation remains required before Phase 0.5 can exit.
+### PR #265 exit gate
 
-### Phase 0.5 exit gate
+PR #265 remains draft and `REQUEST_CHANGES` until the reduced Security Core scope has a new exact head, complete CI/Security evidence, deterministic local validation, and an independent current-head review. External Preview runtime, provider rotation, and Trusted Staging E2E are tracked separately and do not expand PR #265's scope or authority.
 
-Phase 1 remains unauthorized until rotation disposition, trusted-policy bootstrap, exact-head CI/Security/Dependency Review/secret scan, trusted CodeQL evidence, and independent current-head review are complete. PR #265 remains draft and cannot authorize merge, Phase 1, staging auto-merge, or production.
+Phase 1, staging auto-merge, production merge, and production release remain unauthorized.
