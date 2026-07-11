@@ -74,7 +74,8 @@ jobs:
         run: |
           set +e
           cd apps/web
-          npx playwright test security.spec.ts --project=chromium --reporter=json > /tmp/trusted-staging-e2e-results.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/trusted-staging-e2e-results.json \
+            npx playwright test security.spec.ts --project=chromium --reporter=json
           test_status=$?
           cd ../..
           set -e
