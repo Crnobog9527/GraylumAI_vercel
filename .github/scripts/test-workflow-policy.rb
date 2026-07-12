@@ -64,11 +64,31 @@ add_case.call(
 )
 
 add_case.call('top-write-all', workflow_yaml(safe_sha, permissions: 'write-all'), false, 'top-level permissions: write-all is forbidden')
+add_case.call('top-permissions-read-all', workflow_yaml(safe_sha, permissions: 'read-all'), false, 'top-level permissions: read-all is forbidden')
+add_case.call('top-permissions-string', workflow_yaml(safe_sha, permissions: 'contents: read'), false, 'top-level permissions must be an explicit mapping')
 add_case.call(
   'job-write-all',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'permissions' => 'write-all') }),
   false,
   'job unsafe permissions: write-all is forbidden'
+)
+add_case.call(
+  'job-permissions-read-all',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'permissions' => 'read-all') }),
+  false,
+  'job unsafe permissions: read-all is forbidden'
+)
+add_case.call(
+  'job-permissions-missing',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha).tap { |job| job.delete('permissions') } }),
+  false,
+  'job unsafe permissions must be an explicit mapping'
+)
+add_case.call(
+  'job-permissions-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'permissions' => 'contents: read') }),
+  false,
+  'job unsafe permissions must be an explicit mapping'
 )
 add_case.call(
   'push-write-all',
@@ -135,6 +155,32 @@ add_case.call(
   false,
   'must declare timeout-minutes'
 )
+add_case.call(
+  'timeout-zero',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'timeout-minutes' => 0) }),
+  false,
+  'timeout-minutes must be an integer from 1 to 60'
+)
+add_case.call(
+  'timeout-over-limit',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'timeout-minutes' => 61) }),
+  false,
+  'timeout-minutes must be an integer from 1 to 60'
+)
+add_case.call(
+  'timeout-expression',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'timeout-minutes' => '${{ matrix.timeout }}') }),
+  false,
+  'timeout-minutes must be an integer from 1 to 60'
+)
+add_case.call(
+  'timeout-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'timeout-minutes' => '5') }),
+  false,
+  'timeout-minutes must be an integer from 1 to 60'
+)
+add_case.call('timeout-minimum', workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'timeout-minutes' => 1) }), true)
+add_case.call('timeout-maximum', workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'timeout-minutes' => 60) }), true)
 add_case.call(
   'missing-persist-credentials',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => "actions/checkout@#{safe_sha}" }]) }),
@@ -463,12 +509,102 @@ add_case.call(
   false,
   'must use an approved GitHub-hosted runner'
 )
+add_case.call(
+  'issue-comment-self-hosted-runner',
+  workflow_yaml(safe_sha, events: ['issue_comment'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => ['self-hosted', 'linux']) }),
+  false,
+  'must use an approved GitHub-hosted runner'
+)
+add_case.call(
+  'workflow-run-self-hosted-runner',
+  workflow_yaml(
+    safe_sha,
+    events: { 'workflow_run' => { 'workflows' => ['CI'], 'types' => ['completed'] } },
+    jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => 'self-hosted') }
+  ),
+  false,
+  'must use an approved GitHub-hosted runner'
+)
+add_case.call(
+  'schedule-self-hosted-runner',
+  workflow_yaml(
+    safe_sha,
+    events: { 'schedule' => [{ 'cron' => '0 0 * * 1' }] },
+    jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => ['self-hosted', 'scheduled']) }
+  ),
+  false,
+  'must use an approved GitHub-hosted runner'
+)
+add_case.call(
+  'push-custom-runner',
+  workflow_yaml(safe_sha, events: ['push'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => 'corp-linux') }),
+  false,
+  'must use an approved GitHub-hosted runner'
+)
+
+add_case.call(
+  'job-continue-on-error-true',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'continue-on-error' => true) }),
+  false,
+  'job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'job-continue-on-error-expression',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'continue-on-error' => '${{ matrix.allow_failure }}') }),
+  false,
+  'job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'job-continue-on-error-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'continue-on-error' => 'false') }),
+  false,
+  'job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'step-continue-on-error-true',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'exit 1', 'continue-on-error' => true }]) }),
+  false,
+  'step 1 in job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'step-continue-on-error-expression',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'exit 1', 'continue-on-error' => '${{ matrix.allow_failure }}' }]) }
+  ),
+  false,
+  'step 1 in job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'step-continue-on-error-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'exit 1', 'continue-on-error' => 'false' }]) }),
+  false,
+  'step 1 in job unsafe continue-on-error must be explicitly false when present'
+)
+add_case.call(
+  'job-continue-on-error-false',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'continue-on-error' => false) }),
+  true
+)
+add_case.call(
+  'step-continue-on-error-false',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo safe', 'continue-on-error' => false }]) }),
+  true
+)
 {
   'untrusted-pr-title-in-run' => 'echo "${{ github.event.pull_request.title }}"',
   'untrusted-pr-body-in-run' => 'echo "${{ github.event.pull_request.body }}"',
+  'untrusted-pr-head-ref-in-run' => 'echo "${{ github.event.pull_request.head.ref }}"',
+  'untrusted-issue-title-in-run' => 'echo "${{ github.event.issue.title }}"',
   'untrusted-issue-body-in-run' => 'echo "${{ github.event.issue.body }}"',
   'untrusted-comment-body-in-run' => 'echo "${{ github.event.comment.body }}"',
+  'untrusted-review-body-in-run' => 'echo "${{ github.event.review.body }}"',
+  'untrusted-review-comment-body-in-run' => 'echo "${{ github.event.review_comment.body }}"',
+  'untrusted-discussion-title-in-run' => 'echo "${{ github.event.discussion.title }}"',
+  'untrusted-discussion-body-in-run' => 'echo "${{ github.event.discussion.body }}"',
+  'untrusted-workflow-run-head-branch-in-run' => 'echo "${{ github.event.workflow_run.head_branch }}"',
   'untrusted-head-ref-in-run' => 'echo "${{ github.head_ref }}"',
+  'untrusted-ref-name-in-run' => 'echo "${{ github.ref_name }}"',
   'untrusted-commit-message-in-run' => 'echo "${{ github.event.head_commit.message }}"'
 }.each do |name, command|
   add_case.call(
@@ -478,6 +614,16 @@ add_case.call(
     'directly interpolates untrusted GitHub context'
   )
 end
+add_case.call(
+  'trusted-event-name-in-run',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event_name }}"' }]) }),
+  true
+)
+add_case.call(
+  'trusted-sha-in-run',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.sha }}"' }]) }),
+  true
+)
 add_case.call(
   'untrusted-pr-body-bracket-in-run',
   workflow_yaml(

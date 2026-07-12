@@ -24,9 +24,15 @@ CODEQL_WRITE_JOB_NAMES = %w[codeql codeql-analysis].freeze
 LOCAL_USES_ERROR = 'local actions and local reusable workflows are forbidden in policy v1'
 UNTRUSTED_RUN_CONTEXTS = [
   /github\.event\.pull_request\.(?:title|body)/i,
-  /github\.event\.issue\.body/i,
+  /github\.event\.pull_request\.head\.ref/i,
+  /github\.event\.issue\.(?:title|body)/i,
   /github\.event\.comment\.body/i,
+  /github\.event\.review\.body/i,
+  /github\.event\.review_comment\.body/i,
+  /github\.event\.discussion\.(?:title|body)/i,
+  /github\.event\.workflow_run\.head_branch/i,
   /github\.head_ref/i,
+  /github\.ref_name/i,
   /github\.event\.head_commit\.message/i,
   /github\.event\.commits(?:\[[^\]]+\]|\.[\w*-]+)*\.message/i
 ].freeze
@@ -111,8 +117,8 @@ end
 
 def validate_permissions(file, label, permissions, events, job_name = nil, job = nil)
   failures = []
-  if permissions == 'write-all'
-    failures << "#{file}: #{label} permissions: write-all is forbidden"
+  if %w[read-all write-all].include?(permissions)
+    failures << "#{file}: #{label} permissions: #{permissions} is forbidden"
     return failures
   end
   return failures unless permissions.is_a?(Hash)
@@ -142,8 +148,12 @@ def untrusted_context_in_run?(value)
   normalized.include?('${{') && UNTRUSTED_RUN_CONTEXTS.any? { |pattern| normalized.match?(pattern) }
 end
 
-def approved_pr_runner?(runs_on)
+def approved_runner?(runs_on)
   runs_on.is_a?(String) && APPROVED_PR_RUNNERS.any? { |pattern| runs_on.match?(pattern) }
+end
+
+def valid_timeout?(timeout)
+  timeout.is_a?(Integer) && timeout.between?(1, 60)
 end
 
 files = Dir.glob(File.join(workflow_dir, '*.{yml,yaml}')).sort
@@ -167,11 +177,13 @@ files.each do |file|
   end
 
   events = event_config(workflow)
-  pull_request = event_enabled?(events, 'pull_request')
   failures << "#{file}: pull_request_target is forbidden" if event_enabled?(events, 'pull_request_target')
 
   top_permissions = workflow['permissions']
   failures << "#{file}: top-level permissions must be declared" if top_permissions.nil?
+  unless top_permissions.nil? || top_permissions.is_a?(Hash)
+    failures << "#{file}: top-level permissions must be an explicit mapping"
+  end
   failures.concat(validate_permissions(file, 'top-level', top_permissions, events))
 
   if secrets_key_present?(workflow)
@@ -199,8 +211,21 @@ files.each do |file|
       next
     end
 
-    failures.concat(validate_permissions(file, "job #{job_name}", job['permissions'], events, job_name, job))
-    failures << "#{file}: job #{job_name} must declare timeout-minutes" unless job.key?('timeout-minutes')
+    job_permissions = job['permissions']
+    unless job_permissions.is_a?(Hash)
+      failures << "#{file}: job #{job_name} permissions must be an explicit mapping"
+    end
+    failures.concat(validate_permissions(file, "job #{job_name}", job_permissions, events, job_name, job))
+
+    unless job.key?('timeout-minutes')
+      failures << "#{file}: job #{job_name} must declare timeout-minutes"
+    end
+    if job.key?('timeout-minutes') && !valid_timeout?(job['timeout-minutes'])
+      failures << "#{file}: job #{job_name} timeout-minutes must be an integer from 1 to 60"
+    end
+    if job.key?('continue-on-error') && job['continue-on-error'] != false
+      failures << "#{file}: job #{job_name} continue-on-error must be explicitly false when present"
+    end
     if job.key?('container')
       failures << "#{file}: job #{job_name} containers are forbidden in policy v1"
     end
@@ -210,8 +235,8 @@ files.each do |file|
     if job['secrets'].to_s == 'inherit'
       failures << "#{file}: trusted_policy_material_v1 job #{job_name} must not use secrets: inherit"
     end
-    if pull_request && job.key?('runs-on') && !approved_pr_runner?(job['runs-on'])
-      failures << "#{file}: pull_request job #{job_name} must use an approved GitHub-hosted runner"
+    if job.key?('runs-on') && !approved_runner?(job['runs-on'])
+      failures << "#{file}: job #{job_name} must use an approved GitHub-hosted runner"
     end
 
     if job['uses']
@@ -233,6 +258,10 @@ files.each do |file|
 
     steps.each_with_index do |step, index|
       next unless step.is_a?(Hash)
+
+      if step.key?('continue-on-error') && step['continue-on-error'] != false
+        failures << "#{file}: step #{index + 1} in job #{job_name} continue-on-error must be explicitly false when present"
+      end
 
       run = step['run']
       if run.is_a?(String) && untrusted_context_in_run?(run)
