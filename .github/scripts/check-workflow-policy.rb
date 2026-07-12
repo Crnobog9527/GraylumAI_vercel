@@ -58,6 +58,17 @@ def each_string(value, &block)
   end
 end
 
+def secrets_key_present?(value)
+  case value
+  when Array
+    value.any? { |item| secrets_key_present?(item) }
+  when Hash
+    value.any? { |key, item| key.to_s.casecmp('secrets').zero? || secrets_key_present?(item) }
+  else
+    false
+  end
+end
+
 def immutable_uses?(reference)
   return true if reference.start_with?('./')
   return reference.match?(/\A[\w.-]+\/[\w.-]+(?:\/[\w.\/-]+)?@[a-f0-9]{40}\z/i) unless reference.start_with?('docker://')
@@ -120,10 +131,6 @@ def secret_reference?(value)
     value.match?(/\btojson\s*\(\s*secrets\s*\)/i)
 end
 
-def privileged_secret_reference?(value)
-  secret_reference?(value) && value.match?(/PROD|PRODUCTION|LIVE|SERVICE_ROLE|DATABASE|STRIPE|OPENAI|OPENROUTER|ANTHROPIC|CRON/i)
-end
-
 def pipe_to_shell?(value)
   shell = '(?:(?:/usr/bin/)?env(?:\s+-\S+)*\s+)?(?:/(?:usr/)?bin/)?(?:bash|sh)'
   value.match?(/\b(?:curl|wget)\b[\s\S]*?\|\s*#{shell}\b/i)
@@ -166,14 +173,17 @@ files.each do |file|
   failures << "#{file}: top-level permissions must be declared" if top_permissions.nil?
   failures.concat(validate_permissions(file, 'top-level', top_permissions, events))
 
+  if secrets_key_present?(workflow)
+    failures << "#{file}: trusted_policy_material_v1 workflows must not declare or pass secrets"
+  end
+
   each_string(workflow) do |value|
     failures << "#{file}: unsafe runner flag is forbidden" if value.match?(/danger-full-access|--yolo/)
     failures << "#{file}: auto-merge commands are forbidden" if value.match?(/\bgh\s+pr\s+merge\b|\bauto-merge\b/i)
     failures << "#{file}: pipe-to-shell command is forbidden" if pipe_to_shell?(value)
-    next unless pull_request && secret_reference?(value)
+    next unless secret_reference?(value)
 
-    failures << "#{file}: pull_request workflows must not reference secrets"
-    failures << "#{file}: privileged secret name found in pull_request workflow" if privileged_secret_reference?(value)
+    failures << "#{file}: trusted_policy_material_v1 workflows must not reference secrets"
   end
 
   jobs = workflow['jobs']
@@ -190,8 +200,8 @@ files.each do |file|
 
     failures.concat(validate_permissions(file, "job #{job_name}", job['permissions'], events, job_name, job))
     failures << "#{file}: job #{job_name} must declare timeout-minutes" unless job.key?('timeout-minutes')
-    if pull_request && job['secrets'].to_s == 'inherit'
-      failures << "#{file}: pull_request job #{job_name} must not use secrets: inherit"
+    if job['secrets'].to_s == 'inherit'
+      failures << "#{file}: trusted_policy_material_v1 job #{job_name} must not use secrets: inherit"
     end
     if pull_request && job.key?('runs-on') && !approved_pr_runner?(job['runs-on'])
       failures << "#{file}: pull_request job #{job_name} must use an approved GitHub-hosted runner"

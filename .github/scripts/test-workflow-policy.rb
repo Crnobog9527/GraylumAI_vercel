@@ -258,7 +258,98 @@ add_case.call(
   'production-secret',
   workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.STRIPE_LIVE_KEY }}' }) }),
   false,
-  'privileged secret name'
+  'must not reference secrets'
+)
+add_case.call(
+  'bare-secret-object',
+  workflow_yaml(safe_sha, events: ['push'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEYS' => '${{ secrets }}' }) }),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'schedule-secret',
+  workflow_yaml(
+    safe_sha,
+    events: { 'schedule' => [{ 'cron' => '0 0 * * 1' }] },
+    jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.SCHEDULE_KEY }}' }) }
+  ),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'push-secret',
+  workflow_yaml(safe_sha, events: ['push'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.PUSH_KEY }}' }) }),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'workflow-dispatch-secret',
+  workflow_yaml(safe_sha, events: ['workflow_dispatch'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.DISPATCH_KEY }}' }) }),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'workflow-run-secret',
+  workflow_yaml(
+    safe_sha,
+    events: { 'workflow_run' => { 'workflows' => ['CI'], 'types' => ['completed'] } },
+    jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.WORKFLOW_RUN_KEY }}' }) }
+  ),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'issue-comment-secret',
+  workflow_yaml(safe_sha, events: ['issue_comment'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.ISSUE_COMMENT_KEY }}' }) }),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'workflow-call-secret',
+  workflow_yaml(safe_sha, events: ['workflow_call'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.WORKFLOW_CALL_KEY }}' }) }),
+  false,
+  'must not reference secrets'
+)
+add_case.call(
+  'workflow-call-secret-declaration',
+  workflow_yaml(
+    safe_sha,
+    events: { 'workflow_call' => { 'secrets' => { 'CALLER_TOKEN' => { 'required' => true } } } }
+  ),
+  false,
+  'must not declare or pass secrets'
+)
+add_case.call(
+  'workflow-call-secrets-inherit',
+  workflow_yaml(
+    safe_sha,
+    events: ['workflow_call'],
+    jobs: {
+      'unsafe' => {
+        'uses' => './.github/workflows/local-security.yml',
+        'timeout-minutes' => 5,
+        'secrets' => 'inherit'
+      }
+    }
+  ),
+  false,
+  'must not use secrets: inherit'
+)
+add_case.call(
+  'local-reusable-workflow-environment-secret',
+  workflow_yaml(
+    safe_sha,
+    events: ['push'],
+    jobs: {
+      'unsafe' => {
+        'uses' => './.github/workflows/local-security.yml',
+        'timeout-minutes' => 5,
+        'secrets' => { 'environment_token' => '${{ secrets.STAGING_ENVIRONMENT_TOKEN }}' }
+      }
+    }
+  ),
+  false,
+  'must not reference secrets'
 )
 
 add_case.call(
