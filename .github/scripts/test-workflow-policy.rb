@@ -197,6 +197,99 @@ add_case.call(
   false,
   'action repository is not approved'
 )
+add_case.call(
+  'local-composite-action',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => './.github/actions/composite' }]) }),
+  false,
+  'local actions and local reusable workflows are forbidden in policy v1'
+)
+add_case.call(
+  'local-javascript-action',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => './.github/actions/javascript' }]) }),
+  false,
+  'local actions and local reusable workflows are forbidden in policy v1'
+)
+add_case.call(
+  'local-reusable-workflow',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => { 'uses' => './.github/workflows/reusable.yml', 'timeout-minutes' => 5 } }
+  ),
+  false,
+  'local actions and local reusable workflows are forbidden in policy v1'
+)
+add_case.call(
+  'local-action-hides-floating-action',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => './.github/actions/hides-floating-action' }]) }),
+  false,
+  'local actions and local reusable workflows are forbidden in policy v1'
+)
+
+add_case.call(
+  'job-container-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'container' => 'unapproved.invalid/runner:latest') }),
+  false,
+  'containers are forbidden in policy v1'
+)
+add_case.call(
+  'job-container-mapping',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'container' => { 'image' => 'unapproved.invalid/runner:latest' }) }),
+  false,
+  'containers are forbidden in policy v1'
+)
+add_case.call(
+  'job-container-dynamic-expression',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'container' => '${{ matrix.container }}') }),
+  false,
+  'containers are forbidden in policy v1'
+)
+add_case.call(
+  'job-service-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'services' => 'unapproved.invalid/service:latest') }),
+  false,
+  'services are forbidden in policy v1'
+)
+add_case.call(
+  'job-service-mapping',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'services' => { 'database' => { 'image' => 'unapproved.invalid/database:latest' } }) }
+  ),
+  false,
+  'services are forbidden in policy v1'
+)
+add_case.call(
+  'job-service-dynamic-expression',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'services' => { 'database' => '${{ matrix.service }}' }) }
+  ),
+  false,
+  'services are forbidden in policy v1'
+)
+add_case.call(
+  'pinned-but-forbidden-job-container',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'container' => "approved.invalid/runner@sha256:#{'a' * 64}") }
+  ),
+  false,
+  'containers are forbidden in policy v1'
+)
+add_case.call(
+  'pinned-but-forbidden-service',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'services' => { 'database' => { 'image' => "approved.invalid/database@sha256:#{'b' * 64}" } }
+      )
+    }
+  ),
+  false,
+  'services are forbidden in policy v1'
+)
 
 add_case.call(
   'dot-secret',

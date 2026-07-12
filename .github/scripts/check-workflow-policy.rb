@@ -21,6 +21,7 @@ APPROVED_PR_RUNNERS = [
 ].freeze
 CODEQL_WRITE_EVENTS = %w[push schedule].freeze
 CODEQL_WRITE_JOB_NAMES = %w[codeql codeql-analysis].freeze
+LOCAL_USES_ERROR = 'local actions and local reusable workflows are forbidden in policy v1'
 UNTRUSTED_RUN_CONTEXTS = [
   /github\.event\.pull_request\.(?:title|body)/i,
   /github\.event\.issue\.body/i,
@@ -70,7 +71,7 @@ def secrets_key_present?(value)
 end
 
 def immutable_uses?(reference)
-  return true if reference.start_with?('./')
+  return false if reference.start_with?('./')
   return reference.match?(/\A[\w.-]+\/[\w.-]+(?:\/[\w.\/-]+)?@[a-f0-9]{40}\z/i) unless reference.start_with?('docker://')
 
   reference.match?(/\Adocker:\/\/.+@sha256:[a-f0-9]{64}\z/i)
@@ -200,6 +201,12 @@ files.each do |file|
 
     failures.concat(validate_permissions(file, "job #{job_name}", job['permissions'], events, job_name, job))
     failures << "#{file}: job #{job_name} must declare timeout-minutes" unless job.key?('timeout-minutes')
+    if job.key?('container')
+      failures << "#{file}: job #{job_name} containers are forbidden in policy v1"
+    end
+    if job.key?('services')
+      failures << "#{file}: job #{job_name} services are forbidden in policy v1"
+    end
     if job['secrets'].to_s == 'inherit'
       failures << "#{file}: trusted_policy_material_v1 job #{job_name} must not use secrets: inherit"
     end
@@ -209,11 +216,15 @@ files.each do |file|
 
     if job['uses']
       reference = job['uses'].to_s
-      unless immutable_uses?(reference)
-        failures << "#{file}: reusable workflow is not pinned to an immutable reference"
-      end
-      unless approved_action?(reference)
-        failures << "#{file}: reusable workflow repository is not approved"
+      if reference.start_with?('./')
+        failures << "#{file}: #{LOCAL_USES_ERROR}"
+      else
+        unless immutable_uses?(reference)
+          failures << "#{file}: reusable workflow is not pinned to an immutable reference"
+        end
+        unless approved_action?(reference)
+          failures << "#{file}: reusable workflow repository is not approved"
+        end
       end
     end
 
@@ -230,10 +241,14 @@ files.each do |file|
       next unless step['uses']
 
       reference = step['uses'].to_s
-      failures << "#{file}: action is not pinned to an immutable reference" unless immutable_uses?(reference)
-      unless approved_action?(reference)
-        label = reference.start_with?('docker://') ? 'docker image' : 'action repository'
-        failures << "#{file}: #{label} is not approved"
+      if reference.start_with?('./')
+        failures << "#{file}: #{LOCAL_USES_ERROR}"
+      else
+        failures << "#{file}: action is not pinned to an immutable reference" unless immutable_uses?(reference)
+        unless approved_action?(reference)
+          label = reference.start_with?('docker://') ? 'docker image' : 'action repository'
+          failures << "#{file}: #{label} is not approved"
+        end
       end
       next unless reference.match?(/\Aactions\/checkout@[a-f0-9]{40}\z/i)
 
