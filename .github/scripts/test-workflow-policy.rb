@@ -595,6 +595,13 @@ add_case.call(
   'untrusted-pr-title-in-run' => 'echo "${{ github.event.pull_request.title }}"',
   'untrusted-pr-body-in-run' => 'echo "${{ github.event.pull_request.body }}"',
   'untrusted-pr-head-ref-in-run' => 'echo "${{ github.event.pull_request.head.ref }}"',
+  'untrusted-pr-head-label-in-run' => 'echo "${{ github.event.pull_request.head.label }}"',
+  'untrusted-pr-head-object-in-run' => 'echo "${{ toJSON(github.event.pull_request.head) }}"',
+  'untrusted-pr-head-label-bracket-in-run' => 'echo "${{ github[\'event\'][\'pull_request\'][\'head\'][\'label\'] }}"',
+  'untrusted-pr-head-label-double-bracket-in-run' => 'echo "${{ github["event"]["pull_request"]["head"]["label"] }}"',
+  'untrusted-pr-head-label-mixed-notation-in-run' => 'echo "${{ github.event[\'pull_request\'].head[\'label\'] }}"',
+  'untrusted-pr-head-label-case-variant-in-run' => 'echo "${{ GITHUB.EVENT.PULL_REQUEST.HEAD.LABEL }}"',
+  'untrusted-pr-head-label-whitespace-variant-in-run' => 'echo "${{ github . event . pull_request . head . label }}"',
   'untrusted-issue-title-in-run' => 'echo "${{ github.event.issue.title }}"',
   'untrusted-issue-body-in-run' => 'echo "${{ github.event.issue.body }}"',
   'untrusted-comment-body-in-run' => 'echo "${{ github.event.comment.body }}"',
@@ -622,6 +629,16 @@ add_case.call(
 add_case.call(
   'trusted-sha-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.sha }}"' }]) }),
+  true
+)
+add_case.call(
+  'trusted-pr-number-in-run',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.number }}"' }]) }),
+  true
+)
+add_case.call(
+  'trusted-pr-base-ref-in-run',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.base.ref }}"' }]) }),
   true
 )
 add_case.call(

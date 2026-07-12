@@ -24,7 +24,7 @@ CODEQL_WRITE_JOB_NAMES = %w[codeql codeql-analysis].freeze
 LOCAL_USES_ERROR = 'local actions and local reusable workflows are forbidden in policy v1'
 UNTRUSTED_RUN_CONTEXTS = [
   /github\.event\.pull_request\.(?:title|body)/i,
-  /github\.event\.pull_request\.head\.ref/i,
+  /github\.event\.pull_request\.head\b/i,
   /github\.event\.issue\.(?:title|body)/i,
   /github\.event\.comment\.body/i,
   /github\.event\.review\.body/i,
@@ -145,6 +145,7 @@ end
 
 def untrusted_context_in_run?(value)
   normalized = value.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
+  normalized = normalized.gsub(/\s*\.\s*/, '.')
   normalized.include?('${{') && UNTRUSTED_RUN_CONTEXTS.any? { |pattern| normalized.match?(pattern) }
 end
 
