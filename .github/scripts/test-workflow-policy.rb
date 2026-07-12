@@ -105,6 +105,21 @@ add_case.call(
   'write permission security-events: write is forbidden'
 )
 add_case.call(
+  'codeql-step-in-unapproved-job',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'ordinary-build' => standard_job(
+        safe_sha,
+        'permissions' => { 'security-events' => 'write' },
+        'steps' => [{ 'uses' => "github/codeql-action/analyze@#{safe_sha}" }]
+      )
+    }
+  ),
+  false,
+  'write permission security-events: write is forbidden'
+)
+add_case.call(
   'pr-job-write',
   workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'permissions' => { 'issues' => 'write' }) }),
   false,
@@ -161,6 +176,20 @@ add_case.call(
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'docker://alpine:3.20' }]) }),
   false,
   'action is not pinned'
+)
+add_case.call(
+  'unapproved-pinned-docker-image',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'uses' => "docker://unapproved.invalid/scanner@sha256:#{'a' * 64}" }]
+      )
+    }
+  ),
+  false,
+  'docker image is not approved'
 )
 add_case.call(
   'unapproved-pinned-action',
@@ -236,7 +265,19 @@ add_case.call(
   'self-hosted-runner',
   workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => ['self-hosted', 'linux']) }),
   false,
-  'must not use a self-hosted runner'
+  'must use an approved GitHub-hosted runner'
+)
+add_case.call(
+  'custom-runner-label',
+  workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => 'corp-linux') }),
+  false,
+  'must use an approved GitHub-hosted runner'
+)
+add_case.call(
+  'dynamic-runner-expression',
+  workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => '${{ matrix.runner }}') }),
+  false,
+  'must use an approved GitHub-hosted runner'
 )
 {
   'untrusted-pr-title-in-run' => 'echo "${{ github.event.pull_request.title }}"',
@@ -253,6 +294,20 @@ add_case.call(
     'directly interpolates untrusted GitHub context'
   )
 end
+add_case.call(
+  'untrusted-pr-body-bracket-in-run',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => 'echo "${{ github[\'event\'][\'pull_request\'][\'body\'] }}"' }]
+      )
+    }
+  ),
+  false,
+  'directly interpolates untrusted GitHub context'
+)
 
 add_case.call(
   'curl-pipe-bash',
@@ -263,6 +318,18 @@ add_case.call(
 add_case.call(
   'wget-pipe-sh',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | sh' }]) }),
+  false,
+  'pipe-to-shell command is forbidden'
+)
+add_case.call(
+  'curl-pipe-bin-bash',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl -fsSL https://example.invalid/install | /bin/bash' }]) }),
+  false,
+  'pipe-to-shell command is forbidden'
+)
+add_case.call(
+  'wget-pipe-env-sh',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | env sh' }]) }),
   false,
   'pipe-to-shell command is forbidden'
 )

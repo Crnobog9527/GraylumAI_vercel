@@ -13,7 +13,14 @@ APPROVED_ACTION_REPOSITORIES = %w[
   gitleaks/gitleaks-action
   pnpm/action-setup
 ].freeze
+APPROVED_DOCKER_IMAGES = [].freeze
+APPROVED_PR_RUNNERS = [
+  /\Aubuntu-(?:latest|24\.04|22\.04)\z/,
+  /\Awindows-(?:latest|2025|2022)\z/,
+  /\Amacos-(?:latest|15|14|13)\z/
+].freeze
 CODEQL_WRITE_EVENTS = %w[push schedule].freeze
+CODEQL_WRITE_JOB_NAMES = %w[codeql codeql-analysis].freeze
 UNTRUSTED_RUN_CONTEXTS = [
   /github\.event\.pull_request\.(?:title|body)/i,
   /github\.event\.issue\.body/i,
@@ -65,6 +72,11 @@ def action_repository(reference)
 end
 
 def approved_action?(reference)
+  if reference.start_with?('docker://')
+    image = reference.delete_prefix('docker://').split('@', 2).first
+    return APPROVED_DOCKER_IMAGES.include?(image.downcase)
+  end
+
   repository = action_repository(reference)
   repository.nil? || APPROVED_ACTION_REPOSITORIES.include?(repository.downcase)
 end
@@ -78,13 +90,14 @@ def codeql_job?(job)
   end
 end
 
-def codeql_write_allowed?(events, job, permission, value)
+def codeql_write_allowed?(events, job_name, job, permission, value)
   names = event_names(events)
   permission == 'security-events' && value.to_s == 'write' &&
+    CODEQL_WRITE_JOB_NAMES.include?(job_name.to_s) &&
     !names.empty? && (names - CODEQL_WRITE_EVENTS).empty? && codeql_job?(job)
 end
 
-def validate_permissions(file, label, permissions, events, job = nil)
+def validate_permissions(file, label, permissions, events, job_name = nil, job = nil)
   failures = []
   if permissions == 'write-all'
     failures << "#{file}: #{label} permissions: write-all is forbidden"
@@ -94,7 +107,7 @@ def validate_permissions(file, label, permissions, events, job = nil)
 
   permissions.each do |permission, value|
     next unless value.to_s == 'write'
-    next if job && codeql_write_allowed?(events, job, permission.to_s, value)
+    next if job && codeql_write_allowed?(events, job_name, job, permission.to_s, value)
 
     failures << "#{file}: #{label} write permission #{permission}: write is forbidden"
   end
@@ -112,19 +125,17 @@ def privileged_secret_reference?(value)
 end
 
 def pipe_to_shell?(value)
-  value.match?(/\b(?:curl|wget)\b[\s\S]*?\|\s*(?:bash|sh)\b/i)
+  shell = '(?:(?:/usr/bin/)?env(?:\s+-\S+)*\s+)?(?:/(?:usr/)?bin/)?(?:bash|sh)'
+  value.match?(/\b(?:curl|wget)\b[\s\S]*?\|\s*#{shell}\b/i)
 end
 
 def untrusted_context_in_run?(value)
-  value.include?('${{') && UNTRUSTED_RUN_CONTEXTS.any? { |pattern| value.match?(pattern) }
+  normalized = value.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
+  normalized.include?('${{') && UNTRUSTED_RUN_CONTEXTS.any? { |pattern| normalized.match?(pattern) }
 end
 
-def self_hosted_runner?(runs_on)
-  case runs_on
-  when String then runs_on.match?(/(?:^|[,\s])self-hosted(?:$|[,\s])/i)
-  when Array then runs_on.any? { |label| label.to_s.casecmp('self-hosted').zero? }
-  else false
-  end
+def approved_pr_runner?(runs_on)
+  runs_on.is_a?(String) && APPROVED_PR_RUNNERS.any? { |pattern| runs_on.match?(pattern) }
 end
 
 files = Dir.glob(File.join(workflow_dir, '*.{yml,yaml}')).sort
@@ -177,13 +188,13 @@ files.each do |file|
       next
     end
 
-    failures.concat(validate_permissions(file, "job #{job_name}", job['permissions'], events, job))
+    failures.concat(validate_permissions(file, "job #{job_name}", job['permissions'], events, job_name, job))
     failures << "#{file}: job #{job_name} must declare timeout-minutes" unless job.key?('timeout-minutes')
     if pull_request && job['secrets'].to_s == 'inherit'
       failures << "#{file}: pull_request job #{job_name} must not use secrets: inherit"
     end
-    if pull_request && self_hosted_runner?(job['runs-on'])
-      failures << "#{file}: pull_request job #{job_name} must not use a self-hosted runner"
+    if pull_request && job.key?('runs-on') && !approved_pr_runner?(job['runs-on'])
+      failures << "#{file}: pull_request job #{job_name} must use an approved GitHub-hosted runner"
     end
 
     if job['uses']
@@ -210,7 +221,10 @@ files.each do |file|
 
       reference = step['uses'].to_s
       failures << "#{file}: action is not pinned to an immutable reference" unless immutable_uses?(reference)
-      failures << "#{file}: action repository is not approved" unless approved_action?(reference)
+      unless approved_action?(reference)
+        label = reference.start_with?('docker://') ? 'docker image' : 'action repository'
+        failures << "#{file}: #{label} is not approved"
+      end
       next unless reference.match?(/\Aactions\/checkout@[a-f0-9]{40}\z/i)
 
       with = step['with']
