@@ -5,9 +5,21 @@ fixture_root="${1:?fixture directory is required}"
 rm -rf "$fixture_root"
 mkdir -p "$fixture_root/docs" "$fixture_root/tests"
 
-openai_prefix='sk-proj-'
-stripe_prefix='sk_test_'
-vercel_name='VERCEL_TOKEN'
-printf 'example=%s%s\n' "$openai_prefix" 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' > "$fixture_root/docs/fake-secret.md"
-printf 'const key = "%s%s";\n' "$stripe_prefix" 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' > "$fixture_root/tests/fake-secret.test.ts"
-printf 'const token = "%s=%s";\n' "$vercel_name" 'Ab3Cd5Ef7Gh9Jk2Lm4Np6Qr8St0Uv1Wx' > "$fixture_root/tests/fake-vercel-token.test.ts"
+generated_marker='INVALID_GENERATED_REGRESSION_VALUE'
+
+printf 'openai_new=%s%s\n' 'sk-proj-' "${generated_marker}OpenAINew0123456789" \
+  > "$fixture_root/docs/generated-openai-new.md"
+printf 'openai_legacy=%s%s\n' 'sk-' 'InvalidGeneratedOpenAILegacy0123456789' \
+  > "$fixture_root/tests/generated-openai-legacy.test.ts"
+printf 'stripe=%s%s\n' 'sk_test_' 'InvalidGeneratedStripe0123456789' \
+  > "$fixture_root/tests/generated-stripe.test.ts"
+printf '%s=%s\n' 'VERCEL_TOKEN' 'InvalidGeneratedVercelToken0123456789' \
+  > "$fixture_root/docs/generated-vercel-token.md"
+printf '%s=%s.%s.%s\n' \
+  'SUPABASE_SERVICE_ROLE_KEY' \
+  'eyJInvalidGeneratedHeader012345' \
+  'eyJInvalidGeneratedServiceRolePayload012345' \
+  'InvalidGeneratedSignature0123456789' \
+  > "$fixture_root/tests/generated-supabase-service-role.test.ts"
+printf 'openrouter=%s%s\n' 'sk-or-v1-' 'InvalidGeneratedOpenRouter0123456789' \
+  > "$fixture_root/docs/generated-openrouter.md"

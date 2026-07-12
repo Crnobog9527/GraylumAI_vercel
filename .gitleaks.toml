@@ -6,8 +6,14 @@ useDefault = true
 [[rules]]
 id = "graylum-openai-key"
 description = "OpenAI API key"
-regex = '''sk-(?:proj|svc|admin)?-[A-Za-z0-9_-]{20,}'''
+regex = '''sk-(?:(?:proj|svc|admin)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20,})'''
 keywords = ["openai", "sk-"]
+
+[[rules]]
+id = "graylum-openrouter-key"
+description = "OpenRouter API key"
+regex = '''sk-or-(?:v[0-9]+-)?[A-Za-z0-9_-]{20,}'''
+keywords = ["openrouter", "sk-or-"]
 
 [[rules]]
 id = "graylum-anthropic-key"
@@ -23,9 +29,10 @@ keywords = ["stripe", "sk_live_", "rk_live_", "sk_test_", "rk_test_"]
 
 [[rules]]
 id = "graylum-supabase-service-role"
-description = "Supabase service-role JWT"
-regex = '''eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{20,}'''
-keywords = ["supabase", "service_role"]
+description = "Supabase service-role JWT assignment"
+regex = '''(?i)(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SERVICE_ROLE|supabase_service_role_key|service_role_key)\s*[:=]\s*["']?(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+keywords = ["supabase", "service_role", "service-role"]
 
 [[rules]]
 id = "graylum-vercel-token"
