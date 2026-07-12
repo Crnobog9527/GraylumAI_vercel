@@ -39,6 +39,45 @@ add_case = lambda do |name, content, should_pass, expected_error = nil|
   cases[name] = [content, should_pass, expected_error]
 end
 
+manifest_workflow = workflow_yaml(safe_sha)
+add_case.call('missing-workflow-directory', :missing_workflow_directory, false, 'workflow directory is missing')
+add_case.call('empty-workflow-directory', {}, false, 'workflow directory must contain workflow files')
+add_case.call(
+  'only-unrelated-workflow',
+  { 'unrelated.yml' => manifest_workflow },
+  false,
+  'ci.yml: required workflow must exist as a regular non-symlink file'
+)
+add_case.call(
+  'missing-ci-workflow',
+  { 'security.yml' => manifest_workflow },
+  false,
+  'ci.yml: required workflow must exist as a regular non-symlink file'
+)
+add_case.call(
+  'missing-security-workflow',
+  { 'ci.yml' => manifest_workflow },
+  false,
+  'security.yml: required workflow must exist as a regular non-symlink file'
+)
+add_case.call(
+  'symlinked-required-workflow',
+  :symlinked_required_workflow,
+  false,
+  'ci.yml: required workflow must exist as a regular non-symlink file'
+)
+add_case.call(
+  'non-regular-required-workflow',
+  :non_regular_required_workflow,
+  false,
+  'ci.yml: required workflow must exist as a regular non-symlink file'
+)
+add_case.call(
+  'required-workflows-present',
+  { 'ci.yml' => manifest_workflow, 'security.yml' => manifest_workflow },
+  true
+)
+
 add_case.call('safe', workflow_yaml(safe_sha), true)
 add_case.call(
   'codeql-security-events-write',
@@ -592,6 +631,11 @@ add_case.call(
   true
 )
 {
+  'whole-pull-request-context' => 'echo "${{ github.event.pull_request }}"',
+  'whole-event-context' => 'echo "${{ github.event }}"',
+  'tojson-pull-request-context' => 'echo "${{ toJSON(github.event.pull_request) }}"',
+  'nested-format-github-context' => 'echo "${{ format(\'{0}\', contains(toJSON(github.event.pull_request), github.sha)) }}"',
+  'quoted-closing-braces-github-context' => 'echo "${{ format(\'}}\', github.event.pull_request.title) }}"',
   'untrusted-pr-title-in-run' => 'echo "${{ github.event.pull_request.title }}"',
   'untrusted-pr-body-in-run' => 'echo "${{ github.event.pull_request.body }}"',
   'untrusted-pr-head-ref-in-run' => 'echo "${{ github.event.pull_request.head.ref }}"',
@@ -618,9 +662,19 @@ add_case.call(
     name,
     workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
     false,
-    'directly interpolates untrusted GitHub context'
+    'direct github context interpolation in run is forbidden except github.sha and github.event_name'
   )
 end
+add_case.call(
+  'safe-github-event-name',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event_name }}"' }]) }),
+  true
+)
+add_case.call(
+  'safe-github-sha',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.sha }}"' }]) }),
+  true
+)
 add_case.call(
   'trusted-event-name-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event_name }}"' }]) }),
@@ -634,12 +688,14 @@ add_case.call(
 add_case.call(
   'trusted-pr-number-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.number }}"' }]) }),
-  true
+  false,
+  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
 )
 add_case.call(
   'trusted-pr-base-ref-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.base.ref }}"' }]) }),
-  true
+  false,
+  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
 )
 add_case.call(
   'untrusted-pr-body-bracket-in-run',
@@ -653,32 +709,60 @@ add_case.call(
     }
   ),
   false,
-  'directly interpolates untrusted GitHub context'
+  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
 )
 
 add_case.call(
   'curl-pipe-bash',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl -fsSL https://example.invalid/install | bash' }]) }),
   false,
-  'pipe-to-shell command is forbidden'
+  'downloader output must not be piped or executed indirectly'
 )
 add_case.call(
   'wget-pipe-sh',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | sh' }]) }),
   false,
-  'pipe-to-shell command is forbidden'
+  'downloader output must not be piped or executed indirectly'
 )
 add_case.call(
   'curl-pipe-bin-bash',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl -fsSL https://example.invalid/install | /bin/bash' }]) }),
   false,
-  'pipe-to-shell command is forbidden'
+  'downloader output must not be piped or executed indirectly'
 )
 add_case.call(
   'wget-pipe-env-sh',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | env sh' }]) }),
   false,
-  'pipe-to-shell command is forbidden'
+  'downloader output must not be piped or executed indirectly'
+)
+{
+  'curl-pipe-sudo-bash' => 'curl -fsSL https://example.invalid/install | sudo bash',
+  'wget-pipe-command-sh' => 'wget -qO- https://example.invalid/install | command sh',
+  'curl-pipe-nonshell' => 'curl -fsSL https://example.invalid/data | jq .',
+  'bash-process-substitution-curl' => 'bash <(curl -fsSL https://example.invalid/install)',
+  'shell-command-substitution-wget' => 'sh -c "$(wget -qO- https://example.invalid/install)"',
+  'eval-curl-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"'
+}.each do |name, command|
+  add_case.call(
+    name,
+    workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
+    false,
+    'downloader output must not be piped or executed indirectly'
+  )
+end
+add_case.call(
+  'download-file-then-checksum',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'safe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt' }]
+      )
+    }
+  ),
+  true
 )
 add_case.call(
   'danger-full-access',
@@ -707,8 +791,23 @@ passing_cases = cases.count { |_name, (_content, should_pass, _error)| should_pa
 Dir.mktmpdir('graylum-workflow-policy-') do |root|
   cases.each do |name, (content, should_pass, expected_error)|
     directory = File.join(root, name)
-    FileUtils.mkdir_p(directory)
-    File.write(File.join(directory, 'workflow.yml'), content)
+    unless content == :missing_workflow_directory
+      FileUtils.mkdir_p(directory)
+      case content
+      when Hash
+        content.each { |file_name, file_content| File.write(File.join(directory, file_name), file_content) }
+      when :symlinked_required_workflow
+        File.write(File.join(directory, 'ci.fixture'), manifest_workflow)
+        File.symlink('ci.fixture', File.join(directory, 'ci.yml'))
+        File.write(File.join(directory, 'security.yml'), manifest_workflow)
+      when :non_regular_required_workflow
+        FileUtils.mkdir_p(File.join(directory, 'ci.yml'))
+        File.write(File.join(directory, 'security.yml'), manifest_workflow)
+      else
+        File.write(File.join(directory, 'ci.yml'), content)
+        File.write(File.join(directory, 'security.yml'), manifest_workflow)
+      end
+    end
     _stdout, stderr, status = Open3.capture3('ruby', checker, directory)
     actual = status.success?
     next if actual == should_pass && (expected_error.nil? || stderr.include?(expected_error))

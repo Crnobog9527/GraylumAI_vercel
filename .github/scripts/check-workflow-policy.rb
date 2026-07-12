@@ -3,6 +3,8 @@
 require 'yaml'
 
 MAX_WORKFLOW_BYTES = 512 * 1024
+REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
+ALLOWED_RUN_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
 APPROVED_ACTION_REPOSITORIES = %w[
   actions/checkout
   actions/dependency-review-action
@@ -22,20 +24,6 @@ APPROVED_PR_RUNNERS = [
 CODEQL_WRITE_EVENTS = %w[push schedule].freeze
 CODEQL_WRITE_JOB_NAMES = %w[codeql codeql-analysis].freeze
 LOCAL_USES_ERROR = 'local actions and local reusable workflows are forbidden in policy v1'
-UNTRUSTED_RUN_CONTEXTS = [
-  /github\.event\.pull_request\.(?:title|body)/i,
-  /github\.event\.pull_request\.head\b/i,
-  /github\.event\.issue\.(?:title|body)/i,
-  /github\.event\.comment\.body/i,
-  /github\.event\.review\.body/i,
-  /github\.event\.review_comment\.body/i,
-  /github\.event\.discussion\.(?:title|body)/i,
-  /github\.event\.workflow_run\.head_branch/i,
-  /github\.head_ref/i,
-  /github\.ref_name/i,
-  /github\.event\.head_commit\.message/i,
-  /github\.event\.commits(?:\[[^\]]+\]|\.[\w*-]+)*\.message/i
-].freeze
 
 workflow_dir = ARGV.fetch(0, '.github/workflows')
 failures = []
@@ -138,15 +126,64 @@ def secret_reference?(value)
     value.match?(/\btojson\s*\(\s*secrets\s*\)/i)
 end
 
-def pipe_to_shell?(value)
-  shell = '(?:(?:/usr/bin/)?env(?:\s+-\S+)*\s+)?(?:/(?:usr/)?bin/)?(?:bash|sh)'
-  value.match?(/\b(?:curl|wget)\b[\s\S]*?\|\s*#{shell}\b/i)
+def unsafe_downloader_execution?(value)
+  normalized = value.gsub(/\\\s*\r?\n/, ' ')
+  downloader_pipeline = normalized.match?(/\b(?:curl|wget)\b(?:(?!&&|\|\||;|\r|\n).)*\|(?!\|)/i)
+  process_substitution = normalized.match?(/<\(\s*(?:curl|wget)\b/i)
+  command_substitution = normalized.match?(/\b(?:bash|sh|eval)\b[^\r\n]*\$\(\s*(?:curl|wget)\b/i)
+
+  downloader_pipeline || process_substitution || command_substitution
 end
 
-def untrusted_context_in_run?(value)
-  normalized = value.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
-  normalized = normalized.gsub(/\s*\.\s*/, '.')
-  normalized.include?('${{') && UNTRUSTED_RUN_CONTEXTS.any? { |pattern| normalized.match?(pattern) }
+def workflow_expressions(value)
+  expressions = []
+  cursor = 0
+
+  while (start_index = value.index('${{', cursor))
+    index = start_index + 3
+    quote = nil
+    closed = false
+
+    while index < value.length
+      character = value[index]
+      if quote
+        if character == quote && value[index + 1] == quote
+          index += 2
+          next
+        end
+        quote = nil if character == quote
+      elsif character == "'" || character == '"'
+        quote = character
+      elsif value[index, 2] == '}}'
+        expressions << value[(start_index + 3)...index]
+        cursor = index + 2
+        closed = true
+        break
+      end
+      index += 1
+    end
+
+    unless closed
+      expressions << value[(start_index + 3)..]
+      break
+    end
+  end
+
+  expressions
+end
+
+def github_contexts_in_run(value)
+  workflow_expressions(value).flat_map do |expression|
+    normalized = expression.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
+    normalized = normalized.gsub(/\s*\.\s*/, '.').downcase
+    normalized.scan(/\bgithub(?:\.[a-z_][a-z0-9_]*)*/)
+  end.uniq
+end
+
+def forbidden_github_context_in_run?(value)
+  github_contexts_in_run(value).any? do |context|
+    !ALLOWED_RUN_GITHUB_CONTEXTS.include?(context)
+  end
 end
 
 def approved_runner?(runs_on)
@@ -157,8 +194,24 @@ def valid_timeout?(timeout)
   timeout.is_a?(Integer) && timeout.between?(1, 60)
 end
 
-files = Dir.glob(File.join(workflow_dir, '*.{yml,yaml}')).sort
+files = []
+unless Dir.exist?(workflow_dir)
+  failures << "#{workflow_dir}: workflow directory is missing"
+else
+  files = Dir.glob(File.join(workflow_dir, '*.{yml,yaml}')).sort
+  failures << "#{workflow_dir}: workflow directory must contain workflow files" if files.empty?
+
+  REQUIRED_WORKFLOW_FILES.each do |required_file|
+    required_path = File.join(workflow_dir, required_file)
+    unless File.file?(required_path) && !File.symlink?(required_path)
+      failures << "#{required_path}: required workflow must exist as a regular non-symlink file"
+    end
+  end
+end
+
 files.each do |file|
+  next unless File.file?(file)
+
   if File.size(file) > MAX_WORKFLOW_BYTES
     failures << "#{file}: workflow exceeds #{MAX_WORKFLOW_BYTES} byte policy limit"
     next
@@ -194,7 +247,7 @@ files.each do |file|
   each_string(workflow) do |value|
     failures << "#{file}: unsafe runner flag is forbidden" if value.match?(/danger-full-access|--yolo/)
     failures << "#{file}: auto-merge commands are forbidden" if value.match?(/\bgh\s+pr\s+merge\b|\bauto-merge\b/i)
-    failures << "#{file}: pipe-to-shell command is forbidden" if pipe_to_shell?(value)
+    failures << "#{file}: downloader output must not be piped or executed indirectly" if unsafe_downloader_execution?(value)
     next unless secret_reference?(value)
 
     failures << "#{file}: trusted_policy_material_v1 workflows must not reference secrets"
@@ -265,8 +318,8 @@ files.each do |file|
       end
 
       run = step['run']
-      if run.is_a?(String) && untrusted_context_in_run?(run)
-        failures << "#{file}: run step #{index + 1} in job #{job_name} directly interpolates untrusted GitHub context"
+      if run.is_a?(String) && forbidden_github_context_in_run?(run)
+        failures << "#{file}: run step #{index + 1} in job #{job_name} direct github context interpolation in run is forbidden except github.sha and github.event_name"
       end
       next unless step['uses']
 
