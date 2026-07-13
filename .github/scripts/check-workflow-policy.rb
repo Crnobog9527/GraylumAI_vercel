@@ -132,11 +132,71 @@ def literal_loopback_health_probe?(value)
   match && match[:port].to_i.between?(1, 65_535)
 end
 
-def forbidden_downloader_in_run?(value)
-  return true if value.match?(/\bwget\b/i)
-  return false unless value.match?(/\bcurl\b/i)
+def canonical_shell_text(value)
+  canonical = +''
+  quote = nil
+  index = 0
 
-  !literal_loopback_health_probe?(value)
+  while index < value.length
+    character = value[index]
+
+    if quote == "'"
+      if character == "'"
+        quote = nil
+      else
+        canonical << character
+      end
+      index += 1
+      next
+    end
+
+    if character == "'" || character == '"'
+      if quote.nil?
+        quote = character
+      elsif quote == character
+        quote = nil
+      else
+        canonical << character
+      end
+      index += 1
+      next
+    end
+
+    if character == '\\'
+      return nil if index + 1 >= value.length
+
+      next_character = value[index + 1]
+      if next_character == "\n"
+        index += 2
+        next
+      end
+      if next_character == "\r" && value[index + 2] == "\n"
+        index += 3
+        next
+      end
+
+      canonical << next_character
+      index += 2
+      next
+    end
+
+    canonical << character
+    index += 1
+  end
+
+  return nil unless quote.nil?
+  return nil if canonical.include?("\0")
+
+  canonical.downcase
+end
+
+def forbidden_downloader_in_run?(value)
+  return false if literal_loopback_health_probe?(value)
+
+  canonical = canonical_shell_text(value)
+  return true if canonical.nil?
+
+  canonical.match?(/(?<![a-z0-9_])(?:curl|wget)(?![a-z0-9_])/)
 end
 
 def workflow_expressions(value)
@@ -176,18 +236,36 @@ def workflow_expressions(value)
   expressions
 end
 
-def github_contexts(value)
+def github_contexts_in_expression(expression)
+  normalized = expression.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
+  normalized = normalized.gsub(/\s*\.\s*/, '.').downcase
+  normalized.scan(/\bgithub(?:\.[a-z_][a-z0-9_]*)*/)
+end
+
+def github_contexts_in_wrapped_expressions(value)
   workflow_expressions(value).flat_map do |expression|
-    normalized = expression.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
-    normalized = normalized.gsub(/\s*\.\s*/, '.').downcase
-    normalized.scan(/\bgithub(?:\.[a-z_][a-z0-9_]*)*/)
+    github_contexts_in_expression(expression)
   end.uniq
 end
 
-def forbidden_github_context?(value)
-  github_contexts(value).any? do |context|
+def github_contexts_in_implicit_if_expression(value)
+  github_contexts_in_expression(value).uniq
+end
+
+def forbidden_github_contexts?(contexts)
+  contexts.any? do |context|
     !ALLOWED_GITHUB_CONTEXTS.include?(context)
   end
+end
+
+def forbidden_github_context_in_wrapped_expressions?(value)
+  forbidden_github_contexts?(github_contexts_in_wrapped_expressions(value))
+end
+
+def forbidden_github_context_in_if?(value)
+  contexts = github_contexts_in_wrapped_expressions(value)
+  contexts.concat(github_contexts_in_implicit_if_expression(value))
+  forbidden_github_contexts?(contexts.uniq)
 end
 
 def approved_runner?(runs_on)
@@ -251,7 +329,7 @@ files.each do |file|
   each_string(workflow) do |value|
     failures << "#{file}: unsafe runner flag is forbidden" if value.match?(/danger-full-access|--yolo/)
     failures << "#{file}: auto-merge commands are forbidden" if value.match?(/\bgh\s+pr\s+merge\b|\bauto-merge\b/i)
-    if forbidden_github_context?(value)
+    if forbidden_github_context_in_wrapped_expressions?(value)
       failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name"
     end
     next unless secret_reference?(value)
@@ -299,6 +377,11 @@ files.each do |file|
       failures << "#{file}: job #{job_name} must use an approved GitHub-hosted runner"
     end
 
+    job_if = job['if']
+    if job_if.is_a?(String) && forbidden_github_context_in_if?(job_if)
+      failures << "#{file}: job #{job_name} if expression direct github context is forbidden except github.sha and github.event_name"
+    end
+
     if job['uses']
       reference = job['uses'].to_s
       if reference.start_with?('./')
@@ -321,6 +404,11 @@ files.each do |file|
 
       if step.key?('continue-on-error') && step['continue-on-error'] != false
         failures << "#{file}: step #{index + 1} in job #{job_name} continue-on-error must be explicitly false when present"
+      end
+
+      step_if = step['if']
+      if step_if.is_a?(String) && forbidden_github_context_in_if?(step_if)
+        failures << "#{file}: step #{index + 1} in job #{job_name} if expression direct github context is forbidden except github.sha and github.event_name"
       end
 
       run = step['run']

