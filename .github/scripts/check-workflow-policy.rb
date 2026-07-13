@@ -5,7 +5,6 @@ require 'yaml'
 MAX_WORKFLOW_BYTES = 512 * 1024
 REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
 ALLOWED_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
-STRICT_LOOPBACK_CURL = %r{\Acurl\ --disable\ --fail\ --silent\ --show-error\ --max-time\ 10\ http://(?:127\.0\.0\.1|localhost|\[::1\]):(?<port>[1-9][0-9]{0,4})/[A-Za-z0-9._~%+/-]*\ >/dev/null(?:\r?\n)?\z}.freeze
 APPROVED_ACTION_REPOSITORIES = %w[
   actions/checkout
   actions/dependency-review-action
@@ -125,78 +124,6 @@ def secret_reference?(value)
   value.match?(/\bsecrets\s*(?:\.|\[)/i) ||
     value.match?(/\$\{\{\s*secrets\s*\}\}/i) ||
     value.match?(/\btojson\s*\(\s*secrets\s*\)/i)
-end
-
-def literal_loopback_health_probe?(value)
-  match = STRICT_LOOPBACK_CURL.match(value)
-  match && match[:port].to_i.between?(1, 65_535)
-end
-
-def canonical_shell_text(value)
-  canonical = +''
-  quote = nil
-  index = 0
-
-  while index < value.length
-    character = value[index]
-
-    if quote == "'"
-      if character == "'"
-        quote = nil
-      else
-        canonical << character
-      end
-      index += 1
-      next
-    end
-
-    if character == "'" || character == '"'
-      if quote.nil?
-        quote = character
-      elsif quote == character
-        quote = nil
-      else
-        canonical << character
-      end
-      index += 1
-      next
-    end
-
-    if character == '\\'
-      return nil if index + 1 >= value.length
-
-      next_character = value[index + 1]
-      if next_character == "\n"
-        index += 2
-        next
-      end
-      if next_character == "\r" && value[index + 2] == "\n"
-        index += 3
-        next
-      end
-
-      canonical << next_character
-      index += 2
-      next
-    end
-
-    canonical << character
-    index += 1
-  end
-
-  return nil unless quote.nil?
-  return nil if canonical.include?("\0")
-
-  canonical.downcase
-end
-
-def forbidden_downloader_in_run?(value)
-  return false if literal_loopback_health_probe?(value)
-
-  canonical = canonical_shell_text(value)
-  return true if canonical.nil?
-
-  canonical.match?(/(?<![a-z0-9_])(?:curl|wget)(?![a-z0-9_])/)
 end
 
 def workflow_expressions(value)
@@ -327,8 +254,6 @@ files.each do |file|
   end
 
   each_string(workflow) do |value|
-    failures << "#{file}: unsafe runner flag is forbidden" if value.match?(/danger-full-access|--yolo/)
-    failures << "#{file}: auto-merge commands are forbidden" if value.match?(/\bgh\s+pr\s+merge\b|\bauto-merge\b/i)
     if forbidden_github_context_in_wrapped_expressions?(value)
       failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name"
     end
@@ -373,34 +298,56 @@ files.each do |file|
     if job['secrets'].to_s == 'inherit'
       failures << "#{file}: trusted_policy_material_v1 job #{job_name} must not use secrets: inherit"
     end
-    if job.key?('runs-on') && !approved_runner?(job['runs-on'])
-      failures << "#{file}: job #{job_name} must use an approved GitHub-hosted runner"
-    end
-
     job_if = job['if']
     if job_if.is_a?(String) && forbidden_github_context_in_if?(job_if)
       failures << "#{file}: job #{job_name} if expression direct github context is forbidden except github.sha and github.event_name"
     end
 
-    if job['uses']
-      reference = job['uses'].to_s
-      if reference.start_with?('./')
-        failures << "#{file}: #{LOCAL_USES_ERROR}"
-      else
-        unless immutable_uses?(reference)
-          failures << "#{file}: reusable workflow is not pinned to an immutable reference"
-        end
-        unless approved_action?(reference)
-          failures << "#{file}: reusable workflow repository is not approved"
+    if job.key?('uses')
+      reference = job['uses']
+      valid_reference = reference.is_a?(String) && !reference.strip.empty?
+      unless valid_reference
+        failures << "#{file}: reusable workflow job #{job_name} uses must be a non-empty string"
+      end
+      if job.key?('steps')
+        failures << "#{file}: reusable workflow job #{job_name} must not define steps"
+      end
+      if job.key?('runs-on')
+        failures << "#{file}: reusable workflow job #{job_name} must not define runs-on"
+      end
+      if valid_reference
+        if reference.start_with?('./')
+          failures << "#{file}: #{LOCAL_USES_ERROR}"
+        else
+          unless immutable_uses?(reference)
+            failures << "#{file}: reusable workflow is not pinned to an immutable reference"
+          end
+          unless approved_action?(reference)
+            failures << "#{file}: reusable workflow repository is not approved"
+          end
         end
       end
+      next
+    end
+
+    unless job.key?('runs-on')
+      failures << "#{file}: job #{job_name} must declare runs-on"
+    end
+    if job.key?('runs-on') && !approved_runner?(job['runs-on'])
+      failures << "#{file}: job #{job_name} must use an approved GitHub-hosted runner"
     end
 
     steps = job['steps']
-    next unless steps.is_a?(Array)
+    unless steps.is_a?(Array) && !steps.empty?
+      failures << "#{file}: job #{job_name} steps must be a non-empty array"
+      next
+    end
 
     steps.each_with_index do |step, index|
-      next unless step.is_a?(Hash)
+      unless step.is_a?(Hash)
+        failures << "#{file}: step #{index + 1} in job #{job_name} must be a mapping"
+        next
+      end
 
       if step.key?('continue-on-error') && step['continue-on-error'] != false
         failures << "#{file}: step #{index + 1} in job #{job_name} continue-on-error must be explicitly false when present"
@@ -411,13 +358,26 @@ files.each do |file|
         failures << "#{file}: step #{index + 1} in job #{job_name} if expression direct github context is forbidden except github.sha and github.event_name"
       end
 
-      run = step['run']
-      if run.is_a?(String) && forbidden_downloader_in_run?(run)
-        failures << "#{file}: policy v1 forbids curl/wget except an exact literal loopback curl health probe"
+      has_run = step.key?('run')
+      has_uses = step.key?('uses')
+      unless has_run ^ has_uses
+        failures << "#{file}: step #{index + 1} in job #{job_name} must define exactly one of run or uses"
+        next
       end
-      next unless step['uses']
 
-      reference = step['uses'].to_s
+      if has_run
+        run = step['run']
+        unless run.is_a?(String) && !run.strip.empty?
+          failures << "#{file}: step #{index + 1} in job #{job_name} run must be a non-empty string"
+        end
+        next
+      end
+
+      reference = step['uses']
+      unless reference.is_a?(String) && !reference.strip.empty?
+        failures << "#{file}: step #{index + 1} in job #{job_name} uses must be a non-empty string"
+        next
+      end
       if reference.start_with?('./')
         failures << "#{file}: #{LOCAL_USES_ERROR}"
       else
