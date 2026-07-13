@@ -4,7 +4,8 @@ require 'yaml'
 
 MAX_WORKFLOW_BYTES = 512 * 1024
 REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
-ALLOWED_RUN_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
+ALLOWED_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
+STRICT_LOOPBACK_CURL = %r{\Acurl\ --disable\ --fail\ --silent\ --show-error\ --max-time\ 10\ http://(?:127\.0\.0\.1|localhost|\[::1\]):(?<port>[1-9][0-9]{0,4})/[A-Za-z0-9._~%+/-]*\ >/dev/null(?:\r?\n)?\z}.freeze
 APPROVED_ACTION_REPOSITORIES = %w[
   actions/checkout
   actions/dependency-review-action
@@ -126,13 +127,16 @@ def secret_reference?(value)
     value.match?(/\btojson\s*\(\s*secrets\s*\)/i)
 end
 
-def unsafe_downloader_execution?(value)
-  normalized = value.gsub(/\\\s*\r?\n/, ' ')
-  downloader_pipeline = normalized.match?(/\b(?:curl|wget)\b(?:(?!&&|\|\||;|\r|\n).)*\|(?!\|)/i)
-  process_substitution = normalized.match?(/<\(\s*(?:curl|wget)\b/i)
-  command_substitution = normalized.match?(/\b(?:bash|sh|eval)\b[^\r\n]*\$\(\s*(?:curl|wget)\b/i)
+def literal_loopback_health_probe?(value)
+  match = STRICT_LOOPBACK_CURL.match(value)
+  match && match[:port].to_i.between?(1, 65_535)
+end
 
-  downloader_pipeline || process_substitution || command_substitution
+def forbidden_downloader_in_run?(value)
+  return true if value.match?(/\bwget\b/i)
+  return false unless value.match?(/\bcurl\b/i)
+
+  !literal_loopback_health_probe?(value)
 end
 
 def workflow_expressions(value)
@@ -172,7 +176,7 @@ def workflow_expressions(value)
   expressions
 end
 
-def github_contexts_in_run(value)
+def github_contexts(value)
   workflow_expressions(value).flat_map do |expression|
     normalized = expression.gsub(/\[\s*['"]([^'"]+)['"]\s*\]/, '.\\1')
     normalized = normalized.gsub(/\s*\.\s*/, '.').downcase
@@ -180,9 +184,9 @@ def github_contexts_in_run(value)
   end.uniq
 end
 
-def forbidden_github_context_in_run?(value)
-  github_contexts_in_run(value).any? do |context|
-    !ALLOWED_RUN_GITHUB_CONTEXTS.include?(context)
+def forbidden_github_context?(value)
+  github_contexts(value).any? do |context|
+    !ALLOWED_GITHUB_CONTEXTS.include?(context)
   end
 end
 
@@ -247,7 +251,9 @@ files.each do |file|
   each_string(workflow) do |value|
     failures << "#{file}: unsafe runner flag is forbidden" if value.match?(/danger-full-access|--yolo/)
     failures << "#{file}: auto-merge commands are forbidden" if value.match?(/\bgh\s+pr\s+merge\b|\bauto-merge\b/i)
-    failures << "#{file}: downloader output must not be piped or executed indirectly" if unsafe_downloader_execution?(value)
+    if forbidden_github_context?(value)
+      failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name"
+    end
     next unless secret_reference?(value)
 
     failures << "#{file}: trusted_policy_material_v1 workflows must not reference secrets"
@@ -318,8 +324,8 @@ files.each do |file|
       end
 
       run = step['run']
-      if run.is_a?(String) && forbidden_github_context_in_run?(run)
-        failures << "#{file}: run step #{index + 1} in job #{job_name} direct github context interpolation in run is forbidden except github.sha and github.event_name"
+      if run.is_a?(String) && forbidden_downloader_in_run?(run)
+        failures << "#{file}: policy v1 forbids curl/wget except an exact literal loopback curl health probe"
       end
       next unless step['uses']
 

