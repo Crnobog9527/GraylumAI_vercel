@@ -45,6 +45,104 @@ def event_enabled?(events, name)
   event_names(events).include?(name)
 end
 
+def non_empty_string_filter?(value)
+  return !value.empty? if value.is_a?(String)
+
+  value.is_a?(Array) && !value.empty? && value.all? { |item| item.is_a?(String) && !item.empty? }
+end
+
+def includes_literal_staging?(value)
+  values = value.is_a?(Array) ? value : [value]
+  values.include?('staging')
+end
+
+def valid_required_event_collection?(events)
+  case events
+  when String
+    !events.empty?
+  when Array
+    !events.empty? && events.all? { |event| event.is_a?(String) && !event.empty? }
+  when Hash
+    !events.empty? && events.keys.all? { |event| event.is_a?(String) && !event.empty? }
+  else
+    false
+  end
+end
+
+def required_event_configuration_failures(file, event_name, configuration)
+  return [] if configuration.nil?
+
+  unless configuration.is_a?(Hash)
+    return ["#{file}: required #{event_name} trigger configuration is invalid"]
+  end
+
+  failures = []
+  keys = configuration.keys
+  unless keys.all? { |key| key.is_a?(String) && !key.empty? }
+    failures << "#{file}: required #{event_name} trigger configuration is invalid"
+    return failures
+  end
+
+  %w[branches-ignore paths paths-ignore].each do |forbidden_filter|
+    if configuration.key?(forbidden_filter)
+      failures << "#{file}: required #{event_name} trigger must not use #{forbidden_filter}"
+    end
+  end
+  if event_name == 'pull_request' && configuration.key?('types')
+    failures << "#{file}: required pull_request trigger must not use types"
+  elsif event_name == 'push' && configuration.key?('types')
+    failures << "#{file}: required push trigger configuration is invalid"
+  end
+
+  allowed_keys = event_name == 'push' ? %w[branches tags tags-ignore] : %w[branches]
+  known_forbidden_keys = %w[branches-ignore paths paths-ignore types]
+  if (keys - allowed_keys - known_forbidden_keys).any?
+    failures << "#{file}: required #{event_name} trigger configuration is invalid"
+  end
+
+  if configuration.key?('branches')
+    branches = configuration['branches']
+    unless non_empty_string_filter?(branches)
+      failures << "#{file}: required #{event_name} trigger configuration is invalid"
+      return failures
+    end
+    unless includes_literal_staging?(branches)
+      failures << "#{file}: required #{event_name} trigger must cover literal staging branch"
+    end
+  elsif event_name == 'push' && (configuration.key?('tags') || configuration.key?('tags-ignore'))
+    failures << "#{file}: required push trigger must cover literal staging branch"
+  end
+
+  if event_name == 'push'
+    %w[tags tags-ignore].each do |tag_filter|
+      next unless configuration.key?(tag_filter)
+      next if non_empty_string_filter?(configuration[tag_filter])
+
+      failures << "#{file}: required push trigger configuration is invalid"
+    end
+  end
+
+  failures
+end
+
+def required_workflow_trigger_failures(file, events)
+  unless valid_required_event_collection?(events)
+    return ["#{file}: required workflow event configuration is invalid"]
+  end
+
+  failures = []
+  %w[pull_request push].each do |required_event|
+    unless event_enabled?(events, required_event)
+      failures << "#{file}: required workflow must include #{required_event} trigger"
+      next
+    end
+    next unless events.is_a?(Hash)
+
+    failures.concat(required_event_configuration_failures(file, required_event, events[required_event]))
+  end
+  failures
+end
+
 def each_string(value, &block)
   case value
   when String then block.call(value)
@@ -240,6 +338,9 @@ files.each do |file|
   end
 
   events = event_config(workflow)
+  if REQUIRED_WORKFLOW_FILES.include?(File.basename(file))
+    failures.concat(required_workflow_trigger_failures(file, events))
+  end
   failures << "#{file}: pull_request_target is forbidden" if event_enabled?(events, 'pull_request_target')
 
   top_permissions = workflow['permissions']
@@ -272,6 +373,10 @@ files.each do |file|
     unless job.is_a?(Hash)
       failures << "#{file}: job #{job_name} must be a mapping"
       next
+    end
+
+    if job.key?('environment')
+      failures << "#{file}: policy v1 forbids job environments"
     end
 
     job_permissions = job['permissions']

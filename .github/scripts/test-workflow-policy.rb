@@ -25,7 +25,7 @@ def standard_job(safe_sha, overrides = {})
   }.merge(overrides)
 end
 
-def workflow_yaml(safe_sha, events: ['push'], permissions: { 'contents' => 'read' }, jobs: nil)
+def workflow_yaml(safe_sha, events: ['pull_request', 'push'], permissions: { 'contents' => 'read' }, jobs: nil)
   workflow = {
     'name' => 'Policy fixture',
     'on' => events,
@@ -56,6 +56,8 @@ case_category_order = %i[
   wrapped_github_expression_cases
   implicit_if_expression_cases
   manifest_integrity_cases
+  required_trigger_coverage_cases
+  privileged_environment_cases
 ].freeze
 case_categories = case_category_order.to_h { |category| [category, []] }
 current_category = :manifest_integrity_cases
@@ -100,6 +102,239 @@ add_case.call(
 add_case.call(
   'required-workflows-present',
   { 'ci.yml' => manifest_workflow, 'security.yml' => manifest_workflow },
+  true
+)
+
+required_files = lambda do |file_name, workflow|
+  {
+    'ci.yml' => manifest_workflow,
+    'security.yml' => manifest_workflow,
+    file_name => workflow
+  }
+end
+
+current_category = :required_trigger_coverage_cases
+add_case.call(
+  'required-ci-workflow-dispatch-only',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: ['workflow_dispatch'])),
+  false,
+  'ci.yml: required workflow must include pull_request trigger'
+)
+add_case.call(
+  'required-security-workflow-dispatch-only',
+  required_files.call('security.yml', workflow_yaml(safe_sha, events: ['workflow_dispatch'])),
+  false,
+  'security.yml: required workflow must include pull_request trigger'
+)
+add_case.call(
+  'required-ci-push-only',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: ['push'])),
+  false,
+  'ci.yml: required workflow must include pull_request trigger'
+)
+add_case.call(
+  'required-ci-pull-request-only',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: ['pull_request'])),
+  false,
+  'ci.yml: required workflow must include push trigger'
+)
+add_case.call(
+  'required-ci-pr-main-only',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => ['main'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must cover literal staging branch'
+)
+add_case.call(
+  'required-security-pr-main-only',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => ['main'] }, 'push' => nil })
+  ),
+  false,
+  'security.yml: required pull_request trigger must cover literal staging branch'
+)
+add_case.call(
+  'required-ci-push-main-only',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'branches' => ['main'] } })
+  ),
+  false,
+  'ci.yml: required push trigger must cover literal staging branch'
+)
+add_case.call(
+  'required-security-push-main-only',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'branches' => ['main'] } })
+  ),
+  false,
+  'security.yml: required push trigger must cover literal staging branch'
+)
+add_case.call(
+  'required-pr-branches-ignore',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches-ignore' => ['main'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use branches-ignore'
+)
+add_case.call(
+  'required-push-branches-ignore',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'branches-ignore' => ['main'] } })
+  ),
+  false,
+  'ci.yml: required push trigger must not use branches-ignore'
+)
+add_case.call(
+  'required-pr-paths-filter',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'paths' => ['src/**'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use paths'
+)
+add_case.call(
+  'required-pr-paths-ignore',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'paths-ignore' => ['docs/**'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use paths-ignore'
+)
+add_case.call(
+  'required-push-paths-filter',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'paths' => ['src/**'] } })
+  ),
+  false,
+  'ci.yml: required push trigger must not use paths'
+)
+add_case.call(
+  'required-push-paths-ignore',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'paths-ignore' => ['docs/**'] } })
+  ),
+  false,
+  'ci.yml: required push trigger must not use paths-ignore'
+)
+add_case.call(
+  'required-pr-types-closed',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'types' => ['closed'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use types'
+)
+add_case.call(
+  'required-push-tags-only',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'tags' => ['v*'] } })
+  ),
+  false,
+  'ci.yml: required push trigger must cover literal staging branch'
+)
+add_case.call(
+  'required-invalid-event-config',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => 'invalid', 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger configuration is invalid'
+)
+add_case.call(
+  'required-push-invalid-types',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => nil, 'push' => { 'branches' => ['staging'], 'types' => ['created'] } }
+    )
+  ),
+  false,
+  'ci.yml: required push trigger configuration is invalid'
+)
+add_case.call(
+  'required-empty-on-config',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: {})),
+  false,
+  'ci.yml: required workflow event configuration is invalid'
+)
+add_case.call(
+  'required-array-pr-and-push',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: ['pull_request', 'push'])),
+  true
+)
+add_case.call(
+  'required-unfiltered-pr-and-push',
+  required_files.call('ci.yml', workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => nil })),
+  true
+)
+add_case.call(
+  'required-staging-mapping',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: {
+        'pull_request' => { 'branches' => 'staging' },
+        'push' => { 'branches' => ['staging'] }
+      }
+    )
+  ),
+  true
+)
+add_case.call(
+  'required-main-staging-develop-mapping',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(
+      safe_sha,
+      events: {
+        'pull_request' => { 'branches' => ['main', 'staging', 'develop'] },
+        'push' => { 'branches' => ['main', 'staging', 'develop'] }
+      }
+    )
+  ),
+  true
+)
+add_case.call(
+  'required-extra-schedule',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(
+      safe_sha,
+      events: {
+        'pull_request' => nil,
+        'push' => nil,
+        'schedule' => [{ 'cron' => '0 0 * * 1' }]
+      }
+    )
+  ),
+  true
+)
+add_case.call(
+  'required-extra-workflow-dispatch',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => nil, 'push' => nil, 'workflow_dispatch' => nil }
+    )
+  ),
   true
 )
 
@@ -587,6 +822,43 @@ add_case.call(
   'services are forbidden in policy v1'
 )
 
+current_category = :privileged_environment_cases
+add_case.call(
+  'job-environment-string',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'environment' => 'Production') }),
+  false,
+  'policy v1 forbids job environments'
+)
+add_case.call(
+  'job-environment-mapping',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'environment' => { 'name' => 'Production' }) }
+  ),
+  false,
+  'policy v1 forbids job environments'
+)
+add_case.call(
+  'job-environment-expression',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => standard_job(safe_sha, 'environment' => '${{ github.event_name }}') }
+  ),
+  false,
+  'policy v1 forbids job environments'
+)
+add_case.call(
+  'job-environment-null',
+  workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'environment' => nil) }),
+  false,
+  'policy v1 forbids job environments'
+)
+add_case.call(
+  'job-without-environment',
+  workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha) }),
+  true
+)
+
 current_category = :secret_reference_cases
 add_case.call(
   'dot-secret',
@@ -1056,7 +1328,8 @@ Dir.mktmpdir('graylum-workflow-policy-') do |root|
         FileUtils.mkdir_p(File.join(directory, 'ci.yml'))
         File.write(File.join(directory, 'security.yml'), manifest_workflow)
       else
-        File.write(File.join(directory, 'ci.yml'), content)
+        File.write(File.join(directory, 'fixture.yml'), content)
+        File.write(File.join(directory, 'ci.yml'), manifest_workflow)
         File.write(File.join(directory, 'security.yml'), manifest_workflow)
       end
     end
