@@ -42,15 +42,24 @@ An ordinary application, feature, or bugfix contract must not modify these paths
 
 ## Capability boundary
 
+- `policy_model: deterministic_structural_workflow_policy`
+- `github_actions_schema_validation`:
+  - `delegated_to: checksum_verified_actionlint`
+- `required_workflow_event_coverage`:
+  - `enforced_by_checker: true`
+- `required_workflow_execution_integrity`:
+  - `enforced_by_checker: false`
+  - `required_control: protected_policy_surface_gate_and_required_workflow`
 - `shell_semantic_analysis: intentionally_not_claimed`
-- `network_egress_control: not_enforced_by_workflow_policy_checker`
+- `network_egress_control: outside_policy_checker`
+- `reusable_workflow_calls: forbidden_in_policy_v1`
 - `network_egress_required_controls`:
   - Secretless PR runtime.
   - Least-privilege token.
   - No privileged environment.
   - External runner or network policy when required.
 
-The workflow policy checker does not claim to prevent all network access or remote-code execution. It evaluates deterministic workflow structure, permissions, provenance, and declared policy scope.
+The workflow policy checker does not claim to prove that a condition executes tests, that a shell command tests business behavior, or that a workflow is free of all network access or remote-code execution. GitHub Actions schema validation is delegated to checksum-verified actionlint. Execution integrity requires a protected policy-surface gate and required workflow enforcement outside this checker.
 
 ## Required Review
 
@@ -70,6 +79,7 @@ Evaluate:
 Produce an Evaluator report with:
 
 - `machine_decision`: `PASS`, `FAIL`, or `BLOCKED`.
+- `github_review_action`: `APPROVE`, `REQUEST_CHANGES`, `COMMENT`, or `NONE`.
 - `owner_summary_zh`: one Chinese sentence with the decision summary.
 - `owner_next_action_zh`: one Chinese sentence describing what the owner needs to do now.
 - `risk_level`: `low`, `medium`, `high`, or `production`.
@@ -90,5 +100,12 @@ Produce an Evaluator report with:
 - Recommendation.
 
 Owner-facing report text must be in Chinese. Machine-readable field names and enum values must stay stable for automation.
+
+Decision semantics:
+
+- `PASS`: the current gate is satisfied.
+- `FAIL`: evaluation completed with a concrete finding, so the work cannot enter the next gate.
+- `BLOCKED`: trusted evidence, permissions, exact SHA, an external dependency, or readable state is missing, so the Evaluator cannot complete the decision.
+- `github_review_action` records the corresponding GitHub review action and never replaces `machine_decision`.
 
 Do not fix issues yourself. If changes are required, report them and stop.

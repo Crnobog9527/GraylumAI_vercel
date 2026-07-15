@@ -4,6 +4,7 @@ require 'yaml'
 
 MAX_WORKFLOW_BYTES = 512 * 1024
 REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
+ALLOWED_REQUIRED_BRANCHES = %w[main staging develop].freeze
 ALLOWED_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
 APPROVED_ACTION_REPOSITORIES = %w[
   actions/checkout
@@ -45,15 +46,12 @@ def event_enabled?(events, name)
   event_names(events).include?(name)
 end
 
-def non_empty_string_filter?(value)
-  return !value.empty? if value.is_a?(String)
-
-  value.is_a?(Array) && !value.empty? && value.all? { |item| item.is_a?(String) && !item.empty? }
-end
-
-def includes_literal_staging?(value)
+def required_branch_literals(value)
   values = value.is_a?(Array) ? value : [value]
-  values.include?('staging')
+  return nil if values.empty?
+  return nil unless values.all? { |item| item.is_a?(String) && !item.empty? }
+
+  values
 end
 
 def valid_required_event_collection?(events)
@@ -93,33 +91,34 @@ def required_event_configuration_failures(file, event_name, configuration)
   elsif event_name == 'push' && configuration.key?('types')
     failures << "#{file}: required push trigger configuration is invalid"
   end
+  if event_name == 'push'
+    %w[tags tags-ignore].each do |forbidden_filter|
+      if configuration.key?(forbidden_filter)
+        failures << "#{file}: required push trigger must not use #{forbidden_filter}"
+      end
+    end
+  end
 
-  allowed_keys = event_name == 'push' ? %w[branches tags tags-ignore] : %w[branches]
-  known_forbidden_keys = %w[branches-ignore paths paths-ignore types]
+  allowed_keys = %w[branches]
+  known_forbidden_keys = %w[branches-ignore paths paths-ignore types tags tags-ignore]
   if (keys - allowed_keys - known_forbidden_keys).any?
     failures << "#{file}: required #{event_name} trigger configuration is invalid"
   end
 
   if configuration.key?('branches')
-    branches = configuration['branches']
-    unless non_empty_string_filter?(branches)
+    branches = required_branch_literals(configuration['branches'])
+    unless branches
       failures << "#{file}: required #{event_name} trigger configuration is invalid"
       return failures
     end
-    unless includes_literal_staging?(branches)
+    unless branches.all? { |branch| ALLOWED_REQUIRED_BRANCHES.include?(branch) }
+      failures << "#{file}: required #{event_name} branches must use only allowed literal branches"
+    end
+    unless branches.include?('staging')
       failures << "#{file}: required #{event_name} trigger must cover literal staging branch"
     end
   elsif event_name == 'push' && (configuration.key?('tags') || configuration.key?('tags-ignore'))
     failures << "#{file}: required push trigger must cover literal staging branch"
-  end
-
-  if event_name == 'push'
-    %w[tags tags-ignore].each do |tag_filter|
-      next unless configuration.key?(tag_filter)
-      next if non_empty_string_filter?(configuration[tag_filter])
-
-      failures << "#{file}: required push trigger configuration is invalid"
-    end
   end
 
   failures
@@ -375,6 +374,11 @@ files.each do |file|
       next
     end
 
+    if job.key?('uses')
+      failures << "#{file}: reusable workflow calls are forbidden in policy v1"
+      next
+    end
+
     if job.key?('environment')
       failures << "#{file}: policy v1 forbids job environments"
     end
@@ -406,33 +410,6 @@ files.each do |file|
     job_if = job['if']
     if job_if.is_a?(String) && forbidden_github_context_in_if?(job_if)
       failures << "#{file}: job #{job_name} if expression direct github context is forbidden except github.sha and github.event_name"
-    end
-
-    if job.key?('uses')
-      reference = job['uses']
-      valid_reference = reference.is_a?(String) && !reference.strip.empty?
-      unless valid_reference
-        failures << "#{file}: reusable workflow job #{job_name} uses must be a non-empty string"
-      end
-      if job.key?('steps')
-        failures << "#{file}: reusable workflow job #{job_name} must not define steps"
-      end
-      if job.key?('runs-on')
-        failures << "#{file}: reusable workflow job #{job_name} must not define runs-on"
-      end
-      if valid_reference
-        if reference.start_with?('./')
-          failures << "#{file}: #{LOCAL_USES_ERROR}"
-        else
-          unless immutable_uses?(reference)
-            failures << "#{file}: reusable workflow is not pinned to an immutable reference"
-          end
-          unless approved_action?(reference)
-            failures << "#{file}: reusable workflow repository is not approved"
-          end
-        end
-      end
-      next
     end
 
     unless job.key?('runs-on')

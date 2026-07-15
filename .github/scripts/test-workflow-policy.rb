@@ -46,6 +46,7 @@ case_category_order = %i[
   structural_yaml_cases
   malformed_job_structure_cases
   malformed_step_structure_cases
+  reusable_workflow_forbidden_cases
   permissions_cases
   secret_reference_cases
   action_pinning_cases
@@ -61,8 +62,8 @@ case_category_order = %i[
 ].freeze
 case_categories = case_category_order.to_h { |category| [category, []] }
 current_category = :manifest_integrity_cases
-add_case = lambda do |name, content, should_pass, expected_error = nil|
-  cases[name] = [content, should_pass, expected_error]
+add_case = lambda do |name, content, should_pass, expected_error = nil, forbidden_error = nil|
+  cases[name] = [content, should_pass, expected_error, forbidden_error]
   case_categories.fetch(current_category) << name
 end
 
@@ -337,6 +338,108 @@ add_case.call(
   ),
   true
 )
+add_case.call(
+  'required-pr-staging-then-negative-staging',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['staging', '!staging'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'ci.yml: required pull_request branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-push-staging-then-negative-staging',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => nil, 'push' => { 'branches' => ['staging', '!staging'] } }
+    )
+  ),
+  false,
+  'ci.yml: required push branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-pr-negative-staging-then-staging',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['!staging', 'staging'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'security.yml: required pull_request branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-pr-staging-glob',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'branches' => ['staging*'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-push-staging-glob',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => nil, 'push' => { 'branches' => ['staging?'] } })
+  ),
+  false,
+  'security.yml: required push branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-pr-unknown-literal-branch',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['staging', 'release'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'ci.yml: required pull_request branches must use only allowed literal branches'
+)
+add_case.call(
+  'required-push-tags-with-branches',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => nil, 'push' => { 'branches' => ['staging'], 'tags' => ['v*'] } }
+    )
+  ),
+  false,
+  'ci.yml: required push trigger must not use tags'
+)
+add_case.call(
+  'required-push-tags-ignore-with-branches',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => nil, 'push' => { 'branches' => ['staging'], 'tags-ignore' => ['v*'] } }
+    )
+  ),
+  false,
+  'ci.yml: required push trigger must not use tags-ignore'
+)
+add_case.call(
+  'required-escaped-glob-pattern',
+  required_files.call(
+    'security.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['staging', 'feature\\*'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'security.yml: required pull_request branches must use only allowed literal branches'
+)
 
 current_category = :structural_yaml_cases
 add_case.call('safe', workflow_yaml(safe_sha), true)
@@ -401,36 +504,6 @@ add_case.call(
   'job unsafe steps must be a non-empty array'
 )
 
-reusable_reference = "actions/checkout/.github/workflows/reusable.yml@#{safe_sha}"
-reusable_job = {
-  'uses' => reusable_reference,
-  'timeout-minutes' => 5,
-  'permissions' => { 'contents' => 'read' }
-}
-add_case.call(
-  'reusable-workflow-with-steps',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('steps' => [{ 'run' => 'echo unsafe' }]) }),
-  false,
-  'reusable workflow job unsafe must not define steps'
-)
-add_case.call(
-  'reusable-workflow-with-runs-on',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('runs-on' => 'ubuntu-latest') }),
-  false,
-  'reusable workflow job unsafe must not define runs-on'
-)
-add_case.call(
-  'reusable-workflow-empty-uses',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('uses' => '') }),
-  false,
-  'reusable workflow job unsafe uses must be a non-empty string'
-)
-add_case.call(
-  'reusable-workflow-non-string-uses',
-  workflow_yaml(safe_sha, jobs: { 'unsafe' => reusable_job.merge('uses' => ['unsafe']) }),
-  false,
-  'reusable workflow job unsafe uses must be a non-empty string'
-)
 add_case.call(
   'job-without-ordinary-or-reusable-structure',
   workflow_yaml(
@@ -445,10 +518,95 @@ add_case.call(
   false,
   'job unsafe must declare runs-on'
 )
+
+current_category = :reusable_workflow_forbidden_cases
+external_reusable_reference = "owner/repo/.github/workflows/reusable.yml@#{safe_sha}"
 add_case.call(
-  'valid-reusable-workflow-job',
-  workflow_yaml(safe_sha, jobs: { 'reuse' => reusable_job }),
-  true
+  'job-level-action-reference-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'uses' => "actions/checkout@#{safe_sha}",
+        'timeout-minutes' => 5,
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1'
+)
+add_case.call(
+  'external-reusable-workflow-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'uses' => external_reusable_reference,
+        'timeout-minutes' => 5,
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1'
+)
+add_case.call(
+  'local-reusable-workflow-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'uses' => './.github/workflows/reusable.yml',
+        'timeout-minutes' => 5,
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1'
+)
+add_case.call(
+  'reusable-workflow-with-timeout-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'uses' => external_reusable_reference,
+        'timeout-minutes' => 5,
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1'
+)
+add_case.call(
+  'reusable-workflow-without-timeout-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: { 'unsafe' => { 'uses' => external_reusable_reference, 'permissions' => { 'contents' => 'read' } } }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1',
+  'must declare timeout-minutes'
+)
+add_case.call(
+  'reusable-workflow-with-inputs-forbidden',
+  workflow_yaml(
+    safe_sha,
+    jobs: {
+      'unsafe' => {
+        'uses' => external_reusable_reference,
+        'with' => { 'mode' => 'safe' },
+        'needs' => ['prepare'],
+        'permissions' => { 'contents' => 'read' }
+      }
+    }
+  ),
+  false,
+  'reusable workflow calls are forbidden in policy v1',
+  'must declare timeout-minutes'
 )
 
 current_category = :malformed_step_structure_cases
@@ -691,15 +849,6 @@ add_case.call(
   'action is not pinned'
 )
 add_case.call(
-  'floating-job-action',
-  workflow_yaml(
-    safe_sha,
-    jobs: { 'unsafe' => { 'uses' => 'actions/reusable-workflows/.github/workflows/reuse.yml@main', 'timeout-minutes' => 5 } }
-  ),
-  false,
-  'reusable workflow is not pinned'
-)
-add_case.call(
   'docker-tag',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => 'docker://alpine:3.20' }]) }),
   false,
@@ -736,15 +885,6 @@ add_case.call(
 add_case.call(
   'local-javascript-action',
   workflow_yaml(safe_sha, jobs: { 'unsafe' => standard_job(safe_sha, 'steps' => [{ 'uses' => './.github/actions/javascript' }]) }),
-  false,
-  'local actions and local reusable workflows are forbidden in policy v1'
-)
-add_case.call(
-  'local-reusable-workflow',
-  workflow_yaml(
-    safe_sha,
-    jobs: { 'unsafe' => { 'uses' => './.github/workflows/reusable.yml', 'timeout-minutes' => 5 } }
-  ),
   false,
   'local actions and local reusable workflows are forbidden in policy v1'
 )
@@ -898,7 +1038,7 @@ add_case.call(
     }
   ),
   false,
-  'must not use secrets: inherit'
+  'must not declare or pass secrets'
 )
 add_case.call(
   'local-reusable-secrets-inherit',
@@ -914,7 +1054,7 @@ add_case.call(
     }
   ),
   false,
-  'must not use secrets: inherit'
+  'must not declare or pass secrets'
 )
 add_case.call(
   'production-secret',
@@ -995,7 +1135,7 @@ add_case.call(
     }
   ),
   false,
-  'must not use secrets: inherit'
+  'must not declare or pass secrets'
 )
 add_case.call(
   'local-reusable-workflow-environment-secret',
@@ -1313,7 +1453,7 @@ add_case.call('malformed-yaml', "name: [broken\n", false, 'invalid YAML')
 
 policy_case_failures = []
 Dir.mktmpdir('graylum-workflow-policy-') do |root|
-  cases.each do |name, (content, should_pass, expected_error)|
+  cases.each do |name, (content, should_pass, expected_error, forbidden_error)|
     directory = File.join(root, name)
     unless content == :missing_workflow_directory
       FileUtils.mkdir_p(directory)
@@ -1335,9 +1475,11 @@ Dir.mktmpdir('graylum-workflow-policy-') do |root|
     end
     _stdout, stderr, status = Open3.capture3('ruby', checker, directory)
     actual = status.success?
-    next if actual == should_pass && (expected_error.nil? || stderr.include?(expected_error))
+    expected_error_present = expected_error.nil? || stderr.include?(expected_error)
+    forbidden_error_absent = forbidden_error.nil? || !stderr.include?(forbidden_error)
+    next if actual == should_pass && expected_error_present && forbidden_error_absent
 
-    policy_case_failures << "#{name}: expected pass=#{should_pass} and error=#{expected_error.inspect}, got pass=#{actual}: #{stderr}"
+    policy_case_failures << "#{name}: expected pass=#{should_pass}, error=#{expected_error.inspect}, and no error=#{forbidden_error.inspect}; got pass=#{actual}: #{stderr}"
   end
 end
 
