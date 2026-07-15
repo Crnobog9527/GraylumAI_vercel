@@ -405,6 +405,48 @@ add_case.call(
   'ci.yml: required pull_request branches must use only allowed literal branches'
 )
 add_case.call(
+  'required-pr-tags-only',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'tags' => ['v*'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use tags'
+)
+add_case.call(
+  'required-pr-tags-ignore-only',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(safe_sha, events: { 'pull_request' => { 'tags-ignore' => ['v*'] }, 'push' => nil })
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use tags-ignore'
+)
+add_case.call(
+  'required-pr-tags-with-branches',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['staging'], 'tags' => ['v*'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use tags'
+)
+add_case.call(
+  'required-pr-tags-ignore-with-branches',
+  required_files.call(
+    'ci.yml',
+    workflow_yaml(
+      safe_sha,
+      events: { 'pull_request' => { 'branches' => ['staging'], 'tags-ignore' => ['v*'] }, 'push' => nil }
+    )
+  ),
+  false,
+  'ci.yml: required pull_request trigger must not use tags-ignore'
+)
+add_case.call(
   'required-push-tags-with-branches',
   required_files.call(
     'ci.yml',

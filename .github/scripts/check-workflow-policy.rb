@@ -91,11 +91,9 @@ def required_event_configuration_failures(file, event_name, configuration)
   elsif event_name == 'push' && configuration.key?('types')
     failures << "#{file}: required push trigger configuration is invalid"
   end
-  if event_name == 'push'
-    %w[tags tags-ignore].each do |forbidden_filter|
-      if configuration.key?(forbidden_filter)
-        failures << "#{file}: required push trigger must not use #{forbidden_filter}"
-      end
+  %w[tags tags-ignore].each do |forbidden_filter|
+    if configuration.key?(forbidden_filter)
+      failures << "#{file}: required #{event_name} trigger must not use #{forbidden_filter}"
     end
   end
 
