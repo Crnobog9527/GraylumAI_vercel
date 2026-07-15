@@ -269,8 +269,7 @@ jobs:
           report_path="$RUNNER_TEMP/gitleaks-replacement-report.json"
           trap 'rm -f -- "$report_path"' EXIT
           set +e
-          "$GITLEAKS_BINARY" git \
-            --source . \
+          "$GITLEAKS_BINARY" git . \
             --log-opts="$SCAN_FROM..$SCAN_TO" \
             --config .trusted-base-gitleaks/.gitleaks.toml \
             --redact=100 \
