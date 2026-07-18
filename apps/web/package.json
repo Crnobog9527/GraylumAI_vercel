@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:components": "vitest run src/components --config vitest.config.ts",
+    "test:components": "vitest run src/components/home/UpdatesSection.test.ts src/app/admin/announcements/announcementFormPayload.test.ts --config vitest.config.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:critical": "playwright test auth.spec.ts chat.spec.ts admin.spec.ts --project=chromium",

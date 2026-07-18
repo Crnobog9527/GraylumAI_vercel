@@ -16,7 +16,7 @@ interface AnnouncementPresentationInput {
 
 interface AnnouncementPresentationPayload {
   bannerStyle?: BannerStyle;
-  bannerLink?: string;
+  bannerLink?: string | null;
 }
 
 export const ANNOUNCEMENT_LINK_LABEL = '跳转链接（可选）';
@@ -30,7 +30,7 @@ export function buildAnnouncementPresentationPayload({
 
   return {
     bannerStyle: announcementType === 'banner' ? bannerStyle : undefined,
-    bannerLink: normalizedLink || undefined,
+    bannerLink: normalizedLink || null,
   };
 }
 

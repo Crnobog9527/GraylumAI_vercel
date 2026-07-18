@@ -26,7 +26,7 @@ describe('admin announcement presentation payload', () => {
       buildAnnouncementPresentationPayload({
         announcementType: 'banner',
         bannerStyle: 'warning',
-        bannerLink: 'https://example.com/banner',
+        bannerLink: '  https://example.com/banner  ',
       }),
     ).toEqual({
       bannerStyle: 'warning',
@@ -34,7 +34,7 @@ describe('admin announcement presentation payload', () => {
     });
   });
 
-  it('submits a blank homepage link as undefined', () => {
+  it('normalizes a blank link to null when creating an announcement', () => {
     expect(
       buildAnnouncementPresentationPayload({
         announcementType: 'homepage',
@@ -43,7 +43,25 @@ describe('admin announcement presentation payload', () => {
       }),
     ).toEqual({
       bannerStyle: undefined,
-      bannerLink: undefined,
+      bannerLink: null,
+    });
+  });
+
+  it('submits null when an existing homepage link is cleared', () => {
+    const bannerLink = getAnnouncementLinkFormValue(
+      'https://example.com/existing-homepage',
+    );
+
+    expect(bannerLink).toBe('https://example.com/existing-homepage');
+    expect(
+      buildAnnouncementPresentationPayload({
+        announcementType: 'homepage',
+        bannerStyle: 'info',
+        bannerLink: '   ',
+      }),
+    ).toEqual({
+      bannerStyle: undefined,
+      bannerLink: null,
     });
   });
 
@@ -62,5 +80,10 @@ describe('admin announcement presentation payload', () => {
       bannerStyle: undefined,
       bannerLink: 'https://example.com/existing-homepage',
     });
+  });
+
+  it('maps absent database links to an empty form value', () => {
+    expect(getAnnouncementLinkFormValue(null)).toBe('');
+    expect(getAnnouncementLinkFormValue(undefined)).toBe('');
   });
 });
