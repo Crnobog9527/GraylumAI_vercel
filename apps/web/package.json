@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:components": "vitest run src/components --config vitest.config.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:critical": "playwright test auth.spec.ts chat.spec.ts admin.spec.ts --project=chromium",
@@ -86,6 +87,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^10.4.0",
     "tailwindcss": "^4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   }
 }
