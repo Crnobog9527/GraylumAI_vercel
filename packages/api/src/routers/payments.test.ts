@@ -56,6 +56,9 @@ function createSingleQueryBuilder(result: Promise<unknown>) {
     single() {
       return result;
     },
+    maybeSingle() {
+      return result;
+    },
   };
 }
 
@@ -3116,5 +3119,244 @@ describe('paymentsRouter error sanitization', () => {
     expect(metadataJson).not.toContain('in_test_rpc_failure');
     expect(metadataJson).not.toContain('cus_test_sync');
     expect(metadataJson).not.toContain('user@example.com');
+  });
+});
+
+describe('createCheckoutSession catalog fail-closed guards', () => {
+  const packageId = '123e4567-e89b-42d3-a456-426614174000';
+  const planId = '123e4567-e89b-42d3-a456-426614174111';
+
+  beforeEach(() => {
+    stripeState.assertStripeCheckoutConfigured.mockReset();
+    stripeState.getOrCreateStripeCustomerId.mockReset().mockResolvedValue('cus_test_guard');
+    stripeState.getStripeAppUrl.mockReset().mockReturnValue('http://localhost:3000');
+    stripeState.getStripeClient.mockReset();
+    stripeState.buildStripeMetadata.mockReset().mockReturnValue({});
+    stripeState.calculateDiscountedAmountCents.mockReset().mockReturnValue({
+      baseAmountCents: 1000,
+      discountedAmountCents: 1000,
+      normalizedDiscount: 100,
+    });
+  });
+
+  function createGuardHarness(options: {
+    kind: 'credit_package' | 'membership_plan';
+    profileResult?: Promise<unknown>;
+    profileResults?: Promise<unknown>[];
+    itemResult?: Promise<unknown>;
+    factsResult?: Promise<unknown>;
+  }) {
+    const sessionCreate = vi.fn();
+    const orderInserts: unknown[] = [];
+    stripeState.getStripeClient.mockReturnValue({
+      checkout: { sessions: { create: sessionCreate } },
+    });
+
+    const profileResult = options.profileResult ?? Promise.resolve({
+      data: {
+        email: 'user@example.com',
+        nickname: 'User',
+        membership_level: 'free',
+      },
+      error: null,
+    });
+    const itemResult = options.itemResult ?? Promise.resolve({
+      data: options.kind === 'credit_package'
+        ? {
+            id: packageId,
+            name: 'Credits',
+            active: 'true',
+            stripe_price_id: 'price_test_package',
+            price: 1000,
+          }
+        : {
+            id: planId,
+            name: 'Pro',
+            level: 'pro',
+            is_active: 'true',
+            stripe_monthly_price_id: 'price_test_monthly',
+            stripe_yearly_price_id: 'price_test_yearly',
+            monthly_price: 9900,
+            yearly_price: 99900,
+          },
+      error: null,
+    });
+    const factsResult = options.factsResult
+      ?? Promise.resolve({ data: null, error: null });
+    let profileReadCount = 0;
+
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          const result = options.profileResults
+            ? options.profileResults[Math.min(profileReadCount, options.profileResults.length - 1)]
+            : profileResult;
+          profileReadCount += 1;
+          return createSingleQueryBuilder(result);
+        }
+
+        if (table === 'credit_packages' || table === 'membership_plans') {
+          return createSingleQueryBuilder(itemResult);
+        }
+
+        if (table === 'user_subscriptions' || table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(factsResult);
+        }
+
+        throw new Error(`Unexpected guard table ${table}`);
+      },
+    };
+    const supabaseAdmin = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(Promise.resolve({
+            data: {
+              id: 'user-1',
+              role: 'user',
+              status: 'active',
+              email: 'user@example.com',
+              nickname: 'User',
+              membership_level: 'free',
+            },
+            error: null,
+          }));
+        }
+
+        if (table === 'payment_orders') {
+          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
+        }
+
+        throw new Error(`Unexpected guard admin table ${table}`);
+      },
+    };
+
+    return {
+      caller: createProtectedCaller({ supabase, supabaseAdmin }),
+      sessionCreate,
+      orderInserts,
+    };
+  }
+
+  function expectNoCheckoutWrites(harness: {
+    sessionCreate: ReturnType<typeof vi.fn>;
+    orderInserts: unknown[];
+  }) {
+    expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
+    expect(harness.sessionCreate).not.toHaveBeenCalled();
+    expect(harness.orderInserts).toHaveLength(0);
+  }
+
+  it.each([
+    [
+      'database error',
+      () => Promise.resolve({ data: null, error: { code: '42501' } }),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+    [
+      'network rejection',
+      () => Promise.reject(new Error('network unavailable')),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+  ])('returns unavailable for a profile %s before Stripe or order writes', async (
+    _caseName,
+    createProfileResult,
+    code,
+    message,
+  ) => {
+    const failingResult = createProfileResult();
+    const harness = createGuardHarness({
+      kind: 'credit_package',
+      profileResult: failingResult,
+      profileResults: _caseName === 'network rejection'
+        ? [
+            Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                email: 'user@example.com',
+                nickname: 'User',
+                membership_level: 'free',
+              },
+              error: null,
+            }),
+            failingResult,
+          ]
+        : undefined,
+    });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'credit_package',
+      packageId,
+    })).rejects.toMatchObject<Partial<TRPCError>>({ code, message });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it('keeps successful profile not-found distinct from profile read failure', async () => {
+    const harness = createGuardHarness({
+      kind: 'credit_package',
+      profileResult: Promise.resolve({ data: null, error: null }),
+    });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'credit_package',
+      packageId,
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'NOT_FOUND',
+      message: '用户资料不存在，无法创建支付会话',
+    });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it.each([
+    ['database error', Promise.resolve({ data: null, error: { code: '57014' } }), 'SERVICE_UNAVAILABLE', '积分包服务暂不可用，请稍后重试'],
+    ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '积分包不存在'],
+    ['inactive', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'false', stripe_price_id: 'price_test_package', price: 1000 }, error: null }), 'BAD_REQUEST', '该积分包当前未上架'],
+    ['Price missing', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: null, price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
+    ['invalid amount', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: 'price_test_package', price: null }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
+  ])('fails closed for credit package %s', async (_caseName, itemResult, code, message) => {
+    const harness = createGuardHarness({ kind: 'credit_package', itemResult });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'credit_package',
+      packageId,
+    })).rejects.toMatchObject<Partial<TRPCError>>({ code, message });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it.each([
+    ['database error', Promise.resolve({ data: null, error: { code: '42501' } }), 'SERVICE_UNAVAILABLE', '会员套餐服务暂不可用，请稍后重试'],
+    ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '会员套餐不存在'],
+    ['inactive', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'false', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐当前未启用'],
+    ['Price missing', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: null, stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
+    ['invalid amount', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: null, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
+  ])('fails closed for membership plan %s', async (_caseName, itemResult, code, message) => {
+    const harness = createGuardHarness({ kind: 'membership_plan', itemResult });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'membership_plan',
+      planId,
+      billingCycle: 'monthly',
+    })).rejects.toMatchObject<Partial<TRPCError>>({ code, message });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it('fails closed when eligibility facts cannot be read', async () => {
+    const harness = createGuardHarness({
+      kind: 'membership_plan',
+      factsResult: Promise.resolve({ data: null, error: { code: '42501' } }),
+    });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'membership_plan',
+      planId,
+      billingCycle: 'monthly',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '会员状态暂不可用，请稍后重试。',
+    });
+    expectNoCheckoutWrites(harness);
   });
 });

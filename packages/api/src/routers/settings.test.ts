@@ -1,10 +1,20 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../services/stripe', () => ({
+  isStripeCheckoutConfigured: () => true,
+}));
 import { getPublicReadClient, settingsRouter } from './settings';
 
 function createQueryBuilder(result: Promise<unknown>) {
   return {
     select() {
+      return this;
+    },
+    eq() {
+      return this;
+    },
+    order() {
       return this;
     },
     in() {
@@ -15,6 +25,49 @@ function createQueryBuilder(result: Promise<unknown>) {
     finally: result.finally.bind(result),
   };
 }
+
+function createPublicCatalogCaller(table: string, result: Promise<unknown>) {
+  return settingsRouter.createCaller({
+    supabase: {},
+    supabasePublic: {
+      from(actualTable: string) {
+        expect(actualTable).toBe(table);
+        return createQueryBuilder(result);
+      },
+    },
+    supabaseAdmin: {},
+    hasSupabaseAdminPrivileges: false,
+  } as any);
+}
+
+const validCreditPackage = {
+  id: '123e4567-e89b-42d3-a456-426614174000',
+  name: 'Starter credits',
+  price: 1200,
+  credits_amount: 1500,
+  bonus_credits: 100,
+  is_popular: 'true',
+  sort_order: 1,
+  stripe_price_id: 'price_test_package',
+};
+
+const validMembershipPlan = {
+  id: '123e4567-e89b-42d3-a456-426614174111',
+  name: 'Pro',
+  level: 'pro',
+  is_active: 'true',
+  monthly_price: 9900,
+  yearly_price: 99900,
+  monthly_credits: 1000,
+  monthly_bonus_credits: 100,
+  yearly_credits: 12000,
+  yearly_bonus_credits: 1200,
+  package_discount: 90,
+  history_retention_days: 30,
+  features: ['Feature A'],
+  stripe_monthly_price_id: 'price_test_monthly',
+  stripe_yearly_price_id: 'price_test_yearly',
+};
 
 describe('getPublicReadClient', () => {
   it('uses the public client even when admin credentials are configured', () => {
@@ -223,5 +276,111 @@ describe('getPublicReadClient', () => {
       { key: 'site_name', value: 'GraylumAI' },
       { key: 'support_email', value: 'support@example.com' },
     ]);
+  });
+});
+
+describe('public catalog availability', () => {
+  it('returns a validated non-empty credit package catalog', async () => {
+    const caller = createPublicCatalogCaller(
+      'credit_packages',
+      Promise.resolve({ data: [validCreditPackage], error: null }),
+    );
+
+    await expect(caller.getCreditPackages()).resolves.toEqual([{
+      id: validCreditPackage.id,
+      name: validCreditPackage.name,
+      credits: 1500,
+      bonus_credits: 100,
+      price: 12,
+      is_popular: true,
+      checkout_ready: true,
+    }]);
+  });
+
+  it('returns [] only for a successful empty active credit package catalog', async () => {
+    const caller = createPublicCatalogCaller(
+      'credit_packages',
+      Promise.resolve({ data: [], error: null }),
+    );
+
+    await expect(caller.getCreditPackages()).resolves.toEqual([]);
+  });
+
+  it('keeps a valid credit package visible when its Stripe Price is missing', async () => {
+    const caller = createPublicCatalogCaller(
+      'credit_packages',
+      Promise.resolve({
+        data: [{ ...validCreditPackage, stripe_price_id: null }],
+        error: null,
+      }),
+    );
+
+    await expect(caller.getCreditPackages()).resolves.toEqual([
+      expect.objectContaining({
+        id: validCreditPackage.id,
+        price: 12,
+        checkout_ready: false,
+      }),
+    ]);
+  });
+
+  it.each([
+    ['RLS denial', () => Promise.resolve({ data: null, error: { code: '42501' } })],
+    ['query timeout', () => Promise.resolve({ data: null, error: { code: '57014' } })],
+    ['missing table', () => Promise.resolve({ data: null, error: { code: '42P01' } })],
+    ['null successful payload', () => Promise.resolve({ data: null, error: null })],
+    ['invalid row', () => Promise.resolve({ data: [{ ...validCreditPackage, price: null }], error: null })],
+    ['network rejection', () => Promise.reject(new Error('network unavailable'))],
+  ])('marks credit packages unavailable for %s', async (_caseName, createResult) => {
+    const caller = createPublicCatalogCaller('credit_packages', createResult());
+
+    await expect(caller.getCreditPackages()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '套餐服务暂不可用，请稍后重试',
+    });
+  });
+
+  it('returns a validated membership catalog and preserves cycle-specific Price readiness', async () => {
+    const caller = createPublicCatalogCaller(
+      'membership_plans',
+      Promise.resolve({
+        data: [{ ...validMembershipPlan, stripe_yearly_price_id: null }],
+        error: null,
+      }),
+    );
+
+    await expect(caller.getMembershipPlans()).resolves.toEqual([
+      expect.objectContaining({
+        id: validMembershipPlan.id,
+        price: { monthly: 99, yearly: 999 },
+        features: ['Feature A'],
+        checkoutReady: { monthly: true, yearly: false },
+      }),
+    ]);
+  });
+
+  it('returns [] only for a successful catalog with no active membership plans', async () => {
+    const caller = createPublicCatalogCaller(
+      'membership_plans',
+      Promise.resolve({ data: [], error: null }),
+    );
+
+    await expect(caller.getMembershipPlans()).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['RLS denial', () => Promise.resolve({ data: null, error: { code: '42501' } })],
+    ['query timeout', () => Promise.resolve({ data: null, error: { code: '57014' } })],
+    ['null successful payload', () => Promise.resolve({ data: null, error: null })],
+    ['invalid price', () => Promise.resolve({ data: [{ ...validMembershipPlan, monthly_price: null }], error: null })],
+    ['invalid features', () => Promise.resolve({ data: [{ ...validMembershipPlan, features: 'not-an-array' }], error: null })],
+    ['network rejection', () => Promise.reject(new Error('network unavailable'))],
+  ])('marks membership plans unavailable for %s', async (_caseName, createResult) => {
+    const caller = createPublicCatalogCaller('membership_plans', createResult());
+
+    await expect(caller.getMembershipPlans()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '套餐服务暂不可用，请稍后重试',
+    });
   });
 });

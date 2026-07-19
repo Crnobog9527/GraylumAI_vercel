@@ -1598,6 +1598,64 @@ describe('adminRouter lightweight admin dashboards', () => {
     expect(cleanupState.getCleanupStats).not.toHaveBeenCalled();
     expect(cleanupState.getLatestScheduledJobRun).not.toHaveBeenCalled();
   });
+
+  it('fails the settings dashboard instead of rendering defaults when either query fails', async () => {
+    const adminSupabase = {
+      from(table: string) {
+        const result = Promise.resolve(
+          table === 'system_settings'
+            ? { data: null, error: { code: '42501', message: 'permission denied' } }
+            : { data: [], error: null },
+        );
+        return createAwaitableQueryBuilder(result);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getSettingsDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取系统设置失败，请稍后重试',
+    });
+  });
+
+  it('rejects null dashboard data instead of treating it as zero plans', async () => {
+    const adminSupabase = {
+      from(table: string) {
+        return createAwaitableQueryBuilder(Promise.resolve({
+          data: table === 'credit_packages' ? null : [],
+          error: null,
+        }));
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getPackagesDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取套餐列表失败，请稍后重试',
+    });
+  });
+
+  it('fails finance stats when the package query fails instead of returning zero packages', async () => {
+    const adminSupabase = {
+      from(table: string) {
+        const result = Promise.resolve(
+          table === 'credit_packages'
+            ? { data: null, error: { code: '57014', message: 'query timeout' } }
+            : { data: [], error: null },
+        );
+        return createAwaitableQueryBuilder(result);
+      },
+    };
+
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取积分包财务统计失败，请稍后重试',
+    });
+  });
 });
 
 describe('adminRouter remaining performance-sensitive queries', () => {

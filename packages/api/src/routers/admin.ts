@@ -1320,9 +1320,16 @@ export const adminRouter = router({
         throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
       }
 
+      if (!Array.isArray(packagesResult.data) || !Array.isArray(membershipPlansResult.data)) {
+        throw createAdminOperationError(
+          '读取套餐列表',
+          new Error('Admin packages dashboard returned invalid data'),
+        );
+      }
+
       return {
-        packages: packagesResult.data ?? [],
-        membershipPlans: membershipPlansResult.data ?? [],
+        packages: packagesResult.data,
+        membershipPlans: membershipPlansResult.data,
       };
     }),
 
@@ -2011,45 +2018,88 @@ export const adminRouter = router({
    */
   getFinanceStats: adminProcedure
     .query(async ({ ctx }) => {
-      const { data: creditTransactions } = await ctx.supabase
+      const { data: creditTransactions, error: creditTransactionsError } = await ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at, description')
         .order('created_at', { ascending: false });
 
-      const { data: packages } = await ctx.supabase
+      if (creditTransactionsError) {
+        throw createAdminOperationError('读取财务统计', creditTransactionsError);
+      }
+
+      const { data: packages, error: packagesError } = await ctx.supabase
         .from('credit_packages')
         .select('*');
 
-      const { data: users } = await ctx.supabase
+      if (packagesError) {
+        throw createAdminOperationError('读取积分包财务统计', packagesError);
+      }
+
+      if (!Array.isArray(packages)) {
+        throw createAdminOperationError(
+          '读取积分包财务统计',
+          new Error('Admin finance packages query returned invalid data'),
+        );
+      }
+
+      const { data: users, error: usersError } = await ctx.supabase
         .from('profiles')
         .select('credits, created_at');
 
-      const { data: models } = await ctx.supabase
+      if (usersError) {
+        throw createAdminOperationError('读取财务统计', usersError);
+      }
+
+      const { data: models, error: modelsError } = await ctx.supabase
         .from('ai_models')
         .select('*')
         .order('name', { ascending: true });
 
-      const { data: conversations } = await ctx.supabase
+      if (modelsError) {
+        throw createAdminOperationError('读取财务统计', modelsError);
+      }
+
+      const { data: conversations, error: conversationsError } = await ctx.supabase
         .from('conversations')
         .select('id, model_id, created_at');
 
-      const { data: tokenStats } = await ctx.supabase
+      if (conversationsError) {
+        throw createAdminOperationError('读取财务统计', conversationsError);
+      }
+
+      const { data: tokenStats, error: tokenStatsError } = await ctx.supabase
         .from('token_stats')
         .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
 
-      const { data: paymentOrders } = await ctx.supabase
+      if (tokenStatsError) {
+        throw createAdminOperationError('读取财务统计', tokenStatsError);
+      }
+
+      const { data: paymentOrders, error: paymentOrdersError } = await ctx.supabase
         .from('payment_orders')
         .select('amount_total, currency, status, payment_status, created_at');
 
-      const { data: usageLogs } = await ctx.supabase
+      if (paymentOrdersError) {
+        throw createAdminOperationError('读取财务统计', paymentOrdersError);
+      }
+
+      const { data: usageLogs, error: usageLogsError } = await ctx.supabase
         .from('ai_usage_logs')
         .select('status, created_at');
 
-      const { data: billingHistory } = await ctx.supabase
+      if (usageLogsError) {
+        throw createAdminOperationError('读取财务统计', usageLogsError);
+      }
+
+      const { data: billingHistory, error: billingHistoryError } = await ctx.supabase
         .from('billing_history')
         .select('operation_type, amount, created_at, metadata');
 
-      const { data: settings } = await ctx.supabase
+      if (billingHistoryError) {
+        throw createAdminOperationError('读取财务统计', billingHistoryError);
+      }
+
+      const { data: settings, error: settingsError } = await ctx.supabase
         .from('system_settings')
         .select('*')
         .in('key', [
@@ -2058,6 +2108,10 @@ export const adminRouter = router({
           'billing_credits_per_usd',
           'billing_token_price_multiplier',
         ]);
+
+      if (settingsError) {
+        throw createAdminOperationError('读取财务统计', settingsError);
+      }
 
       // Calculate overall stats
       const now = new Date();
@@ -2335,11 +2389,18 @@ export const adminRouter = router({
         throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
       }
 
+      if (!Array.isArray(systemSettingsResult.data) || !Array.isArray(membershipPlansResult.data)) {
+        throw createAdminOperationError(
+          '读取设置页数据',
+          new Error('Admin settings dashboard returned invalid data'),
+        );
+      }
+
       return {
         systemSettings: Object.fromEntries(
-          (systemSettingsResult.data ?? []).map((setting) => [setting.key, setting.value]),
+          systemSettingsResult.data.map((setting) => [setting.key, setting.value]),
         ),
-        membershipPlans: membershipPlansResult.data ?? [],
+        membershipPlans: membershipPlansResult.data,
       };
     }),
 

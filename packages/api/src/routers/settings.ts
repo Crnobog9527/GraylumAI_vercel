@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
-import { createSafeInternalError } from '../lib/publicError';
+import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 
 const USER_FACING_SYSTEM_SETTING_KEYS = [
@@ -25,6 +25,55 @@ const USER_FACING_SYSTEM_SETTING_KEYS = [
   'input_credits_per_1k',
   'output_credits_per_1k',
 ] as const;
+
+const creditPackageCatalogRowSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1),
+  price: z.number().int().nonnegative(),
+  credits_amount: z.number().int().positive(),
+  bonus_credits: z.number().int().nonnegative().nullable(),
+  is_popular: z.enum(['true', 'false']).nullable(),
+  sort_order: z.number().int().nonnegative(),
+  stripe_price_id: z.string().trim().min(1).nullable(),
+});
+
+const membershipPlanCatalogRowSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1),
+  level: z.enum(['free', 'pro', 'gold']),
+  is_active: z.literal('true'),
+  monthly_price: z.number().int().nonnegative(),
+  yearly_price: z.number().int().nonnegative(),
+  monthly_credits: z.number().int().nonnegative().nullable(),
+  monthly_bonus_credits: z.number().int().nonnegative().nullable(),
+  yearly_credits: z.number().int().nonnegative().nullable(),
+  yearly_bonus_credits: z.number().int().nonnegative().nullable(),
+  package_discount: z.number().int().min(0).max(100).nullable(),
+  history_retention_days: z.number().int().positive().nullable(),
+  features: z.array(z.string()).nullable(),
+  stripe_monthly_price_id: z.string().trim().min(1).nullable(),
+  stripe_yearly_price_id: z.string().trim().min(1).nullable(),
+}).passthrough();
+
+const CATALOG_UNAVAILABLE_MESSAGE = '套餐服务暂不可用，请稍后重试';
+
+function parseCatalogRows<T>(
+  value: unknown,
+  schema: z.ZodType<T>,
+  catalog: 'credit_packages' | 'membership_plans',
+): T[] {
+  const result = z.array(schema).safeParse(value);
+
+  if (!result.success) {
+    logger.warn('billing', 'settings_catalog_parse_failed', {
+      catalog,
+      issueCount: result.error.issues.length,
+    });
+    throw createSafeServiceUnavailableError(result.error, CATALOG_UNAVAILABLE_MESSAGE);
+  }
+
+  return result.data;
+}
 
 function reduceSettings(data: Array<{ key: string; value: unknown }>) {
   return data.reduce((acc: Record<string, unknown>, setting) => ({
@@ -182,22 +231,39 @@ export const settingsRouter = router({
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
     const stripeReady = isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
-    const { data, error } = await readClient
-      .from('credit_packages')
-      .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order, stripe_price_id')
-      .eq('active', 'true')
-      .order('sort_order', { ascending: true })
-      .order('price', { ascending: true });
+    let result;
+
+    try {
+      result = await readClient
+        .from('credit_packages')
+        .select('id, name, price, credits_amount, bonus_credits, is_popular, sort_order, stripe_price_id')
+        .eq('active', 'true')
+        .order('sort_order', { ascending: true })
+        .order('price', { ascending: true });
+    } catch (error) {
+      logger.warn('billing', 'settings_credit_packages_fetch_failed', {
+        failureType: 'request_rejected',
+      });
+      throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
+    }
+
+    const { data, error } = result;
 
     if (error) {
       logger.warn('billing', 'settings_credit_packages_fetch_failed', {
         code: error.code,
       });
-      return [];
+      throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
     }
 
+    const packages = parseCatalogRows(
+      data,
+      creditPackageCatalogRowSchema,
+      'credit_packages',
+    );
+
     // 映射字段名以兼容前端
-    return (data ?? []).map(pkg => ({
+    return packages.map(pkg => ({
       id: pkg.id,
       name: pkg.name,
       credits: pkg.credits_amount,
@@ -215,21 +281,38 @@ export const settingsRouter = router({
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
     const stripeReady = isStripeCheckoutConfigured();
     const readClient = getPublicReadClient(ctx);
-    const { data, error } = await readClient
-      .from('membership_plans')
-      .select('*')
-      .eq('is_active', 'true')
-      .order('sort_order', { ascending: true });
+    let result;
 
-    if (error) {
-      logger.warn('system', 'settings_membership_plans_fetch_failed', {
-        code: error.code,
+    try {
+      result = await readClient
+        .from('membership_plans')
+        .select('*')
+        .eq('is_active', 'true')
+        .order('sort_order', { ascending: true });
+    } catch (error) {
+      logger.warn('billing', 'settings_membership_plans_fetch_failed', {
+        failureType: 'request_rejected',
       });
-      return [];
+      throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
     }
 
+    const { data, error } = result;
+
+    if (error) {
+      logger.warn('billing', 'settings_membership_plans_fetch_failed', {
+        code: error.code,
+      });
+      throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
+    }
+
+    const plans = parseCatalogRows(
+      data,
+      membershipPlanCatalogRowSchema,
+      'membership_plans',
+    );
+
     // 映射字段名以兼容前端
-    return (data ?? []).map(plan => ({
+    return plans.map(plan => ({
       id: plan.id,
       name: plan.name,
       level: plan.level,
