@@ -21,6 +21,12 @@ const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business'
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
 const moduleBadgeTypeSchema = z.enum(['new', 'hot', 'recommend']).nullable().optional();
 const moduleBooleanSchema = z.boolean();
+const announcementLinkInputSchema = z
+  .string()
+  .trim()
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
 const promptBatchPatchSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   fullDescription: z.string().max(5000).nullable().optional(),
@@ -1493,7 +1499,7 @@ export const adminRouter = router({
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
       announcementType: z.enum(['homepage', 'banner']).default('homepage'),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      bannerLink: z.string().optional(),
+      bannerLink: announcementLinkInputSchema,
       icon: z.string().default('Megaphone'),
       iconColor: z.string().default('text-blue-500'),
       tag: z.string().optional(),
@@ -1511,7 +1517,7 @@ export const adminRouter = router({
           type: input.type,
           announcement_type: input.announcementType,
           banner_style: input.bannerStyle ?? input.type,
-          banner_link: input.bannerLink,
+          banner_link: input.bannerLink ?? null,
           icon: input.icon,
           icon_color: input.iconColor,
           tag: input.tag,
@@ -1543,7 +1549,7 @@ export const adminRouter = router({
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       announcementType: z.enum(['homepage', 'banner']).optional(),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      bannerLink: z.string().optional(),
+      bannerLink: announcementLinkInputSchema,
       icon: z.string().optional(),
       iconColor: z.string().optional(),
       tag: z.string().optional(),

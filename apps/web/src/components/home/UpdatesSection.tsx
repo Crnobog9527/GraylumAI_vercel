@@ -1,6 +1,7 @@
 'use client';
 
 import { Sparkles, Volume2, Wrench, Megaphone, Gift, Bell, AlertTriangle, Info, Star, ArrowUpRight } from 'lucide-react';
+import Link from 'next/link';
 
 /**
  * 更新公告组件
@@ -40,11 +41,58 @@ interface Announcement {
   expire_date?: string;
   publish_date?: string;
   created_date?: string;
+  link_url?: string | null;
 }
 
 interface UpdatesSectionProps {
   announcements?: Announcement[];
   isLoading?: boolean;
+}
+
+interface AnnouncementLink {
+  href: string;
+  isExternal: boolean;
+}
+
+const INTERNAL_LINK_BASE = 'https://graylum.internal';
+
+export function resolveAnnouncementLink(linkUrl?: string | null): AnnouncementLink | null {
+  const href = linkUrl?.trim();
+
+  if (!href) {
+    return null;
+  }
+
+  if (href.startsWith('/') && !href.startsWith('//')) {
+    try {
+      const parsed = new URL(href, INTERNAL_LINK_BASE);
+
+      if (parsed.origin === INTERNAL_LINK_BASE) {
+        return {
+          href: `${parsed.pathname}${parsed.search}${parsed.hash}`,
+          isExternal: false,
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (!/^https?:\/\//i.test(href)) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(href);
+
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return { href: parsed.href, isExternal: true };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export default function UpdatesSection({ announcements = [], isLoading = false }: UpdatesSectionProps) {
@@ -129,6 +177,7 @@ export default function UpdatesSection({ announcements = [], isLoading = false }
         {announcements.slice(0, 3).map((item) => {
           const IconComponent = iconMap[item.icon || 'Megaphone'] || Megaphone;
           const tagStyle = tagColorMap[item.tag_color || 'blue'] || tagColorMap.blue;
+          const announcementLink = resolveAnnouncementLink(item.link_url);
 
           let dateDisplay = '';
           if (item.expire_date) {
@@ -139,15 +188,8 @@ export default function UpdatesSection({ announcements = [], isLoading = false }
             dateDisplay = formatDate(item.created_date);
           }
 
-          return (
-            <div
-              key={item.id}
-              className="card card-clickable group p-8 flex flex-col h-full"
-              style={{
-                borderRadius: 'var(--radius-2xl)',
-                contain: 'layout paint',
-              }}
-            >
+          const cardContent = (
+            <>
               {/* 头部 - 图标和标签 */}
               <div className="flex items-center justify-between mb-6">
                 <div
@@ -205,12 +247,55 @@ export default function UpdatesSection({ announcements = [], isLoading = false }
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-disabled)' }}>
                   {dateDisplay}
                 </span>
-                <ArrowUpRight
-                  className="h-4 w-4 transition-colors duration-300"
-                  style={{ color: 'var(--text-disabled)' }}
-                />
+                {announcementLink && (
+                  <ArrowUpRight
+                    aria-hidden="true"
+                    className="h-4 w-4 transition-colors duration-300"
+                    style={{ color: 'var(--text-disabled)' }}
+                  />
+                )}
               </div>
-            </div>
+            </>
+          );
+
+          const cardClassName = `card p-8 flex flex-col h-full${announcementLink ? ' card-clickable group' : ''}`;
+          const cardStyle = {
+            borderRadius: 'var(--radius-2xl)',
+            contain: 'layout paint',
+          } as const;
+
+          if (!announcementLink) {
+            return (
+              <div key={item.id} className={cardClassName} style={cardStyle}>
+                {cardContent}
+              </div>
+            );
+          }
+
+          if (announcementLink.isExternal) {
+            return (
+              <a
+                key={item.id}
+                href={announcementLink.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cardClassName}
+                style={cardStyle}
+              >
+                {cardContent}
+              </a>
+            );
+          }
+
+          return (
+            <Link
+              key={item.id}
+              href={announcementLink.href}
+              className={cardClassName}
+              style={cardStyle}
+            >
+              {cardContent}
+            </Link>
           );
         })}
       </div>
