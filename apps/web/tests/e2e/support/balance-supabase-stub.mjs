@@ -17,6 +17,10 @@ const user = {
   user_metadata: { email_verified: true },
   created_at: '2026-01-01T00:00:00.000Z',
 };
+const requestCounts = {
+  '/auth/v1/user': 0,
+  '/rest/v1/system_settings': 0,
+};
 
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', origin);
@@ -27,13 +31,21 @@ const server = createServer((request, response) => {
     return;
   }
 
+  if (url.pathname === '/metrics') {
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ requests: requestCounts }));
+    return;
+  }
+
   if (url.pathname === '/auth/v1/user') {
+    requestCounts['/auth/v1/user'] += 1;
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(user));
     return;
   }
 
   if (url.pathname === '/rest/v1/system_settings') {
+    requestCounts['/rest/v1/system_settings'] += 1;
     response.writeHead(200, {
       'Content-Type': 'application/json',
       'Content-Range': '0-0/1',

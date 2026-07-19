@@ -172,4 +172,12 @@ test('fails closed on an unavailable refetch and retries without losing the prom
   await expect(prompt).toHaveValue('');
   await expect(page.getByText('本地测试回复')).toBeVisible();
   expect(streamRequestCount).toBe(1);
+
+  const metricsResponse = await page.request.get('http://127.0.0.1:54321/metrics');
+  expect(metricsResponse.ok()).toBe(true);
+  const metrics = await metricsResponse.json() as {
+    requests: Record<string, number>;
+  };
+  expect(metrics.requests['/auth/v1/user']).toBeGreaterThan(0);
+  expect(metrics.requests['/rest/v1/system_settings']).toBeGreaterThan(0);
 });
