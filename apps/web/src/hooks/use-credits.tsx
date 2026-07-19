@@ -6,7 +6,7 @@
 
 import { trpc } from '@/trpc/client';
 import { logClientDevError } from '@/lib/client-log';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 // ============================================================================
@@ -25,6 +25,69 @@ export const CREDIT_THRESHOLDS = {
 } as const;
 
 export type WarningLevel = 'none' | 'low' | 'very_low' | 'critical' | 'empty';
+export type CreditsBalanceStatus = 'loading' | 'ready' | 'unavailable';
+
+export interface CreditsBalanceState {
+  status: CreditsBalanceStatus;
+  credits: number | null;
+  creditsExpiringSoon: number | null;
+  creditsExpiryDate: string | null;
+  warningLevel: WarningLevel | null;
+}
+
+function isValidCredits(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0;
+}
+
+export function deriveCreditsBalanceState(input: {
+  data?: unknown;
+  error?: unknown;
+  isLoading?: boolean;
+}): CreditsBalanceState {
+  if (input.error) {
+    return {
+      status: 'unavailable',
+      credits: null,
+      creditsExpiringSoon: null,
+      creditsExpiryDate: null,
+      warningLevel: null,
+    };
+  }
+
+  const data = input.data && typeof input.data === 'object'
+    ? input.data as Record<string, unknown>
+    : null;
+  if (data && isValidCredits(data.credits)) {
+    return {
+      status: 'ready',
+      credits: data.credits,
+      creditsExpiringSoon: isValidCredits(data.creditsExpiringSoon) ? data.creditsExpiringSoon : 0,
+      creditsExpiryDate: typeof data.creditsExpiryDate === 'string' ? data.creditsExpiryDate : null,
+      warningLevel: getWarningLevel(data.credits),
+    };
+  }
+
+  if (input.isLoading) {
+    return {
+      status: 'loading',
+      credits: null,
+      creditsExpiringSoon: null,
+      creditsExpiryDate: null,
+      warningLevel: null,
+    };
+  }
+
+  return {
+    status: 'unavailable',
+    credits: null,
+    creditsExpiringSoon: null,
+    creditsExpiryDate: null,
+    warningLevel: null,
+  };
+}
 
 /**
  * 根据积分余额判断警告级别
@@ -98,23 +161,40 @@ export function useCreditsBalance(options?: { enabled?: boolean }) {
     refetchOnWindowFocus: true, // 窗口聚焦时刷新
   });
 
-  const credits = query.data?.credits ?? 0;
-  const warningLevel = getWarningLevel(credits);
+  const balanceState = deriveCreditsBalanceState({
+    data: query.data,
+    error: query.error,
+    isLoading: query.isLoading,
+  });
+  const refreshBalance = useCallback(async (): Promise<CreditsBalanceState> => {
+    try {
+      const result = await query.refetch();
+      return deriveCreditsBalanceState({
+        data: result.data,
+        error: result.error,
+        isLoading: false,
+      });
+    } catch (error) {
+      return deriveCreditsBalanceState({ error, isLoading: false });
+    }
+  }, [query.refetch]);
+  const isReady = balanceState.status === 'ready';
+  const warningLevel = balanceState.warningLevel;
 
   return {
-    credits,
-    creditsExpiringSoon: query.data?.creditsExpiringSoon ?? 0,
-    creditsExpiryDate: query.data?.creditsExpiryDate,
-    isLoading: query.isLoading,
+    ...balanceState,
+    isLoading: balanceState.status === 'loading',
+    isUnavailable: balanceState.status === 'unavailable',
     error: query.error,
-    refetch: query.refetch,
+    refetch: refreshBalance,
     // 预警相关
-    warningLevel,
-    warningColor: getWarningColor(warningLevel),
-    warningBgColor: getWarningBgColor(warningLevel),
-    warningBorderColor: getWarningBorderColor(warningLevel),
-    isLowBalance: warningLevel !== 'none',
-    canSendMessage: credits > CREDIT_THRESHOLDS.EMPTY,
+    warningColor: warningLevel ? getWarningColor(warningLevel) : 'var(--text-tertiary)',
+    warningBgColor: warningLevel ? getWarningBgColor(warningLevel) : 'var(--bg-secondary)',
+    warningBorderColor: warningLevel ? getWarningBorderColor(warningLevel) : 'var(--border-primary)',
+    isLowBalance: isReady && warningLevel !== 'none',
+    canSendMessage: isReady
+      && balanceState.credits !== null
+      && balanceState.credits > CREDIT_THRESHOLDS.EMPTY,
   };
 }
 
@@ -240,11 +320,20 @@ export function useCheckCredits(amount: number) {
     { enabled: amount > 0 }
   );
 
+  const status: CreditsBalanceStatus = query.error
+    ? 'unavailable'
+    : query.data
+      ? 'ready'
+      : query.isLoading
+        ? 'loading'
+        : 'unavailable';
+
   return {
-    sufficient: query.data?.sufficient ?? false,
-    currentCredits: query.data?.currentCredits ?? 0,
-    shortfall: query.data?.shortfall ?? 0,
-    isLoading: query.isLoading,
+    status,
+    sufficient: status === 'ready' ? query.data?.sufficient ?? null : null,
+    currentCredits: status === 'ready' ? query.data?.currentCredits ?? null : null,
+    shortfall: status === 'ready' ? query.data?.shortfall ?? null : null,
+    isLoading: status === 'loading',
   };
 }
 
@@ -256,15 +345,15 @@ export function useCheckCredits(amount: number) {
  * 积分显示组件
  */
 export function CreditsDisplay() {
-  const { credits, creditsExpiringSoon, isLoading, error } = useCreditsBalance();
+  const { credits, creditsExpiringSoon, status } = useCreditsBalance();
 
-  if (isLoading) return <div>加载中...</div>;
-  if (error) return <div>获取积分失败</div>;
+  if (status === 'loading') return <div>加载中...</div>;
+  if (status === 'unavailable' || credits === null) return <div>积分暂不可用</div>;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="text-2xl font-bold">{credits} 积分</div>
-      {creditsExpiringSoon > 0 && (
+      {creditsExpiringSoon !== null && creditsExpiringSoon > 0 && (
         <div className="text-sm text-orange-500">
           {creditsExpiringSoon} 积分即将过期
         </div>
@@ -284,9 +373,13 @@ export function ConsumeCreditsButton({
   serviceId: string;
 }) {
   const { deduct, isLoading, error } = useDeductCredits();
-  const { sufficient, shortfall } = useCheckCredits(amount);
+  const { status: balanceStatus, sufficient, shortfall } = useCheckCredits(amount);
 
   const handleConsume = async () => {
+    if (balanceStatus !== 'ready') {
+      alert('余额暂时无法验证，请重试');
+      return;
+    }
     if (!sufficient) {
       alert(`积分不足，还差 ${shortfall} 积分`);
       return;

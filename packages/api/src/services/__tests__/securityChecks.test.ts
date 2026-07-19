@@ -11,8 +11,96 @@ import {
   generateSignature,
   verifyTimestamp,
   verifyRequestSignature,
+  getUserBalance,
+  preAICallSecurityChecks,
   SIGNATURE_CONFIG,
 } from '../../middleware/securityChecks';
+
+function createBalanceSecurityContext(options: {
+  credits?: unknown;
+  data?: Record<string, unknown> | null;
+  error?: { code?: string; message?: string } | null;
+  thrown?: unknown;
+}) {
+  return {
+    userId: 'user-balance-test',
+    supabase: {
+      from: vi.fn(() => {
+        let selectedColumns = '';
+        const builder = {
+          select(columns: string) {
+            selectedColumns = columns;
+            return builder;
+          },
+          eq() {
+            return builder;
+          },
+          single() {
+            if (selectedColumns === 'status, role') {
+              return Promise.resolve({
+                data: { status: 'active', role: 'user' },
+                error: null,
+              });
+            }
+            if (options.thrown !== undefined) {
+              return Promise.reject(options.thrown);
+            }
+
+            return Promise.resolve({
+              data: 'data' in options ? options.data : { credits: options.credits },
+              error: options.error ?? null,
+            });
+          },
+        };
+
+        return builder;
+      }),
+    },
+  } as any;
+}
+
+describe('AI balance security preflight', () => {
+  it.each([
+    ['positive balance', { credits: 100 }, 100],
+    ['real zero balance', { credits: 0 }, 0],
+  ])('preserves %s', async (_label, options, expected) => {
+    await expect(getUserBalance(createBalanceSecurityContext(options))).resolves.toBe(expected);
+  });
+
+  it.each([
+    ['query error', { error: { code: '500', message: 'database unavailable' } }],
+    ['profile missing', { data: null }],
+    ['null balance', { credits: null }],
+    ['invalid balance', { credits: '100' }],
+    ['thrown network exception', { thrown: new TypeError('fetch failed') }],
+  ])('returns a safe service error for %s', async (_label, options) => {
+    await expect(getUserBalance(createBalanceSecurityContext(options))).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
+    });
+  });
+
+  it('keeps a real zero balance as the existing insufficient-credits result', async () => {
+    await expect(preAICallSecurityChecks(
+      createBalanceSecurityContext({ credits: 0 }),
+      1,
+      { skipRateLimit: true, skipCircuitBreaker: true },
+    )).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+  });
+
+  it('does not misreport a failed balance read as insufficient credits', async () => {
+    await expect(preAICallSecurityChecks(
+      createBalanceSecurityContext({ error: { code: '57014', message: 'timeout' } }),
+      1,
+      { skipRateLimit: true, skipCircuitBreaker: true },
+    )).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
+    });
+  });
+});
 
 // ============================================
 // Input Security Tests (Prompt Injection)

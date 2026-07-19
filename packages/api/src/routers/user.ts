@@ -2,8 +2,13 @@ import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
-import { createSafeInternalError } from '../lib/publicError';
+import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { countsAsCreditSpend } from '../services/creditLedger';
+import {
+  CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
+  classifyCreditBalanceFailure,
+  readCreditBalance,
+} from '../services/creditBalance';
 
 export const userRouter = router({
   getUserProfile: protectedProcedure.query(async ({ ctx }) => {
@@ -36,7 +41,7 @@ export const userRouter = router({
         full_name: displayName,
         avatar_url: null,
         role: 'user',
-        credits: 0,
+        credits: null,
         membership_level: 'free',
         status: 'active',
         auth_provider: ctx.authProvider,
@@ -77,21 +82,14 @@ export const userRouter = router({
     }),
 
   getUserCredits: protectedProcedure.query(async ({ ctx }) => {
-    const { data: userProfile, error } = await ctx.supabase
-      .from('profiles')
-      .select('credits')
-      .eq('id', ctx.profileId)
-      .single();
-
-    if (error) {
+    try {
+      return await readCreditBalance(ctx.supabase, ctx.profileId);
+    } catch (error) {
       logger.error('billing', 'user_credits_fetch_failed', {
-        code: error.code,
+        reason: classifyCreditBalanceFailure(error),
       });
-      // 返回默认值而不是抛出错误
-      return 0;
+      throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
     }
-
-    return userProfile?.credits ?? 0;
   }),
 
   /**

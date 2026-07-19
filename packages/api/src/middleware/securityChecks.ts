@@ -9,6 +9,12 @@ import { TRPCError } from '@trpc/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../lib/logger';
+import { createSafeServiceUnavailableError } from '../lib/publicError';
+import {
+  classifyCreditBalanceFailure,
+  CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
+  readCreditBalance,
+} from '../services/creditBalance';
 
 // ============================================
 // 类型定义
@@ -235,20 +241,15 @@ export async function checkConsumptionCircuitBreaker(
  * 获取用户余额
  */
 export async function getUserBalance(ctx: SecurityContext): Promise<number> {
-  const { data: profile, error } = await ctx.supabase
-    .from('profiles')
-    .select('credits')
-    .eq('id', ctx.userId)
-    .single();
-
-  if (error || !profile) {
-    throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: '用户资料不存在',
+  try {
+    return await readCreditBalance(ctx.supabase, ctx.userId);
+  } catch (error) {
+    logger.error('security', 'ai_preflight_balance_unavailable', {
+      reason: classifyCreditBalanceFailure(error),
     });
-  }
 
-  return profile.credits ?? 0;
+    throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
+  }
 }
 
 /**

@@ -20,6 +20,9 @@ const routeMocks = vi.hoisted(() => ({
   },
   filterAIOutput: vi.fn((text: string) => text),
   billingServiceConstructor: vi.fn(),
+  billingGetBalance: vi.fn(),
+  billingPreDeduct: vi.fn(),
+  billingRecordUsageLog: vi.fn(),
   calculateTokenCostWithPricing: vi.fn(),
   estimatePreDeductCredits: vi.fn(),
   getBillingRuntimeSettings: vi.fn(),
@@ -63,6 +66,18 @@ vi.mock('@repo/api/src/services/billing', () => {
   class BillingService {
     constructor(...args: unknown[]) {
       routeMocks.billingServiceConstructor(...args);
+    }
+
+    getBalance() {
+      return routeMocks.billingGetBalance();
+    }
+
+    preDeduct(...args: unknown[]) {
+      return routeMocks.billingPreDeduct(...args);
+    }
+
+    recordUsageLog(...args: unknown[]) {
+      return routeMocks.billingRecordUsageLog(...args);
     }
   }
 
@@ -143,6 +158,20 @@ function makeStreamRequest(body: Record<string, unknown>) {
   });
 }
 
+function makeAuthenticatedStreamRequest(body: Record<string, unknown>) {
+  return new Request('https://graylum.test/api/ai/stream', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer test-token',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message: 'balance failure should stop before providers',
+      ...body,
+    }),
+  });
+}
+
 async function callStreamRoute(body: Record<string, unknown>) {
   const response = await POST(makeStreamRequest(body) as any);
   const payload = await response.json() as { error?: string };
@@ -193,5 +222,68 @@ describe('ai stream route moduleId early validation', () => {
     expect(result.error).toContain(MISSING_AUTH_MESSAGE);
     expect(result.error).not.toContain(INVALID_MODULE_MESSAGE);
     expectNoDownstreamRuntimeAccess();
+  });
+});
+
+describe('ai stream route balance availability gate', () => {
+  it('returns a safe 503 before token providers or preDeduct when balance lookup fails', async () => {
+    const authenticatedClient = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: 'user-1' } },
+          error: null,
+        }),
+      },
+      from: vi.fn((table: string) => {
+        if (table !== 'profiles') {
+          throw new Error(`Unexpected authenticated table ${table}`);
+        }
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: { status: 'active', role: 'user' },
+            error: null,
+          }),
+        };
+      }),
+    };
+    const adminClient = {
+      from: vi.fn((table: string) => {
+        if (table !== 'system_settings') {
+          throw new Error(`Unexpected admin table ${table}`);
+        }
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: { value: false }, error: null }),
+        };
+      }),
+    };
+
+    routeMocks.createClient
+      .mockReset()
+      .mockImplementationOnce(() => authenticatedClient)
+      .mockImplementationOnce(() => adminClient);
+    routeMocks.getChatRuntimeSettings.mockResolvedValue({});
+    routeMocks.getBillingRuntimeSettings.mockResolvedValue({});
+    routeMocks.checkRateLimit.mockResolvedValue({
+      success: true,
+      limit: 10,
+      remaining: 9,
+      reset: Date.now() + 60_000,
+    });
+    routeMocks.billingGetBalance.mockRejectedValue(new Error('private database detail'));
+
+    const response = await POST(makeAuthenticatedStreamRequest({}) as any);
+    const payload = await response.json() as { error?: string };
+
+    expect(response.status).toBe(503);
+    expect(response.status).not.toBe(402);
+    expect(payload.error).toBe('AI 对话服务暂时不可用，请稍后重试');
+    expect(payload.error).not.toContain('private database detail');
+    expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+    expect(routeMocks.countTokens).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -10,3 +10,14 @@ export function createSafeInternalError(
     cause,
   });
 }
+
+export function createSafeServiceUnavailableError(
+  cause: unknown,
+  message = '服务暂时不可用，请稍后重试',
+) {
+  return new TRPCError({
+    code: 'SERVICE_UNAVAILABLE',
+    message,
+    cause,
+  });
+}

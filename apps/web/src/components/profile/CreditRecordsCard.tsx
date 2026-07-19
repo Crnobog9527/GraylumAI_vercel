@@ -3,6 +3,7 @@
 import { memo, useMemo } from 'react';
 import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, Loader2 } from 'lucide-react';
 import { trpc } from '@/trpc/client';
+import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
   countsAsCreditSpend,
   getCreditLedgerLabel,
@@ -139,7 +140,7 @@ const DailyUsageTrendChart = memo(function DailyUsageTrendChart({
 
 // 积分记录页面主组件
 export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { user: MockUser }) {
-  const credits = user?.credits || 0;
+  const credits = typeof user?.credits === 'number' ? user.credits : null;
 
   // 从 API 获取积分统计数据
   const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
@@ -235,7 +236,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                   WebkitTextFillColor: 'transparent'
                 }}
               >
-                {credits.toLocaleString()}
+                {formatCreditsBalance(credits === null ? 'unavailable' : 'ready', credits)}
               </div>
             </div>
 
