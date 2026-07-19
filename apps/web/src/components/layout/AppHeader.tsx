@@ -30,7 +30,11 @@ import { buildAppHref, resolveSiteName } from '@/lib/site-config';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
 import { AlertTriangle } from 'lucide-react';
-import { formatCreditsBalance, getCreditsAvailabilityLabel } from '@/components/credits/balancePresentation';
+import {
+  formatCreditsBalance,
+  getCreditsAvailabilityLabel,
+  getCreditsRechargeAction,
+} from '@/components/credits/balancePresentation';
 
 // Navigation items configuration
 const navItems = [
@@ -56,6 +60,7 @@ export function AppHeader() {
     warningBorderColor,
     isLowBalance,
   } = useCreditsBalance();
+  const creditsRechargeAction = getCreditsRechargeAction(creditsStatus);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Get user profile to check for admin role
@@ -151,8 +156,8 @@ export function AppHeader() {
         {/* Right section */}
         <div className="flex items-center gap-4">
           {/* Credits badge with warning styles */}
-          {creditsStatus === 'ready' ? (
-          <Link href="/profile?tab=subscription">
+          {creditsRechargeAction.available ? (
+          <Link href={creditsRechargeAction.href}>
             <div
               className="hidden cursor-pointer items-center gap-2 rounded-xl px-4 py-2 transition-opacity duration-200 hover:opacity-90 sm:flex"
               style={{
@@ -215,6 +220,7 @@ export function AppHeader() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
+                aria-label="打开用户菜单"
                 variant="ghost"
                 className="flex items-center gap-2 px-2 h-10 rounded-xl hover:opacity-90"
                 style={{ background: 'transparent' }}
@@ -247,15 +253,17 @@ export function AppHeader() {
                   <span>个人中心</span>
                 </DropdownMenuItem>
               </Link>
-              <Link href="/profile?tab=subscription">
-                <DropdownMenuItem
-                  className="gap-2 rounded-lg cursor-pointer"
-                  style={{ color: 'var(--text-secondary)' }}
-                >
-                  <CreditCard className="h-4 w-4" />
-                  <span>充值积分</span>
-                </DropdownMenuItem>
-              </Link>
+              {creditsRechargeAction.available && (
+                <Link href={creditsRechargeAction.href}>
+                  <DropdownMenuItem
+                    className="gap-2 rounded-lg cursor-pointer"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    <span>充值积分</span>
+                  </DropdownMenuItem>
+                </Link>
+              )}
               <Link href="/profile?tab=settings">
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"

@@ -22,6 +22,7 @@ const routeMocks = vi.hoisted(() => ({
   billingServiceConstructor: vi.fn(),
   billingGetBalance: vi.fn(),
   billingPreDeduct: vi.fn(),
+  billingRefund: vi.fn(),
   billingRecordUsageLog: vi.fn(),
   calculateTokenCostWithPricing: vi.fn(),
   estimatePreDeductCredits: vi.fn(),
@@ -43,6 +44,8 @@ const routeMocks = vi.hoisted(() => ({
   getOpenAICompatibleHeaders: vi.fn(),
   normalizeOpenAICompatibleEndpoint: vi.fn(),
   usesOpenAICompatibleApi: vi.fn(),
+  contextLoad: vi.fn(),
+  contextBuildMessages: vi.fn(),
 }));
 
 vi.mock('next/server', () => ({
@@ -76,6 +79,10 @@ vi.mock('@repo/api/src/services/billing', () => {
       return routeMocks.billingPreDeduct(...args);
     }
 
+    refund(...args: unknown[]) {
+      return routeMocks.billingRefund(...args);
+    }
+
     recordUsageLog(...args: unknown[]) {
       return routeMocks.billingRecordUsageLog(...args);
     }
@@ -94,7 +101,15 @@ vi.mock('@repo/api/src/services/billing', () => {
 });
 
 vi.mock('@repo/api/src/services/contextManager', () => ({
-  ContextManager: class ContextManager {},
+  ContextManager: class ContextManager {
+    loadContext(...args: unknown[]) {
+      return routeMocks.contextLoad(...args);
+    }
+
+    buildMessages(...args: unknown[]) {
+      return routeMocks.contextBuildMessages(...args);
+    }
+  },
 }));
 
 vi.mock('@repo/api/src/services/contextSnapshots', () => ({
@@ -187,6 +202,149 @@ function expectNoDownstreamRuntimeAccess() {
   expect(routeMocks.checkRateLimit).not.toHaveBeenCalled();
   expect(routeMocks.billingServiceConstructor).not.toHaveBeenCalled();
   expect(fetchSpy).not.toHaveBeenCalled();
+}
+
+function setupBalanceAuthorizationRoute() {
+  const authenticatedClient = {
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: 'user-1' } },
+        error: null,
+      }),
+    },
+    from: vi.fn((table: string) => {
+      if (table === 'profiles') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: { status: 'active', role: 'user' },
+            error: null,
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return {
+          insert: vi.fn().mockReturnThis(),
+          select: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: { id: 'conversation-1' },
+            error: null,
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+        };
+      }
+      throw new Error(`Unexpected authenticated table ${table}`);
+    }),
+  };
+  const adminClient = {
+    from: vi.fn((table: string) => {
+      if (table === 'system_settings') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: { value: false }, error: null }),
+        };
+      }
+      if (table === 'ai_models') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: 'model-record-1',
+              model_id: 'model-1',
+              name: 'Test model',
+              provider: 'openai',
+              max_tokens: 1024,
+              input_token_cost: 1,
+              output_token_cost: 1,
+              api_key: null,
+              api_endpoint: null,
+              enable_web_search: 'false',
+              token_counting_supported: 'true',
+              token_counting_method: 'verified_openai_tokenizer',
+              tokenizer_family: 'openai',
+            },
+            error: null,
+          }),
+        };
+      }
+      throw new Error(`Unexpected admin table ${table}`);
+    }),
+  };
+
+  routeMocks.createClient
+    .mockReset()
+    .mockImplementationOnce(() => authenticatedClient)
+    .mockImplementationOnce(() => adminClient);
+  routeMocks.getChatRuntimeSettings.mockResolvedValue({
+    maxInputCharacters: 2500,
+    maxMessagesPerConversation: 100,
+    smartRoutingMinConfidence: 0.8,
+    enableSmartSearchDecision: false,
+    searchSurchargeCredits: 0,
+    enableFreeTier: false,
+    freeTierMessages: 0,
+    searchDecisionMinConfidence: 0.8,
+    siteName: 'Graylum test',
+  });
+  routeMocks.getBillingRuntimeSettings.mockResolvedValue({ requireModelPricing: true });
+  routeMocks.checkRateLimit.mockResolvedValue({
+    success: true,
+    limit: 10,
+    remaining: 9,
+    reset: Date.now() + 60_000,
+  });
+  routeMocks.getSystemDefaultModels.mockResolvedValue({
+    primary: { id: 'model-record-1' },
+  });
+  routeMocks.selectModel.mockResolvedValue({
+    modelConfig: {
+      id: 'model-record-1',
+      modelId: 'model-1',
+      name: 'Test model',
+      provider: 'openai',
+      maxTokens: 1024,
+      inputTokenCost: 1,
+      outputTokenCost: 1,
+      enableWebSearch: false,
+    },
+    routingReason: 'targeted balance authorization test',
+    routingDecision: {
+      taskType: 'general_chat',
+      modelRole: 'primary',
+      assistantEligible: false,
+      reasonCodes: [],
+      confidence: 1,
+    },
+  });
+  routeMocks.shouldUpgradeAssistantRoute.mockReturnValue({
+    shouldUpgrade: false,
+    reasonCodes: [],
+  });
+  routeMocks.buildRuntimeSystemPrompt.mockReturnValue('test system prompt');
+  routeMocks.applyUserPromptTemplate.mockImplementation((_prompt, message) => message);
+  routeMocks.contextLoad.mockResolvedValue({});
+  routeMocks.contextBuildMessages.mockReturnValue({
+    messages: [{ role: 'user', content: 'balance authorization test' }],
+  });
+  routeMocks.countTokens.mockResolvedValue({ inputTokens: 10 });
+  routeMocks.estimateOutputTokens.mockReturnValue(10);
+  routeMocks.getModelPricing.mockResolvedValue({});
+  routeMocks.calculateTokenCostWithPricing.mockReturnValue({ credits: 10 });
+  routeMocks.estimatePreDeductCredits.mockReturnValue(10);
+  routeMocks.billingRecordUsageLog.mockResolvedValue(undefined);
+  routeMocks.billingRefund.mockResolvedValue(undefined);
+  routeMocks.billingPreDeduct.mockResolvedValue({ preDeductId: 'pre-deduct-1' });
+  routeMocks.getConfiguredProviderApiKey.mockReturnValue(null);
 }
 
 describe('ai stream route moduleId early validation', () => {
@@ -282,8 +440,72 @@ describe('ai stream route balance availability gate', () => {
     expect(response.status).not.toBe(402);
     expect(payload.error).toBe('AI 对话服务暂时不可用，请稍后重试');
     expect(payload.error).not.toContain('private database detail');
+    expect(routeMocks.logger.error).toHaveBeenCalledWith(
+      'ai',
+      'ai_stream_initial_balance_unavailable',
+      undefined,
+    );
+    expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain('private database detail');
+    expect(authenticatedClient.from).toHaveBeenCalledTimes(1);
     expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
     expect(routeMocks.countTokens).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses the second balance read as the authorization source when it is positive', async () => {
+    setupBalanceAuthorizationRoute();
+    routeMocks.billingGetBalance
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(100);
+
+    const response = await POST(makeAuthenticatedStreamRequest({}) as any);
+
+    expect(response.status).not.toBe(402);
+    expect(routeMocks.billingGetBalance).toHaveBeenCalledTimes(2);
+    expect(routeMocks.billingPreDeduct).toHaveBeenCalledWith(10, expect.objectContaining({
+      reason: 'AI 对话预扣',
+    }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('blocks from the fresh zero balance even when the initial read was positive', async () => {
+    setupBalanceAuthorizationRoute();
+    routeMocks.billingGetBalance
+      .mockResolvedValueOnce(100)
+      .mockResolvedValueOnce(0);
+
+    const response = await POST(makeAuthenticatedStreamRequest({}) as any);
+    const payload = await response.json() as { error?: string };
+
+    expect(response.status).toBe(402);
+    expect(payload.error).toBe('积分不足');
+    expect(routeMocks.billingGetBalance).toHaveBeenCalledTimes(2);
+    expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a distinct safe 503 when the authorization balance recheck fails', async () => {
+    setupBalanceAuthorizationRoute();
+    routeMocks.billingGetBalance
+      .mockResolvedValueOnce(100)
+      .mockRejectedValueOnce(new Error('private authorization database detail'));
+
+    const response = await POST(makeAuthenticatedStreamRequest({}) as any);
+    const payload = await response.json() as { error?: string };
+
+    expect(response.status).toBe(503);
+    expect(response.status).not.toBe(402);
+    expect(payload.error).toBe('AI 对话服务暂时不可用，请稍后重试');
+    expect(routeMocks.countTokens).toHaveBeenCalledOnce();
+    expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(routeMocks.logger.error).toHaveBeenCalledWith(
+      'ai',
+      'ai_stream_authorization_balance_unavailable',
+      undefined,
+    );
+    expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain(
+      'private authorization database detail',
+    );
   });
 });

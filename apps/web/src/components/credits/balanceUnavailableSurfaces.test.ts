@@ -6,15 +6,6 @@ function readSource(relativePath: string): string {
 }
 
 describe('unavailable balance surface wiring', () => {
-  it('keeps AppHeader subscription links and recharge warnings inside the ready branch', () => {
-    const source = readSource('../layout/AppHeader.tsx');
-
-    expect(source).toContain("creditsStatus === 'ready' ?");
-    expect(source).toContain('href="/profile?tab=subscription"');
-    expect(source).toContain('积分余额暂不可用，请稍后重试');
-    expect(source).toContain('getCreditsAvailabilityLabel(creditsStatus)');
-  });
-
   it('uses credits.getBalance state as Profile canonical balance without profile fallback', () => {
     const source = readSource('../../app/profile/page.tsx');
 

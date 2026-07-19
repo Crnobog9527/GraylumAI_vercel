@@ -481,12 +481,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let balance: number;
     const balanceStartedAt = Date.now();
     try {
-      balance = await billingService.getBalance();
+      await billingService.getBalance();
     } catch {
-      logAiStreamError('ai_stream_balance_unavailable');
+      logAiStreamError('ai_stream_initial_balance_unavailable');
       return new Response(
         JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
@@ -740,6 +739,19 @@ export async function POST(request: NextRequest) {
         ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits),
       billingRuntimeSettings,
     );
+
+    let balance: number;
+    const authorizationBalanceStartedAt = Date.now();
+    try {
+      balance = await billingService.getBalance();
+    } catch {
+      logAiStreamError('ai_stream_authorization_balance_unavailable');
+      return new Response(
+        JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    recordStageTiming(stageTimings, 'authorization_balance_lookup', authorizationBalanceStartedAt);
 
     const freeTierStartedAt = Date.now();
     const freeTierUsedToday = runtimeSettings.enableFreeTier
