@@ -68,6 +68,29 @@ function createMockSupabase(options: {
   } as unknown as BillingContext['supabase'];
 }
 
+function createBalanceOnlySupabase(options: {
+  credits?: unknown;
+  data?: Record<string, unknown> | null;
+  error?: { code?: string; message?: string } | null;
+  thrown?: unknown;
+}) {
+  return {
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn(() => {
+        if (options.thrown !== undefined) {
+          return Promise.reject(options.thrown);
+        }
+        return Promise.resolve({
+          data: 'data' in options ? options.data : { credits: options.credits },
+          error: options.error ?? null,
+        });
+      }),
+    })),
+  } as unknown as BillingContext['supabase'];
+}
+
 function createSettleAbortSupabase(options: {
   modelPricing?: {
     input_token_cost: number;
@@ -848,6 +871,30 @@ describe('BillingService', () => {
       const balance = await service.getBalance();
 
       expect(balance).toBe(5000);
+    });
+
+    it('preserves a real zero balance', async () => {
+      const service = new BillingService({
+        supabase: createBalanceOnlySupabase({ credits: 0 }),
+        userId: 'test-user',
+      });
+
+      await expect(service.getBalance()).resolves.toBe(0);
+    });
+
+    it.each([
+      ['query error', createBalanceOnlySupabase({ error: { code: '42501', message: 'private detail' } })],
+      ['profile missing', createBalanceOnlySupabase({ data: null })],
+      ['null balance', createBalanceOnlySupabase({ credits: null })],
+      ['undefined balance', createBalanceOnlySupabase({ credits: undefined })],
+      ['invalid balance', createBalanceOnlySupabase({ credits: Number.NaN })],
+      ['negative balance', createBalanceOnlySupabase({ credits: -1 })],
+      ['thrown exception', createBalanceOnlySupabase({ thrown: new TypeError('private network detail') })],
+    ])('fails closed for %s without entering billing mutations', async (_name, supabase) => {
+      const service = new BillingService({ supabase, userId: 'test-user' });
+
+      await expect(service.getBalance()).rejects.toThrow('余额暂时无法验证，请稍后重试');
+      expect((supabase as any).rpc).toBeUndefined();
     });
   });
 

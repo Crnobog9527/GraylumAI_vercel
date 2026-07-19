@@ -27,8 +27,9 @@ import { trpc } from '@/trpc/client';
 import { useChatStore } from '@/stores';
 import { useBanner } from '@/hooks/use-banner';
 import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
-import { useCreditsBalance, CREDIT_THRESHOLDS, getWarningLevel } from '@/hooks/use-credits';
+import { useCreditsBalance, type WarningLevel } from '@/hooks/use-credits';
 import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
+import { CHAT_BALANCE_UNAVAILABLE_PRESENTATION, runChatBalancePreflight } from './balancePreflight';
 
 interface Message {
   id: string;
@@ -54,6 +55,12 @@ function ChatPageContent() {
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [lowBalanceDialogOpen, setLowBalanceDialogOpen] = useState(false);
+  const [lowBalanceNotice, setLowBalanceNotice] = useState<{
+    credits: number;
+    warningLevel: WarningLevel;
+  }>({ credits: 0, warningLevel: 'empty' });
+  const [balanceUnavailableDialogOpen, setBalanceUnavailableDialogOpen] = useState(false);
+  const [isRetryingBalance, setIsRetryingBalance] = useState(false);
   const [longTextConfirmOpen, setLongTextConfirmOpen] = useState(false);
   const [pendingLongTextMessage, setPendingLongTextMessage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +72,6 @@ function ChatPageContent() {
   // Credits balance for pre-send check
   const {
     credits,
-    warningLevel,
     refetch: refetchCreditsBalance,
   } = useCreditsBalance();
 
@@ -286,40 +292,45 @@ function ChatPageContent() {
       return;
     }
 
-    // 发送前主动刷新一次余额，避免使用过期缓存继续向后端发起流式请求。
-    const latestBalance = await refetchCreditsBalance();
-    const latestCredits = latestBalance.data?.credits ?? credits;
-    const latestWarningLevel = getWarningLevel(latestCredits);
-    const latestSettings = systemSettings ?? (await refetchSystemSettings()).data ?? systemSettings;
-    const latestEnableFreeTier =
-      latestSettings?.enable_free_tier === true || latestSettings?.enable_free_tier === 'true';
-    const latestCanSendMessage = latestCredits > CREDIT_THRESHOLDS.EMPTY || latestEnableFreeTier;
+    const decision = await runChatBalancePreflight({
+      cachedCredits: credits,
+      refetchBalance: refetchCreditsBalance,
+      resolveFreeTierEnabled: async () => {
+        const result = systemSettings
+          ? { data: systemSettings, error: null }
+          : await refetchSystemSettings();
+        if (result.error || !result.data) {
+          throw new Error('chat settings unavailable');
+        }
+        return result.data.enable_free_tier === true || result.data.enable_free_tier === 'true';
+      },
+      onReady: async ({ credits: latestCredits, warningLevel: latestWarningLevel }) => {
+        if (latestWarningLevel === 'critical' && latestCredits > 0) {
+          setLowBalanceNotice({ credits: latestCredits, warningLevel: latestWarningLevel });
+          setLowBalanceDialogOpen(true);
+        }
 
-    // 发送前检查积分余额
-    if (!latestCanSendMessage) {
-      // 积分为 0，阻止发送并显示充值弹窗
-      setLowBalanceDialogOpen(true);
+        const messageToSend = inputMessage;
+        setInputMessage('');
+        await sendStreamingMessage(messageToSend, {
+          modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
+          moduleId,
+        });
+        if (pendingLongTextMessage === messageToSend) {
+          setPendingLongTextMessage(null);
+        }
+      },
+    });
+
+    if (decision.status === 'unavailable') {
+      setBalanceUnavailableDialogOpen(true);
       return;
     }
 
-    // 积分不足但仍可发送，显示警告（critical 级别）
-    if (latestWarningLevel === 'critical' && latestCredits > 0) {
+    if (decision.status === 'blocked_zero') {
+      setLowBalanceNotice({ credits: decision.credits, warningLevel: decision.warningLevel });
       setLowBalanceDialogOpen(true);
-      // 继续发送，用户可以在弹窗中选择"稍后再说"
-    }
-
-    const messageToSend = inputMessage;
-    setInputMessage(''); // 立即清空输入框
-
-    // 使用流式 API 发送消息
-    // conversationId 为 null 时会自动创建新对话
-    // 传递选中的模型 ID（如果启用了模型选择器）
-    await sendStreamingMessage(messageToSend, {
-      modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
-      moduleId,
-    });
-    if (pendingLongTextMessage === messageToSend) {
-      setPendingLongTextMessage(null);
+      return;
     }
   }, [
     credits,
@@ -339,6 +350,16 @@ function ChatPageContent() {
     showModelSelector,
     systemSettings,
   ]);
+
+  const handleRetryBalance = useCallback(async () => {
+    setBalanceUnavailableDialogOpen(false);
+    setIsRetryingBalance(true);
+    try {
+      await handleSend();
+    } finally {
+      setIsRetryingBalance(false);
+    }
+  }, [handleSend]);
 
   const estimatedPendingInputTokens = pendingLongTextMessage ? estimateTokens(pendingLongTextMessage) : 0;
   const estimatedPendingCredits = pendingLongTextMessage
@@ -652,9 +673,32 @@ function ChatPageContent() {
       <LowBalanceDialog
         open={lowBalanceDialogOpen}
         onOpenChange={setLowBalanceDialogOpen}
-        credits={credits}
-        warningLevel={warningLevel}
+        credits={lowBalanceNotice.credits}
+        warningLevel={lowBalanceNotice.warningLevel}
       />
+      <AlertDialog open={balanceUnavailableDialogOpen} onOpenChange={setBalanceUnavailableDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{CHAT_BALANCE_UNAVAILABLE_PRESENTATION.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {CHAT_BALANCE_UNAVAILABLE_PRESENTATION.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{CHAT_BALANCE_UNAVAILABLE_PRESENTATION.cancelLabel}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isRetryingBalance}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleRetryBalance();
+              }}
+            >
+              {isRetryingBalance && <Loader2 className="h-4 w-4 animate-spin" />}
+              {CHAT_BALANCE_UNAVAILABLE_PRESENTATION.retryLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog
         open={longTextConfirmOpen}
         onOpenChange={(open) => {

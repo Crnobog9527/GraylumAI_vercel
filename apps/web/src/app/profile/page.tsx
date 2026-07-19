@@ -2,7 +2,7 @@
 
 import { useState, Suspense, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Menu, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2, Menu, RefreshCw } from 'lucide-react';
 import { logClientDevError } from '@/lib/client-log';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,6 +28,7 @@ import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard'
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
+import { useCreditsBalance } from '@/hooks/use-credits';
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -47,7 +48,13 @@ function ProfilePageContent() {
 
   // tRPC queries for real data (only enabled after auth check)
   const { data: userProfile, isLoading: isProfileLoading, error: profileError } = trpc.user.getUserProfile.useQuery();
-  const { data: creditsBalance, isLoading: isBalanceLoading, error: creditsError } = trpc.credits.getBalance.useQuery();
+  const {
+    credits,
+    status: creditsStatus,
+    isLoading: isBalanceLoading,
+    error: creditsError,
+    refetch: refetchCreditsBalance,
+  } = useCreditsBalance();
   const { data: creditsSummary, isLoading: isSummaryLoading } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
 
   const isLoading = isProfileLoading || isBalanceLoading || isSummaryLoading;
@@ -63,26 +70,28 @@ function ProfilePageContent() {
   }, [profileError, creditsError]);
 
   // Map tRPC data to MockUser interface for component compatibility
-  // Use credits from userProfile as fallback if creditsBalance fails
   const userData: MockUser = useMemo(() => ({
     id: userProfile?.id ?? '',
     email: userProfile?.email ?? '',
     nickname: userProfile?.nickname ?? '用户',
     full_name: userProfile?.full_name ?? userProfile?.nickname ?? '用户',
     avatar_url: userProfile?.avatar_url ?? '',
-    credits: creditsBalance?.credits ?? (userProfile as any)?.credits ?? 0,
+    credits: creditsStatus === 'ready' && credits !== null ? credits : undefined,
     total_credits_used: creditsSummary?.totalSpent ?? 0,
     total_credits_purchased: creditsSummary?.totalEarned ?? 0,
     subscription_tier: (userProfile as any)?.membership_level ?? 'free',
     auth_provider: (userProfile as any)?.auth_provider ?? 'email',
     email_verified: (userProfile as any)?.email_verified ?? false,
     created_date: userProfile?.created_at ?? new Date().toISOString(),
-  }), [userProfile, creditsBalance, creditsSummary]);
+  }), [userProfile, credits, creditsStatus, creditsSummary]);
 
   const [localUser, setLocalUser] = useState<MockUser | null>(null);
 
   // Sync localUser with userData when data loads
-  const effectiveUser = localUser ?? userData;
+  const effectiveUser = useMemo(() => ({
+    ...(localUser ?? userData),
+    credits: userData.credits,
+  }), [localUser, userData]);
 
   const handleNavigateToCreateTicket = () => {
     setTicketInitialView('create');
@@ -143,6 +152,29 @@ function ProfilePageContent() {
       <GlobalBanner banners={banners} />
 
       <div className="container mx-auto px-4 py-8 max-w-7xl relative" style={{ zIndex: 1 }}>
+        {creditsStatus === 'unavailable' && (
+          <div
+            className="mb-6 flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-primary)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5" style={{ color: 'var(--text-tertiary)' }} />
+              <div>
+                <div className="font-medium" style={{ color: 'var(--text-primary)' }}>积分余额暂不可用</div>
+                <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
+                  当前无法验证余额，页面不会显示伪零或余额不足提示。
+                </div>
+              </div>
+            </div>
+            <Button variant="outline" className="gap-2" onClick={() => void refetchCreditsBalance()}>
+              <RefreshCw className="h-4 w-4" />
+              重试
+            </Button>
+          </div>
+        )}
         <div className="flex flex-col md:flex-row gap-4 md:gap-8">
           {/* Mobile Sidebar Trigger */}
           <div className="md:hidden mb-4">

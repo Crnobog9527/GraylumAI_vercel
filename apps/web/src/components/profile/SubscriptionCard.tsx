@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
   getMembershipPlanButtonState,
   getPlanEligibilityKey,
@@ -747,7 +748,8 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
   const router = useRouter();
   const [purchaseIntent, setPurchaseIntent] = useState<PurchaseIntent | null>(null);
   const [pendingCheckoutPackageId, setPendingCheckoutPackageId] = useState<string | null>(null);
-  const credits = user?.credits || 0;
+  const credits = typeof user?.credits === 'number' ? user.credits : null;
+  const hasVerifiedBalance = credits !== null;
   const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
 
   // 从 API 获取积分统计数据
@@ -820,7 +822,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
                   WebkitTextFillColor: 'transparent'
                 }}
               >
-                {credits.toLocaleString()}
+                {formatCreditsBalance(hasVerifiedBalance ? 'ready' : 'unavailable', credits)}
               </div>
             </div>
 
@@ -850,7 +852,9 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
       </div>
 
       {/* 积分加油包 */}
-      <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId} />
+      {hasVerifiedBalance && (
+        <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId} />
+      )}
 
       {pendingCheckoutPackageId && (
         <div className="mt-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
