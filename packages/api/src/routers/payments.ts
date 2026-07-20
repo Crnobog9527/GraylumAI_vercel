@@ -250,6 +250,39 @@ function createPaymentOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
 }
 
+function normalizeCheckoutPriceId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function readMembershipEligibilityData<T>(
+  query: PromiseLike<{ data: T | null; error: unknown }>,
+): Promise<T | null> {
+  let result;
+
+  try {
+    result = await query;
+  } catch (error) {
+    throw createSafeServiceUnavailableError(
+      error,
+      '会员状态暂不可用，请稍后重试',
+    );
+  }
+
+  if (result.error) {
+    throw createSafeServiceUnavailableError(
+      result.error,
+      '会员状态暂不可用，请稍后重试',
+    );
+  }
+
+  return result.data;
+}
+
 async function readCheckoutData<T>(input: {
   query: PromiseLike<{ data: T | null; error: unknown }>;
   checkoutInput: CreateCheckoutInput;
@@ -844,18 +877,15 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 export const paymentsRouter = router({
   getMembershipEligibilityMatrix: protectedProcedure
     .query(async ({ ctx }) => {
-      const { data: profile, error: profileError } = await ctx.supabase
-        .from('profiles')
-        .select('membership_level')
-        .eq('id', ctx.profileId)
-        .maybeSingle();
-
-      if (profileError) {
-        throw createSafeServiceUnavailableError(
-          profileError,
-          '会员状态暂不可用，请稍后重试',
-        );
-      }
+      const profile = await readMembershipEligibilityData<{
+        membership_level: string | null;
+      }>(
+        ctx.supabase
+          .from('profiles')
+          .select('membership_level')
+          .eq('id', ctx.profileId)
+          .maybeSingle(),
+      );
 
       if (!profile) {
         throw new TRPCError({
@@ -864,18 +894,17 @@ export const paymentsRouter = router({
         });
       }
 
-      const { data: plans, error: plansError } = await ctx.supabase
-        .from('membership_plans')
-        .select('id, level, is_active')
-        .eq('is_active', 'true')
-        .order('sort_order', { ascending: true });
-
-      if (plansError) {
-        throw createSafeServiceUnavailableError(
-          plansError,
-          '会员状态暂不可用，请稍后重试',
-        );
-      }
+      const plans = await readMembershipEligibilityData<Array<{
+        id: string;
+        level: string;
+        is_active: string;
+      }>>(
+        ctx.supabase
+          .from('membership_plans')
+          .select('id, level, is_active')
+          .eq('is_active', 'true')
+          .order('sort_order', { ascending: true }),
+      );
 
       if (!Array.isArray(plans)) {
         throw createSafeServiceUnavailableError(
@@ -899,6 +928,10 @@ export const paymentsRouter = router({
                 targetPlan: plan,
                 targetBillingCycle: billingCycle,
               });
+
+              if (eligibility.reasonCode === 'READ_FAILED') {
+                throw new Error('Membership eligibility facts could not be read');
+              }
 
               return {
                 planId: plan.id,
@@ -1239,7 +1272,9 @@ export const paymentsRouter = router({
           throw toCheckoutConfigError('该积分包当前未上架');
         }
 
-        if (!creditPackage.stripe_price_id) {
+        const selectedPriceId = normalizeCheckoutPriceId(creditPackage.stripe_price_id);
+
+        if (!selectedPriceId) {
           throw toItemUnavailableError();
         }
 
@@ -1290,8 +1325,8 @@ export const paymentsRouter = router({
                 stage: 'plan_discount_read',
                 operation: '会员折扣服务',
                 extra: {
-                  priceId: maskIdentifier(creditPackage.stripe_price_id),
-                  hasPriceId: Boolean(creditPackage.stripe_price_id),
+                  priceId: maskIdentifier(selectedPriceId),
+                  hasPriceId: true,
                 },
               })
             : null;
@@ -1318,7 +1353,7 @@ export const paymentsRouter = router({
             itemType: 'credit_package',
             itemId: creditPackage.id,
             userId: ctx.profileId,
-            priceId: creditPackage.stripe_price_id,
+            priceId: selectedPriceId,
             billingCycle: 'one_time',
           }),
           membershipLevel: eligibility.level,
@@ -1331,7 +1366,7 @@ export const paymentsRouter = router({
           discountedAmountCents === baseAmountCents
             ? [
                 {
-                  price: creditPackage.stripe_price_id,
+                  price: selectedPriceId,
                   quantity: 1,
                 },
               ]
@@ -1362,8 +1397,8 @@ export const paymentsRouter = router({
           });
         } catch (error) {
           logCheckoutStageFailure('stripe_session_create', input, error, {
-            priceId: maskIdentifier(creditPackage.stripe_price_id),
-            hasPriceId: Boolean(creditPackage.stripe_price_id),
+            priceId: maskIdentifier(selectedPriceId),
+            hasPriceId: true,
           });
           throw createPaymentOperationError('创建支付会话', error);
         }
@@ -1375,7 +1410,7 @@ export const paymentsRouter = router({
           billing_cycle: 'one_time',
           stripe_checkout_session_id: session.id,
           stripe_customer_id: checkout.customerId,
-          stripe_price_id: creditPackage.stripe_price_id,
+          stripe_price_id: selectedPriceId,
           amount_total: discountedAmountCents,
           currency: 'usd',
           mode: 'payment',
@@ -1386,8 +1421,8 @@ export const paymentsRouter = router({
 
         if (orderError) {
           logCheckoutStageFailure('order_insert', input, orderError, {
-            priceId: maskIdentifier(creditPackage.stripe_price_id),
-            hasPriceId: Boolean(creditPackage.stripe_price_id),
+            priceId: maskIdentifier(selectedPriceId),
+            hasPriceId: true,
           });
           throw createPaymentOperationError('保存支付订单', orderError);
         }
@@ -1437,10 +1472,11 @@ export const paymentsRouter = router({
         throw toCheckoutConfigError('免费套餐无需创建支付会话');
       }
 
-      const selectedPriceId =
+      const selectedPriceId = normalizeCheckoutPriceId(
         input.billingCycle === 'monthly'
           ? plan.stripe_monthly_price_id
-          : plan.stripe_yearly_price_id;
+          : plan.stripe_yearly_price_id,
+      );
 
       if (!selectedPriceId) {
         throw toItemUnavailableError('该会员套餐暂不可购买，请稍后重试');

@@ -1868,6 +1868,99 @@ describe('paymentsRouter error sanitization', () => {
     });
   });
 
+  it('returns service unavailable when eligibility facts resolve as READ_FAILED', async () => {
+    const userSupabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(Promise.resolve({
+            data: {
+              id: 'user-1',
+              role: 'user',
+              status: 'active',
+              nickname: 'User',
+              email: 'user@example.com',
+              membership_level: 'free',
+            },
+            error: null,
+          }));
+        }
+
+        if (table === 'membership_plans') {
+          return createAwaitableQueryBuilder(Promise.resolve({
+            data: [{ id: 'plan-pro', level: 'pro', is_active: 'true' }],
+            error: null,
+          }));
+        }
+
+        if (table === 'user_subscriptions') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({
+            data: null,
+            error: { code: '42501' },
+          }));
+        }
+
+        if (table === 'payment_orders') {
+          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        }
+
+        throw new Error(`Unexpected matrix table ${table}`);
+      },
+    };
+
+    const caller = createProtectedCaller({ supabase: userSupabase });
+
+    await expect(caller.getMembershipEligibilityMatrix()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '会员状态暂不可用，请稍后重试',
+    });
+  });
+
+  it.each(['profiles', 'membership_plans'])(
+    'returns service unavailable when the %s matrix read rejects',
+    async (rejectedTable) => {
+      let profileReadCount = 0;
+      const userSupabase = {
+        from(table: string) {
+          if (table === 'profiles') {
+            const validProfile = Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+                membership_level: 'free',
+              },
+              error: null,
+            });
+            const result = rejectedTable === table && profileReadCount > 0
+              ? Promise.reject(new Error('network unavailable'))
+              : validProfile;
+            profileReadCount += 1;
+            return createSingleQueryBuilder(result);
+          }
+
+          if (table === 'membership_plans') {
+            return createAwaitableQueryBuilder(
+              rejectedTable === table
+                ? Promise.reject(new Error('network unavailable'))
+                : Promise.resolve({ data: [], error: null }),
+            );
+          }
+
+          throw new Error(`Unexpected matrix table ${table}`);
+        },
+      };
+
+      const caller = createProtectedCaller({ supabase: userSupabase });
+
+      await expect(caller.getMembershipEligibilityMatrix()).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '会员状态暂不可用，请稍后重试',
+      });
+    },
+  );
+
   it('creates membership checkout for a free user with no active subscription', async () => {
     const sessionCreate = vi.fn().mockResolvedValue({
       id: 'cs_test_membership',
@@ -3315,6 +3408,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '积分包不存在'],
     ['inactive', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'false', stripe_price_id: 'price_test_package', price: 1000 }, error: null }), 'BAD_REQUEST', '该积分包当前未上架'],
     ['Price missing', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: null, price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
+    ['Price blank', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: '   ', price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
     ['invalid amount', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: 'price_test_package', price: null }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
   ])('fails closed for credit package %s', async (_caseName, itemResult, code, message) => {
     const harness = createGuardHarness({ kind: 'credit_package', itemResult });
@@ -3331,6 +3425,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '会员套餐不存在'],
     ['inactive', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'false', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐当前未启用'],
     ['Price missing', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: null, stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
+    ['Price blank', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: '   ', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
     ['invalid amount', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: null, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
   ])('fails closed for membership plan %s', async (_caseName, itemResult, code, message) => {
     const harness = createGuardHarness({ kind: 'membership_plan', itemResult });
@@ -3342,6 +3437,54 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     })).rejects.toMatchObject<Partial<TRPCError>>({ code, message });
     expectNoCheckoutWrites(harness);
   });
+
+  it('fails closed for a blank yearly membership Price before Stripe or order writes', async () => {
+    const harness = createGuardHarness({
+      kind: 'membership_plan',
+      itemResult: Promise.resolve({
+        data: {
+          id: planId,
+          name: 'Pro',
+          level: 'pro',
+          is_active: 'true',
+          stripe_monthly_price_id: 'price_test_monthly',
+          stripe_yearly_price_id: '   ',
+          monthly_price: 9900,
+          yearly_price: 99900,
+        },
+        error: null,
+      }),
+    });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'membership_plan',
+      planId,
+      billingCycle: 'yearly',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'BAD_REQUEST',
+      message: '该会员套餐暂不可购买，请稍后重试',
+    });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it.each(['credit_package', 'membership_plan'] as const)(
+    'fails closed when the %s item read rejects',
+    async (kind) => {
+      const harness = createGuardHarness({
+        kind,
+        itemResult: Promise.reject(new Error('network unavailable')),
+      });
+
+      await expect(harness.caller.createCheckoutSession(
+        kind === 'credit_package'
+          ? { kind, packageId }
+          : { kind, planId, billingCycle: 'monthly' },
+      )).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'SERVICE_UNAVAILABLE',
+      });
+      expectNoCheckoutWrites(harness);
+    },
+  );
 
   it('fails closed when eligibility facts cannot be read', async () => {
     const harness = createGuardHarness({
@@ -3356,6 +3499,23 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     })).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'SERVICE_UNAVAILABLE',
       message: '会员状态暂不可用，请稍后重试。',
+    });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it('fails closed when eligibility facts reject', async () => {
+    const harness = createGuardHarness({
+      kind: 'membership_plan',
+      factsResult: Promise.reject(new Error('network unavailable')),
+    });
+
+    await expect(harness.caller.createCheckoutSession({
+      kind: 'membership_plan',
+      planId,
+      billingCycle: 'monthly',
+    })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '会员状态暂不可用，请稍后重试',
     });
     expectNoCheckoutWrites(harness);
   });

@@ -61,7 +61,6 @@ const validMembershipPlan = {
   monthly_credits: 1000,
   monthly_bonus_credits: 100,
   yearly_credits: 12000,
-  yearly_bonus_credits: 1200,
   package_discount: 90,
   history_retention_days: 30,
   features: ['Feature A'],
@@ -324,6 +323,26 @@ describe('public catalog availability', () => {
     ]);
   });
 
+  it.each([null, '', '   '])(
+    'keeps a credit package visible but not checkout-ready for an unconfigured Price %#',
+    async (stripePriceId) => {
+      const caller = createPublicCatalogCaller(
+        'credit_packages',
+        Promise.resolve({
+          data: [{ ...validCreditPackage, stripe_price_id: stripePriceId }],
+          error: null,
+        }),
+      );
+
+      await expect(caller.getCreditPackages()).resolves.toEqual([
+        expect.objectContaining({
+          id: validCreditPackage.id,
+          checkout_ready: false,
+        }),
+      ]);
+    },
+  );
+
   it.each([
     ['RLS denial', () => Promise.resolve({ data: null, error: { code: '42501' } })],
     ['query timeout', () => Promise.resolve({ data: null, error: { code: '57014' } })],
@@ -353,11 +372,49 @@ describe('public catalog availability', () => {
       expect.objectContaining({
         id: validMembershipPlan.id,
         price: { monthly: 99, yearly: 999 },
+        credits: {
+          monthly: 1000,
+          monthlyBonus: 100,
+          yearly: 12000,
+          yearlyBonus: 0,
+        },
         features: ['Feature A'],
         checkoutReady: { monthly: true, yearly: false },
       }),
     ]);
   });
+
+  it.each([
+    ['', 'price_test_yearly'],
+    ['   ', 'price_test_yearly'],
+    ['price_test_monthly', ''],
+    ['price_test_monthly', '   '],
+  ])(
+    'keeps a membership plan visible with blank cycle Price IDs disabled',
+    async (monthlyPriceId, yearlyPriceId) => {
+      const caller = createPublicCatalogCaller(
+        'membership_plans',
+        Promise.resolve({
+          data: [{
+            ...validMembershipPlan,
+            stripe_monthly_price_id: monthlyPriceId,
+            stripe_yearly_price_id: yearlyPriceId,
+          }],
+          error: null,
+        }),
+      );
+
+      await expect(caller.getMembershipPlans()).resolves.toEqual([
+        expect.objectContaining({
+          id: validMembershipPlan.id,
+          checkoutReady: {
+            monthly: Boolean(monthlyPriceId.trim()),
+            yearly: Boolean(yearlyPriceId.trim()),
+          },
+        }),
+      ]);
+    },
+  );
 
   it('returns [] only for a successful catalog with no active membership plans', async () => {
     const caller = createPublicCatalogCaller(

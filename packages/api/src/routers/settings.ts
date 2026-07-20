@@ -34,7 +34,7 @@ const creditPackageCatalogRowSchema = z.object({
   bonus_credits: z.number().int().nonnegative().nullable(),
   is_popular: z.enum(['true', 'false']).nullable(),
   sort_order: z.number().int().nonnegative(),
-  stripe_price_id: z.string().trim().min(1).nullable(),
+  stripe_price_id: z.string().nullable(),
 });
 
 const membershipPlanCatalogRowSchema = z.object({
@@ -47,15 +47,18 @@ const membershipPlanCatalogRowSchema = z.object({
   monthly_credits: z.number().int().nonnegative().nullable(),
   monthly_bonus_credits: z.number().int().nonnegative().nullable(),
   yearly_credits: z.number().int().nonnegative().nullable(),
-  yearly_bonus_credits: z.number().int().nonnegative().nullable(),
   package_discount: z.number().int().min(0).max(100).nullable(),
   history_retention_days: z.number().int().positive().nullable(),
   features: z.array(z.string()).nullable(),
-  stripe_monthly_price_id: z.string().trim().min(1).nullable(),
-  stripe_yearly_price_id: z.string().trim().min(1).nullable(),
+  stripe_monthly_price_id: z.string().nullable(),
+  stripe_yearly_price_id: z.string().nullable(),
 }).passthrough();
 
 const CATALOG_UNAVAILABLE_MESSAGE = '套餐服务暂不可用，请稍后重试';
+
+function hasConfiguredStripePriceId(value: string | null): boolean {
+  return Boolean(value?.trim());
+}
 
 function parseCatalogRows<T>(
   value: unknown,
@@ -270,7 +273,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
-      checkout_ready: stripeReady && Boolean(pkg.stripe_price_id),
+      checkout_ready: stripeReady && hasConfiguredStripePriceId(pkg.stripe_price_id),
     }));
   }),
 
@@ -324,7 +327,7 @@ export const settingsRouter = router({
         monthly: plan.monthly_credits ?? 0,
         monthlyBonus: plan.monthly_bonus_credits ?? 0,
         yearly: plan.yearly_credits ?? 0,
-        yearlyBonus: plan.yearly_bonus_credits ?? 0,
+        yearlyBonus: 0,
       },
       // package_discount: 100 = no discount, 95 = 5% off
       discount: plan.package_discount ? (100 - plan.package_discount) / 100 : 0,
@@ -334,8 +337,8 @@ export const settingsRouter = router({
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
       checkoutReady: {
-        monthly: stripeReady && Boolean(plan.stripe_monthly_price_id),
-        yearly: stripeReady && Boolean(plan.stripe_yearly_price_id),
+        monthly: stripeReady && hasConfiguredStripePriceId(plan.stripe_monthly_price_id),
+        yearly: stripeReady && hasConfiguredStripePriceId(plan.stripe_yearly_price_id),
       },
     }));
   }),
