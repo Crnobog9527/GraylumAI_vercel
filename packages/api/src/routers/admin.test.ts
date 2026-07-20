@@ -933,6 +933,128 @@ describe('adminRouter dashboard statistics aggregation', () => {
 });
 
 describe('adminRouter finance stats runtime billing summary', () => {
+  const financeTables = [
+    'credit_transactions',
+    'credit_packages',
+    'profiles',
+    'ai_models',
+    'conversations',
+    'token_stats',
+    'payment_orders',
+    'ai_usage_logs',
+    'billing_history',
+    'system_settings',
+  ] as const;
+  type FinanceTable = typeof financeTables[number];
+
+  function createValidFinanceData(): Record<FinanceTable, unknown[]> {
+    return {
+      credit_transactions: [{
+        amount: 25,
+        type: 'addition',
+        created_at: '2026-03-29T08:00:00.000Z',
+        description: 'grant',
+      }],
+      credit_packages: [{
+        id: 'package-1',
+        name: 'Starter',
+        price: 1000,
+        credits_amount: 1200,
+        active: 'true',
+      }],
+      profiles: [{ credits: 100, created_at: '2026-03-28T08:00:00.000Z' }],
+      ai_models: [{
+        id: 'model-row-1',
+        name: 'Model A',
+        model_id: 'model-a',
+        provider: 'openai',
+        is_active: 'true',
+        input_token_cost: 1000000,
+        output_token_cost: 2000000,
+        input_token_cost_above_200k: 0,
+        output_token_cost_above_200k: 0,
+        web_search_cost: 0,
+        max_tokens: 8192,
+      }],
+      conversations: [{
+        id: 'conversation-1',
+        model_id: 'model-row-1',
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+      token_stats: [{
+        model_used: 'model-a',
+        total_credits: 5,
+        total_cost_usd: '0.125000',
+        cached_tokens: 0,
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+      payment_orders: [{
+        amount_total: 1500,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+      ai_usage_logs: [{
+        status: 'success',
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+      billing_history: [{
+        operation_type: 'refund',
+        amount: 3,
+        created_at: '2026-03-29T08:00:00.000Z',
+        metadata: {},
+      }],
+      system_settings: [
+        { key: 'new_user_credits', value: '120' },
+        { key: 'search_surcharge_credits', value: '7' },
+        { key: 'billing_credits_per_usd', value: '1000' },
+        { key: 'billing_token_price_multiplier', value: '1.5' },
+      ],
+    };
+  }
+
+  function createFinanceStatsSupabase(
+    overrides: Partial<Record<FinanceTable, unknown>> = {},
+  ) {
+    const defaultData = createValidFinanceData();
+
+    return {
+      from(table: string) {
+        if (!financeTables.includes(table as FinanceTable)) {
+          throw new Error(`Unexpected finance table ${table}`);
+        }
+
+        const data = Object.prototype.hasOwnProperty.call(overrides, table)
+          ? overrides[table as FinanceTable]
+          : defaultData[table as FinanceTable];
+        const result = Promise.resolve({ data, error: null });
+        const builder = {
+          select() {
+            return builder;
+          },
+          order() {
+            return builder;
+          },
+          in() {
+            return builder;
+          },
+          then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+            return result.then(onFulfilled, onRejected);
+          },
+          catch(onRejected: (reason: unknown) => unknown) {
+            return result.catch(onRejected);
+          },
+          finally(onFinally: () => void) {
+            return result.finally(onFinally);
+          },
+        };
+
+        return builder;
+      },
+    };
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-29T12:00:00.000Z'));
@@ -940,6 +1062,147 @@ describe('adminRouter finance stats runtime billing summary', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(financeTables)(
+    'fails closed when %s returns null data without a query error',
+    async (table) => {
+      const caller = createAdminCaller(createFinanceStatsSupabase({ [table]: null }));
+
+      await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'INTERNAL_SERVER_ERROR',
+      });
+    },
+  );
+
+  it('fails closed when a finance source returns a non-array payload', async () => {
+    const caller = createAdminCaller(createFinanceStatsSupabase({
+      conversations: { id: 'not-an-array' },
+    }));
+
+    await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取财务统计失败，请稍后重试',
+    });
+  });
+
+  it.each([
+    ['wrong numeric type', '25'],
+    ['non-finite number', Number.POSITIVE_INFINITY],
+  ])('fails closed for a malformed finance amount: %s', async (_caseName, amount) => {
+    const caller = createAdminCaller(createFinanceStatsSupabase({
+      credit_transactions: [{
+        amount,
+        type: 'addition',
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+    }));
+
+    await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取财务统计失败，请稍后重试',
+    });
+  });
+
+  it('fails closed for an invalid required finance date', async () => {
+    const caller = createAdminCaller(createFinanceStatsSupabase({
+      ai_usage_logs: [{ status: 'success', created_at: 'not-a-date' }],
+    }));
+
+    await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取财务统计失败，请稍后重试',
+    });
+  });
+
+  it.each(['', 'not-a-number', null])(
+    'fails closed when an existing billing setting is invalid: %#',
+    async (value) => {
+      const caller = createAdminCaller(createFinanceStatsSupabase({
+        system_settings: [{ key: 'billing_credits_per_usd', value }],
+      }));
+
+      await expect(caller.getFinanceStats()).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: '读取财务统计失败，请稍后重试',
+      });
+    },
+  );
+
+  it('accepts genuinely empty datasets and keeps missing-setting fallbacks', async () => {
+    const emptyOverrides = Object.fromEntries(
+      financeTables.map((table) => [table, []]),
+    ) as Partial<Record<FinanceTable, unknown>>;
+    const caller = createAdminCaller(createFinanceStatsSupabase(emptyOverrides));
+
+    const result = await caller.getFinanceStats();
+
+    expect(result.transactions).toEqual({
+      totalAdditions: 0,
+      totalDeductions: 0,
+      totalPurchases: 0,
+      totalRefunds: 0,
+      todayTransactions: 0,
+      weekTransactions: 0,
+      monthTransactions: 0,
+    });
+    expect(result.users).toEqual({
+      totalUsers: 0,
+      totalCreditsInSystem: 0,
+      averageCreditsPerUser: 0,
+      newUsersThisMonth: 0,
+      newUsersThisWeek: 0,
+    });
+    expect(result.packages).toEqual({
+      totalPackages: 0,
+      activePackages: 0,
+      packages: [],
+    });
+    expect(result.modelStats).toEqual([]);
+    expect(result.dailyChart).toHaveLength(30);
+    expect(result.runtimeBilling).toMatchObject({
+      creditsPerUsd: 1000,
+      tokenPriceMultiplier: 1.5,
+      searchSurchargeCredits: 0,
+      newUserCredits: 100,
+    });
+  });
+
+  it('preserves the established successful finance result shape and calculations', async () => {
+    const caller = createAdminCaller(createFinanceStatsSupabase());
+
+    const result = await caller.getFinanceStats();
+
+    expect(result).toMatchObject({
+      transactions: {
+        totalAdditions: 25,
+        totalDeductions: 5,
+        totalRefunds: 3,
+      },
+      users: {
+        totalUsers: 1,
+        totalCreditsInSystem: 100,
+      },
+      packages: {
+        totalPackages: 1,
+        activePackages: 1,
+      },
+      apiStats: {
+        totalRequests: 1,
+        totalConversations: 1,
+      },
+      financeOverview: {
+        estimatedRevenue: 1500,
+        creditsConsumed: 5,
+        creditsGiven: 25,
+      },
+      runtimeBilling: {
+        creditsPerUsd: 1000,
+        tokenPriceMultiplier: 1.5,
+        searchSurchargeCredits: 7,
+        newUserCredits: 120,
+      },
+    });
   });
 
   it('derives runtime billing ranges from active model pricing instead of retired system token settings', async () => {
@@ -1487,14 +1750,42 @@ describe('adminRouter lightweight admin dashboards', () => {
         const execute = async () => {
           if (table === 'credit_packages') {
             return {
-              data: [{ id: 'pkg-1', name: 'Starter', price: 999, sort_order: 1 }],
+              data: [{
+                id: 'pkg-1',
+                name: 'Starter',
+                price: 999,
+                credits_amount: 1000,
+                bonus_credits: 100,
+                stripe_price_id: null,
+                sort_order: 1,
+                is_popular: 'false',
+                active: 'true',
+                created_at: '2026-03-29T08:00:00.000Z',
+              }],
               error: null,
             };
           }
 
           if (table === 'membership_plans') {
             return {
-              data: [{ id: 'plan-1', name: 'Pro', level: 'pro', sort_order: 1 }],
+              data: [{
+                id: 'plan-1',
+                name: 'Pro',
+                level: 'pro',
+                monthly_price: 9900,
+                yearly_price: 99900,
+                stripe_monthly_price_id: null,
+                stripe_yearly_price_id: null,
+                monthly_credits: 1000,
+                yearly_credits: 12000,
+                monthly_bonus_credits: 100,
+                package_discount: 90,
+                features: ['Feature A'],
+                max_context_messages: 20,
+                is_active: 'true',
+                sort_order: 1,
+                created_at: '2026-03-29T08:00:00.000Z',
+              }],
               error: null,
             };
           }
@@ -1528,8 +1819,36 @@ describe('adminRouter lightweight admin dashboards', () => {
     const result = await caller.getPackagesDashboard();
 
     expect(result).toEqual({
-      packages: [{ id: 'pkg-1', name: 'Starter', price: 999, sort_order: 1 }],
-      membershipPlans: [{ id: 'plan-1', name: 'Pro', level: 'pro', sort_order: 1 }],
+      packages: [{
+        id: 'pkg-1',
+        name: 'Starter',
+        price: 999,
+        credits_amount: 1000,
+        bonus_credits: 100,
+        stripe_price_id: null,
+        sort_order: 1,
+        is_popular: 'false',
+        active: 'true',
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
+      membershipPlans: [{
+        id: 'plan-1',
+        name: 'Pro',
+        level: 'pro',
+        monthly_price: 9900,
+        yearly_price: 99900,
+        stripe_monthly_price_id: null,
+        stripe_yearly_price_id: null,
+        monthly_credits: 1000,
+        yearly_credits: 12000,
+        monthly_bonus_credits: 100,
+        package_discount: 90,
+        features: ['Feature A'],
+        max_context_messages: 20,
+        is_active: 'true',
+        sort_order: 1,
+        created_at: '2026-03-29T08:00:00.000Z',
+      }],
     });
     expect(adminQueries).toEqual(['credit_packages', 'membership_plans']);
   });
@@ -1554,7 +1873,14 @@ describe('adminRouter lightweight admin dashboards', () => {
 
           if (table === 'membership_plans') {
             return {
-              data: [{ id: 'plan-1', name: 'Pro', level: 'pro', sort_order: 1 }],
+              data: [{
+                id: 'plan-1',
+                name: 'Pro',
+                level: 'pro',
+                history_retention_days: 30,
+                allow_export: 'true',
+                allow_batch_export: 'false',
+              }],
               error: null,
             };
           }
@@ -1592,7 +1918,14 @@ describe('adminRouter lightweight admin dashboards', () => {
         site_name: 'Graylum AI',
         maintenance_mode: 'false',
       },
-      membershipPlans: [{ id: 'plan-1', name: 'Pro', level: 'pro', sort_order: 1 }],
+      membershipPlans: [{
+        id: 'plan-1',
+        name: 'Pro',
+        level: 'pro',
+        history_retention_days: 30,
+        allow_export: 'true',
+        allow_batch_export: 'false',
+      }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
     expect(cleanupState.getCleanupStats).not.toHaveBeenCalled();
@@ -1629,6 +1962,141 @@ describe('adminRouter lightweight admin dashboards', () => {
       },
     };
 
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getPackagesDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取套餐列表失败，请稍后重试',
+    });
+  });
+
+  it('accepts genuinely empty settings and packages dashboards', async () => {
+    const adminSupabase = {
+      from() {
+        return createAwaitableQueryBuilder(Promise.resolve({ data: [], error: null }));
+      },
+    };
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getSettingsDashboard()).resolves.toEqual({
+      systemSettings: {},
+      membershipPlans: [],
+    });
+    await expect(caller.getPackagesDashboard()).resolves.toEqual({
+      packages: [],
+      membershipPlans: [],
+    });
+  });
+
+  it.each([
+    ['malformed setting row', 'system_settings', [{ key: 'site_name', value: { nested: true } }]],
+    ['malformed settings membership row', 'membership_plans', [{
+      id: 'plan-1',
+      name: 'Pro',
+      level: 'pro',
+      history_retention_days: null,
+      allow_export: 'true',
+      allow_batch_export: 'false',
+    }]],
+  ])('fails the settings dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
+    const adminSupabase = {
+      from(table: string) {
+        const validData = table === 'system_settings'
+          ? [{ key: 'site_name', value: 'Graylum AI' }]
+          : [{
+              id: 'plan-1',
+              name: 'Pro',
+              level: 'pro',
+              history_retention_days: 30,
+              allow_export: 'true',
+              allow_batch_export: 'false',
+            }];
+        return createAwaitableQueryBuilder(Promise.resolve({
+          data: table === invalidTable ? invalidData : validData,
+          error: null,
+        }));
+      },
+    };
+    const caller = createAdminCaller(adminSupabase);
+
+    await expect(caller.getSettingsDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: '读取设置页数据失败，请稍后重试',
+    });
+  });
+
+  it.each([
+    ['malformed package row', 'credit_packages', [{
+      id: 'pkg-1',
+      name: 'Starter',
+      price: '999',
+      credits_amount: 1000,
+      bonus_credits: 0,
+      stripe_price_id: null,
+      sort_order: 1,
+      is_popular: 'false',
+      active: 'true',
+      created_at: '2026-03-29T08:00:00.000Z',
+    }]],
+    ['malformed package membership row', 'membership_plans', [{
+      id: 'plan-1',
+      name: 'Pro',
+      level: 'pro',
+      monthly_price: 9900,
+      yearly_price: 99900,
+      stripe_monthly_price_id: null,
+      stripe_yearly_price_id: null,
+      monthly_credits: 1000,
+      yearly_credits: 12000,
+      monthly_bonus_credits: 100,
+      package_discount: 90,
+      features: 'not-an-array',
+      max_context_messages: 20,
+      is_active: 'true',
+      sort_order: 1,
+      created_at: '2026-03-29T08:00:00.000Z',
+    }]],
+  ])('fails the packages dashboard for a %s', async (_caseName, invalidTable, invalidData) => {
+    const validPackage = {
+      id: 'pkg-1',
+      name: 'Starter',
+      price: 999,
+      credits_amount: 1000,
+      bonus_credits: 0,
+      stripe_price_id: null,
+      sort_order: 1,
+      is_popular: 'false',
+      active: 'true',
+      created_at: '2026-03-29T08:00:00.000Z',
+    };
+    const validPlan = {
+      id: 'plan-1',
+      name: 'Pro',
+      level: 'pro',
+      monthly_price: 9900,
+      yearly_price: 99900,
+      stripe_monthly_price_id: null,
+      stripe_yearly_price_id: null,
+      monthly_credits: 1000,
+      yearly_credits: 12000,
+      monthly_bonus_credits: 100,
+      package_discount: 90,
+      features: ['Feature A'],
+      max_context_messages: 20,
+      is_active: 'true',
+      sort_order: 1,
+      created_at: '2026-03-29T08:00:00.000Z',
+    };
+    const adminSupabase = {
+      from(table: string) {
+        return createAwaitableQueryBuilder(Promise.resolve({
+          data: table === invalidTable
+            ? invalidData
+            : table === 'credit_packages' ? [validPackage] : [validPlan],
+          error: null,
+        }));
+      },
+    };
     const caller = createAdminCaller(adminSupabase);
 
     await expect(caller.getPackagesDashboard()).rejects.toMatchObject<Partial<TRPCError>>({
