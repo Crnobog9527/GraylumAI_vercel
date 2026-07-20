@@ -310,6 +310,35 @@ async function readCheckoutData<T>(input: {
   return result.data;
 }
 
+async function readSubscriptionChangeData<T>(input: {
+  query: PromiseLike<{ data: T | null; error: unknown }>;
+  changeInput: ChangeSubscriptionPlanInput;
+  stage: string;
+  operation: string;
+}): Promise<T | null> {
+  let result;
+
+  try {
+    result = await input.query;
+  } catch (error) {
+    logSubscriptionChangeStageFailure(input.stage, input.changeInput, error);
+    throw createSafeServiceUnavailableError(
+      error,
+      `${input.operation}暂不可用，请稍后重试`,
+    );
+  }
+
+  if (result.error) {
+    logSubscriptionChangeStageFailure(input.stage, input.changeInput, result.error);
+    throw createSafeServiceUnavailableError(
+      result.error,
+      `${input.operation}暂不可用，请稍后重试`,
+    );
+  }
+
+  return result.data;
+}
+
 function getCheckoutSessionSubscriptionId(session: any) {
   return typeof session.subscription === 'string'
     ? session.subscription
@@ -972,34 +1001,36 @@ export const paymentsRouter = router({
         throw toSubscriptionChangeUnavailableError();
       }
 
-      const { data: profile, error: profileError } = await ctx.supabase
-        .from('profiles')
-        .select('email, nickname, membership_level')
-        .eq('id', ctx.profileId)
-        .single();
+      const profile = await readSubscriptionChangeData({
+        query: ctx.supabase
+          .from('profiles')
+          .select('email, nickname, membership_level')
+          .eq('id', ctx.profileId)
+          .maybeSingle(),
+        changeInput: input,
+        stage: 'profile_read',
+        operation: '用户资料服务',
+      });
 
-      if (profileError || !profile) {
-        if (profileError) {
-          logSubscriptionChangeStageFailure('profile_read', input, profileError);
-        }
-
+      if (!profile) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '用户资料不存在，无法切换订阅套餐',
         });
       }
 
-      const { data: plan, error: planError } = await ctx.supabase
-        .from('membership_plans')
-        .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id')
-        .eq('id', input.planId)
-        .single();
+      const plan = await readSubscriptionChangeData({
+        query: ctx.supabase
+          .from('membership_plans')
+          .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id')
+          .eq('id', input.planId)
+          .maybeSingle(),
+        changeInput: input,
+        stage: 'plan_read',
+        operation: '会员套餐服务',
+      });
 
-      if (planError || !plan) {
-        if (planError) {
-          logSubscriptionChangeStageFailure('plan_read', input, planError);
-        }
-
+      if (!plan) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: '会员套餐不存在',
@@ -1008,6 +1039,13 @@ export const paymentsRouter = router({
 
       if (plan.is_active !== 'true') {
         throw toCheckoutConfigError('该会员套餐当前未启用');
+      }
+
+      const selectedPriceId = normalizeCheckoutPriceId(
+        getMembershipPlanPriceId(plan, input.billingCycle),
+      );
+      if (!selectedPriceId || plan.level === 'free') {
+        throw toItemUnavailableError('该会员套餐暂不可升级，请稍后重试');
       }
 
       const eligibility = await resolveMembershipEligibility({
@@ -1021,11 +1059,6 @@ export const paymentsRouter = router({
 
       if (eligibility.action !== 'changeSubscriptionPlan') {
         throwNonUpgradeEligibilityError(eligibility);
-      }
-
-      const selectedPriceId = getMembershipPlanPriceId(plan, input.billingCycle);
-      if (!selectedPriceId || plan.level === 'free') {
-        throw toItemUnavailableError('该会员套餐暂不可升级，请稍后重试');
       }
 
       let currentSubscription;

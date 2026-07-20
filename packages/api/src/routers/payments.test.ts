@@ -219,6 +219,148 @@ function createProtectedCaller(options: {
   } as any);
 }
 
+function createSubscriptionChangeGuardHarness(options: {
+  monthlyPrice?: unknown;
+  yearlyPrice?: unknown;
+  profileResult?: () => Promise<unknown>;
+  planResult?: () => Promise<unknown>;
+} = {}) {
+  const targetPlanId = '123e4567-e89b-42d3-a456-426614174222';
+  const subscriptionRetrieve = vi.fn().mockResolvedValue({
+    id: 'sub_test_active',
+    status: 'active',
+    cancel_at_period_end: false,
+    metadata: { userId: 'user-1' },
+    items: {
+      data: [{ id: 'si_test_current' }],
+    },
+  });
+  const updatedSubscription = {
+    id: 'sub_test_active',
+    status: 'active',
+    cancel_at_period_end: false,
+    metadata: { userId: 'user-1' },
+    items: {
+      data: [{ id: 'si_test_current' }],
+    },
+  };
+  const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
+  const orderInserts: unknown[] = [];
+  const userTableReads: string[] = [];
+  let profileReadCount = 0;
+
+  stripeState.getStripeClient.mockReturnValue({
+    subscriptions: {
+      retrieve: subscriptionRetrieve,
+      update: subscriptionUpdate,
+    },
+  });
+
+  const userSupabase = {
+    from(table: string) {
+      userTableReads.push(table);
+
+      if (table === 'profiles') {
+        profileReadCount += 1;
+        const result = profileReadCount === 1
+          ? Promise.resolve({
+            data: {
+              id: 'user-1',
+              role: 'user',
+              status: 'active',
+              email: 'user@example.com',
+              nickname: 'User',
+              membership_level: 'pro',
+            },
+            error: null,
+          })
+          : options.profileResult?.() ?? Promise.resolve({
+            data: {
+              id: 'user-1',
+              email: 'user@example.com',
+              nickname: 'User',
+              membership_level: 'pro',
+            },
+            error: null,
+          });
+
+        return createSingleQueryBuilder(result);
+      }
+
+      if (table === 'membership_plans') {
+        return createSingleQueryBuilder(
+          options.planResult?.() ?? Promise.resolve({
+            data: {
+              id: targetPlanId,
+              name: 'Gold',
+              level: 'gold',
+              is_active: 'true',
+              stripe_monthly_price_id: 'monthlyPrice' in options
+                ? options.monthlyPrice
+                : 'price_test_gold_monthly',
+              stripe_yearly_price_id: 'yearlyPrice' in options
+                ? options.yearlyPrice
+                : 'price_test_gold_yearly',
+            },
+            error: null,
+          }),
+        );
+      }
+
+      if (table === 'user_subscriptions') {
+        return createListQueryBuilder(
+          Promise.resolve({
+            data: [{
+              id: 'sub-row-1',
+              membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
+              stripe_subscription_id: 'sub_test_active',
+              stripe_customer_id: 'cus_test_active',
+              status: 'active',
+              billing_cycle: 'monthly',
+              cancel_at_period_end: 'false',
+              metadata: {},
+            }],
+            error: null,
+          }),
+        );
+      }
+
+      if (table === 'payment_orders') {
+        return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+      }
+
+      throw new Error(`Unexpected user table ${table}`);
+    },
+  };
+
+  const adminSupabase = {
+    from(table: string) {
+      if (table === 'payment_orders') {
+        return createInsertBuilder(
+          Promise.resolve({ data: { id: 'order-change-1' }, error: null }),
+          orderInserts,
+        );
+      }
+
+      throw new Error(`Unexpected admin table ${table}`);
+    },
+  };
+
+  return {
+    caller: createProtectedCaller({
+      supabase: userSupabase,
+      supabaseAdmin: adminSupabase,
+    }),
+    targetPlanId,
+    subscriptionRetrieve,
+    subscriptionUpdate,
+    updatedSubscription,
+    orderInserts,
+    userTableReads,
+    adminSupabase,
+  };
+}
+
 describe('paymentsRouter error sanitization', () => {
   beforeEach(() => {
     stripeState.assertStripeCheckoutConfigured.mockReset();
@@ -955,6 +1097,167 @@ describe('paymentsRouter error sanitization', () => {
     expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(sessionCreate).not.toHaveBeenCalled();
     expect(orderInserts).toHaveLength(0);
+  });
+
+  it.each([
+    ['monthly', null],
+    ['monthly', ''],
+    ['monthly', ' '],
+    ['yearly', null],
+    ['yearly', ''],
+    ['yearly', ' '],
+  ] as const)(
+    'rejects an unconfigured %s subscription Price before Stripe or order side effects (%j)',
+    async (billingCycle, priceId) => {
+      const harness = createSubscriptionChangeGuardHarness(
+        billingCycle === 'monthly'
+          ? { monthlyPrice: priceId }
+          : { yearlyPrice: priceId },
+      );
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle,
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'BAD_REQUEST',
+        message: '该会员套餐暂不可升级，请稍后重试',
+      });
+
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+      expect(harness.userTableReads).not.toContain('user_subscriptions');
+      expect(harness.userTableReads).not.toContain('payment_orders');
+    },
+  );
+
+  it.each([
+    [
+      'database error',
+      () => Promise.resolve({ data: null, error: { code: '42501' } }),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+    [
+      'rejected query',
+      () => Promise.reject(new Error('profile network timeout')),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+    [
+      'successful not-found',
+      () => Promise.resolve({ data: null, error: null }),
+      'NOT_FOUND',
+      '用户资料不存在，无法切换订阅套餐',
+    ],
+  ] as const)(
+    'distinguishes profile %s before subscription change side effects',
+    async (_caseName, profileResult, errorCode, message) => {
+      const harness = createSubscriptionChangeGuardHarness({ profileResult });
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: errorCode,
+        message,
+      });
+
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      'database error',
+      () => Promise.resolve({ data: null, error: { code: '57014' } }),
+      'SERVICE_UNAVAILABLE',
+      '会员套餐服务暂不可用，请稍后重试',
+    ],
+    [
+      'rejected query',
+      () => Promise.reject(new Error('membership plan network timeout')),
+      'SERVICE_UNAVAILABLE',
+      '会员套餐服务暂不可用，请稍后重试',
+    ],
+    [
+      'successful not-found',
+      () => Promise.resolve({ data: null, error: null }),
+      'NOT_FOUND',
+      '会员套餐不存在',
+    ],
+  ] as const)(
+    'distinguishes membership plan %s before subscription change side effects',
+    async (_caseName, planResult, errorCode, message) => {
+      const harness = createSubscriptionChangeGuardHarness({ planResult });
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: errorCode,
+        message,
+      });
+
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+    },
+  );
+
+  it('trims a configured subscription Price before metadata, order, and Stripe update', async () => {
+    const harness = createSubscriptionChangeGuardHarness({
+      yearlyPrice: ' price_test_gold_yearly ',
+    });
+    stripeState.buildStripeMetadata.mockImplementation((metadata) => metadata);
+
+    await expect(
+      harness.caller.changeSubscriptionPlan({
+        planId: harness.targetPlanId,
+        billingCycle: 'yearly',
+      }),
+    ).resolves.toMatchObject({
+      subscriptionId: 'sub_test_active',
+      planId: harness.targetPlanId,
+      billingCycle: 'yearly',
+      action: 'changeSubscriptionPlan',
+    });
+
+    expect(stripeState.buildStripeMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      priceId: 'price_test_gold_yearly',
+    }));
+    expect(harness.orderInserts).toHaveLength(1);
+    expect(harness.orderInserts[0]).toMatchObject({
+      stripe_price_id: 'price_test_gold_yearly',
+      metadata: expect.objectContaining({
+        priceId: 'price_test_gold_yearly',
+      }),
+    });
+    expect(harness.subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
+    expect(harness.subscriptionUpdate).toHaveBeenCalledWith(
+      'sub_test_active',
+      expect.objectContaining({
+        items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
+        metadata: expect.objectContaining({
+          priceId: 'price_test_gold_yearly',
+        }),
+      }),
+    );
+    expect(syncSubscriptionState).toHaveBeenCalledWith(
+      harness.adminSupabase,
+      harness.updatedSubscription,
+    );
   });
 
   it('changes an eligible active subscription plan without creating checkout or credit grants', async () => {
