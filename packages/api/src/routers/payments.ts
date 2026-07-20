@@ -1052,14 +1052,23 @@ export const paymentsRouter = router({
         throw toItemUnavailableError('该会员套餐暂不可升级，请稍后重试');
       }
 
-      const eligibility = await resolveMembershipEligibility({
-        supabase: ctx.supabase,
-        userId: ctx.profileId,
-        profile,
-        action: 'create_membership_checkout',
-        targetPlan: plan,
-        targetBillingCycle: input.billingCycle,
-      });
+      let eligibility: MembershipEligibilityResult;
+      try {
+        eligibility = await resolveMembershipEligibility({
+          supabase: ctx.supabase,
+          userId: ctx.profileId,
+          profile,
+          action: 'create_membership_checkout',
+          targetPlan: plan,
+          targetBillingCycle: input.billingCycle,
+        });
+      } catch (error) {
+        logSubscriptionChangeStageFailure('eligibility_read', input, error);
+        throw createSafeServiceUnavailableError(
+          error,
+          '会员状态暂不可用，请稍后重试',
+        );
+      }
 
       if (eligibility.action !== 'changeSubscriptionPlan') {
         throwNonUpgradeEligibilityError(eligibility);

@@ -224,6 +224,8 @@ function createSubscriptionChangeGuardHarness(options: {
   yearlyPrice?: unknown;
   profileResult?: () => Promise<unknown>;
   planResult?: () => Promise<unknown>;
+  eligibilitySubscriptionResult?: () => Promise<unknown>;
+  eligibilityOrderResult?: () => Promise<unknown>;
 } = {}) {
   const targetPlanId = '123e4567-e89b-42d3-a456-426614174222';
   const subscriptionRetrieve = vi.fn().mockResolvedValue({
@@ -309,7 +311,7 @@ function createSubscriptionChangeGuardHarness(options: {
 
       if (table === 'user_subscriptions') {
         return createListQueryBuilder(
-          Promise.resolve({
+          options.eligibilitySubscriptionResult?.() ?? Promise.resolve({
             data: [{
               id: 'sub-row-1',
               membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
@@ -326,7 +328,9 @@ function createSubscriptionChangeGuardHarness(options: {
       }
 
       if (table === 'payment_orders') {
-        return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
+        return createMaybeSingleQueryBuilder(
+          options.eligibilityOrderResult?.() ?? Promise.resolve({ data: null, error: null }),
+        );
       }
 
       throw new Error(`Unexpected user table ${table}`);
@@ -1131,6 +1135,43 @@ describe('paymentsRouter error sanitization', () => {
       expect(syncSubscriptionState).not.toHaveBeenCalled();
       expect(harness.userTableReads).not.toContain('user_subscriptions');
       expect(harness.userTableReads).not.toContain('payment_orders');
+    },
+  );
+
+  it.each([
+    'user_subscriptions',
+    'payment_orders',
+  ] as const)(
+    'sanitizes rejected %s eligibility facts before subscription change side effects',
+    async (rejectedTable) => {
+      const rejectedResult = () => Promise.reject(new Error(`${rejectedTable} facts timeout`));
+      const harness = createSubscriptionChangeGuardHarness(
+        rejectedTable === 'user_subscriptions'
+          ? { eligibilitySubscriptionResult: rejectedResult }
+          : { eligibilityOrderResult: rejectedResult },
+      );
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '会员状态暂不可用，请稍后重试',
+      });
+
+      expect(loggerState.error).toHaveBeenCalledWith(
+        'billing',
+        'payments_change_subscription_plan_stage_failed',
+        expect.objectContaining({ stage: 'eligibility_read' }),
+      );
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+      expect(harness.userTableReads.filter((table) => table === 'user_subscriptions')).toHaveLength(1);
+      expect(harness.userTableReads.filter((table) => table === 'payment_orders')).toHaveLength(1);
     },
   );
 
