@@ -1001,7 +1001,11 @@ export const paymentsRouter = router({
         throw toSubscriptionChangeUnavailableError();
       }
 
-      const profile = await readSubscriptionChangeData({
+      const profile = await readSubscriptionChangeData<{
+        email: string | null;
+        nickname: string | null;
+        membership_level: string | null;
+      }>({
         query: ctx.supabase
           .from('profiles')
           .select('email, nickname, membership_level')
@@ -1019,7 +1023,7 @@ export const paymentsRouter = router({
         });
       }
 
-      const plan = await readSubscriptionChangeData({
+      const plan = await readSubscriptionChangeData<MembershipPlanPaymentRow>({
         query: ctx.supabase
           .from('membership_plans')
           .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id')
