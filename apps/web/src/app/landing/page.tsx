@@ -14,6 +14,7 @@ export default async function LandingPage() {
     siteName,
     supportEmail,
     membershipPlans,
+    membershipPlansStatus,
     featuredModules,
     showOnboarding,
     showFeaturedModules,
@@ -46,7 +47,7 @@ export default async function LandingPage() {
             </div>
           </section>
         )}
-        <PricingSection plans={membershipPlans} />
+        <PricingSection plans={membershipPlans} status={membershipPlansStatus} />
         <CTASection />
       </main>
       <LandingFooter siteName={siteName} supportEmail={supportEmail} />

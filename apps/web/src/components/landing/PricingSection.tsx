@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Check, Crown, Sparkles, Zap } from 'lucide-react';
 import { formatUsd } from '@/lib/currency';
 import { buildAuthHref } from '@/lib/site-config';
+import type { PublicCatalogStatus } from '@/lib/public-site';
 
 type MembershipPlan = {
   id: string;
@@ -26,42 +27,6 @@ type MembershipPlan = {
   };
 };
 
-const fallbackPlans: MembershipPlan[] = [
-  {
-    id: 'free',
-    name: '免费版',
-    level: 'free',
-    price: { monthly: 0, yearly: 0 },
-    credits: { monthly: 100, monthlyBonus: 0, yearly: 0, yearlyBonus: 0 },
-    features: ['基础内容生成功能', '入门级历史记录保留', '适合体验产品能力'],
-    recommended: false,
-    highlight: false,
-    checkoutReady: { monthly: false, yearly: false },
-  },
-  {
-    id: 'pro',
-    name: 'Pro 专业版',
-    level: 'pro',
-    price: { monthly: 99, yearly: 999 },
-    credits: { monthly: 1000, monthlyBonus: 0, yearly: 12000, yearlyBonus: 0 },
-    features: ['更高积分额度', '更长历史记录保留', '适合个人创作者持续使用'],
-    recommended: true,
-    highlight: true,
-    checkoutReady: { monthly: true, yearly: true },
-  },
-  {
-    id: 'gold',
-    name: 'Gold 黄金版',
-    level: 'gold',
-    price: { monthly: 299, yearly: 2999 },
-    credits: { monthly: 5000, monthlyBonus: 0, yearly: 60000, yearlyBonus: 0 },
-    features: ['高阶策略与导出能力', '更长历史记录保留', '适合高频使用者与团队'],
-    recommended: false,
-    highlight: false,
-    checkoutReady: { monthly: true, yearly: true },
-  },
-];
-
 function resolvePlanIcon(level: string) {
   if (level === 'gold') {
     return Crown;
@@ -78,8 +43,14 @@ function formatCreditAmount(value: number) {
   return new Intl.NumberFormat('en-US').format(value);
 }
 
-export default function PricingSection({ plans }: { plans?: MembershipPlan[] }) {
-  const resolvedPlans = plans && plans.length > 0 ? plans : fallbackPlans;
+export default function PricingSection({
+  plans,
+  status = plans && plans.length > 0 ? 'available' : 'empty',
+}: {
+  plans?: MembershipPlan[];
+  status?: PublicCatalogStatus;
+}) {
+  const resolvedPlans = status === 'available' ? plans ?? [] : [];
 
   return (
     <section id="pricing" className="relative py-24 md:py-32">
@@ -107,8 +78,31 @@ export default function PricingSection({ plans }: { plans?: MembershipPlan[] }) 
           </p>
         </div>
 
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 xl:grid-cols-3">
-          {resolvedPlans.map((plan) => {
+        {status === 'unavailable' ? (
+          <div
+            data-testid="public-pricing-unavailable"
+            className="mx-auto max-w-2xl rounded-2xl border border-amber-400/30 bg-amber-400/10 px-6 py-8 text-center"
+          >
+            <h3 className="text-xl font-semibold text-white">套餐服务暂不可用</h3>
+            <p className="mt-3 text-[#B0B0B0]">当前无法安全读取最新套餐与价格，请稍后重试。</p>
+            <Link
+              href="/landing#pricing"
+              className="mt-6 inline-flex rounded-xl border border-[#FFD700]/40 px-5 py-2.5 font-semibold text-[#FFD700] hover:bg-[#FFD700]/10"
+            >
+              重新加载
+            </Link>
+          </div>
+        ) : status === 'empty' ? (
+          <div
+            data-testid="public-pricing-empty"
+            className="mx-auto max-w-2xl rounded-2xl border border-[#333333] bg-[#1A1A1A] px-6 py-8 text-center"
+          >
+            <h3 className="text-xl font-semibold text-white">当前暂无可用套餐</h3>
+            <p className="mt-3 text-[#B0B0B0]">新的套餐开放后，这里会自动显示最新价格与权益。</p>
+          </div>
+        ) : (
+          <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 xl:grid-cols-3">
+            {resolvedPlans.map((plan) => {
             const Icon = resolvePlanIcon(plan.level);
             const monthlyPrice = Number(plan.price.monthly ?? 0);
             const yearlyPrice = Number(plan.price.yearly ?? 0);
@@ -199,12 +193,15 @@ export default function PricingSection({ plans }: { plans?: MembershipPlan[] }) 
                 </Link>
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+        )}
 
-        <p className="mt-12 text-center text-sm text-[#808080]">
-          年付积分按月释放，未使用积分可累积，不按月清零。页面展示价格与权益来自后台会员配置。
-        </p>
+        {status === 'available' && (
+          <p className="mt-12 text-center text-sm text-[#808080]">
+            年付积分按月释放，未使用积分可累积，不按月清零。页面展示价格与权益来自后台会员配置。
+          </p>
+        )}
       </div>
     </section>
   );

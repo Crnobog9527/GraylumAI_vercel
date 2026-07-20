@@ -55,6 +55,28 @@ function createEligibilitySupabase(options: {
 }
 
 describe('resolveMembershipEligibility', () => {
+  it.each([
+    ['subscription facts', { subscriptionError: { code: '42501' } }],
+    ['payment-order facts', { orderError: { code: '57014' } }],
+  ])('fails closed when %s cannot be read', async (_caseName, options) => {
+    const result = await resolveMembershipEligibility({
+      supabase: createEligibilitySupabase(options),
+      userId: 'user-1',
+      profile: { membership_level: 'free' },
+      action: 'create_membership_checkout',
+      targetPlan: { id: 'plan-pro', level: 'pro' },
+      targetBillingCycle: 'monthly',
+    });
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: 'inconsistent',
+      action: 'none',
+      reasonCode: 'READ_FAILED',
+      safeMessage: '会员状态暂不可用，请稍后重试。',
+    });
+  });
+
   it('allows free users with no active subscription to create a membership checkout', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({}),

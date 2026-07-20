@@ -118,6 +118,60 @@ const emptyStateCardStyle = {
   background: 'var(--bg-primary)',
 } as const;
 
+export function ProfileCatalogState({
+  status,
+  onRetry,
+  retrying = false,
+}: {
+  status: 'empty' | 'unavailable';
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
+  if (status === 'empty') {
+    return (
+      <div
+        data-testid="profile-catalog-empty"
+        className="col-span-4 rounded-xl border px-4 py-6 text-center text-sm"
+        style={emptyStateCardStyle}
+      >
+        <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+          当前暂无可用套餐
+        </div>
+        <div style={{ color: 'var(--text-tertiary)' }}>
+          新套餐开放后，这里会自动显示最新价格与权益。
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="profile-catalog-unavailable"
+      className="col-span-4 rounded-xl border px-4 py-6 text-center text-sm"
+      style={emptyStateCardStyle}
+    >
+      <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+        套餐服务暂不可用
+      </div>
+      <div style={{ color: 'var(--text-tertiary)' }}>
+        当前无法安全读取最新套餐与价格，请稍后重试。
+      </div>
+      {onRetry && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          disabled={retrying}
+          onClick={onRetry}
+        >
+          {retrying ? '重试中...' : '重试'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // 积分加油包区块
 const CreditPackagesSection = memo(function CreditPackagesSection({
   onBuyClick,
@@ -127,7 +181,13 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
   pendingPackageId?: string | null;
 }) {
   // 从 API 获取积分加油包数据
-  const { data: packages = [], isLoading } = trpc.settings.getCreditPackages.useQuery();
+  const {
+    data: packages = [],
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = trpc.settings.getCreditPackages.useQuery();
 
   return (
     <div
@@ -153,18 +213,14 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
           <div className="col-span-4 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
             加载中...
           </div>
+        ) : isError ? (
+          <ProfileCatalogState
+            status="unavailable"
+            retrying={isFetching}
+            onRetry={() => { void refetch(); }}
+          />
         ) : packages.length === 0 ? (
-          <div
-            className="col-span-4 rounded-xl border px-4 py-6 text-center text-sm"
-            style={emptyStateCardStyle}
-          >
-            <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-              积分包暂未发布
-            </div>
-            <div style={{ color: 'var(--text-tertiary)' }}>
-              后台尚未配置可展示的积分包，发布后这里会自动同步。
-            </div>
-          </div>
+          <ProfileCatalogState status="empty" />
         ) : packages.map((pkg) => (
           <div
             key={pkg.id}
@@ -266,10 +322,19 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   };
 
   // 从 API 获取会员等级数据
-  const { data: apiPlans = [], isLoading: plansLoading } = trpc.settings.getMembershipPlans.useQuery();
+  const {
+    data: apiPlans = [],
+    isLoading: plansLoading,
+    isError: plansError,
+    isFetching: plansFetching,
+    refetch: refetchPlans,
+  } = trpc.settings.getMembershipPlans.useQuery();
   const {
     data: eligibilityMatrix,
     isLoading: eligibilityLoading,
+    isError: eligibilityError,
+    isFetching: eligibilityFetching,
+    refetch: refetchEligibility,
   } = trpc.payments.getMembershipEligibilityMatrix.useQuery();
 
   const eligibilityByPlanCycle = useMemo(() => {
@@ -406,12 +471,18 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const ready = billingCycle === 'monthly'
       ? plan.checkoutReady?.monthly
       : plan.checkoutReady?.yearly;
-    const buttonState = getMembershipPlanButtonState({
-      eligibility,
-      eligibilityLoading,
-      checkoutReady: Boolean(ready),
-      pending: pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`,
-    });
+    const buttonState = eligibilityError
+      ? {
+          canCreateCheckout: false,
+          canChangeSubscriptionPlan: false,
+          message: '购买资格暂不可用，请稍后重试。',
+        }
+      : getMembershipPlanButtonState({
+          eligibility,
+          eligibilityLoading,
+          checkoutReady: Boolean(ready),
+          pending: pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`,
+        });
 
     if (!buttonState.canCreateCheckout && !buttonState.canChangeSubscriptionPlan) {
       const summary = eligibility?.action === 'createCheckoutSession' && !ready
@@ -580,18 +651,14 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           <div className="col-span-3 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
             加载中...
           </div>
+        ) : plansError ? (
+          <ProfileCatalogState
+            status="unavailable"
+            retrying={plansFetching}
+            onRetry={() => { void refetchPlans(); }}
+          />
         ) : displayPlans.length === 0 ? (
-          <div
-            className="col-span-3 rounded-xl border px-4 py-6 text-center text-sm"
-            style={emptyStateCardStyle}
-          >
-            <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-              会员方案暂未发布
-            </div>
-            <div style={{ color: 'var(--text-tertiary)' }}>
-              后台尚未发布可展示的会员计划，配置完成后这里会自动更新。
-            </div>
-          </div>
+          <ProfileCatalogState status="empty" />
         ) : displayPlans.map((plan) => {
           const isHighlight = plan.recommended || plan.highlight;
           const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
@@ -605,12 +672,17 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           const ready = billingCycle === 'monthly'
             ? plan.checkoutReady?.monthly
             : plan.checkoutReady?.yearly;
-          const buttonState = getMembershipPlanButtonState({
-            eligibility,
-            eligibilityLoading,
-            checkoutReady: Boolean(ready),
-            pending: isPendingPlan,
-          });
+          const buttonState = eligibilityError
+            ? {
+                disabled: true,
+                label: '购买资格暂不可用',
+              }
+            : getMembershipPlanButtonState({
+                eligibility,
+                eligibilityLoading,
+                checkoutReady: Boolean(ready),
+                pending: isPendingPlan,
+              });
 
           return (
             <div
@@ -731,6 +803,28 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           );
         })}
       </div>
+
+      {eligibilityError && !plansError && displayPlans.length > 0 && (
+        <div
+          data-testid="profile-eligibility-unavailable"
+          className="mt-4 rounded-xl border px-4 py-3 text-sm"
+          style={emptyStateCardStyle}
+        >
+          <span style={{ color: 'var(--text-secondary)' }}>
+            购买资格暂不可用，已暂停 Checkout。
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="ml-3"
+            disabled={eligibilityFetching}
+            onClick={() => { void refetchEligibility(); }}
+          >
+            {eligibilityFetching ? '重试中...' : '重试'}
+          </Button>
+        </div>
+      )}
 
       <PurchaseIntentDialog
         intent={purchaseIntent}
