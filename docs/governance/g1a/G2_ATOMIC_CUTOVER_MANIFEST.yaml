@@ -1,0 +1,175 @@
+schema: graylum.g1a.g2-atomic-cutover-manifest
+version: 1
+phase: G1A
+material_type: NON_EXECUTABLE_G1A_DESIGN_ONLY
+live_enforcement_active: false
+legacy_authority_disabled: false
+replacement_policy_activated: false
+g2_policy_binding_accepted: false
+live_activation_authorized: false
+
+repository:
+  numeric_id: 1133708061
+  full_name: Crnobog9527/GraylumAI_vercel
+  default_branch: main
+task:
+  issue_number: 282
+  state_version: 3
+  issue_definition_revision: BOUNDED_CORRECTION_2
+  phase: G1A
+  prior_event_comment_database_id: 5049327209
+
+expected_pre_state:
+  bootstrap_stage_status: ACTIVE
+  policy_binding:
+    kind: BOOTSTRAP_SENTINEL
+    sentinel: BOOTSTRAP_SENTINEL
+    policy_blob_sha: null
+    accepted_policy_epoch: null
+    event: null
+  g2_policy_binding_event_status: NOT_PRESENT
+  accepted_policy_epoch_status: NOT_ACTIVATED
+  active_authority_changed: false
+  legacy_executable_authority: CURRENT_STATE_UNVERIFIED
+
+bootstrap_sentinel_binding:
+  sentinel: BOOTSTRAP_SENTINEL
+  binding_purpose: design_time_pre_state_only
+  executable: false
+  live_effect: NONE
+
+proposed_real_policy_binding:
+  status: PROPOSED
+  policy_blob_sha: POLICY_BLOB_SHA
+  accepted_policy_epoch: authority_epoch
+  acceptance_event: G2_POLICY_BINDING_ACCEPTED
+  live_effect_in_g1a: NONE
+
+refs:
+  main_exact_sha: a9f26d7dd4fa8fdaf716d90008ec12030379f368
+  staging_exact_sha: 69beaf0b82717b0809f6a6f72c29fca0abe0b8d0
+  merge_base_exact_sha: a9f26d7dd4fa8fdaf716d90008ec12030379f368
+  main_agents_blob_sha: 971537d77f66a4d7e8d3dcc4f5fb07e444834302
+  staging_agents_blob_sha: 4f2b314a1862abf61eea06c4b8cc841d5fd87769
+  policy_file_main: ABSENT_CONFIRMED
+  policy_file_staging: ABSENT_CONFIRMED
+
+parity_requirements:
+  main_staging_policy_material_parity: REQUIRED_BEFORE_G2
+  main_staging_agents_parity: REQUIRED_OR_EXPLICIT_CAS_EXCEPTION
+  exact_ref_snapshot: REQUIRED
+  mismatch_decision: DENY
+
+replacement_activation_objects:
+  - object: real_policy_blob
+    digest: POLICY_BLOB_SHA
+    status: PROPOSED
+  - object: authority_epoch
+    value: authority_epoch
+    monotonic: true
+    status: PROPOSED
+  - object: rmg_contract
+    digest: RMG_CONTRACT_DIGEST
+    executable_in_g1a: false
+
+legacy_executable_disable_objects:
+  - source_class: .agents
+    disposition: FUTURE_G2_DISABLE_EXECUTABLE_CONSUMPTION
+    g1a_action: NONE
+  - source_class: task.json/progress.md/findings.md/task_plan.md
+    disposition: FUTURE_G2_DERIVED_ONLY
+    g1a_action: NONE
+  - source_class: Manus workflow and recovery prose
+    disposition: FUTURE_G2_DERIVED_ONLY
+    g1a_action: NONE
+
+atomicity:
+  same_transaction_or_same_commit_digest: REQUIRED
+  replacement_activation_and_legacy_disable: SAME_ATOMIC_CUTOVER
+  exactly-one-writer: REQUIRED
+  dual_write_allowed: false
+  partial_activation: DENY
+  partial_disable: DENY
+  commit_point: FUTURE_G2_ACCEPTED_CAS_COMMIT
+
+cas_prerequisites:
+  repository_id: 1133708061
+  task_issue: 282
+  state_version: 3
+  prior_event: 5049327209
+  main_exact_sha: a9f26d7dd4fa8fdaf716d90008ec12030379f368
+  staging_exact_sha: 69beaf0b82717b0809f6a6f72c29fca0abe0b8d0
+  policy_blob_sha: POLICY_BLOB_SHA
+  authority_epoch: authority_epoch
+  required_decision: CAS_MATCH
+
+before_state_observable:
+  stage_b: ACTIVE
+  g2_event: NOT_PRESENT
+  accepted_epoch: NOT_ACTIVATED
+  live_authority_change: false
+
+after_state_observable:
+  status: FUTURE_G2_EXPECTED_BEHAVIOR
+  g2_event: G2_POLICY_BINDING_ACCEPTED
+  accepted_epoch: authority_epoch
+  replacement_policy: ACTIVATED_ONLY_AFTER_ACCEPTANCE
+  legacy_executable_authority: DISABLED_ONLY_AFTER_SAME_ATOMIC_CUTOVER
+  writer_count: exactly-one-writer
+  dual_write_allowed: false
+
+g2_acceptance_event_fields:
+  record_type: G2_POLICY_BINDING_ACCEPTED
+  repository_id: 1133708061
+  task_issue: 282
+  phase: G2
+  prior_event: REQUIRED
+  policy_blob_sha: POLICY_BLOB_SHA
+  authority_epoch: authority_epoch
+  main_exact_sha: REQUIRED_EXACT_REF
+  staging_exact_sha: REQUIRED_EXACT_REF
+  replacement_activation_digest: REQUIRED_DIGEST
+  legacy_disable_digest: REQUIRED_DIGEST
+  cas_result: CAS_MATCH
+  exactly_one_writer: true
+  dual_write_allowed: false
+  acceptance_status: REQUIRED_OWNER_AND_INDEPENDENT_EVIDENCE
+
+evidence_manifest:
+  required:
+    - exact repository/task/phase/state identity
+    - exact main/staging refs and AGENTS/policy parity
+    - policy blob and contract digests
+    - replacement activation digest
+    - legacy disable digest
+    - CAS pre-state and post-state
+    - provider identity without secret values
+    - independent acceptance event identity
+  current_g1a_status: DESIGN_ONLY_NOT_COLLECTED_AS_G2_EVIDENCE
+
+failure_states:
+  - INVALID_IDENTITY
+  - POLICY_BLOB_DIGEST_MISMATCH
+  - EPOCH_NOT_MONOTONIC
+  - REF_OR_PARITY_MISMATCH
+  - CAS_MISMATCH
+  - SECOND_WRITER_DETECTED
+  - DUAL_WRITE_ATTEMPT
+  - PARTIAL_REPLACEMENT
+  - PARTIAL_LEGACY_DISABLE
+  - MISSING_ACCEPTANCE_EVENT
+  - RECEIPT_EXPIRED_REVOKED_OR_SUPERSEDED
+  - UNKNOWN_FIELD_OR_CANONICALIZATION_MISMATCH
+
+failure_disposition:
+  forward_only: true
+  decision: DENY_OR_BLOCKED_ADVISORY
+  automatic_legacy_authority_restore: false
+  repair_mode: ADVISORY_ONLY
+  g1b_entry_allowed: false
+
+g1b_entry_prerequisite:
+  required_event: G2_POLICY_BINDING_ACCEPTED
+  exact_head_audit: REQUIRED
+  owner_acceptance: REQUIRED
+  archive_delete_legacy: NOT_IN_G1A
