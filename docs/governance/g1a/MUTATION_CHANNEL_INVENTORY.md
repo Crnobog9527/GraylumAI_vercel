@@ -74,3 +74,77 @@ The live objects read for this G1A window were repository `1133708061`, Issues `
 - The inventory is evidence for the future G2 cutover and does not itself freeze a channel.
 - `exactly-one-writer` and `dual_write_allowed=false` are normative future requirements, not current live facts.
 - Any source not represented by an exact path/blob or direct GitHub identity is `UNVERIFIED` or `NOT_OBSERVABLE`; prose cannot raise the evidence ceiling.
+
+## Exact staging-tree remediation ledger
+
+This ledger is the complete fixed-class supplement for `staging@69beaf0b82717b0809f6a6f72c29fca0abe0b8d0`. It was recomputed from that Git tree, rather than from the earlier report count. Every listed repository object has a deterministic classification; `NOT_MUTATION_CHANNEL` is recorded explicitly and never inferred from omission. All entries are blobs with mode `100644` unless the row says otherwise.
+
+### Root instruction, trackers, bootstrap, and legacy prose
+
+| exact path | exact blob SHA | classification | deterministic disposition |
+|---|---|---|---|
+| `AGENTS.md` | `4f2b314a1862abf61eea06c4b8cc841d5fd87769` | `AUTHORITY_CONSUMER` | future RMG-bound policy input; no live change in G1A |
+| `task.json` | `16a646de84dfe59564a35ef9e1fe3279d7facfdc` | `STATE_WRITER_REFERENCE` | historical/derived input only |
+| `progress.md` | `bdcab1b45e1d6ae75a8e0dea29d84dd519795648` | `STATE_WRITER_REFERENCE` | historical evidence only |
+| `findings.md` | `32427edc8994d50198f324c3da5f7e12756da3a1` | `STATE_WRITER_REFERENCE` | historical evidence only |
+| `task_plan.md` | `66670f570e29d533a8c10f1545a34d0d96548c59` | `HISTORICAL_ONLY` | archival planning reference |
+| `init.sh` (mode `100755`) | `f7165e69077bef8038f475e263aba6e2737525f4` | `MUTATION_CHANNEL` | observable setup/write-capable reference; not executed or changed |
+| `Manus正确工作流程.md` | `8cdd36b32466f2788935e8a766224c79d6865236` | `HISTORICAL_ONLY` | prose reference, never authorization |
+| `manus工作流使用说明.md` | `279830310c0e740955ee15a53b688e52273080e4` | `HISTORICAL_ONLY` | prose reference, never authorization |
+
+### Complete `.agents/**` tree (19 of 19)
+
+`all_agents_tree_paths_classified: PASS` is asserted only for this exact staging-tree enumeration: all 19 `.agents/**` staging-tree blobs are present below, each with its exact blob SHA and deterministic classification.
+
+| exact path | exact blob SHA | classification | deterministic disposition |
+|---|---|---|---|
+| `.agents/rules/code-generation-guide.md` | `6dbda4b11b4c6acf91ae1b2db51ef0b904b79991` | `AUTHORITY_CONSUMER` | historical agent instruction; future derived input |
+| `.agents/rules/code-style-guide.md` | `671ca1e3ef0231938e1bebbae580c48e18fee369` | `NOT_MUTATION_CHANNEL` | style-only input; no authority inferred |
+| `.agents/rules/graylumai-workspace-rules.md` | `d33a326317462ba9fe121ee4d223ae8b773dd994` | `AUTHORITY_CONSUMER` | historical workspace rule; future derived input |
+| `.agents/rules/task-json-workflow-rules.md` | `299cbbae1325ccd46b4c60ce7fca50543ec5d804` | `STATE_WRITER_REFERENCE` | historical tracker workflow reference |
+| `.agents/skills/graylum-skill-search/SKILL.md` | `56520f12a22ecbbdf48f807279f91b544b447abc` | `NOT_MUTATION_CHANNEL` | catalog/search instruction only |
+| `.agents/skills/license-header-adder/SKILL.md` | `6e78c56da5ff658fcebc410c6463b69252b7ea36` | `MUTATION_CHANNEL` | potential source-edit instruction; not invoked |
+| `.agents/skills/license-header-adder/resources/HEADER.txt` | `369ada6863881df8450d3de6ad0e069eb3f7e481` | `NON_AUTHORITY_INPUT` | inert template resource |
+| `.agents/workflows/add-component.md` | `57d41d92b553013883946a978d43ab1248f98d49` | `MUTATION_CHANNEL` | potential filesystem-write workflow; not invoked |
+| `.agents/workflows/add-page.md` | `575d9281ce0b6d2a4db645bae06b64cd9474210b` | `MUTATION_CHANNEL` | potential filesystem-write workflow; not invoked |
+| `.agents/workflows/add-router.md` | `6a5f492de9a6cd2b3bb2c41cb68567c1b57c4941` | `MUTATION_CHANNEL` | potential filesystem-write workflow; not invoked |
+| `.agents/workflows/build.md` | `b6511b858941de5256c9e7f4efea0a5ac3c58f1c` | `NOT_MUTATION_CHANNEL` | build instruction; execution not observed |
+| `.agents/workflows/db-migrate.md` | `486fe60bb2c037b9b62e68c8d46ab7d5762c4fbd` | `MUTATION_CHANNEL` | potential database-change workflow; not invoked |
+| `.agents/workflows/debug.md` | `8dfa30cad91c8b47ee02ca84a5e440a575743553` | `NOT_MUTATION_CHANNEL` | diagnostic instruction; no writer inferred |
+| `.agents/workflows/dev.md` | `108cede716541609a2a6f4bded4e2e30190610c9` | `MUTATION_CHANNEL` | potential local-service/write workflow; not invoked |
+| `.agents/workflows/do-next.md` | `38858a31dc4a1761ff2ddc4d443a7fa51fdba0b6` | `AUTHORITY_CONSUMER` | task-selection workflow reference |
+| `.agents/workflows/generate-unit-tests.md` | `6fbdc6e5504fe89866f2454a7f711690c5f5ae62` | `MUTATION_CHANNEL` | potential test-file write workflow; not invoked |
+| `.agents/workflows/git-commit.md` | `15eb0f21fbdd3c9477d69acd73f9ba3d34f5f2da` | `MUTATION_CHANNEL` | potential commit/push workflow; not invoked |
+| `.agents/workflows/new-feature.md` | `78da48a9f504b70110a58776103400ebbf1a1de3` | `MUTATION_CHANNEL` | potential implementation workflow; not invoked |
+| `.agents/workflows/test.md` | `f1c8658ca1336aa684d7a44308af1574d8cca5bf` | `NOT_MUTATION_CHANNEL` | test instruction; no writer inferred |
+
+### Templates, governance/security scripts, and workflows
+
+| exact path | exact blob SHA | classification | deterministic disposition |
+|---|---|---|---|
+| `.github/ISSUE_TEMPLATE/agent-task.yml` | `0f9952e165ec3d412826fe03a5171a0cea54948c` | `NON_AUTHORITY_INPUT` | template only |
+| `.github/pull_request_template.md` | `6746d01b5d6f9beb73661ebcd97b95ac854583c2` | `NON_AUTHORITY_INPUT` | template only |
+| `.github/codex/prompts/planner.md` | `9b2b81e5080a7764549c4f36a4f319d66a077c33` | `AUTHORITY_CONSUMER` | planner context only |
+| `.github/codex/prompts/generator.md` | `1f70831e8872e0b9fe602e4fbae79bf017e075ec` | `MUTATION_CHANNEL` | potential generation instruction; not executed |
+| `.github/codex/prompts/evaluator.md` | `a11247e4e43e4a82aa8bc8b346ae9355ca73750b` | `NOT_MUTATION_CHANNEL` | review context only |
+| `.github/codex/prompts/release-auditor.md` | `d86e4f3ed834c4363ab29127e23ce43b452eaabb` | `NOT_MUTATION_CHANNEL` | review context only |
+| `.github/scripts/check-playwright-results.cjs` | `a700977c6233ef413e9a30c91ec29c51aa936d33` | `NOT_MUTATION_CHANNEL` | check parser only |
+| `.github/scripts/check-workflow-policy.rb` | `d6377e902953a24e30321b311eea3fa08ca4da18` | `AUTHORITY_CONSUMER` | policy evidence adapter, not live authority |
+| `.github/scripts/create-secret-scan-regression-fixtures.sh` | `df810b95697d832048f10e9a956539eab44a317f` | `MUTATION_CHANNEL` | fixture-file writer; not invoked |
+| `.github/scripts/test-workflow-policy.rb` | `55a9e322660f611076000b0df59d5e51893059dc` | `NOT_MUTATION_CHANNEL` | test evidence only |
+| `.github/workflows/ci.yml` | `d6263e8722f64ec53946214a0ca2d655551b28c1` | `MUTATION_CHANNEL` | check-run/status surface; requiredness not observable |
+| `.github/workflows/codeql.yml` | `9fda35079e2cf63d31a1c5d591dfc2fd5e0c62f6` | `MUTATION_CHANNEL` | check-run/status surface; requiredness not observable |
+| `.github/workflows/security.yml` | `99c8e32eb8acdae0b5e76f1d7a836bdc07b2b678` | `MUTATION_CHANNEL` | check-run/status surface; requiredness not observable |
+
+### Repository-visible provider and GitHub surfaces
+
+| surface/object | exact repository evidence | classification | evidence ceiling |
+|---|---|---|---|
+| GitHub Issues, comments, PRs, refs, commits, checks, reviews, review threads | direct REST identity and metadata, not a repository blob | `MUTATION_CHANNEL` | reachable capability/ruleset/writer identity is `NOT_OBSERVABLE` without a future gate |
+| Vercel configuration | `apps/web/vercel.json` / `66de27d77c663cc848af31cba41d28ddb4f369dd` | `MUTATION_CHANNEL` | source reference only; project settings and deployment are `NOT_OBSERVABLE` |
+| Stripe webhook | `apps/web/src/app/api/stripe/webhook/route.ts` / `31b027acb0ff339fb503692ec97c917e47e94caa` | `MUTATION_CHANNEL` | source reference only; no provider call made |
+| Supabase client | `apps/web/src/lib/supabase.ts` / `cf280b460d1dbe01cf896863e3fd3a825d4a23a6` | `MUTATION_CHANNEL` | source reference only; values/state are not read |
+| Stripe client and fulfillment | `packages/api/src/services/stripe.ts` / `5bfc716160bc0a799e60b98dfef0fbb04543013f`; `packages/api/src/services/stripeFulfillment.ts` / `6b8fd1ce50ef318fd33cb2d417be7450ee482534` | `MUTATION_CHANNEL` | source reference only; no external action |
+| database schema/migrations | `packages/db/schema.ts` / `901c0390de6c51c26c49da004cd7d66369b8fbbb`; migration tree | `MUTATION_CHANNEL` | source text only; live database is `NOT_OBSERVABLE` |
+
+No source object was modified while being inventoried. The authoritative inventory source remains the exact staging tree; G1A does not establish a live mutation guard, disable legacy authority, activate a replacement policy, or accept a G2 binding.

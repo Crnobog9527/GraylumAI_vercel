@@ -47,6 +47,13 @@ These fixtures are test vectors and acceptance criteria, not runnable scripts an
 | G1A-FX-029 | a second primary, auxiliary, replacement, stacked, or follow-up PR exists | DENY | `PRIMARY_PR_BOUNDARY_VIOLATION` | `DESIGN_ONLY_NO_LIVE_MUTATION` | fail closed |
 | G1A-FX-030 | unknown JSON field or canonicalization version | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | fail closed |
 | G1A-FX-031 | invalid UTF-8, invalid YAML, invalid JSON, duplicate key, or trailing data | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | fail closed |
+| G1A-FX-032 | RFC 8785 property names are ordered by Unicode scalar value instead of UTF-16 code units | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | fail closed |
+| G1A-FX-033 | array marked as a logical set is reordered during JCS instead of before its JCS input object exists | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | fail closed |
+| G1A-FX-034 | future G2 reuses Issue `#282` or its node ID | DENY | `INVALID_G2_TASK_IDENTITY` | `DESIGN_ONLY_NO_LIVE_MUTATION` | require a dedicated G2 Issue and node ID |
+| G1A-FX-035 | future G2 omits a `CUTOVER_FREEZE` receipt identity/digest/TTL | DENY | `MISSING_CUTOVER_FREEZE` | `DESIGN_ONLY_NO_LIVE_MUTATION` | require a new freeze receipt |
+| G1A-FX-036 | future G2 uses G1A main/staging refs or a stale CAS snapshot | DENY | `STALE_G2_REF_OR_CAS` | `DESIGN_ONLY_NO_LIVE_MUTATION` | take a fresh G2-gate snapshot |
+| G1A-FX-037 | a fixed source class or one `.agents/**` tree blob is absent from the exact inventory | DENY | `FIXED_CLASS_INVENTORY_OMISSION` | `DESIGN_ONLY_NO_LIVE_MUTATION` | rebuild from the exact staging tree |
+| G1A-FX-038 | JCS vector canonical bytes or digest differs from its expected value | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | correct implementation/profile before any future gate |
 
 ## Fixture input contract
 
@@ -57,13 +64,15 @@ Each fixture records an immutable input identity: repository, Issue, phase, stat
 `G1A-FX-RECOVERY-001` starts with no local tracker or conversation context. A fresh window must:
 
 1. Read repository identity and active user identity through authenticated GitHub REST.
-2. Read Issue `#282`, its full body and comments, and verify `state_version=3`, `BOUNDED_CORRECTION_2`, `ACTIVE`, the accepted G0 chain, independent PASS `5202274452`, and Owner authorization `5202764691`.
+2. Read Issue `#282`, its full body and comments, and verify `state_version=3`, `BOUNDED_CORRECTION_2`, `ACTIVE`, the accepted G0 chain, independent PASS `5202274452`, the controlling audit `5204372790`, and the only consumable superseding authorization `5207467262`. Reject superseded malformed receipt `5204867513`, any revoke, later supersede, competing unsuperseded receipt, or prior remediation execution record.
 3. Recompute exact comment body hashes from direct REST UTF-8 bodies and verify `created_at == updated_at`.
 4. Read `main`, `staging`, merge base, both exact `AGENTS.md` blobs, policy-file absence, open issues/PRs, branch identity, and the five target paths at the bound staging SHA.
 5. Recompute the authorization TTL offline and reject drift, expiry, duplicate implementation record, second task, second writer, or existing branch/PR.
-6. Rebuild the same design-time conclusion: `READY_FOR_FRESH_CONTEXT_EXACT_HEAD_AUDIT` after the five non-executable files and one Draft staging PR are independently verified. This is not proof of current live enforcement.
+6. Rebuild the same design-time conclusion: `READY_FOR_FRESH_CONTEXT_REMEDIATED_EXACT_HEAD_AUDIT` only after the five non-executable files and one Draft staging PR are independently verified. This is not proof of current live enforcement.
 
 `no-live-mutation: true` applies to every step. The recovery fixture cannot create a branch, commit, PR, comment, or policy event.
+
+`G1A-FX-RECOVERY-002` is the post-expiry or drift recovery boundary: discard the old authorization as non-consumable, begin a fresh context, re-read the live repository/Issue/PR/ref identities, obtain a new explicit receipt bound to the then-current exact head, and repeat an independent audit. It cannot reuse a former receipt, execute G2, restore legacy authority, or infer a policy activation.
 
 ## Forward-only rollback packet
 

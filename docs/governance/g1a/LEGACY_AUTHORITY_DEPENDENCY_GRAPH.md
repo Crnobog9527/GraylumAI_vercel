@@ -76,6 +76,23 @@ G1A design/test material
 
 No G1A artifact can act as a substitute for the G2 event.
 
+## Remediation identity boundary
+
+The graph consumes the complete fixed-class inventory in `MUTATION_CHANNEL_INVENTORY.md`, including all 19 `.agents/**` staging-tree blobs. A missing path is an inventory failure, not evidence that the object is non-authoritative. Classifications distinguish `MUTATION_CHANNEL`, `AUTHORITY_CONSUMER`, `STATE_WRITER_REFERENCE`, `NON_AUTHORITY_INPUT`, `NOT_MUTATION_CHANNEL`, `HISTORICAL_ONLY`, and `NOT_OBSERVABLE`; none of these labels changes current live authority in G1A.
+
+Issue `#282`, node `I_kwDOQ5MDHc8AAAABLjOy1Q`, phase `G1A`, and state version `3` are source-context evidence only. A future G2 transition must have a different dedicated Issue number and node ID, a new G2 task epoch/state version/prior-event digest, a `CUTOVER_FREEZE` receipt, and fresh G2-time main/staging/policy/authority/CAS identity. The G1A refs and Issue identity are explicitly forbidden as future G2 execution CAS.
+
+```text
+G1A source context (Issue #282; design only)
+  -> independent exact-head audit
+  -> dedicated future G2 task + CUTOVER_FREEZE + fresh CAS
+  -> same atomic replacement activation / legacy executable disable
+  -> accepted G2 event
+  -> G1B archive or delete only under a separate authorization
+```
+
+Any wrong G2 identity, missing freeze receipt, stale G2 CAS, inventory omission, duplicate/out-of-order event, or canonical digest mismatch is `INVALID_FAIL_CLOSED`; repair is forward-only with new bounded evidence and never restoration of legacy authority.
+
 ## Threat paths and evidence ceiling
 
 The following paths must be denied by the future RMG: a PR head supplying its own policy or PASS evidence; self-approval; admin/maintain/push bypass; a stale branch or stale `AGENTS.md`; tracker prose used as a receipt; duplicate or edited issue comments; direct provider or database writes that skip the guard; a second primary PR; a PR switched to Ready for review; and a merge/main/production action inferred from file existence. These are design threats, not claims that a live RMG currently blocks them.
