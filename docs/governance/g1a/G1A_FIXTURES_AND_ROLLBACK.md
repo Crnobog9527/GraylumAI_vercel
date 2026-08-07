@@ -54,6 +54,16 @@ These fixtures are test vectors and acceptance criteria, not runnable scripts an
 | G1A-FX-036 | future G2 uses G1A main/staging refs or a stale CAS snapshot | DENY | `STALE_G2_REF_OR_CAS` | `DESIGN_ONLY_NO_LIVE_MUTATION` | take a fresh G2-gate snapshot |
 | G1A-FX-037 | a fixed source class or one `.agents/**` tree blob is absent from the exact inventory | DENY | `FIXED_CLASS_INVENTORY_OMISSION` | `DESIGN_ONLY_NO_LIVE_MUTATION` | rebuild from the exact staging tree |
 | G1A-FX-038 | JCS vector canonical bytes or digest differs from its expected value | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | correct implementation/profile before any future gate |
+| G1A-FX-039 | corrected JCS-002 canonical JSON, UTF-8 hex, or SHA-256 differs | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | recalculate exact RFC 8785 vector |
+| G1A-FX-040 | receipt idempotency projection omits, adds, or changes a bound field | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | use graylum-owner-auth-idempotency-input/v1 |
+| G1A-FX-041 | event idempotency projection omits, adds, or changes a bound field | DENY | `CANONICALIZATION_INVALID` | `DESIGN_ONLY_NO_LIVE_MUTATION` | use graylum-owner-auth-event-idempotency-input/v1 |
+| G1A-FX-042 | a receipt receives a second terminal lifecycle event | DENY | `RECEIPT_LIFECYCLE_CONFLICT` | `DESIGN_ONLY_NO_LIVE_MUTATION` | retain first valid terminal event only |
+| G1A-FX-043 | two different sequence-1 terminal events exist | DENY | `INVALID_FAIL_CLOSED` | `DESIGN_ONLY_NO_LIVE_MUTATION` | choose no winner and do not apply sequence 2 |
+| G1A-FX-044 | OBSERVED or VALIDATED is submitted as a lifecycle event | DENY | `RECEIPT_LIFECYCLE_CONFLICT` | `DESIGN_ONLY_NO_LIVE_MUTATION` | record only as a decision/audit record |
+| G1A-FX-045 | event omits receipt digest or gate | DENY | `IDENTITY_INCOMPLETE` | `DESIGN_ONLY_NO_LIVE_MUTATION` | bind receipt digest and closed gate |
+| G1A-FX-046 | SUPERSEDED event omits superseding receipt digest | DENY | `IDENTITY_INCOMPLETE` | `DESIGN_ONLY_NO_LIVE_MUTATION` | bind replacement receipt ID and digest |
+| G1A-FX-047 | event or receipt uses an unsupported gate | DENY | `MUTATION_NOT_AUTHORIZED` | `DESIGN_ONLY_NO_LIVE_MUTATION` | use accepted-G0 closed enum |
+| G1A-FX-048 | task transition is used as receipt lifecycle state, or vice versa | DENY | `RECEIPT_LIFECYCLE_CONFLICT` | `DESIGN_ONLY_NO_LIVE_MUTATION` | keep transition and lifecycle fields separate |
 
 ## Fixture input contract
 
