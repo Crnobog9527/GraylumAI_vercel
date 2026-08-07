@@ -58,22 +58,24 @@ The reducer MUST bind repository numeric ID and full name, visibility/default br
 
 ```yaml
 kind: BOOTSTRAP_SENTINEL
-sentinel: BOOTSTRAP_SENTINEL
-policy_blob_sha: null
-accepted_policy_epoch: null
+sentinel_id: GRAYLUM_G0_BOOTSTRAP_SENTINEL_V1
+sentinel_contract_digest: sha256:REQUIRED_SHA256
+sentinel_epoch: 0
 ```
 
 or:
 
 ```yaml
-kind: ACCEPTED_REAL_POLICY
-sentinel: null
-policy_blob_sha: POLICY_BLOB_SHA
-accepted_policy_epoch: authority_epoch
-acceptance_event: G2_POLICY_BINDING_ACCEPTED
+kind: POLICY_BLOB_SHA
+policy_path: docs/governance/DEVELOPMENT_POLICY.md
+policy_blob_sha: REQUIRED_LOWERCASE_GIT_BLOB_SHA
+policy_contract_digest: sha256:REQUIRED_SHA256
+accepted_policy_epoch: REQUIRED_POSITIVE_INTEGER
 ```
 
-`BOOTSTRAP_SENTINEL` is a pre-G2 identity binding and is not a real accepted policy. A real policy requires an independently accepted `G2_POLICY_BINDING_ACCEPTED` event, a non-null `POLICY_BLOB_SHA`, and a monotonic `authority_epoch`. G1A uses the sentinel only as a design-time pre-state; `live_enforcement_active: false` remains mandatory.
+Exactly one variant is valid. `BOOTSTRAP_SENTINEL` MUST contain exactly `kind`, `sentinel_id`, `sentinel_contract_digest`, and `sentinel_epoch`; it MUST NOT carry any policy-blob field. `POLICY_BLOB_SHA` MUST contain exactly `kind`, `policy_path`, `policy_blob_sha`, `policy_contract_digest`, and `accepted_policy_epoch`; it MUST NOT carry any sentinel field. `policy_blob_sha` is an exact lowercase Git blob SHA, not a branch SHA or a placeholder. `sentinel_id` is the fixed non-Git identity `GRAYLUM_G0_BOOTSTRAP_SENTINEL_V1` and MUST NOT resemble a Git SHA. The receipt and event idempotency projections bind the complete selected object, while `contract_digest` remains a separate top-level field.
+
+`BOOTSTRAP_SENTINEL` is a pre-G2 identity binding and is not a real accepted policy. A real policy requires an independently accepted `G2_POLICY_BINDING_ACCEPTED` event, a `POLICY_BLOB_SHA` variant, and a positive accepted policy epoch. G1A uses the sentinel only as a design-time pre-state; `live_enforcement_active: false` remains mandatory.
 
 ## 3. Immutable receipt lifecycle and reducer
 
@@ -197,62 +199,79 @@ The closed gate enum is taken from the accepted G0 live correction chain, not in
 
 ### Idempotency projections
 
-Both projections are closed schemas: unknown fields are rejected, ordered arrays
-are preserved, null differs from omission, and RFC 8785 JCS supplies the UTF-8
-bytes.
+Both inputs are exact, closed JSON object schemas. They are not “profile-only”
+hashes: the input is the complete listed projection. Unknown fields fail closed;
+`null` and omission differ; arrays keep their supplied order; strings are UTF-8;
+and RFC 8785 JCS produces the bytes to hash. Projection context is supplied by
+the named version below, not by a projection-only JSON field.
 
-The receipt projection profile is `graylum-owner-auth-idempotency-input/v1`:
+#### Receipt input: `graylum-owner-auth-idempotency-input/v1`
 
-~~~
-SHA-256(RFC8785_JCS_UTF8_BYTES(receipt_idempotency_projection))
-profile
-repository: numeric_id, full_name
-task: issue_number, issue_node_id, authority_epoch, task_epoch,
-  expected_state_version, resulting_state_version, prior_event_digest
-gate
-transition: from_task_state, to_task_state
-policy_binding: contract_digest
-exact_identity: base_ref, base_sha, target_ref, target_sha, candidate_id,
-  pr_number, pr_node_id, head_sha, merge_sha, deployment_id, deployment_sha
-actor: numeric_id
-source_comment: database_id, node_id, body_sha256
-ttl_seconds
-single_use
-allowed_actions
-forbidden_actions
-~~~
+| receipt schema path | projection path | disposition | null / array policy | reason |
+|---|---|---|---|---|
+| `schema` | — | EXCLUDED | omission only | versioned input schema selects this closed projection; no projection-only field is added |
+| `receipt_id`, `receipt_digest_algorithm`, `receipt_digest`, `idempotency_key` | — | EXCLUDED | omission only | output/self-referential identity cannot decide its own idempotency |
+| `repository.numeric_id`, `.full_name`, `.visibility`, `.default_branch` | same paths | INCLUDED | non-null scalars | full repository identity |
+| `task.issue_number`, `.issue_node_id`, `.authority_epoch`, `.task_epoch`, `.expected_state_version`, `.resulting_state_version`, `.prior_event_digest` | same paths | INCLUDED | non-null scalars | complete task/CAS identity |
+| `gate` | `gate` | INCLUDED | non-null scalar | accepted gate binding |
+| `transition.from_task_state`, `.to_task_state` | same paths | INCLUDED | non-null scalars | task transition is distinct from lifecycle |
+| `actor.login`, `.numeric_id`, `.verified_role` | same paths | INCLUDED | non-null scalars | exact actor identity |
+| `provider.kind`, `.identity`, `.authenticated_user_numeric_id` | same paths | INCLUDED | non-null scalars | provider identity is bound, not inferred |
+| `source_comment.database_id`, `.node_id`, `.body_sha256`, `.created_at`, `.updated_at` | same paths | INCLUDED | non-null scalars | REST comment identity and immutable timestamps |
+| `exact_identity.base_ref`, `.base_sha`, `.head_ref`, `.head_sha`, `.pr_number`, `.merge_sha`, `.deployment_identity` | same paths | INCLUDED | nullable fields remain explicit `null` | exact identity is one-for-one with the receipt schema; no target/candidate/projection aliases exist |
+| `policy_binding` | complete `policy_binding` object | INCLUDED | exactly one tagged-union variant | full binding; never `policy_binding: contract_digest` |
+| `contract_digest` | `contract_digest` | INCLUDED | non-null scalar | independent contract binding |
+| `issued_at`, `expires_at` | — | EXCLUDED | omission only | time of issuance/expiry is not an action-identity input; TTL is bound below |
+| `ttl_seconds`, `single_use` | same paths | INCLUDED | non-null scalar | lifetime and consumption semantics |
+| `revoke_nonce`, `supersedes` | same paths | INCLUDED | explicit `null` is retained | null is not omission; future revocation/supersession identity is bound |
+| `allowed_actions`, `forbidden_actions` | same paths | INCLUDED | ordered arrays; no set sorting | exact authorization boundary |
 
-It excludes receipt_id, receipt_digest, idempotency_key, issued_at, expires_at,
-and every derived lifecycle state. Profile fixture: canonical JSON
-`{"profile":"graylum-owner-auth-idempotency-input/v1"}`; UTF-8 hex
-`7b2270726f66696c65223a22677261796c756d2d6f776e65722d617574682d6964656d706f74656e63792d696e7075742f7631227d`; SHA-256
-`a154b7d568b1cc426fe8c3f4de6378e65e3ccc9dd2e57c51befee039991c793e`.
+The projection is the object containing exactly the `INCLUDED` paths above.
 
-The event projection profile is `graylum-owner-auth-event-idempotency-input/v1`:
+**Complete synthetic fixture (non-secret):**
 
-~~~
-profile
-repository
-task
-receipt: receipt_id, receipt_digest, gate
-event_sequence
-event_type
-expected_prior_lifecycle_state
-resulting_lifecycle_state
-actor: numeric_id
-provider: identity
-source_comment: database_id, node_id, body_sha256
-exact_identity
-superseding_receipt: receipt_id, receipt_digest
-revoke_nonce
-reason_code
-~~~
+```json
+{"actor":{"login":"synthetic-owner","numeric_id":424242,"verified_role":"OWNER"},"allowed_actions":["READ_ONLY_DESIGN"],"contract_digest":"1111111111111111111111111111111111111111111111111111111111111111","exact_identity":{"base_ref":"staging","base_sha":"cccccccccccccccccccccccccccccccccccccccc","deployment_identity":null,"head_ref":"codex/synthetic","head_sha":"dddddddddddddddddddddddddddddddddddddddd","merge_sha":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","pr_number":999},"forbidden_actions":["MERGE","PRODUCTION"],"gate":"TASK_START","policy_binding":{"kind":"BOOTSTRAP_SENTINEL","sentinel_contract_digest":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","sentinel_epoch":0,"sentinel_id":"GRAYLUM_G0_BOOTSTRAP_SENTINEL_V1"},"provider":{"authenticated_user_numeric_id":424242,"identity":"github:user:424242","kind":"github"},"repository":{"default_branch":"staging","full_name":"example/graylum","numeric_id":1133708061,"visibility":"private"},"revoke_nonce":null,"single_use":true,"source_comment":{"body_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","created_at":"2030-01-01T00:00:00Z","database_id":900001,"node_id":"IC_SYNTHETIC_900001","updated_at":"2030-01-01T00:00:00Z"},"supersedes":null,"task":{"authority_epoch":0,"expected_state_version":3,"issue_node_id":"I_SYNTHETIC_282","issue_number":282,"prior_event_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resulting_state_version":3,"task_epoch":3},"transition":{"from_task_state":"PROPOSED","to_task_state":"AUTHORIZED"},"ttl_seconds":3600}
+```
 
-It excludes event_id, event_digest, event_idempotency_key, and occurred_at.
-Profile fixture: canonical JSON
-`{"profile":"graylum-owner-auth-event-idempotency-input/v1"}`; UTF-8 hex
-`7b2270726f66696c65223a22677261796c756d2d6f776e65722d617574682d6576656e742d6964656d706f74656e63792d696e7075742f7631227d`; SHA-256
-`0a4a9f331925ad2ba94d97889d8b31efdc5f76c890ac61ce343d11e117a20a55`.
+The JSON above is its RFC 8785 canonical JSON. Its UTF-8 hex is
+`7b226163746f72223a7b226c6f67696e223a2273796e7468657469632d6f776e6572222c226e756d657269635f6964223a3432343234322c2276657269666965645f726f6c65223a224f574e4552227d2c22616c6c6f7765645f616374696f6e73223a5b22524541445f4f4e4c595f44455349474e225d2c22636f6e74726163745f646967657374223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c2265786163745f6964656e74697479223a7b22626173655f726566223a2273746167696e67222c22626173655f736861223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363222c226465706c6f796d656e745f6964656e74697479223a6e756c6c2c22686561645f726ეფ...`; SHA-256 `d69eacbf3e6f0b90fc3b4bebcf559ddca62071def6946a6ec11c0852edec251f`.
+
+The preceding abbreviated line is a non-normative presentation preview. The normative complete fixture bytes are the full UTF-8 hex below; its independently recomputed SHA-256 is `d69eacbf3e6f0b90fc3b4bebcf559ddca62071def6946a6ec11c0852edec251f`.
+
+```text
+7b226163746f72223a7b226c6f67696e223a2273796e7468657469632d6f776e6572222c226e756d657269635f6964223a3432343234322c2276657269666965645f726f6c65223a224f574e4552227d2c22616c6c6f7765645f616374696f6e73223a5b22524541445f4f4e4c595f44455349474e225d2c22636f6e74726163745f646967657374223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c2265786163745f6964656e74697479223a7b22626173655f726566223a2273746167696e67222c22626173655f736861223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363222c226465706c6f796d656e745f6964656e74697479223a6e756c6c2c22686561645f726566223a22636f6465782f73796e746865746963222c22686561645f736861223a2264646464646464646464646464646464646464646464646464646464646464646464646464646464222c226d657267655f736861223a2265656565656565656565656565656565656565656565656565656565656565656565656565656565222c2270725f6e756d626572223a3939397d2c22666f7262696464656e5f616374696f6e73223a5b224d45524745222c2250524f44554354494f4e225d2c2267617465223a225441534b5f5354415254222c22706f6c6963795f62696e64696e67223a7b226b696e64223a22424f4f5453545241505f53454e54494e454c222c2273656e74696e656c5f636f6e74726163745f646967657374223a227368613235363a66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666222c2273656e74696e656c5f65706f6368223a302c2273656e74696e656c5f6964223a22475241594c554d5f47305f424f4f5453545241505f53454e54494e454c5f5631227d2c2270726f7669646572223a7b2261757468656e746963617465645f757365725f6e756d657269635f6964223a3432343234322c226964656e74697479223a226769746875623a757365723a343234323432222c226b696e64223a22676974687562227d2c227265706f7369746f7279223a7b2264656661756c745f6272616e6368223a2273746167696e67222c2266756c6c5f6e616d65223a226578616d706c652f677261796c756d222c226e756d657269635f6964223a313133333730383036312c227669736962696c697479223a2270726976617465227d2c227265766f6b655f6e6f6e6365223a6e756c6c2c2273696e676c655f757365223a747275652c22736f757263655f636f6d6d656e74223a7b22626f64795f736861323536223a2262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262222c22637265617465645f6174223a22323033302d30312d30315430303a30303a30305a222c2264617461626173655f6964223a3930303030312c226e6f64655f6964223a2249435f53594e5448455449435f393030303031222c22757064617465645f6174223a22323033302d30312d30315430303a30303a30305a227d2c2273757065727365646573223a6e756c6c2c227461736b223a7b22617574686f726974795f65706f6368223a302c2265787065637465645f73746174655f76657273696f6e223a332c2269737375655f6e6f64655f6964223a22495f53594e5448455449435f323832222c2269737375655f6e756d626572223a3238322c227072696f725f6576656e745f646967657374223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22726573756c74696e675f73746174655f76657273696f6e223a332c227461736b5f65706f6368223a337d2c227472616e736974696f6e223a7b2266726f6d5f7461736b5f7374617465223a2250524f504f534544222c22746f5f7461736b5f7374617465223a22415554484f52495a4544227d2c2274746c5f7365636f6e6473223a333630307d
+```
+
+#### Event input: `graylum-owner-auth-event-idempotency-input/v1`
+
+| event schema path | projection path | disposition | null / array policy | reason |
+|---|---|---|---|---|
+| `schema`, `event_id`, `event_digest_algorithm`, `event_digest`, `event_idempotency_key`, `occurred_at` | — | EXCLUDED | omission only | version selector or output/self-referential event identity |
+| `receipt.receipt_id`, `.receipt_digest`, `.gate` | same paths | INCLUDED | non-null scalars | receipt ID, digest, and gate are all bound |
+| `event_sequence`, `event_type`, `expected_prior_lifecycle_state`, `resulting_lifecycle_state` | same paths | INCLUDED | non-null scalars | ordered lifecycle transition |
+| `repository`, `task`, `actor`, `provider`, `source_comment`, `exact_identity` | same complete objects | INCLUDED | preserve each receipt-input field and explicit null | complete inherited identity, including provider and comment timestamps |
+| `policy_binding` | complete `policy_binding` object | INCLUDED | exactly one tagged-union variant | complete policy binding |
+| `contract_digest` | `contract_digest` | INCLUDED | non-null scalar | separate contract binding |
+| `superseding_receipt.receipt_id`, `.receipt_digest` | same paths | INCLUDED | explicit null retained | replacement identity is not omitted |
+| `revoke_nonce`, `reason_code` | same paths | INCLUDED | explicit null retained for nonce | revoke/reason semantics |
+
+The event projection contains exactly the `INCLUDED` paths; no event input may
+be reduced to a single `profile` value.
+
+**Complete synthetic fixture (non-secret; already RFC 8785 canonical JSON):**
+
+```json
+{"actor":{"login":"synthetic-owner","numeric_id":424242,"verified_role":"OWNER"},"contract_digest":"1111111111111111111111111111111111111111111111111111111111111111","event_sequence":1,"event_type":"CONSUMED","exact_identity":{"base_ref":"staging","base_sha":"cccccccccccccccccccccccccccccccccccccccc","deployment_identity":null,"head_ref":"codex/synthetic","head_sha":"dddddddddddddddddddddddddddddddddddddddd","merge_sha":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","pr_number":999},"expected_prior_lifecycle_state":"ACTIVE","policy_binding":{"kind":"BOOTSTRAP_SENTINEL","sentinel_contract_digest":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","sentinel_epoch":0,"sentinel_id":"GRAYLUM_G0_BOOTSTRAP_SENTINEL_V1"},"provider":{"authenticated_user_numeric_id":424242,"identity":"github:user:424242","kind":"github"},"reason_code":"MATCHING_EXECUTION","receipt":{"gate":"TASK_START","receipt_digest":"2222222222222222222222222222222222222222222222222222222222222222","receipt_id":"receipt-synthetic-001"},"repository":{"default_branch":"staging","full_name":"example/graylum","numeric_id":1133708061,"visibility":"private"},"resulting_lifecycle_state":"CONSUMED","revoke_nonce":null,"source_comment":{"body_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","created_at":"2030-01-01T00:00:00Z","database_id":900001,"node_id":"IC_SYNTHETIC_900001","updated_at":"2030-01-01T00:00:00Z"},"superseding_receipt":{"receipt_digest":null,"receipt_id":null},"task":{"authority_epoch":0,"expected_state_version":3,"issue_node_id":"I_SYNTHETIC_282","issue_number":282,"prior_event_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resulting_state_version":3,"task_epoch":3}}
+```
+
+UTF-8 hex:
+
+```text
+7b226163746f72223a7b226c6f67696e223a2273796e7468657469632d6f776e6572222c226e756d657269635f6964223a3432343234322c2276657269666965645f726f6c65223a224f574e4552227d2c22636f6e74726163745f646967657374223a2231313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131222c226576656e745f73657175656e6365223a312c226576656e745f74797065223a22434f4e53554d4544222c2265786163745f6964656e74697479223a7b22626173655f726566223a2273746167696e67222c22626173655f736861223a2263636363636363636363636363636363636363636363636363636363636363636363636363636363222c226465706c6f796d656e745f6964656e74697479223a6e756c6c2c22686561645f726566223a22636f6465782f73796e746865746963222c22686561645f736861223a2264646464646464646464646464646464646464646464646464646464646464646464646464646464222c226d657267655f736861223a2265656565656565656565656565656565656565656565656565656565656565656565656565656565222c2270725f6e756d626572223a3939397d2c2265787065637465645f7072696f725f6c6966656379636c655f7374617465223a22414354495645222c22706f6c6963795f62696e64696e67223a7b226b696e64223a22424f4f5453545241505f53454e54494e454c222c2273656e74696e656c5f636f6e74726163745f646967657374223a227368613235363a66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666222c2273656e74696e656c5f65706f6368223a302c2273656e74696e656c5f6964223a22475241594c554d5f47305f424f4f5453545241505f53454e54494e454c5f5631227d2c2270726f7669646572223a7b2261757468656e746963617465645f757365725f6e756d657269635f6964223a3432343234322c226964656e74697479223a226769746875623a757365723a343234323432222c226b696e64223a22676974687562227d2c22726561736f6e5f636f6465223a224d41544348494e475f455845435554494f4e222c2272656365697074223a7b2267617465223a225441534b5f5354415254222c22726563656970745f646967657374223a2232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232222c22726563656970745f6964223a22726563656970742d73796e7468657469632d303031227d2c227265706f7369746f7279223a7b2264656661756c745f6272616e6368223a2273746167696e67222c2266756c6c5f6e616d65223a226578616d706c652f677261796c756d222c226e756d657269635f6964223a313133333730383036312c227669736962696c697479223a2270726976617465227d2c22726573756c74696e675f6c6966656379636c655f7374617465223a22434f4e53554d4544222c227265766f6b655f6e6f6e6365223a6e756c6c2c22736f757263655f636f6d6d656e74223a7b22626f64795f736861323536223a2262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262222c22637265617465645f6174223a22323033302d30312d30315430303a30303a30305a222c2264617461626173655f6964223a3930303030312c226e6f64655f6964223a2249435f53594e5448455449435f393030303031222c22757064617465645f6174223a22323033302d30312d30315430303a30303a30305a227d2c227375706572736564696e675f72656365697074223a7b22726563656970745f646967657374223a6e756c6c2c22726563656970745f6964223a6e756c6c7d2c227461736b223a7b22617574686f726974795f65706f6368223a302c2265787065637465645f73746174655f76657273696f6e223a332c2269737375655f6e6f64655f6964223a22495f53594e5448455449435f323832222c2269737375655f6e756d626572223a3238322c227072696f725f6576656e745f646967657374223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22726573756c74696e675f73746174655f76657273696f6e223a332c227461736b5f65706f6368223a337d7d
+```
+
+SHA-256: `beb1aea9da62c3c1460f4bf34bb8e7a79b65c9467aed9fd44fdf9fdf9afcb6f9`.
 
 ## 7. Deterministic event ordering and lifecycle reduction
 

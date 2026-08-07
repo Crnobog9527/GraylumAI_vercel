@@ -69,20 +69,86 @@ These fixtures are test vectors and acceptance criteria, not runnable scripts an
 
 Each fixture records an immutable input identity: repository, Issue, phase, state version, prior event, exact refs, Owner/provider identity, requested mutation, policy-binding tag, receipt source identity/body hash, lifecycle position, and CAS snapshot. Omitted and `null` fields are intentionally distinct. The expected result is a design-time decision only; no fixture is connected to a workflow, Ruleset, branch protection, GitHub App, bot, dispatcher, runtime interceptor, provider call, SQL statement, or external platform.
 
-## Fresh-window recovery fixture
+## Accepted-G0 bootstrap policy-binding fixture
 
-`G1A-FX-RECOVERY-001` starts with no local tracker or conversation context. A fresh window must:
+`G1A-FX-POLICY-BOOTSTRAP-001` is fixture-only and non-executable. Its source is
+the direct-REST identity of Issue #278 bootstrap authorization comment
+`5030614921`: node `IC_kwDOQ5MDHc8AAAABK9kXiQ`, UTF-8 body SHA-256
+`f90255ec8d6fe7f85cdcbe779d392790f009f43720c743e03777807e2626493f`,
+and `issued_at: 2026-07-21T05:52:05Z`. The current main/staging refs were
+independently read as `a9f26d7dd4fa8fdaf716d90008ec12030379f368` and
+`69beaf0b82717b0809f6a6f72c29fca0abe0b8d0`; their policy path is
+`ABSENT_CONFIRMED`, so this fixture asserts no real policy blob and no live
+activation.
 
-1. Read repository identity and active user identity through authenticated GitHub REST.
-2. Read Issue `#282`, its full body and comments, and verify `state_version=3`, `BOUNDED_CORRECTION_2`, `ACTIVE`, the accepted G0 chain, independent PASS `5202274452`, the controlling audit `5204372790`, and the only consumable superseding authorization `5207467262`. Reject superseded malformed receipt `5204867513`, any revoke, later supersede, competing unsuperseded receipt, or prior remediation execution record.
-3. Recompute exact comment body hashes from direct REST UTF-8 bodies and verify `created_at == updated_at`.
-4. Read `main`, `staging`, merge base, both exact `AGENTS.md` blobs, policy-file absence, open issues/PRs, branch identity, and the five target paths at the bound staging SHA.
-5. Recompute the authorization TTL offline and reject drift, expiry, duplicate implementation record, second task, second writer, or existing branch/PR.
-6. Rebuild the same design-time conclusion: `READY_FOR_FRESH_CONTEXT_REMEDIATED_EXACT_HEAD_AUDIT` only after the five non-executable files and one Draft staging PR are independently verified. This is not proof of current live enforcement.
+```yaml
+fixture_id: G1A-FX-POLICY-BOOTSTRAP-001
+fixture_only: true
+non_executable: true
+no_live_activation: true
+issued_at: 2026-07-21T05:52:05Z
+expires_at: null
+expiry_rule: no fixed timestamp; automatically superseded only by accepted G2 policy binding
+policy_binding:
+  kind: BOOTSTRAP_SENTINEL
+  sentinel_id: GRAYLUM_G0_BOOTSTRAP_SENTINEL_V1
+  sentinel_contract_digest: sha256:f90255ec8d6fe7f85cdcbe779d392790f009f43720c743e03777807e2626493f
+  sentinel_epoch: 0
+real_policy_blob_status: ABSENT_CONFIRMED
+automatic_supersession:
+  event: G2_POLICY_BINDING_ACCEPTED
+  requires: POLICY_BLOB_SHA variant with positive accepted_policy_epoch
+```
 
-`no-live-mutation: true` applies to every step. The recovery fixture cannot create a branch, commit, PR, comment, or policy event.
+The sentinel contract digest above identifies the accepted bootstrap authority
+fixture and is not a Git blob SHA. The fixture cannot claim a fake policy blob,
+activate policy, or authorize G2.
 
-`G1A-FX-RECOVERY-002` is the post-expiry or drift recovery boundary: discard the old authorization as non-consumable, begin a fresh context, re-read the live repository/Issue/PR/ref identities, obtain a new explicit receipt bound to the then-current exact head, and repeat an independent audit. It cannot reuse a former receipt, execute G2, restore legacy authority, or infer a policy activation.
+## Fresh-window recovery reducer fixtures
+
+The recovery algorithm reads every append-only Issue #282 comment by
+`record_type`, not by the largest comment ID: independent audits, Owner
+receipts, supersede/revoke/expiry records, and execution records. For each
+receipt it derives exactly one of `VALID_UNCONSUMED`, `CONSUMED`, `SUPERSEDED`,
+`REVOKED`, `EXPIRED`, or `INVALID`. An execution consumes a receipt only if it
+uniquely matches its authorization comment ID, source-audit identity, old head,
+resulting/current PR head, and allowed changed-file set. A prior consumed
+receipt and its matching execution are accepted historical evidence; a second
+consumption of the same receipt is fail-closed. A stale-head receipt never
+authorizes the current head.
+
+`G1A-FX-RECOVERY-001` reconstructs the existing history without relying on a
+fixed future comment ID:
+
+```yaml
+history:
+  - { receipt: 5207467262, derived_state: CONSUMED, matching_execution: 5213359408 }
+  - { audit: 5213491955, conclusion: G1A_REMEDIATED_EXACT_HEAD_AUDIT_REVISION_REQUEST }
+  - { receipt: 5213699227, derived_state: CONSUMED, matching_execution: 5213778004 }
+  - { old_head: 25efe498d75ef2d2c031baf4fff715b55a5779b8 }
+  - { audit: 5213972212, conclusion: G1A_SECOND_REMEDIATED_EXACT_HEAD_AUDIT_REVISION_REQUEST }
+current_control_state: VALID_UNCONSUMED_RECEIPT_REQUIRED
+```
+
+`G1A-FX-RECOVERY-002` asserts that `5207467262` and `5213699227` are accepted
+history, not a conflict. `G1A-FX-RECOVERY-003` provides two otherwise matching
+execution records for one receipt and returns `INVALID`. `G1A-FX-RECOVERY-004`
+uses an unconsumed receipt whose `head_sha` is not the current PR head and
+returns `INVALID`. `G1A-FX-RECOVERY-005` derives `VALID_UNCONSUMED` for the
+latest unexpired, unrevised receipt with no matching execution. `G1A-FX-RECOVERY-006`
+finds exactly one dynamic matching execution by `record_type`, authorization ID,
+source audit ID, old/new head, and two-file allowlist and returns
+`AWAITING_CURRENT_EXACT_HEAD_INDEPENDENT_AUDIT`. `G1A-FX-RECOVERY-007` applies
+a later revision-request audit and reopens remediation while preserving the
+historical consumed records.
+
+After this third receipt, one allowed commit/push, and its dynamically found
+matching execution record, the same reducer derives
+`AWAITING_CURRENT_EXACT_HEAD_INDEPENDENT_AUDIT`; it must not require this file
+to predeclare the future execution-record comment ID.
+
+`no-live-mutation: true` applies to every recovery fixture. A fixture cannot
+create a branch, commit, PR, comment, policy event, or live enforcement result.
 
 ## Forward-only rollback packet
 
