@@ -1,5 +1,22 @@
 # GraylumAI Agent Rules
 
+## Authoritative Startup and Policy Binding
+
+This section is the repository-level startup authority. It takes precedence over any conflicting retained prose in this file or in legacy workflow material.
+
+Every fresh ChatGPT/Codex window must recover execution authority from GitHub live state in this order:
+
+1. Verify the repository identity and current `main` and `staging` refs.
+2. Read this authoritative `AGENTS.md` from the verified live repository.
+3. Resolve the accepted `docs/governance/DEVELOPMENT_POLICY.md` exact blob and `authority_epoch` from live `G2_POLICY_BINDING_ACCEPTED` evidence.
+4. Resolve the current dedicated Task Issue from GitHub live state.
+5. Verify a separate explicit Owner receipt for the exact next executable gate.
+6. Only after all five identities and bindings are present, current, unambiguous, and non-conflicting may the authorized mutation occur.
+
+Missing, stale, ambiguous, conflicting, or locally inferred identity fails closed. The existence of a task, branch, prompt, local file, screenshot, prior conversation, or issue alone never grants executable permission. Before an accepted G2 policy binding exists, the repository remains fail-closed and legacy authority must not be restored.
+
+Class-wide precedence is mandatory. Retained `.agents/**`, `task.json`, `progress.md`, `findings.md`, `task_plan.md`, Manus material, templates, Codex prompts, tracker prose, and history are `non-authoritative / derived / historical`. They cannot independently produce current task selection, a receipt, authorization, executable permission, state-writing authority, commit permission, merge permission, deployment permission, or external mutation permission. Their presence does not create a fallback path.
+
 ## Branch And Release Policy
 
 GraylumAI is a live production application. Treat `main` as the production release branch and `staging` as the required pre-production integration branch.
