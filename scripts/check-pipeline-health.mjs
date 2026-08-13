@@ -106,15 +106,40 @@ function reportedChecks(repo, sha) {
   const statuses = gh(`repos/${repo}/commits/${sha}/status`).statuses ?? [];
 
   const byName = new Map();
-  // Newest wins: a name can be reported more than once on the same commit
-  // (a push run and a pull_request run both target the head SHA).
-  for (const run of [...runs].sort((a, b) => new Date(a.completed_at ?? 0) - new Date(b.completed_at ?? 0))) {
-    byName.set(run.name, { conclusion: run.conclusion, status: run.status });
+  const addReport = (name, report) => {
+    const reports = byName.get(name) ?? [];
+    const sameSourceIndex = reports.findIndex((candidate) => candidate.source === report.source);
+    if (sameSourceIndex === -1) {
+      reports.push(report);
+    } else {
+      const candidate = reports[sameSourceIndex];
+      const candidateTime = new Date(candidate.observedAt ?? 0).getTime();
+      const reportTime = new Date(report.observedAt ?? 0).getTime();
+      if (reportTime > candidateTime || (reportTime === candidateTime && (report.runId ?? 0) > (candidate.runId ?? 0))) {
+        reports[sameSourceIndex] = report;
+      }
+    }
+    byName.set(name, reports);
+  };
+
+  // Keep the newest report from each source: a name can be reported by both a
+  // re-run and a legacy commit status. Sorting by completion time loses an
+  // in-progress re-run because it has no completed_at value.
+  for (const run of runs) {
+    addReport(run.name, {
+      conclusion: run.conclusion,
+      status: run.status,
+      observedAt: run.started_at ?? run.created_at ?? null,
+      runId: run.id,
+      source: 'check_run',
+    });
   }
-  for (const status of [...statuses].sort(
-    (a, b) => new Date(a.updated_at ?? a.created_at ?? 0) - new Date(b.updated_at ?? b.created_at ?? 0),
-  )) {
-    byName.set(status.context, normalizeCommitStatus(status));
+  for (const status of statuses) {
+    addReport(status.context, {
+      ...normalizeCommitStatus(status),
+      observedAt: status.updated_at ?? status.created_at ?? null,
+      source: 'commit_status',
+    });
   }
   return byName;
 }
@@ -157,11 +182,20 @@ function contextsSeenOnRecentPullRequests(repo, branch, workflowChangedAt) {
     return { seen, evidence, eligiblePulls };
   }
   for (const pull of pulls) {
-    if (workflowChangedAt && new Date(pull.created_at) <= new Date(workflowChangedAt)) continue;
     if (!workflowChangedAt) continue;
-    eligiblePulls += 1;
     try {
-      for (const name of reportedChecks(repo, pull.head.sha).keys()) {
+      const headCommit = gh(`repos/${repo}/commits/${pull.head.sha}`);
+      const headCommittedAt = headCommit.commit?.committer?.date ?? null;
+      if (!headCommittedAt || new Date(headCommittedAt) <= new Date(workflowChangedAt)) continue;
+
+      const checks = reportedChecks(repo, pull.head.sha);
+      const currentChecks = new Map();
+      for (const [name, reports] of checks) {
+        currentChecks.set(name, reports);
+      }
+      if (currentChecks.size === 0) continue;
+      eligiblePulls += 1;
+      for (const name of currentChecks.keys()) {
         seen.add(name);
         if (!evidence.has(name)) evidence.set(name, { number: pull.number, createdAt: pull.created_at });
       }
@@ -310,8 +344,10 @@ function auditOpenPullRequests(repo) {
 
     const neverReported = required.filter((context) => !checks.has(context));
     const failing = required.filter((context) => {
-      const check = checks.get(context);
-      return check && check.status === 'completed' && !PASSING_CONCLUSIONS.has(check.conclusion);
+      const reports = checks.get(context) ?? [];
+      return reports.some(
+        (report) => report.status === 'completed' && !PASSING_CONCLUSIONS.has(report.conclusion),
+      );
     });
 
     if (neverReported.length > 0 || failing.length > 0) {
