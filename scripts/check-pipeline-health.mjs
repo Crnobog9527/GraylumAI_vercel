@@ -28,7 +28,7 @@
 import { execFileSync } from 'node:child_process';
 
 const STALE_PRODUCTION_DAYS = 7;
-const PR_SAMPLE_FOR_CONTEXT_EVIDENCE = 5;
+const PR_SAMPLE_FOR_CONTEXT_EVIDENCE = 20;
 
 // A required context is satisfied by any of these conclusions.  `skipped` and
 // `neutral` count: GitHub treats them as passing for branch protection.
@@ -111,10 +111,25 @@ function reportedChecks(repo, sha) {
   for (const run of [...runs].sort((a, b) => new Date(a.completed_at ?? 0) - new Date(b.completed_at ?? 0))) {
     byName.set(run.name, { conclusion: run.conclusion, status: run.status });
   }
-  for (const status of statuses) {
-    byName.set(status.context, { conclusion: status.state === 'success' ? 'success' : status.state, status: 'completed' });
+  for (const status of [...statuses].sort(
+    (a, b) => new Date(a.updated_at ?? a.created_at ?? 0) - new Date(b.updated_at ?? b.created_at ?? 0),
+  )) {
+    byName.set(status.context, normalizeCommitStatus(status));
   }
   return byName;
+}
+
+/** GitHub commit-status states: error | failure | pending | success. */
+function normalizeCommitStatus(status) {
+  if (status.state === 'pending') {
+    // Keep in-flight semantics, matching how an in-progress check run is
+    // treated.  A legacy status integration mid-deploy is not a failure.
+    return { conclusion: null, status: 'in_progress' };
+  }
+  return {
+    conclusion: status.state === 'success' ? 'success' : 'failure',
+    status: 'completed',
+  };
 }
 
 /**
@@ -126,23 +141,36 @@ function reportedChecks(repo, sha) {
  * on every pull request.  Comparing against HEAD alone would call them phantom
  * and claim the branch is permanently blocked when it is not.
  */
-function contextsSeenOnRecentPullRequests(repo, branch) {
+function lastWorkflowChangeAt(repo, branch) {
+  const commits = gh(`repos/${repo}/commits?sha=${branch}&path=.github/workflows&per_page=1`);
+  return commits[0]?.commit?.committer?.date ?? null;
+}
+
+function contextsSeenOnRecentPullRequests(repo, branch, workflowChangedAt) {
   const seen = new Set();
+  const evidence = new Map();
+  let eligiblePulls = 0;
   let pulls;
   try {
     pulls = gh(`repos/${repo}/pulls?state=all&base=${branch}&per_page=${PR_SAMPLE_FOR_CONTEXT_EVIDENCE}&sort=updated&direction=desc`);
   } catch {
-    return seen;
+    return { seen, evidence, eligiblePulls };
   }
   for (const pull of pulls) {
+    if (workflowChangedAt && new Date(pull.created_at) <= new Date(workflowChangedAt)) continue;
+    if (!workflowChangedAt) continue;
+    eligiblePulls += 1;
     try {
-      for (const name of reportedChecks(repo, pull.head.sha).keys()) seen.add(name);
+      for (const name of reportedChecks(repo, pull.head.sha).keys()) {
+        seen.add(name);
+        if (!evidence.has(name)) evidence.set(name, { number: pull.number, createdAt: pull.created_at });
+      }
     } catch {
       // A single unreadable pull request must not sink the audit; the caller
       // only ever uses this set to *withdraw* a phantom accusation.
     }
   }
-  return seen;
+  return { seen, evidence, eligiblePulls };
 }
 
 function auditRequiredChecks(repo, branch) {
@@ -172,21 +200,38 @@ function auditRequiredChecks(repo, branch) {
     return;
   }
 
-  const onPullRequests = contextsSeenOnRecentPullRequests(repo, branch);
+  const workflowChangedAt = lastWorkflowChangeAt(repo, branch);
+  const { seen: onPullRequests, evidence, eligiblePulls } = contextsSeenOnRecentPullRequests(
+    repo,
+    branch,
+    workflowChangedAt,
+  );
   const pullRequestOnly = missingOnHead.filter((context) => onPullRequests.has(context));
   const phantom = missingOnHead.filter((context) => !onPullRequests.has(context));
 
   if (pullRequestOnly.length > 0) {
-    notes.push(
-      `${branch}: ${pullRequestOnly.length} required check(s) are pull-request-only and correctly absent from HEAD: ${pullRequestOnly.join(', ')}`,
-    );
+    for (const context of pullRequestOnly) {
+      const item = evidence.get(context);
+      notes.push(
+        `${branch}: ${context} is pull-request-only — last seen on #${item.number} ` +
+          `(created ${item.createdAt}, after the last workflow change${workflowChangedAt ? ` (${workflowChangedAt})` : ''})`,
+      );
+    }
   }
   if (phantom.length > 0) {
-    problem(
-      `${branch}: ${phantom.length} required status check(s) reported neither on HEAD (${head.slice(0, 7)}) nor on ` +
-        `the last ${PR_SAMPLE_FOR_CONTEXT_EVIDENCE} pull requests — every pull request into ${branch} will block ` +
-        `forever with no failure to inspect: ${phantom.join(', ')}`,
-    );
+    if (eligiblePulls === 0) {
+      problem(
+        `${branch}: ${phantom.length} required check(s) missing from HEAD and no pull request created since the last ` +
+          `workflow change (${workflowChangedAt ?? 'unknown'}) to confirm them — treat as phantom until a new pull request ` +
+          `reports them: ${phantom.join(', ')}`,
+      );
+    } else {
+      problem(
+        `${branch}: ${phantom.length} required status check(s) reported neither on HEAD (${head.slice(0, 7)}) nor on ` +
+          `the last ${PR_SAMPLE_FOR_CONTEXT_EVIDENCE} eligible pull requests — every pull request into ${branch} will block ` +
+          `forever with no failure to inspect: ${phantom.join(', ')}`,
+      );
+    }
   } else {
     notes.push(`${branch}: all ${required.length} required status check(s) accounted for — no phantom contexts`);
   }
