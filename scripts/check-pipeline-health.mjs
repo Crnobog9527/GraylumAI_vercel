@@ -39,15 +39,23 @@ function parseArgs(argv) {
 }
 
 function gh(path, { paginate = false } = {}) {
+  // `gh api --paginate` emits one independent JSON document per page, which
+  // JSON.parse cannot consume once a request spans more than one page.
+  // `--slurp` wraps the pages in a single outer array; flatten it back to the
+  // shape a single-page response would have.
   const argv = ['api'];
-  if (paginate) argv.push('--paginate');
+  if (paginate) argv.push('--paginate', '--slurp');
   argv.push(path);
   try {
     const raw = execFileSync('gh', argv, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return paginate ? parsed.flat() : parsed;
   } catch (error) {
-    const stderr = error.stderr?.toString().trim();
-    throw new Error(`gh api ${path} failed: ${stderr || error.message}`);
+    const stderr = error.stderr?.toString().trim() ?? '';
+    const wrapped = new Error(`gh api ${path} failed: ${stderr || error.message}`);
+    wrapped.stderr = stderr;
+    wrapped.notFound = /HTTP 404|Not Found/i.test(stderr);
+    throw wrapped;
   }
 }
 
@@ -72,8 +80,17 @@ function auditRequiredChecks(repo, branch) {
   let protection;
   try {
     protection = gh(`repos/${repo}/branches/${branch}/protection`);
-  } catch {
-    notes.push(`${branch}: no branch protection (or no admin access to read it)`);
+  } catch (error) {
+    if (error.notFound) {
+      notes.push(`${branch}: no branch protection configured`);
+    } else {
+      // Fail closed.  A permission or API error means the phantom required-check
+      // audit did not run at all; reporting OK in that case would reproduce the
+      // exact failure this script exists to catch.
+      problem(
+        `${branch}: could not read branch protection, so the phantom required-check audit did NOT run — ${error.message}`,
+      );
+    }
     return;
   }
 
@@ -176,23 +193,39 @@ function auditStuckPullRequests(repo) {
 
 /** Scheduled workflow runs are the canary nobody watches. */
 function auditScheduledRuns(repo, production) {
-  const runs = gh(`repos/${repo}/actions/runs?event=schedule&branch=${production}&per_page=10`).workflow_runs ?? [];
+  const runs = gh(`repos/${repo}/actions/runs?event=schedule&branch=${production}&per_page=50`).workflow_runs ?? [];
   if (runs.length === 0) {
     notes.push(`${production}: no scheduled workflow runs found`);
     return;
   }
 
-  const failing = runs.filter((run) => run.conclusion === 'failure');
-  const consecutive = runs.findIndex((run) => run.conclusion !== 'failure');
-  const streak = consecutive === -1 ? runs.length : consecutive;
+  // Scheduled runs from different workflows interleave by time (security.yml
+  // runs Mondays, codeql.yml runs Tuesdays).  A streak computed over the merged
+  // list both invents failures that never repeated and hides real ones behind an
+  // unrelated workflow's success, so group by workflow before counting.
+  const byWorkflow = new Map();
+  for (const run of runs) {
+    const key = run.workflow_id ?? run.name;
+    if (!byWorkflow.has(key)) byWorkflow.set(key, []);
+    byWorkflow.get(key).push(run);
+  }
 
-  if (streak >= 2) {
-    problem(
-      `${production}: scheduled workflow "${runs[0].name}" has failed ${streak} run(s) in a row ` +
-        `(most recent ${runs[0].html_url})`,
-    );
-  } else if (failing.length > 0) {
-    notes.push(`${production}: ${failing.length}/${runs.length} recent scheduled runs failed`);
+  for (const workflowRuns of byWorkflow.values()) {
+    const ordered = [...workflowRuns].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const firstNonFailure = ordered.findIndex((run) => run.conclusion !== 'failure');
+    const streak = firstNonFailure === -1 ? ordered.length : firstNonFailure;
+    const name = ordered[0].name;
+
+    if (streak >= 2) {
+      problem(
+        `${production}: scheduled workflow "${name}" has failed ${streak} run(s) in a row ` +
+          `(most recent ${ordered[0].html_url})`,
+      );
+    } else if (streak === 1) {
+      notes.push(
+        `${production}: scheduled workflow "${name}" failed its most recent run (${ordered[0].html_url})`,
+      );
+    }
   }
 }
 
