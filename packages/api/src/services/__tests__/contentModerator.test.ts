@@ -72,6 +72,38 @@ describe('contentModerator', () => {
     ]);
   });
 
+  it.each([
+    ['sk-' + 'a'.repeat(4097), ViolationType.PII_LEAK],
+    ['sk-' + 'a'.repeat(100), ViolationType.PII_LEAK],
+    ["';" + ' '.repeat(65) + 'DROP ', ViolationType.MALICIOUS_CODE],
+    ["';" + '   ' + 'DROP ', ViolationType.MALICIOUS_CODE],
+  ])('preserves detection for unbounded credential and SQL whitespace inputs', (input, type) => {
+    const result = new ContentModerator().moderateInput(input);
+    const violations = type === ViolationType.PII_LEAK
+      ? new ContentModerator().moderateOutput(input).violations
+      : result.violations;
+
+    expect(violations).toEqual([
+      expect.objectContaining({ type }),
+    ]);
+  });
+
+  it.each([
+    ['<script>alert(1)</script>', 0, '<script>alert(1)</script>'],
+    ['<script>alert(1)</script >', 0, '<script>alert(1)</script >'],
+    ['İ<SCRIPT>alert(1)</SCRIPT>', 1, '<SCRIPT>alert(1)</SCRIPT>'],
+  ])('preserves script detection metadata for %j', (input, start, matchedPattern) => {
+    const result = new ContentModerator().moderateInput(input);
+
+    expect(result.violations).toEqual([
+      expect.objectContaining({
+        type: ViolationType.MALICIOUS_CODE,
+        matchedPattern,
+        position: { start, end: start + matchedPattern.length },
+      }),
+    ]);
+  });
+
   it('keeps PII matching responsive on an adversarial email-shaped input', () => {
     const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
 

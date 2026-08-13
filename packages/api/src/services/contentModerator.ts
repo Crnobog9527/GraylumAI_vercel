@@ -102,7 +102,7 @@ const PII_PATTERNS = [
   /[\w.-]{1,254}@[\w.-]{1,254}\.\w{2,63}/i,
 
   // API Key 模式
-  /\b(sk-|pk-|api[_-]?key|secret[_-]?key)[a-zA-Z0-9]{20,4096}\b/i,
+  /\b(sk-|pk-|api[_-]?key|secret[_-]?key)[a-zA-Z0-9]{20,}\b/i,
 
   // JWT Token
   /eyJ[a-zA-Z0-9_-]{1,8192}\.eyJ[a-zA-Z0-9_-]{1,8192}\.[a-zA-Z0-9_-]{1,8192}/,
@@ -116,7 +116,7 @@ const JAVASCRIPT_PATTERN = /javascript:/i;
 const MALICIOUS_CODE_PATTERNS: RegExp[] = [
   // SQL 注入
   /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\b.{0,100000}\b(FROM|INTO|SET|WHERE)\b)/i,
-  /(['"];\s{0,64}(DROP|DELETE|UPDATE|INSERT)\s{1,64})/i,
+  /(['"];\s*(DROP|DELETE|UPDATE|INSERT)\s)/i,
 
   // XSS
   JAVASCRIPT_PATTERN,
@@ -128,17 +128,21 @@ const MALICIOUS_CODE_PATTERNS: RegExp[] = [
 ];
 
 function findScriptElement(content: string): { match: string; index: number } | undefined {
-  const lowerContent = content.toLowerCase();
+  const lowerContent = content.replace(/[A-Z]/g, (character) => character.toLowerCase());
   const openingIndex = lowerContent.indexOf('<script');
   if (openingIndex === -1) return undefined;
 
   const openingEnd = lowerContent.indexOf('>', openingIndex + '<script'.length);
   if (openingEnd === -1) return undefined;
 
-  const closingIndex = lowerContent.indexOf('</script>', openingEnd + 1);
+  const closingIndex = lowerContent.indexOf('</script', openingEnd + 1);
   if (closingIndex === -1) return undefined;
 
-  const end = closingIndex + '</script>'.length;
+  let closingEnd = closingIndex + '</script'.length;
+  while (/\s/.test(lowerContent[closingEnd] ?? '')) closingEnd++;
+  if (lowerContent[closingEnd] !== '>') return undefined;
+
+  const end = closingEnd + 1;
   return { match: content.slice(openingIndex, end), index: openingIndex };
 }
 
