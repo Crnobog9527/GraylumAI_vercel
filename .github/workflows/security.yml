@@ -133,6 +133,11 @@ jobs:
             fi
           done
           if [ "${#missing_materials[@]}" -gt 0 ]; then
+            if git merge-base --is-ancestor "$bootstrap_sha" "$trusted_sha"; then
+              printf 'Trusted policy source rejected: trusted SHA=%s is later than the trusted bootstrap baseline; missing material(s) treated as deletion: %s\n' \
+                "$original_trusted_sha" "${missing_materials[*]}" >&2
+              exit 1
+            fi
             printf 'Trusted policy source fallback: original trusted SHA=%s; missing material(s): %s; bootstrap SHA=%s\n' \
               "$original_trusted_sha" "${missing_materials[*]}" "$bootstrap_sha"
             trusted_sha="$bootstrap_sha"
@@ -238,6 +243,11 @@ jobs:
             fi
           done
           if [ "${#missing_materials[@]}" -gt 0 ]; then
+            if git merge-base --is-ancestor "$bootstrap_sha" "$trusted_sha"; then
+              printf 'Trusted policy source rejected: trusted SHA=%s is later than the trusted bootstrap baseline; missing material(s) treated as deletion: %s\n' \
+                "$original_trusted_sha" "${missing_materials[*]}" >&2
+              exit 1
+            fi
             printf 'Trusted policy source fallback: original trusted SHA=%s; missing material(s): %s; bootstrap SHA=%s\n' \
               "$original_trusted_sha" "${missing_materials[*]}" "$bootstrap_sha"
             trusted_sha="$bootstrap_sha"
