@@ -3,7 +3,7 @@ name: Security Scan
 
 on:
   pull_request:
-    branches: [main, staging, develop]
+    branches: [main, staging]
   push:
     branches: [main, staging]
   schedule:
@@ -32,7 +32,13 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          cache: pnpm
+          # Intentionally absent: cache: pnpm.
+          # "Setup audit-compatible pnpm" below swaps the active pnpm version and
+          # package_json_file, which changes the resolved pnpm store path. The
+          # setup-node post step then tries to save a store path that no longer
+          # exists and fails the whole job ("Path Validation Error"), even when
+          # "Run security audit" succeeded. This job audits a lockfile copy in
+          # RUNNER_TEMP and does not benefit from the store cache.
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

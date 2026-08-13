@@ -15,6 +15,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
+    "pipeline:health": "node ./scripts/check-pipeline-health.mjs",
     "release:preflight": "bash ./scripts/run-release-preflight.sh",
     "release:preflight:preview": "bash ./scripts/run-release-preflight.sh --with-preview",
     "release:preflight:destructive": "bash ./scripts/run-release-preflight.sh --with-preview --with-admin-destructive",
