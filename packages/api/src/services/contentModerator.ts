@@ -111,13 +111,15 @@ const PII_PATTERNS = [
 /**
  * 恶意代码检测模式
  */
+const JAVASCRIPT_PATTERN = /javascript:/i;
+
 const MALICIOUS_CODE_PATTERNS: RegExp[] = [
   // SQL 注入
   /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\b.{0,100000}\b(FROM|INTO|SET|WHERE)\b)/i,
   /(['"];\s{0,64}(DROP|DELETE|UPDATE|INSERT)\s{1,64})/i,
 
   // XSS
-  /javascript:/i,
+  JAVASCRIPT_PATTERN,
   /on(load|error|click|mouse)\s*=/i,
 
   // 命令注入
@@ -317,40 +319,34 @@ export class ContentModerator {
    */
   private checkMaliciousCode(content: string): Violation[] {
     const scriptMatch = findScriptElement(content);
-    const patternViolations: Violation[] = [];
+    const violations: Violation[] = [];
 
-    const appendPatternViolations = (patterns: RegExp[]): void => {
-      for (const pattern of patterns) {
-        const match = content.match(pattern);
-        if (match) {
-          patternViolations.push({
-            type: ViolationType.MALICIOUS_CODE,
-            severity: 'high',
-            message: '检测到可能的恶意代码',
-            matchedPattern: match[0].substring(0, 50) + (match[0].length > 50 ? '...' : ''),
-            position: match.index !== undefined
-              ? { start: match.index, end: match.index + match[0].length }
-              : undefined,
-          });
-        }
+    for (const pattern of MALICIOUS_CODE_PATTERNS) {
+      if (pattern === JAVASCRIPT_PATTERN && scriptMatch) {
+        violations.push({
+          type: ViolationType.MALICIOUS_CODE,
+          severity: 'high',
+          message: '检测到可能的恶意代码',
+          matchedPattern: scriptMatch.match.substring(0, 50) + (scriptMatch.match.length > 50 ? '...' : ''),
+          position: { start: scriptMatch.index, end: scriptMatch.index + scriptMatch.match.length },
+        });
       }
-    };
 
-    appendPatternViolations(MALICIOUS_CODE_PATTERNS.slice(0, 2));
-
-    if (scriptMatch) {
-      patternViolations.push({
-        type: ViolationType.MALICIOUS_CODE,
-        severity: 'high',
-        message: '检测到可能的恶意代码',
-        matchedPattern: scriptMatch.match.substring(0, 50) + (scriptMatch.match.length > 50 ? '...' : ''),
-        position: { start: scriptMatch.index, end: scriptMatch.index + scriptMatch.match.length },
-      });
+      const match = content.match(pattern);
+      if (match) {
+        violations.push({
+          type: ViolationType.MALICIOUS_CODE,
+          severity: 'high',
+          message: '检测到可能的恶意代码',
+          matchedPattern: match[0].substring(0, 50) + (match[0].length > 50 ? '...' : ''),
+          position: match.index !== undefined
+            ? { start: match.index, end: match.index + match[0].length }
+            : undefined,
+        });
+      }
     }
 
-    appendPatternViolations(MALICIOUS_CODE_PATTERNS.slice(2));
-
-    return patternViolations;
+    return violations;
   }
 
   /**
