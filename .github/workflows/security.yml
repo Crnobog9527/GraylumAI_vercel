@@ -94,6 +94,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Human-maintained immutable bootstrap base. It contains every trusted
+          # policy material required by this workflow.
+          bootstrap_sha='2331a1f64794cc85b9ae5539930e13e7bd48f211'
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               trusted_sha="$(jq -er '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
@@ -113,6 +116,33 @@ jobs:
             printf '%s' "$trusted_sha" | grep -Eq '^0{40}$'; then
             echo 'Exact trusted policy SHA is unavailable.'
             exit 1
+          fi
+          if ! git cat-file -e "${trusted_sha}^{commit}" 2>/dev/null; then
+            echo "Trusted policy commit is unavailable: $trusted_sha"
+            exit 1
+          fi
+          original_trusted_sha="$trusted_sha"
+          missing_materials=()
+          for material in \
+            .github/scripts/check-workflow-policy.rb \
+            .github/scripts/test-workflow-policy.rb \
+            .github/scripts/create-secret-scan-regression-fixtures.sh \
+            .gitleaks.toml; do
+            if ! git cat-file -e "${trusted_sha}:${material}" 2>/dev/null; then
+              missing_materials+=("$material")
+            fi
+          done
+          if [ "${#missing_materials[@]}" -gt 0 ]; then
+            if git merge-base --is-ancestor "$bootstrap_sha" "$trusted_sha"; then
+              printf 'Trusted policy source rejected: trusted SHA=%s is later than the trusted bootstrap baseline; missing material(s) treated as deletion: %s\n' \
+                "$original_trusted_sha" "${missing_materials[*]}" >&2
+              exit 1
+            fi
+            printf 'Trusted policy source fallback: original trusted SHA=%s; missing material(s): %s; bootstrap SHA=%s\n' \
+              "$original_trusted_sha" "${missing_materials[*]}" "$bootstrap_sha"
+            trusted_sha="$bootstrap_sha"
+          else
+            echo "Trusted policy source: base commit SHA=$trusted_sha (source=trusted base)"
           fi
           git cat-file -e "${trusted_sha}^{commit}"
           echo "sha=$trusted_sha" >> "$GITHUB_OUTPUT"
@@ -168,6 +198,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Human-maintained immutable bootstrap base. It contains every trusted
+          # policy material required by this workflow.
+          bootstrap_sha='2331a1f64794cc85b9ae5539930e13e7bd48f211'
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               trusted_sha="$(jq -er '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
@@ -189,6 +222,38 @@ jobs:
               exit 1
               ;;
           esac
+          if ! printf '%s' "$trusted_sha" | grep -Eq '^[0-9a-f]{40}$' ||
+            printf '%s' "$trusted_sha" | grep -Eq '^0{40}$'; then
+            echo 'Exact trusted policy SHA is unavailable.'
+            exit 1
+          fi
+          if ! git cat-file -e "${trusted_sha}^{commit}" 2>/dev/null; then
+            echo "Trusted policy commit is unavailable: $trusted_sha"
+            exit 1
+          fi
+          original_trusted_sha="$trusted_sha"
+          missing_materials=()
+          for material in \
+            .github/scripts/check-workflow-policy.rb \
+            .github/scripts/test-workflow-policy.rb \
+            .github/scripts/create-secret-scan-regression-fixtures.sh \
+            .gitleaks.toml; do
+            if ! git cat-file -e "${trusted_sha}:${material}" 2>/dev/null; then
+              missing_materials+=("$material")
+            fi
+          done
+          if [ "${#missing_materials[@]}" -gt 0 ]; then
+            if git merge-base --is-ancestor "$bootstrap_sha" "$trusted_sha"; then
+              printf 'Trusted policy source rejected: trusted SHA=%s is later than the trusted bootstrap baseline; missing material(s) treated as deletion: %s\n' \
+                "$original_trusted_sha" "${missing_materials[*]}" >&2
+              exit 1
+            fi
+            printf 'Trusted policy source fallback: original trusted SHA=%s; missing material(s): %s; bootstrap SHA=%s\n' \
+              "$original_trusted_sha" "${missing_materials[*]}" "$bootstrap_sha"
+            trusted_sha="$bootstrap_sha"
+          else
+            echo "Trusted policy source: base commit SHA=$trusted_sha (source=trusted base)"
+          fi
           for sha in "$trusted_sha" "$scan_from" "$scan_to"; do
             if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' ||
               printf '%s' "$sha" | grep -Eq '^0{40}$'; then
