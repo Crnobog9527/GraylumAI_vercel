@@ -481,6 +481,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const balanceStartedAt = Date.now();
+    try {
+      await billingService.getBalance();
+    } catch {
+      logAiStreamError('ai_stream_initial_balance_unavailable');
+      return new Response(
+        JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    recordStageTiming(stageTimings, 'balance_lookup', balanceStartedAt);
+
     const modulePromptStartedAt = Date.now();
     let activePrompt: Awaited<ReturnType<typeof resolveActiveModulePrompt>> | null = null;
     if (moduleId) {
@@ -728,13 +740,23 @@ export async function POST(request: NextRequest) {
       billingRuntimeSettings,
     );
 
-    const balanceStartedAt = Date.now();
+    let balance: number;
+    const authorizationBalanceStartedAt = Date.now();
+    try {
+      balance = await billingService.getBalance();
+    } catch {
+      logAiStreamError('ai_stream_authorization_balance_unavailable');
+      return new Response(
+        JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    recordStageTiming(stageTimings, 'authorization_balance_lookup', authorizationBalanceStartedAt);
+
     const freeTierStartedAt = Date.now();
-    const [balance, freeTierUsedToday] = await Promise.all([
-      billingService.getBalance(),
-      runtimeSettings.enableFreeTier ? getFreeTierUsageCount(supabaseAuth, userId) : Promise.resolve(0),
-    ]);
-    recordStageTiming(stageTimings, 'balance_lookup', balanceStartedAt);
+    const freeTierUsedToday = runtimeSettings.enableFreeTier
+      ? await getFreeTierUsageCount(supabaseAuth, userId)
+      : 0;
     recordStageTiming(stageTimings, 'free_tier_lookup', freeTierStartedAt);
     const canUseFreeTier = runtimeSettings.enableFreeTier
       && balance <= 0

@@ -1,13 +1,18 @@
 import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { createSafeInternalError } from '../lib/publicError';
+import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import {
   countsAsCreditSpend,
   normalizeCreditLedgerType,
   normalizeCreditTransactionRow,
 } from '../services/creditLedger';
+import {
+  CREDIT_BALANCE_UNAVAILABLE_MESSAGE,
+  classifyCreditBalanceFailure,
+  readCreditBalance,
+} from '../services/creditBalance';
 
 // ============================================================================
 // 类型定义
@@ -147,41 +152,23 @@ export const creditsRouter = router({
    * 获取当前用户积分余额
    */
   getBalance: protectedProcedure.query(async ({ ctx }) => {
-    // 只查询确定存在的 credits 列，避免因不存在的列导致查询失败
-    const { data: profile, error } = await ctx.supabase
-      .from('profiles')
-      .select('credits')
-      .eq('id', ctx.profileId)
-      .single();
-
-    // 如果查询失败或 profile 不存在，返回默认值而不是抛出错误
-    // 这样可以避免因 profile 表结构问题导致页面无法加载
-    if (error) {
-      logger.error('billing', 'credits_balance_query_failed', {
-        code: error.code,
+    try {
+      const credits = await readCreditBalance(ctx.supabase, ctx.profileId);
+      logger.info('billing', 'credits_balance_read', {
+        outcome: credits === 0 ? 'real_zero' : 'ready',
       });
-      // 返回默认值，让页面能够正常显示
+
       return {
-        credits: 0,
+        credits,
         creditsExpiringSoon: 0,
         creditsExpiryDate: null,
       };
+    } catch (error) {
+      logger.error('billing', 'credits_balance_unavailable', {
+        reason: classifyCreditBalanceFailure(error),
+      });
+      throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
     }
-
-    if (!profile) {
-      logger.warn('billing', 'credits_balance_profile_missing');
-      return {
-        credits: 0,
-        creditsExpiringSoon: 0,
-        creditsExpiryDate: null,
-      };
-    }
-
-    return {
-      credits: profile.credits ?? 0,
-      creditsExpiringSoon: 0, // 这些列可能不存在，使用默认值
-      creditsExpiryDate: null,
-    };
   }),
 
   /**
@@ -552,13 +539,15 @@ export const creditsRouter = router({
   checkSufficientCredits: protectedProcedure
     .input(z.object({ amount: z.number().positive() }))
     .query(async ({ ctx, input }) => {
-      const { data: profile } = await ctx.supabase
-        .from('profiles')
-        .select('credits')
-        .eq('id', ctx.profileId)
-        .single();
-
-      const currentCredits = profile?.credits ?? 0;
+      let currentCredits: number;
+      try {
+        currentCredits = await readCreditBalance(ctx.supabase, ctx.profileId);
+      } catch (error) {
+        logger.error('billing', 'credits_sufficiency_balance_unavailable', {
+          reason: classifyCreditBalanceFailure(error),
+        });
+        throw createSafeServiceUnavailableError(error, CREDIT_BALANCE_UNAVAILABLE_MESSAGE);
+      }
       const sufficient = currentCredits >= input.amount;
 
       return {

@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:components": "vitest run src/components/home/UpdatesSection.test.ts src/app/admin/announcements/announcementFormPayload.test.ts --config vitest.config.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:critical": "playwright test auth.spec.ts chat.spec.ts admin.spec.ts --project=chromium",
@@ -66,7 +67,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
-    "next": "16.2.6",
+    "next": "16.2.11",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "recharts": "^3.6.0",
@@ -86,6 +87,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^10.4.0",
     "tailwindcss": "^4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   }
 }

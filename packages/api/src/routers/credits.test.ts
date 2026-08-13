@@ -44,6 +44,60 @@ function createProfileSupabase(role: 'user' | 'admin', credits = 123) {
   };
 }
 
+function createBalanceSupabase(options: {
+  credits?: unknown;
+  data?: Record<string, unknown> | null;
+  error?: { code?: string; message?: string } | null;
+  thrown?: unknown;
+} = {}) {
+  return {
+    from(table: string) {
+      if (table !== 'profiles') {
+        throw new Error(`Unexpected balance table ${table}`);
+      }
+
+      let selection = '';
+      return {
+        select(value: string) {
+          selection = value;
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        single() {
+          if (selection !== 'credits') {
+            return Promise.resolve({
+              data: {
+                id: 'user-1',
+                role: 'user',
+                status: 'active',
+                nickname: 'User',
+                email: 'user@example.com',
+                credits: 123,
+                membership_level: 'free',
+                created_at: '2026-07-19T00:00:00.000Z',
+              },
+              error: null,
+            });
+          }
+          if (options.thrown !== undefined) {
+            return Promise.reject(options.thrown);
+          }
+
+          const data = 'data' in options
+            ? options.data
+            : { credits: 'credits' in options ? options.credits : 123 };
+          return Promise.resolve({
+            data,
+            error: options.error ?? null,
+          });
+        },
+      };
+    },
+  };
+}
+
 function createCreditTransactionsSupabase(rows: Array<Record<string, unknown>> = []) {
   const result = Promise.resolve({
     data: rows,
@@ -261,6 +315,47 @@ describe('creditsRouter permissions', () => {
 
     await expect(caller.getBalance()).resolves.toMatchObject({
       credits: 123,
+    });
+  });
+
+  it('preserves a real zero balance as a successful ready value', async () => {
+    const caller = createCreditsCaller({
+      supabase: createBalanceSupabase({ credits: 0 }),
+    });
+
+    await expect(caller.getBalance()).resolves.toMatchObject({ credits: 0 });
+  });
+
+  it.each([
+    ['query error', createBalanceSupabase({ error: { code: '42501', message: 'private database detail' } })],
+    ['profile missing', createBalanceSupabase({ data: null })],
+    ['null balance', createBalanceSupabase({ credits: null })],
+    ['undefined balance', createBalanceSupabase({ credits: undefined })],
+    ['string balance', createBalanceSupabase({ credits: '0' })],
+    ['NaN balance', createBalanceSupabase({ credits: Number.NaN })],
+    ['infinite balance', createBalanceSupabase({ credits: Number.POSITIVE_INFINITY })],
+    ['fractional balance', createBalanceSupabase({ credits: 1.5 })],
+    ['negative balance', createBalanceSupabase({ credits: -1 })],
+    ['thrown network failure', createBalanceSupabase({ thrown: new TypeError('private network detail') })],
+  ])('returns a safe unavailable error for %s', async (_name, supabase) => {
+    const caller = createCreditsCaller({ supabase });
+
+    const error = await caller.getBalance().catch((caught) => caught as TRPCError);
+    expect(error).toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
+    });
+    expect(error.message).not.toMatch(/private database detail|private network detail/);
+  });
+
+  it('does not fabricate a zero shortfall when the sufficiency balance read fails', async () => {
+    const caller = createCreditsCaller({
+      supabase: createBalanceSupabase({ error: { code: '57014', message: 'statement timeout' } }),
+    });
+
+    await expect(caller.checkSufficientCredits({ amount: 1 })).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
     });
   });
 

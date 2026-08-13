@@ -40,6 +40,11 @@ import {
 } from "@/components/ui/table";
 import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
+import {
+  ANNOUNCEMENT_LINK_LABEL,
+  buildAnnouncementPresentationPayload,
+  getAnnouncementLinkFormValue,
+} from './announcementFormPayload';
 
 type AnnouncementType = 'info' | 'warning' | 'success' | 'error' | 'promo' | 'announcement';
 type AnnouncementAreaType = 'homepage' | 'banner';
@@ -168,7 +173,7 @@ export default function AdminAnnouncementsPage() {
       type: announcement.type,
       announcementType: announcement.announcement_type,
       bannerStyle: (announcement.banner_style || 'info') as BannerStyle,
-      bannerLink: announcement.banner_link || '',
+      bannerLink: getAnnouncementLinkFormValue(announcement.banner_link),
       icon: announcement.icon || 'Megaphone',
       iconColor: announcement.icon_color || 'text-blue-500',
       tag: announcement.tag || '',
@@ -193,8 +198,11 @@ export default function AdminAnnouncementsPage() {
       content: formData.content,
       type: formData.type,
       announcementType: formData.announcementType,
-      bannerStyle: formData.announcementType === 'banner' ? formData.bannerStyle : undefined,
-      bannerLink: formData.announcementType === 'banner' && formData.bannerLink ? formData.bannerLink : undefined,
+      ...buildAnnouncementPresentationPayload({
+        announcementType: formData.announcementType,
+        bannerStyle: formData.bannerStyle,
+        bannerLink: formData.bannerLink,
+      }),
       icon: formData.icon,
       iconColor: formData.iconColor,
       tag: formData.tag || undefined,
@@ -605,8 +613,10 @@ export default function AdminAnnouncementsPage() {
               </div>
             </div>
 
-            {formData.announcementType === 'banner' && (
-              <div className="grid grid-cols-2 gap-4">
+            <div
+              className={`grid gap-4 ${formData.announcementType === 'banner' ? 'grid-cols-2' : 'grid-cols-1'}`}
+            >
+              {formData.announcementType === 'banner' && (
                 <div className="space-y-2">
                   <Label style={{ color: 'var(--text-secondary)' }}>
                     <div className="flex items-center gap-2">
@@ -633,23 +643,23 @@ export default function AdminAnnouncementsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              )}
 
-                <div className="space-y-2">
-                  <Label style={{ color: 'var(--text-secondary)' }}>
-                    <div className="flex items-center gap-2">
-                      <Link2 className="h-4 w-4" />
-                      横幅链接 (可选)
-                    </div>
-                  </Label>
-                  <Input
-                    value={formData.bannerLink}
-                    onChange={(e) => setFormData({ ...formData, bannerLink: e.target.value })}
-                    placeholder="https://..."
-                    className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                  />
-                </div>
+              <div className="space-y-2">
+                <Label style={{ color: 'var(--text-secondary)' }}>
+                  <div className="flex items-center gap-2">
+                    <Link2 className="h-4 w-4" />
+                    {ANNOUNCEMENT_LINK_LABEL}
+                  </div>
+                </Label>
+                <Input
+                  value={formData.bannerLink}
+                  onChange={(e) => setFormData({ ...formData, bannerLink: e.target.value })}
+                  placeholder="https://example.com 或 /marketplace"
+                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
+                />
               </div>
-            )}
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

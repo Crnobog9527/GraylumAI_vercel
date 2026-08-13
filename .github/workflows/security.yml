@@ -1,137 +1,330 @@
-# 安全扫描工作流
-# 在 PR 和 push 时运行安全检查
-
+# Secretless repository security checks and transitional local E2E evidence.
 name: Security Scan
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, staging, develop]
   push:
-    branches: [main]
+    branches: [main, staging]
   schedule:
-    # 每周一 9:00 UTC 运行
     - cron: '0 9 * * 1'
 
 permissions:
   contents: read
 
 jobs:
-  # 依赖安全审计
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        # 自动从 package.json 的 packageManager 字段读取版本
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          cache: 'pnpm'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run security audit
+      - name: Setup audit-compatible pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.13.0
+          # Intentionally absent: isolate the audit CLI from the repository's install-time pnpm version.
+          package_json_file: .github/pnpm-audit-toolchain.json
+
+      - name: Prepare isolated audit input
         run: |
-          echo "## 依赖安全审计报告" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          audit_dir="$RUNNER_TEMP/graylum-pnpm-audit"
+          rm -rf -- "$audit_dir"
+          mkdir -p "$audit_dir"
+          cp pnpm-lock.yaml "$audit_dir/pnpm-lock.yaml"
 
-          # 运行审计并捕获输出
-          AUDIT_OUTPUT=$(pnpm audit --json 2>/dev/null || true)
+      - name: Run security audit
+        working-directory: ${{ runner.temp }}/graylum-pnpm-audit
+        run: pnpm audit --audit-level high
 
-          # 统计漏洞数量
-          CRITICAL=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.critical // 0')
-          HIGH=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.high // 0')
-          MODERATE=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.moderate // 0')
-          LOW=$(printf '%s' "$AUDIT_OUTPUT" | jq -r '.metadata.vulnerabilities.low // 0')
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
+        with:
+          fail-on-severity: high
 
-          echo "| 严重程度 | 数量 |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Moderate | $MODERATE |" >> $GITHUB_STEP_SUMMARY
-          echo "| Low | $LOW |" >> $GITHUB_STEP_SUMMARY
+  workflow-policy:
+    name: Workflow Policy Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-          # 如果有高危或严重漏洞，标记为失败
-          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ 发现高危漏洞，请尽快修复！" >> $GITHUB_STEP_SUMMARY
-            pnpm audit
+      - name: Resolve exact trusted policy SHA
+        id: trusted-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              trusted_sha="$(jq -er '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
+              ;;
+            push)
+              trusted_sha="$(jq -er '.before' "$GITHUB_EVENT_PATH")"
+              ;;
+            schedule)
+              trusted_sha="$GITHUB_SHA"
+              ;;
+            *)
+              echo 'Unsupported workflow event.'
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$trusted_sha" | grep -Eq '^[0-9a-f]{40}$' ||
+            printf '%s' "$trusted_sha" | grep -Eq '^0{40}$'; then
+            echo 'Exact trusted policy SHA is unavailable.'
             exit 1
-          else
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "✅ 没有发现高危漏洞" >> $GITHUB_STEP_SUMMARY
           fi
+          git cat-file -e "${trusted_sha}^{commit}"
+          echo "sha=$trusted_sha" >> "$GITHUB_OUTPUT"
 
-  # 代码安全扫描
+      - name: Checkout trusted policy source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ steps.trusted-ref.outputs.sha }}
+          path: .trusted-base-policy
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/check-workflow-policy.rb
+            .github/scripts/test-workflow-policy.rb
+            .github/scripts/create-secret-scan-regression-fixtures.sh
+
+      - name: Require trusted policy source
+        run: |
+          set -euo pipefail
+          test -f .trusted-base-policy/.github/scripts/check-workflow-policy.rb
+          test -f .trusted-base-policy/.github/scripts/test-workflow-policy.rb
+          test -f .trusted-base-policy/.github/scripts/create-secret-scan-regression-fixtures.sh
+
+      - name: Run trusted workflow policy regression tests
+        run: ruby .trusted-base-policy/.github/scripts/test-workflow-policy.rb
+
+      - name: Check candidate workflow allowlist
+        run: |
+          set -euo pipefail
+          candidate_dir="$(mktemp -d "$RUNNER_TEMP/graylum-candidate-workflows.XXXXXX")"
+          trap 'rm -rf -- "$candidate_dir"' EXIT
+          cp .github/workflows/ci.yml "$candidate_dir/ci.yml"
+          cp .github/workflows/security.yml "$candidate_dir/security.yml"
+          cp .github/workflows/codeql.yml "$candidate_dir/codeql.yml"
+          test "$(find "$candidate_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 3
+          ruby .trusted-base-policy/.github/scripts/check-workflow-policy.rb "$candidate_dir"
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve trusted source and scan range
+        id: event-range
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              trusted_sha="$(jq -er '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
+              scan_from="$trusted_sha"
+              scan_to="$(jq -er '.pull_request.head.sha' "$GITHUB_EVENT_PATH")"
+              ;;
+            push)
+              trusted_sha="$(jq -er '.before' "$GITHUB_EVENT_PATH")"
+              scan_from="$trusted_sha"
+              scan_to="$(jq -er '.after' "$GITHUB_EVENT_PATH")"
+              ;;
+            schedule)
+              trusted_sha="$GITHUB_SHA"
+              scan_to="$GITHUB_SHA"
+              scan_from="$(git rev-parse "${GITHUB_SHA}^")"
+              ;;
+            *)
+              echo 'Unsupported workflow event.'
+              exit 1
+              ;;
+          esac
+          for sha in "$trusted_sha" "$scan_from" "$scan_to"; do
+            if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' ||
+              printf '%s' "$sha" | grep -Eq '^0{40}$'; then
+              echo 'A required exact commit SHA is unavailable.'
+              exit 1
+            fi
+            git cat-file -e "${sha}^{commit}"
+          done
+          echo "trusted-sha=$trusted_sha" >> "$GITHUB_OUTPUT"
+          echo "scan-from=$scan_from" >> "$GITHUB_OUTPUT"
+          echo "scan-to=$scan_to" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted Gitleaks material
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ steps.event-range.outputs.trusted-sha }}
+          path: .trusted-base-gitleaks
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .gitleaks.toml
+            .github/scripts/create-secret-scan-regression-fixtures.sh
+
+      - name: Require trusted Gitleaks material
+        run: |
+          set -euo pipefail
+          test -f .trusted-base-gitleaks/.gitleaks.toml
+          test -f .trusted-base-gitleaks/.github/scripts/create-secret-scan-regression-fixtures.sh
+
+      - name: Install checksum-verified Gitleaks
+        id: gitleaks
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks_8.24.3_linux_x64.tar.gz"
+          binary_dir="$RUNNER_TEMP/gitleaks-bin"
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            '9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c' \
+            "$archive" | sha256sum --check
+          mkdir -p "$binary_dir"
+          tar -xzf "$archive" -C "$binary_dir" gitleaks
+          echo "binary=$binary_dir/gitleaks" >> "$GITHUB_OUTPUT"
+
+      - name: Require trusted regression fixtures to be rejected
+        env:
+          GITLEAKS_BINARY: ${{ steps.gitleaks.outputs.binary }}
+        run: |
+          set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP"
+          fixture_root="$RUNNER_TEMP/graylum-secret-scan-fixtures.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.${RANDOM}"
+          report_path="$RUNNER_TEMP/gitleaks-fixture-report.json"
+          trap 'rm -rf -- "$fixture_root" "$report_path"' EXIT
+          bash .trusted-base-gitleaks/.github/scripts/create-secret-scan-regression-fixtures.sh "$fixture_root"
+          set +e
+          "$GITLEAKS_BINARY" detect \
+            --no-git \
+            --source "$fixture_root" \
+            --config .trusted-base-gitleaks/.gitleaks.toml \
+            --redact=100 \
+            --report-format json \
+            --report-path "$report_path"
+          scan_status=$?
+          set -e
+          if [ "$scan_status" -ne 1 ]; then
+            echo 'Trusted secret fixtures were not rejected deterministically.'
+            exit 1
+          fi
+          detected_files="$(jq '[.[].File] | unique | length' "$report_path")"
+          if [ "$detected_files" -ne 6 ]; then
+            echo 'Trusted secret regression did not cover all generated fixture files.'
+            exit 1
+          fi
+          echo 'Trusted secret regression rejected all generated fixture files.'
+
+      - name: Scan replacement commit range
+        env:
+          GITLEAKS_BINARY: ${{ steps.gitleaks.outputs.binary }}
+          SCAN_FROM: ${{ steps.event-range.outputs.scan-from }}
+          SCAN_TO: ${{ steps.event-range.outputs.scan-to }}
+        run: |
+          set -euo pipefail
+          report_path="$RUNNER_TEMP/gitleaks-replacement-report.json"
+          trap 'rm -f -- "$report_path"' EXIT
+          set +e
+          "$GITLEAKS_BINARY" git . \
+            --log-opts="$SCAN_FROM..$SCAN_TO" \
+            --config .trusted-base-gitleaks/.gitleaks.toml \
+            --redact=100 \
+            --report-format json \
+            --report-path "$report_path"
+          scan_status=$?
+          set -e
+          if [ "$scan_status" -ne 0 ]; then
+            echo 'Secret scan rejected the replacement commit range or failed closed.'
+            exit "$scan_status"
+          fi
+          echo 'Replacement commit range secret scan passed.'
+
   code-scan:
     name: Code Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
-      - name: Check for hardcoded secrets
+      - name: Reject tracked environment files
         run: |
-          echo "## 硬编码密钥检查" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 检查 Anthropic API key
-          if grep -rn "sk-ant-api" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" . 2>/dev/null | grep -v ".example" | grep -v "test" | grep -v "pattern"; then
-            echo "❌ 发现可能的 Anthropic API key 硬编码" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | \
+            grep -Ev '(^|/)\.env\.(example|sample|template)$'; then
+            echo 'Tracked environment files are forbidden.'
             exit 1
           fi
+          echo 'No tracked sensitive environment files found.'
 
-          # 检查 Supabase key
-          if grep -rn "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" . 2>/dev/null | grep -v ".example" | grep -v "test"; then
-            echo "❌ 发现可能的 JWT token 硬编码" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-
-          echo "✅ 未发现硬编码密钥" >> $GITHUB_STEP_SUMMARY
-
-      - name: Check .env files not committed
-        run: |
-          echo "## 环境文件检查" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 检查是否有 .env 文件被提交
-          if git ls-files | grep -E "^\.env$|\.env\.local$|\.env\.[^example]"; then
-            echo "❌ 检测到 .env 文件被提交到仓库" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-
-          echo "✅ 没有敏感环境文件被提交" >> $GITHUB_STEP_SUMMARY
-
-  # TypeScript 类型检查
   typecheck:
     name: TypeScript Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        # 自动从 package.json 的 packageManager 字段读取版本
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          cache: 'pnpm'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -139,127 +332,109 @@ jobs:
       - name: Run TypeScript check
         run: pnpm --filter web typecheck
 
-  # 安全单元测试
   security-unit-tests:
     name: Security Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          cache: 'pnpm'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run security tests (API package)
-        run: |
-          echo "## 安全单元测试报告" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+      - name: Run security tests
+        run: pnpm --filter @repo/api test:run
 
-          set -o pipefail
-          cd packages/api
-          pnpm test -- --run --reporter=verbose 2>&1 | tee test-output.txt
-          TEST_EXIT=${PIPESTATUS[0]}
-
-          # Extract test summary
-          if grep -q "Tests:" test-output.txt; then
-            SUMMARY=$(grep "Tests:" test-output.txt | tail -1)
-            echo "### 测试结果" >> $GITHUB_STEP_SUMMARY
-            echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "$TEST_EXIT" -ne 0 ]; then
-            echo "❌ 安全测试失败" >> $GITHUB_STEP_SUMMARY
-            exit "$TEST_EXIT"
-          fi
-
-          echo "✅ 安全单元测试通过" >> $GITHUB_STEP_SUMMARY
-
-  # E2E 安全测试
   security-e2e-tests:
     name: Security E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
+    permissions:
+      contents: read
     env:
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key-for-security-e2e-local-runtime-only-000000000000000000000000000000000000000000000000000000000000' }}
-      NEXT_PUBLIC_APP_URL: https://ci.graylum.example
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'sk-or-security-e2e-placeholder-local-runtime-only' }}
+      NEXT_PUBLIC_SUPABASE_URL: https://local.invalid
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: local-noncredential-value-local-noncredential-value-local-noncredential-value-local-noncredential-value
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      OPENROUTER_API_KEY: disabled-local-runtime
       SECURITY_E2E_LOCAL_ONLY: 'true'
+      E2E_ALLOW_DATABASE_FIXTURES: 'false'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          cache: 'pnpm'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        run: cd apps/web && npx playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
 
       - name: Build application
-        run: pnpm turbo build
+        run: pnpm build
 
       - name: Start application
         run: |
+          set -euo pipefail
           cd apps/web
-          pnpm start > /tmp/graylum-security-e2e.log 2>&1 &
-          echo $! > /tmp/graylum-security-e2e.pid
-
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000/login >/dev/null; then
+          pnpm start > "$RUNNER_TEMP/graylum-security-e2e.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/graylum-security-e2e.pid"
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/login > /dev/null; then
               exit 0
             fi
             sleep 2
           done
-
-          echo "Application failed to start"
-          cat /tmp/graylum-security-e2e.log || true
+          echo 'Application failed to start for secretless E2E.'
           exit 1
 
-      - name: Run E2E security tests
-        run: |
-          cd apps/web
-          npx playwright test security.spec.ts --project=chromium --reporter=html,list
+      - name: Run transitional secretless Security E2E
         env:
-          CI: true
+          CI: 'true'
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
-          E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
-          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
-          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
-          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: |
+          set +e
+          cd apps/web
+          PLAYWRIGHT_JSON_OUTPUT_FILE="$RUNNER_TEMP/security-e2e-results.json" \
+            pnpm exec playwright test security.spec.ts --project=chromium --reporter=json
+          playwright_status=$?
+          cd ../..
+          set -e
+          node .github/scripts/check-playwright-results.cjs \
+            "$RUNNER_TEMP/security-e2e-results.json" \
+            --allow-skipped
+          if [ "$playwright_status" -ne 0 ]; then
+            exit "$playwright_status"
+          fi
 
       - name: Stop application
         if: always()
         run: |
-          if [ -f /tmp/graylum-security-e2e.pid ]; then
-            kill "$(cat /tmp/graylum-security-e2e.pid)" || true
+          if [ -f "$RUNNER_TEMP/graylum-security-e2e.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/graylum-security-e2e.pid")"
           fi
 
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: playwright-security-report
-          path: apps/web/playwright-report/
-          retention-days: 7
+      # Browser reports, storage state, traces, videos, and screenshots are intentionally not uploaded.

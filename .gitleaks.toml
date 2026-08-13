@@ -1,0 +1,59 @@
+title = "Graylum secret scanning policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "graylum-openai-key"
+description = "OpenAI API key"
+regex = '''sk-(?:(?:proj|svc|admin)-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20,})'''
+keywords = ["openai", "sk-"]
+
+[[rules]]
+id = "graylum-openrouter-key"
+description = "OpenRouter API key"
+regex = '''sk-or-(?:v[0-9]+-)?[A-Za-z0-9_-]{20,}'''
+keywords = ["openrouter", "sk-or-"]
+
+[[rules]]
+id = "graylum-anthropic-key"
+description = "Anthropic API key"
+regex = '''sk-ant-[A-Za-z0-9_-]{20,}'''
+keywords = ["anthropic", "sk-ant-"]
+
+[[rules]]
+id = "graylum-stripe-secret"
+description = "Stripe secret or restricted key"
+regex = '''(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}'''
+keywords = ["stripe", "sk_live_", "rk_live_", "sk_test_", "rk_test_"]
+
+[[rules]]
+id = "graylum-supabase-service-role"
+description = "Supabase service-role JWT assignment"
+regex = '''(?i)(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_SERVICE_ROLE|supabase_service_role_key|service_role_key)\s*[:=]\s*["']?(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+keywords = ["supabase", "service_role", "service-role"]
+
+[[rules]]
+id = "graylum-vercel-token"
+description = "Vercel token"
+regex = '''(?:VERCEL_TOKEN|VERCEL_API_TOKEN|vercel_token|vercel-api-token)\s*[:=]\s*["']?([A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+
+[[rules]]
+id = "graylum-github-token"
+description = "GitHub token"
+regex = '''gh[pousr]_[A-Za-z0-9]{20,}'''
+keywords = ["github", "ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+
+[[rules]]
+id = "graylum-private-key"
+description = "Private key block"
+regex = '''-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----'''
+keywords = ["private key"]
+
+[[rules]]
+id = "graylum-database-url"
+description = "Database connection URL with password"
+regex = '''(?:postgres|postgresql|mysql|mongodb(?:\+srv)?):\/\/[^\s:@/]+:[^\s@/]+@[^\s/]+'''
+keywords = ["database_url", "postgres", "postgresql", "mysql", "mongodb"]

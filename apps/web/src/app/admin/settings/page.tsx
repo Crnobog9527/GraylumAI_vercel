@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import AdminErrorState from '@/components/admin/AdminErrorState';
 
 // 完整的系统设置定义
 const defaultSettings: Record<string, { value: string; type: 'string' | 'number' | 'boolean'; label: string; description: string }> = {
@@ -108,6 +109,16 @@ interface MembershipPlan {
   allow_batch_export: string;
 }
 
+export function AdminSettingsLoadError({
+  error,
+  onRetry,
+}: {
+  error: Error | { message: string };
+  onRetry?: () => void;
+}) {
+  return <AdminErrorState error={error} onRetry={onRetry} />;
+}
+
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<Record<string, SettingData>>({});
   const [saving, setSaving] = useState(false);
@@ -115,7 +126,12 @@ export default function AdminSettingsPage() {
   const [cleanupMessage, setCleanupMessage] = useState('');
   const [membershipSettings, setMembershipSettings] = useState<Record<string, { historyRetentionDays: number; allowExport: boolean; allowBatchExport: boolean }>>({});
 
-  const { data: dashboard, isLoading, refetch: refetchDashboard } = trpc.admin.getSettingsDashboard.useQuery();
+  const {
+    data: dashboard,
+    error: dashboardError,
+    isLoading,
+    refetch: refetchDashboard,
+  } = trpc.admin.getSettingsDashboard.useQuery();
   const {
     data: cleanupStats,
     isLoading: cleanupStatsLoading,
@@ -286,6 +302,15 @@ export default function AdminSettingsPage() {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
       </div>
+    );
+  }
+
+  if (dashboardError) {
+    return (
+      <AdminSettingsLoadError
+        error={dashboardError}
+        onRetry={() => { void refetchDashboard(); }}
+      />
     );
   }
 

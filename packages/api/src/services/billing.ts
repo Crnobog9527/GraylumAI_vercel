@@ -16,6 +16,7 @@ import {
 } from '../types/billing';
 import { type TokenUsage, type CostBreakdown } from '../types/ai';
 import { logger } from '../lib/logger';
+import { classifyCreditBalanceFailure, readCreditBalance } from './creditBalance';
 import { applyInvitationRebateForSpend } from './invitationRebate';
 
 // ============================================
@@ -716,17 +717,14 @@ export class BillingService {
    * 获取用户当前余额
    */
   async getBalance(): Promise<number> {
-    const { data: profile, error } = await this.supabase
-      .from('profiles')
-      .select('credits')
-      .eq('id', this.userId)
-      .single();
-
-    if (error || !profile) {
-      throw new Error('无法获取用户余额');
+    try {
+      return await readCreditBalance(this.supabase, this.userId);
+    } catch (error) {
+      logger.error('billing', 'billing_balance_unavailable', {
+        reason: classifyCreditBalanceFailure(error),
+      });
+      throw error;
     }
-
-    return profile.credits ?? 0;
   }
 
   /**

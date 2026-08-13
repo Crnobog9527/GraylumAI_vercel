@@ -21,6 +21,146 @@ const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business'
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
 const moduleBadgeTypeSchema = z.enum(['new', 'hot', 'recommend']).nullable().optional();
 const moduleBooleanSchema = z.boolean();
+const adminDateStringSchema = z.string().refine(
+  (value) => Number.isFinite(new Date(value).getTime()),
+  'Invalid admin date',
+);
+const adminFiniteNumericValueSchema = z.union([
+  z.number().finite(),
+  z.string().trim().min(1).refine(
+    (value) => Number.isFinite(Number(value)),
+    'Invalid admin numeric value',
+  ),
+]);
+const adminScalarSettingValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+]);
+const adminFinanceCreditTransactionRowSchema = z.object({
+  amount: z.number().finite(),
+  type: z.enum(['deduction', 'addition', 'purchase', 'refund']),
+  created_at: adminDateStringSchema,
+  description: z.string().nullable().optional(),
+}).passthrough();
+const adminFinanceCreditPackageRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  price: z.number().finite(),
+  credits_amount: z.number().finite(),
+  active: z.enum(['true', 'false']),
+}).passthrough();
+const adminFinanceProfileRowSchema = z.object({
+  credits: z.number().finite(),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminFinanceModelRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  model_id: z.string().min(1),
+  provider: z.string().min(1),
+  is_active: z.union([z.enum(['true', 'false']), z.boolean()]),
+  input_token_cost: z.number().finite(),
+  output_token_cost: z.number().finite(),
+  input_token_cost_above_200k: z.number().finite(),
+  output_token_cost_above_200k: z.number().finite(),
+  web_search_cost: z.number().finite(),
+  max_tokens: z.number().finite(),
+}).passthrough();
+const adminFinanceConversationRowSchema = z.object({
+  id: z.string().min(1),
+  model_id: z.string().nullable(),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminFinanceTokenStatRowSchema = z.object({
+  model_used: z.string().min(1),
+  total_credits: z.number().finite(),
+  total_cost_usd: adminFiniteNumericValueSchema,
+  cached_tokens: z.number().finite(),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminFinancePaymentOrderRowSchema = z.object({
+  amount_total: z.number().finite().nullable(),
+  currency: z.string().min(1),
+  status: z.string().min(1),
+  payment_status: z.string().nullable(),
+  created_at: adminDateStringSchema,
+}).passthrough().superRefine((order, ctx) => {
+  const isPaidCompletedOrder =
+    order.status === 'completed'
+    && (order.payment_status === 'paid' || order.payment_status === 'no_payment_required')
+    && order.currency.toLowerCase() === 'usd';
+
+  if (isPaidCompletedOrder && order.amount_total === null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['amount_total'],
+      message: 'Completed payment order amount is required',
+    });
+  }
+});
+const adminFinanceUsageLogRowSchema = z.object({
+  status: z.string().min(1),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminFinanceBillingHistoryRowSchema = z.object({
+  operation_type: z.string().min(1),
+  amount: z.number().finite(),
+  created_at: adminDateStringSchema,
+  metadata: z.unknown().optional(),
+}).passthrough();
+const adminFinanceSettingRowSchema = z.object({
+  key: z.string().trim().min(1),
+  value: z.unknown(),
+}).passthrough();
+const adminPackageDashboardRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  price: z.number().finite(),
+  credits_amount: z.number().finite(),
+  bonus_credits: z.number().finite(),
+  stripe_price_id: z.string().nullable(),
+  sort_order: z.number().finite(),
+  is_popular: z.enum(['true', 'false']),
+  active: z.enum(['true', 'false']),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminPackageMembershipPlanRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  level: z.enum(['free', 'pro', 'gold']),
+  monthly_price: z.number().finite(),
+  yearly_price: z.number().finite(),
+  stripe_monthly_price_id: z.string().nullable(),
+  stripe_yearly_price_id: z.string().nullable(),
+  monthly_credits: z.number().finite(),
+  yearly_credits: z.number().finite(),
+  monthly_bonus_credits: z.number().finite(),
+  package_discount: z.number().finite(),
+  features: z.array(z.string()),
+  max_context_messages: z.number().finite(),
+  is_active: z.enum(['true', 'false']),
+  sort_order: z.number().finite(),
+  created_at: adminDateStringSchema,
+}).passthrough();
+const adminSettingsRowSchema = z.object({
+  key: z.string().trim().min(1),
+  value: adminScalarSettingValueSchema,
+}).passthrough();
+const adminSettingsMembershipPlanRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  level: z.enum(['free', 'pro', 'gold']),
+  history_retention_days: z.number().finite(),
+  allow_export: z.enum(['true', 'false']),
+  allow_batch_export: z.enum(['true', 'false']),
+}).passthrough();
+const announcementLinkInputSchema = z
+  .string()
+  .trim()
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
 const promptBatchPatchSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   fullDescription: z.string().max(5000).nullable().optional(),
@@ -47,6 +187,22 @@ const promptBatchPatchSchema = z.object({
 
 function createAdminOperationError(operation: string, cause: unknown) {
   return createSafeInternalError(cause, `${operation}失败，请稍后重试`);
+}
+
+function assertValidAdminRows<T>(
+  value: unknown,
+  rowSchema: z.ZodType<T>,
+  operation: string,
+  source: string,
+): asserts value is T[] {
+  const result = z.array(rowSchema).safeParse(value);
+
+  if (!result.success) {
+    throw createAdminOperationError(
+      operation,
+      new Error(`Admin ${source} query returned invalid data`),
+    );
+  }
 }
 
 function throwMembershipEligibilityError(result: MembershipEligibilityResult): never {
@@ -128,19 +284,32 @@ function summarizeTicketStatuses(tickets: Array<{ status: string | null | undefi
   return summary;
 }
 
-function parseNumericSetting(value: unknown, fallback: number): number {
+function parseNumericSetting(
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+): number {
+  if (!Object.prototype.hasOwnProperty.call(settings, key)) {
+    return fallback;
+  }
+
+  const value = settings[key];
+
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
 
-  if (typeof value === 'string') {
+  if (typeof value === 'string' && value.trim().length > 0) {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) {
       return parsed;
     }
   }
 
-  return fallback;
+  throw createAdminOperationError(
+    '读取财务统计',
+    new Error(`Admin finance setting ${key} is invalid`),
+  );
 }
 
 function formatRange(values: number[]): { min: number; max: number } | null {
@@ -1314,9 +1483,22 @@ export const adminRouter = router({
         throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
       }
 
+      assertValidAdminRows(
+        packagesResult.data,
+        adminPackageDashboardRowSchema,
+        '读取套餐列表',
+        'packages dashboard packages',
+      );
+      assertValidAdminRows(
+        membershipPlansResult.data,
+        adminPackageMembershipPlanRowSchema,
+        '读取套餐列表',
+        'packages dashboard membership plans',
+      );
+
       return {
-        packages: packagesResult.data ?? [],
-        membershipPlans: membershipPlansResult.data ?? [],
+        packages: packagesResult.data,
+        membershipPlans: membershipPlansResult.data,
       };
     }),
 
@@ -1493,7 +1675,7 @@ export const adminRouter = router({
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).default('info'),
       announcementType: z.enum(['homepage', 'banner']).default('homepage'),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      bannerLink: z.string().optional(),
+      bannerLink: announcementLinkInputSchema,
       icon: z.string().default('Megaphone'),
       iconColor: z.string().default('text-blue-500'),
       tag: z.string().optional(),
@@ -1511,7 +1693,7 @@ export const adminRouter = router({
           type: input.type,
           announcement_type: input.announcementType,
           banner_style: input.bannerStyle ?? input.type,
-          banner_link: input.bannerLink,
+          banner_link: input.bannerLink ?? null,
           icon: input.icon,
           icon_color: input.iconColor,
           tag: input.tag,
@@ -1543,7 +1725,7 @@ export const adminRouter = router({
       type: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
       announcementType: z.enum(['homepage', 'banner']).optional(),
       bannerStyle: z.enum(['info', 'warning', 'success', 'error', 'promo', 'announcement']).optional(),
-      bannerLink: z.string().optional(),
+      bannerLink: announcementLinkInputSchema,
       icon: z.string().optional(),
       iconColor: z.string().optional(),
       tag: z.string().optional(),
@@ -2005,45 +2187,144 @@ export const adminRouter = router({
    */
   getFinanceStats: adminProcedure
     .query(async ({ ctx }) => {
-      const { data: creditTransactions } = await ctx.supabase
+      const { data: creditTransactions, error: creditTransactionsError } = await ctx.supabase
         .from('credit_transactions')
         .select('amount, type, created_at, description')
         .order('created_at', { ascending: false });
 
-      const { data: packages } = await ctx.supabase
+      if (creditTransactionsError) {
+        throw createAdminOperationError('读取财务统计', creditTransactionsError);
+      }
+
+      assertValidAdminRows(
+        creditTransactions,
+        adminFinanceCreditTransactionRowSchema,
+        '读取财务统计',
+        'credit transactions',
+      );
+
+      const { data: packages, error: packagesError } = await ctx.supabase
         .from('credit_packages')
         .select('*');
 
-      const { data: users } = await ctx.supabase
+      if (packagesError) {
+        throw createAdminOperationError('读取积分包财务统计', packagesError);
+      }
+
+      assertValidAdminRows(
+        packages,
+        adminFinanceCreditPackageRowSchema,
+        '读取积分包财务统计',
+        'credit packages',
+      );
+
+      const { data: users, error: usersError } = await ctx.supabase
         .from('profiles')
         .select('credits, created_at');
 
-      const { data: models } = await ctx.supabase
+      if (usersError) {
+        throw createAdminOperationError('读取财务统计', usersError);
+      }
+
+      assertValidAdminRows(
+        users,
+        adminFinanceProfileRowSchema,
+        '读取财务统计',
+        'profiles',
+      );
+
+      const { data: models, error: modelsError } = await ctx.supabase
         .from('ai_models')
         .select('*')
         .order('name', { ascending: true });
 
-      const { data: conversations } = await ctx.supabase
+      if (modelsError) {
+        throw createAdminOperationError('读取财务统计', modelsError);
+      }
+
+      assertValidAdminRows(
+        models,
+        adminFinanceModelRowSchema,
+        '读取财务统计',
+        'AI models',
+      );
+
+      const { data: conversations, error: conversationsError } = await ctx.supabase
         .from('conversations')
         .select('id, model_id, created_at');
 
-      const { data: tokenStats } = await ctx.supabase
+      if (conversationsError) {
+        throw createAdminOperationError('读取财务统计', conversationsError);
+      }
+
+      assertValidAdminRows(
+        conversations,
+        adminFinanceConversationRowSchema,
+        '读取财务统计',
+        'conversations',
+      );
+
+      const { data: tokenStats, error: tokenStatsError } = await ctx.supabase
         .from('token_stats')
         .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at');
 
-      const { data: paymentOrders } = await ctx.supabase
+      if (tokenStatsError) {
+        throw createAdminOperationError('读取财务统计', tokenStatsError);
+      }
+
+      assertValidAdminRows(
+        tokenStats,
+        adminFinanceTokenStatRowSchema,
+        '读取财务统计',
+        'token stats',
+      );
+
+      const { data: paymentOrders, error: paymentOrdersError } = await ctx.supabase
         .from('payment_orders')
         .select('amount_total, currency, status, payment_status, created_at');
 
-      const { data: usageLogs } = await ctx.supabase
+      if (paymentOrdersError) {
+        throw createAdminOperationError('读取财务统计', paymentOrdersError);
+      }
+
+      assertValidAdminRows(
+        paymentOrders,
+        adminFinancePaymentOrderRowSchema,
+        '读取财务统计',
+        'payment orders',
+      );
+
+      const { data: usageLogs, error: usageLogsError } = await ctx.supabase
         .from('ai_usage_logs')
         .select('status, created_at');
 
-      const { data: billingHistory } = await ctx.supabase
+      if (usageLogsError) {
+        throw createAdminOperationError('读取财务统计', usageLogsError);
+      }
+
+      assertValidAdminRows(
+        usageLogs,
+        adminFinanceUsageLogRowSchema,
+        '读取财务统计',
+        'AI usage logs',
+      );
+
+      const { data: billingHistory, error: billingHistoryError } = await ctx.supabase
         .from('billing_history')
         .select('operation_type, amount, created_at, metadata');
 
-      const { data: settings } = await ctx.supabase
+      if (billingHistoryError) {
+        throw createAdminOperationError('读取财务统计', billingHistoryError);
+      }
+
+      assertValidAdminRows(
+        billingHistory,
+        adminFinanceBillingHistoryRowSchema,
+        '读取财务统计',
+        'billing history',
+      );
+
+      const { data: settings, error: settingsError } = await ctx.supabase
         .from('system_settings')
         .select('*')
         .in('key', [
@@ -2052,6 +2333,17 @@ export const adminRouter = router({
           'billing_credits_per_usd',
           'billing_token_price_multiplier',
         ]);
+
+      if (settingsError) {
+        throw createAdminOperationError('读取财务统计', settingsError);
+      }
+
+      assertValidAdminRows(
+        settings,
+        adminFinanceSettingRowSchema,
+        '读取财务统计',
+        'system settings',
+      );
 
       // Calculate overall stats
       const now = new Date();
@@ -2077,7 +2369,7 @@ export const adminRouter = router({
         dailyStats[dateKey] = { additions: 0, deductions: 0, purchases: 0 };
       }
 
-      creditTransactions?.forEach(t => {
+      creditTransactions.forEach(t => {
         const transDate = new Date(t.created_at);
         const dateKey = transDate.toISOString().split('T')[0];
 
@@ -2094,10 +2386,10 @@ export const adminRouter = router({
         if (transDate >= thirtyDaysAgo) transactionStats.monthTransactions++;
       });
 
-      tokenStats?.forEach((stat) => {
+      tokenStats.forEach((stat) => {
         const createdAt = new Date(stat.created_at);
         const dateKey = createdAt.toISOString().split('T')[0];
-        const credits = stat.total_credits ?? 0;
+        const credits = stat.total_credits;
 
         transactionStats.totalDeductions += credits;
         if (dailyStats[dateKey]) {
@@ -2105,27 +2397,27 @@ export const adminRouter = router({
         }
       });
 
-      billingHistory?.forEach((entry) => {
+      billingHistory.forEach((entry) => {
         const createdAt = new Date(entry.created_at);
         if (createdAt >= todayStart) transactionStats.todayTransactions++;
         if (createdAt >= sevenDaysAgo) transactionStats.weekTransactions++;
         if (createdAt >= thirtyDaysAgo) transactionStats.monthTransactions++;
 
         if (entry.operation_type === 'refund') {
-          transactionStats.totalRefunds += Math.abs(entry.amount ?? 0);
+          transactionStats.totalRefunds += Math.abs(entry.amount);
         }
       });
 
       // User statistics
       const userStats = {
-        totalUsers: users?.length ?? 0,
-        totalCreditsInSystem: users?.reduce((sum, u) => sum + (u.credits ?? 0), 0) ?? 0,
+        totalUsers: users.length,
+        totalCreditsInSystem: users.reduce((sum, u) => sum + u.credits, 0),
         averageCreditsPerUser: 0,
         newUsersThisMonth: 0,
         newUsersThisWeek: 0,
       };
 
-      users?.forEach(u => {
+      users.forEach(u => {
         const createdAt = new Date(u.created_at);
         if (createdAt >= thirtyDaysAgo) userStats.newUsersThisMonth++;
         if (createdAt >= sevenDaysAgo) userStats.newUsersThisWeek++;
@@ -2137,15 +2429,15 @@ export const adminRouter = router({
 
       // Package statistics
       const packageStats = {
-        totalPackages: packages?.length ?? 0,
-        activePackages: packages?.filter(p => p.active === 'true').length ?? 0,
-        packages: packages?.map(p => ({
+        totalPackages: packages.length,
+        activePackages: packages.filter(p => p.active === 'true').length,
+        packages: packages.map(p => ({
           id: p.id,
           name: p.name,
           price: p.price,
           creditsAmount: p.credits_amount,
           active: p.active,
-        })) ?? [],
+        })),
       };
 
       // Convert daily stats to array for charting
@@ -2158,32 +2450,32 @@ export const adminRouter = router({
 
       // API/Model statistics
       const apiStats = {
-        totalRequests: usageLogs?.length ?? tokenStats?.length ?? 0,
-        totalConversations: conversations?.length ?? 0,
-        messagesThisMonth: usageLogs?.filter(log => new Date(log.created_at) >= thirtyDaysAgo).length ?? 0,
-        messagesThisWeek: usageLogs?.filter(log => new Date(log.created_at) >= sevenDaysAgo).length ?? 0,
+        totalRequests: usageLogs.length,
+        totalConversations: conversations.length,
+        messagesThisMonth: usageLogs.filter(log => new Date(log.created_at) >= thirtyDaysAgo).length,
+        messagesThisWeek: usageLogs.filter(log => new Date(log.created_at) >= sevenDaysAgo).length,
       };
 
       // Model statistics with usage count
       const modelUsageByConversation: Record<string, number> = {};
-      conversations?.forEach((conv) => {
+      conversations.forEach((conv) => {
         if (conv.model_id) {
           modelUsageByConversation[conv.model_id] = (modelUsageByConversation[conv.model_id] || 0) + 1;
         }
       });
 
       const modelUsageByToken: Record<string, { requests: number; credits: number; costUsd: number }> = {};
-      tokenStats?.forEach((stat) => {
+      tokenStats.forEach((stat) => {
         const key = stat.model_used;
         if (!key) return;
         const current = modelUsageByToken[key] ?? { requests: 0, credits: 0, costUsd: 0 };
         current.requests += 1;
-        current.credits += stat.total_credits ?? 0;
-        current.costUsd += parseFloat(stat.total_cost_usd ?? '0');
+        current.credits += stat.total_credits;
+        current.costUsd += Number(stat.total_cost_usd);
         modelUsageByToken[key] = current;
       });
 
-      const modelStats = models?.map(model => ({
+      const modelStats = models.map(model => ({
         id: model.id,
         name: model.name,
         modelId: model.model_id,
@@ -2199,14 +2491,14 @@ export const adminRouter = router({
         requestCount: modelUsageByToken[model.model_id]?.requests || 0,
         creditsConsumed: modelUsageByToken[model.model_id]?.credits || 0,
         costUsd: parseFloat((modelUsageByToken[model.model_id]?.costUsd || 0).toFixed(6)),
-      })) ?? [];
+      }));
 
-      const actualRevenue = paymentOrders?.reduce((sum, order) => {
+      const actualRevenue = paymentOrders.reduce((sum, order) => {
         if (order.status !== 'completed') return sum;
         if (order.payment_status !== 'paid' && order.payment_status !== 'no_payment_required') return sum;
         if (order.currency && order.currency.toLowerCase() !== 'usd') return sum;
         return sum + (order.amount_total ?? 0);
-      }, 0) ?? 0;
+      }, 0);
 
       const financeOverview = {
         estimatedRevenue: actualRevenue,
@@ -2218,19 +2510,21 @@ export const adminRouter = router({
 
       // Runtime billing reference derived from active model pricing
       const settingsMap: Record<string, unknown> = {};
-      settings?.forEach(s => {
+      settings.forEach(s => {
         settingsMap[s.key] = s.value;
       });
 
-      const activeMeteredModels = (models ?? []).filter((model) =>
+      const activeMeteredModels = models.filter((model) =>
         model.is_active === 'true' || model.is_active === true,
       );
       const creditsPerUsd = parseNumericSetting(
-        settingsMap['billing_credits_per_usd'],
+        settingsMap,
+        'billing_credits_per_usd',
         BILLING_CONSTANTS.CREDITS_PER_USD,
       );
       const tokenPriceMultiplier = parseNumericSetting(
-        settingsMap['billing_token_price_multiplier'],
+        settingsMap,
+        'billing_token_price_multiplier',
         BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER,
       );
 
@@ -2267,8 +2561,8 @@ export const adminRouter = router({
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
         searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),
-        searchSurchargeCredits: parseNumericSetting(settingsMap['search_surcharge_credits'], 0),
-        newUserCredits: parseNumericSetting(settingsMap['new_user_credits'], 100),
+        searchSurchargeCredits: parseNumericSetting(settingsMap, 'search_surcharge_credits', 0),
+        newUserCredits: parseNumericSetting(settingsMap, 'new_user_credits', 100),
       };
 
       return {
@@ -2329,11 +2623,24 @@ export const adminRouter = router({
         throw createAdminOperationError('读取会员方案列表', membershipPlansResult.error);
       }
 
+      assertValidAdminRows(
+        systemSettingsResult.data,
+        adminSettingsRowSchema,
+        '读取设置页数据',
+        'settings dashboard settings',
+      );
+      assertValidAdminRows(
+        membershipPlansResult.data,
+        adminSettingsMembershipPlanRowSchema,
+        '读取设置页数据',
+        'settings dashboard membership plans',
+      );
+
       return {
         systemSettings: Object.fromEntries(
-          (systemSettingsResult.data ?? []).map((setting) => [setting.key, setting.value]),
+          systemSettingsResult.data.map((setting) => [setting.key, setting.value]),
         ),
-        membershipPlans: membershipPlansResult.data ?? [],
+        membershipPlans: membershipPlansResult.data,
       };
     }),
 

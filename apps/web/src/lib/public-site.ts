@@ -15,8 +15,19 @@ export type PublicSiteSettings = {
   showOnboarding: boolean;
   showFeaturedModules: boolean;
   membershipPlans: any[];
+  membershipPlansStatus: PublicCatalogStatus;
   featuredModules: any[];
 };
+
+export type PublicCatalogStatus = 'available' | 'empty' | 'unavailable';
+
+function resolveCatalogStatus(result: PromiseSettledResult<unknown[]>): PublicCatalogStatus {
+  if (result.status === 'rejected') {
+    return 'unavailable';
+  }
+
+  return result.value.length > 0 ? 'available' : 'empty';
+}
 
 function parseBooleanSetting(value: unknown, fallback: boolean) {
   if (value === true || value === 'true') {
@@ -57,6 +68,7 @@ async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
       showOnboarding: parseBooleanSetting(settings.home_show_onboarding, true),
       showFeaturedModules: parseBooleanSetting(settings.home_show_featured_modules, true),
       membershipPlans,
+      membershipPlansStatus: resolveCatalogStatus(membershipPlansResult),
       featuredModules,
     };
   } catch {
@@ -66,6 +78,7 @@ async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
       showOnboarding: true,
       showFeaturedModules: true,
       membershipPlans: [],
+      membershipPlansStatus: 'unavailable',
       featuredModules: [],
     };
   }

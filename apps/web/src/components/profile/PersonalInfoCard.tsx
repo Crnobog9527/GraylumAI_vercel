@@ -18,6 +18,7 @@ import { trpc } from '@/trpc/client';
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 
 // Mock user type
 export interface MockUser {
@@ -289,7 +290,8 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
   user: MockUser;
   onNavigateToSubscription?: () => void;
 }) {
-  const credits = user?.credits || 0;
+  const credits = typeof user?.credits === 'number' ? user.credits : null;
+  const hasVerifiedBalance = credits !== null;
 
   // 从 API 获取本月消耗数据
   const { data: creditsSummary } = trpc.credits.getCreditsSummary.useQuery({ period: 'month' });
@@ -327,22 +329,24 @@ export const CreditsAndSubscriptionCards = memo(function CreditsAndSubscriptionC
             WebkitTextFillColor: 'transparent'
           }}
         >
-          {credits.toLocaleString()}
+          {formatCreditsBalance(hasVerifiedBalance ? 'ready' : 'unavailable', credits)}
         </div>
         <div className="text-sm mb-4 flex-1" style={{ color: 'var(--text-tertiary)' }}>
-          本月已消耗 {monthlyUsed.toLocaleString()} 积分
+          {hasVerifiedBalance ? `本月已消耗 ${monthlyUsed.toLocaleString()} 积分` : '余额暂不可用'}
         </div>
-        <Button
-          onClick={() => onNavigateToSubscription?.()}
-          className="w-full gap-2"
-          style={{
-            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-            color: 'var(--bg-primary)',
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          购买加油包
-        </Button>
+        {hasVerifiedBalance && (
+          <Button
+            onClick={() => onNavigateToSubscription?.()}
+            className="w-full gap-2"
+            style={{
+              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+              color: 'var(--bg-primary)',
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            购买加油包
+          </Button>
+        )}
       </div>
 
       {/* Subscription Card */}

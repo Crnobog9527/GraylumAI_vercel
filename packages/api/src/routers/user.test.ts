@@ -22,7 +22,7 @@ function createQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createUserCaller(profileUpdateResult: { data: unknown; error: unknown }) {
+function createUserCaller(profileUpdateResult: unknown) {
   let profilesSingleCallCount = 0;
 
   const supabase = {
@@ -95,6 +95,46 @@ describe('userRouter error sanitization', () => {
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'INTERNAL_SERVER_ERROR',
       message: '更新个人资料失败，请稍后重试',
+    });
+  });
+
+  it('keeps the deprecated duplicate balance endpoint aligned for real zero', async () => {
+    const caller = createUserCaller({ data: { credits: 0 }, error: null });
+
+    await expect(caller.getUserCredits()).resolves.toBe(0);
+  });
+
+  it.each([
+    ['query error', { data: null, error: { code: '42501', message: 'private database detail' } }],
+    ['profile missing', { data: null, error: null }],
+    ['null balance', { data: { credits: null }, error: null }],
+    ['invalid balance', { data: { credits: '0' }, error: null }],
+  ])('makes getUserCredits unavailable for %s', async (_name, result) => {
+    const caller = createUserCaller(result);
+
+    await expect(caller.getUserCredits()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
+    });
+  });
+
+  it('makes getUserCredits unavailable when the balance query throws', async () => {
+    const caller = createUserCaller(Promise.reject(new TypeError('private network detail')));
+
+    await expect(caller.getUserCredits()).rejects.toMatchObject<Partial<TRPCError>>({
+      code: 'SERVICE_UNAVAILABLE',
+      message: '余额暂时无法验证，请稍后重试',
+    });
+  });
+
+  it('does not put a fabricated zero balance on the synthetic profile fallback', async () => {
+    const caller = createUserCaller({
+      data: null,
+      error: { code: '57014', message: 'private timeout detail' },
+    });
+
+    await expect(caller.getUserProfile()).resolves.toMatchObject({
+      credits: null,
     });
   });
 });
