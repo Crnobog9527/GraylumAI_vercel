@@ -125,3 +125,9 @@ Agents must not perform these actions unless a future owner-approved gate explic
 - Uncontrolled RPC, RLS, schema, or grant modification.
 - Cron trigger.
 - High-risk issue closure.
+
+### Worktree Lifecycle
+
+Every implementation task must use a stable task-bound disposable worktree, or an explicitly justified existing clean worktree. Ordinary task worktrees must not claim local `main` or `staging`; detached exact-SHA work may use a read-only anchor. Before creating one, check for an existing worktree or branch for the same live task and fail closed on any ambiguity.
+
+At closeout, record an explicit disposition for the task worktree: removed, retained-dirty, retained-unique-history, retained-active-dependency, or retained-blocked. Preserve any dirty, unique/unpushed/unmerged, ambiguous, uninspectable, or live-task-dependent worktree. Normal safe removal is non-force only; force deletion, manual Git metadata deletion, and `rm -rf` are not routine lifecycle tools. `git worktree prune` is not routine closeout behavior and requires a separate exact authorization. New work must not create additional unclassified residual worktrees.
