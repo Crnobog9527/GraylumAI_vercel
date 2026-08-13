@@ -41,6 +41,37 @@ describe('contentModerator', () => {
     ]);
   });
 
+  it('executes every malicious-code pattern', () => {
+    const samples = [
+      'SELECT value FROM users',
+      "'; DROP table",
+      '<script>alert(1)</script>',
+      'javascript:alert(1)',
+      'onerror=alert(1)',
+      '; rm file',
+      '$(whoami)',
+    ];
+
+    for (const sample of samples) {
+      const result = new ContentModerator().moderateInput(sample);
+      expect(result.violations).toEqual([
+        expect.objectContaining({ type: ViolationType.MALICIOUS_CODE }),
+      ]);
+    }
+  });
+
+  it('preserves malicious-code violation order around script elements', () => {
+    const result = new ContentModerator().moderateInput(
+      'SELECT value FROM users <script>alert(1)</script> javascript:alert(1)',
+    );
+
+    expect(result.violations.map((violation) => violation.matchedPattern)).toEqual([
+      'SELECT value FROM',
+      '<script>alert(1)</script>',
+      'javascript:',
+    ]);
+  });
+
   it('keeps PII matching responsive on an adversarial email-shaped input', () => {
     const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
 
