@@ -89,11 +89,21 @@ describe('contentModerator', () => {
   });
 
   it.each([
-    ['<script>alert(1)</script>', 0, '<script>alert(1)</script>'],
-    ['<script>alert(1)</script >', 0, '<script>alert(1)</script >'],
-    ['İ<SCRIPT>alert(1)</SCRIPT>', 1, '<SCRIPT>alert(1)</SCRIPT>'],
-  ])('preserves script detection metadata for %j', (input, start, matchedPattern) => {
+    ['<script>alert(1)</script>', true, 0, '<script>alert(1)</script>'],
+    ['<script>alert(1)</script >', true, 0, '<script>alert(1)</script >'],
+    ['<SCRIPT>x</SCRIPT   >', true, 0, '<SCRIPT>x</SCRIPT   >'],
+    ['İ<SCRIPT>alert(1)</SCRIPT>', true, 1, '<SCRIPT>alert(1)</SCRIPT>'],
+    ['<script>alert(1)</scriptfoo></script>', true, 0, '<script>alert(1)</scriptfoo></script>'],
+    ['<script>a</scriptX></scriptY></script >', true, 0, '<script>a</scriptX></scriptY></script >'],
+    ['<script>alert(1)', false, 0, ''],
+    ['<script>alert(1)</scriptfoo>', false, 0, ''],
+  ])('preserves script detection metadata for %j', (input, detected, start, matchedPattern) => {
     const result = new ContentModerator().moderateInput(input);
+
+    if (!detected) {
+      expect(result.violations).toEqual([]);
+      return;
+    }
 
     expect(result.violations).toEqual([
       expect.objectContaining({

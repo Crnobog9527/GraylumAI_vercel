@@ -135,15 +135,22 @@ function findScriptElement(content: string): { match: string; index: number } | 
   const openingEnd = lowerContent.indexOf('>', openingIndex + '<script'.length);
   if (openingEnd === -1) return undefined;
 
-  const closingIndex = lowerContent.indexOf('</script', openingEnd + 1);
-  if (closingIndex === -1) return undefined;
+  let searchFrom = openingEnd + 1;
+  for (;;) {
+    const closingIndex = lowerContent.indexOf('</script', searchFrom);
+    if (closingIndex === -1) return undefined;
 
-  let closingEnd = closingIndex + '</script'.length;
-  while (/\s/.test(lowerContent[closingEnd] ?? '')) closingEnd++;
-  if (lowerContent[closingEnd] !== '>') return undefined;
+    let closingEnd = closingIndex + '</script'.length;
+    while (/\s/.test(lowerContent[closingEnd] ?? '')) closingEnd++;
+    if (lowerContent[closingEnd] === '>') {
+      return {
+        match: content.slice(openingIndex, closingEnd + 1),
+        index: openingIndex,
+      };
+    }
 
-  const end = closingEnd + 1;
-  return { match: content.slice(openingIndex, end), index: openingIndex };
+    searchFrom = closingEnd;
+  }
 }
 
 // ============================================
