@@ -56,6 +56,22 @@ const RATE_LIMITED_PATHS = [
   '/api/trpc',
 ];
 
+export function isAppDomain(hostname: string): boolean {
+  return hostname === 'app.graylum.com' || hostname.endsWith('.app.graylum.com');
+}
+
+export function isPreviewDeployment(hostname: string): boolean {
+  return hostname.endsWith('.vercel.app');
+}
+
+export function isLocalhost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
+}
+
+export function isDevEnvironment(hostname: string): boolean {
+  return isLocalhost(hostname) || hostname.endsWith('.github.dev') || hostname.endsWith('.gitpod.io');
+}
+
 // 判断是否为公开路径
 function isPublicPath(pathname: string): boolean {
   if (isSentryTunnelPath(pathname)) {
@@ -277,20 +293,16 @@ export async function proxy(request: NextRequest) {
   }
 
   // 判断域名类型
-  const isAppDomain = normalizedHostname === 'app.graylum.com' || normalizedHostname.startsWith('app.');
+  const isAppDomainMatch = isAppDomain(normalizedHostname);
   const isPublicSiteDomain =
     normalizedHostname === 'graylum.com' ||
     normalizedHostname === 'www.graylum.com' ||
     normalizedHostname.startsWith('www.');
-  const isPreviewDeployment = normalizedHostname.endsWith('.vercel.app');
-  const isLocalhost = normalizedHostname.includes('localhost') || normalizedHostname.includes('127.0.0.1');
-  const isDevEnvironment =
-    isLocalhost ||
-    normalizedHostname.includes('.github.dev') ||
-    normalizedHostname.includes('.gitpod.io');
+  const isPreviewDeploymentMatch = isPreviewDeployment(normalizedHostname);
+  const isDevEnvironmentMatch = isDevEnvironment(normalizedHostname);
   const domainParam = request.nextUrl.searchParams.get('domain');
   const isPreviewPublicSitePricingEntry =
-    isPreviewDeployment && domainParam === 'www' && isPublicPricingEntryPath(pathname);
+    isPreviewDeploymentMatch && domainParam === 'www' && isPublicPricingEntryPath(pathname);
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -379,7 +391,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // app 域名: 应用后台 (需要认证)
-  if (isAppDomain || isPreviewDeployment) {
+  if (isAppDomainMatch || isPreviewDeploymentMatch) {
     // 公开路径允许访问
     if (isPublicPath(pathname)) {
       // 已登录用户访问登录页时重定向到首页
@@ -415,7 +427,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
-  if (isDevEnvironment) {
+  if (isDevEnvironmentMatch) {
     // 开发环境使用查询参数 ?domain=www 模拟 www 域名
     if (domainParam === 'www') {
       if (isPublicPricingEntryPath(pathname)) {
