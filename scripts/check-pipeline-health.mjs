@@ -237,8 +237,10 @@ function auditRequiredChecks(repo, branch) {
   let workflowChangedAt = null;
   try {
     workflowChangedAt = lastWorkflowChangeAt(repo, branch);
-  } catch {
-    problem(`${branch}: 无法确定 workflow 最后变更时间，幽灵证据无法定日期`);
+  } catch (error) {
+    problem(
+      `${branch}: could not determine the last workflow change, so phantom evidence could not be dated — ${error.message}`,
+    );
   }
   const { seen: onPullRequests, evidence, eligiblePulls } = contextsSeenOnRecentPullRequests(
     repo,
