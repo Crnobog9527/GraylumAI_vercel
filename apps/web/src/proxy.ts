@@ -56,6 +56,10 @@ const RATE_LIMITED_PATHS = [
   '/api/trpc',
 ];
 
+export function normalizeHostname(hostname: string): string {
+  return hostname.split(':')[0].toLowerCase().replace(/\.$/, '');
+}
+
 export function isAppDomain(hostname: string): boolean {
   return hostname === 'app.graylum.com' || hostname.endsWith('.app.graylum.com');
 }
@@ -70,6 +74,14 @@ export function isLocalhost(hostname: string): boolean {
 
 export function isDevEnvironment(hostname: string): boolean {
   return isLocalhost(hostname) || hostname.endsWith('.github.dev') || hostname.endsWith('.gitpod.io');
+}
+
+export function isPublicSiteDomain(hostname: string): boolean {
+  return (
+    hostname === 'graylum.com' ||
+    hostname === 'www.graylum.com' ||
+    hostname.endsWith('.www.graylum.com')
+  );
 }
 
 // 判断是否为公开路径
@@ -243,7 +255,7 @@ function getRateLimiter(): Ratelimit | null {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hostname = request.nextUrl.hostname || request.headers.get('host') || '';
-  const normalizedHostname = hostname.split(':')[0].toLowerCase();
+  const normalizedHostname = normalizeHostname(hostname);
 
   // ========================================
   // 速率限制检查 (API 路径)
@@ -294,10 +306,7 @@ export async function proxy(request: NextRequest) {
 
   // 判断域名类型
   const isAppDomainMatch = isAppDomain(normalizedHostname);
-  const isPublicSiteDomain =
-    normalizedHostname === 'graylum.com' ||
-    normalizedHostname === 'www.graylum.com' ||
-    normalizedHostname.startsWith('www.');
+  const isPublicSiteDomainMatch = isPublicSiteDomain(normalizedHostname);
   const isPreviewDeploymentMatch = isPreviewDeployment(normalizedHostname);
   const isDevEnvironmentMatch = isDevEnvironment(normalizedHostname);
   const domainParam = request.nextUrl.searchParams.get('domain');
@@ -355,7 +364,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // 公开站点域名: 展示着陆页 (公开访问)
-  if (isPublicSiteDomain) {
+  if (isPublicSiteDomainMatch) {
     // 根路径重写到着陆页
     if (pathname === '/') {
       const url = request.nextUrl.clone();
