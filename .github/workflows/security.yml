@@ -32,13 +32,19 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
-          # Intentionally absent: cache: pnpm.
+          # setup-node v5 defaults package-manager-cache to true, so omitting
+          # `cache:` does not disable caching. It must be turned off explicitly.
+          #
           # "Setup audit-compatible pnpm" below swaps the active pnpm version and
           # package_json_file, which changes the resolved pnpm store path. The
-          # setup-node post step then tries to save a store path that no longer
-          # exists and fails the whole job ("Path Validation Error"), even when
-          # "Run security audit" succeeded. This job audits a lockfile copy in
-          # RUNNER_TEMP and does not benefit from the store cache.
+          # post step then tries to save a store path that no longer exists and
+          # fails the whole job ("Path Validation Error") even when "Run security
+          # audit" succeeded. The failure only surfaces when the lockfile changes:
+          # otherwise the cache hits and the post step skips the save.
+          #
+          # This job audits a lockfile copy in RUNNER_TEMP and never reads the
+          # store cache, so caching is disabled rather than repaired.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
