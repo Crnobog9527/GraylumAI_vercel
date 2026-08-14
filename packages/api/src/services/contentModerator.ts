@@ -99,32 +99,59 @@ const PII_PATTERNS = [
   /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/,
 
   // 邮箱 (输出时可能需要脱敏)
-  /[\w.-]+@[\w.-]+\.\w{2,}/i,
+  /[\w.-]{1,254}@[\w.-]{1,254}\.\w{2,63}/i,
 
   // API Key 模式
   /\b(sk-|pk-|api[_-]?key|secret[_-]?key)[a-zA-Z0-9]{20,}\b/i,
 
   // JWT Token
-  /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/,
+  /eyJ[a-zA-Z0-9_-]{1,8192}\.eyJ[a-zA-Z0-9_-]{1,8192}\.[a-zA-Z0-9_-]{1,8192}/,
 ];
 
 /**
  * 恶意代码检测模式
  */
-const MALICIOUS_CODE_PATTERNS = [
+const JAVASCRIPT_PATTERN = /javascript:/i;
+
+const MALICIOUS_CODE_PATTERNS: RegExp[] = [
   // SQL 注入
-  /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\b.*\b(FROM|INTO|SET|WHERE)\b)/i,
+  /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION)\b.{0,100000}\b(FROM|INTO|SET|WHERE)\b)/i,
   /(['"];\s*(DROP|DELETE|UPDATE|INSERT)\s)/i,
 
   // XSS
-  /<script[^>]*>[\s\S]*?<\/script>/i,
-  /javascript:/i,
+  JAVASCRIPT_PATTERN,
   /on(load|error|click|mouse)\s*=/i,
 
   // 命令注入
   /[;&|]\s*(rm|del|format|shutdown|reboot)\s/i,
   /\$\([^)]+\)|\`[^`]+\`/,
 ];
+
+function findScriptElement(content: string): { match: string; index: number } | undefined {
+  const lowerContent = content.replace(/[A-Z]/g, (character) => character.toLowerCase());
+  const openingIndex = lowerContent.indexOf('<script');
+  if (openingIndex === -1) return undefined;
+
+  const openingEnd = lowerContent.indexOf('>', openingIndex + '<script'.length);
+  if (openingEnd === -1) return undefined;
+
+  let searchFrom = openingEnd + 1;
+  for (;;) {
+    const closingIndex = lowerContent.indexOf('</script', searchFrom);
+    if (closingIndex === -1) return undefined;
+
+    let closingEnd = closingIndex + '</script'.length;
+    while (/\s/.test(lowerContent[closingEnd] ?? '')) closingEnd++;
+    if (lowerContent[closingEnd] === '>') {
+      return {
+        match: content.slice(openingIndex, closingEnd + 1),
+        index: openingIndex,
+      };
+    }
+
+    searchFrom = closingEnd;
+  }
+}
 
 // ============================================
 // 类型定义
@@ -302,9 +329,20 @@ export class ContentModerator {
    * 检测恶意代码
    */
   private checkMaliciousCode(content: string): Violation[] {
+    const scriptMatch = findScriptElement(content);
     const violations: Violation[] = [];
 
     for (const pattern of MALICIOUS_CODE_PATTERNS) {
+      if (pattern === JAVASCRIPT_PATTERN && scriptMatch) {
+        violations.push({
+          type: ViolationType.MALICIOUS_CODE,
+          severity: 'high',
+          message: '检测到可能的恶意代码',
+          matchedPattern: scriptMatch.match.substring(0, 50) + (scriptMatch.match.length > 50 ? '...' : ''),
+          position: { start: scriptMatch.index, end: scriptMatch.index + scriptMatch.match.length },
+        });
+      }
+
       const match = content.match(pattern);
       if (match) {
         violations.push({

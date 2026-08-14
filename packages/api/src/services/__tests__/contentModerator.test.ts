@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest';
+import {
+  ContentModerator,
+  ViolationType,
+  moderateInput,
+  moderateOutput,
+} from '../contentModerator';
+
+function expectCompletesWithin(action: () => unknown, limitMs = 100): void {
+  const startedAt = performance.now();
+  action();
+  expect(performance.now() - startedAt).toBeLessThan(limitMs);
+}
+
+describe('contentModerator', () => {
+  it('preserves existing decisions for normal content', () => {
+    expect(moderateInput('这是一个正常的用户问题。')).toMatchObject({
+      passed: true,
+      violations: [],
+      riskScore: 0,
+    });
+
+    const piiResult = moderateOutput('请联系 alice@example.com 获取帮助。');
+    expect(piiResult.passed).toBe(true);
+    expect(piiResult.violations[0]).toMatchObject({ type: ViolationType.PII_LEAK });
+
+    const harmfulResult = moderateInput('how to make a bomb at home');
+    expect(harmfulResult.passed).toBe(false);
+    expect(harmfulResult.violations[0]).toMatchObject({ type: ViolationType.HARMFUL_CONTENT });
+  });
+
+  it('detects script elements without a regular expression', () => {
+    const result = new ContentModerator().moderateInput('<SCRIPT>alert(1)</SCRIPT>');
+
+    expect(result.passed).toBe(false);
+    expect(result.violations).toEqual([
+      expect.objectContaining({
+        type: ViolationType.MALICIOUS_CODE,
+        matchedPattern: '<SCRIPT>alert(1)</SCRIPT>',
+      }),
+    ]);
+  });
+
+  it('executes every malicious-code pattern', () => {
+    const samples = [
+      'SELECT value FROM users',
+      "'; DROP table",
+      '<script>alert(1)</script>',
+      'javascript:alert(1)',
+      'onerror=alert(1)',
+      '; rm file',
+      '$(whoami)',
+    ];
+
+    for (const sample of samples) {
+      const result = new ContentModerator().moderateInput(sample);
+      expect(result.violations).toEqual([
+        expect.objectContaining({ type: ViolationType.MALICIOUS_CODE }),
+      ]);
+    }
+  });
+
+  it('preserves malicious-code violation order around script elements', () => {
+    const result = new ContentModerator().moderateInput(
+      'SELECT value FROM users <script>alert(1)</script> javascript:alert(1)',
+    );
+
+    expect(result.violations.map((violation) => violation.matchedPattern)).toEqual([
+      'SELECT value FROM',
+      '<script>alert(1)</script>',
+      'javascript:',
+    ]);
+  });
+
+  it.each([
+    ['sk-' + 'a'.repeat(4097), ViolationType.PII_LEAK],
+    ['sk-' + 'a'.repeat(100), ViolationType.PII_LEAK],
+    ["';" + ' '.repeat(65) + 'DROP ', ViolationType.MALICIOUS_CODE],
+    ["';" + '   ' + 'DROP ', ViolationType.MALICIOUS_CODE],
+  ])('preserves detection for unbounded credential and SQL whitespace inputs', (input, type) => {
+    const result = new ContentModerator().moderateInput(input);
+    const violations = type === ViolationType.PII_LEAK
+      ? new ContentModerator().moderateOutput(input).violations
+      : result.violations;
+
+    expect(violations).toEqual([
+      expect.objectContaining({ type }),
+    ]);
+  });
+
+  it.each([
+    ['<script>alert(1)</script>', true, 0, '<script>alert(1)</script>'],
+    ['<script>alert(1)</script >', true, 0, '<script>alert(1)</script >'],
+    ['<SCRIPT>x</SCRIPT   >', true, 0, '<SCRIPT>x</SCRIPT   >'],
+    ['İ<SCRIPT>alert(1)</SCRIPT>', true, 1, '<SCRIPT>alert(1)</SCRIPT>'],
+    ['<script>alert(1)</scriptfoo></script>', true, 0, '<script>alert(1)</scriptfoo></script>'],
+    ['<script>a</scriptX></scriptY></script >', true, 0, '<script>a</scriptX></scriptY></script >'],
+    ['<script>alert(1)', false, 0, ''],
+    ['<script>alert(1)</scriptfoo>', false, 0, ''],
+  ])('preserves script detection metadata for %j', (input, detected, start, matchedPattern) => {
+    const result = new ContentModerator().moderateInput(input);
+
+    if (!detected) {
+      expect(result.violations).toEqual([]);
+      return;
+    }
+
+    expect(result.violations).toEqual([
+      expect.objectContaining({
+        type: ViolationType.MALICIOUS_CODE,
+        matchedPattern,
+        position: { start, end: start + matchedPattern.length },
+      }),
+    ]);
+  });
+
+  it('keeps PII matching responsive on an adversarial email-shaped input', () => {
+    const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
+
+    expectCompletesWithin(() => moderateOutput(input));
+  });
+
+  it('keeps malicious-code matching responsive on an adversarial SQL-shaped input', () => {
+    const input = `SELECT ${'a'.repeat(10_000)}!`;
+
+    expectCompletesWithin(() => moderateInput(input));
+  });
+
+  it('keeps PII sanitization responsive on an adversarial email-shaped input', () => {
+    const input = `${'a'.repeat(10_000)}@${'b'.repeat(10_000)}!`;
+
+    expectCompletesWithin(() => new ContentModerator().sanitize(input));
+  });
+});
