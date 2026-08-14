@@ -234,7 +234,12 @@ function auditRequiredChecks(repo, branch) {
     return;
   }
 
-  const workflowChangedAt = lastWorkflowChangeAt(repo, branch);
+  let workflowChangedAt = null;
+  try {
+    workflowChangedAt = lastWorkflowChangeAt(repo, branch);
+  } catch {
+    problem(`${branch}: 无法确定 workflow 最后变更时间，幽灵证据无法定日期`);
+  }
   const { seen: onPullRequests, evidence, eligiblePulls } = contextsSeenOnRecentPullRequests(
     repo,
     branch,
