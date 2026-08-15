@@ -137,10 +137,12 @@ High-risk tasks include billing, payments, auth, database schema, migrations, RL
 
 High-risk tasks must have all of the following before they can advance:
 
-1. A sprint contract recorded as the task card, containing the goal, `allowed_paths`, forbidden actions, acceptance commands, and stop conditions.
-2. Evaluator PASS, established by machine evidence consisting of CI status and the output of the task card's acceptance commands, together with a structured conclusion of `PASS` or `BLOCKED` that includes scope and forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion.
-3. Release Auditor PASS, using the same machine-evidence standard for release: required checks are green, branch posture is verified, and rollback plan and remaining risks are recorded, together with a structured `PASS` or `BLOCKED` conclusion and scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for these machine-evidence requirements.
+1. A sprint contract recorded as the task card and conforming to the canonical Sprint Contract Schema (`docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md`), with the goal in `owner_goal`, scope in `allowed_scope.files`, `allowed_scope.commands`, and applicable `allowed_scope.services`, forbidden actions in `forbidden_actions`, validation in `required_validation`, and stop conditions in `stop_conditions`.
+2. Evaluator PASS, established by machine evidence consisting of CI status and the output of the contract's `required_validation` commands, together with a structured conclusion conforming to the canonical Evaluator Report Schema (`docs/agent-harness/EVALUATOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED` and scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion.
+3. Release Auditor PASS, using the same machine-evidence standard for release and a structured conclusion conforming to the canonical Release Auditor Report Schema (`docs/agent-harness/RELEASE_AUDITOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED`; required checks are green, branch posture is verified, and rollback plan and remaining risks are recorded, together with scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion.
 4. Explicit owner authorization for the next gate.
+
+For both report gates, only `PASS` satisfies the corresponding High-Risk Gate item. `FAIL` records a genuine contract, required-check, scope, or forbidden-action failure; `BLOCKED` records missing authorization/evidence or a separate remediation track and must not replace `FAIL`.
 
 Production is never bundled into an implementation PR. Production deployment, production smoke, and production merge are always separate owner release gates.
 
