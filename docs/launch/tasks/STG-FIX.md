@@ -1,8 +1,10 @@
 # STG-FIX Task Specification
 
-`CANDIDATE_NOT_ACTIVE`
+`STAGING_REF_CONDITIONAL_ACTIVE`
 
-This file is the stable STG-FIX task specification and Sprint Contract materialization template. It is not the canonical execution Sprint Contract, an implementation authorization, or a current-task selection. A real dedicated STG-FIX Task Issue must be created first. Only then may a Planner read this exact specification blob and materialize a canonical Sprint Contract from the then-live `docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md`, filling the real Issue identity, fresh refs, and other applicable execution identities.
+This file is the stable STG-FIX task specification and Sprint Contract materialization template only when this exact cutover content is present on the authoritative current `staging` ref. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate this specification.
+
+Even when the authoritative-staging condition is true, this file is not the canonical execution Sprint Contract, an implementation authorization, or a current-task selection. STG-FIX implementation remains unauthorized until a future real dedicated STG-FIX Task Issue exists, this exact task specification is bound to a materialized canonical Sprint Contract from the then-live schema with fresh repository refs/identities, and a separate exact high-risk Owner gate authorizes the implementation/database scope.
 
 ```yaml
 task_specification_id: STG-FIX
@@ -94,7 +96,7 @@ stop_conditions:
 
 ## Definition of Done
 
-The following is the only STG-FIX completion definition in the candidate:
+The following is the only STG-FIX completion definition in this stable specification:
 
 1. The exact future-bound migration and structure comparison record are the only implementation paths changed.
 2. The migration is idempotent and adds the required `claim_daily_checkin` function, `application_logs` table, and `diagnostic_results` table without altering unrelated definitions.
@@ -105,4 +107,4 @@ The following is the only STG-FIX completion definition in the candidate:
 7. The second staging application is a no-op with no error, and `pnpm test:api` passes.
 8. The evidence record contains exact refs, object fingerprints, validation results, and no secret values; production application remains a separate Owner-gated action.
 
-This candidate remains `CANDIDATE_NOT_ACTIVE`; its DoD does not authorize implementation, database access, merge, or promotion.
+`STAGING_REF_CONDITIONAL_ACTIVE` applies only to the task-specification role of this file. It does not authorize STG-FIX implementation, database access, merge, or promotion; those remain blocked until the future dedicated Task Issue, exact materialized-contract binding, fresh refs, and separate high-risk Owner gate exist.
