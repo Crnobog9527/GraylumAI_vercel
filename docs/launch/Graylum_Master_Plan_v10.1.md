@@ -1,6 +1,6 @@
-# Candidate status: `CANDIDATE_NOT_ACTIVE`
+# Launch status: `STAGING_REF_CONDITIONAL_ACTIVE`
 
-This file is a verbatim freeze of the Owner-provided v10.1 input. It is candidate material only; it is not runtime authority, task authorization, or activation.
+This file is a verbatim freeze of the Owner-provided v10.1 input. Its frozen plan body below is not reopened or substantively redesigned by this cutover. The wrapper is effective only when this exact cutover content is present on the authoritative current `staging` ref after a separately Owner-authorized, independently audited governance merge. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate Launch Authority. This file remains a plan and does not itself authorize a product task, STG-FIX, merge, database action, main, production, or external-system mutation.
 
 # Graylum 公开付费 MVP — Master Plan v10.1（执行进度刷新版）
 
@@ -705,4 +705,4 @@ migration_slot_reserved: false
 
 ---
 
-Candidate status: `CANDIDATE_NOT_ACTIVE` (inert candidate; no activation is provided by this file).
+Launch status: `STAGING_REF_CONDITIONAL_ACTIVE` (active only when this exact cutover content is present on the authoritative current `staging` ref; feature-branch/PR existence is not activation and this plan still does not authorize a task).

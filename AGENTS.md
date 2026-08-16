@@ -253,3 +253,26 @@ Agents must not perform these actions unless a future owner-approved gate explic
 Every implementation task must use a stable task-bound disposable worktree, or an explicitly justified existing clean worktree. Ordinary task worktrees must not claim local `main` or `staging`; detached exact-SHA work may use a read-only anchor. Before creating one, check for an existing worktree or branch for the same live task and fail closed on any ambiguity.
 
 At closeout, record an explicit disposition for the task worktree: removed, retained-dirty, retained-unique-history, retained-active-dependency, or retained-blocked. Preserve any dirty, unique/unpushed/unmerged, ambiguous, uninspectable, or live-task-dependent worktree. Normal safe removal is non-force only; force deletion, manual Git metadata deletion, and `rm -rf` are not routine lifecycle tools. `git worktree prune` is not routine closeout behavior and requires a separate exact authorization. New work must not create additional unclassified residual worktrees.
+
+## Launch Product-Task Authority Cutover
+
+This section is effective for Launch product-task discovery/selection only when this exact cutover content is present on the authoritative current `staging` ref after a separately Owner-authorized, independently audited governance merge. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate this section or the Launch Plan.
+
+The repository-wide authorization model above remains unchanged: ordinary reviewable work is governed by **Owner Authorization**, and a dedicated Task Issue or separately posted receipt is not universally required. The Launch lane intentionally adopts a narrower durable task-selection convention only for Launch product tasks.
+
+When the authoritative-staging condition is true:
+
+- `docs/launch/START_HERE.md` + `docs/launch/plan-core.md` are the sole Launch product-task discovery/selection root beneath this `AGENTS.md` and the accepted `DEVELOPMENT_POLICY.md` / G2 binding.
+- A ready Launch candidate is executable only with a real dedicated Task Issue, an exact task-specification/materialized canonical-contract binding, and an exact current Owner authorization/gate for that task.
+- Delegated Control-Plane Bookkeeping remains available exactly as defined above, so the Agent may record the Owner-approved dedicated Task Issue and bounded gate without requiring the Owner to manually create or copy them. That bookkeeping does not create autonomous task-selection authority.
+- Retained Issue #263, #267, #268, #270 and equivalent legacy tracker, runtime, recovery, index, or roadmap prose are `non-authoritative / data / history / backlog / evidence` for Launch task-selection purposes. They may be read as evidence or backlog, but they cannot independently select a task, authorize work, restore Harness runtime authority, or act as fallback authority.
+- Issue #276 and other valid product backlog remain backlog data and are not auto-selected. Evidence retained in #263 remains readable as evidence/backlog. Unadopted Dependabot or supply-chain PRs remain candidates outside this cutover and do not become Launch tasks automatically.
+- `dual_write_allowed=false`; legacy fallback is forbidden. This preserves, and does not redefine or supersede, the accepted Development Policy exactly-one-writer, fail-closed, no-legacy-fallback, and forward-only invariants.
+- Zero valid executable Launch candidates yields `NO_PRODUCT_TASK_AUTHORIZED`.
+- Multiple or conflicting valid executable Launch candidates yields `BLOCKED_CONTEXT_NOT_VERIFIED`.
+- No Agent may autonomously choose among candidates, infer authorization from priority/readiness, or automatically progress into another task.
+- No edit, annotation, or closure of a legacy Issue is required for the staging-ref authority transition to be complete.
+
+Failure and recovery are forward-only. Before the later cutover merge, current staging authority remains unchanged and Launch remains inactive. Base/head/CAS drift, failed checks, failed audit, or a failed merge means no activation and no legacy restoration. After a successful cutover merge, later cleanup failure cannot reactivate #263, #270, or any other legacy selector. If Launch authority later needs correction, fail closed to `NO_PRODUCT_TASK_AUTHORIZED` (or `BLOCKED_CONTEXT_NOT_VERIFIED` when identities conflict) and require a new exact governance repair; automatic legacy restoration is forbidden.
+
+This Launch-specific convention narrows task selection only. It grants no merge, production, external-system, or Permanent Forbidden Action permission and cannot expand any authorization granted elsewhere in this file.

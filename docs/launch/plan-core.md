@@ -1,8 +1,10 @@
 # Launch Plan Core
 
-`CANDIDATE_NOT_ACTIVE`
+`STAGING_REF_CONDITIONAL_ACTIVE`
 
-This document is the structural-root candidate for the Launch Plan. It contains plan structure only. It does not select, authorize, execute, or report runtime tasks.
+This document is the Launch Plan structural and task-discovery root only when this exact cutover content is present on the authoritative current `staging` ref under the repository-wide `AGENTS.md` + accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate this file.
+
+When that authoritative-staging condition is true, `docs/launch/START_HERE.md` + this `plan-core.md` are the sole Launch product-task discovery/selection root. This file contains plan structure only; it stores no progress, runtime, completion, authorization, or current-task state.
 
 ## Task structure
 
@@ -33,12 +35,22 @@ The derivation then emits eligible node IDs ordered by ascending `priority`, asc
 
 The derivation output is a projection called a ready-candidate set. A ready candidate is not an authorized task.
 
-## Authority boundary
+## Launch-lane authority boundary
 
-- Only a dedicated Task Issue with an exact canonical task-card binding and an exact, current Owner gate can become the current executable task.
-- The Owner gate must bind the repository identity, fresh refs, exact task-card blob, and permitted action scope before Generator work begins.
-- Without a valid Owner gate, the required result is `NO_PRODUCT_TASK_AUTHORIZED`.
-- An Agent must not choose one task from multiple ready candidates, infer authorization from priority, or turn this file into runtime state.
-- Priority and order determine only deterministic presentation order; they do not grant authorization.
-- An Agent must not autonomously choose among multiple ready candidates.
-- This candidate remains `CANDIDATE_NOT_ACTIVE` until a separate Owner cutover gate accepts its exact blob. Even then, acceptance is a separate activation decision; this PR provides no activation.
+- Repository-wide authorization remains governed by the authoritative `AGENTS.md`. Ordinary repository work does not universally require a dedicated Task Issue or a separately posted receipt.
+- Launch product-task selection intentionally uses a narrower durable convention. A ready Launch candidate becomes executable only when there is a real dedicated Task Issue, an exact task-specification/materialized canonical-contract binding, and an exact current Owner authorization/gate for that task.
+- Delegated Control-Plane Bookkeeping remains available exactly as `AGENTS.md` permits, so an Agent may record the Owner-approved dedicated Task Issue and bounded gate without requiring the Owner to manually create or copy them.
+- The exact current gate must bind the live repository identity, fresh refs, the exact task-specification/materialized-contract identity, and the permitted action scope before Generator work begins.
+- Priority and order determine only deterministic presentation order; they do not grant authorization and do not permit autonomous task choice.
+- Zero valid executable Launch candidates produces `NO_PRODUCT_TASK_AUTHORIZED`.
+- Multiple or conflicting valid executable Launch candidates produces `BLOCKED_CONTEXT_NOT_VERIFIED`.
+- No Agent may choose among multiple candidates, infer authorization from readiness or priority, or automatically progress to another task.
+- This Launch convention narrows task selection only. It does not expand repository permissions, authorize merge or production, or override any Permanent Forbidden Action in `AGENTS.md`.
+
+## Exactly-one-writer and recovery
+
+When the authoritative-staging condition is true, retained legacy tracker/runtime/recovery material is evidence, history, index, or backlog data only for Launch task-selection purposes and cannot become a second writer or fallback selector. `dual_write_allowed=false`; legacy fallback is forbidden.
+
+Before the later cutover merge, this file remains inactive and the existing authoritative staging state is unchanged. Base/head/CAS drift, failed checks, failed audit, or a failed merge means no activation and no reinterpretation or restoration of legacy authority.
+
+After a successful cutover merge, later cleanup failure cannot reactivate a legacy selector. If Launch authority later needs correction, fail closed to `NO_PRODUCT_TASK_AUTHORIZED` (or `BLOCKED_CONTEXT_NOT_VERIFIED` when identities conflict) and require a new exact forward governance change. Recovery is forward-only; automatic legacy restoration is forbidden.
