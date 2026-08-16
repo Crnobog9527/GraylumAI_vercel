@@ -1,15 +1,17 @@
-# STG-FIX Sprint Contract Candidate
+# STG-FIX Task Specification
 
 `CANDIDATE_NOT_ACTIVE`
 
-This file is the canonical STG-FIX Sprint Contract candidate. It is not an implementation authorization and does not select STG-FIX as the current task. The current Issue #314 is the materialization gate only; a future dedicated STG-FIX Task Issue and exact Owner gate must bind this contract before execution.
+This file is the stable STG-FIX task specification and Sprint Contract materialization template. It is not the canonical execution Sprint Contract, an implementation authorization, or a current-task selection. A real dedicated STG-FIX Task Issue must be created first. Only then may a Planner read this exact specification blob and materialize a canonical Sprint Contract from the then-live `docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md`, filling the real Issue identity, fresh refs, and other applicable execution identities.
 
 ```yaml
-contract_id: STG-FIX
-issue:
-  number: 314
-  url: https://github.com/Crnobog9527/GraylumAI_vercel/issues/314
-  title: "[Governance][Dedicated Task] Graylum Launch Tracking / Harness Control convergence"
+task_specification_id: STG-FIX
+specification_kind: task specification / Sprint Contract materialization template
+materialization:
+  canonical_execution_contract: materialized only after a real dedicated STG-FIX Task Issue exists
+  planner_input: this exact task-specification blob
+  schema: then-live docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md
+  required_bindings: real Issue identity, fresh refs, and other applicable execution identities
 owner_goal: >-
   Prepare a bounded, idempotent database migration candidate that restores the
   staging objects required by the accepted product plan and records reproducible
@@ -40,7 +42,7 @@ forbidden_actions:
   - Apply a migration to production or access production data without a separate Owner gate.
   - Push directly to main or staging, merge, auto-merge, deploy, or perform a production smoke test.
   - Change Supabase, Stripe, Vercel, environment, project, branch-protection, or required-check settings.
-  - Modify Issue #263, Issue #270, Issue #314, the Launch Plan candidate, or Harness runtime surfaces.
+  - Modify any external Task Issue, the Launch Plan candidate, or Harness runtime surfaces.
   - Implement a runtime lifecycle classifier, stale/reclaim engine, dispatcher, event ledger, control-plane-sync, automatic remediation, or autonomous task selection.
   - Copy a second DoD/checklist into a Task Issue or use an Issue checklist as completion truth.
 implementation_plan:
@@ -87,7 +89,7 @@ stop_conditions:
   - Fresh repository identity, refs, policy binding, task identity, Owner gate, or branch posture is missing, stale, ambiguous, or conflicting.
   - Another active STG-FIX implementation, equivalent PR, or competing writer appears.
   - Progress requires production, external-platform, environment, merge, deployment, or protected-branch action.
-  - The work would modify #263, #270, #314, the Launch Plan candidate, or any runtime control-plane surface.
+  - The work would modify any external Task Issue, the Launch Plan candidate, or any runtime control-plane surface.
 ```
 
 ## Definition of Done

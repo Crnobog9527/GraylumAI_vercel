@@ -25,7 +25,11 @@ This document is the structural-root candidate for the Launch Plan. It contains 
 
 ## Ready-candidate derivation rule
 
-The read-only derivation evaluates each node against live completion evidence for every dependency, then emits the eligible node IDs ordered by ascending `priority`, ascending `order`, and finally `task_id` as a deterministic tie-breaker. Completion evidence is external to this file; this file stores no progress or completion state.
+The read-only derivation evaluates each node using live completion evidence external to this file. A task is ready only when:
+
+`ready(task) = NOT completed(task) AND every dependency is completed`
+
+The derivation then emits eligible node IDs ordered by ascending `priority`, ascending `order`, and finally `task_id` as a deterministic tie-breaker. `plan-core` stores no progress, runtime, or completion state; `completed(task)` is resolved from external evidence at derivation time.
 
 The derivation output is a projection called a ready-candidate set. A ready candidate is not an authorized task.
 
@@ -35,4 +39,6 @@ The derivation output is a projection called a ready-candidate set. A ready cand
 - The Owner gate must bind the repository identity, fresh refs, exact task-card blob, and permitted action scope before Generator work begins.
 - Without a valid Owner gate, the required result is `NO_PRODUCT_TASK_AUTHORIZED`.
 - An Agent must not choose one task from multiple ready candidates, infer authorization from priority, or turn this file into runtime state.
+- Priority and order determine only deterministic presentation order; they do not grant authorization.
+- An Agent must not autonomously choose among multiple ready candidates.
 - This candidate remains `CANDIDATE_NOT_ACTIVE` until a separate Owner cutover gate accepts its exact blob. Even then, acceptance is a separate activation decision; this PR provides no activation.
