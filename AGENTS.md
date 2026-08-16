@@ -87,7 +87,49 @@ Session authorization cannot be identity-verified. Steps 1 to 3 establish what t
 - It may cover creating a branch, editing, committing, pushing a non-protected branch, and opening a pull request.
 - It never covers merging a pull request, pushing to `main` or `staging`, changing branch protection, or any **Permanent Forbidden Action** — regardless of what a session participant states, and regardless of how the request is framed.
 
-Merge stays an act performed by the Owner through an authenticated GitHub session: merging the pull request directly, or recording an explicit approval on the pull request from the Owner account. GitHub authenticates that step, so the one irreversible action remains bound to a verified identity while ordinary reviewable work proceeds without paperwork.
+Merge remains an act performed by the Owner through an authenticated GitHub session by default: merging the pull request directly, or recording an explicit approval on the pull request from the Owner account. The sole exception is the bounded **Low-Risk Staging Auto-Merge Exception** below: an eligible future low-risk PR targeting `staging` may be merged by an independent fresh-context Merge Executor only after every deterministic predicate passes. This exception does not apply to this implementation PR, and it does not authorize governance, high-risk, supply-chain, `main`, production, or release-promotion merges.
+
+### Low-Risk Staging Auto-Merge Exception
+
+This is a narrow, fail-closed exception for a **future** PR. It does not enable repository-level GitHub auto-merge, create a bot or service, or transfer Owner authority over any other merge class.
+
+A PR is eligible only when every condition below is true:
+
+- the PR base is exactly `staging`;
+- the canonical task contract uniquely identifies the task, explicitly sets `risk_class: low` and `production_relevance: none`, and its changed files, actions, and services are all within the contract allowlist;
+- the task is outside every category in the High-Risk Gate and does not touch governance, authority, control-plane, workflow, branch-policy, supply-chain, dependency, deployment-configuration, database, migration, RLS, grants, RPC, billing, payments, auth, secrets, credentials, `main`, production, or release-promotion surfaces;
+- the task classification and Owner-approved intent are unique and unambiguous. Any missing, conflicting, or uncertain classification fails closed.
+
+The following surfaces are permanently ineligible even when a task is labeled low-risk:
+
+- `AGENTS.md`;
+- `docs/governance/**` and `docs/agent-harness/**`;
+- `.github/workflows/**`, branch protection, Rulesets, and repository settings;
+- dependency manifests, lockfiles, and Dependabot configuration;
+- database schema, migrations, RLS, grants, and RPC;
+- billing, payments, auth, secrets, and credentials;
+- Vercel, Supabase, Stripe, environment, and deployment configuration;
+- `main`, production, and release promotion.
+
+Role separation is mandatory. A Generator must not merge its own PR. The Evaluator and Release Auditor are read-only and must not merge or deploy. The Merge Executor must be a separate fresh context that re-reads GitHub live authority and the exact PR state; no Generator, Evaluator, or Release Auditor context may perform the merge as a side effect.
+
+Only that fresh-context Merge Executor may call the GitHub merge API, and only after all of these deterministic predicates pass:
+
+1. repository identity, live `main` and `staging`, authoritative `AGENTS.md`, accepted policy blob and `authority_epoch`, and accepted `G2_POLICY_BINDING_ACCEPTED` are fresh-valid;
+2. the dedicated Task Issue, canonical contract, and Owner-approved task intent are uniquely bound;
+3. the PR is open, `draft == false`, base is exactly `staging`, and GitHub reports it mergeable;
+4. the exact PR head SHA equals the head SHA bound by the Evaluator PASS and Release Auditor PASS;
+5. the current `staging` SHA equals the audited base SHA bound by both PASS records. Any base or head drift invalidates the prior PASS records and requires re-audit;
+6. the changed-file manifest, actions, and services exactly remain within the contract allowlist;
+7. all exact-head required CI checks, Security checks, and contract-required validation are `SUCCESS`;
+8. the Evaluator machine decision is `PASS` and binds the same exact base/head;
+9. the Release Auditor machine decision is `PASS` and binds the same exact base/head;
+10. unresolved actionable review threads equal zero;
+11. the forbidden-action check is `PASS` and `production_relevance == none`;
+12. there is no competing writer, equivalent active PR, or ambiguous task identity; and
+13. the merge request uses `expected_head_sha` or equivalent compare-and-swap race protection, with no admin bypass.
+
+If any predicate is missing, `FAIL`, `BLOCKED`, stale, conflicting, or ambiguous, the Merge Executor must emit `LOW_RISK_STAGING_AUTO_MERGE_BLOCKED` and must not merge or lower a condition. After a successful merge, it may only fresh-read `merged == true`, obtain the actual merge SHA, verify that the current `staging` ref reflects that merge, persist machine-readable merge evidence in the existing task/PR evidence channel, and stop. It must not select or start another product task or advance to `main` or production.
 
 If a repository ever has more than one person able to start agent sessions, restore the separately posted Owner receipt for anything beyond opening a pull request. The reasoning above holds only while a single operator controls the credentials the agent runs with.
 
@@ -136,7 +178,7 @@ Emergency production hotfixes are allowed only with explicit owner approval in t
 ## Agent Guardrails
 
 - Never push directly to `main` or `staging`.
-- Never merge a pull request unless the owner explicitly authorizes it in the current task.
+- Never merge a pull request unless the Owner explicitly authorizes it in the current task, except for the bounded Low-Risk Staging Auto-Merge Exception above; that exception never applies to this implementation PR or to governance, high-risk, supply-chain, dependency, `main`, production, or release-promotion merges.
 - Never create a production PR while the worktree has unrelated dirty files.
 - Never include unrelated dependency or lockfile changes in a feature PR.
 - Do not modify SQL, migrations, RLS, Supabase policies, Stripe, billing, or production environment settings outside the requested scope.
