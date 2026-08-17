@@ -196,43 +196,43 @@ COMMENT ON TABLE public.application_logs IS '应用日志表 - 存储关键业�
 -- Source of truth: packages/db/migrations/0027_balance_write_surface_lockdown.sql
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.claim_daily_checkin(p_user_id uuid)
+CREATE OR REPLACE FUNCTION public.claim_daily_checkin(p_user_id UUID)
 RETURNS TABLE (
-  already_claimed boolean,
-  checkin_date text,
-  streak_day integer,
-  reward_credits integer,
-  monthly_bonus_credits integer,
-  total_reward_credits integer,
-  monthly_checkin_count integer
+  already_claimed BOOLEAN,
+  checkin_date TEXT,
+  streak_day INTEGER,
+  reward_credits INTEGER,
+  monthly_bonus_credits INTEGER,
+  total_reward_credits INTEGER,
+  monthly_checkin_count INTEGER
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_today date := timezone('Asia/Shanghai', now())::date;
-  v_month_key text := to_char(v_today, 'YYYY-MM');
-  v_existing public.user_checkins%ROWTYPE;
-  v_previous public.user_checkins%ROWTYPE;
-  v_streak_day integer;
-  v_reward_credits integer;
-  v_monthly_bonus_credits integer;
-  v_total_reward_credits integer;
-  v_monthly_count_before integer;
+  v_today DATE := timezone('Asia/Shanghai', now())::date;
+  v_month_key TEXT := to_char(v_today, 'YYYY-MM');
+  v_existing user_checkins%ROWTYPE;
+  v_previous user_checkins%ROWTYPE;
+  v_streak_day INTEGER;
+  v_reward_credits INTEGER;
+  v_monthly_bonus_credits INTEGER;
+  v_total_reward_credits INTEGER;
+  v_monthly_count_before INTEGER;
 BEGIN
   IF auth.uid() IS NOT NULL AND auth.uid() <> p_user_id THEN
     RAISE EXCEPTION 'claim_daily_checkin user mismatch';
   END IF;
 
   SELECT * INTO v_existing
-  FROM public.user_checkins AS uc
+  FROM user_checkins AS uc
   WHERE uc.user_id = p_user_id
     AND uc.checkin_date = v_today;
 
   IF FOUND THEN
     SELECT COUNT(*) INTO v_monthly_count_before
-    FROM public.user_checkins AS uc
+    FROM user_checkins AS uc
     WHERE uc.user_id = p_user_id
       AND uc.month_key = v_month_key;
 
@@ -249,7 +249,7 @@ BEGIN
   END IF;
 
   SELECT * INTO v_previous
-  FROM public.user_checkins AS uc
+  FROM user_checkins AS uc
   WHERE uc.user_id = p_user_id
     AND uc.checkin_date = (v_today - 1);
 
@@ -263,7 +263,7 @@ BEGIN
   END IF;
 
   v_reward_credits := get_system_setting_int(
-    'checkin_day' || v_streak_day::text,
+    'checkin_day' || v_streak_day::TEXT,
     CASE v_streak_day
       WHEN 1 THEN 5
       WHEN 2 THEN 10
@@ -274,7 +274,7 @@ BEGIN
   );
 
   SELECT COUNT(*) INTO v_monthly_count_before
-  FROM public.user_checkins AS uc
+  FROM user_checkins AS uc
   WHERE uc.user_id = p_user_id
     AND uc.month_key = v_month_key;
 
@@ -285,7 +285,7 @@ BEGIN
 
   v_total_reward_credits := v_reward_credits + v_monthly_bonus_credits;
 
-  INSERT INTO public.user_checkins (
+  INSERT INTO user_checkins (
     user_id,
     checkin_date,
     month_key,
@@ -301,11 +301,11 @@ BEGIN
     v_monthly_bonus_credits
   );
 
-  UPDATE public.profiles
+  UPDATE profiles
   SET credits = COALESCE(credits, 0) + v_total_reward_credits
   WHERE id = p_user_id;
 
-  INSERT INTO public.credit_transactions (
+  INSERT INTO credit_transactions (
     user_id,
     amount,
     type,
@@ -332,11 +332,11 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.claim_daily_checkin(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.claim_daily_checkin(uuid) FROM anon;
-REVOKE ALL ON FUNCTION public.claim_daily_checkin(uuid) FROM authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_daily_checkin(uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.claim_daily_checkin(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_daily_checkin(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.claim_daily_checkin(UUID) FROM anon;
+REVOKE ALL ON FUNCTION public.claim_daily_checkin(UUID) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_daily_checkin(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_daily_checkin(UUID) TO service_role;
 
-COMMENT ON FUNCTION public.claim_daily_checkin(uuid)
+COMMENT ON FUNCTION public.claim_daily_checkin(UUID)
   IS 'Atomically executes one daily checkin for the authenticated user; direct authenticated calls must match auth.uid() and p_user_id';

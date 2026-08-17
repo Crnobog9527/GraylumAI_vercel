@@ -14,7 +14,8 @@ or remediating this record.
 | --- | --- |
 | Task Issue | #322 |
 | Contract | `STG-FIX-ISSUE-322-C1` |
-| Owner gate | Issue #322 comment `5308738373` |
+| Owner preparation gate | Issue #322 comment `5308738373` |
+| Remediation V2 gate | Issue #322 comment `5312811024` |
 | Audited staging base | `0cfe8e09eb90a2238ada5c7d9ed8a564d46d280b` |
 | Main ref at task materialization | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
 | STG-FIX specification blob | `96806c8ce0baac0e85ebb462a17b53f04963de9a` |
@@ -55,7 +56,9 @@ repository history. They are not claims about either live database.
 - Columns/checks: UUID primary key, level/category checks, message, JSONB
   context, nullable profile foreign key with `ON DELETE SET NULL`, request ID,
   and non-null timestamp.
-- Expected repository-defined unique index-name set is **nine** entries:
+- Complete expected `pg_indexes` comparison set is **ten** entries, including
+  the PostgreSQL PRIMARY KEY backing index created by the inline primary key:
+  - `application_logs_pkey`
   - `idx_application_logs_user_id`
   - `idx_application_logs_created_at`
   - `idx_application_logs_category`
@@ -65,6 +68,8 @@ repository history. They are not claims about either live database.
   - `idx_application_logs_level_created`
   - `idx_application_logs_context`
   - `idx_application_logs_created`
+- `application_logs_pkey` is part of the same comparison domain returned by the
+  future `pg_indexes` query and must not be treated as extra drift.
 - Both `idx_application_logs_created_at` and `idx_application_logs_created`
   intentionally resolve to `created_at DESC`; they are distinct names present
   in repository migration history.
@@ -88,12 +93,16 @@ repository history. They are not claims about either live database.
 - Columns/checks: UUID primary key, test ID/name, the two enums, message, JSONB
   details, latency, nullable profile foreign key, `manual|cron|ci` run type,
   batch ID, and non-null timestamp.
-- Expected repository-defined index-name set:
+- Complete expected `pg_indexes` comparison set is **six** entries, including
+  the PostgreSQL PRIMARY KEY backing index created by the inline primary key:
+  - `diagnostic_results_pkey`
   - `idx_diagnostic_results_batch_id`
   - `idx_diagnostic_results_test_id`
   - `idx_diagnostic_results_category`
   - `idx_diagnostic_results_status`
   - `idx_diagnostic_results_created_at`
+- `diagnostic_results_pkey` is part of the same comparison domain returned by
+  the future `pg_indexes` query and must not be treated as extra drift.
 - The similarly named `diagnostics_results` conditional block in migration
   `0007_performance_indexes.sql` targets a different table identity and does
   not alter the expected `diagnostic_results` index set.
@@ -103,6 +112,13 @@ repository history. They are not claims about either live database.
   `Admins can insert diagnostic results`.
 - `Service can insert diagnostic results` is intentionally not restored because
   migration `0015_security_advisor_hardening.sql` removes it.
+
+For both target tables, expected-set membership is evaluated over the complete
+rows returned by `pg_indexes`. The index names above define required membership,
+but future evidence must retain and compare the raw `indexdef` for every row as
+well as `indexname`. No legitimate extra index may be discarded to force a
+match, and PRIMARY KEY backing indexes are not excluded from the comparison
+domain.
 
 ## Table-grant posture: unresolved, fail closed
 
@@ -143,6 +159,9 @@ Before any staging application:
 5. if a repository change is required to restore a specific ACL, a new bounded
    repository-remediation authorization is required before database apply.
 
+A database/read gate must not patch or rewrite the migration SQL ad hoc to
+resolve ACL uncertainty.
+
 This fail-closed posture is intentional. RLS-policy presence is not a substitute
 for table-privilege parity, and this record does not infer privileges from
 policy names or application intent.
@@ -182,15 +201,18 @@ the source was staging or production.
 ```sql
 SELECT
   p.oid::regprocedure::text AS identity,
+  pg_get_functiondef(p.oid) AS function_definition,
   md5(pg_get_functiondef(p.oid)) AS functiondef_md5,
   pg_get_userbyid(p.proowner) AS owner,
   COALESCE(p.proacl::text, '<NULL>') AS proacl
 FROM pg_proc AS p
-WHERE p.oid = to_regprocedure('public.claim_daily_checkin(uuid)');
+WHERE p.oid =
+  to_regprocedure('public.claim_daily_checkin(uuid)');
 ```
 
 A missing row is an absent-object result. A present row must be compared using
-all four fields, not the function name alone.
+all five fields, including the raw `pg_get_functiondef` output and its
+deterministic hash, not the function name alone.
 
 ### 2. Table columns, types, nullability, and defaults
 
@@ -273,6 +295,10 @@ WHERE schemaname = 'public'
   AND tablename IN ('application_logs', 'diagnostic_results')
 ORDER BY tablename, indexname;
 ```
+
+The future comparison domain is the complete result of this query, including
+PRIMARY KEY backing indexes. Each row must retain both `indexname` and
+`indexdef`; comparison by index name alone is insufficient.
 
 ### 7. Non-internal triggers
 
