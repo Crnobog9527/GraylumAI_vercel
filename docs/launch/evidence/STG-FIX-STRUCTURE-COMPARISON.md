@@ -1,25 +1,63 @@
 # STG-FIX structure-comparison evidence record
 
-Status: `REPOSITORY_CANDIDATE_TEMPLATE_ONLY`
+Status: `REPOSITORY_CANDIDATE_C2_REMEDIATION`
 
 This file records the repository-derived expected structure and the exact
 future fingerprint protocol for the STG-FIX candidate. It is not a staging or
-production readout. No database connection, Supabase query, structure
-fingerprint, migration application, or production read occurred while creating
-or remediating this record.
+production readout. No staging or production database connection, Supabase
+query, structure fingerprint, remote migration application, or production read
+occurred while creating or remediating this record. A disposable local
+PostgreSQL database was used only for the bounded C2 repository validation
+recorded below.
 
 ## Binding
 
 | Field | Value |
 | --- | --- |
 | Task Issue | #322 |
-| Contract | `STG-FIX-ISSUE-322-C1` |
+| Contract | `STG-FIX-ISSUE-322-C2` |
 | Owner preparation gate | Issue #322 comment `5308738373` |
 | Remediation V2 gate | Issue #322 comment `5312811024` |
+| C2 repository remediation gate | Issue #322 comment `5317179895` |
 | Audited staging base | `0cfe8e09eb90a2238ada5c7d9ed8a564d46d280b` |
 | Main ref at task materialization | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
 | STG-FIX specification blob | `96806c8ce0baac0e85ebb462a17b53f04963de9a` |
 | Candidate migration | `packages/db/migrations/0048_restore_staging_baseline_objects.sql` |
+
+## C2 repository remediation record
+
+The C2 change is limited to direct dependency normalization in migration 0048.
+It restores the repository-authoritative `public.user_checkins` shape from
+0013, including `DATE` check-in dates, the streak-day check, both indexes, RLS,
+and the three 0013 policies. A `TEXT` check-in date is converted only after
+deterministic checks prove the durable known drift shape; those disposable rows
+are truncated before the type conversion. A normalized `DATE` table is never
+discarded merely because 0048 is rerun.
+
+`public.get_system_setting_int(text, integer)` uses the 0013 function body and
+retains the 0015 `SET search_path = public, pg_temp` hardening. The
+`public.claim_daily_checkin(uuid)` definition and revoke/grant posture remain
+source-faithful to 0027.
+
+### Local disposable-DB validation
+
+`C2_LOCAL_DISPOSABLE_DB_VALIDATION: PASS`
+
+- Known drift reproduced with `user_checkins.checkin_date` as `TEXT`, no
+  streak-day check, the bound primary-key index name, and the observed single
+  policy.
+- First identical 0048 execution succeeded.
+- Post-normalization shape verified: `checkin_date` is `date`, the streak check
+  exists, three 0013 policies exist, and the helper search path is
+  `public, pg_temp`.
+- A sentinel row was inserted after normalization.
+- Second identical 0048 execution succeeded and the sentinel row count remained
+  `1`.
+- The validation used only a disposable local `postgres:16-alpine` container;
+  no Supabase, staging, production, or remote database access occurred.
+
+`C2_REMOTE_DATABASE_APPLICATION: NOT_EXECUTED`
+`C2_PRODUCTION_ACCESS: NOT_EXECUTED`
 
 The hashes above bind the repository candidate lineage only. Every later
 database/read gate must fresh-read current repository refs and must fail closed
@@ -388,14 +426,18 @@ match.
 | Production read-only parity fingerprint | `NOT_EXECUTED — separate Owner production-read gate required` |
 | First staging migration application | `NOT_EXECUTED — separate Owner database gate required` |
 | Second staging migration application / idempotency | `NOT_EXECUTED — separate Owner database gate required` |
+| Local disposable-DB C2 double-run / sentinel preservation | `PASS` |
+| Static 0013/0015/0027 source-fidelity and ACL checks | `PASS` |
 | Database PASS / Evaluator PASS / Release Auditor PASS | `NOT_ASSERTED` |
 
-The candidate intentionally does not recreate `user_checkins`, `profiles`,
+The C2 candidate normalizes the known dependency-drift shape of `user_checkins`
+under the exact C2 gate. It intentionally does not recreate `profiles`,
 `credit_transactions`, or `system_settings`; those are dependencies of the
-bounded function and remain outside the exact STG-FIX write allowlist. Any
-dependency or live-structure mismatch must be reported rather than repaired by
-expanding this candidate's scope.
+bounded function and remain outside the exact C2 database-object allowlist. Any
+other dependency or live-structure mismatch must be reported rather than
+repaired by expanding this candidate's scope.
 
-No database fingerprint, query result, secret, production definition, database
-PASS, Evaluator PASS, or Release Auditor PASS is recorded in this repository
-candidate.
+No remote database fingerprint, secret, production definition, database PASS,
+Evaluator PASS, or Release Auditor PASS is recorded in this repository
+candidate. The only query result recorded here is the sanitized local
+disposable-DB C2 validation above.

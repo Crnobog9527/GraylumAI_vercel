@@ -12,6 +12,191 @@
 -- the apply must BLOCK/STOP rather than treating name existence as success.
 
 -- ---------------------------------------------------------------------------
+-- C2 direct dependency normalization
+-- Source of truth: packages/db/migrations/0013_checkin_rewards.sql and
+-- packages/db/migrations/0015_security_advisor_hardening.sql
+-- ---------------------------------------------------------------------------
+
+-- The current staging dependency drift is a known disposable-test shape:
+-- checkin_date is TEXT, the streak-day check is absent, the primary-key index
+-- is user_checkins_user_id_checkin_date_pk, and the only policy is the observed
+-- user_checkins_select_own policy. Only that exact shape may discard rows while
+-- changing the column type. Any other TEXT shape fails closed.
+CREATE TABLE IF NOT EXISTS public.user_checkins (
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  checkin_date DATE NOT NULL,
+  month_key TEXT NOT NULL,
+  streak_day INTEGER NOT NULL CHECK (streak_day BETWEEN 1 AND 5),
+  reward_credits INTEGER NOT NULL DEFAULT 0,
+  monthly_bonus_credits INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, checkin_date)
+);
+
+DO $$
+DECLARE
+  v_checkin_date_type TEXT;
+  v_column_count INTEGER;
+  v_total_column_count INTEGER;
+  v_pk_index_count INTEGER;
+  v_total_index_count INTEGER;
+  v_check_count INTEGER;
+  v_policy_count INTEGER;
+BEGIN
+  SELECT c.data_type
+  INTO v_checkin_date_type
+  FROM information_schema.columns AS c
+  WHERE c.table_schema = 'public'
+    AND c.table_name = 'user_checkins'
+    AND c.column_name = 'checkin_date';
+
+  IF v_checkin_date_type = 'text' THEN
+    SELECT COUNT(*)
+    INTO v_column_count
+    FROM information_schema.columns AS c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'user_checkins'
+      AND (
+        (c.column_name = 'user_id' AND c.data_type = 'uuid')
+        OR (c.column_name = 'checkin_date' AND c.data_type = 'text')
+        OR (c.column_name = 'month_key' AND c.data_type = 'text')
+        OR (c.column_name = 'streak_day' AND c.data_type = 'integer')
+        OR (c.column_name = 'reward_credits' AND c.data_type = 'integer')
+        OR (c.column_name = 'monthly_bonus_credits' AND c.data_type = 'integer')
+        OR (c.column_name = 'created_at' AND c.data_type = 'timestamp with time zone')
+      );
+
+    SELECT COUNT(*)
+    INTO v_total_column_count
+    FROM information_schema.columns AS c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = 'user_checkins';
+
+    SELECT COUNT(*)
+    INTO v_pk_index_count
+    FROM pg_index AS i
+    JOIN pg_class AS index_rel ON index_rel.oid = i.indexrelid
+    JOIN pg_class AS table_rel ON table_rel.oid = i.indrelid
+    JOIN pg_namespace AS table_ns ON table_ns.oid = table_rel.relnamespace
+    WHERE table_ns.nspname = 'public'
+      AND table_rel.relname = 'user_checkins'
+      AND index_rel.relname = 'user_checkins_user_id_checkin_date_pk'
+      AND i.indisprimary;
+
+    SELECT COUNT(*)
+    INTO v_total_index_count
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename = 'user_checkins';
+
+    SELECT COUNT(*)
+    INTO v_check_count
+    FROM pg_constraint AS con
+    WHERE con.conrelid = 'public.user_checkins'::regclass
+      AND con.contype = 'c';
+
+    SELECT COUNT(*)
+    INTO v_policy_count
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'user_checkins'
+      AND policyname = 'user_checkins_select_own';
+
+    IF v_column_count <> 7
+       OR v_total_column_count <> 7
+       OR v_pk_index_count <> 1
+       OR v_total_index_count <> 1
+       OR v_check_count <> 0
+       OR v_policy_count <> 1
+       OR (SELECT COUNT(*) FROM pg_policies
+           WHERE schemaname = 'public' AND tablename = 'user_checkins') <> 1 THEN
+      RAISE EXCEPTION
+        'C2 refuses to normalize unknown public.user_checkins TEXT drift shape';
+    END IF;
+
+    TRUNCATE TABLE public.user_checkins;
+    ALTER TABLE public.user_checkins
+      ALTER COLUMN checkin_date TYPE DATE USING checkin_date::DATE;
+  ELSIF v_checkin_date_type IS DISTINCT FROM 'date' THEN
+    RAISE EXCEPTION
+      'C2 refuses public.user_checkins with unsupported checkin_date type: %',
+      v_checkin_date_type;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.user_checkins'::regclass
+      AND conname = 'user_checkins_streak_day_check'
+  ) THEN
+    ALTER TABLE public.user_checkins
+      ADD CONSTRAINT user_checkins_streak_day_check
+      CHECK (streak_day BETWEEN 1 AND 5);
+  END IF;
+END
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_user_checkins_user_month
+  ON public.user_checkins(user_id, month_key);
+CREATE INDEX IF NOT EXISTS idx_user_checkins_created_at
+  ON public.user_checkins(created_at DESC);
+
+ALTER TABLE public.user_checkins ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "user_checkins_select_own" ON public.user_checkins;
+DROP POLICY IF EXISTS "users_own_user_checkins_select" ON public.user_checkins;
+DROP POLICY IF EXISTS "users_own_user_checkins_insert" ON public.user_checkins;
+DROP POLICY IF EXISTS "admin_all_user_checkins" ON public.user_checkins;
+
+CREATE POLICY "users_own_user_checkins_select"
+  ON public.user_checkins
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "users_own_user_checkins_insert"
+  ON public.user_checkins
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "admin_all_user_checkins"
+  ON public.user_checkins
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+    )
+  );
+
+COMMENT ON TABLE public.user_checkins IS '用户每日签到流水，按北京时间记录每日唯一签到和奖励';
+
+CREATE OR REPLACE FUNCTION public.get_system_setting_int(
+  p_key TEXT,
+  p_default INTEGER
+)
+RETURNS INTEGER AS $$
+DECLARE
+  v_raw TEXT;
+BEGIN
+  SELECT value #>> '{}' INTO v_raw
+  FROM system_settings
+  WHERE key = p_key;
+
+  IF v_raw IS NULL OR v_raw = '' OR v_raw !~ '^-?[0-9]+$' THEN
+    RETURN p_default;
+  END IF;
+
+  RETURN v_raw::INTEGER;
+END;
+$$ LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp;
+
+-- ---------------------------------------------------------------------------
 -- diagnostic_results dependencies and table
 -- Source of truth: packages/db/migrations/0005_diagnostics.sql plus the
 -- service-policy removal in packages/db/migrations/0015_security_advisor_hardening.sql
