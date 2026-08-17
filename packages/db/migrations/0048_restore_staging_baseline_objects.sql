@@ -1,13 +1,20 @@
 -- Migration: 0048_restore_staging_baseline_objects
 -- Purpose: restore the repository-defined STG-FIX staging baseline objects.
 -- Scope: claim_daily_checkin, application_logs, diagnostic_results, and their
--- directly corresponding repository-defined RLS, policies, and grants.
+-- directly corresponding repository-defined RLS and policies.
 -- This migration is intentionally expand-only. It does not inspect or rewrite
 -- production, and it does not drop existing objects or policies.
+--
+-- IMPORTANT: IF NOT EXISTS / CREATE OR REPLACE are restoration mechanisms, not
+-- parity proof. Before any separately authorized staging application, the
+-- complete live fingerprints defined in STG-FIX-STRUCTURE-COMPARISON.md must be
+-- captured. If an object already exists and any required fingerprint differs,
+-- the apply must BLOCK/STOP rather than treating name existence as success.
 
 -- ---------------------------------------------------------------------------
 -- diagnostic_results dependencies and table
--- Source of truth: packages/db/migrations/0005_diagnostics.sql
+-- Source of truth: packages/db/migrations/0005_diagnostics.sql plus the
+-- service-policy removal in packages/db/migrations/0015_security_advisor_hardening.sql
 -- ---------------------------------------------------------------------------
 
 DO $$
@@ -92,7 +99,11 @@ BEGIN
 END
 $$;
 
-GRANT SELECT, INSERT ON TABLE public.diagnostic_results TO authenticated;
+-- Deliberately no table GRANT/REVOKE here. The current repository migrations
+-- establish RLS/policy intent for diagnostic_results but do not deterministically
+-- bind the exact hosted table ACL/default-privilege result. Inventing one here
+-- would violate the fail-closed parity requirement. A separately authorized
+-- live grant fingerprint must establish the expected ACL before any apply.
 
 COMMENT ON TABLE public.diagnostic_results IS 'Stores results of system diagnostic tests';
 COMMENT ON COLUMN public.diagnostic_results.test_id
@@ -104,8 +115,9 @@ COMMENT ON COLUMN public.diagnostic_results.run_type
 
 -- ---------------------------------------------------------------------------
 -- application_logs table
--- Source of truth: packages/db/migrations/0006_application_logs.sql and
--- the service-policy removal in packages/db/migrations/0015_security_advisor_hardening.sql
+-- Source of truth: packages/db/migrations/0006_application_logs.sql,
+-- packages/db/migrations/0007_performance_indexes.sql, and the service-policy
+-- removal in packages/db/migrations/0015_security_advisor_hardening.sql
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.application_logs (
@@ -135,6 +147,10 @@ CREATE INDEX IF NOT EXISTS idx_application_logs_user_created
   ON public.application_logs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_application_logs_level_created
   ON public.application_logs(level, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_application_logs_context
+  ON public.application_logs(context);
+CREATE INDEX IF NOT EXISTS idx_application_logs_created
+  ON public.application_logs(created_at DESC);
 
 ALTER TABLE public.application_logs ENABLE ROW LEVEL SECURITY;
 
@@ -169,7 +185,9 @@ BEGIN
 END
 $$;
 
-GRANT SELECT ON TABLE public.application_logs TO authenticated;
+-- Deliberately no table GRANT/REVOKE here for the same reason as
+-- diagnostic_results: repository SQL does not bind the exact hosted table ACL
+-- or default-privilege outcome. Later grant fingerprint parity is mandatory.
 
 COMMENT ON TABLE public.application_logs IS '应用日志表 - 存储关键业务日志，用于问题排查和审计';
 
