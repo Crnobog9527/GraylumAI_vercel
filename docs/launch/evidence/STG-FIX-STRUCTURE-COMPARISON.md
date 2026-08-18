@@ -198,11 +198,14 @@ well as `indexname`. No legitimate extra index may be discarded to force a
 match, and PRIMARY KEY backing indexes are not excluded from the comparison
 domain.
 
-## Table-grant posture: unresolved, fail closed
+## Historical pre-C3 table-grant posture — superseded by durable C2 results and C3 migration 0049
 
-`TABLE_GRANT_EXPECTATION_FROM_REPOSITORY: UNRESOLVED_FAIL_CLOSED`
+This section preserves the pre-C3 C1/C2 repository-candidate posture. It is
+historical and superseded; it is not the current effective C3 grant posture.
 
-The repository establishes role-specific RLS/policy intent for
+`HISTORICAL_PRE_C3_TABLE_GRANT_EXPECTATION_FROM_REPOSITORY: UNRESOLVED_FAIL_CLOSED`
+
+Before C3, the repository established role-specific RLS/policy intent for
 `application_logs` and `diagnostic_results`, but the reviewed repository
 migration history does not deterministically bind the complete hosted table ACL
 or the database-level default privileges that may have existed when those
@@ -220,10 +223,16 @@ In particular:
 - no repository binding is being treated as proof of hosted
   `ALTER DEFAULT PRIVILEGES` state.
 
-Therefore the remediation candidate deliberately does **not** invent or change
-table grants for `application_logs` or `diagnostic_results`.
+Therefore, before C3, the repository candidate deliberately did **not** invent
+or change table grants for `application_logs` or `diagnostic_results`. The later
+production durable result `5324287732` and staging durable result `5324869886`
+resolved that uncertainty for the current C3 repository remediation: they bind
+the effective missing-grant set, and migration 0049 adds exactly those
+forward-only grants. Migration 0049 has not been remotely applied, and final
+staging parity has not been established or claimed.
 
-Before any staging application:
+The following pre-C3 uncertainty procedure is retained as historical context;
+it is not a current unresolved blocker:
 
 1. a separately authorized production read must capture the sorted
    `information_schema.role_table_grants` fingerprint for the two target
@@ -238,13 +247,22 @@ Before any staging application:
    repository-remediation authorization is required before database apply.
 
 A database/read gate must not patch or rewrite the migration SQL ad hoc to
-resolve ACL uncertainty.
+resolve ACL uncertainty. The current C3 expectation is already bound by the
+durable results above; any later staging gate must still fresh-read its own
+live state and may not infer final parity from this repository record.
 
-This fail-closed posture is intentional. RLS-policy presence is not a substitute
-for table-privilege parity, and this record does not infer privileges from
-policy names or application intent.
+This historical pre-C3 fail-closed posture is preserved intentionally. RLS-policy
+presence is not a substitute for table-privilege parity, and the current C3
+grant expectation is not inferred from policy names or application intent.
 
-## Mandatory future staging preflight
+## Future separately authorized staging preflight
+
+The C3 repository correction does not authorize staging access or migration
+application. A later separately authorized staging database gate must fresh-read
+the current repository refs, project identity, and live staging state. The first
+0048 application is already recorded in durable result `5324869886`; this
+evidence-only correction did not re-access staging. Migration 0049 remains
+`NOT_REMOTELY_APPLIED`, and STG-FIX final staging parity remains unestablished.
 
 `IF NOT EXISTS` and policy-name guards are idempotency mechanisms, not structure
 parity checks.
@@ -461,10 +479,10 @@ match.
 | --- | --- |
 | Repository-derived expected structure | `RECORDED` |
 | Complete future fingerprint query template | `RECORDED_NOT_EXECUTED` |
-| Exact table-grant expectation | `BOUND_BY_DURABLE_RESULT_5324287732 — not re-read in this repository-only execution` |
-| Staging live structure fingerprint | `NOT_EXECUTED — separate Owner database gate required` |
-| Production read-only parity fingerprint | `RECORDED_IN_DURABLE_RESULT_5324287732 — not re-read in this repository-only execution` |
-| First staging migration application | `RECORDED_IN_DURABLE_RESULT_5324869886 — not re-executed in this repository-only execution` |
+| Exact table-grant expectation | `BOUND_BY_DURABLE_RESULTS_5324287732_AND_5324869886 — current C3 expectation; not re-read in this evidence-only correction` |
+| Staging live structure fingerprint | `RECORDED_IN_DURABLE_RESULT_5324869886 — first post-0048 structural parity excluding grants MATCH; grant parity MISMATCH; not re-accessed in this correction` |
+| Production read-only parity fingerprint | `RECORDED_IN_DURABLE_RESULT_5324287732 — not re-read in this evidence-only correction` |
+| First staging migration application | `RECORDED_IN_DURABLE_RESULT_5324869886 — SUCCESS; not re-executed in this evidence-only correction` |
 | Second staging migration application / idempotency | `NOT_EXECUTED — separate Owner database gate required` |
 | Local disposable-DB C2 double-run / sentinel preservation | `PASS` |
 | Local disposable-DB C3 16-to-28 grant remediation / structural fingerprint | `PASS` |
@@ -478,7 +496,10 @@ bounded function and remain outside the exact C2 database-object allowlist. Any
 other dependency or live-structure mismatch must be reported rather than
 repaired by expanding this candidate's scope.
 
-No remote database fingerprint, secret, production definition, database PASS,
-Evaluator PASS, or Release Auditor PASS is recorded in this repository
-candidate. The only query result recorded here is the sanitized local
-disposable-DB C2 validation above.
+No raw remote database fingerprint, secret, production definition, database
+PASS, Evaluator PASS, or Release Auditor PASS is embedded in this repository
+candidate. The durable remote results are referenced by immutable GitHub
+lineage above, while the query results recorded here are the sanitized local
+disposable-DB C2 and C3 validations. This evidence-only correction did not
+re-run PostgreSQL validation, access staging or production, apply 0049, or
+claim final staging parity or STG-FIX completion.
