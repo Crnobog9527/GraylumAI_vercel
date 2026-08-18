@@ -1,14 +1,14 @@
 # STG-FIX structure-comparison evidence record
 
-Status: `CURRENT_FINAL_STG_FIX_EVIDENCE_RECONCILED_BY_C5`
+Status: `CURRENT_FINAL_STG_FIX_EVIDENCE_IDENTITY_RECONCILED_BY_C6`
 
-This record is the forward-only C5 reconciliation of STG-FIX evidence. It does
-not rerun a database query or migration. Current/final assertions below come
-only from fresh-read append-only GitHub durable records, current merged
-repository identity, and read-only Vercel staging deployment metadata. No raw
-fingerprint is invented: where a durable record exposes a raw fingerprint or
-hash it is copied with provenance; where it exposes only a comparison decision,
-this record stores the decision and exact durable source.
+This record preserves the forward-only C5 evidence reconciliation and applies
+only the C6 post-PR-335-merge repository-identity correction. It does not rerun
+a database query or migration. Current identity assertions below come only from
+fresh-read GitHub live state and append-only durable records. C1-C5 historical
+evidence, C4 database validation, and C5 audit provenance remain historical
+facts and are not retroactively reinterpreted. No raw fingerprint or current
+Vercel deployment identity is invented.
 
 ## Current / final STG-FIX evidence
 
@@ -18,15 +18,22 @@ this record stores the decision and exact durable source.
 | --- | --- |
 | Task Issue | `#322` |
 | Historical execution contract | `STG-FIX-ISSUE-322-C4` |
-| Current evidence-reconciliation contract | `STG-FIX-ISSUE-322-C5` |
+| Historical evidence-reconciliation contract | `STG-FIX-ISSUE-322-C5` |
+| Current identity-reconciliation contract | `STG-FIX-ISSUE-322-C6` |
 | C4 Owner gate | Issue #322 comment `5327870357` |
 | C4 durable final result | Issue #322 comment `5328099005` |
 | C5 repository gate | Issue #322 comment `5329885802` |
+| C5 canonical Evaluator PASS | PR #335 comment `5333616844` |
+| C5 canonical Release Auditor PASS | PR #335 comment `5333620329` |
+| C6 Owner gate | Issue #322 comment `5333774702` |
 | Production durable fingerprint result | Issue #322 comment `5324287732` |
 | Historical C2 staging result | Issue #322 comment `5324869886` |
-| Current main SHA at C5 reconciliation | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
-| Current staging SHA / PR #334 merge SHA | `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d` |
+| Current main SHA at C6 reconciliation | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
+| Historical PR #334 actual merge SHA / C5 pre-merge audited staging base | `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d` |
 | Historical audited PR #334 head | `175a2f5ae1e23740b1f03196642ccf8f3953e122` |
+| PR #335 audited head | `a96ba4c6706c1b4aecd0e332c249d4832712863d` |
+| PR #335 actual merge SHA | `ec9925410b513484c69b5c1decb2abda7882646c` |
+| Current staging SHA | `ec9925410b513484c69b5c1decb2abda7882646c` |
 | STG-FIX specification blob | `96806c8ce0baac0e85ebb462a17b53f04963de9a` |
 
 ### Merged repository identity
@@ -39,7 +46,22 @@ pr_334:
   head_branch: codex/stg-fix-322
   audited_head_sha: 175a2f5ae1e23740b1f03196642ccf8f3953e122
   actual_merge_sha: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
-  current_staging_sha: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
+  identity_semantics: HISTORICAL_PR_334_MERGE_IDENTITY
+  merge_contains_audited_head: true
+
+c5_pre_merge_audit_identity:
+  audited_staging_base_sha: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
+  pr_335_audited_head_sha: a96ba4c6706c1b4aecd0e332c249d4832712863d
+  evaluator_pass_comment: 5333616844
+  release_auditor_pass_comment: 5333620329
+
+pr_335:
+  merged: true
+  base_branch: staging
+  head_branch: codex/stg-fix-322-c5-evidence-closeout
+  audited_head_sha: a96ba4c6706c1b4aecd0e332c249d4832712863d
+  actual_merge_sha: ec9925410b513484c69b5c1decb2abda7882646c
+  current_staging_sha: ec9925410b513484c69b5c1decb2abda7882646c
   merge_contains_audited_head: true
 
 repository_blobs_on_current_staging:
@@ -47,8 +69,8 @@ repository_blobs_on_current_staging:
   packages/db/migrations/0049_reconcile_stg_fix_target_grants.sql: 1a05b778b1ca1ad80c0ff7cd5f8e4c6892187988
 ```
 
-C5 changes neither migration. There is no fourth STG-FIX implementation path;
-C5 is an evidence-record reconciliation only.
+C5 changed neither migration. C6 also changes neither migration and only
+reconciles the evidence record's post-merge identity labels.
 
 ### Durable C4 staging execution result
 
@@ -179,18 +201,24 @@ counts. Where C4 does not repeat a raw fingerprint value in this repository
 record, the durable comment identity is the provenance; C5 does not fabricate a
 replacement raw value.
 
-### Current Vercel staging deployment binding
+### HISTORICAL_PRE_C5_MERGE_DEPLOYMENT_OBSERVATION
 
-Read-only metadata only; no Vercel mutation was performed.
+This deployment record is preserved only as a historical pre-C5-merge
+observation. C6 did not access or mutate Vercel, and no authorized fresh
+read-only source in this execution proved a replacement current deployment
+identity. Therefore this record must not be interpreted as the current Vercel
+staging deployment.
 
 ```yaml
 project_name: graylumai-staging
 project_id: prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC
 deployment_id: dpl_2hXdyR6UH8nYKqPZ5QYTaan4RXXn
-state: READY
-git_branch: staging
-git_commit_sha: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
-binds_current_staging_sha: true
+state_at_observation: READY
+git_branch_at_observation: staging
+git_commit_sha_at_observation: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
+historical_identity: HISTORICAL_PRE_C5_MERGE_STAGING_IDENTITY
+binds_current_staging_sha: false
+current_vercel_staging_deployment_identity: NOT_ASSERTED_BY_C6
 ```
 
 ### Current non-actions / boundary
@@ -207,12 +235,20 @@ C5_SUPABASE_ACCESS: false
 C5_DATABASE_QUERY: false
 C5_SQL_EXECUTION: false
 C5_VERCEL_MUTATION: false
+C6_SUPABASE_ACCESS: false
+C6_DATABASE_ACCESS: false
+C6_SQL_EXECUTION: false
+C6_VERCEL_ACCESS: false
+C6_VERCEL_MUTATION: false
 ```
 
 This evidence record does not authorize merge, Issue closure, staging-to-main
-promotion, production deployment/smoke, or any next Launch task. It also does
-not create a new Evaluator or Release Auditor PASS; the next allowed step after
-the C5 Draft PR is an independent read-only evidence audit.
+promotion, production deployment/smoke, or any next Launch task. C5 canonical
+Evaluator and Release Auditor PASS remain historical audit provenance bound to
+PR #335 audited head `a96ba4c6706c1b4aecd0e332c249d4832712863d` and pre-merge
+staging base `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d`; they are not
+reinterpreted as auditing PR #335's later merge commit. The next allowed step
+after this C6 Draft PR is an independent read-only C6 evidence audit.
 
 ## HISTORICAL_PRE_C4_STATE
 
@@ -413,12 +449,13 @@ The pre-C4 snapshot is retained without being treated as current state:
 
 `SUPERSEDED_BY_C4_DURABLE_RESULT_5328099005`
 
-## C5 evidence-record validation posture
+## C6 post-merge identity-reconciliation validation posture
 
-The current/final section above is the authoritative current evidence posture
-for this C5 candidate. It binds exact refs, repository blobs, durable object
-fingerprints/provenance, C4 validation results, and no-secret/non-action
-markers. C5 performs no database validation, no Supabase access, and no
-production access. The exact one-file repository diff and exact-head CI/Security
-status are validated at the C5 Draft PR boundary; no merge or later gate is
-implied by this record.
+The current/final section above is the authoritative identity posture for the
+C6 candidate. It preserves C4 validation results and C5 durable audit provenance
+while separating the historical PR #334 merge / C5 pre-merge audited base from
+PR #335 audited head, actual merge SHA, and current staging SHA. C6 performs no
+database validation, no Supabase access, no production access, and no Vercel
+access or mutation. Migration 0048 and 0049 remain byte-identical. The exact
+one-file repository diff and exact-head CI/Security status are validated at the
+C6 Draft PR boundary; no merge or later gate is implied by this record.
