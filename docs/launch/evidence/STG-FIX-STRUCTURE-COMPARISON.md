@@ -1,28 +1,68 @@
 # STG-FIX structure-comparison evidence record
 
-Status: `REPOSITORY_CANDIDATE_C2_REMEDIATION`
+Status: `REPOSITORY_CANDIDATE_C3_GRANT_REMEDIATION`
 
 This file records the repository-derived expected structure and the exact
 future fingerprint protocol for the STG-FIX candidate. It is not a staging or
 production readout. No staging or production database connection, Supabase
 query, structure fingerprint, remote migration application, or production read
-occurred while creating or remediating this record. A disposable local
-PostgreSQL database was used only for the bounded C2 repository validation
-recorded below.
+occurred while creating or remediating this record. Disposable local
+PostgreSQL databases were used only for the bounded C2 and C3 repository
+validations recorded below.
 
 ## Binding
 
 | Field | Value |
 | --- | --- |
 | Task Issue | #322 |
-| Contract | `STG-FIX-ISSUE-322-C2` |
+| Contract | `STG-FIX-ISSUE-322-C3` |
 | Owner preparation gate | Issue #322 comment `5308738373` |
 | Remediation V2 gate | Issue #322 comment `5312811024` |
 | C2 repository remediation gate | Issue #322 comment `5317179895` |
+| C3 grant remediation gate | Issue #322 comment `5325304686` |
 | Audited staging base | `0cfe8e09eb90a2238ada5c7d9ed8a564d46d280b` |
 | Main ref at task materialization | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
 | STG-FIX specification blob | `96806c8ce0baac0e85ebb462a17b53f04963de9a` |
 | Candidate migration | `packages/db/migrations/0048_restore_staging_baseline_objects.sql` |
+| C3 grant remediation migration | `packages/db/migrations/0049_reconcile_stg_fix_target_grants.sql` |
+
+## C3 repository-only grant remediation
+
+The C2 staging application result `5324869886` durably records a successful
+first application of 0048 followed by a fail-closed grant mismatch: each target
+table had 16 rows instead of the production durable baseline of 28 rows. The
+production durable result `5324287732` establishes the matching 28-row posture,
+with the missing rows limited to `SELECT`, `INSERT`, `UPDATE`, and `DELETE` for
+`anon`, `authenticated`, and `service_role` on each target table. C3 consumes
+those append-only GitHub records as evidence; it does not access or mutate any
+remote database.
+
+Migration 0048 remains byte-identical and immutable. Migration 0049 adds only
+six explicit deterministic, idempotent `GRANT` statements: one statement per
+grantee for each of `public.application_logs` and
+`public.diagnostic_results`, granting only `SELECT`, `INSERT`, `UPDATE`, and
+`DELETE`. No `REVOKE`, `ALTER DEFAULT PRIVILEGES`, unrelated grant, or
+structural statement is included.
+
+`C3_REMOTE_DATABASE_APPLICATION: NOT_EXECUTED`
+`C3_SUPABASE_ACCESS: NOT_EXECUTED`
+
+### C3 local disposable-DB validation
+
+`C3_LOCAL_DISPOSABLE_DB_VALIDATION: PASS`
+
+- A fresh `postgres:16` container reproduced the durable post-0048-equivalent
+  state with exactly 16 `role_table_grants` rows for each target table.
+- The first identical 0049 application produced exactly 28 rows for both
+  `public.application_logs` and `public.diagnostic_results`.
+- The second identical 0049 application remained exactly 28 rows per target
+  table, proving idempotency.
+- The complete deterministic non-grant structural fingerprint over the target
+  tables, columns, constraints, indexes, enums, RLS flags, policies, and
+  non-internal triggers was unchanged: `59|79e465dd0718f76552e4f6f3ea4d6e9b`
+  before, after the first apply, and after the second apply.
+- The container was disposable and local only; no Supabase, staging,
+  production, or remote database access occurred.
 
 ## C2 repository remediation record
 
@@ -421,12 +461,13 @@ match.
 | --- | --- |
 | Repository-derived expected structure | `RECORDED` |
 | Complete future fingerprint query template | `RECORDED_NOT_EXECUTED` |
-| Exact table-grant expectation | `UNRESOLVED_FAIL_CLOSED — separate production-read evidence required` |
+| Exact table-grant expectation | `BOUND_BY_DURABLE_RESULT_5324287732 — not re-read in this repository-only execution` |
 | Staging live structure fingerprint | `NOT_EXECUTED — separate Owner database gate required` |
-| Production read-only parity fingerprint | `NOT_EXECUTED — separate Owner production-read gate required` |
-| First staging migration application | `NOT_EXECUTED — separate Owner database gate required` |
+| Production read-only parity fingerprint | `RECORDED_IN_DURABLE_RESULT_5324287732 — not re-read in this repository-only execution` |
+| First staging migration application | `RECORDED_IN_DURABLE_RESULT_5324869886 — not re-executed in this repository-only execution` |
 | Second staging migration application / idempotency | `NOT_EXECUTED — separate Owner database gate required` |
 | Local disposable-DB C2 double-run / sentinel preservation | `PASS` |
+| Local disposable-DB C3 16-to-28 grant remediation / structural fingerprint | `PASS` |
 | Static 0013/0015/0027 source-fidelity and ACL checks | `PASS` |
 | Database PASS / Evaluator PASS / Release Auditor PASS | `NOT_ASSERTED` |
 
