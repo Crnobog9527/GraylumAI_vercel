@@ -1,10 +1,13 @@
 # Release Auditor Report Schema
 
-The Release Auditor report is a read-only release gate artifact. It does not merge, deploy, or authorize production by itself.
+The Release Auditor report is independent release-gate evidence produced under `AUDITED_STATE_READ_ONLY`. It does not merge, deploy, or authorize production by itself. The sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION`: after a completed canonical audit, the Release Auditor may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run, unless the Owner explicitly says not to persist/post it.
+
+`REPORT_COMMENT_IS_EVIDENCE_ONLY`: the persisted comment is evidence only and never authorizes remediation, mark-ready, merge, deploy, production, Issue lifecycle mutation, a next gate, or Owner authorization. It is not a review submission and does not permit `APPROVE`, `REQUEST_CHANGES`, inline review comments, PR metadata mutation, comment editing/deletion, code/repository mutation, branch/commit writes, merge, deployment, or external-system mutation.
 
 ## Required Fields
 
 ```yaml
+report_role: RELEASE_AUDITOR
 report_id: string
 machine_decision: PASS | FAIL | BLOCKED
 owner_summary_zh: string
@@ -31,6 +34,7 @@ pull_request:
   number: integer
   url: string
   base_branch: string
+  base_sha: string | null
   head_branch: string
   head_sha: string
   mergeable: boolean
@@ -60,6 +64,12 @@ production_relevance:
 owner_decision_needed: string
 ```
 
+## Persistence Binding
+
+A persisted canonical Release Auditor report comment must contain this entire schema and must bind the exact audited PR number, exact audited `head_sha`, `base_branch`, and `base_sha` when determinable. `report_role`, `report_id`, and `machine_decision` are mandatory in the persisted comment.
+
+If the exact PR identity or audited head cannot be verified, or the canonical report is incomplete, do not post. Do not replace the missing report comment with another GitHub mutation.
+
 ## Owner and Automation Fields
 
 All Release Auditor reports must include stable machine-readable fields and Chinese owner-facing fields.
@@ -77,3 +87,4 @@ All Release Auditor reports must include stable machine-readable fields and Chin
 - Production is always a separate owner release gate.
 - If Evaluator is blocked or fail, Release Auditor must be blocked.
 - If forbidden actions were performed, Release Auditor must fail.
+- Report persistence never changes any of those decision semantics or gates.
