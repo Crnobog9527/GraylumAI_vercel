@@ -111,7 +111,7 @@ The following surfaces are permanently ineligible even when a task is labeled lo
 - Vercel, Supabase, Stripe, environment, and deployment configuration;
 - `main`, production, and release promotion.
 
-Role separation is mandatory. A Generator must not merge its own PR. The Evaluator and Release Auditor are read-only and must not merge or deploy. The Merge Executor must be a separate fresh context that re-reads GitHub live authority and the exact PR state; no Generator, Evaluator, or Release Auditor context may perform the merge as a side effect.
+Role separation is mandatory. A Generator must not merge its own PR. The Evaluator and Release Auditor are `AUDITED_STATE_READ_ONLY`: they must not edit audited repository/external state, submit reviews, mark ready, merge, or deploy. Their sole permitted write is the `REPORT_COMMENT_PERSISTENCE_EXCEPTION` defined under **Agent Harness Control Plane**; that evidence-only exception never permits merge or deployment. The Merge Executor must be a separate fresh context that re-reads GitHub live authority and the exact PR state; no Generator, Evaluator, or Release Auditor context may perform the merge as a side effect.
 
 Only that fresh-context Merge Executor may call the GitHub merge API, and only after all of these deterministic predicates pass:
 
@@ -213,11 +213,23 @@ The Agent Harness is a GitHub issue driven Planner -> Generator -> Evaluator -> 
 
 - Planner: read-only. Converts the issue into a sprint contract with goal, allowed scope, forbidden actions, risk class, evidence requirements, and stop conditions.
 - Generator: writes code and tests only inside the approved sprint contract.
-- Evaluator: read-only. Verifies scope, diff, tests, evidence, and forbidden actions. It must not edit code.
-- Release Auditor: read-only. Reviews release readiness, branch posture, checks, risk gates, and production relevance. It must not merge or deploy.
+- Evaluator: independent `AUDITED_STATE_READ_ONLY`. Verifies scope, diff, tests, evidence, and forbidden actions. It must not edit code or audited repository/external state. Its sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION` below.
+- Release Auditor: independent `AUDITED_STATE_READ_ONLY`. Reviews release readiness, branch posture, checks, risk gates, and production relevance. It must not modify audited state, mark ready, merge, or deploy. Its sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION` below.
 - Owner: defines business goals and production authorization. The owner does not act as the code reviewer.
 
 Owner-facing reports must be in Chinese and must include a one-line decision summary and next action. Machine-readable fields must remain stable for automation.
+
+### REPORT_COMMENT_PERSISTENCE_EXCEPTION
+
+For canonical Evaluator and Release Auditor tasks, `read-only`, `strictly read-only`, `本窗口严格 read-only`, and equivalent wording mean `AUDITED_STATE_READ_ONLY`: code, repository files, branches, PR metadata, reviews, inline review comments, merge state, deployments, Issue lifecycle, production, and external systems remain non-mutating.
+
+After the canonical audit is complete, the Evaluator or Release Auditor may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run. This is the sole audit-role write exception. Only an explicit Owner instruction such as `do not persist/post the report`, or an unambiguously equivalent instruction for that run, disables it.
+
+The report comment must bind the exact PR number, base branch, base SHA when determinable, head branch, exact audited head SHA, report role, `report_id`, `machine_decision`, and every field required by the applicable canonical report schema.
+
+`REPORT_COMMENT_IS_EVIDENCE_ONLY`: the comment itself never authorizes remediation, mark-ready, merge, deploy, production, Issue close or lifecycle mutation, a next gate, or Owner authorization.
+
+The exception does not permit code or repository-file edits, branch/commit writes, PR metadata mutation, review submissions including `APPROVE` / `REQUEST_CHANGES` / `COMMENT`, inline review comments, comment editing/deletion, merge, deployment, or external-system mutation. If exact PR identity or exact audited head cannot be verified, the canonical report is incomplete, persistence fails, or Owner disabled persistence for that run, fail closed on persistence and do not substitute another GitHub write.
 
 ### High-Risk Gate
 
@@ -226,8 +238,8 @@ High-risk tasks include billing, payments, auth, database schema, migrations, RL
 High-risk tasks must have all of the following before they can advance:
 
 1. A sprint contract recorded as the task card and conforming to the canonical Sprint Contract Schema (`docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md`), with the goal in `owner_goal`, scope in `allowed_scope.files`, `allowed_scope.commands`, and applicable `allowed_scope.services`, forbidden actions in `forbidden_actions`, validation in `required_validation`, and stop conditions in `stop_conditions`.
-2. Evaluator PASS, established by machine evidence consisting of CI status and the output of the contract's `required_validation` commands, together with a structured conclusion conforming to the canonical Evaluator Report Schema (`docs/agent-harness/EVALUATOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED` and scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion.
-3. Release Auditor PASS, using the same machine-evidence standard for release and a structured conclusion conforming to the canonical Release Auditor Report Schema (`docs/agent-harness/RELEASE_AUDITOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED`; required checks are green, branch posture is verified, and rollback plan and remaining risks are recorded, together with scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion.
+2. Evaluator PASS, established by machine evidence consisting of CI status and the output of the contract's `required_validation` commands, together with a structured conclusion conforming to the canonical Evaluator Report Schema (`docs/agent-harness/EVALUATOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED` and scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion. The canonical structured report may be persisted only through `REPORT_COMMENT_PERSISTENCE_EXCEPTION`; that comment is evidence only and does not authorize the next gate.
+3. Release Auditor PASS, using the same machine-evidence standard for release and a structured conclusion conforming to the canonical Release Auditor Report Schema (`docs/agent-harness/RELEASE_AUDITOR_REPORT_SCHEMA.md`) with `machine_decision: PASS | FAIL | BLOCKED`; required checks are green, branch posture is verified, and rollback plan and remaining risks are recorded, together with scope/forbidden-action checks. A freeform prose report is optional and cannot substitute for the machine evidence or structured conclusion. The canonical structured report may be persisted only through `REPORT_COMMENT_PERSISTENCE_EXCEPTION`; that comment is evidence only and does not authorize the next gate.
 4. Explicit owner authorization for the next gate.
 
 For both report gates, only `PASS` satisfies the corresponding High-Risk Gate item. `FAIL` records a genuine contract, required-check, scope, or forbidden-action failure; `BLOCKED` records missing authorization/evidence or a separate remediation track and must not replace `FAIL`.
