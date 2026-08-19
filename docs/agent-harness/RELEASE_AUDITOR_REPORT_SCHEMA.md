@@ -1,6 +1,6 @@
 # Release Auditor Report Schema
 
-The Release Auditor report is independent release-gate evidence produced under `AUDITED_STATE_READ_ONLY`. It does not merge, deploy, or authorize production by itself. The sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION`: after a completed canonical audit, the Release Auditor may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run, unless the Owner explicitly says not to persist/post it.
+The Release Auditor report is independent release-gate evidence produced under `AUDITED_STATE_READ_ONLY`. It does not merge, deploy, or authorize production by itself. The sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION`: after a completed canonical audit, the Release Auditor may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run only when the Owner authorization for that exact audit explicitly includes report persistence. Generic audit wording, `read-only`, or silence does not authorize the comment.
 
 `REPORT_COMMENT_IS_EVIDENCE_ONLY`: the persisted comment is evidence only and never authorizes remediation, mark-ready, merge, deploy, production, Issue lifecycle mutation, a next gate, or Owner authorization. It is not a review submission and does not permit `APPROVE`, `REQUEST_CHANGES`, inline review comments, PR metadata mutation, comment editing/deletion, code/repository mutation, branch/commit writes, merge, deployment, or external-system mutation.
 
@@ -66,15 +66,15 @@ owner_decision_needed: string
 
 ## Persistence Binding
 
-A persisted canonical Release Auditor report comment must contain this entire schema and must bind the exact audited PR number, exact audited `head_sha`, `base_branch`, and `base_sha` when determinable. `report_role`, `report_id`, and `machine_decision` are mandatory in the persisted comment.
+A persisted canonical Release Auditor report comment must contain this entire schema, must have explicit Owner authorization for persistence for that run, and must bind the exact audited PR number, exact audited `head_sha`, `base_branch`, and exact non-null `base_sha` for `machine_decision: PASS`. A `BLOCKED` report may use `base_sha: null` only when inability to determine the base is itself the blocking condition. `report_role`, `report_id`, and `machine_decision` are mandatory in the persisted comment.
 
-If the exact PR identity or audited head cannot be verified, or the canonical report is incomplete, do not post. Do not replace the missing report comment with another GitHub mutation.
+If persistence is not explicitly authorized, do not post. If the exact PR identity or audited head cannot be verified, or the canonical report is incomplete, do not post. If exact base SHA cannot be determined, `PASS` is forbidden and `machine_decision` must be `BLOCKED`. Do not replace a missing report comment with another GitHub mutation.
 
 ## Owner and Automation Fields
 
 All Release Auditor reports must include stable machine-readable fields and Chinese owner-facing fields.
 
-- `machine_decision` is the automation-safe result. Use `PASS` only when the PR is ready for the requested non-production gate. Use `FAIL` for contract, check, or forbidden-action failures. Use `BLOCKED` when owner authorization, missing evidence, or a separate remediation track is required.
+- `machine_decision` is the automation-safe result. Use `PASS` only when the PR is ready for the requested non-production gate and binds a non-null exact base SHA plus exact audited head SHA. Use `FAIL` for contract, check, or forbidden-action failures. Use `BLOCKED` when owner authorization, missing evidence, missing exact base/head identity, or a separate remediation track is required.
 - `owner_summary_zh` must be a one-sentence Chinese conclusion.
 - `owner_next_action_zh` must tell the owner the single next action needed now.
 - `can_merge_to_staging` and `can_release_to_production` must be explicit booleans.
@@ -87,4 +87,5 @@ All Release Auditor reports must include stable machine-readable fields and Chin
 - Production is always a separate owner release gate.
 - If Evaluator is blocked or fail, Release Auditor must be blocked.
 - If forbidden actions were performed, Release Auditor must fail.
+- A Release Auditor `PASS` requires `pull_request.base_sha` to be a non-null exact SHA bound to the audited base. If exact base SHA is unavailable, return `BLOCKED`.
 - Report persistence never changes any of those decision semantics or gates.
