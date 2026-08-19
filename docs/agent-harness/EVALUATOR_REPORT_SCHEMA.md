@@ -1,6 +1,6 @@
 # Evaluator Report Schema
 
-The Evaluator report is independent evidence produced under `AUDITED_STATE_READ_ONLY`. It must not include patches or direct code/repository changes. The sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION`: after a completed canonical audit, the Evaluator may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run, unless the Owner explicitly says not to persist/post it.
+The Evaluator report is independent evidence produced under `AUDITED_STATE_READ_ONLY`. It must not include patches or direct code/repository changes. The sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION`: after a completed canonical audit, the Evaluator may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run only when the Owner authorization for that exact audit explicitly includes report persistence. Generic audit wording, `read-only`, or silence does not authorize the comment.
 
 `REPORT_COMMENT_IS_EVIDENCE_ONLY`: the persisted comment is evidence only and never authorizes remediation, mark-ready, merge, deploy, production, Issue lifecycle mutation, a next gate, or Owner authorization. It is not a review submission and does not permit `APPROVE`, `REQUEST_CHANGES`, inline review comments, PR metadata mutation, comment editing/deletion, code/repository mutation, branch/commit writes, merge, deployment, or external-system mutation.
 
@@ -68,15 +68,15 @@ recommendation: string
 
 ## Persistence Binding
 
-A persisted canonical Evaluator report comment must contain this entire schema and must bind the exact audited PR number, exact audited `head_sha`, `base_branch`, and `base_sha` when determinable. `report_role`, `report_id`, and `machine_decision` are mandatory in the persisted comment.
+A persisted canonical Evaluator report comment must contain this entire schema, must have explicit Owner authorization for persistence for that run, and must bind the exact audited PR number, exact audited `head_sha`, `base_branch`, and exact non-null `base_sha` for `machine_decision: PASS`. A `BLOCKED` report may use `base_sha: null` only when inability to determine the base is itself the blocking condition. `report_role`, `report_id`, and `machine_decision` are mandatory in the persisted comment.
 
-If the exact PR identity or audited head cannot be verified, or the canonical report is incomplete, do not post. Do not replace the missing report comment with another GitHub mutation.
+If persistence is not explicitly authorized, do not post. If the exact PR identity or audited head cannot be verified, or the canonical report is incomplete, do not post. If exact base SHA cannot be determined, `PASS` is forbidden and `machine_decision` must be `BLOCKED`. Do not replace a missing report comment with another GitHub mutation.
 
 ## Owner and Automation Fields
 
 All Evaluator reports must include stable machine-readable fields and Chinese owner-facing fields.
 
-- `machine_decision` is the automation-safe result. Use `PASS` only when the PR satisfies scope, validation, and forbidden-action checks. Use `FAIL` for contract violations or required-check failures. Use `BLOCKED` when external authorization, missing evidence, or a separate remediation track is required.
+- `machine_decision` is the automation-safe result. Use `PASS` only when the PR satisfies scope, validation, forbidden-action checks, and binds a non-null exact base SHA plus exact audited head SHA. Use `FAIL` for contract violations or required-check failures. Use `BLOCKED` when external authorization, missing evidence, missing exact base/head identity, or a separate remediation track is required.
 - `github_review_action` is always `NONE`; report persistence uses a top-level PR Conversation comment, not the GitHub review API.
 - `owner_summary_zh` must be a one-sentence Chinese conclusion.
 - `owner_next_action_zh` must tell the owner the single next action needed now.
@@ -86,7 +86,7 @@ All Evaluator reports must include stable machine-readable fields and Chinese ow
 
 ## Result Meanings
 
-- `pass`: The PR satisfies the contract and validation requirements.
-- `pass-with-notes`: The PR can proceed but has non-blocking notes.
-- `blocked`: The PR cannot proceed without external authorization, missing evidence, or a separate track.
+- `pass`: The PR satisfies the contract and validation requirements and binds exact non-null base/head identity.
+- `pass-with-notes`: The PR can proceed but has non-blocking notes and still binds exact non-null base/head identity.
+- `blocked`: The PR cannot proceed without external authorization, exact identity, missing evidence, or a separate track.
 - `fail`: The PR violates the contract or has failing required checks.
