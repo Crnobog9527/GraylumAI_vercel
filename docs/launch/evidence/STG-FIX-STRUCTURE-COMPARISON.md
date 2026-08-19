@@ -1,39 +1,51 @@
 # STG-FIX structure-comparison evidence record
 
-Status: `CURRENT_FINAL_STG_FIX_EVIDENCE_IDENTITY_RECONCILED_BY_C6`
+Status: `STABLE_FINAL_STG_FIX_EVIDENCE_IDENTITY_CLOSEOUT_BY_C7`
 
-This record preserves the forward-only C5 evidence reconciliation and applies
-only the C6 post-PR-335-merge repository-identity correction. It does not rerun
-a database query or migration. Current identity assertions below come only from
-fresh-read GitHub live state and append-only durable records. C1-C5 historical
-evidence, C4 database validation, and C5 audit provenance remain historical
-facts and are not retroactively reinterpreted. No raw fingerprint or current
-Vercel deployment identity is invented.
+This record preserves the forward-only C5/C6 evidence reconciliation and applies
+only the C7 stable post-merge identity closeout. It does not rerun a database
+query or migration. C1-C6 historical evidence, C4 database validation, and C5/C6
+audit provenance remain historical facts and are not retroactively reinterpreted.
+No raw fingerprint or current Vercel deployment identity is invented.
 
-## Current / final STG-FIX evidence
+A live branch ref is inherently time-varying. This repository record therefore
+does not persist any SHA as an indefinitely current `staging` ref. Any assertion
+about the live current `staging` ref must be fresh-read from GitHub live state.
+Persisted branch SHAs below are bounded to explicit historical events or the C7
+branch-creation snapshot.
+
+## Stable / final STG-FIX evidence
 
 ### Contract and durable lineage
 
-| Field | Current/final value |
+| Field | Stable/final value |
 | --- | --- |
 | Task Issue | `#322` |
 | Historical execution contract | `STG-FIX-ISSUE-322-C4` |
 | Historical evidence-reconciliation contract | `STG-FIX-ISSUE-322-C5` |
-| Current identity-reconciliation contract | `STG-FIX-ISSUE-322-C6` |
+| Historical identity-reconciliation contract | `STG-FIX-ISSUE-322-C6` |
+| Current stable-identity closeout contract | `STG-FIX-ISSUE-322-C7` |
 | C4 Owner gate | Issue #322 comment `5327870357` |
 | C4 durable final result | Issue #322 comment `5328099005` |
 | C5 repository gate | Issue #322 comment `5329885802` |
 | C5 canonical Evaluator PASS | PR #335 comment `5333616844` |
 | C5 canonical Release Auditor PASS | PR #335 comment `5333620329` |
 | C6 Owner gate | Issue #322 comment `5333774702` |
+| C6 canonical Evaluator PASS | PR #339 comment `5334007980` |
+| C6 canonical Release Auditor PASS | PR #339 comment `5338833049` |
+| C7 Owner gate | Issue #322 comment `5339310420` |
 | Production durable fingerprint result | Issue #322 comment `5324287732` |
 | Historical C2 staging result | Issue #322 comment `5324869886` |
-| Current main SHA at C6 reconciliation | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
+| Main SHA at C7 branch creation | `ecf4c6a347038f9352477a98d4171a8ef00c85de` |
 | Historical PR #334 actual merge SHA / C5 pre-merge audited staging base | `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d` |
 | Historical audited PR #334 head | `175a2f5ae1e23740b1f03196642ccf8f3953e122` |
 | PR #335 audited head | `a96ba4c6706c1b4aecd0e332c249d4832712863d` |
 | PR #335 actual merge SHA | `ec9925410b513484c69b5c1decb2abda7882646c` |
-| Current staging SHA | `ec9925410b513484c69b5c1decb2abda7882646c` |
+| PR #339 audited head | `e13b9dd3694a01a618c2bf43262aea1285bfaeec` |
+| PR #339 actual merge SHA | `5fe07eb5877a74380061d97bee470d0e6dd40c76` |
+| Latest completed STG-FIX staging merge SHA at C7 branch creation | `5fe07eb5877a74380061d97bee470d0e6dd40c76` |
+| Staging SHA at C7 branch creation | `5fe07eb5877a74380061d97bee470d0e6dd40c76` |
+| Live current staging ref | `FRESH_READ_FROM_GITHUB_REQUIRED` |
 | STG-FIX specification blob | `96806c8ce0baac0e85ebb462a17b53f04963de9a` |
 
 ### Merged repository identity
@@ -61,16 +73,33 @@ pr_335:
   head_branch: codex/stg-fix-322-c5-evidence-closeout
   audited_head_sha: a96ba4c6706c1b4aecd0e332c249d4832712863d
   actual_merge_sha: ec9925410b513484c69b5c1decb2abda7882646c
-  current_staging_sha: ec9925410b513484c69b5c1decb2abda7882646c
+  staging_after_pr_335_merge_sha: ec9925410b513484c69b5c1decb2abda7882646c
   merge_contains_audited_head: true
+  identity_semantics: HISTORICAL_PR_335_MERGE_IDENTITY
 
-repository_blobs_on_current_staging:
+pr_339:
+  merged: true
+  base_branch: staging
+  head_branch: codex/stg-fix-322-c6-post-merge-identity-reconciliation
+  audited_head_sha: e13b9dd3694a01a618c2bf43262aea1285bfaeec
+  actual_merge_sha: 5fe07eb5877a74380061d97bee470d0e6dd40c76
+  staging_at_c7_branch_creation_sha: 5fe07eb5877a74380061d97bee470d0e6dd40c76
+  latest_completed_stg_fix_merge_sha_at_c7_branch_creation: 5fe07eb5877a74380061d97bee470d0e6dd40c76
+  evaluator_pass_comment: 5334007980
+  release_auditor_pass_comment: 5338833049
+  merge_contains_audited_head: true
+  identity_semantics: LATEST_COMPLETED_STG_FIX_MERGE_AT_C7_BRANCH_CREATION
+
+live_current_staging_ref: FRESH_READ_FROM_GITHUB_REQUIRED
+
+repository_blobs_at_c7_branch_creation:
   packages/db/migrations/0048_restore_staging_baseline_objects.sql: 96b57ea4c7cd153cc43b40ec65ebdfd151c80ff5
   packages/db/migrations/0049_reconcile_stg_fix_target_grants.sql: 1a05b778b1ca1ad80c0ff7cd5f8e4c6892187988
 ```
 
-C5 changed neither migration. C6 also changes neither migration and only
-reconciles the evidence record's post-merge identity labels.
+C5, C6, and C7 change neither migration. C7 only removes self-invalidating
+static-current-ref semantics and records the completed PR #339 merge identity
+with explicit event/snapshot bounds.
 
 ### Durable C4 staging execution result
 
@@ -204,7 +233,7 @@ replacement raw value.
 ### HISTORICAL_PRE_C5_MERGE_DEPLOYMENT_OBSERVATION
 
 This deployment record is preserved only as a historical pre-C5-merge
-observation. C6 did not access or mutate Vercel, and no authorized fresh
+observation. C6/C7 did not access or mutate Vercel, and no authorized fresh
 read-only source in this execution proved a replacement current deployment
 identity. Therefore this record must not be interpreted as the current Vercel
 staging deployment.
@@ -218,7 +247,7 @@ git_branch_at_observation: staging
 git_commit_sha_at_observation: 5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d
 historical_identity: HISTORICAL_PRE_C5_MERGE_STAGING_IDENTITY
 binds_current_staging_sha: false
-current_vercel_staging_deployment_identity: NOT_ASSERTED_BY_C6
+current_vercel_staging_deployment_identity: NOT_ASSERTED_BY_C6_OR_C7
 ```
 
 ### Current non-actions / boundary
@@ -240,15 +269,22 @@ C6_DATABASE_ACCESS: false
 C6_SQL_EXECUTION: false
 C6_VERCEL_ACCESS: false
 C6_VERCEL_MUTATION: false
+C7_SUPABASE_ACCESS: false
+C7_DATABASE_ACCESS: false
+C7_SQL_EXECUTION: false
+C7_VERCEL_ACCESS: false
+C7_VERCEL_MUTATION: false
 ```
 
 This evidence record does not authorize merge, Issue closure, staging-to-main
 promotion, production deployment/smoke, or any next Launch task. C5 canonical
 Evaluator and Release Auditor PASS remain historical audit provenance bound to
 PR #335 audited head `a96ba4c6706c1b4aecd0e332c249d4832712863d` and pre-merge
-staging base `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d`; they are not
-reinterpreted as auditing PR #335's later merge commit. The next allowed step
-after this C6 Draft PR is an independent read-only C6 evidence audit.
+staging base `5d8b38fd5046a94d6f525c8da72dbca8d0aa6f4d`. C6 canonical
+Evaluator and Release Auditor PASS remain historical audit provenance bound to
+PR #339 audited head `e13b9dd3694a01a618c2bf43262aea1285bfaeec` and its audited
+pre-merge staging base. None of those reports is reinterpreted as auditing a
+later merge commit or a permanently current branch ref.
 
 ## HISTORICAL_PRE_C4_STATE
 
@@ -449,13 +485,15 @@ The pre-C4 snapshot is retained without being treated as current state:
 
 `SUPERSEDED_BY_C4_DURABLE_RESULT_5328099005`
 
-## C6 post-merge identity-reconciliation validation posture
+## C7 stable post-merge identity closeout validation posture
 
-The current/final section above is the authoritative identity posture for the
-C6 candidate. It preserves C4 validation results and C5 durable audit provenance
-while separating the historical PR #334 merge / C5 pre-merge audited base from
-PR #335 audited head, actual merge SHA, and current staging SHA. C6 performs no
-database validation, no Supabase access, no production access, and no Vercel
-access or mutation. Migration 0048 and 0049 remain byte-identical. The exact
-one-file repository diff and exact-head CI/Security status are validated at the
-C6 Draft PR boundary; no merge or later gate is implied by this record.
+The stable/final section above preserves C4 final validation and C5/C6 durable
+audit provenance while recording PR #334, PR #335, and PR #339 only with
+historical or event-bounded identity semantics. The live current `staging` ref is
+not represented by a persisted static SHA and must be fresh-read from GitHub live
+state whenever current identity matters. C7 performs no database validation, no
+Supabase access, no production access, and no Vercel access or mutation.
+Migration 0048 and 0049 remain byte-identical. The exact one-file repository
+diff and exact-head CI/Security status are validated at the C7 Draft PR boundary;
+no merge, Issue closure, promotion, production action, next gate, or next Launch
+task is implied by this record.
