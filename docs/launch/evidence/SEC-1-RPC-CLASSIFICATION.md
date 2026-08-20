@@ -46,7 +46,7 @@ the following complete identities. `UNKNOWN=0`.
 | `public.get_log_stats(timestamp with time zone,timestamp with time zone)` | SERVICE_ROLE_ONLY | service_role |
 | `public.get_test_history(text,integer)` | SERVICE_ROLE_ONLY | service_role |
 | `public.get_user_credits(uuid)` | SERVICE_ROLE_ONLY | service_role |
-| `public.is_admin()` | RLS_HELPER | service_role only; no direct client execute |
+| `public.is_admin()` | RLS_HELPER | PUBLIC/anon/authenticated denied; existing service_role posture preserved; no direct client execute |
 | `public.purge_deleted_records(integer)` | SERVICE_ROLE_ONLY | service_role |
 | `public.soft_delete_conversation(uuid,uuid)` | AUTHENTICATED_SELF_GUARDED | authenticated only |
 | `public.soft_delete_ticket(uuid,uuid)` | SERVICE_ROLE_ONLY | service_role |
@@ -63,6 +63,9 @@ not application RPC identities in this candidate.
 - Every `atomic_*` overload listed here, every `cleanup_*` overload listed
   here, and `purge_deleted_records(integer)` are denied to `PUBLIC`, `anon`,
   and `authenticated`.
+- `is_admin()` is denied to `PUBLIC`, `anon`, and `authenticated`; migration
+  `0050` preserves any pre-existing environment-specific `service_role`
+  EXECUTE posture and neither grants nor revokes it.
 - `soft_delete_conversation(uuid,uuid)` is the only business body change. It
   fails closed when `auth.uid()` is null or differs from `p_user_id`, then
   preserves ownership checking, conversation soft delete, related-message
