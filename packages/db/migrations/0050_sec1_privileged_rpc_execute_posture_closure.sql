@@ -26,19 +26,19 @@ BEGIN
     FROM public.conversations
     WHERE id = p_conversation_id
       AND user_id = p_user_id
-      AND is_deleted = false
+      AND is_deleted = 'false'
   ) THEN
     RETURN false;
   END IF;
 
   UPDATE public.conversations
-  SET is_deleted = true,
+  SET is_deleted = 'true',
       deleted_at = NOW()
   WHERE id = p_conversation_id
     AND user_id = p_user_id;
 
   UPDATE public.messages
-  SET is_deleted = true,
+  SET is_deleted = 'true',
       deleted_at = NOW()
   WHERE conversation_id = p_conversation_id;
 
