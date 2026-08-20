@@ -76,7 +76,6 @@ DECLARE
     'public.get_log_stats(timestamp with time zone,timestamp with time zone)',
     'public.get_test_history(text,integer)',
     'public.get_user_credits(uuid)',
-    'public.is_admin()',
     'public.purge_deleted_records(integer)',
     'public.soft_delete_ticket(uuid,uuid)'
   ];
@@ -88,6 +87,14 @@ BEGIN
       EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', v_signature);
     END IF;
   END LOOP;
+
+  -- Legacy RLS helper: deny direct client execution without widening or
+  -- narrowing any environment-specific service_role posture.
+  v_signature := 'public.is_admin()';
+  IF to_regprocedure(v_signature) IS NOT NULL THEN
+    EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', v_signature);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated', v_signature);
+  END IF;
 
   v_signature := 'public.claim_daily_checkin(uuid)';
   IF to_regprocedure(v_signature) IS NOT NULL THEN
