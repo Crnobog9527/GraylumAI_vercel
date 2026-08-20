@@ -467,6 +467,7 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     ctx: {
       ...ctx,
       supabase: userScopedSupabase,
+      userScopedSupabase,
       user: ctx.user,
       profileId,
       userRole,
@@ -498,6 +499,7 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
     ctx: {
       ...ctx,
       supabase: ctx.supabaseAdmin,
+      userScopedSupabase: ctx.userScopedSupabase,
     },
   });
 });
