@@ -157,6 +157,7 @@ export const diagnosticsRouter = router({
 
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -196,6 +197,7 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: input?.runType ?? 'manual',
       });
@@ -219,6 +221,7 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: input.runType,
       });
@@ -241,6 +244,7 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: 'manual',
       });
@@ -264,6 +268,7 @@ export const diagnosticsRouter = router({
     .query(async ({ ctx }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -277,6 +282,7 @@ export const diagnosticsRouter = router({
     .query(async ({ ctx }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -300,6 +306,7 @@ export const diagnosticsRouter = router({
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -322,6 +329,7 @@ export const diagnosticsRouter = router({
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -341,6 +349,7 @@ export const diagnosticsRouter = router({
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
         supabase: ctx.supabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -401,7 +410,7 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const daysToKeep = input?.daysToKeep ?? 30;
 
-      const { data, error } = await ctx.supabase.rpc('cleanup_old_diagnostic_results', {
+      const { data, error } = await ctx.supabaseAdmin.rpc('cleanup_old_diagnostic_results', {
         p_days_to_keep: daysToKeep,
       });
 

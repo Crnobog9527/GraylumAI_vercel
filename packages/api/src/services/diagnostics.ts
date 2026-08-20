@@ -61,6 +61,7 @@ export interface DiagnosticRunResult {
 
 export interface DiagnosticContext {
   supabase: SupabaseClient;
+  supabaseAdmin: SupabaseClient;
   userId?: string;
   runType?: 'manual' | 'cron' | 'ci';
 }
@@ -788,7 +789,7 @@ async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticT
       const requestId = crypto.randomUUID();
 
       // 实际调用数据库 RPC
-      const { data, error } = await ctx.supabase.rpc('atomic_pre_deduct', {
+      const { data, error } = await ctx.supabaseAdmin.rpc('atomic_pre_deduct', {
         p_user_id: ctx.userId,
         p_amount: testAmount,
         p_reason: '诊断测试预扣',
@@ -801,7 +802,7 @@ async function testBillingPrededuct(ctx: DiagnosticContext): Promise<DiagnosticT
 
       // 立即退款以保持积分平衡
       if (deductResult && deductResult.pre_deduct_id) {
-        await ctx.supabase.rpc('atomic_refund', {
+        await ctx.supabaseAdmin.rpc('atomic_refund', {
           p_user_id: ctx.userId,
           p_pre_deduct_id: deductResult.pre_deduct_id,
           p_reason: '诊断测试自动退费'
@@ -848,7 +849,7 @@ async function testBillingIdempotency(ctx: DiagnosticContext): Promise<Diagnosti
   try {
     const { result, latencyMs } = await measureLatency(async () => {
       // 检查 RPC 函数是否存在
-      const { data: rpcCheck, error: rpcError } = await ctx.supabase.rpc('atomic_pre_deduct', {
+      const { data: rpcCheck, error: rpcError } = await ctx.supabaseAdmin.rpc('atomic_pre_deduct', {
         p_user_id: '00000000-0000-0000-0000-000000000000',
         p_amount: 0,
         p_reason: 'test',
@@ -1110,11 +1111,13 @@ async function testRLSIsolation(ctx: DiagnosticContext): Promise<DiagnosticTestR
 
 export class DiagnosticsService {
   private supabase: SupabaseClient;
+  private supabaseAdmin: SupabaseClient;
   private userId?: string;
   private runType: 'manual' | 'cron' | 'ci';
 
   constructor(ctx: DiagnosticContext) {
     this.supabase = ctx.supabase;
+    this.supabaseAdmin = ctx.supabaseAdmin;
     this.userId = ctx.userId;
     this.runType = ctx.runType ?? 'manual';
   }
@@ -1129,6 +1132,7 @@ export class DiagnosticsService {
 
     const ctx: DiagnosticContext = {
       supabase: this.supabase,
+      supabaseAdmin: this.supabaseAdmin,
       userId: this.userId,
       runType: this.runType,
     };
@@ -1186,6 +1190,7 @@ export class DiagnosticsService {
 
     const ctx: DiagnosticContext = {
       supabase: this.supabase,
+      supabaseAdmin: this.supabaseAdmin,
       userId: this.userId,
       runType: this.runType,
     };
@@ -1231,6 +1236,7 @@ export class DiagnosticsService {
   async runSingleTest(testId: string): Promise<DiagnosticTestResult | null> {
     const ctx: DiagnosticContext = {
       supabase: this.supabase,
+      supabaseAdmin: this.supabaseAdmin,
       userId: this.userId,
       runType: this.runType,
     };
@@ -1294,7 +1300,7 @@ export class DiagnosticsService {
    * 获取测试历史
    */
   async getTestHistory(testId: string, limit: number = 10): Promise<DiagnosticTestResult[]> {
-    const { data } = await this.supabase.rpc('get_test_history', {
+    const { data } = await this.supabaseAdmin.rpc('get_test_history', {
       p_test_id: testId,
       p_limit: limit,
     });
@@ -1313,7 +1319,7 @@ export class DiagnosticsService {
    * 获取诊断摘要统计
    */
   async getSummaryStats(hours: number = 24) {
-    const { data } = await this.supabase.rpc('get_diagnostic_summary', {
+    const { data } = await this.supabaseAdmin.rpc('get_diagnostic_summary', {
       p_hours: hours,
     });
 

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  DiagnosticsService,
   hasRoutingEvidence,
   matchBillingSettleByRequestId,
   matchBillingSettleForUsage,
@@ -59,5 +60,49 @@ describe('diagnostics helpers', () => {
     });
 
     expect(matched?.id).toBe('settle-closest');
+  });
+});
+
+describe('diagnostics privileged client separation', () => {
+  it('routes privileged RPCs through the service-role client and keeps reads user-scoped', async () => {
+    const userRpc = vi.fn(() => {
+      throw new Error('privileged RPC dispatched through the user client');
+    });
+    const userFrom = vi.fn(() => ({
+      select: vi.fn(() => ({
+        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+      })),
+      insert: vi.fn().mockResolvedValue({ error: null }),
+    }));
+    const adminRpc = vi.fn(async (name: string) => {
+      if (name === 'atomic_pre_deduct') {
+        return { data: [{ pre_deduct_id: 'pre-deduct-1' }], error: null };
+      }
+
+      return { data: [], error: null };
+    });
+    const adminFrom = vi.fn();
+
+    const service = new DiagnosticsService({
+      supabase: { rpc: userRpc, from: userFrom } as any,
+      supabaseAdmin: { rpc: adminRpc, from: adminFrom } as any,
+      userId: 'user-1',
+    });
+
+    await service.getTestHistory('billing_prededuct');
+    await service.getSummaryStats();
+    await service.getLatestResults();
+    const billingResult = await service.runSingleTest('billing_prededuct');
+
+    expect(billingResult?.status).toBe('passed');
+    expect(adminRpc.mock.calls.map(([name]) => name)).toEqual([
+      'get_test_history',
+      'get_diagnostic_summary',
+      'atomic_pre_deduct',
+      'atomic_refund',
+    ]);
+    expect(userRpc).not.toHaveBeenCalled();
+    expect(userFrom).toHaveBeenCalledWith('diagnostic_latest_results');
+    expect(adminFrom).not.toHaveBeenCalled();
   });
 });
