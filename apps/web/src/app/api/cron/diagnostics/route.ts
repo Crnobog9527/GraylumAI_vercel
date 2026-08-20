@@ -50,6 +50,7 @@ export async function GET(request: Request) {
     // 运行诊断测试
     const diagnosticsService = new DiagnosticsService({
       supabase,
+      supabaseAdmin: supabase,
       runType: 'cron',
     });
 
