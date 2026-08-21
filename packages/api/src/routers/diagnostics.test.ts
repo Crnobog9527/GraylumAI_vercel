@@ -33,6 +33,9 @@ function createProfilesQueryBuilder(result: Promise<unknown>) {
     eq() {
       return this;
     },
+    limit() {
+      return result;
+    },
     single() {
       return result;
     },
@@ -101,41 +104,33 @@ function createAdminCaller(options?: {
   aiModelsResult?: { data: unknown; error: unknown };
   aiModelsKeyResult?: { data: unknown; error: unknown };
 }) {
+  let aiModelsCallCount = 0;
+  let profileCallCount = 0;
   const userScopedSupabase = {
     from(table: string) {
       if (table === 'profiles') {
+        profileCallCount += 1;
+        const result = profileCallCount === 1
+          ? {
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }
+          : (options?.profilesResult ?? { data: [{ id: 'admin-user' }], error: null });
         return createProfilesQueryBuilder(
-          Promise.resolve({
-            data: {
-              id: 'admin-user',
-              role: 'admin',
-              status: 'active',
-              nickname: 'Admin',
-              email: 'admin@example.com',
-            },
-            error: null,
-          }),
+          Promise.resolve(result),
         );
       }
 
-      throw new Error(`Unexpected user-scoped table ${table}`);
-    },
-  };
-
-  let aiModelsCallCount = 0;
-  const adminSupabase = {
-    from(table: string) {
       if (table === 'diagnostic_results') {
         return options?.batchResult
           ? createBatchResultsQueryBuilder(Promise.resolve(options.batchResult))
           : createRecentRunsQueryBuilder(Promise.resolve(options?.recentRunsResult ?? { data: [], error: null }));
-      }
-
-      if (table === 'profiles') {
-        return createHealthQueryBuilder(Promise.resolve(options?.profilesResult ?? {
-          data: [{ id: 'admin-user' }],
-          error: null,
-        }));
       }
 
       if (table === 'ai_models') {
@@ -146,6 +141,12 @@ function createAdminCaller(options?: {
         return createHealthQueryBuilder(Promise.resolve(result));
       }
 
+      throw new Error(`Unexpected user-scoped table ${table}`);
+    },
+  };
+
+  const adminSupabase = {
+    from(table: string) {
       throw new Error(`Unexpected admin-scoped table ${table}`);
     },
     rpc(fn: string) {
@@ -180,35 +181,27 @@ function createAdminHealthCaller(options?: {
   aiModelsResult?: { data: unknown; error: unknown };
   aiModelsKeyResult?: { data: unknown; error: unknown };
 }) {
+  let aiModelsCallCount = 0;
+  let profileCallCount = 0;
   const authSupabase = {
     from(table: string) {
       if (table === 'profiles') {
+        profileCallCount += 1;
+        const result = profileCallCount === 1
+          ? {
+              data: {
+                id: 'admin-user',
+                role: 'admin',
+                status: 'active',
+                nickname: 'Admin',
+                email: 'admin@example.com',
+              },
+              error: null,
+            }
+          : (options?.profilesResult ?? { data: [{ id: 'admin-user' }], error: null });
         return createProfilesQueryBuilder(
-          Promise.resolve({
-            data: {
-              id: 'admin-user',
-              role: 'admin',
-              status: 'active',
-              nickname: 'Admin',
-              email: 'admin@example.com',
-            },
-            error: null,
-          }),
+          Promise.resolve(result),
         );
-      }
-
-      throw new Error(`Unexpected auth table ${table}`);
-    },
-  };
-
-  let aiModelsCallCount = 0;
-  const adminSupabase = {
-    from(table: string) {
-      if (table === 'profiles') {
-        return createHealthQueryBuilder(Promise.resolve(options?.profilesResult ?? {
-          data: [{ id: 'admin-user' }],
-          error: null,
-        }));
       }
 
       if (table === 'ai_models') {
@@ -219,6 +212,12 @@ function createAdminHealthCaller(options?: {
         return createHealthQueryBuilder(Promise.resolve(result));
       }
 
+      throw new Error(`Unexpected auth table ${table}`);
+    },
+  };
+
+  const adminSupabase = {
+    from(table: string) {
       throw new Error(`Unexpected admin table ${table}`);
     },
   };

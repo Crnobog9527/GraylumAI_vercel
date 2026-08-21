@@ -26,6 +26,7 @@ async function runDiagnostics() {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const service = new DiagnosticsService({
         supabase: supabase as any,
+        supabaseAdmin: supabase as any,
         userId,
         runType: 'manual'
     });

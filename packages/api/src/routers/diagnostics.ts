@@ -156,7 +156,8 @@ export const diagnosticsRouter = router({
       const recentRunsLimit = input?.recentRunsLimit ?? 5;
 
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -169,12 +170,12 @@ export const diagnosticsRouter = router({
           logDiagnosticsFallback('diagnostics_summary_stats_failed', { hours: summaryHours });
           return createSummaryStatsFallback();
         }),
-        getDiagnosticsHealthCheck(ctx.supabase),
+        getDiagnosticsHealthCheck(ctx.userScopedSupabase),
         service.getLatestRuntimeProof(runtimeHours).catch(() => {
           logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: runtimeHours });
           return createRuntimeProofFallback(runtimeHours);
         }),
-        getRecentRunsData(ctx.supabase, recentRunsLimit),
+        getRecentRunsData(ctx.userScopedSupabase, recentRunsLimit),
       ]);
 
       return {
@@ -195,7 +196,8 @@ export const diagnosticsRouter = router({
     }).optional())
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: input?.runType ?? 'manual',
       });
@@ -218,7 +220,8 @@ export const diagnosticsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: input.runType,
       });
@@ -240,7 +243,8 @@ export const diagnosticsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
         runType: 'manual',
       });
@@ -263,7 +267,8 @@ export const diagnosticsRouter = router({
   getTestDefinitions: adminProcedure
     .query(async ({ ctx }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -276,7 +281,8 @@ export const diagnosticsRouter = router({
   getLatestResults: adminProcedure
     .query(async ({ ctx }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -299,7 +305,8 @@ export const diagnosticsRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -321,7 +328,8 @@ export const diagnosticsRouter = router({
     }).optional())
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -340,7 +348,8 @@ export const diagnosticsRouter = router({
     }).optional())
     .query(async ({ ctx, input }) => {
       const service = new DiagnosticsService({
-        supabase: ctx.supabase,
+        supabase: ctx.userScopedSupabase,
+        supabaseAdmin: ctx.supabaseAdmin,
         userId: ctx.profileId,
       });
 
@@ -359,7 +368,7 @@ export const diagnosticsRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(20).default(5),
     }).optional())
-    .query(async ({ ctx, input }) => getRecentRunsData(ctx.supabase, input?.limit ?? 5)),
+    .query(async ({ ctx, input }) => getRecentRunsData(ctx.userScopedSupabase, input?.limit ?? 5)),
 
   /**
    * 获取指定批次的结果
@@ -369,7 +378,7 @@ export const diagnosticsRouter = router({
       batchId: z.string(),
     }))
     .query(async ({ ctx, input }) => {
-      const { data, error } = await ctx.supabase
+      const { data, error } = await ctx.userScopedSupabase
         .from('diagnostic_results')
         .select('*')
         .eq('batch_id', input.batchId)
@@ -401,7 +410,7 @@ export const diagnosticsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const daysToKeep = input?.daysToKeep ?? 30;
 
-      const { data, error } = await ctx.supabase.rpc('cleanup_old_diagnostic_results', {
+      const { data, error } = await ctx.supabaseAdmin.rpc('cleanup_old_diagnostic_results', {
         p_days_to_keep: daysToKeep,
       });
 
@@ -421,7 +430,7 @@ export const diagnosticsRouter = router({
    * 不运行完整测试，只检查关键状态
    */
   healthCheck: adminProcedure
-    .query(async ({ ctx }) => getDiagnosticsHealthCheck(ctx.supabase)),
+    .query(async ({ ctx }) => getDiagnosticsHealthCheck(ctx.userScopedSupabase)),
 });
 
 export default diagnosticsRouter;
