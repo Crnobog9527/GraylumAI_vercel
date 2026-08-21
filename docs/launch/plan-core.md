@@ -35,14 +35,16 @@ A ready candidate is never an authorized task, even when exactly one candidate i
 
 ## Launch selection boundary
 
-- Only the Owner may select the next named Launch task.
+- Only the Owner may select the next named Launch task, and the selected task must be a member of the currently derived ready-candidate set.
+- Readiness narrows the set of eligible Owner choices but never selects or authorizes a task by itself.
+- If the Owner selects a task that is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`; do not classify, plan, or implement it.
 - No Agent may infer task authorization from readiness, dependency completion, priority, ordering, a previous task finishing, or a prior gate.
 - If the Owner has not explicitly selected a current Launch task, return `NO_PRODUCT_TASK_AUTHORIZED`.
-- After Owner selection, classify the task under current `AGENTS.md`.
+- After an eligible Owner selection, classify the task under current `AGENTS.md`.
 - Ordinary Launch work may use the ordinary direct-authorization path and bounded module/risk envelope; a Dedicated Task Issue/canonical report lifecycle is not required by default.
 - High-risk Launch work requires the durable task record, canonical contract, adversarial Evaluator, deterministic Release Auditor/Release Gate, staging validation, and explicit Owner transition gate defined by `AGENTS.md`.
 - Delegated Control-Plane Bookkeeping may record high-risk task/gate evidence but cannot select the task.
-- Multiple/conflicting current task identities, gates, or writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
+- Multiple/conflicting current task identities, readiness evidence, gates, or writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
 - After any task or transition completes, stop. Never automatically progress to another node.
 
 ## Writer and recovery invariants

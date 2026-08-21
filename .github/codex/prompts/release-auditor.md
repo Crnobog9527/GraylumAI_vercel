@@ -20,7 +20,7 @@ Do not repeat the Evaluator's semantic code review. The Evaluator owns adversari
 - adversarial Evaluator PASS bound to the same exact base/head;
 - exact-head CI/Security and contract validation results;
 - High-Risk Validation Floor evidence, including any concrete `NOT_APPLICABLE` reason for genuinely docs-only/non-runtime work;
-- direct-main hotfix status and protected staging-resync evidence when applicable;
+- direct-main hotfix lifecycle phase and, when auditing post-merge resync completion, protected staging-resync evidence;
 - actionable review-thread state, writer state, mergeability, and production relevance.
 
 If any required identity or evidence is missing, stale, ambiguous, conflicting, or drifted, return `BLOCKED` or `FAIL`; do not substitute semantic re-review or remediation.
@@ -34,7 +34,7 @@ A Release Auditor `PASS` requires all applicable predicates to be true:
 3. Required CI/Security and contract validation for the exact head are successful.
 4. Changed scope remains inside the high-risk contract and forbidden-action checks pass.
 5. The High-Risk Validation Floor is present and current. A missing required item is `FAIL` or `BLOCKED`; only genuinely docs-only/non-runtime work may record `NOT_APPLICABLE` with a concrete reason.
-6. If the change is an emergency direct-main hotfix, the same exact fix has been synchronized back into `staging` through the protected PR path under fresh Owner authorization and live checks; unresolved resync is `FAIL` or `BLOCKED`. Otherwise record this predicate as not applicable with a reason.
+6. For an emergency direct-main hotfix before its merge, verify that the contract records the mandatory post-merge synchronization of the same exact fix back into `staging` through the protected PR path and that the later sync remains a separately Owner-authorized transition; do not require that future resync to have already occurred. When auditing post-merge hotfix lifecycle completion or the staging-resync transition, require current evidence that the same exact fix has been synchronized into `staging` through the protected PR path under fresh Owner authorization and live checks; unresolved resync blocks lifecycle completion. Otherwise record this predicate as not applicable with a reason.
 7. Unresolved actionable review findings equal zero.
 8. Exactly-one-writer holds and no equivalent competing PR exists.
 9. Branch posture and mergeability are valid for the requested transition.

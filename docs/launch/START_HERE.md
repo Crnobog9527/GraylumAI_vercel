@@ -19,15 +19,16 @@ This file stores no current task, runtime ledger, authorization state, or comple
 1. Fresh-read repository identity and exact current `main` / `staging` refs.
 2. Read authoritative current `staging` `AGENTS.md` and resolve the accepted policy blob / `authority_epoch` from live G2 evidence.
 3. Read `plan-core.md` and derive ready candidates from live completion evidence.
-4. Treat the ready-candidate set as discovery data only.
-5. Require the Owner to explicitly select the named Launch task before any planning or implementation begins.
-6. Classify the Owner-selected task using current `AGENTS.md`:
+4. Treat the ready-candidate set as discovery data only; readiness never selects or authorizes a task by itself.
+5. Require the Owner to explicitly select a named Launch task from the current ready-candidate set before any planning or implementation begins.
+6. If the Owner-selected task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`; do not classify, plan, or implement it.
+7. Classify the eligible Owner-selected task using current `AGENTS.md`:
    - ordinary Launch work may use direct Owner authorization plus a bounded module/risk envelope;
    - high-risk Launch work requires the durable task record, canonical contract, and bounded gate defined by `AGENTS.md`.
-7. Verify exactly-one-writer and the exact branch/PR state before mutation.
-8. If no Launch task is explicitly Owner-selected, return `NO_PRODUCT_TASK_AUTHORIZED`.
-9. If task identity, authorization, or writer state conflicts, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
-10. After the authorized task/transition completes, stop. Never automatically select or progress to the next Launch task.
+8. Verify exactly-one-writer and the exact branch/PR state before mutation.
+9. If no Launch task is explicitly Owner-selected, return `NO_PRODUCT_TASK_AUTHORIZED`.
+10. If task identity, authorization, readiness evidence, or writer state conflicts, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
+11. After the authorized task/transition completes, stop. Never automatically select or progress to the next Launch task.
 
 A Dedicated Task Issue is therefore not a universal Launch prerequisite. It remains required for high-risk work and available when the Owner wants a durable record.
 

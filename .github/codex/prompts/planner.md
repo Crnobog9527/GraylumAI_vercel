@@ -12,7 +12,9 @@ Classify the Owner-selected task using `AGENTS.md`.
 - **High-risk task:** require a durable task record and produce/validate a canonical Sprint Contract using `docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md` before Generator implementation.
 - **Uncertain risk:** fail closed to high risk until the Owner resolves the classification.
 
-Never select a Launch task yourself. Readiness, dependency state, priority, and plan order are data only. Plan only the exact task the Owner explicitly selected.
+Never select a Launch task yourself. Readiness, dependency state, priority, and plan order are data only and never select a task.
+
+For Launch work, explicit Owner selection is necessary but not sufficient: before classification or planning, verify the named task is a member of the currently derived ready-candidate set from the authoritative Launch roots and live completion evidence. If it is not ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY` and do not plan or implement it. Readiness narrows eligible Owner choices; it never creates selection or authorization.
 
 ## Ordinary implementation brief
 
