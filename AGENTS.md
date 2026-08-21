@@ -30,6 +30,10 @@ Every implementation PR created under Owner authorization must record the Owner-
 
 Readiness, dependency completion, priority, issue state, plan ordering, tracker state, and model recommendations are data only. They never authorize a task.
 
+Launch readiness is a mandatory eligibility gate for every Launch planning or implementation entry point. Explicit Owner selection is necessary but not sufficient: before risk classification, branch creation, planning, or Generator implementation for any named Launch task, derive the current ready-candidate set from authoritative current `staging` `docs/launch/START_HERE.md` + `docs/launch/plan-core.md` using live completion evidence and verify that the exact Owner-selected task is a member.
+
+If the Owner-selected Launch task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY` and do not classify, create a branch, plan, or implement it. If readiness evidence is missing, stale, ambiguous, or conflicting, return `BLOCKED_CONTEXT_NOT_VERIFIED` and stop. This requirement applies equally to Planner-mediated flows, direct ordinary Owner authorization, and direct Generator invocation; no path may bypass it.
+
 No Agent may automatically select, start, or progress to another Launch task. The Owner must explicitly select the named Launch task before planning or implementation begins. After any task, PR, audit, merge, or closeout completes, stop unless the Owner has separately authorized the next exact action.
 
 If current evidence yields multiple conflicting task identities or writers, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
@@ -58,7 +62,7 @@ The default ordinary flow is intentionally short:
 
 For ordinary work:
 
-1. Fresh-read live authority and the Owner-selected goal.
+1. Fresh-read live authority and the Owner-selected goal. If the goal names a Launch task, satisfy the mandatory Launch ready-candidate eligibility gate above before risk classification or any mutation.
 2. Create a feature branch from current exact `staging`.
 3. Implement only the allowed modules/risk envelope plus directly necessary callers/tests.
 4. Run relevant validation and create a Draft PR to `staging`.
