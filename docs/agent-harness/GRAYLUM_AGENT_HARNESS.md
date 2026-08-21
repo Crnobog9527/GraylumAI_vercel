@@ -31,9 +31,14 @@ High-risk work retains durable evidence and role separation:
 2. Bounded Generator implementation on a feature branch from exact `staging`.
 3. Required CI/Security and validation on the exact head.
 4. Independent adversarial Evaluator PASS bound to exact base/head.
-5. Applicable staging/browser validation.
-6. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
-7. Fresh explicit Owner authorization for the exact next GitHub transition.
+5. The High-Risk Validation Floor: current GitHub CI, relevant lint/typecheck/test evidence, runtime Vercel staging deployment status, affected-flow smoke/browser evidence, rollback plan, and remaining risks before `staging -> main` promotion.
+6. Category-specific staging validation: Supabase staging for DB/RLS/RPC/migration work, Stripe test mode for payment/billing work, staging auth-flow validation with non-production/test identities for auth work, and Vercel staging environment/configuration validation for runtime env/config changes. Genuinely docs-only/non-runtime governance work may record `NOT_APPLICABLE` only with a concrete reason.
+7. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
+8. Fresh explicit Owner authorization for the exact next GitHub transition.
+
+The Release Auditor must fail or block when a required High-Risk Validation Floor item is absent; it must not reinterpret a missing item as optional.
+
+An emergency production hotfix directly to `main` requires explicit Owner authorization and a mandatory synchronization of the same exact fix back into `staging` through the protected PR path. No direct protected-branch push or unrelated bundled change is allowed, and the hotfix lifecycle remains incomplete while that resync is unresolved under fresh Owner authorization and live checks.
 
 Retained schemas remain the high-risk structured evidence formats:
 

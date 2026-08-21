@@ -34,7 +34,22 @@ Do not lock ordinary work to an arbitrary exact file count. Do not grant unrestr
 
 The durable contract must bind the exact Owner goal, risk class, base/target, allowed repository paths/actions/services, forbidden actions, required validation, adversarial Evaluator checklist, deterministic Release Auditor predicates, production relevance, and stop conditions.
 
-High-risk work remains staging-first and requires exact base/head identity, required CI/Security, adversarial Evaluator PASS, applicable staging/browser validation, deterministic Release Auditor PASS, and a separate explicit Owner gate for the exact next transition.
+High-risk work remains staging-first and requires exact base/head identity, required CI/Security, the High-Risk Validation Floor below, adversarial Evaluator PASS, deterministic Release Auditor PASS, and a separate explicit Owner gate for the exact next transition.
+
+## High-Risk Validation Floor
+
+Every high-risk contract must carry a non-optional validation floor; do not collapse it into generic `applicable` judgment. Before any `staging` to `main` promotion, require current GitHub CI status, relevant lint/typecheck/test evidence, Vercel staging deployment status for runtime changes, affected-flow smoke/browser evidence, a rollback plan, and remaining risks.
+
+Carry these category-specific staging requirements into the contract:
+
+- DB/RLS/RPC/migration/Supabase work: Supabase staging validation;
+- payment/billing/Stripe work: Stripe test-mode validation;
+- auth work: staging auth-flow validation with non-production/test identities and staging-only state; and
+- runtime environment/configuration work: applicable Vercel staging environment/configuration validation.
+
+Genuinely docs-only/non-runtime governance work may record runtime, browser, or staging-service validation as `NOT_APPLICABLE` only with a concrete reason. The Release Auditor must fail or block when a required floor item is absent; it must not treat the item as optional.
+
+If an emergency production hotfix is authorized directly to `main`, the contract must also require the same exact fix to be synchronized back into `staging` through the protected PR path. No direct protected-branch push or unrelated bundled change is allowed, and the hotfix lifecycle remains incomplete until that resync is resolved by a fresh Owner-authorized transition.
 
 ## Frozen Harness boundary
 

@@ -82,11 +82,33 @@ A high-risk candidate advances only through all of the following:
 1. Bounded Generator implementation on a feature branch from exact current `staging`.
 2. Required CI/Security and contract validation on the exact head.
 3. Independent adversarial Evaluator PASS bound to exact non-null base/head identity.
-4. Applicable staging/browser validation evidence.
+4. The High-Risk Validation Floor below, with every required category-specific item present or explicitly recorded as `NOT_APPLICABLE` with a concrete reason for genuinely docs-only/non-runtime work.
 5. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
 6. Fresh explicit Owner authorization for the exact next GitHub transition.
 
 A candidate that changes governance, `AGENTS.md`, Harness documents, or policy prompts must be reviewed and released under the authoritative rules from its exact PR base. Candidate-side proposed rules never authorize, audit, or weaken the lifecycle of that same candidate.
+
+## High-Risk Validation Floor
+
+The high-risk lifecycle has a mandatory validation floor. A generic `applicable` label is not a waiver and cannot make a required category-specific validation discretionary.
+
+Before any `staging` to `main` promotion, verify and report:
+
+- current GitHub CI status;
+- relevant local or CI lint, typecheck, and test results;
+- Vercel staging deployment status for runtime changes;
+- affected-flow smoke or browser evidence;
+- rollback plan; and
+- remaining risks.
+
+Category-specific staging validation is mandatory when the change touches the corresponding surface:
+
+- DB/RLS/RPC/migration/Supabase work: Supabase staging validation;
+- payment/billing/Stripe work: Stripe test-mode validation;
+- auth work: staging auth-flow validation using non-production/test identities and staging-only state; and
+- runtime environment or configuration work: applicable Vercel staging environment/configuration validation.
+
+A genuinely docs-only, non-runtime governance change may record runtime, browser, or staging-service validation as `NOT_APPLICABLE` only with a concrete reason. Planner/high-risk contract guidance must carry these category-specific requirements, and the Release Auditor must return `FAIL` or `BLOCKED` when a required floor item is absent rather than reinterpret it as optional.
 
 ## Adversarial Evaluator
 
@@ -121,7 +143,7 @@ Its decision is limited to verifiable release-state predicates:
 - the Evaluator PASS binds the same exact base/head;
 - required CI/Security and contract validation for the exact head are successful;
 - changed scope remains within the high-risk contract and forbidden-action checks pass;
-- applicable staging/browser validation evidence is present and current;
+- High-Risk Validation Floor evidence is present and current; a missing required item yields `FAIL` or `BLOCKED`, while only genuinely docs-only/non-runtime work may record `NOT_APPLICABLE` with a concrete reason;
 - unresolved actionable review findings equal zero;
 - exactly-one-writer still holds and no equivalent competing PR exists;
 - mergeability/branch posture is valid for the requested transition;
@@ -150,6 +172,12 @@ A persisted report must bind the exact PR and audited base/head and conform to t
 - Required CI/Security and branch protections must not be bypassed.
 - Exact base/head identity must be rebound before audit, ready, merge, or release transitions.
 - `staging -> main` promotion is a separate Owner-authorized release transition.
+
+## Production Hotfix Staging Resync Guard
+
+An emergency production hotfix that goes directly to `main` requires explicit Owner authorization. After that direct-main hotfix, the same exact fix must be synchronized back into `staging` through the protected PR path; no direct protected-branch push or unrelated change may be bundled.
+
+The staging resync is a mandatory lifecycle step, but it does not create autonomous permission: the exact sync transition still requires fresh Owner authorization and current live checks. The direct-main hotfix lifecycle is not complete while the corresponding staging synchronization remains unresolved.
 
 Owner authorization is a decision gate, not a requirement that the Owner personally click GitHub. A fresh-context Agent may execute an exact GitHub transition only when the Owner explicitly authorizes that transition and all applicable live predicates pass. There is no autonomous merge path.
 
