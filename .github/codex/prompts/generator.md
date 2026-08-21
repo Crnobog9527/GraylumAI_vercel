@@ -21,9 +21,14 @@ For a high-risk task:
 - exact current Owner implementation gate;
 - exact allowed paths/actions/services and stop conditions.
 
+For any named Launch task, ordinary or high risk, also require fresh readiness evidence derived from the authoritative current `staging` Launch roots and live completion evidence. Explicit Owner selection is necessary but is not sufficient Launch eligibility.
+
 ## Implementation rules
 
 - Fresh-read repository identity, exact `main`/`staging`, `AGENTS.md`, accepted policy/G2 binding, Owner authorization, and writer/branch state before mutation.
+- Before risk classification, branch creation, planning handoff, or implementation of any named Launch task, derive the current ready-candidate set from authoritative current `staging` `docs/launch/START_HERE.md` + `docs/launch/plan-core.md` and live completion evidence, then verify the exact Owner-selected task is a member. This check applies to direct Generator invocation as well as Planner-mediated flows and cannot be bypassed by ordinary direct Owner authorization.
+- If the Owner-selected Launch task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY` and stop without classifying, creating a branch, editing files, or implementing the task.
+- If Launch readiness evidence is missing, stale, ambiguous, or conflicting, return `BLOCKED_CONTEXT_NOT_VERIFIED` and stop without mutation.
 - Start feature work from fresh exact `staging` unless an explicit hotfix authorization says otherwise.
 - Target `staging` with a Draft PR.
 - Never push directly to `main` or `staging` and never force-push.
