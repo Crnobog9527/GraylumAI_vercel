@@ -1,85 +1,89 @@
-# Graylum Agent Harness
+# Graylum Agent Harness — Frozen Minimal Operating Model
 
-The Graylum Agent Harness is a GitHub issue driven control plane for bounded engineering work. It separates planning, implementation, validation, and release readiness into distinct roles:
+## Status
 
-1. Planner
-2. Generator
-3. Evaluator
-4. Release Auditor
+Agent Harness / Orchestrator expansion is frozen until Graylum completes its first official launch and the Owner later performs an explicit re-evaluation.
 
-The harness does not make production decisions. Owner authorization remains required for production releases and high-risk gates.
+This document now describes only the minimal role guidance that supports product delivery. It is not a separate task selector, authorization source, runtime ledger, dispatcher, receipt engine, or autonomous control plane. GitHub live state plus authoritative `AGENTS.md` and the accepted policy/G2 binding remain the authority chain.
 
-## Branch Model
+Do not build or advance Phase 0.6, `control-plane-sync`, automatic repair, low-risk auto-merge, OpenSpec, or a new Harness service/bot/ledger/dispatcher/receipt engine/Orchestrator while the freeze is active.
 
-- `main` is the production release branch.
-- `staging` is the pre-production integration branch.
-- Agent branches start from the latest `origin/staging` by default.
-- Agent pull requests target `staging` by default.
-- Production promotion is a separate owner-authorized release gate.
+## Ordinary product flow
 
-## Role Model
+The normal flow is:
 
-Planner is read-only and writes a sprint contract only when separately authorized by the applicable task flow.
+`Owner goal -> Codex Draft PR -> required CI/Security -> ChatGPT adversarial semantic review -> browser/staging validation when applicable -> Owner-authorized merge`
 
-Generator implements only the approved sprint contract.
+Ordinary tasks do not require by default:
 
-Evaluator is independent and `AUDITED_STATE_READ_ONLY`: it verifies the PR against the contract and must not edit code, repository files, branches, PR metadata, reviews, issues, merge state, deployments, or external systems. Its sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION` below, and that exception itself requires explicit Owner authorization for report persistence for the exact audit run.
+- a Dedicated Task Issue;
+- a canonical Sprint Contract;
+- a persisted canonical Evaluator report;
+- a Release Auditor report.
 
-Release Auditor is independent and `AUDITED_STATE_READ_ONLY`: it checks release readiness, branch posture, checks, and production relevance and must not edit audited state, submit reviews, mark ready, merge, deploy, mutate issues, or mutate external systems. Its sole write exception is `REPORT_COMMENT_PERSISTENCE_EXCEPTION` below, and that exception itself requires explicit Owner authorization for report persistence for the exact audit run.
+Ordinary scope is expressed as allowed modules / risk envelope plus directly necessary callers and tests. Crossing into another module, protected/high-risk surface, dependency/supply-chain work, database/auth/payment work, production/external systems, or a different risk class requires a new Owner decision.
 
-Owner defines business goals and production authorization. Owner does not act as the code reviewer.
+## High-risk flow
 
-## REPORT_COMMENT_PERSISTENCE_EXCEPTION
+High-risk work retains durable evidence and role separation:
 
-After a canonical Evaluator or Release Auditor completes an audit of an unambiguously identified PR, that audit role may append exactly one top-level PR Conversation comment containing the complete canonical structured report for that run only when the Owner authorization for that exact audit explicitly includes report persistence, such as `persist/post the canonical report` or an unambiguously equivalent `persist_report: true` instruction.
+1. Durable task record and canonical Sprint Contract.
+2. Bounded Generator implementation on a feature branch from exact `staging`.
+3. Required CI/Security and validation on the exact head.
+4. Independent adversarial Evaluator PASS bound to exact base/head.
+5. Applicable staging/browser validation.
+6. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
+7. Fresh explicit Owner authorization for the exact next GitHub transition.
 
-For canonical audit tasks, `read-only`, `strictly read-only`, and equivalent wording mean `AUDITED_STATE_READ_ONLY`. They do not suppress an already authorized report-output write, but they do not create report-comment authorization. Generic audit wording or silence is not authorization. If persistence is not explicitly authorized, the audit still completes and returns its canonical report to the Owner without any GitHub write.
+Retained schemas remain the high-risk structured evidence formats:
 
-The persisted comment must bind the exact PR number, base branch, exact audited head SHA, head branch, report role, `report_id`, `machine_decision`, and every field required by the applicable canonical report schema. A `PASS` report must also bind a non-null exact base SHA; if exact base SHA cannot be determined, the audit must return `BLOCKED`, not `PASS`. A `BLOCKED` report may use `base_sha: null` only when missing base identity is the blocking condition.
+- `SPRINT_CONTRACT_SCHEMA.md`
+- `EVALUATOR_REPORT_SCHEMA.md`
+- `RELEASE_AUDITOR_REPORT_SCHEMA.md`
 
-`REPORT_COMMENT_IS_EVIDENCE_ONLY`: the comment is evidence only. It cannot authorize remediation, mark-ready, merge, deploy, production, Issue closure or lifecycle mutation, a next gate, or Owner authorization. The exception does not permit code/repository edits, branch/commit writes, PR metadata changes, `APPROVE` / `REQUEST_CHANGES` / `COMMENT` review submissions, inline review comments, comment editing/deletion, merges, deployments, or external-system mutations.
+A candidate that changes governance/Harness/policy prompts cannot use candidate-side rules to audit or release itself; base-side authoritative rules govern that candidate's lifecycle.
 
-If persistence is not explicitly authorized, exact PR/base/head identity required for the decision cannot be verified, the canonical report is incomplete, or persistence fails, fail closed on persistence and do not substitute another GitHub write.
+## Role boundaries
 
-## Report Contract
+### Planner
 
-Evaluator and Release Auditor reports must be both owner-readable and machine-readable.
+Read-only. For ordinary work it produces a bounded implementation brief. For high-risk work it produces/validates the canonical durable contract. It never selects the next Launch task.
 
-Owner-facing fields must be in Chinese and include:
+### Generator
 
-- `owner_summary_zh`: one sentence with the decision summary.
-- `owner_next_action_zh`: one sentence describing what the owner needs to do now.
+Implements only the Owner-authorized ordinary risk envelope or exact high-risk contract. It creates a Draft PR to `staging` and stops at the authorized transition. It never auto-merges or expands risk/scope silently.
 
-Machine-readable fields must remain stable for automation:
+### Evaluator
 
-- `report_role`: `EVALUATOR` or `RELEASE_AUDITOR`.
-- `report_id`: unique report identifier.
-- `machine_decision`: `PASS`, `FAIL`, or `BLOCKED`.
-- exact PR identity, base/head branch, exact audited head SHA, and a non-null exact base SHA for `PASS`.
-- `risk_level`: `low`, `medium`, `high`, or `production`.
-- `can_merge_to_staging`: boolean.
-- `can_release_to_production`: boolean.
-- `forbidden_actions_observed`: boolean.
-- `required_human_authorization`: `none`, `owner`, or `production_owner_gate`.
-- `evidence_links`: GitHub checks, PR, issue, logs, and reports.
-- `stop_reason`: required when blocked.
+Independent and `AUDITED_STATE_READ_ONLY`. It is adversarial: it actively tries to falsify correctness, completeness, scope compliance, validation quality, and security assumptions.
 
-## Permanent Forbidden Actions
+Ordinary Evaluator output may be concise and need not be persisted. High-risk output uses the canonical schema and exact base/head binding.
 
-The harness must not perform:
+### Release Auditor
 
-- Production deployment or production smoke.
-- Supabase production DB access.
-- Stripe live action.
-- Real checkout, payment, refund, cancel, or webhook replay.
-- Vercel, Supabase, or Stripe env/project settings changes.
-- Uncontrolled DB migration.
-- Uncontrolled RPC, RLS, schema, or grant modification.
-- Cron trigger.
-- High-risk issue closure.
+High-risk deterministic release-state gate. It checks exact identity, checks/validation, scope/forbidden actions, staging evidence, unresolved findings, writer state, mergeability, and production relevance. It does not redo semantic code review and it never merges.
 
-The report-comment exception never changes these forbidden-action boundaries.
+### Owner
 
-## Phase 0 Boundary
+Selects the task and authorizes exact state-changing transitions. Readiness, priority, or plan order never substitutes for Owner task selection. The Owner may authorize a fresh-context Agent to execute an exact GitHub transition after live predicates pass; this is still Owner-controlled and is not autonomous merge.
 
-Phase 0 only creates the control-plane foundation: rules, prompts, schemas, templates, documentation, and workflow trigger coverage. It is not automatic development and it is not automatic merge.
+## Security and release invariants
+
+Preserve:
+
+- GitHub-live authority;
+- staging-first integration;
+- protected branches and required CI/Security;
+- exact base/head binding for audits/transitions;
+- exactly-one-writer and `dual_write_allowed=false`;
+- no direct protected-branch push;
+- no autonomous merge or task progression;
+- separate strict Owner gates for main/production and DB/RLS/auth/payment/secrets/env/external-system actions.
+
+`SECURITY_BASELINE.md`, `THREAT_MODEL.md`, and `TRUST_BOUNDARIES.md` remain security reference material. Their open/future workstreams do not authorize Harness expansion during the freeze.
+
+## Canonical report persistence
+
+For high-risk audits, canonical report comments are evidence only. Persistence requires explicit Owner authorization for that exact audit run. Without it, return the report without a GitHub write.
+
+A report comment never authorizes remediation, mark-ready, merge, deployment, production, Issue lifecycle mutation, or another task.
