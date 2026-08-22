@@ -11,7 +11,12 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
+import {
+  getAuthCaptchaOptions,
+  getAuthCaptchaSiteKey,
+  HCAPTCHA_SCRIPT_SRC,
+  runAuthCaptchaAttempt,
+} from '@/lib/authCaptcha';
 
 type VerifyTone = 'info' | 'success' | 'error';
 
@@ -108,9 +113,9 @@ function VerifyEmailPageContent() {
 
     setResending(true);
     const supabase = createClient();
-    let captchaToken: string;
+    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
     try {
-      captchaToken = getAuthCaptchaToken();
+      captchaOptions = getAuthCaptchaOptions();
     } catch (error) {
       setMessage({ tone: 'error', text: getSafeErrorMessage(error, '请完成人机验证后重试。') });
       setResending(false);
@@ -120,14 +125,16 @@ function VerifyEmailPageContent() {
     const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
     emailRedirectTo.searchParams.set('next', redirectTarget);
 
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email,
-      options: {
-        emailRedirectTo: emailRedirectTo.toString(),
-        captchaToken,
-      },
-    });
+    const { error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
+      supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: {
+          emailRedirectTo: emailRedirectTo.toString(),
+          ...options,
+        },
+      }),
+    );
 
     if (error) {
       setMessage({

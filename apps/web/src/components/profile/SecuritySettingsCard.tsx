@@ -15,7 +15,12 @@ import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
+import {
+  getAuthCaptchaOptions,
+  getAuthCaptchaSiteKey,
+  HCAPTCHA_SCRIPT_SRC,
+  runAuthCaptchaAttempt,
+} from '@/lib/authCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -58,15 +63,16 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
       setStatusMessage('当前没有可用邮箱地址，无法发送验证邮件。');
       return;
     }
+    const userEmail = user.email;
 
     setResendLoading(true);
     setStatusMessage(null);
 
     try {
       const supabase = createClient();
-      let captchaToken: string;
+      let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
       try {
-        captchaToken = getAuthCaptchaToken();
+        captchaOptions = getAuthCaptchaOptions();
       } catch (error) {
         setStatusTone('error');
         setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
@@ -75,14 +81,16 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
       const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
       emailRedirectTo.searchParams.set('next', '/profile?tab=security');
 
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: user.email,
-        options: {
-          emailRedirectTo: emailRedirectTo.toString(),
-          captchaToken,
-        },
-      });
+      const { error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
+        supabase.auth.resend({
+          type: 'signup',
+          email: userEmail,
+          options: {
+            emailRedirectTo: emailRedirectTo.toString(),
+            ...options,
+          },
+        }),
+      );
 
       if (error) {
         setStatusTone('error');
@@ -121,24 +129,27 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
       setStatusMessage('当前会话缺少邮箱信息，无法修改密码。');
       return;
     }
+    const userEmail = user.email;
 
     setPasswordLoading(true);
 
     try {
       const supabase = createClient();
-      let captchaToken: string;
+      let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
       try {
-        captchaToken = getAuthCaptchaToken();
+        captchaOptions = getAuthCaptchaOptions();
       } catch (error) {
         setStatusTone('error');
         setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
         return;
       }
-      const { error: reauthError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: passwordForm.current_password,
-        options: { captchaToken },
-      });
+      const { error: reauthError } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
+        supabase.auth.signInWithPassword({
+          email: userEmail,
+          password: passwordForm.current_password,
+          options,
+        }),
+      );
 
       if (reauthError) {
         setStatusTone('error');

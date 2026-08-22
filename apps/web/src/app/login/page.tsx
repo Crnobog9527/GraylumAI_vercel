@@ -21,7 +21,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
-import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
+import {
+  getAuthCaptchaOptions,
+  getAuthCaptchaSiteKey,
+  HCAPTCHA_SCRIPT_SRC,
+  runAuthCaptchaAttempt,
+} from '@/lib/authCaptcha';
 
 type AuthMode = 'login' | 'signup';
 type StatusTone = 'error' | 'success' | 'info';
@@ -126,9 +131,9 @@ function LoginPageContent() {
     setPendingAction('login');
     setStatus(null);
 
-    let captchaToken: string;
+    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
     try {
-      captchaToken = getAuthCaptchaToken();
+      captchaOptions = getAuthCaptchaOptions();
     } catch (error) {
       setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
       setPendingAction(null);
@@ -136,11 +141,13 @@ function LoginPageContent() {
     }
 
     const supabase = createClient();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-      options: { captchaToken },
-    });
+    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
+      supabase.auth.signInWithPassword({
+        email,
+        password,
+        options,
+      }),
+    );
 
     if (error) {
       const shouldRouteToVerify = /confirm|verified|verification|email/i.test(getErrorMessageText(error));
@@ -190,28 +197,30 @@ function LoginPageContent() {
 
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
-    let captchaToken: string;
+    let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
     try {
-      captchaToken = getAuthCaptchaToken();
+      captchaOptions = getAuthCaptchaOptions();
     } catch (error) {
       setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
       setPendingAction(null);
       return;
     }
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo,
-        captchaToken,
-        data: {
-          nickname: nickname.trim() || undefined,
-          display_name: nickname.trim() || undefined,
-          invite_code: trimmedInviteCode || undefined,
+    const { data, error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
+      supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo,
+          ...options,
+          data: {
+            nickname: nickname.trim() || undefined,
+            display_name: nickname.trim() || undefined,
+            invite_code: trimmedInviteCode || undefined,
+          },
         },
-      },
-    });
+      }),
+    );
 
     if (error) {
       setStatus({

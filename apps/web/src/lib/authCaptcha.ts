@@ -2,6 +2,11 @@ export const HCAPTCHA_SCRIPT_SRC = 'https://js.hcaptcha.com/1/api.js';
 
 type HCaptchaClient = {
   getResponse: (widgetId?: number) => string;
+  reset: (widgetId?: number) => void;
+};
+
+export type AuthCaptchaOptions = {
+  captchaToken?: string;
 };
 
 declare global {
@@ -11,10 +16,14 @@ declare global {
 }
 
 export function getAuthCaptchaSiteKey() {
-  return process.env.NEXT_PUBLIC_HCAPTCHA_SITEKEY ?? '';
+  return process.env.NEXT_PUBLIC_HCAPTCHA_SITEKEY?.trim() ?? '';
 }
 
-export function getAuthCaptchaToken(widgetId?: number) {
+export function getAuthCaptchaToken(widgetId?: number): string | undefined {
+  if (!getAuthCaptchaSiteKey()) {
+    return undefined;
+  }
+
   if (typeof window === 'undefined') {
     throw new Error('人机验证暂不可用，请稍后重试。');
   }
@@ -25,4 +34,29 @@ export function getAuthCaptchaToken(widgetId?: number) {
   }
 
   return token;
+}
+
+export function getAuthCaptchaOptions(widgetId?: number): AuthCaptchaOptions {
+  const token = getAuthCaptchaToken(widgetId);
+  return token ? { captchaToken: token } : {};
+}
+
+export function resetAuthCaptcha(widgetId?: number) {
+  if (!getAuthCaptchaSiteKey() || typeof window === 'undefined') {
+    return;
+  }
+
+  window.hcaptcha?.reset(widgetId);
+}
+
+export async function runAuthCaptchaAttempt<T>(
+  options: AuthCaptchaOptions,
+  operation: (options: AuthCaptchaOptions) => Promise<T>,
+  widgetId?: number,
+): Promise<T> {
+  try {
+    return await operation(options);
+  } finally {
+    resetAuthCaptcha(widgetId);
+  }
 }
