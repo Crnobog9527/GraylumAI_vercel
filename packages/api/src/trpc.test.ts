@@ -94,21 +94,18 @@ describe('createTRPCContext', () => {
 
   it('marks admin privileges as unavailable when service role key is missing', async () => {
     const publicClient = { role: 'public-client' };
-    const fallbackClient = { role: 'anon-fallback-client' };
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    createClientMock
-      .mockReturnValueOnce(publicClient)
-      .mockReturnValueOnce(fallbackClient);
+    createClientMock.mockReturnValueOnce(publicClient);
 
     const { createTRPCContext } = await import('./trpc');
     const ctx = await createTRPCContext({
       headers: new Headers(),
     });
 
-    expect(createClientMock).toHaveBeenCalledTimes(2);
+    expect(createClientMock).toHaveBeenCalledTimes(1);
     expect(ctx.supabase).toBe(publicClient);
     expect(ctx.supabasePublic).toBe(publicClient);
-    expect(ctx.supabaseAdmin).toBe(fallbackClient);
+    expect(ctx.supabaseAdmin).toBeNull();
     expect(ctx.hasSupabaseAdminPrivileges).toBe(false);
   });
 });
@@ -458,7 +455,7 @@ describe('protectedProcedure profile bootstrap', () => {
     expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
   });
 
-  it('bootstraps a logged-in dashboard-created auth user before the email verification gate', async () => {
+  it('blocks an unverified auth user before profile bootstrap or opening grant', async () => {
     const supabaseMocks = createProfilesSupabase();
     const dashboardCreatedUser = {
       ...user,
@@ -475,22 +472,36 @@ describe('protectedProcedure profile bootstrap', () => {
       message: 'EMAIL_NOT_VERIFIED',
     });
 
-    expect(supabaseMocks.profileInserts).toEqual([
-      expect.objectContaining({
-        id: user.id,
-        email: user.email,
-        nickname: 'Dashboard User',
-        role: 'user',
-        status: 'active',
-        membership_level: 'free',
-        credits: 0,
-      }),
-    ]);
+    expect(supabaseMocks.profileInserts).toEqual([]);
     expect(supabaseMocks.userProfileInserts).toEqual([]);
-    expect(supabaseMocks.rpc).toHaveBeenCalledWith('atomic_apply_credit_ledger_entry', expect.objectContaining({
-      p_user_id: user.id,
-      p_idempotency_key: `opening_grant:${user.id}`,
-    }));
+    expect(supabaseMocks.userProfileSelects).toEqual([]);
+    expect(supabaseMocks.adminTableCalls).toEqual([]);
+    expect(supabaseMocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('bootstraps a first Google OAuth user and keeps the opening grant exactly once', async () => {
+    const supabaseMocks = createProfilesSupabase();
+    const googleUser = {
+      ...user,
+      app_metadata: { provider: 'google', providers: ['google'] },
+      email_confirmed_at: null,
+      identities: [],
+    };
+    const { isEmailVerified } = await import('./lib/auth');
+
+    expect(isEmailVerified(googleUser as any)).toBe(true);
+    await expect(callProtectedProcedure(supabaseMocks, {
+      userOverride: googleUser,
+      isEmailVerified: isEmailVerified(googleUser as any),
+    })).resolves.toMatchObject({ profileId: user.id });
+    await expect(callProtectedProcedure(supabaseMocks, {
+      userOverride: googleUser,
+      isEmailVerified: isEmailVerified(googleUser as any),
+    })).resolves.toMatchObject({ profileId: user.id });
+
+    expect(supabaseMocks.profileInserts).toHaveLength(1);
+    expect(supabaseMocks.rpc).toHaveBeenCalledTimes(1);
+    expect(supabaseMocks.creditTransactions).toHaveLength(1);
   });
 
   it('does not issue another opening grant when the profile already exists', async () => {

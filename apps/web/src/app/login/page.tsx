@@ -1,6 +1,7 @@
 "use client";
 
 import Link from 'next/link';
+import Script from 'next/script';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -20,6 +21,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
+import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
 
 type AuthMode = 'login' | 'signup';
 type StatusTone = 'error' | 'success' | 'info';
@@ -124,10 +126,20 @@ function LoginPageContent() {
     setPendingAction('login');
     setStatus(null);
 
+    let captchaToken: string;
+    try {
+      captchaToken = getAuthCaptchaToken();
+    } catch (error) {
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setPendingAction(null);
+      return;
+    }
+
     const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
+      options: { captchaToken },
     });
 
     if (error) {
@@ -178,11 +190,21 @@ function LoginPageContent() {
 
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
+    let captchaToken: string;
+    try {
+      captchaToken = getAuthCaptchaToken();
+    } catch (error) {
+      setStatus({ tone: 'error', message: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setPendingAction(null);
+      return;
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo,
+        captchaToken,
         data: {
           nickname: nickname.trim() || undefined,
           display_name: nickname.trim() || undefined,
@@ -247,6 +269,7 @@ function LoginPageContent() {
   };
 
   const isBusy = pendingAction !== null;
+  const captchaSiteKey = getAuthCaptchaSiteKey();
   const submitLabel = mode === 'signup' ? '创建账户' : '登录';
   const submitBusyLabel = mode === 'signup' ? '创建中...' : '登录中...';
   const siteName =
@@ -399,6 +422,12 @@ function LoginPageContent() {
                   </div>
 
                   <form className="space-y-4" onSubmit={handleSubmit}>
+                    {captchaSiteKey ? (
+                      <>
+                        <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
+                        <div className="h-captcha" data-sitekey={captchaSiteKey} />
+                      </>
+                    ) : null}
                     {mode === 'signup' && (
                       <>
                         <div className="space-y-2">

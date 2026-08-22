@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from 'react';
+import Script from 'next/script';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, LogOut, MailCheck, RefreshCw } from 'lucide-react';
@@ -10,6 +11,7 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
 
 type VerifyTone = 'info' | 'success' | 'error';
 
@@ -106,6 +108,15 @@ function VerifyEmailPageContent() {
 
     setResending(true);
     const supabase = createClient();
+    let captchaToken: string;
+    try {
+      captchaToken = getAuthCaptchaToken();
+    } catch (error) {
+      setMessage({ tone: 'error', text: getSafeErrorMessage(error, '请完成人机验证后重试。') });
+      setResending(false);
+      return;
+    }
+
     const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
     emailRedirectTo.searchParams.set('next', redirectTarget);
 
@@ -114,6 +125,7 @@ function VerifyEmailPageContent() {
       email,
       options: {
         emailRedirectTo: emailRedirectTo.toString(),
+        captchaToken,
       },
     });
 
@@ -147,6 +159,8 @@ function VerifyEmailPageContent() {
       </div>
     );
   }
+
+  const captchaSiteKey = getAuthCaptchaSiteKey();
 
   return (
     <main className="min-h-screen bg-[#070707] px-4 py-6 sm:px-6">
@@ -213,6 +227,12 @@ function VerifyEmailPageContent() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
+              {captchaSiteKey ? (
+                <>
+                  <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
+                  <div className="h-captcha sm:col-span-2" data-sitekey={captchaSiteKey} />
+                </>
+              ) : null}
               <Button
                 type="button"
                 onClick={handleRefreshStatus}

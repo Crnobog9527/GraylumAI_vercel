@@ -31,6 +31,13 @@ function readSmokeSql() {
   );
 }
 
+function readAuthMigrationSql() {
+  return readFileSync(
+    new URL('../../db/migrations/0051_auth_opening_grant_profile_defaults.sql', import.meta.url),
+    'utf8',
+  );
+}
+
 function extractServiceRoleInsertColumns(sql: string) {
   const grantBlock = sql.match(
     /GRANT INSERT \(([\s\S]*?)\) ON TABLE public\.profiles TO service_role;/,
@@ -45,6 +52,15 @@ function extractServiceRoleInsertColumns(sql: string) {
 }
 
 describe('profile bootstrap service-role grants migration', () => {
+  it('binds the AUTH-1 profile default to zero without rewriting balances', () => {
+    const migrationSql = readAuthMigrationSql();
+    const schemaSource = readFileSync(new URL('../../db/schema.ts', import.meta.url), 'utf8');
+
+    expect(migrationSql).toContain('ALTER COLUMN credits SET DEFAULT 0;');
+    expect(migrationSql).toContain('does not rewrite existing balances');
+    expect(schemaSource).toContain("credits: integer('credits').default(0).notNull(),");
+  });
+
   it('grants service_role the minimum profile bootstrap surface', () => {
     const migrationSql = readMigrationSql();
 

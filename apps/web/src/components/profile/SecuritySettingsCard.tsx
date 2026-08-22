@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
+import Script from 'next/script';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
@@ -14,6 +15,7 @@ import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getAuthCaptchaSiteKey, getAuthCaptchaToken, HCAPTCHA_SCRIPT_SRC } from '@/lib/authCaptcha';
 import {
   Dialog,
   DialogContent,
@@ -45,6 +47,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   const authProvider = user?.auth_provider || 'email';
   const isEmailPasswordAccount = authProvider === 'email';
+  const captchaSiteKey = getAuthCaptchaSiteKey();
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
@@ -61,6 +64,14 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
+      let captchaToken: string;
+      try {
+        captchaToken = getAuthCaptchaToken();
+      } catch (error) {
+        setStatusTone('error');
+        setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
+        return;
+      }
       const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
       emailRedirectTo.searchParams.set('next', '/profile?tab=security');
 
@@ -69,6 +80,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
         email: user.email,
         options: {
           emailRedirectTo: emailRedirectTo.toString(),
+          captchaToken,
         },
       });
 
@@ -114,9 +126,18 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
     try {
       const supabase = createClient();
+      let captchaToken: string;
+      try {
+        captchaToken = getAuthCaptchaToken();
+      } catch (error) {
+        setStatusTone('error');
+        setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
+        return;
+      }
       const { error: reauthError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: passwordForm.current_password,
+        options: { captchaToken },
       });
 
       if (reauthError) {
@@ -150,6 +171,12 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
 
   return (
     <>
+      {captchaSiteKey ? (
+        <>
+          <Script src={HCAPTCHA_SCRIPT_SRC} strategy="afterInteractive" />
+          <div className="h-captcha" data-sitekey={captchaSiteKey} />
+        </>
+      ) : null}
       <div
         className="rounded-2xl p-6"
         style={{
