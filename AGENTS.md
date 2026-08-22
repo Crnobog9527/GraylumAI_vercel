@@ -174,7 +174,8 @@ A persisted report must bind the exact PR and audited base/head and conform to t
 - Never push directly to `main` or `staging`.
 - Never force-push unless an exact later rule and Owner authorization explicitly permit it; ordinary and high-risk task flows do not.
 - Required CI/Security and branch protections must not be bypassed.
-- Exact base/head identity must be rebound before audit, ready, merge, or release transitions.
+- Before ready, merge, or release transitions, the current PR base SHA and head SHA must exactly match the identities bound by the latest applicable semantic review/audit evidence; for high-risk work they must match the latest applicable Evaluator PASS and Release Auditor PASS. Any base or head drift invalidates the prior review/audit evidence. Do not rebind old PASS records to the new state; run the required fresh review/audit again before proceeding.
+- Any Agent-executed merge must submit `expected_head_sha` equal to the exact audited/current head SHA, or use an equivalent atomic compare-and-swap. A mismatch fails closed; do not retry the merge against a new head until that head has been freshly reviewed/audited and the Owner has authorized the new exact transition.
 - `staging -> main` promotion is a separate Owner-authorized release transition.
 
 ## Production Hotfix Staging Resync Guard
