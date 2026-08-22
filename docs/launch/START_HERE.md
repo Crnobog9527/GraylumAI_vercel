@@ -2,32 +2,38 @@
 
 `STAGING_REF_CONDITIONAL_ACTIVE`
 
-This file is the stable Launch discovery index only when this exact cutover content is present on the authoritative current `staging` ref under the repository-wide `AGENTS.md` plus accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate this index.
+This file is a Launch discovery index only when this exact content is present on the authoritative current `staging` ref under live `AGENTS.md` plus the accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. A feature branch, commit, Draft PR, review, check, Issue, gate, ready set, or model conclusion cannot activate or authorize Launch work.
 
-This file is index/discovery-only. It does not contain or duplicate a DAG, ready set, current task, completed status, next task, runtime ledger, authorization state, or completion state.
+This file stores no current task, runtime ledger, authorization state, or completion state.
 
 ## Entry points
 
-- [Authoritative staging AGENTS.md](https://github.com/Crnobog9527/GraylumAI_vercel/blob/staging/AGENTS.md)
-- [DEVELOPMENT_POLICY.md / G2 authority path](https://github.com/Crnobog9527/GraylumAI_vercel/blob/staging/docs/governance/DEVELOPMENT_POLICY.md)
-- [Frozen Master Plan v10.1](./Graylum_Master_Plan_v10.1.md)
-- [Launch Plan Core](./plan-core.md)
-- Stable task specifications under `docs/launch/tasks/`
-- Dedicated Task Issue plus exact task-spec/materialized-contract plus current Owner-gate convention for Launch product-task selection
+- Authoritative current `staging` `AGENTS.md`.
+- Accepted `docs/governance/DEVELOPMENT_POLICY.md` / G2 binding.
+- Frozen Master Plan v10.1.
+- `docs/launch/plan-core.md`.
+- Stable task specifications under `docs/launch/tasks/`.
 
 ## Discovery protocol
 
-1. Fresh-read the live repository identity and exact current `main` / `staging` refs.
-2. Read the authoritative current `staging` `AGENTS.md`, then resolve the accepted `DEVELOPMENT_POLICY.md` exact blob / `authority_epoch` from live G2 binding evidence.
-3. Confirm that this cutover content is actually present on the authoritative current `staging` ref. If it is only on a feature branch, commit, Draft PR, review, check, Issue, or gate, Launch remains inactive.
-4. Read `plan-core.md` and derive the ready candidate(s) using its external completion evidence and ready predicate.
-5. For every Launch candidate considered executable, require a real dedicated Task Issue and verify an exact task-specification/materialized canonical-contract binding.
-6. Verify the exact current Owner authorization/gate for that dedicated task. Delegated Control-Plane Bookkeeping may record this durable evidence exactly as allowed by `AGENTS.md`; it does not create autonomous task-selection authority.
-7. Exactly one valid executable candidate may become the current Launch product task.
-8. Zero valid executable candidates produces `NO_PRODUCT_TASK_AUTHORIZED`.
-9. Multiple or conflicting valid executable candidates produces `BLOCKED_CONTEXT_NOT_VERIFIED`.
-10. Do not autonomously choose among candidates or automatically progress to another task.
+1. Fresh-read repository identity and exact current `main` / `staging` refs.
+2. Read authoritative current `staging` `AGENTS.md` and resolve the accepted policy blob / `authority_epoch` from live G2 evidence.
+3. Read `plan-core.md` and derive ready candidates from live completion evidence.
+4. Treat the ready-candidate set as discovery data only; readiness never selects or authorizes a task by itself.
+5. Require the Owner to explicitly select a named Launch task from the current ready-candidate set before any planning or implementation begins.
+6. If the Owner-selected task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`; do not classify, plan, or implement it.
+7. Classify the eligible Owner-selected task using current `AGENTS.md`:
+   - ordinary Launch work may use direct Owner authorization plus a bounded module/risk envelope;
+   - high-risk Launch work requires the durable task record, canonical contract, and bounded gate defined by `AGENTS.md`.
+8. Verify exactly-one-writer and the exact branch/PR state before mutation.
+9. If no Launch task is explicitly Owner-selected, return `NO_PRODUCT_TASK_AUTHORIZED`.
+10. If task identity, authorization, readiness evidence, or writer state conflicts, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
+11. After the authorized task/transition completes, stop. Never automatically select or progress to the next Launch task.
 
-Retained Issue #263/#267/#268/#270 and equivalent legacy tracker/runtime/recovery prose are readable only as data, history, backlog, index, or evidence for Launch task-selection purposes. They cannot independently select or authorize a task, restore Harness runtime authority, or become fallback authority. Issue #276 and other valid product backlog remain backlog data and are not auto-selected. Evidence retained in #263 remains readable as evidence/backlog. Unadopted Dependabot/supply-chain PRs remain outside Launch task selection unless separately authorized.
+A Dedicated Task Issue is therefore not a universal Launch prerequisite. It remains required for high-risk work and available when the Owner wants a durable record.
 
-`dual_write_allowed=false`. Legacy fallback is forbidden. No legacy Issue edit or closure is required for this staging-ref cutover to be complete, and later cleanup failure cannot reactivate a legacy selector. Recovery is forward-only through a new exact governance change.
+Delegated Control-Plane Bookkeeping may record a high-risk durable task/gate exactly as `AGENTS.md` permits, but it never creates task-selection authority.
+
+Retained Issues, trackers, Harness runtime prose, historical gates, and backlog items are evidence/history only. They cannot select a task, restore a legacy writer, or create fallback authority.
+
+`dual_write_allowed=false`. Recovery is forward-only. No cleanup failure or historical state can reactivate automatic task selection.

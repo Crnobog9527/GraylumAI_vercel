@@ -2,9 +2,7 @@
 
 `STAGING_REF_CONDITIONAL_ACTIVE`
 
-This document is the Launch Plan structural and task-discovery root only when this exact cutover content is present on the authoritative current `staging` ref under the repository-wide `AGENTS.md` + accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate this file.
-
-When that authoritative-staging condition is true, `docs/launch/START_HERE.md` + this `plan-core.md` are the sole Launch product-task discovery/selection root. This file contains plan structure only; it stores no progress, runtime, completion, authorization, or current-task state.
+This document is the Launch structural/discovery root only when present on the authoritative current `staging` ref under live `AGENTS.md` plus the accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. It stores no runtime, completion, authorization, current-task, or automatic-progression state.
 
 ## Task structure
 
@@ -25,32 +23,34 @@ When that authoritative-staging condition is true, `docs/launch/START_HERE.md` +
 | `CI-1` | `STG-FIX` | `product` | `none` | 130 | 130 |
 | `REL-1` | `BILL-1`, `SKILL-1B`, `PAY-1`, `CI-1` | `shared` | `none` | 140 | 140 |
 
-## Ready-candidate derivation rule
+## Ready-candidate derivation
 
-The read-only derivation evaluates each node using live completion evidence external to this file. A task is ready only when:
+Resolve completion from live external evidence and compute:
 
 `ready(task) = NOT completed(task) AND every dependency is completed`
 
-The derivation then emits eligible node IDs ordered by ascending `priority`, ascending `order`, and finally `task_id` as a deterministic tie-breaker. `plan-core` stores no progress, runtime, or completion state; `completed(task)` is resolved from external evidence at derivation time.
+Candidates may be presented in deterministic `priority`, `order`, then `task_id` order. This ordering is informational only.
 
-The derivation output is a projection called a ready-candidate set. A ready candidate is not an authorized task.
+A ready candidate is never an authorized task, even when exactly one candidate is ready.
 
-## Launch-lane authority boundary
+## Launch selection boundary
 
-- Repository-wide authorization remains governed by the authoritative `AGENTS.md`. Ordinary repository work does not universally require a dedicated Task Issue or a separately posted receipt.
-- Launch product-task selection intentionally uses a narrower durable convention. A ready Launch candidate becomes executable only when there is a real dedicated Task Issue, an exact task-specification/materialized canonical-contract binding, and an exact current Owner authorization/gate for that task.
-- Delegated Control-Plane Bookkeeping remains available exactly as `AGENTS.md` permits, so an Agent may record the Owner-approved dedicated Task Issue and bounded gate without requiring the Owner to manually create or copy them.
-- The exact current gate must bind the live repository identity, fresh refs, the exact task-specification/materialized-contract identity, and the permitted action scope before Generator work begins.
-- Priority and order determine only deterministic presentation order; they do not grant authorization and do not permit autonomous task choice.
-- Zero valid executable Launch candidates produces `NO_PRODUCT_TASK_AUTHORIZED`.
-- Multiple or conflicting valid executable Launch candidates produces `BLOCKED_CONTEXT_NOT_VERIFIED`.
-- No Agent may choose among multiple candidates, infer authorization from readiness or priority, or automatically progress to another task.
-- This Launch convention narrows task selection only. It does not expand repository permissions, authorize merge or production, or override any Permanent Forbidden Action in `AGENTS.md`.
+- Only the Owner may select the next named Launch task, and the selected task must be a member of the currently derived ready-candidate set.
+- Readiness narrows the set of eligible Owner choices but never selects or authorizes a task by itself.
+- If the Owner selects a task that is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`; do not classify, plan, or implement it.
+- No Agent may infer task authorization from readiness, dependency completion, priority, ordering, a previous task finishing, or a prior gate.
+- If the Owner has not explicitly selected a current Launch task, return `NO_PRODUCT_TASK_AUTHORIZED`.
+- After an eligible Owner selection, classify the task under current `AGENTS.md`.
+- Ordinary Launch work may use the ordinary direct-authorization path and bounded module/risk envelope; a Dedicated Task Issue/canonical report lifecycle is not required by default.
+- High-risk Launch work requires the durable task record, canonical contract, adversarial Evaluator, deterministic Release Auditor/Release Gate, staging validation, and explicit Owner transition gate defined by `AGENTS.md`.
+- Delegated Control-Plane Bookkeeping may record high-risk task/gate evidence but cannot select the task.
+- Multiple/conflicting current task identities, readiness evidence, gates, or writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
+- After any task or transition completes, stop. Never automatically progress to another node.
 
-## Exactly-one-writer and recovery
+## Writer and recovery invariants
 
-When the authoritative-staging condition is true, retained legacy tracker/runtime/recovery material is evidence, history, index, or backlog data only for Launch task-selection purposes and cannot become a second writer or fallback selector. `dual_write_allowed=false`; legacy fallback is forbidden.
+Exactly-one-writer is required for the current authorized task. `dual_write_allowed=false`.
 
-Before the later cutover merge, this file remains inactive and the existing authoritative staging state is unchanged. Base/head/CAS drift, failed checks, failed audit, or a failed merge means no activation and no reinterpretation or restoration of legacy authority.
+Retained trackers, Issues, Harness material, historical gates, and completion prose are evidence/history only and cannot become a second writer or fallback selector.
 
-After a successful cutover merge, later cleanup failure cannot reactivate a legacy selector. If Launch authority later needs correction, fail closed to `NO_PRODUCT_TASK_AUTHORIZED` (or `BLOCKED_CONTEXT_NOT_VERIFIED` when identities conflict) and require a new exact forward governance change. Recovery is forward-only; automatic legacy restoration is forbidden.
+Base/head drift, failed checks, failed audit, writer conflict, or failed transition fails closed. Recovery is forward-only through fresh live authority and a new exact Owner decision when needed; automatic legacy restoration is forbidden.
