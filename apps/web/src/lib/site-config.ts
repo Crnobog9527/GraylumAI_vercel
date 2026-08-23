@@ -46,6 +46,33 @@ function resolveHostname(hostname?: string | null) {
   return '';
 }
 
+function isRuntimeAuthHost(hostname: string) {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.vercel.app')
+  );
+}
+
+function resolveRuntimeAuthOrigin(value?: string | URL | null) {
+  const candidate = value ?? (typeof window !== 'undefined' ? window.location.origin : null);
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const url = new URL(candidate.toString());
+    if (!['http:', 'https:'].includes(url.protocol) || !isRuntimeAuthHost(url.hostname.toLowerCase())) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function resolveSiteName(value?: string | null) {
   return resolveTrimmedValue(value) ||
     resolveTrimmedValue(process.env.NEXT_PUBLIC_SITE_NAME) ||
@@ -66,12 +93,21 @@ export function resolveAppUrl() {
   );
 }
 
-export function resolveAuthAppUrl() {
+export function resolveAuthAppUrl(runtimeOrigin?: string | URL | null) {
+  const runtimeAuthOrigin = resolveRuntimeAuthOrigin(runtimeOrigin);
+  if (runtimeAuthOrigin) {
+    return runtimeAuthOrigin;
+  }
+
   return normalizeAppOrigin(
     resolveTrimmedValue(process.env.NEXT_PUBLIC_AUTH_APP_URL) ||
       resolveTrimmedValue(process.env.NEXT_PUBLIC_APP_URL),
     DEFAULT_AUTH_APP_URL
   );
+}
+
+export function resolveAuthCallbackOrigin(requestOrigin: string | URL) {
+  return resolveAuthAppUrl(requestOrigin);
 }
 
 export function resolveSupabaseCookieOptions(hostname?: string | null) {

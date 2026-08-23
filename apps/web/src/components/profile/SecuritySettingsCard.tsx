@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import { buildAuthHref, resolveAuthAppUrl } from '@/lib/site-config';
+import { buildAuthHref } from '@/lib/site-config';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,7 +39,6 @@ interface MockUser {
 
 export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }: { user: MockUser }) {
   const router = useRouter();
-  const [resendLoading, setResendLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [statusTone, setStatusTone] = useState<'info' | 'success' | 'error'>('info');
@@ -56,54 +55,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
   const registerDate = user?.created_date
     ? new Date(user.created_date).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
-
-  const handleResendVerificationEmail = async () => {
-    if (!user?.email) {
-      setStatusTone('error');
-      setStatusMessage('当前没有可用邮箱地址，无法发送验证邮件。');
-      return;
-    }
-    const userEmail = user.email;
-
-    setResendLoading(true);
-    setStatusMessage(null);
-
-    try {
-      const supabase = createClient();
-      let captchaOptions: ReturnType<typeof getAuthCaptchaOptions>;
-      try {
-        captchaOptions = getAuthCaptchaOptions();
-      } catch (error) {
-        setStatusTone('error');
-        setStatusMessage(getSafeErrorMessage(error, '请完成人机验证后重试。'));
-        return;
-      }
-      const emailRedirectTo = new URL('/auth/callback', resolveAuthAppUrl());
-      emailRedirectTo.searchParams.set('next', '/profile?tab=security');
-
-      const { error } = await runAuthCaptchaAttempt(captchaOptions, (options) =>
-        supabase.auth.resend({
-          type: 'signup',
-          email: userEmail,
-          options: {
-            emailRedirectTo: emailRedirectTo.toString(),
-            ...options,
-          },
-        }),
-      );
-
-      if (error) {
-        setStatusTone('error');
-        setStatusMessage(getSafeErrorMessage(error, '验证邮件发送失败，请稍后重试。'));
-        return;
-      }
-
-      setStatusTone('success');
-      setStatusMessage('验证邮件已重新发送，请前往收件箱完成验证。');
-    } finally {
-      setResendLoading(false);
-    }
-  };
 
   const handleChangePassword = async () => {
     if (!passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password) {
@@ -248,19 +199,6 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleResendVerificationEmail}
-                    disabled={resendLoading}
-                    style={{
-                      background: 'transparent',
-                      borderColor: 'rgba(255, 215, 0, 0.3)',
-                      color: 'var(--color-primary)',
-                    }}
-                  >
-                    {resendLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : '重发验证邮件'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
                     onClick={() =>
                       router.push(
                         buildAuthHref(
@@ -268,9 +206,13 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                         )
                       )
                     }
-                    style={{ color: 'var(--text-secondary)' }}
+                    style={{
+                      background: 'transparent',
+                      borderColor: 'rgba(255, 215, 0, 0.3)',
+                      color: 'var(--color-primary)',
+                    }}
                   >
-                    查看说明
+                    前往验证页重发
                   </Button>
                 </div>
               )}
