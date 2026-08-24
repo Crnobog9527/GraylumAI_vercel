@@ -261,12 +261,43 @@ function isoFromMs(value: number) {
   return new Date(value).toISOString();
 }
 
-function normalizeBillingCycle(value: string | null | undefined): SubscriptionBillingCycle {
-  return value === 'yearly' ? 'yearly' : 'monthly';
+function normalizeIsoInstant(value: string) {
+  const parsedMs = parseTime(value);
+  return parsedMs === null ? value : isoFromMs(parsedMs);
 }
 
-function isCancelAtPeriodEnd(value: string | boolean | null | undefined): boolean {
-  return value === true || value === 'true';
+/**
+ * UTC 日历月加法，月末按目标月最后一天收敛（D6：01-31 → 02-28/29 → 03-31 → 04-30）。
+ * 每期都从原始 anchor 计算，保留 anchor 的时分秒。
+ */
+export function addUtcCalendarMonthsClamped(anchor: Date, offset: number): Date {
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('offset must be a non-negative integer');
+  }
+
+  if (Number.isNaN(anchor.getTime())) {
+    throw new Error('anchor must be a valid Date');
+  }
+
+  const targetMonthIndex = anchor.getUTCMonth() + offset;
+  const targetYear = anchor.getUTCFullYear() + Math.floor(targetMonthIndex / 12);
+  const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+  const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const clampedDay = Math.min(anchor.getUTCDate(), daysInTargetMonth);
+
+  return new Date(Date.UTC(
+    targetYear,
+    targetMonth,
+    clampedDay,
+    anchor.getUTCHours(),
+    anchor.getUTCMinutes(),
+    anchor.getUTCSeconds(),
+    anchor.getUTCMilliseconds(),
+  ));
+}
+
+function normalizeBillingCycle(value: string | null | undefined): SubscriptionBillingCycle {
+  return value === 'yearly' ? 'yearly' : 'monthly';
 }
 
 function shouldInitializeMirrorStatus(value: string | null | undefined): boolean {
@@ -281,8 +312,8 @@ function buildMonthlyGrantPeriodKey(invoiceId: string) {
   return `invoice:${invoiceId}`;
 }
 
-function buildAnnualGrantPeriodKey(subscriptionId: string, periodStart: string, periodIndex: number) {
-  return `${subscriptionId}:${periodStart.slice(0, 7)}:${String(periodIndex).padStart(2, '0')}`;
+function buildAnnualGrantPeriodKey(termStartIso: string, periodIndex: number) {
+  return `annual:${normalizeIsoInstant(termStartIso)}:${String(periodIndex).padStart(2, '0')}`;
 }
 
 function buildGrantIdempotencyKey(input: {
@@ -357,29 +388,33 @@ export function getDueAnnualGrantPeriods(input: {
     return [];
   }
 
+  const anchor = new Date(startMs);
+  const termStartIso = anchor.toISOString();
   const schedule = calculateAnnualMonthlyGrantSchedule(input.yearlyCredits);
-  const periodMs = (endMs - startMs) / 12;
-  const dueCount = Math.min(12, Math.floor((Math.min(nowMs, endMs) - startMs) / periodMs) + 1);
 
-  return schedule.slice(0, dueCount).map((creditsGranted, index) => {
+  return schedule.flatMap((creditsGranted, index): GrantPeriod[] => {
     const periodIndex = index + 1;
-    const periodStart = isoFromMs(Math.round(startMs + periodMs * index));
-    const periodEnd = isoFromMs(Math.round(startMs + periodMs * periodIndex));
-    return {
+    const periodStart = addUtcCalendarMonthsClamped(anchor, index);
+    if (periodStart.getTime() > nowMs) {
+      return [];
+    }
+
+    return [{
       periodIndex,
       totalPeriods: 12,
-      periodStart,
-      periodEnd,
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodIndex === 12
+        ? isoFromMs(endMs)
+        : addUtcCalendarMonthsClamped(anchor, periodIndex).toISOString(),
       creditsGranted,
-      grantPeriodKey: buildAnnualGrantPeriodKey(input.stripeSubscriptionId, periodStart, periodIndex),
-    };
+      grantPeriodKey: buildAnnualGrantPeriodKey(termStartIso, periodIndex),
+    }];
   });
 }
 
 export function shouldReleaseAnnualSubscriptionCredits(input: {
   billingCycle?: string | null;
   status?: string | null;
-  cancelAtPeriodEnd?: string | boolean | null;
   currentPeriodEnd?: string | null;
   hasFullRefund?: boolean;
   now?: Date;
@@ -408,8 +443,8 @@ export function shouldReleaseAnnualSubscriptionCredits(input: {
 
   const periodEndMs = parseTime(input.currentPeriodEnd);
   const nowMs = (input.now ?? new Date()).getTime();
-  if (periodEndMs !== null && nowMs >= periodEndMs && !isCancelAtPeriodEnd(input.cancelAtPeriodEnd)) {
-    return status === 'active' || status === 'trialing';
+  if (periodEndMs !== null && nowMs >= periodEndMs) {
+    return false;
   }
 
   return status === 'active' || status === 'trialing';
@@ -2532,7 +2567,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       periodStart,
       periodEnd,
       creditsGranted: calculateAnnualMonthlyGrant(plan.yearly_credits ?? 0, 1),
-      grantPeriodKey: buildAnnualGrantPeriodKey(input.subscriptionId, periodStart, 1),
+      grantPeriodKey: buildAnnualGrantPeriodKey(periodStart, 1),
     }
     : {
       periodIndex: null,
@@ -2669,7 +2704,6 @@ export async function releaseDueAnnualSubscriptionCredits(
     if (!shouldReleaseAnnualSubscriptionCredits({
       billingCycle: subscription.billing_cycle,
       status: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
       currentPeriodEnd: subscription.current_period_end,
       hasFullRefund,
       now,

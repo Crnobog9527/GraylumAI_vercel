@@ -402,6 +402,8 @@ export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
 }, (table) => ({
   idempotencyKeyUnique: uniqueIndex('subscription_credit_grants_idempotency_key_key')
     .on(table.idempotencyKey),
+  subscriptionPeriodKeyUnique: uniqueIndex('subscription_credit_grants_subscription_period_key_key')
+    .on(table.stripeSubscriptionId, table.grantPeriodKey),
 }));
 
 /**
