@@ -47,8 +47,9 @@ export const createTRPCContext = async (opts: {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const hasSupabaseAdminPrivileges = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
   const supabasePublic = createClient(supabaseUrl, supabaseAnonKey);
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
-  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+  const supabaseAdmin = hasSupabaseAdminPrivileges
+    ? createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    : null;
 
   let user = opts.user ?? null;
   let supabaseAuth = opts.supabaseAuth ?? null;
@@ -85,7 +86,9 @@ export const createTRPCContext = async (opts: {
     ...opts,
     supabase: supabaseAuth ?? supabasePublic,
     supabasePublic,
-    supabaseAdmin,
+    // Keep the admin writer absent when the service-role credential is absent.
+    // Privileged procedures are guarded by hasSupabaseAdminPrivileges.
+    supabaseAdmin: supabaseAdmin as ApiSupabaseClient,
     supabaseAuth,
     hasSupabaseAdminPrivileges,
     user,
@@ -440,14 +443,14 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
     });
   }
 
-  const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
-
   if (!ctx.isEmailVerified) {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: 'EMAIL_NOT_VERIFIED',
     });
   }
+
+  const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
 
   if (userStatus === 'disabled') {
     throw new TRPCError({

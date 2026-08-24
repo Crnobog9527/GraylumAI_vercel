@@ -10,7 +10,7 @@ export const profiles = pgTable('profiles', {
   role: text('role', { enum: ['user', 'admin'] }).default('user').notNull(), // User role for access control
   status: text('status', { enum: ['active', 'disabled', 'banned'] }).default('active').notNull(), // Account status
   membershipLevel: text('membership_level', { enum: ['free', 'pro', 'gold'] }).default('free').notNull(), // Membership level
-  credits: integer('credits').default(100).notNull(),
+  credits: integer('credits').default(0).notNull(),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   lastIp: text('last_ip'),
   isDeleted: text('is_deleted').default('false').notNull(), // Soft delete flag

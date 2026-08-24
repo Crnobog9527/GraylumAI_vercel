@@ -4,7 +4,7 @@ import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { logServerError } from '@/lib/server-log';
-import { resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
+import { resolveAuthCallbackOrigin, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get('code');
   const next = sanitizeRedirectTarget(requestUrl.searchParams.get('next'));
 
-  let response = NextResponse.redirect(new URL(next, resolveAuthAppUrl()));
+  const authOrigin = resolveAuthCallbackOrigin(requestUrl.origin);
+  let response = NextResponse.redirect(new URL(next, authOrigin));
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       logServerError('auth', 'auth_callback_session_exchange_failed');
-      const loginUrl = new URL('/login', resolveAuthAppUrl());
+      const loginUrl = new URL('/login', authOrigin);
       loginUrl.searchParams.set('error', '登录验证失败，请稍后重试');
       return NextResponse.redirect(loginUrl);
     }
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (user && !isEmailVerified(user)) {
-    const verifyUrl = new URL('/verify-email', resolveAuthAppUrl());
+    const verifyUrl = new URL('/verify-email', authOrigin);
     verifyUrl.searchParams.set('email', user.email ?? '');
     verifyUrl.searchParams.set('redirect', next);
     return NextResponse.redirect(verifyUrl);
