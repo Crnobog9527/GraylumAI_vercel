@@ -120,7 +120,7 @@ class RefundWebhookMockQuery {
     if (this.mode === 'update') {
       const rows = this.matchingRows();
       rows.forEach((row) => Object.assign(row, this.payload));
-      return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+      return { data: rows[0] ?? null, error: null };
     }
 
     const rows = this.matchingRows();
@@ -176,6 +176,10 @@ class RefundWebhookMockQuery {
         if (operator === 'like') {
           const pattern = String(value).replace(/%/g, '');
           return typeof row[column] === 'string' && row[column].startsWith(pattern);
+        }
+
+        if (value === null) {
+          return row[column] === null || row[column] === undefined;
         }
 
         return row[column] === value;
@@ -2303,9 +2307,12 @@ describe('stripe fulfillment helpers', () => {
         stripe_invoice_id: 'in_webhook_payment_intent_invoice',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: 'sub_webhook_payment_intent_invoice:2026-01:01',
+        grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+        period_start: '2026-01-01T00:00:00.000Z',
+        period_end: '2026-02-01T00:00:00.000Z',
         period_index: 1,
         credits_granted: 10,
+        consumed_amount: 0,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       }],
@@ -2338,6 +2345,7 @@ describe('stripe fulfillment helpers', () => {
             charge: 'ch_webhook_payment_intent_invoice',
             payment_intent: 'pi_webhook_payment_intent_invoice',
             metadata: {},
+            created: 1768348800,
           } as Stripe.Refund,
         },
       } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
@@ -2762,9 +2770,12 @@ describe('stripe fulfillment helpers', () => {
           stripe_invoice_id: 'in_webhook_charge_refund_2026',
           billing_cycle: 'yearly',
           grant_type: 'annual_monthly_release',
-          grant_period_key: `sub_webhook_charge_refund:2026-0${periodIndex}:0${periodIndex}`,
+          grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+          period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+          period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
           period_index: periodIndex,
           credits_granted: 10,
+          consumed_amount: 10,
           status: 'granted',
           metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2026' },
         })),
@@ -2776,9 +2787,12 @@ describe('stripe fulfillment helpers', () => {
           stripe_invoice_id: 'in_webhook_charge_refund_2027',
           billing_cycle: 'yearly',
           grant_type: 'annual_monthly_release',
-          grant_period_key: `sub_webhook_charge_refund:2027-0${periodIndex}:0${periodIndex}`,
+          grant_period_key: `annual:2027-01-01T00:00:00.000Z:0${periodIndex}`,
+          period_start: `2027-0${periodIndex}-01T00:00:00.000Z`,
+          period_end: `2027-0${periodIndex + 1}-01T00:00:00.000Z`,
           period_index: periodIndex,
           credits_granted: 10,
+          consumed_amount: 5,
           status: 'granted',
           metadata: { sourceType: 'stripe_invoice', sourceId: 'in_webhook_charge_refund_2027' },
         })),
@@ -2800,6 +2814,7 @@ describe('stripe fulfillment helpers', () => {
             status: 'succeeded',
             invoice: 'in_webhook_charge_refund_2027',
             payment_intent: 'pi_webhook_charge_refund',
+            created: 1802649600,
             refunds: {
               data: [{
                 id: 're_webhook_charge_refund_pending',
@@ -2819,9 +2834,10 @@ describe('stripe fulfillment helpers', () => {
       reconciled: true,
       fullRefund: true,
       reviewRequired: false,
-      reversedGrantCount: 2,
-      clawbackAmount: 20,
-      appliedClawbackAmount: 20,
+      locatedPeriodKey: 'annual:2027-01-01T00:00:00.000Z:02',
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
+      appliedClawbackAmount: 5,
       shortfallAmount: 0,
     });
     expect(supabase.tables.payment_orders[0]).toMatchObject({
@@ -2835,7 +2851,8 @@ describe('stripe fulfillment helpers', () => {
           fullRefund: true,
           reviewRequired: false,
           reversalStatus: 'complete',
-          reversedGrantCount: 2,
+          locatedPeriodKey: 'annual:2027-01-01T00:00:00.000Z:02',
+          reversedGrantCount: 1,
         }),
       },
     });
@@ -2844,9 +2861,9 @@ describe('stripe fulfillment helpers', () => {
       .map((grant) => grant.status)).toEqual(['granted', 'granted']);
     expect(supabase.tables.subscription_credit_grants
       .filter((grant) => grant.stripe_invoice_id === 'in_webhook_charge_refund_2027')
-      .map((grant) => grant.status)).toEqual(['reversed', 'reversed']);
+      .map((grant) => grant.status)).toEqual(['granted', 'reversed']);
     expect(supabase.tables.credit_transactions[0]).toMatchObject({
-      amount: -20,
+      amount: -5,
       ledger_type: 'refund_clawback',
       reason_code: 'refund_clawback',
       counts_as_spend: false,
@@ -2878,6 +2895,7 @@ describe('stripe fulfillment helpers', () => {
             status: 'succeeded',
             invoice: 'in_webhook_charge_refund_2027',
             payment_intent: 'pi_webhook_charge_refund',
+            created: 1802649600,
             refunds: {
               data: [{
                 id: 're_webhook_charge_refund_pending',
@@ -2945,9 +2963,12 @@ describe('stripe fulfillment helpers', () => {
         stripe_invoice_id: 'in_webhook_refund_created',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_webhook_refund_created:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: periodIndex === 3 ? 0 : 10,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       })),
@@ -2977,6 +2998,7 @@ describe('stripe fulfillment helpers', () => {
             charge: 'ch_webhook_refund_created',
             payment_intent: 'pi_webhook_refund_created',
             metadata: {},
+            created: 1773446400,
           } as Stripe.Refund,
         },
       } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
@@ -2991,10 +3013,11 @@ describe('stripe fulfillment helpers', () => {
       reconciled: true,
       fullRefund: true,
       reviewRequired: true,
-      reversedGrantCount: 3,
-      clawbackAmount: 30,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:03',
+      reversedGrantCount: 1,
+      clawbackAmount: 10,
       appliedClawbackAmount: 5,
-      shortfallAmount: 25,
+      shortfallAmount: 5,
       creditTransactionId: 'txn-refund-webhook-1',
     });
     expect(supabase.tables.payment_orders[0]).toMatchObject({
@@ -3007,12 +3030,12 @@ describe('stripe fulfillment helpers', () => {
           invoiceId: 'in_webhook_refund_created',
           fullRefund: true,
           reviewRequired: true,
-          clawbackAmount: 30,
+          clawbackAmount: 10,
           appliedClawbackAmount: 5,
-          shortfallAmount: 25,
+          shortfallAmount: 5,
           shortfallReason: 'insufficient_balance',
           reversalStatus: 'shortfall_review_required',
-          reversedGrantCount: 3,
+          reversedGrantCount: 1,
           creditTransactionId: 'txn-refund-webhook-1',
         }),
       },
@@ -3024,13 +3047,13 @@ describe('stripe fulfillment helpers', () => {
       reason_code: 'refund_clawback',
       counts_as_spend: false,
       metadata: expect.objectContaining({
-        requiredClawbackAmount: 30,
-        shortfallAmount: 25,
+        requiredClawbackAmount: 10,
+        shortfallAmount: 5,
       }),
     });
     expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
-      'reversed',
-      'reversed',
+      'granted',
+      'granted',
       'reversed',
     ]);
 
@@ -3058,6 +3081,7 @@ describe('stripe fulfillment helpers', () => {
             status: 'succeeded',
             invoice: 'in_webhook_refund_created',
             payment_intent: 'pi_webhook_refund_created',
+            created: 1773446400,
             refunds: {
               data: [{
                 id: 're_webhook_refund_created_charge_later',
@@ -3075,10 +3099,10 @@ describe('stripe fulfillment helpers', () => {
       fullRefund: true,
       alreadyReconciled: true,
       reviewRequired: true,
-      reversedGrantCount: 3,
-      clawbackAmount: 30,
+      reversedGrantCount: 1,
+      clawbackAmount: 10,
       appliedClawbackAmount: 5,
-      shortfallAmount: 25,
+      shortfallAmount: 5,
       creditTransactionId: 'txn-refund-webhook-1',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
@@ -3087,9 +3111,9 @@ describe('stripe fulfillment helpers', () => {
       eventType: 'refund.created',
       invoiceId: 'in_webhook_refund_created',
       reviewRequired: true,
-      shortfallAmount: 25,
+      shortfallAmount: 5,
       reversalStatus: 'shortfall_review_required',
-      reversedGrantCount: 3,
+      reversedGrantCount: 1,
     });
   });
 
@@ -3137,9 +3161,12 @@ describe('stripe fulfillment helpers', () => {
         stripe_invoice_id: 'in_webhook_cumulative_full',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_webhook_cumulative_full:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: periodIndex === 2 ? 5 : 10,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       })),
@@ -3169,6 +3196,7 @@ describe('stripe fulfillment helpers', () => {
             charge: 'ch_webhook_cumulative_full',
             payment_intent: 'pi_webhook_cumulative_full',
             metadata: {},
+            created: 1771027200,
           } as Stripe.Refund,
         },
       } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
@@ -3183,9 +3211,10 @@ describe('stripe fulfillment helpers', () => {
       reconciled: true,
       fullRefund: true,
       reviewRequired: false,
-      reversedGrantCount: 2,
-      clawbackAmount: 20,
-      appliedClawbackAmount: 20,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:02',
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
+      appliedClawbackAmount: 5,
       shortfallAmount: 0,
       creditTransactionId: 'txn-refund-webhook-1',
     });
@@ -3201,28 +3230,26 @@ describe('stripe fulfillment helpers', () => {
           fullRefund: true,
           reviewRequired: false,
           reversalStatus: 'complete',
-          reversedGrantCount: 2,
+          reversedGrantCount: 1,
         }),
       },
     });
     expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
-      'reversed',
+      'granted',
       'reversed',
     ]);
     expect(supabase.tables.credit_transactions[0]).toMatchObject({
-      amount: -20,
+      amount: -5,
       ledger_type: 'refund_clawback',
       reason_code: 'refund_clawback',
       counts_as_spend: false,
       source_refund_id: 're_webhook_cumulative_full_second',
       idempotency_key: 'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
     });
-    expect(supabase.tables.subscription_credit_grants.map((grant) =>
-      grant.metadata.reversal.idempotencyKey,
-    )).toEqual([
+    expect(supabase.tables.subscription_credit_grants[1].metadata.reversal.idempotencyKey).toBe(
       'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
-      'stripe_refund:subscription_grants:invoice:in_webhook_cumulative_full:sub_webhook_cumulative_full',
-    ]);
+    );
+    expect(supabase.tables.subscription_credit_grants[0].metadata.reversal).toBeUndefined();
 
     const refundUpdatedReplay = await reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
@@ -3238,6 +3265,7 @@ describe('stripe fulfillment helpers', () => {
             charge: 'ch_webhook_cumulative_full',
             payment_intent: 'pi_webhook_cumulative_full',
             metadata: {},
+            created: 1771027200,
           } as Stripe.Refund,
         },
       } as Stripe.Event & { type: 'refund.updated'; data: { object: Stripe.Refund } },
@@ -3252,9 +3280,9 @@ describe('stripe fulfillment helpers', () => {
       fullRefund: true,
       alreadyReconciled: true,
       reviewRequired: false,
-      reversedGrantCount: 2,
-      clawbackAmount: 20,
-      appliedClawbackAmount: 20,
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
+      appliedClawbackAmount: 5,
       shortfallAmount: 0,
       creditTransactionId: 'txn-refund-webhook-1',
     });
@@ -3262,8 +3290,8 @@ describe('stripe fulfillment helpers', () => {
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
       refundId: 're_webhook_cumulative_full_second',
       eventType: 'refund.created',
-      reversedGrantCount: 2,
-      clawbackAmount: 20,
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
       reviewRequired: false,
     });
 
@@ -3277,7 +3305,7 @@ describe('stripe fulfillment helpers', () => {
     });
   });
 
-  it('keeps cumulative partial refunds below the order total in review without clawback', async () => {
+  it('applies the same termination and located-period clawback to partial subscription refunds', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{
         id: 'order-webhook-cumulative-partial',
@@ -3321,9 +3349,12 @@ describe('stripe fulfillment helpers', () => {
         stripe_invoice_id: 'in_webhook_cumulative_partial',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: 'sub_webhook_cumulative_partial:2026-01:01',
+        grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+        period_start: '2026-01-01T00:00:00.000Z',
+        period_end: '2026-02-01T00:00:00.000Z',
         period_index: 1,
         credits_granted: 10,
+        consumed_amount: 4,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       }],
@@ -3353,6 +3384,7 @@ describe('stripe fulfillment helpers', () => {
             charge: 'ch_webhook_cumulative_partial',
             payment_intent: 'pi_webhook_cumulative_partial',
             metadata: {},
+            created: 1768348800,
           } as Stripe.Refund,
         },
       } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
@@ -3366,12 +3398,13 @@ describe('stripe fulfillment helpers', () => {
     expect(result).toMatchObject({
       reconciled: true,
       fullRefund: false,
-      reviewRequired: true,
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
-      appliedClawbackAmount: 0,
+      reviewRequired: false,
+      terminationWritten: true,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:01',
+      reversedGrantCount: 1,
+      clawbackAmount: 6,
+      appliedClawbackAmount: 6,
       shortfallAmount: 0,
-      creditTransactionId: null,
     });
     expect(supabase.tables.payment_orders[0]).toMatchObject({
       status: 'partially_refunded',
@@ -3383,15 +3416,25 @@ describe('stripe fulfillment helpers', () => {
           invoiceId: 'in_webhook_cumulative_partial',
           amountRefunded: 2500,
           fullRefund: false,
-          reviewRequired: true,
-          reversalStatus: 'partial_refund_review_required',
-          reversedGrantCount: 0,
+          reviewRequired: false,
+          reversalStatus: 'complete',
+          locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:01',
+          reversedGrantCount: 1,
         }),
       },
     });
-    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
-    expect(supabase.tables.credit_transactions).toHaveLength(0);
-    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_reason: 'stripe_refund:refund.created',
+      credit_release_terminated_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -6,
+      ledger_type: 'refund_clawback',
+      counts_as_spend: false,
+      source_refund_id: 're_webhook_cumulative_partial_second',
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(94);
   });
 
   it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {

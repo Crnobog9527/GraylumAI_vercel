@@ -372,6 +372,11 @@ export const userSubscriptions = pgTable('user_subscriptions', {
   cancelAtPeriodEnd: text('cancel_at_period_end').default('false').notNull(),
   currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  // REFUND-1B: credit-release termination (first successful refund event wins)
+  creditReleaseTerminatedAt: timestamp('credit_release_terminated_at', { withTimezone: true }),
+  creditReleaseTerminatedReason: text('credit_release_terminated_reason'),
+  creditReleaseTerminatedEventId: text('credit_release_terminated_event_id'),
+  creditReleaseTerminatedPeriodKey: text('credit_release_terminated_period_key'),
   metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -393,6 +398,8 @@ export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
   periodIndex: integer('period_index'),
   totalPeriods: integer('total_periods'),
   creditsGranted: integer('credits_granted').notNull(),
+  // REFUND-1B: per-period consumed quota, invariant 0 <= consumedAmount <= creditsGranted
+  consumedAmount: integer('consumed_amount').default(0).notNull(),
   status: text('status', { enum: ['granted', 'skipped', 'reversed', 'failed'] }).default('granted').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   creditTransactionId: uuid('credit_transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),

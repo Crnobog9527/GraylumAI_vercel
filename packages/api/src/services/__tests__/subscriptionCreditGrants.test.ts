@@ -113,7 +113,7 @@ class MockQuery {
     if (this.mode === 'update') {
       const rows = this.matchingRows();
       rows.forEach((row) => Object.assign(row, this.payload));
-      return { data: rows[0] ? { id: rows[0].id } : null, error: null };
+      return { data: rows[0] ?? null, error: null };
     }
 
     const rows = this.matchingRows();
@@ -498,7 +498,7 @@ describe('subscription credit grants', () => {
 
     expect(reconciliation).toMatchObject({
       fullRefund: true,
-      reviewRequired: false,
+      reviewRequired: true,
       reversedGrantCount: 0,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
@@ -510,7 +510,8 @@ describe('subscription credit grants', () => {
       metadata: {
         subscriptionCreditGrantReversal: expect.objectContaining({
           fullRefund: true,
-          reversalStatus: 'complete',
+          reviewRequired: true,
+          reversalStatus: 'review_required',
         }),
       },
     });
@@ -549,7 +550,7 @@ describe('subscription credit grants', () => {
         subscriptionCreditGrantReversal: expect.objectContaining({
           refundId: 're_invoice_refund_race_full',
           fullRefund: true,
-          reversalStatus: 'complete',
+          reversalStatus: 'review_required',
         }),
       },
     });
@@ -694,7 +695,7 @@ describe('subscription credit grants', () => {
           refundId: 're_invoice_partial_review_block',
           fullRefund: false,
           reviewRequired: true,
-          reversalStatus: 'partial_refund_review_required',
+          reversalStatus: 'review_required',
         }),
       },
     });
@@ -736,7 +737,7 @@ describe('subscription credit grants', () => {
           clawbackAmount: 0,
           appliedClawbackAmount: 0,
           shortfallAmount: 0,
-          reversalStatus: 'partial_refund_review_required',
+          reversalStatus: 'review_required',
         }),
       },
     });
@@ -2738,7 +2739,7 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.profiles[0].credits).toBe(10);
   });
 
-  it('claws back released annual grants on full refund and keeps the clawback out of spend', async () => {
+  it('claws back the located period as granted minus consumed on full refund and keeps the clawback out of spend', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
         id: 'order-subscription-refund',
@@ -2777,9 +2778,12 @@ describe('subscription credit grants', () => {
         stripe_invoice_id: 'in_subscription_refund',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_subscription_refund:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: periodIndex === 3 ? 4 : 10,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       })),
@@ -2795,16 +2799,29 @@ describe('subscription credit grants', () => {
       refundCurrency: 'usd',
       invoiceId: 'in_subscription_refund',
       isFullRefund: true,
+      eventId: 'evt_subscription_full',
+      refundCreatedAt: '2026-03-15T00:00:00.000Z',
       now: '2026-04-01T00:00:00.000Z',
     });
 
     expect(result).toMatchObject({
       fullRefund: true,
       reviewRequired: false,
-      reversedGrantCount: 3,
-      clawbackAmount: 30,
+      terminationWritten: true,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:03',
+      reversedGrantCount: 1,
+      clawbackAmount: 6,
+      appliedClawbackAmount: 6,
+      shortfallAmount: 0,
       creditTransactionId: 'txn-1',
       alreadyReconciled: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(94);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_at: '2026-04-01T00:00:00.000Z',
+      credit_release_terminated_reason: 'stripe_refund:refund.created',
+      credit_release_terminated_event_id: 'evt_subscription_full',
+      credit_release_terminated_period_key: 'annual:2026-01-01T00:00:00.000Z:03',
     });
     expect(supabase.tables.payment_orders[0]).toMatchObject({
       id: 'order-subscription-refund',
@@ -2814,16 +2831,17 @@ describe('subscription credit grants', () => {
         subscriptionCreditGrantReversal: expect.objectContaining({
           fullRefund: true,
           reviewRequired: false,
-          clawbackAmount: 30,
-          reversedGrantCount: 3,
+          clawbackAmount: 6,
+          reversedGrantCount: 1,
           creditTransactionId: 'txn-1',
+          locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:03',
           idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
         }),
       },
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.credit_transactions[0]).toMatchObject({
-      amount: -30,
+      amount: -6,
       type: 'deduction',
       ledger_type: 'refund_clawback',
       reason_code: 'refund_clawback',
@@ -2836,13 +2854,13 @@ describe('subscription credit grants', () => {
     });
     expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
     expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
-      'reversed',
-      'reversed',
+      'granted',
+      'granted',
       'reversed',
     ]);
-    expect(supabase.tables.subscription_credit_grants[0].metadata.reversal).toMatchObject({
+    expect(supabase.tables.subscription_credit_grants[2].metadata.reversal).toMatchObject({
       refundId: 're_subscription_full',
-      creditTransactionId: 'txn-1',
+      periodKey: 'annual:2026-01-01T00:00:00.000Z:03',
       source: 'subscription_refund',
     });
 
@@ -2862,30 +2880,25 @@ describe('subscription credit grants', () => {
       refundEventType: 'refund.updated',
       refundStatus: 'succeeded',
       isFullRefund: true,
+      eventId: 'evt_subscription_full_later',
+      refundCreatedAt: '2026-03-15T00:00:00.000Z',
       now: '2026-04-01T00:05:00.000Z',
     });
 
     expect(replay).toMatchObject({
       alreadyReconciled: true,
-      clawbackAmount: 30,
+      clawbackAmount: 6,
       creditTransactionId: 'txn-1',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
       refundId: 're_subscription_full',
       eventType: 'refund.created',
-      reversedGrantCount: 3,
-      clawbackAmount: 30,
+      reversedGrantCount: 1,
+      clawbackAmount: 6,
       reviewRequired: false,
       idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
     });
-    expect(supabase.tables.subscription_credit_grants.map((grant) =>
-      grant.metadata.reversal.idempotencyKey,
-    )).toEqual([
-      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
-      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
-      'stripe_refund:subscription_grants:invoice:in_subscription_refund:sub_subscription_refund',
-    ]);
   });
 
   it('records an auditable full-refund shortfall when the current balance cannot cover clawback', async () => {
@@ -2927,9 +2940,12 @@ describe('subscription credit grants', () => {
         stripe_invoice_id: 'in_subscription_refund_shortfall',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_subscription_refund_shortfall:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: 0,
         status: 'granted',
         metadata: { sourceType: 'stripe_invoice' },
       })),
@@ -2945,16 +2961,20 @@ describe('subscription credit grants', () => {
       refundCurrency: 'usd',
       invoiceId: 'in_subscription_refund_shortfall',
       isFullRefund: true,
+      eventId: 'evt_subscription_shortfall',
+      refundCreatedAt: '2026-03-15T00:00:00.000Z',
       now: '2026-04-01T00:00:00.000Z',
     });
 
     expect(result).toMatchObject({
       fullRefund: true,
       reviewRequired: true,
-      reversedGrantCount: 3,
-      clawbackAmount: 30,
+      terminationWritten: true,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:03',
+      reversedGrantCount: 1,
+      clawbackAmount: 10,
       appliedClawbackAmount: 5,
-      shortfallAmount: 25,
+      shortfallAmount: 5,
       creditTransactionId: 'txn-1',
       alreadyReconciled: false,
     });
@@ -2966,11 +2986,11 @@ describe('subscription credit grants', () => {
         subscriptionCreditGrantReversal: expect.objectContaining({
           fullRefund: true,
           reviewRequired: true,
-          clawbackAmount: 30,
+          clawbackAmount: 10,
           appliedClawbackAmount: 5,
-          shortfallAmount: 25,
+          shortfallAmount: 5,
           shortfallReason: 'insufficient_balance',
-          reversedGrantCount: 3,
+          reversedGrantCount: 1,
           creditTransactionId: 'txn-1',
           reversalStatus: 'shortfall_review_required',
         }),
@@ -2987,22 +3007,19 @@ describe('subscription credit grants', () => {
       source_refund_id: 're_subscription_shortfall',
       source_order_id: 'order-subscription-refund-shortfall',
       metadata: expect.objectContaining({
-        requiredClawbackAmount: 30,
-        shortfallAmount: 25,
+        requiredClawbackAmount: 10,
+        shortfallAmount: 5,
       }),
     });
     expect(countsAsCreditSpend(supabase.tables.credit_transactions[0])).toBe(false);
     expect(supabase.tables.subscription_credit_grants.map((grant) => grant.status)).toEqual([
-      'reversed',
-      'reversed',
+      'granted',
+      'granted',
       'reversed',
     ]);
-    expect(supabase.tables.subscription_credit_grants[0].metadata.reversal).toMatchObject({
-      reviewRequired: true,
-      clawbackAmount: 30,
-      appliedClawbackAmount: 5,
-      shortfallAmount: 25,
-      shortfallReason: 'insufficient_balance',
+    expect(supabase.tables.subscription_credit_grants[2].metadata.reversal).toMatchObject({
+      refundId: 're_subscription_shortfall',
+      periodKey: 'annual:2026-01-01T00:00:00.000Z:03',
       source: 'subscription_refund',
     });
 
@@ -3022,28 +3039,30 @@ describe('subscription credit grants', () => {
       refundEventType: 'refund.updated',
       refundStatus: 'succeeded',
       isFullRefund: true,
+      eventId: 'evt_subscription_shortfall_later',
+      refundCreatedAt: '2026-03-15T00:00:00.000Z',
       now: '2026-04-01T00:05:00.000Z',
     });
 
     expect(replay).toMatchObject({
       alreadyReconciled: true,
       reviewRequired: true,
-      clawbackAmount: 30,
+      clawbackAmount: 10,
       appliedClawbackAmount: 5,
-      shortfallAmount: 25,
+      shortfallAmount: 5,
       creditTransactionId: 'txn-1',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
       refundId: 're_subscription_shortfall',
-      reversedGrantCount: 3,
-      shortfallAmount: 25,
+      reversedGrantCount: 1,
+      shortfallAmount: 5,
       reversalStatus: 'shortfall_review_required',
       idempotencyKey: 'stripe_refund:subscription_grants:invoice:in_subscription_refund_shortfall:sub_subscription_refund_shortfall',
     });
   });
 
-  it('includes already reversed invoice grants when completing a later full-refund event', async () => {
+  it('resumes a pending full refund whose located period was already reversed without re-deducting', async () => {
     const invoiceScopedKey = 'stripe_refund:subscription_grants:invoice:in_subscription_refund_pending:sub_subscription_refund_pending';
     const supabase = createMockSupabase({
       payment_orders: [{
@@ -3061,6 +3080,16 @@ describe('subscription credit grants', () => {
             reversalStatus: 'pending',
           },
         },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-refund-pending',
+        user_id: 'user-subscription-refund-pending',
+        membership_plan_id: 'plan-subscription-refund-pending',
+        stripe_subscription_id: 'sub_subscription_refund_pending',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
       }],
       profiles: [{
         id: 'user-subscription-refund-pending',
@@ -3083,15 +3112,19 @@ describe('subscription credit grants', () => {
         stripe_invoice_id: 'in_subscription_refund_pending',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_subscription_refund_pending:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: 0,
         status: 'reversed',
         metadata: {
           sourceType: 'stripe_invoice',
           reversal: {
             invoiceId: 'in_subscription_refund_pending',
             idempotencyKey: invoiceScopedKey,
+            clawbackAmount: 20,
             creditTransactionId: 'txn-existing-invoice-refund',
             source: 'subscription_refund',
           },
@@ -3109,6 +3142,8 @@ describe('subscription credit grants', () => {
       refundCurrency: 'usd',
       invoiceId: 'in_subscription_refund_pending',
       isFullRefund: true,
+      eventId: 'evt_subscription_refund_pending_later',
+      refundCreatedAt: '2026-02-15T00:00:00.000Z',
       now: '2026-04-01T00:05:00.000Z',
     });
 
@@ -3116,13 +3151,15 @@ describe('subscription credit grants', () => {
       fullRefund: true,
       alreadyReconciled: true,
       reviewRequired: false,
-      reversedGrantCount: 2,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:02',
+      reversedGrantCount: 0,
       clawbackAmount: 20,
       appliedClawbackAmount: 20,
       shortfallAmount: 0,
       creditTransactionId: 'txn-existing-invoice-refund',
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(80);
     expect(supabase.tables.payment_orders[0]).toMatchObject({
       status: 'refunded',
       payment_status: 'refunded',
@@ -3132,12 +3169,13 @@ describe('subscription credit grants', () => {
           eventType: 'charge.refunded',
           fullRefund: true,
           reviewRequired: false,
-          reversedGrantCount: 2,
+          reversedGrantCount: 0,
           clawbackAmount: 20,
           appliedClawbackAmount: 20,
           shortfallAmount: 0,
           creditTransactionId: 'txn-existing-invoice-refund',
           idempotencyKey: invoiceScopedKey,
+          alreadyReversed: true,
           reversalStatus: 'complete',
         }),
       },
@@ -3146,6 +3184,9 @@ describe('subscription credit grants', () => {
       'reversed',
       'reversed',
     ]);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_reason: 'stripe_refund:charge.refunded',
+    });
   });
 
   it('reuses legacy refund-id keyed clawback when invoice-scoped replay completes a pending full refund', async () => {
@@ -3175,6 +3216,16 @@ describe('subscription credit grants', () => {
             reversalStatus: 'pending',
           },
         },
+      }],
+      user_subscriptions: [{
+        id: 'subscription-refund-legacy',
+        user_id: 'user-subscription-refund-legacy',
+        membership_plan_id: 'plan-subscription-refund-legacy',
+        stripe_subscription_id: 'sub_subscription_refund_legacy',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
       }],
       profiles: [{
         id: 'user-subscription-refund-legacy',
@@ -3206,15 +3257,19 @@ describe('subscription credit grants', () => {
         stripe_invoice_id: 'in_subscription_refund_legacy',
         billing_cycle: 'yearly',
         grant_type: 'annual_monthly_release',
-        grant_period_key: `sub_subscription_refund_legacy:2026-0${periodIndex}:0${periodIndex}`,
+        grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+        period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+        period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
         period_index: periodIndex,
         credits_granted: 10,
+        consumed_amount: 0,
         status: 'reversed',
         metadata: {
           sourceType: 'stripe_invoice',
           reversal: {
             invoiceId: 'in_subscription_refund_legacy',
             idempotencyKey: legacyRefundKey,
+            clawbackAmount: 20,
             creditTransactionId: 'txn-existing-legacy-refund',
             reviewRequired: true,
             shortfallAmount: 15,
@@ -3235,6 +3290,8 @@ describe('subscription credit grants', () => {
       refundCurrency: 'usd',
       invoiceId: 'in_subscription_refund_legacy',
       isFullRefund: true,
+      eventId: 'evt_subscription_refund_legacy_later',
+      refundCreatedAt: '2026-02-15T00:00:00.000Z',
       now: '2026-04-01T00:05:00.000Z',
     });
 
@@ -3242,7 +3299,8 @@ describe('subscription credit grants', () => {
       fullRefund: true,
       alreadyReconciled: true,
       reviewRequired: true,
-      reversedGrantCount: 2,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:02',
+      reversedGrantCount: 0,
       clawbackAmount: 20,
       appliedClawbackAmount: 5,
       shortfallAmount: 15,
@@ -3287,7 +3345,7 @@ describe('subscription credit grants', () => {
     )).toEqual([legacyRefundKey, legacyRefundKey]);
   });
 
-  it('limits full-refund reversal to grants from the refunded invoice', async () => {
+  it('limits full-refund reversal to the period located by the trusted refund timestamp', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
         id: 'order-subscription-refund-renewal',
@@ -3327,9 +3385,12 @@ describe('subscription credit grants', () => {
           stripe_invoice_id: 'in_subscription_refund_2026',
           billing_cycle: 'yearly',
           grant_type: 'annual_monthly_release',
-          grant_period_key: `sub_subscription_refund_renewal:2026-0${periodIndex}:0${periodIndex}`,
+          grant_period_key: `annual:2026-01-01T00:00:00.000Z:0${periodIndex}`,
+          period_start: `2026-0${periodIndex}-01T00:00:00.000Z`,
+          period_end: `2026-0${periodIndex + 1}-01T00:00:00.000Z`,
           period_index: periodIndex,
           credits_granted: 10,
+          consumed_amount: 10,
           status: 'granted',
           metadata: { sourceType: 'stripe_invoice', sourceId: 'in_subscription_refund_2026' },
         })),
@@ -3341,9 +3402,12 @@ describe('subscription credit grants', () => {
           stripe_invoice_id: 'in_subscription_refund_2027',
           billing_cycle: 'yearly',
           grant_type: 'annual_monthly_release',
-          grant_period_key: `sub_subscription_refund_renewal:2027-0${periodIndex}:0${periodIndex}`,
+          grant_period_key: `annual:2027-01-01T00:00:00.000Z:0${periodIndex}`,
+          period_start: `2027-0${periodIndex}-01T00:00:00.000Z`,
+          period_end: `2027-0${periodIndex + 1}-01T00:00:00.000Z`,
           period_index: periodIndex,
           credits_granted: 10,
+          consumed_amount: 5,
           status: 'granted',
           metadata: { sourceType: 'stripe_invoice', sourceId: 'in_subscription_refund_2027' },
         })),
@@ -3360,15 +3424,18 @@ describe('subscription credit grants', () => {
       refundCurrency: 'usd',
       invoiceId: 'in_subscription_refund_2027',
       isFullRefund: true,
+      eventId: 'evt_subscription_renewal_full',
+      refundCreatedAt: '2027-02-15T00:00:00.000Z',
       now: '2027-03-01T00:00:00.000Z',
     });
 
     expect(result).toMatchObject({
       fullRefund: true,
       reviewRequired: false,
-      reversedGrantCount: 2,
-      clawbackAmount: 20,
-      appliedClawbackAmount: 20,
+      locatedPeriodKey: 'annual:2027-01-01T00:00:00.000Z:02',
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
+      appliedClawbackAmount: 5,
       shortfallAmount: 0,
       creditTransactionId: 'txn-1',
     });
@@ -3377,25 +3444,24 @@ describe('subscription credit grants', () => {
       .map((grant) => grant.status)).toEqual(['granted', 'granted', 'granted']);
     expect(supabase.tables.subscription_credit_grants
       .filter((grant) => grant.stripe_invoice_id === 'in_subscription_refund_2027')
-      .map((grant) => grant.status)).toEqual(['reversed', 'reversed']);
+      .map((grant) => grant.status)).toEqual(['granted', 'reversed']);
     expect(supabase.tables.credit_transactions[0]).toMatchObject({
-      amount: -20,
+      amount: -5,
       ledger_type: 'refund_clawback',
       counts_as_spend: false,
       metadata: expect.objectContaining({
         invoiceId: 'in_subscription_refund_2027',
-        requiredClawbackAmount: 20,
-        reversedGrantCount: 2,
-        reversedGrantPeriodKeys: [
-          'sub_subscription_refund_renewal:2027-01:01',
-          'sub_subscription_refund_renewal:2027-02:02',
-        ],
+        requiredClawbackAmount: 5,
+        reversedGrantCount: 1,
+        reversedGrantPeriodKeys: ['annual:2027-01-01T00:00:00.000Z:02'],
       }),
     });
     expect(supabase.tables.subscription_credit_grants
       .find((grant) => grant.id === 'grant-refund-2026-1')?.metadata.reversal).toBeUndefined();
     expect(supabase.tables.subscription_credit_grants
-      .find((grant) => grant.id === 'grant-refund-2027-1')?.metadata.reversal).toMatchObject({
+      .find((grant) => grant.id === 'grant-refund-2027-1')?.metadata.reversal).toBeUndefined();
+    expect(supabase.tables.subscription_credit_grants
+      .find((grant) => grant.id === 'grant-refund-2027-2')?.metadata.reversal).toMatchObject({
         invoiceId: 'in_subscription_refund_2027',
         source: 'subscription_refund',
       });

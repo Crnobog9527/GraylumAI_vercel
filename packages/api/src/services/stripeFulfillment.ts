@@ -2017,6 +2017,11 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     charge = await resolveRefundCharge(refund, retrieveCharge);
   }
 
+  // REFUND-1B: 可信退款时间戳 (Stripe refund/charge created) 用于周期定位
+  const refundCreatedAt = event.type === 'charge.refunded'
+    ? asIsoTimestamp(getSuccessfulChargeRefund(charge)?.created ?? charge?.created ?? null)
+    : asIsoTimestamp((event.data.object as Stripe.Refund).created);
+
   const chargeId = charge?.id ?? null;
   const paymentIntentId = getMetadataPaymentIntentId(refundMetadata)
     ?? getMetadataPaymentIntentId(charge?.metadata)
@@ -2194,6 +2199,8 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
         order,
         metadata: refundMetadata,
       }),
+      eventId: event.id,
+      refundCreatedAt,
       now,
     });
 
