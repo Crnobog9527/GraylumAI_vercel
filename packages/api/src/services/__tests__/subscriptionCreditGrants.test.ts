@@ -6,8 +6,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  addUtcCalendarMonthsClamped,
   calculateAnnualMonthlyGrantSchedule,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
+  getDueAnnualGrantPeriods,
   grantSubscriptionCredits,
   releaseDueAnnualSubscriptionCredits,
   reconcileSubscriptionRefundCreditGrants,
@@ -2298,6 +2300,147 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants.map((row) => row.period_index)).toEqual([1, 2, 3]);
   });
 
+  it('clamps UTC calendar month arithmetic to end of month', () => {
+    const anchor = new Date('2026-01-31T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(anchor, 0).toISOString()).toBe('2026-01-31T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(anchor, 1).toISOString()).toBe('2026-02-28T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(anchor, 2).toISOString()).toBe('2026-03-31T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(anchor, 3).toISOString()).toBe('2026-04-30T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(anchor, 12).toISOString()).toBe('2027-01-31T00:00:00.000Z');
+  });
+
+  it('uses February 29 in leap years when clamping', () => {
+    expect(addUtcCalendarMonthsClamped(new Date('2028-01-31T00:00:00.000Z'), 1).toISOString())
+      .toBe('2028-02-29T00:00:00.000Z');
+    expect(addUtcCalendarMonthsClamped(new Date('2027-08-31T00:00:00.000Z'), 6).toISOString())
+      .toBe('2028-02-29T00:00:00.000Z');
+  });
+
+  it('preserves anchor time of day and rejects invalid offsets', () => {
+    expect(addUtcCalendarMonthsClamped(new Date('2026-01-31T09:30:15.500Z'), 1).toISOString())
+      .toBe('2026-02-28T09:30:15.500Z');
+    expect(() => addUtcCalendarMonthsClamped(new Date('2026-01-31T00:00:00.000Z'), -1)).toThrow();
+    expect(() => addUtcCalendarMonthsClamped(new Date('2026-01-31T00:00:00.000Z'), 1.5)).toThrow();
+  });
+
+  it('builds calendar-month annual periods keyed by term start', () => {
+    const periods = getDueAnnualGrantPeriods({
+      yearlyCredits: 1200,
+      stripeSubscriptionId: 'sub_calendar',
+      currentPeriodStart: '2026-01-31T00:00:00.000Z',
+      currentPeriodEnd: '2027-01-31T00:00:00.000Z',
+      now: new Date('2026-02-28T00:00:00.000Z'),
+    });
+
+    expect(periods.map((period) => period.periodIndex)).toEqual([1, 2]);
+    expect(periods[0]).toMatchObject({
+      periodStart: '2026-01-31T00:00:00.000Z',
+      periodEnd: '2026-02-28T00:00:00.000Z',
+      grantPeriodKey: 'annual:2026-01-31T00:00:00.000Z:01',
+    });
+    expect(periods[1]).toMatchObject({
+      periodStart: '2026-02-28T00:00:00.000Z',
+      periodEnd: '2026-03-31T00:00:00.000Z',
+      grantPeriodKey: 'annual:2026-01-31T00:00:00.000Z:02',
+    });
+  });
+
+  it('computes every annual period from the original anchor and ends period 12 at the Stripe period end', () => {
+    const periods = getDueAnnualGrantPeriods({
+      yearlyCredits: 1200,
+      stripeSubscriptionId: 'sub_calendar_full',
+      currentPeriodStart: '2026-01-31T00:00:00.000Z',
+      currentPeriodEnd: '2027-01-31T00:00:00.000Z',
+      now: new Date('2027-02-01T00:00:00.000Z'),
+    });
+
+    expect(periods).toHaveLength(12);
+    expect(periods.reduce((sum, period) => sum + period.creditsGranted, 0)).toBe(1200);
+    expect(periods[2].periodStart).toBe('2026-03-31T00:00:00.000Z');
+    expect(periods[3].periodStart).toBe('2026-04-30T00:00:00.000Z');
+    expect(periods[11]).toMatchObject({
+      periodIndex: 12,
+      periodStart: '2026-12-31T00:00:00.000Z',
+      periodEnd: '2027-01-31T00:00:00.000Z',
+      grantPeriodKey: 'annual:2026-01-31T00:00:00.000Z:12',
+    });
+  });
+
+  it('releases the first annual period immediately and only once per due month', () => {
+    const immediate = getDueAnnualGrantPeriods({
+      yearlyCredits: 1200,
+      stripeSubscriptionId: 'sub_immediate',
+      currentPeriodStart: '2026-05-15T00:00:00.000Z',
+      currentPeriodEnd: '2027-05-15T00:00:00.000Z',
+      now: new Date('2026-05-15T00:00:00.000Z'),
+    });
+    expect(immediate.map((period) => period.periodIndex)).toEqual([1]);
+
+    const later = getDueAnnualGrantPeriods({
+      yearlyCredits: 1200,
+      stripeSubscriptionId: 'sub_immediate',
+      currentPeriodStart: '2026-05-15T00:00:00.000Z',
+      currentPeriodEnd: '2027-05-15T00:00:00.000Z',
+      now: new Date('2026-07-15T00:00:00.000Z'),
+    });
+    expect(later.map((period) => period.periodIndex)).toEqual([1, 2, 3]);
+  });
+
+  it('does not duplicate the first annual period when cron runs after the invoice webhook already granted it', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-webhook-cron-once',
+        user_id: 'user-webhook-cron-once',
+        item_id: 'plan-webhook-cron-once',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_webhook_cron_once',
+        stripe_customer_id: 'cus_webhook_cron_once',
+        stripe_price_id: 'price_webhook_cron_once',
+        status: 'completed',
+        payment_status: 'paid',
+        created_at: '2026-01-31T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-cron-once',
+        name: 'Gold',
+        level: 'gold',
+        yearly_credits: 1200,
+      }],
+      profiles: [{
+        id: 'user-webhook-cron-once',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      amountTotal: 9900,
+      currency: 'usd',
+      invoiceId: 'in_webhook_cron_once',
+      invoiceCreatedAt: '2026-01-31T00:00:00.000Z',
+      paymentStatus: 'paid',
+      periodStart: '2026-01-31T00:00:00Z',
+      periodEnd: '2027-01-31T00:00:00Z',
+      stripeCustomerId: 'cus_webhook_cron_once',
+      subscriptionId: 'sub_webhook_cron_once',
+      now: '2026-01-31T00:00:01.000Z',
+    });
+
+    const release = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-01-31T00:05:00.000Z'),
+    });
+
+    expect(release.releasedGrantCount).toBe(0);
+    expect(release.releasedCredits).toBe(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      period_index: 1,
+      grant_period_key: 'annual:2026-01-31T00:00:00.000Z:01',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+  });
+
   it('releases only the currently due annual month for a normal paid active subscription', async () => {
     const supabase = createMockSupabase({
       user_subscriptions: [{
@@ -2338,21 +2481,34 @@ describe('subscription credit grants', () => {
     });
   });
 
-  it('continues annual release before current_period_end when cancel_at_period_end is true', () => {
+  it('continues annual release before current_period_end for a normal cancel', () => {
     expect(shouldReleaseAnnualSubscriptionCredits({
       billingCycle: 'yearly',
       status: 'active',
-      cancelAtPeriodEnd: 'true',
       currentPeriodEnd: '2026-12-01T00:00:00.000Z',
       now: new Date('2026-08-01T00:00:00.000Z'),
     })).toBe(true);
+  });
+
+  it('stops annual release at current_period_end even while still active', () => {
+    expect(shouldReleaseAnnualSubscriptionCredits({
+      billingCycle: 'yearly',
+      status: 'active',
+      currentPeriodEnd: '2026-07-01T00:00:00.000Z',
+      now: new Date('2026-08-01T00:00:00.000Z'),
+    })).toBe(false);
+    expect(shouldReleaseAnnualSubscriptionCredits({
+      billingCycle: 'yearly',
+      status: 'active',
+      currentPeriodEnd: '2026-07-01T00:00:00.000Z',
+      now: new Date('2026-07-01T00:00:00.000Z'),
+    })).toBe(false);
   });
 
   it('stops annual release after canceled subscription passes current_period_end', () => {
     expect(shouldReleaseAnnualSubscriptionCredits({
       billingCycle: 'yearly',
       status: 'canceled',
-      cancelAtPeriodEnd: 'false',
       currentPeriodEnd: '2026-07-01T00:00:00.000Z',
       now: new Date('2026-08-01T00:00:00.000Z'),
     })).toBe(false);
@@ -2363,7 +2519,6 @@ describe('subscription credit grants', () => {
       expect(shouldReleaseAnnualSubscriptionCredits({
         billingCycle: 'yearly',
         status,
-        cancelAtPeriodEnd: 'true',
         currentPeriodEnd: '2027-01-01T00:00:00.000Z',
         now: new Date('2026-03-01T00:00:00.000Z'),
       })).toBe(false);
