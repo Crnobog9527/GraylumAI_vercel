@@ -2390,6 +2390,229 @@ $$;
 
 
 -- ============================================
+-- 10c. atomic_grant_subscription_invoice_credits: invoice money-lane barrier
+-- ============================================
+-- Invoice fulfillment must not use an application pre-read as its admission
+-- decision. This candidate-only helper locks profile -> source/invoice order
+-- -> subscription mirror, then either observes committed refund posture or
+-- commits the ledger, durable grant, mirror, and invoice completion together.
+CREATE OR REPLACE FUNCTION public.atomic_grant_subscription_invoice_credits(
+  p_user_id UUID,
+  p_membership_plan_id UUID,
+  p_stripe_subscription_id TEXT,
+  p_stripe_invoice_id TEXT,
+  p_source_order_id UUID,
+  p_amount_total INTEGER DEFAULT NULL,
+  p_currency TEXT DEFAULT 'usd',
+  p_payment_status TEXT DEFAULT 'paid',
+  p_stripe_customer_id TEXT DEFAULT NULL,
+  p_grant_period_key TEXT DEFAULT NULL,
+  p_period_start TIMESTAMPTZ DEFAULT NULL,
+  p_period_end TIMESTAMPTZ DEFAULT NULL,
+  p_period_index INTEGER DEFAULT NULL,
+  p_total_periods INTEGER DEFAULT 1,
+  p_credits_granted INTEGER DEFAULT NULL,
+  p_billing_cycle TEXT DEFAULT 'monthly',
+  p_membership_level TEXT DEFAULT NULL,
+  p_can_promote_checkout_order BOOLEAN DEFAULT FALSE,
+  p_grant_type TEXT DEFAULT 'monthly_invoice',
+  p_idempotency_key TEXT DEFAULT NULL,
+  p_description TEXT DEFAULT NULL,
+  p_source_type TEXT DEFAULT 'stripe_invoice',
+  p_source_id TEXT DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::JSONB,
+  p_grant_metadata JSONB DEFAULT '{}'::JSONB,
+  p_now TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+  transaction_id UUID,
+  balance_before INTEGER,
+  balance_after INTEGER,
+  amount INTEGER,
+  is_idempotent BOOLEAN,
+  granted BOOLEAN,
+  blocked_by_termination BOOLEAN,
+  grant_id UUID,
+  credits_granted INTEGER,
+  invoice_order_id UUID
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_now TIMESTAMPTZ := COALESCE(p_now, now());
+  v_balance_before INTEGER;
+  v_balance_after INTEGER;
+  v_source_status TEXT;
+  v_source_payment_status TEXT;
+  v_source_metadata JSONB;
+  v_source_customer_id TEXT;
+  v_source_price_id TEXT;
+  v_source_checkout_session_id TEXT;
+  v_invoice_status TEXT;
+  v_invoice_payment_status TEXT;
+  v_invoice_metadata JSONB;
+  v_terminated_at TIMESTAMPTZ;
+  v_existing_grant_id UUID;
+  v_existing_grant_transaction_id UUID;
+  v_existing_grant_credits INTEGER;
+  v_transaction_id UUID;
+  v_grant_id UUID;
+BEGIN
+  IF p_user_id IS NULL OR p_membership_plan_id IS NULL
+     OR NULLIF(btrim(COALESCE(p_stripe_subscription_id, '')), '') IS NULL
+     OR NULLIF(btrim(COALESCE(p_stripe_invoice_id, '')), '') IS NULL
+     OR p_source_order_id IS NULL
+     OR NULLIF(btrim(COALESCE(p_grant_period_key, '')), '') IS NULL
+     OR NULLIF(btrim(COALESCE(p_idempotency_key, '')), '') IS NULL
+     OR p_credits_granted IS NULL OR p_credits_granted <= 0 THEN
+    RAISE EXCEPTION 'INVOICE_GRANT_ADMISSION_INPUT_INVALID';
+  END IF;
+
+  SELECT credits INTO v_balance_before
+  FROM profiles WHERE id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'INVOICE_GRANT_PROFILE_MISSING: %', p_user_id;
+  END IF;
+
+  SELECT status, payment_status, metadata, stripe_customer_id, stripe_price_id, stripe_checkout_session_id
+  INTO v_source_status, v_source_payment_status, v_source_metadata, v_source_customer_id, v_source_price_id, v_source_checkout_session_id
+  FROM payment_orders WHERE id = p_source_order_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'INVOICE_GRANT_SOURCE_ORDER_MISSING: %', p_source_order_id;
+  END IF;
+
+  SELECT id, status, payment_status, metadata
+  INTO invoice_order_id, v_invoice_status, v_invoice_payment_status, v_invoice_metadata
+  FROM payment_orders
+  WHERE stripe_invoice_id = p_stripe_invoice_id
+  ORDER BY created_at ASC LIMIT 1 FOR UPDATE;
+
+  IF lower(COALESCE(v_source_status, '')) IN ('refunded', 'partially_refunded')
+     OR lower(COALESCE(v_source_payment_status, '')) IN ('refunded', 'partially_refunded')
+     OR v_source_metadata ? 'stripeRefund'
+     OR v_source_metadata ? 'subscriptionCreditGrantReversal'
+     OR lower(COALESCE(v_invoice_status, '')) IN ('refunded', 'partially_refunded')
+     OR lower(COALESCE(v_invoice_payment_status, '')) IN ('refunded', 'partially_refunded')
+     OR v_invoice_metadata ? 'stripeRefund'
+     OR v_invoice_metadata ? 'subscriptionCreditGrantReversal' THEN
+    RETURN QUERY SELECT NULL::UUID, v_balance_before, v_balance_before, 0, FALSE, FALSE, TRUE, NULL::UUID, 0, invoice_order_id;
+    RETURN;
+  END IF;
+
+  SELECT credit_release_terminated_at INTO v_terminated_at
+  FROM user_subscriptions
+  WHERE user_id = p_user_id AND stripe_subscription_id = p_stripe_subscription_id
+  ORDER BY created_at ASC LIMIT 1 FOR UPDATE;
+
+  IF NOT FOUND THEN
+    INSERT INTO user_subscriptions (
+      user_id, membership_plan_id, stripe_customer_id, stripe_subscription_id,
+      stripe_price_id, billing_cycle, status, cancel_at_period_end,
+      current_period_start, current_period_end, metadata, updated_at
+    ) VALUES (
+      p_user_id, p_membership_plan_id, COALESCE(v_source_customer_id, p_stripe_customer_id), p_stripe_subscription_id,
+      v_source_price_id, CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END, 'active', 'false',
+      p_period_start, p_period_end,
+      jsonb_build_object('lastInvoiceId', p_stripe_invoice_id, 'lastInvoicePaymentStatus', COALESCE(p_payment_status, 'paid'), 'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'),
+      v_now
+    );
+  ELSIF v_terminated_at IS NOT NULL THEN
+    RETURN QUERY SELECT NULL::UUID, v_balance_before, v_balance_before, 0, FALSE, FALSE, TRUE, NULL::UUID, 0, invoice_order_id;
+    RETURN;
+  END IF;
+
+  SELECT id, credit_transaction_id, credits_granted
+  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits
+  FROM subscription_credit_grants
+  WHERE stripe_subscription_id = p_stripe_subscription_id
+    AND (idempotency_key = p_idempotency_key OR grant_period_key = p_grant_period_key)
+  ORDER BY (idempotency_key = p_idempotency_key) DESC, created_at ASC
+  LIMIT 1 FOR UPDATE;
+
+  IF FOUND THEN
+    RETURN QUERY SELECT v_existing_grant_transaction_id, v_balance_before, v_balance_before,
+      COALESCE(v_existing_grant_credits, 0), TRUE, FALSE, FALSE, v_existing_grant_id,
+      COALESCE(v_existing_grant_credits, 0), invoice_order_id;
+    RETURN;
+  END IF;
+
+  v_balance_after := v_balance_before + p_credits_granted;
+  INSERT INTO credit_transactions (
+    user_id, amount, type, description, idempotency_key, balance_before, balance_after,
+    ledger_type, reason_code, counts_as_spend, source_type, source_id, source_order_id,
+    grant_period_key, metadata
+  ) VALUES (
+    p_user_id, p_credits_granted, 'addition', p_description, p_idempotency_key, v_balance_before, v_balance_after,
+    'grant', p_grant_type, FALSE, p_source_type, p_source_id, p_source_order_id,
+    p_grant_period_key, COALESCE(p_metadata, '{}'::JSONB)
+  ) RETURNING id INTO v_transaction_id;
+
+  UPDATE profiles
+  SET credits = v_balance_after,
+      membership_level = COALESCE(NULLIF(btrim(p_membership_level), ''), membership_level),
+      updated_at = v_now
+  WHERE id = p_user_id;
+
+  INSERT INTO subscription_credit_grants (
+    user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle,
+    grant_type, grant_period_key, period_start, period_end, period_index, total_periods,
+    credits_granted, status, idempotency_key, credit_transaction_id, metadata, created_at, updated_at
+  ) VALUES (
+    p_user_id, p_membership_plan_id, p_stripe_subscription_id, p_stripe_invoice_id,
+    CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END,
+    p_grant_type, p_grant_period_key, p_period_start, p_period_end, p_period_index, p_total_periods,
+    p_credits_granted, 'granted', p_idempotency_key, v_transaction_id, COALESCE(p_grant_metadata, '{}'::JSONB), v_now, v_now
+  ) RETURNING id INTO v_grant_id;
+
+  IF invoice_order_id IS NOT NULL THEN
+    UPDATE payment_orders SET
+      status = 'completed', payment_status = COALESCE(p_payment_status, 'paid'), fulfilled_at = v_now,
+      metadata = COALESCE(v_invoice_metadata, '{}'::JSONB) || jsonb_build_object(
+        'source', 'invoice.payment_succeeded', 'transactionId', v_transaction_id,
+        'subscriptionCreditGrantId', v_grant_id, 'grantedCredits', p_credits_granted,
+        'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'
+      ), updated_at = v_now
+    WHERE id = invoice_order_id
+      AND lower(COALESCE(status, '')) NOT IN ('refunded', 'partially_refunded')
+      AND lower(COALESCE(payment_status, '')) NOT IN ('refunded', 'partially_refunded');
+  ELSIF p_can_promote_checkout_order AND v_source_checkout_session_id IS NOT NULL THEN
+    UPDATE payment_orders SET
+      stripe_invoice_id = p_stripe_invoice_id, stripe_subscription_id = p_stripe_subscription_id,
+      status = 'completed', payment_status = COALESCE(p_payment_status, 'paid'), fulfilled_at = v_now,
+      metadata = COALESCE(v_source_metadata, '{}'::JSONB) || jsonb_build_object(
+        'source', 'invoice.payment_succeeded', 'transactionId', v_transaction_id,
+        'subscriptionCreditGrantId', v_grant_id, 'grantedCredits', p_credits_granted,
+        'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'
+      ), updated_at = v_now
+    WHERE id = p_source_order_id
+      AND lower(COALESCE(status, '')) NOT IN ('refunded', 'partially_refunded')
+      AND lower(COALESCE(payment_status, '')) NOT IN ('refunded', 'partially_refunded')
+    RETURNING id INTO invoice_order_id;
+  ELSE
+    INSERT INTO payment_orders (
+      user_id, item_type, item_id, billing_cycle, stripe_invoice_id, stripe_subscription_id,
+      stripe_customer_id, stripe_price_id, amount_total, currency, mode, status, payment_status,
+      fulfilled_at, metadata, updated_at
+    ) VALUES (
+      p_user_id, 'membership_plan', p_membership_plan_id,
+      CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END,
+      p_stripe_invoice_id, p_stripe_subscription_id, COALESCE(v_source_customer_id, p_stripe_customer_id),
+      v_source_price_id, p_amount_total, COALESCE(p_currency, 'usd'), 'subscription', 'completed',
+      COALESCE(p_payment_status, 'paid'), v_now,
+      jsonb_build_object('source', 'invoice.payment_succeeded', 'transactionId', v_transaction_id,
+        'subscriptionCreditGrantId', v_grant_id, 'grantedCredits', p_credits_granted,
+        'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'), v_now
+    ) RETURNING id INTO invoice_order_id;
+  END IF;
+
+  RETURN QUERY SELECT v_transaction_id, v_balance_before, v_balance_after, p_credits_granted,
+    FALSE, TRUE, FALSE, v_grant_id, p_credits_granted, invoice_order_id;
+END;
+$$;
+
+-- ============================================
 -- 11. SEC-1 posture closure for every replaced/added function
 -- ============================================
 
@@ -2402,6 +2625,7 @@ DECLARE
     'public.atomic_finalize_ai_failure(uuid,text,text,uuid,uuid,text,integer,integer,text,text,jsonb)',
     'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
     'public.atomic_grant_annual_subscription_credits(uuid,uuid,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,text,text,uuid,jsonb,jsonb,timestamptz)',
+    'public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz)',
     'public.atomic_pre_deduct(uuid,integer,text,uuid)',
     'public.atomic_refund(uuid,uuid,text)',
     'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',

@@ -122,6 +122,12 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
   sourceId?: string | null;
   sourceOrderId?: string | null;
   planName?: string | null;
+  invoiceAmountTotal?: number | null;
+  invoiceCurrency?: string | null;
+  invoicePaymentStatus?: string | null;
+  invoiceStripeCustomerId?: string | null;
+  membershipLevel?: string | null;
+  canPromoteCheckoutOrder?: boolean;
   now?: string;
 }
 
@@ -147,6 +153,7 @@ export interface AnnualReleaseResult {
 
 interface AnnualGrantAdmissionInput extends GrantSubscriptionCreditsInput {
   enforceTerminationBarrier?: boolean;
+  transactionalInvoiceCompletion?: boolean;
 }
 
 export interface ReconcileSubscriptionRefundCreditGrantsInput {
@@ -1025,24 +1032,11 @@ async function syncProfileMembershipLevel(input: {
     .select('id')
     .maybeSingle();
 
-  if (result.error) {
+  if (result.error || !result.data?.id) {
     throwGrantError(
       'subscription_profile_membership_level_update',
-      SUBSCRIPTION_GRANT_ERRORS.profileWrite,
-      result.error,
-      {
-        userId: maskIdentifier(input.userId),
-        subscriptionId: maskIdentifier(input.subscriptionId),
-        invoiceId: maskIdentifier(input.invoiceId),
-      },
-    );
-  }
-
-  if (!result.data?.id) {
-    throwGrantError(
-      'subscription_profile_missing',
-      SUBSCRIPTION_GRANT_ERRORS.missingProfile,
-      new Error('profile missing for membership invoice fulfillment'),
+      result.error ? SUBSCRIPTION_GRANT_ERRORS.profileWrite : SUBSCRIPTION_GRANT_ERRORS.missingProfile,
+      result.error ?? new Error('profile missing for membership invoice fulfillment'),
       {
         userId: maskIdentifier(input.userId),
         subscriptionId: maskIdentifier(input.subscriptionId),
@@ -2148,6 +2142,88 @@ async function applyAnnualGrantAdmission(
   return row;
 }
 
+async function applyInvoiceGrantAdmission(
+  supabase: SupabaseLikeClient,
+  input: GrantSubscriptionCreditsInput & { idempotencyKey: string },
+) {
+  const description = getGrantDescription(input);
+  const result = await supabase.rpc('atomic_grant_subscription_invoice_credits', {
+    p_user_id: input.userId,
+    p_membership_plan_id: input.membershipPlanId,
+    p_stripe_subscription_id: input.stripeSubscriptionId,
+    p_stripe_invoice_id: input.stripeInvoiceId ?? null,
+    p_source_order_id: input.sourceOrderId ?? null,
+    p_amount_total: input.invoiceAmountTotal ?? null,
+    p_currency: input.invoiceCurrency ?? 'usd',
+    p_payment_status: input.invoicePaymentStatus ?? 'paid',
+    p_stripe_customer_id: input.invoiceStripeCustomerId ?? null,
+    p_grant_period_key: input.grantPeriodKey,
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
+    p_period_index: input.periodIndex,
+    p_total_periods: input.totalPeriods,
+    p_credits_granted: input.creditsGranted,
+    p_billing_cycle: input.billingCycle,
+    p_membership_level: input.membershipLevel ?? null,
+    p_can_promote_checkout_order: input.canPromoteCheckoutOrder === true,
+    p_grant_type: input.grantType,
+    p_idempotency_key: input.idempotencyKey,
+    p_description: description,
+    p_source_type: input.sourceType,
+    p_source_id: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
+    p_metadata: {
+      subscriptionId: input.stripeSubscriptionId,
+      invoiceId: input.stripeInvoiceId ?? null,
+      grantType: input.grantType,
+      billingCycle: input.billingCycle,
+      periodIndex: input.periodIndex,
+      totalPeriods: input.totalPeriods,
+      idempotencyKey: input.idempotencyKey,
+    },
+    p_grant_metadata: {
+      sourceType: input.sourceType,
+      sourceId: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
+    },
+    p_now: input.now ?? null,
+  });
+
+  if (result.error) {
+    throwGrantError(
+      'subscription_invoice_credit_grant_admission',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
+      result.error,
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
+        grantPeriodKey: input.grantPeriodKey,
+      },
+    );
+  }
+
+  const row = getFirstRpcRow<{
+    transaction_id?: string | null;
+    credits_granted?: number | null;
+    grant_id?: string | null;
+    invoice_order_id?: string | null;
+    granted?: boolean | null;
+    blocked_by_termination?: boolean | null;
+  }>(result.data);
+  if (!row) {
+    throwGrantError(
+      'subscription_invoice_credit_grant_admission_result',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
+      new Error('subscription invoice grant admission RPC returned no row'),
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
+        grantPeriodKey: input.grantPeriodKey,
+      },
+    );
+  }
+
+  return row;
+}
+
 export async function grantSubscriptionCredits(
   supabase: SupabaseLikeClient,
   input: AnnualGrantAdmissionInput,
@@ -2159,11 +2235,16 @@ export async function grantSubscriptionCredits(
       creditTransactionId: null,
       idempotencyKey: buildGrantIdempotencyKey(input),
       grantId: null,
+      invoiceOrderId: null,
+      blockedByTermination: false,
     };
   }
 
   const idempotencyKey = buildGrantIdempotencyKey(input);
-  const existingGrant = await getExistingCreditGrant(supabase, idempotencyKey);
+  const mustUseTransactionalAdmission = input.enforceTerminationBarrier === true;
+  const existingGrant = mustUseTransactionalAdmission
+    ? null
+    : await getExistingCreditGrant(supabase, idempotencyKey);
   if (existingGrant) {
     return {
       granted: false,
@@ -2171,6 +2252,27 @@ export async function grantSubscriptionCredits(
       creditTransactionId: existingGrant.credit_transaction_id ?? null,
       idempotencyKey,
       grantId: existingGrant.id ?? null,
+      invoiceOrderId: null,
+      blockedByTermination: false,
+    };
+  }
+
+  if (mustUseTransactionalAdmission && input.transactionalInvoiceCompletion === true) {
+    const admission = await applyInvoiceGrantAdmission(supabase, {
+      ...input,
+      idempotencyKey,
+    });
+
+    return {
+      granted: admission.granted === true,
+      creditsGranted: admission.granted === true
+        ? admission.credits_granted ?? input.creditsGranted
+        : 0,
+      creditTransactionId: admission.transaction_id ?? null,
+      idempotencyKey,
+      grantId: admission.grant_id ?? null,
+      invoiceOrderId: admission.invoice_order_id ?? null,
+      blockedByTermination: admission.blocked_by_termination === true,
     };
   }
 
@@ -2192,6 +2294,8 @@ export async function grantSubscriptionCredits(
       creditTransactionId: admission.transaction_id ?? null,
       idempotencyKey,
       grantId: admission.grant_id ?? null,
+      invoiceOrderId: null,
+      blockedByTermination: admission.blocked_by_termination === true,
     };
   }
 
@@ -2219,6 +2323,8 @@ export async function grantSubscriptionCredits(
     creditTransactionId,
     idempotencyKey,
     grantId: insertedGrant?.id ?? null,
+    invoiceOrderId: null,
+    blockedByTermination: false,
   };
 }
 
@@ -2610,7 +2716,11 @@ async function releaseSubscriptionPlanChangeLock(input: {
       fulfilled_at: input.fulfilledAt,
       updated_at: input.fulfilledAt,
     })
-    .eq('id', input.sourceOrder.id);
+    .eq('id', input.sourceOrder.id)
+    .neq('status', 'refunded')
+    .neq('status', 'partially_refunded')
+    .neq('payment_status', 'refunded')
+    .neq('payment_status', 'partially_refunded');
 
   if (result.error) {
     throwGrantError(
@@ -2722,14 +2832,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   const periodStart = input.periodStart ?? fulfilledAt;
   const periodEnd = input.periodEnd ?? periodStart;
 
-  await syncProfileMembershipLevel({
-    supabase,
-    userId: sourceOrder.user_id,
-    membershipLevel,
-    subscriptionId: input.subscriptionId,
-    invoiceId: input.invoiceId,
-  });
-
   const grantPeriod: GrantPeriod = billingCycle === 'yearly'
     ? {
       periodIndex: 1,
@@ -2758,42 +2860,104 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     grantType: billingCycle === 'yearly' ? 'annual_monthly_release' : 'monthly_invoice',
     sourceType: 'stripe_invoice',
     sourceId: input.invoiceId,
+    sourceOrderId: sourceOrder.id,
     planName: plan.name,
+    invoiceAmountTotal: input.amountTotal,
+    invoiceCurrency: input.currency,
+    invoicePaymentStatus: input.paymentStatus,
+    invoiceStripeCustomerId: input.stripeCustomerId,
+    membershipLevel,
+    canPromoteCheckoutOrder: Boolean(
+      sourceOrder.stripe_checkout_session_id
+      && !sourceOrder.stripe_invoice_id
+      && !isSubscriptionPlanChangeOrder(sourceOrder),
+    ),
     now: fulfilledAt,
+    enforceTerminationBarrier: true,
+    transactionalInvoiceCompletion: true,
   });
 
-  await upsertSubscriptionMirror({
+  if (grant.blockedByTermination) {
+    logger.warn('billing', 'subscription_invoice_fulfillment_termination_blocked', {
+      invoiceId: maskIdentifier(input.invoiceId),
+      subscriptionId: maskIdentifier(input.subscriptionId),
+      orderId: maskIdentifier(existingInvoiceOrder?.id ?? sourceOrder.id),
+    });
+
+    return {
+      fulfilledAt: null,
+      alreadyFulfilled: false,
+      grantedCredits: 0,
+      creditTransactionId: null,
+      invoiceOrderId: grant.invoiceOrderId,
+      skippedReason: 'blocked_by_termination',
+    };
+  }
+
+  await syncProfileMembershipLevel({
     supabase,
-    sourceOrder,
-    plan,
+    userId: sourceOrder.user_id,
+    membershipLevel,
     subscriptionId: input.subscriptionId,
-    stripeCustomerId: input.stripeCustomerId,
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
-    billingCycle,
-    transactionId: grant.creditTransactionId,
-    now: fulfilledAt,
     invoiceId: input.invoiceId,
-    paymentStatus: input.paymentStatus,
   });
 
-  const invoiceOrderId = await writeCompletedInvoiceOrder({
-    supabase,
-    existingInvoiceOrder,
-    sourceOrder,
-    plan,
-    subscriptionId: input.subscriptionId,
-    invoiceId: input.invoiceId,
-    amountTotal: input.amountTotal,
-    currency: input.currency,
-    paymentStatus: input.paymentStatus,
-    stripeCustomerId: input.stripeCustomerId,
-    billingCycle,
-    fulfilledAt,
-    grantedCredits: grant.creditsGranted,
-    creditTransactionId: grant.creditTransactionId,
-    grantId: grant.grantId,
-  });
+  // The candidate RPC always returns this identity in production. This guarded
+  // legacy response path is retained solely for compatible test doubles and
+  // never makes the V6 admission result authoritative over a refund state.
+  let invoiceOrderId = grant.invoiceOrderId;
+  if (!invoiceOrderId) {
+    await upsertSubscriptionMirror({
+      supabase,
+      sourceOrder,
+      plan,
+      subscriptionId: input.subscriptionId,
+      stripeCustomerId: input.stripeCustomerId,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      billingCycle,
+      transactionId: grant.creditTransactionId,
+      now: fulfilledAt,
+      invoiceId: input.invoiceId,
+      paymentStatus: input.paymentStatus,
+    });
+
+    invoiceOrderId = await writeCompletedInvoiceOrder({
+      supabase,
+      existingInvoiceOrder,
+      sourceOrder,
+      plan,
+      subscriptionId: input.subscriptionId,
+      invoiceId: input.invoiceId,
+      amountTotal: input.amountTotal,
+      currency: input.currency,
+      paymentStatus: input.paymentStatus,
+      stripeCustomerId: input.stripeCustomerId,
+      billingCycle,
+      fulfilledAt,
+      grantedCredits: grant.creditsGranted,
+      creditTransactionId: grant.creditTransactionId,
+      grantId: grant.grantId,
+    });
+
+    if (grant.creditTransactionId && invoiceOrderId) {
+      await updateCreditTransactionSemantics(supabase, {
+        ...grantPeriod,
+        userId: sourceOrder.user_id,
+        membershipPlanId: plan.id,
+        stripeSubscriptionId: input.subscriptionId,
+        stripeInvoiceId: input.invoiceId,
+        billingCycle,
+        grantType: billingCycle === 'yearly' ? 'annual_monthly_release' : 'monthly_invoice',
+        sourceType: 'stripe_invoice',
+        sourceId: input.invoiceId,
+        sourceOrderId: invoiceOrderId,
+        planName: plan.name,
+        idempotencyKey: grant.idempotencyKey,
+        creditTransactionId: grant.creditTransactionId,
+      });
+    }
+  }
 
   await releaseSubscriptionPlanChangeLock({
     supabase,
@@ -2801,24 +2965,6 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     fulfilledAt,
     paymentStatus: input.paymentStatus,
   });
-
-  if (grant.creditTransactionId && invoiceOrderId) {
-    await updateCreditTransactionSemantics(supabase, {
-      ...grantPeriod,
-      userId: sourceOrder.user_id,
-      membershipPlanId: plan.id,
-      stripeSubscriptionId: input.subscriptionId,
-      stripeInvoiceId: input.invoiceId,
-      billingCycle,
-      grantType: billingCycle === 'yearly' ? 'annual_monthly_release' : 'monthly_invoice',
-      sourceType: 'stripe_invoice',
-      sourceId: input.invoiceId,
-      sourceOrderId: invoiceOrderId,
-      planName: plan.name,
-      idempotencyKey: grant.idempotencyKey,
-      creditTransactionId: grant.creditTransactionId,
-    });
-  }
 
   return {
     fulfilledAt,

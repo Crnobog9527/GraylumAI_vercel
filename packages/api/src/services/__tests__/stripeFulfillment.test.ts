@@ -515,18 +515,46 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
         return applyRefundTerminationClawbackContract(tables, payload);
       }
 
-      if (name === 'atomic_grant_annual_subscription_credits') {
+      if (name === 'atomic_grant_annual_subscription_credits' || name === 'atomic_grant_subscription_invoice_credits') {
         const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
         const subscription = tables.user_subscriptions.find((row) =>
           row.user_id === payload.p_user_id
           && row.stripe_subscription_id === payload.p_stripe_subscription_id,
         );
         if (!subscription) {
-          return { data: null, error: { message: 'ANNUAL_GRANT_SUBSCRIPTION_MIRROR_MISSING' } };
+          if (name === 'atomic_grant_subscription_invoice_credits') {
+            tables.user_subscriptions.push({
+              id: `subscription-refund-webhook-${tables.user_subscriptions.length + 1}`,
+              user_id: payload.p_user_id,
+              membership_plan_id: payload.p_membership_plan_id,
+              stripe_subscription_id: payload.p_stripe_subscription_id,
+              billing_cycle: payload.p_billing_cycle,
+              status: 'active',
+              current_period_start: payload.p_period_start,
+              current_period_end: payload.p_period_end,
+              metadata: {
+                lastInvoiceId: payload.p_stripe_invoice_id,
+                fulfillmentSource: 'subscription_credit_grants',
+              },
+            });
+          } else {
+            return { data: null, error: { message: 'ANNUAL_GRANT_SUBSCRIPTION_MIRROR_MISSING' } };
+          }
         }
 
         const balanceBefore = profile ? Math.floor(Number(profile.credits ?? 0)) : 0;
-        if (subscription.credit_release_terminated_at != null) {
+        const currentSubscription = tables.user_subscriptions.find((row) =>
+          row.user_id === payload.p_user_id
+          && row.stripe_subscription_id === payload.p_stripe_subscription_id,
+        );
+        const sourceOrder = tables.payment_orders.find((row) => row.id === payload.p_source_order_id);
+        const invoiceOrder = tables.payment_orders.find((row) => row.stripe_invoice_id === payload.p_stripe_invoice_id);
+        const refunded = [sourceOrder, invoiceOrder].some((order) =>
+          order && ['refunded', 'partially_refunded'].includes(String(order.status ?? '').toLowerCase())
+          || order && ['refunded', 'partially_refunded'].includes(String(order.payment_status ?? '').toLowerCase())
+          || Boolean(order?.metadata?.stripeRefund),
+        );
+        if (currentSubscription?.credit_release_terminated_at != null || refunded) {
           return {
             data: [{
               transaction_id: null,
@@ -538,6 +566,7 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
               blocked_by_termination: true,
               grant_id: null,
               credits_granted: 0,
+              invoice_order_id: invoiceOrder?.id ?? null,
             }],
             error: null,
           };
@@ -584,7 +613,7 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           balance_before: balanceBefore,
           balance_after: balanceAfter,
           ledger_type: 'grant',
-          reason_code: 'annual_monthly_release',
+          reason_code: payload.p_grant_type ?? 'annual_monthly_release',
           counts_as_spend: false,
           source_type: payload.p_source_type,
           source_id: payload.p_source_id,
@@ -597,8 +626,8 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           membership_plan_id: payload.p_membership_plan_id,
           stripe_subscription_id: payload.p_stripe_subscription_id,
           stripe_invoice_id: payload.p_stripe_invoice_id ?? null,
-          billing_cycle: 'yearly',
-          grant_type: 'annual_monthly_release',
+          billing_cycle: payload.p_billing_cycle ?? 'yearly',
+          grant_type: payload.p_grant_type ?? 'annual_monthly_release',
           grant_period_key: payload.p_grant_period_key,
           period_start: payload.p_period_start,
           period_end: payload.p_period_end,
@@ -612,6 +641,22 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           metadata: payload.p_grant_metadata ?? {},
         });
 
+        const completedInvoiceOrder = invoiceOrder ?? sourceOrder;
+        if (name === 'atomic_grant_subscription_invoice_credits' && completedInvoiceOrder) {
+          Object.assign(completedInvoiceOrder, {
+            stripe_invoice_id: payload.p_stripe_invoice_id,
+            stripe_subscription_id: payload.p_stripe_subscription_id,
+            status: 'completed',
+            payment_status: payload.p_payment_status ?? 'paid',
+            fulfilled_at: payload.p_now ?? '2026-06-01T00:00:00.000Z',
+            metadata: {
+              ...(completedInvoiceOrder.metadata ?? {}),
+              source: 'invoice.payment_succeeded',
+              grantedCredits: amount,
+            },
+          });
+        }
+
         return {
           data: [{
             transaction_id: transactionId,
@@ -623,6 +668,7 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
             blocked_by_termination: false,
             grant_id: grantId,
             credits_granted: amount,
+            invoice_order_id: completedInvoiceOrder?.id ?? null,
           }],
           error: null,
         };
@@ -2425,6 +2471,63 @@ describe('stripe fulfillment helpers', () => {
 
     const supabase = {
       async rpc(name: string, payload: Record<string, unknown>) {
+        if (name === 'atomic_grant_subscription_invoice_credits') {
+          const transaction = {
+            id: 'txn-membership-grant',
+            user_id: payload.p_user_id,
+            amount: payload.p_credits_granted,
+            type: 'addition',
+            idempotency_key: payload.p_idempotency_key,
+            ledger_type: 'grant',
+            reason_code: payload.p_grant_type,
+            counts_as_spend: false,
+            source_type: payload.p_source_type,
+            source_id: payload.p_source_id,
+          };
+          const grant = {
+            id: 'grant-membership-grant',
+            user_id: payload.p_user_id,
+            membership_plan_id: payload.p_membership_plan_id,
+            stripe_subscription_id: payload.p_stripe_subscription_id,
+            stripe_invoice_id: payload.p_stripe_invoice_id,
+            billing_cycle: payload.p_billing_cycle,
+            grant_type: payload.p_grant_type,
+            grant_period_key: payload.p_grant_period_key,
+            period_index: payload.p_period_index,
+            total_periods: payload.p_total_periods,
+            credits_granted: payload.p_credits_granted,
+            credit_transaction_id: transaction.id,
+          };
+          tables.credit_transactions.push(transaction);
+          tables.subscription_credit_grants.push(grant);
+          tables.user_subscriptions.push({
+            id: 'subscription-membership-grant',
+            user_id: payload.p_user_id,
+            membership_plan_id: payload.p_membership_plan_id,
+            stripe_subscription_id: payload.p_stripe_subscription_id,
+            billing_cycle: payload.p_billing_cycle,
+            status: 'active',
+          });
+          const sourceOrder = tables.payment_orders.find((row) => row.id === payload.p_source_order_id);
+          Object.assign(sourceOrder ?? {}, {
+            stripe_invoice_id: payload.p_stripe_invoice_id,
+            status: 'completed',
+            payment_status: payload.p_payment_status ?? 'paid',
+            fulfilled_at: payload.p_now,
+          });
+          return {
+            data: [{
+              transaction_id: transaction.id,
+              granted: true,
+              blocked_by_termination: false,
+              grant_id: grant.id,
+              credits_granted: payload.p_credits_granted,
+              invoice_order_id: sourceOrder?.id ?? null,
+            }],
+            error: null,
+          };
+        }
+
         expect(name).toBe('atomic_apply_credit_ledger_entry');
         const transaction = {
           id: 'txn-membership-grant',
