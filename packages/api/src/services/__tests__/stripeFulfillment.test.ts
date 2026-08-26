@@ -3096,6 +3096,7 @@ describe('stripe fulfillment helpers', () => {
               }, {
                 id: 're_webhook_charge_refund_full',
                 status: 'succeeded',
+                created: 1802649700,
               }],
             },
           } as Stripe.Charge,
@@ -3107,7 +3108,11 @@ describe('stripe fulfillment helpers', () => {
     expect(replay).toMatchObject({
       reconciled: true,
       alreadyReconciled: true,
-      creditTransactionId: 'txn-refund-webhook-1',
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
   });
@@ -3378,6 +3383,7 @@ describe('stripe fulfillment helpers', () => {
               data: [{
                 id: 're_webhook_refund_created_charge_later',
                 status: 'succeeded',
+                created: 1773446400,
               }],
             },
           } as Stripe.Charge,
@@ -3390,22 +3396,22 @@ describe('stripe fulfillment helpers', () => {
       reconciled: true,
       fullRefund: true,
       alreadyReconciled: true,
-      reviewRequired: true,
-      reversedGrantCount: 1,
-      clawbackAmount: 10,
-      appliedClawbackAmount: 5,
-      shortfallAmount: 5,
-      creditTransactionId: 'txn-refund-webhook-1',
+      reviewRequired: false,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_webhook_refund_created_full',
-      eventType: 'refund.created',
+      refundId: 're_webhook_refund_created_charge_later',
+      eventType: 'charge.refunded',
       invoiceId: 'in_webhook_refund_created',
-      reviewRequired: true,
-      shortfallAmount: 5,
-      reversalStatus: 'shortfall_review_required',
-      reversedGrantCount: 1,
+      reviewRequired: false,
+      shortfallAmount: 0,
+      reversalStatus: 'complete',
+      reversedGrantCount: 0,
     });
   });
 
@@ -3572,19 +3578,20 @@ describe('stripe fulfillment helpers', () => {
       fullRefund: true,
       alreadyReconciled: true,
       reviewRequired: false,
-      reversedGrantCount: 1,
-      clawbackAmount: 5,
-      appliedClawbackAmount: 5,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
       shortfallAmount: 0,
-      creditTransactionId: 'txn-refund-webhook-1',
+      creditTransactionId: null,
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_webhook_cumulative_full_second',
-      eventType: 'refund.created',
-      reversedGrantCount: 1,
-      clawbackAmount: 5,
+      refundId: 're_webhook_cumulative_full_update',
+      eventType: 'refund.updated',
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
       reviewRequired: false,
+      reversalStatus: 'complete',
     });
 
     const releaseAfterCumulativeFullRefund = await releaseDueAnnualSubscriptionCredits(supabase, {

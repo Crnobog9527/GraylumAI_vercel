@@ -320,9 +320,12 @@ BEGIN
            (us.credit_release_terminated_at IS NOT NULL) AS terminated
     INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
     FROM subscription_credit_grants AS g
-    LEFT JOIN user_subscriptions AS us
+    JOIN user_subscriptions AS us
       ON us.stripe_subscription_id = g.stripe_subscription_id
+     AND us.user_id = p_user_id
     WHERE g.id = v_charged_grant_id
+      AND g.user_id = p_user_id
+      AND g.grant_period_key = v_period_key
     FOR UPDATE OF g;
 
     IF NOT FOUND THEN
@@ -442,6 +445,7 @@ DECLARE
   v_balance_after INTEGER;
   v_existing_process UUID;
   v_charged_grant_id UUID;
+  v_period_key TEXT;
   v_to_period INTEGER := 0;
   v_to_other INTEGER := 0;
   v_grant_status TEXT;
@@ -499,6 +503,7 @@ BEGIN
   -- 3b. REFUND-1B: 预扣完全未用, 按绑定逆分配返还
   v_charged_grant_id := NULLIF(v_pre_meta->>'chargedGrantId', '')::UUID;
   IF v_charged_grant_id IS NOT NULL THEN
+    v_period_key := v_pre_meta->>'chargedPeriodKey';
     v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
     v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
@@ -507,9 +512,12 @@ BEGIN
            (us.credit_release_terminated_at IS NOT NULL) AS terminated
     INTO v_grant_status, v_grant_terminated
     FROM subscription_credit_grants AS g
-    LEFT JOIN user_subscriptions AS us
+    JOIN user_subscriptions AS us
       ON us.stripe_subscription_id = g.stripe_subscription_id
+     AND us.user_id = p_user_id
     WHERE g.id = v_charged_grant_id
+      AND g.user_id = p_user_id
+      AND g.grant_period_key = v_period_key
     FOR UPDATE OF g;
 
     IF NOT FOUND THEN
@@ -678,9 +686,12 @@ BEGIN
            (us.credit_release_terminated_at IS NOT NULL) AS terminated
     INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
     FROM subscription_credit_grants AS g
-    LEFT JOIN user_subscriptions AS us
+    JOIN user_subscriptions AS us
       ON us.stripe_subscription_id = g.stripe_subscription_id
+     AND us.user_id = p_user_id
     WHERE g.id = v_charged_grant_id
+      AND g.user_id = p_user_id
+      AND g.grant_period_key = v_period_key
     FOR UPDATE OF g;
 
     IF NOT FOUND THEN
@@ -920,9 +931,12 @@ BEGIN
              (us.credit_release_terminated_at IS NOT NULL) AS terminated
       INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
       FROM subscription_credit_grants AS g
-      LEFT JOIN user_subscriptions AS us
+      JOIN user_subscriptions AS us
         ON us.stripe_subscription_id = g.stripe_subscription_id
+       AND us.user_id = p_user_id
       WHERE g.id = v_charged_grant_id
+        AND g.user_id = p_user_id
+        AND g.grant_period_key = v_period_key
       FOR UPDATE OF g;
 
       IF NOT FOUND THEN
@@ -1134,6 +1148,7 @@ DECLARE
   v_refund_id UUID;
   v_existing_process UUID;
   v_charged_grant_id UUID;
+  v_period_key TEXT;
   v_to_period INTEGER := 0;
   v_to_other INTEGER := 0;
   v_grant_status TEXT;
@@ -1189,6 +1204,7 @@ BEGIN
     -- REFUND-1B: 预扣完全未用, 按绑定逆分配返还 (锁序 profile -> grant)
     v_charged_grant_id := NULLIF(v_pre_meta->>'chargedGrantId', '')::UUID;
     IF v_charged_grant_id IS NOT NULL THEN
+      v_period_key := v_pre_meta->>'chargedPeriodKey';
       v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
       v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
@@ -1197,9 +1213,12 @@ BEGIN
              (us.credit_release_terminated_at IS NOT NULL) AS terminated
       INTO v_grant_status, v_grant_terminated
       FROM subscription_credit_grants AS g
-      LEFT JOIN user_subscriptions AS us
+      JOIN user_subscriptions AS us
         ON us.stripe_subscription_id = g.stripe_subscription_id
+       AND us.user_id = p_user_id
       WHERE g.id = v_charged_grant_id
+        AND g.user_id = p_user_id
+        AND g.grant_period_key = v_period_key
       FOR UPDATE OF g;
 
       IF NOT FOUND THEN
@@ -1422,9 +1441,12 @@ BEGIN
            (us.credit_release_terminated_at IS NOT NULL) AS terminated
     INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
     FROM subscription_credit_grants AS g
-    LEFT JOIN user_subscriptions AS us
-      ON us.stripe_subscription_id = g.stripe_subscription_id
-    WHERE g.id = v_charged_grant_id
+      JOIN user_subscriptions AS us
+        ON us.stripe_subscription_id = g.stripe_subscription_id
+       AND us.user_id = p_user_id
+      WHERE g.id = v_charged_grant_id
+        AND g.user_id = p_user_id
+        AND g.grant_period_key = v_period_key
     FOR UPDATE OF g;
 
     IF NOT FOUND THEN
@@ -1656,9 +1678,25 @@ DECLARE
   v_shortfall INTEGER := 0;
   v_transaction_id UUID;
   v_existing_transaction RECORD;
+  v_existing_termination_at TIMESTAMPTZ;
 BEGIN
   IF btrim(COALESCE(p_subscription_id, '')) = '' THEN
     RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_ID_REQUIRED';
+  END IF;
+
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_USER_REQUIRED';
+  END IF;
+
+  -- R2/R8: every mode binds the profile and the subscription mirror before
+  -- any termination or grant mutation; the profile lock remains first.
+  SELECT credits INTO v_balance_before
+  FROM profiles
+  WHERE id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_MISSING: %', p_user_id;
   END IF;
 
   v_full_mode := (p_termination_only IS NOT TRUE) AND (btrim(COALESCE(p_period_key, '')) <> '');
@@ -1666,20 +1704,6 @@ BEGIN
   IF v_full_mode THEN
     IF btrim(COALESCE(p_idempotency_key, '')) = '' THEN
       RAISE EXCEPTION 'REFUND_CLAWBACK_CANONICAL_IDEMPOTENCY_KEY_REQUIRED';
-    END IF;
-
-    IF p_user_id IS NULL THEN
-      RAISE EXCEPTION 'REFUND_CLAWBACK_USER_REQUIRED';
-    END IF;
-
-    -- R2: 锁序 profile -> grant; 该锁也是并发退款/结算调用的串行化点
-    SELECT credits INTO v_balance_before
-    FROM profiles
-    WHERE id = p_user_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_MISSING: %', p_user_id;
     END IF;
 
     -- R1: 持锁后复查 canonical (event_id + subscription_id + period_key) 幂等键;
@@ -1711,28 +1735,36 @@ BEGIN
 
   -- R5: 先写 termination (首个成功事件确立); mirror 缺失即失败关闭,
   --     不得继续 grant reversal / clawback
-  UPDATE user_subscriptions
-  SET credit_release_terminated_at = v_now,
-      credit_release_terminated_reason = COALESCE(NULLIF(btrim(p_reason), ''), 'stripe_refund'),
-      credit_release_terminated_event_id = p_event_id,
-      credit_release_terminated_period_key = p_period_key,
-      updated_at = v_now
+  -- R8: lock the mirror for the same owner/subscription before writing its
+  -- termination marker; a mismatched owner's mirror is not a valid binding.
+  SELECT id, credit_release_terminated_at
+  INTO v_mirror_id, v_existing_termination_at
+  FROM user_subscriptions
   WHERE stripe_subscription_id = p_subscription_id
-    AND credit_release_terminated_at IS NULL
-  RETURNING id INTO v_mirror_id;
+    AND user_id = p_user_id
+  ORDER BY created_at ASC
+  LIMIT 1
+  FOR UPDATE;
 
-  IF v_mirror_id IS NOT NULL THEN
-    v_termination_written := TRUE;
-  ELSE
-    SELECT id INTO v_mirror_id
-    FROM user_subscriptions
-    WHERE stripe_subscription_id = p_subscription_id
-    ORDER BY created_at ASC
-    LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
+  END IF;
+
+  IF v_existing_termination_at IS NULL THEN
+    UPDATE user_subscriptions
+    SET credit_release_terminated_at = v_now,
+        credit_release_terminated_reason = COALESCE(NULLIF(btrim(p_reason), ''), 'stripe_refund'),
+        credit_release_terminated_event_id = p_event_id,
+        credit_release_terminated_period_key = p_period_key,
+        updated_at = v_now
+    WHERE id = v_mirror_id
+      AND credit_release_terminated_at IS NULL;
 
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
+      RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_TERMINATION_WRITE_MISS: %', p_subscription_id;
     END IF;
+
+    v_termination_written := TRUE;
   END IF;
 
   -- REVIEW_REQUIRED / termination-only: 只停止未来释放, 不猜测扣款
@@ -1775,7 +1807,12 @@ BEGIN
   SELECT g.id, g.status, g.credits_granted, g.consumed_amount
   INTO v_grant_id, v_grant_status, v_grant_granted, v_grant_consumed
   FROM subscription_credit_grants AS g
-  WHERE g.stripe_subscription_id = p_subscription_id
+  JOIN user_subscriptions AS us
+    ON us.id = v_mirror_id
+   AND us.stripe_subscription_id = g.stripe_subscription_id
+   AND us.user_id = p_user_id
+  WHERE g.user_id = p_user_id
+    AND g.stripe_subscription_id = p_subscription_id
     AND g.grant_period_key = p_period_key
   ORDER BY g.created_at DESC
   LIMIT 1
@@ -1786,7 +1823,7 @@ BEGIN
   END IF;
 
   IF v_grant_status NOT IN ('granted', 'reversed') THEN
-    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS: % (%)', v_period_key, v_grant_status;
+    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS: % (%)', p_period_key, v_grant_status;
   END IF;
 
   IF v_grant_status = 'reversed' THEN
@@ -1826,7 +1863,7 @@ BEGIN
     AND status = 'granted';
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_REVERSAL_RACE: %', v_period_key;
+    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_REVERSAL_RACE: %', p_period_key;
   END IF;
 
   -- clawback = granted - consumed (持锁值); 以当前余额封顶, 绝不为负

@@ -1596,42 +1596,9 @@ export async function reconcileSubscriptionRefundCreditGrants(
     ? { ...input, invoiceId: invoiceScope.invoiceId }
     : input;
 
-  const priorReversal = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
-  const priorReversalStatus = typeof priorReversal.reversalStatus === 'string'
-    ? priorReversal.reversalStatus
-    : null;
-  const priorTermination = asRecord(priorReversal.termination);
-
-  // 已完成的 reconciliation: 重放/后续事件不重复扣、不追历史
-  if (priorReversalStatus && priorReversalStatus !== 'pending') {
-    return {
-      orderId: order.id as string,
-      subscriptionId: input.subscriptionId,
-      refundId: input.refundId ?? null,
-      fullRefund: input.isFullRefund,
-      reviewRequired: priorReversal.reviewRequired === true,
-      reviewReason: typeof priorReversal.reviewReason === 'string'
-        ? priorReversal.reviewReason
-        : null,
-      terminationWritten: false,
-      terminatedAt: typeof priorTermination.terminatedAt === 'string'
-        ? priorTermination.terminatedAt
-        : null,
-      locatedPeriodKey: typeof priorReversal.locatedPeriodKey === 'string'
-        ? priorReversal.locatedPeriodKey
-        : null,
-      reversedGrantCount: toNonNegativeInteger(priorReversal.reversedGrantCount),
-      clawbackAmount: toNonNegativeInteger(priorReversal.clawbackAmount),
-      appliedClawbackAmount: toNonNegativeInteger(
-        priorReversal.appliedClawbackAmount ?? priorReversal.clawbackAmount,
-      ),
-      shortfallAmount: toNonNegativeInteger(priorReversal.shortfallAmount),
-      creditTransactionId: typeof priorReversal.creditTransactionId === 'string'
-        ? priorReversal.creditTransactionId
-        : null,
-      alreadyReconciled: true,
-    };
-  }
+  // R1: order/payment metadata is audit/cache evidence only. The canonical
+  // event + subscription + period barrier in the transaction RPC is the sole
+  // authority for replay and later-event behavior.
 
   // REFUND-1B (R4): 加载 grants + mirror (term start 证据), 用可信退款时间戳 +
   // term start + 周期窗口定位退款周期; 缺任一可信证据即 REVIEW_REQUIRED
