@@ -567,6 +567,79 @@ function applyAnnualGrantAdmissionContract(
   };
 }
 
+function applyFreshRefundTerminationClawbackContract(
+  tables: Record<TableName, Row[]>,
+  payload: Row,
+) {
+  const subscription = tables.user_subscriptions.find((row) =>
+    row.user_id === payload.p_user_id
+      && row.stripe_subscription_id === payload.p_subscription_id) ?? null;
+  const refundMs = payload.p_refund_created_at ? Date.parse(String(payload.p_refund_created_at)) : Number.NaN;
+  const termStartMs = subscription?.current_period_start
+    ? Date.parse(String(subscription.current_period_start))
+    : Number.NaN;
+  let periodKey: string | null = null;
+  let reviewReason: string | null = null;
+
+  if (!Number.isFinite(refundMs)) {
+    reviewReason = 'missing_trusted_refund_timestamp';
+  } else if (!Number.isFinite(termStartMs)) {
+    reviewReason = 'missing_trusted_term_start';
+  } else if (refundMs < termStartMs) {
+    reviewReason = 'refund_timestamp_precedes_term_start';
+  } else {
+    const candidate = tables.subscription_credit_grants
+      .filter((row) => row.user_id === payload.p_user_id
+        && row.stripe_subscription_id === payload.p_subscription_id
+        && Date.parse(String(row.period_start)) <= refundMs
+        && refundMs < Date.parse(String(row.period_end)))
+      .sort((left, right) => String(right.created_at ?? '').localeCompare(String(left.created_at ?? '')))[0];
+    if (!candidate) {
+      reviewReason = 'no_period_window_covers_refund_timestamp';
+    } else if (candidate.grant_type === 'annual_monthly_release'
+      && Number.isInteger(candidate.period_index)
+      && candidate.period_index >= 1
+      && Date.parse(String(candidate.period_start)) === addUtcCalendarMonthsClamped(new Date(termStartMs), candidate.period_index - 1).getTime()) {
+      periodKey = candidate.grant_period_key;
+    } else if (candidate.grant_type === 'monthly_invoice'
+      && Date.parse(String(candidate.period_start)) === termStartMs) {
+      periodKey = candidate.grant_period_key;
+    } else {
+      reviewReason = candidate.grant_type === 'annual_monthly_release' || candidate.grant_type === 'monthly_invoice'
+        ? 'term_start_period_mismatch'
+        : 'term_start_period_anchor_unknown';
+    }
+  }
+
+  if (!reviewReason && payload.p_invoice_scope_review_reason) {
+    reviewReason = String(payload.p_invoice_scope_review_reason);
+  }
+  const eventId = typeof payload.p_event_id === 'string' && payload.p_event_id.trim()
+    ? payload.p_event_id.trim()
+    : null;
+  if (!reviewReason && !eventId) {
+    reviewReason = 'missing_event_id';
+  }
+  const idempotencyKey = `stripe_refund:subscription_grants:event:${eventId ?? 'unlocated'}:sub:${payload.p_subscription_id}:period:${periodKey ?? 'unlocated'}`;
+  const result = applyRefundTerminationClawbackContract(tables, {
+    ...payload,
+    p_period_key: periodKey,
+    p_idempotency_key: idempotencyKey,
+    p_termination_only: Boolean(reviewReason) || !periodKey,
+  });
+
+  return {
+    ...result,
+    data: result.data?.map((row: Row) => ({
+      ...row,
+      resolved_period_key: periodKey,
+      review_required: Boolean(reviewReason) || !periodKey,
+      review_reason: reviewReason,
+      idempotency_key: idempotencyKey,
+    })),
+  };
+}
+
 function createMockSupabase(
   seed: Partial<Record<TableName, Row[]>> = {},
   hooks: MockSupabaseHooks = {},
@@ -586,6 +659,10 @@ function createMockSupabase(
       return new MockQuery(tables, table, hooks);
     },
     async rpc(name: string, payload: Row) {
+      if (name === 'atomic_refund_termination_clawback_fresh') {
+        return applyFreshRefundTerminationClawbackContract(tables, payload);
+      }
+
       if (name === 'atomic_refund_termination_clawback') {
         return applyRefundTerminationClawbackContract(tables, payload);
       }

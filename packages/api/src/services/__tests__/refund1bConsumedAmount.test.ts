@@ -434,8 +434,108 @@ function applyRefundTerminationClawbackContract(
   };
 }
 
+function addUtcCalendarMonthsClampedForRefundTest(timestamp: number, months: number) {
+  const source = new Date(timestamp);
+  const day = source.getUTCDate();
+  const target = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth(), 1));
+  target.setUTCMonth(target.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.getTime();
+}
+
+function applyFreshRefundTerminationClawbackContract(
+  tables: Record<TableName, Row[]>,
+  writes: Array<{ table: TableName; mode: 'insert' | 'update' }>,
+  payload: Row,
+) {
+  const mirror = tables.user_subscriptions.find((row) =>
+    row.stripe_subscription_id === payload.p_subscription_id
+      && row.user_id === payload.p_user_id) ?? null;
+  const refundMs = payload.p_refund_created_at ? Date.parse(String(payload.p_refund_created_at)) : Number.NaN;
+  const termStartMs = mirror?.current_period_start ? Date.parse(String(mirror.current_period_start)) : Number.NaN;
+  let periodKey: string | null = null;
+  let reviewReason: string | null = null;
+
+  if (!Number.isFinite(refundMs)) {
+    reviewReason = 'missing_trusted_refund_timestamp';
+  } else if (!Number.isFinite(termStartMs)) {
+    reviewReason = 'missing_trusted_term_start';
+  } else if (refundMs < termStartMs) {
+    reviewReason = 'refund_timestamp_precedes_term_start';
+  } else {
+    const candidates = tables.subscription_credit_grants
+      .filter((row) => row.user_id === payload.p_user_id
+        && row.stripe_subscription_id === payload.p_subscription_id
+        && Date.parse(String(row.period_start)) <= refundMs
+        && refundMs < Date.parse(String(row.period_end)))
+      .sort((left, right) => {
+        const startDifference = Date.parse(String(right.period_start)) - Date.parse(String(left.period_start));
+        return startDifference !== 0
+          ? startDifference
+          : String(right.created_at ?? '').localeCompare(String(left.created_at ?? ''));
+      });
+    const candidate = candidates[0];
+    if (!candidate) {
+      reviewReason = 'no_period_window_covers_refund_timestamp';
+    } else if (candidate.grant_type === 'annual_monthly_release'
+      && Number.isInteger(candidate.period_index)
+      && candidate.period_index >= 1) {
+      const expectedStart = addUtcCalendarMonthsClampedForRefundTest(termStartMs, candidate.period_index - 1);
+      if (Date.parse(String(candidate.period_start)) !== expectedStart) {
+        reviewReason = 'term_start_period_mismatch';
+      } else {
+        periodKey = candidate.grant_period_key;
+      }
+    } else if (candidate.grant_type === 'monthly_invoice') {
+      if (Date.parse(String(candidate.period_start)) !== termStartMs) {
+        reviewReason = 'term_start_period_mismatch';
+      } else {
+        periodKey = candidate.grant_period_key;
+      }
+    } else {
+      reviewReason = 'term_start_period_anchor_unknown';
+    }
+  }
+
+  if (!reviewReason && payload.p_invoice_scope_review_reason) {
+    reviewReason = String(payload.p_invoice_scope_review_reason);
+  }
+  const eventId = typeof payload.p_event_id === 'string' && payload.p_event_id.trim()
+    ? payload.p_event_id.trim()
+    : null;
+  if (!reviewReason && !eventId) {
+    reviewReason = 'missing_event_id';
+  }
+  const idempotencyKey = `stripe_refund:subscription_grants:event:${eventId ?? 'unlocated'}:sub:${payload.p_subscription_id}:period:${periodKey ?? 'unlocated'}`;
+  const result = applyRefundTerminationClawbackContract(tables, writes, {
+    ...payload,
+    p_period_key: periodKey,
+    p_idempotency_key: idempotencyKey,
+    p_termination_only: Boolean(reviewReason) || !periodKey,
+  });
+
+  return {
+    ...result,
+    data: result.data?.map((row: Row) => ({
+      ...row,
+      resolved_period_key: periodKey,
+      review_required: Boolean(reviewReason) || !periodKey,
+      review_reason: reviewReason,
+      idempotency_key: idempotencyKey,
+    })),
+  };
+}
+
+type Refund1bBeforeRpc = (
+  name: string,
+  payload: Row,
+  tables: Record<TableName, Row[]>,
+) => void | Promise<void>;
+
 function createRefund1bSupabase(
   seed: Partial<Record<TableName, Row[]>> = {},
+  options: { beforeRpc?: Refund1bBeforeRpc } = {},
 ) {
   const writes: Array<{ table: TableName; mode: 'insert' | 'update' }> = [];
   const tables: Record<TableName, Row[]> = {
@@ -455,6 +555,10 @@ function createRefund1bSupabase(
       return new Refund1bMockQuery(tables, table, (event) => writes.push(event));
     },
     async rpc(name: string, payload: Row) {
+      await options.beforeRpc?.(name, payload, tables);
+      if (name === 'atomic_refund_termination_clawback_fresh') {
+        return applyFreshRefundTerminationClawbackContract(tables, writes, payload);
+      }
       expect(name).toBe('atomic_refund_termination_clawback');
       return applyRefundTerminationClawbackContract(tables, writes, payload);
     },
@@ -789,6 +893,91 @@ describe('REFUND-1B refund reconciliation integration', () => {
     expect(supabase.tables.profiles[0].credits).toBe(300);
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.credit_transactions[0].amount).toBe(-500);
+  });
+
+  it('closes the reverse interleave: stale refund pre-read is followed by a committed annual grant, then the locked refund accounts for it', async () => {
+    let annualGrantCommitted = false;
+    const supabase = seedSubscription({ creditsGranted: 1000, consumedAmount: 0, balance: 0 });
+    supabase.tables.subscription_credit_grants.splice(0, 1);
+    const annualPeriodKey = 'annual:2026-01-01T00:00:00.000Z:01';
+    const annualIdempotencyKey = 'annual-grant:sub_f3:01';
+    const interleavedSupabase = createRefund1bSupabase({
+      payment_orders: supabase.tables.payment_orders,
+      user_subscriptions: supabase.tables.user_subscriptions,
+      membership_plans: supabase.tables.membership_plans,
+      profiles: supabase.tables.profiles,
+      subscription_credit_grants: supabase.tables.subscription_credit_grants,
+      credit_transactions: supabase.tables.credit_transactions,
+    }, {
+      beforeRpc: (name, _payload, tables) => {
+        if (name !== 'atomic_refund_termination_clawback_fresh' || annualGrantCommitted) {
+          return;
+        }
+        annualGrantCommitted = true;
+        tables.profiles[0].credits = 1000;
+        tables.credit_transactions.push({
+          id: 'txn-annual-interleaved',
+          user_id: 'user-f3',
+          amount: 1000,
+          type: 'addition',
+          ledger_type: 'grant',
+          counts_as_spend: false,
+          idempotency_key: annualIdempotencyKey,
+          grant_period_key: annualPeriodKey,
+          balance_before: 0,
+          balance_after: 1000,
+        });
+        tables.subscription_credit_grants.push({
+          id: 'grant-annual-interleaved',
+          user_id: 'user-f3',
+          membership_plan_id: 'plan-f3',
+          stripe_subscription_id: 'sub_f3',
+          stripe_invoice_id: 'in_annual_interleaved',
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: annualPeriodKey,
+          period_start: '2026-01-01T00:00:00.000Z',
+          period_end: '2026-02-01T00:00:00.000Z',
+          period_index: 1,
+          credits_granted: 1000,
+          consumed_amount: 0,
+          status: 'granted',
+          idempotency_key: annualIdempotencyKey,
+          credit_transaction_id: 'txn-annual-interleaved',
+          metadata: {},
+          created_at: '2026-01-15T00:00:00.000Z',
+        });
+      },
+    });
+
+    const result = await reconcileSubscriptionRefundCreditGrants(interleavedSupabase, refundInput);
+    const annualGrant = interleavedSupabase.tables.subscription_credit_grants.find((row) => row.id === 'grant-annual-interleaved');
+    const refundTransactions = interleavedSupabase.tables.credit_transactions
+      .filter((row) => row.ledger_type === 'refund_clawback');
+
+    expect(annualGrantCommitted).toBe(true);
+    expect(result).toMatchObject({
+      reviewRequired: false,
+      locatedPeriodKey: annualPeriodKey,
+      terminationWritten: true,
+      reversedGrantCount: 1,
+      clawbackAmount: 1000,
+      appliedClawbackAmount: 1000,
+      shortfallAmount: 0,
+    });
+    expect(annualGrant).toMatchObject({ status: 'reversed', consumed_amount: 0 });
+    expect(interleavedSupabase.tables.profiles[0].credits).toBe(0);
+    expect(refundTransactions).toHaveLength(1);
+    expect(refundTransactions[0]).toMatchObject({
+      amount: -1000,
+      grant_period_key: annualPeriodKey,
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 1000,
+        appliedClawbackAmount: 1000,
+        reversedGrantPeriodKeys: [annualPeriodKey],
+      }),
+    });
+    expect(interleavedSupabase.tables.credit_transactions.filter((row) => row.type === 'deduction')).toHaveLength(1);
   });
 
   it('does not touch credit-pack purchases when clawing back a subscription refund', async () => {
@@ -1457,6 +1646,7 @@ describe('REFUND-1B migration 0053 contract', () => {
       'atomic_finalize_ai_failure',
       'atomic_finalize_ai_abort',
       'atomic_refund_termination_clawback',
+      'atomic_refund_termination_clawback_fresh',
     ];
 
     for (const functionName of functions) {
@@ -1543,6 +1733,7 @@ describe('REFUND-1B migration 0053 contract', () => {
       'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
       'public.atomic_pre_deduct(uuid,integer,text,uuid)',
       'public.atomic_refund(uuid,uuid,text)',
+      'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',
       'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',
       'public.atomic_settle(uuid,uuid,integer,jsonb,jsonb)',
     ];

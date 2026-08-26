@@ -1608,8 +1608,9 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // event + subscription + period barrier in the transaction RPC is the sole
   // authority for replay and later-event behavior.
 
-  // REFUND-1B (R4): 加载 grants + mirror (term start 证据), 用可信退款时间戳 +
-  // term start + 周期窗口定位退款周期; 缺任一可信证据即 REVIEW_REQUIRED
+  // REFUND-1B (R4): this application read is only a non-authoritative hint for
+  // pending metadata and diagnostics. The refund transaction below must
+  // resolve the period again after taking its database locks.
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
     subscriptionId: input.subscriptionId,
   });
@@ -1621,23 +1622,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
     refundCreatedAt: input.refundCreatedAt,
     termStart: mirror?.current_period_start ?? null,
   });
-  const locatedPeriodKey = located.grant?.grant_period_key ?? null;
-
-  let reviewReason: string | null = located.reviewReason;
-  if (invoiceScope.status !== 'scoped') {
-    reviewReason ??= invoiceScope.reason;
-  }
+  const snapshotLocatedPeriodKey = located.grant?.grant_period_key ?? null;
 
   // REFUND-1B (R1): canonical 幂等身份 = event_id + subscription_id + period_key。
-  // 缺 event_id 时不得猜测扣款 (仍写 termination 停止未来释放)。
+  // The pending marker may use the snapshot hint, but the final canonical key
+  // is returned by the locked transaction after fresh period resolution.
   const canonicalEventId = input.eventId?.trim() || null;
-  if (!canonicalEventId) {
-    reviewReason ??= 'missing_event_id';
-  }
-  const idempotencyKey = buildSubscriptionRefundIdempotencyKey({
+  const pendingIdempotencyKey = buildSubscriptionRefundIdempotencyKey({
     eventId: canonicalEventId ?? 'unlocated',
     subscriptionId: input.subscriptionId,
-    periodKey: locatedPeriodKey ?? 'unlocated',
+    periodKey: snapshotLocatedPeriodKey ?? 'unlocated',
   });
 
   // 标记 pending (崩溃恢复锚点)
@@ -1646,27 +1640,25 @@ export async function reconcileSubscriptionRefundCreditGrants(
     order,
     refund: scopedRefund,
     now,
-    idempotencyKey,
+    idempotencyKey: pendingIdempotencyKey,
     reviewRequired: false,
     reversalStatus: 'pending',
   });
 
-  // REFUND-1B (R2/R5): 统一退款事务 RPC — profiles FOR UPDATE ->
-  // subscription_credit_grants FOR UPDATE 单事务内完成 termination 写入
-  // (mirror 缺失即失败关闭)、周期 grant 反转 (缺失/异常即失败关闭) 与
-  // granted - consumed clawback (余额封顶, 绝不为负)。
+  // REFUND-1B (R2/R5): the fresh resolver takes the profile -> subscription ->
+  // grant lock barrier, resolves the trusted period from locked state, and
+  // performs termination/reversal/clawback in that same transaction. The
+  // application snapshot above must never decide termination-only mode.
   const terminationReason = `stripe_refund:${input.refundEventType ?? 'refund'}`;
   const userId = order.user_id ?? mirror?.user_id ?? located.grant?.user_id ?? null;
-  const terminationOnly = Boolean(reviewReason) || !locatedPeriodKey;
 
-  const clawbackResult = await supabase.rpc('atomic_refund_termination_clawback', {
+  const clawbackResult = await supabase.rpc('atomic_refund_termination_clawback_fresh', {
     p_user_id: userId,
     p_subscription_id: input.subscriptionId,
     p_event_id: canonicalEventId,
-    p_period_key: locatedPeriodKey,
-    p_idempotency_key: idempotencyKey,
+    p_refund_created_at: input.refundCreatedAt ?? null,
+    p_invoice_scope_review_reason: invoiceScope.status !== 'scoped' ? invoiceScope.reason : null,
     p_reason: terminationReason,
-    p_termination_only: terminationOnly,
     p_refund_id: input.refundId ?? null,
     p_now: now,
   });
@@ -1676,7 +1668,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
       'subscription_refund_termination_clawback_rpc',
       SUBSCRIPTION_GRANT_ERRORS.refundTerminationClawbackRpc,
       clawbackResult.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey },
+      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey: snapshotLocatedPeriodKey },
     );
   }
 
@@ -1693,6 +1685,10 @@ export async function reconcileSubscriptionRefundCreditGrants(
     already_reversed?: boolean | null;
     credits_granted?: number | null;
     consumed_amount?: number | null;
+    resolved_period_key?: string | null;
+    review_required?: boolean | null;
+    review_reason?: string | null;
+    idempotency_key?: string | null;
   }>(clawbackResult.data);
 
   if (!clawbackRow) {
@@ -1700,9 +1696,19 @@ export async function reconcileSubscriptionRefundCreditGrants(
       'subscription_refund_termination_clawback_rpc_result',
       SUBSCRIPTION_GRANT_ERRORS.refundTerminationClawbackRpc,
       new Error('refund termination clawback RPC returned no row'),
-      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey },
+      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey: snapshotLocatedPeriodKey },
     );
   }
+
+  const locatedPeriodKey = clawbackRow.resolved_period_key ?? null;
+  const idempotencyKey = clawbackRow.idempotency_key ?? buildSubscriptionRefundIdempotencyKey({
+    eventId: canonicalEventId ?? 'unlocated',
+    subscriptionId: input.subscriptionId,
+    periodKey: locatedPeriodKey ?? 'unlocated',
+  });
+  const reviewReason = clawbackRow.review_required === true
+    ? clawbackRow.review_reason ?? 'refund_review_required'
+    : null;
 
   const terminationWritten = clawbackRow.termination_written === true;
   const alreadyTerminated = clawbackRow.already_terminated === true;

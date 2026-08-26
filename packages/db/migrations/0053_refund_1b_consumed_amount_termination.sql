@@ -1962,6 +1962,191 @@ END;
 $$;
 
 -- ============================================
+-- 10a. atomic_refund_termination_clawback_fresh: locked refund resolution
+-- ============================================
+-- The application-level grant snapshot is deliberately not authoritative.
+-- This candidate-new wrapper takes the same profile -> subscription -> grant
+-- barrier as annual admission, resolves the trusted period while those locks
+-- are held, and calls the existing refund transaction before releasing them.
+-- Therefore a grant committed before this refund transaction obtains the
+-- profile lock is visible to the refund, while an annual admission that loses
+-- the lock race observes the committed termination and is blocked.
+
+CREATE OR REPLACE FUNCTION public.atomic_refund_termination_clawback_fresh(
+  p_user_id UUID,
+  p_subscription_id TEXT,
+  p_event_id TEXT,
+  p_refund_created_at TIMESTAMPTZ DEFAULT NULL,
+  p_invoice_scope_review_reason TEXT DEFAULT NULL,
+  p_reason TEXT DEFAULT 'stripe_refund',
+  p_refund_id TEXT DEFAULT NULL,
+  p_now TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+  transaction_id UUID,
+  balance_after INTEGER,
+  clawback_amount INTEGER,
+  applied_clawback_amount INTEGER,
+  shortfall_amount INTEGER,
+  already_applied BOOLEAN,
+  termination_written BOOLEAN,
+  already_terminated BOOLEAN,
+  grant_reversed BOOLEAN,
+  already_reversed BOOLEAN,
+  credits_granted INTEGER,
+  consumed_amount INTEGER,
+  resolved_period_key TEXT,
+  review_required BOOLEAN,
+  review_reason TEXT,
+  idempotency_key TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_term_start TIMESTAMPTZ;
+  v_grant_type TEXT;
+  v_period_index INTEGER;
+  v_period_start TIMESTAMPTZ;
+  v_expected_period_start TIMESTAMPTZ;
+  v_period_key TEXT;
+  v_review_reason TEXT;
+  v_event_id TEXT := NULLIF(btrim(p_event_id), '');
+  v_idempotency_key TEXT;
+  v_termination_only BOOLEAN;
+BEGIN
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_USER_REQUIRED';
+  END IF;
+
+  IF btrim(COALESCE(p_subscription_id, '')) = '' THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_ID_REQUIRED';
+  END IF;
+
+  -- Lock order is profile -> subscription -> grant. No period or termination
+  -- decision below may rely on the pre-lock application snapshot.
+  PERFORM credits
+  FROM profiles
+  WHERE id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_MISSING: %', p_user_id;
+  END IF;
+
+  SELECT us.current_period_start
+  INTO v_term_start
+  FROM user_subscriptions AS us
+  WHERE us.stripe_subscription_id = p_subscription_id
+    AND us.user_id = p_user_id
+  ORDER BY us.created_at ASC
+  LIMIT 1
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
+  END IF;
+
+  -- R4: resolve only from trusted refund time + the freshly locked term start.
+  IF p_refund_created_at IS NULL THEN
+    v_review_reason := 'missing_trusted_refund_timestamp';
+  ELSIF v_term_start IS NULL THEN
+    v_review_reason := 'missing_trusted_term_start';
+  ELSIF p_refund_created_at < v_term_start THEN
+    v_review_reason := 'refund_timestamp_precedes_term_start';
+  ELSE
+    -- The newest matching row mirrors the application hint ordering, but is
+    -- selected after the money-lane locks and is itself locked before use.
+    SELECT g.grant_type,
+           g.period_index,
+           g.period_start,
+           g.grant_period_key
+    INTO v_grant_type, v_period_index, v_period_start, v_period_key
+    FROM subscription_credit_grants AS g
+    WHERE g.user_id = p_user_id
+      AND g.stripe_subscription_id = p_subscription_id
+      AND g.period_start <= p_refund_created_at
+      AND p_refund_created_at < g.period_end
+    ORDER BY g.period_start DESC, g.created_at DESC
+    LIMIT 1
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      v_period_key := NULL;
+      v_review_reason := 'no_period_window_covers_refund_timestamp';
+    ELSIF v_grant_type = 'annual_monthly_release'
+       AND v_period_index IS NOT NULL
+       AND v_period_index >= 1 THEN
+      v_expected_period_start := (
+        (v_term_start AT TIME ZONE 'UTC') + make_interval(months => v_period_index - 1)
+      ) AT TIME ZONE 'UTC';
+      IF v_period_start <> v_expected_period_start THEN
+        v_period_key := NULL;
+        v_review_reason := 'term_start_period_mismatch';
+      END IF;
+    ELSIF v_grant_type = 'monthly_invoice' THEN
+      v_expected_period_start := v_term_start;
+      IF v_period_start <> v_expected_period_start THEN
+        v_period_key := NULL;
+        v_review_reason := 'term_start_period_mismatch';
+      END IF;
+    ELSE
+      v_period_key := NULL;
+      v_review_reason := 'term_start_period_anchor_unknown';
+    END IF;
+  END IF;
+
+  IF v_review_reason IS NULL THEN
+    v_review_reason := NULLIF(btrim(p_invoice_scope_review_reason), '');
+  END IF;
+
+  IF v_review_reason IS NULL AND v_event_id IS NULL THEN
+    v_review_reason := 'missing_event_id';
+  END IF;
+
+  v_termination_only := v_review_reason IS NOT NULL OR v_period_key IS NULL;
+  v_idempotency_key := format(
+    'stripe_refund:subscription_grants:event:%s:sub:%s:period:%s',
+    COALESCE(v_event_id, 'unlocated'),
+    p_subscription_id,
+    COALESCE(v_period_key, 'unlocated')
+  );
+
+  -- Keep the existing public signature untouched. The call is in this same
+  -- transaction, while the profile/subscription/grant barrier remains held.
+  RETURN QUERY
+  SELECT refund.transaction_id,
+         refund.balance_after,
+         refund.clawback_amount,
+         refund.applied_clawback_amount,
+         refund.shortfall_amount,
+         refund.already_applied,
+         refund.termination_written,
+         refund.already_terminated,
+         refund.grant_reversed,
+         refund.already_reversed,
+         refund.credits_granted,
+         refund.consumed_amount,
+         v_period_key,
+         v_termination_only,
+         v_review_reason,
+         v_idempotency_key
+  FROM public.atomic_refund_termination_clawback(
+    p_user_id,
+    p_subscription_id,
+    p_event_id,
+    v_period_key,
+    v_idempotency_key,
+    p_reason,
+    v_termination_only,
+    p_refund_id,
+    p_now
+  ) AS refund;
+END;
+$$;
+
+-- ============================================
 -- 10b. atomic_grant_annual_subscription_credits: termination-aware annual admission
 -- ============================================
 -- The cron-side subscription snapshot is only an eligibility hint. This RPC is
@@ -2219,6 +2404,7 @@ DECLARE
     'public.atomic_grant_annual_subscription_credits(uuid,uuid,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,text,text,uuid,jsonb,jsonb,timestamptz)',
     'public.atomic_pre_deduct(uuid,integer,text,uuid)',
     'public.atomic_refund(uuid,uuid,text)',
+    'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',
     'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',
     'public.atomic_settle(uuid,uuid,integer,jsonb,jsonb)'
   ];
