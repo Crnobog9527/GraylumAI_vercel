@@ -1561,11 +1561,15 @@ async function updateRefundClawbackTransactionSemantics(input: {
         subscriptionId: input.refund.subscriptionId,
         invoiceId: input.refund.invoiceId ?? null,
         refundId: input.refund.refundId ?? null,
+        eventId: input.refund.eventId ?? null,
         refundStatus: input.refund.refundStatus ?? null,
         refundEventType: input.refund.refundEventType ?? null,
-        clawbackAmount: input.amount,
+        clawbackAmount: input.requiredAmount,
         requiredClawbackAmount: input.requiredAmount,
+        appliedClawbackAmount: input.amount,
         shortfallAmount: input.shortfallAmount,
+        reviewRequired: input.shortfallAmount > 0,
+        reversalStatus: input.shortfallAmount > 0 ? 'shortfall_review_required' : 'complete',
         reversedGrantCount: input.reversedGrantCount,
         reversedGrantPeriodKeys: input.reversedGrantPeriodKeys,
         idempotencyKey: input.idempotencyKey,
@@ -1741,19 +1745,23 @@ export async function reconcileSubscriptionRefundCreditGrants(
 
   // 同一 canonical 事件精确重放 (幂等屏障命中): 返回既有结果, 不重复扣
   if (clawbackRow.already_applied === true) {
-    const replayedClawback = toNonNegativeInteger(clawbackRow.applied_clawback_amount);
+    const replayedClawback = toNonNegativeInteger(clawbackRow.clawback_amount);
+    const replayedAppliedClawback = toNonNegativeInteger(clawbackRow.applied_clawback_amount);
+    const replayedShortfall = toNonNegativeInteger(clawbackRow.shortfall_amount);
+    const replayedReviewRequired = replayedShortfall > 0;
     await updateSubscriptionRefundOrder({
       supabase,
       order,
       refund: scopedRefund,
       now,
       idempotencyKey,
-      reviewRequired: false,
+      reviewRequired: replayedReviewRequired,
       clawbackAmount: replayedClawback,
-      appliedClawbackAmount: replayedClawback,
-      shortfallAmount: 0,
-      reversalStatus: 'complete',
-      reversedGrantCount: 1,
+      appliedClawbackAmount: replayedAppliedClawback,
+      shortfallAmount: replayedShortfall,
+      shortfallReason: replayedReviewRequired ? 'insufficient_balance' : null,
+      reversalStatus: replayedReviewRequired ? 'shortfall_review_required' : 'complete',
+      reversedGrantCount: clawbackRow.grant_reversed === true ? 1 : 0,
       creditTransactionId: clawbackRow.transaction_id ?? null,
       alreadyReconciled: true,
       terminationWritten: false,
@@ -1769,15 +1777,15 @@ export async function reconcileSubscriptionRefundCreditGrants(
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
-      reviewRequired: false,
+      reviewRequired: replayedReviewRequired,
       reviewReason: null,
       terminationWritten: false,
       terminatedAt,
       locatedPeriodKey,
-      reversedGrantCount: 1,
+      reversedGrantCount: clawbackRow.grant_reversed === true ? 1 : 0,
       clawbackAmount: replayedClawback,
-      appliedClawbackAmount: replayedClawback,
-      shortfallAmount: 0,
+      appliedClawbackAmount: replayedAppliedClawback,
+      shortfallAmount: replayedShortfall,
       creditTransactionId: clawbackRow.transaction_id ?? null,
       alreadyReconciled: true,
     };

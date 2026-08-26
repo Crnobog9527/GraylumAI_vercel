@@ -1708,7 +1708,15 @@ BEGIN
 
     -- R1: 持锁后复查 canonical (event_id + subscription_id + period_key) 幂等键;
     --     唯一索引 idx_credit_transactions_user_idempotency_key 是最终硬屏障
-    SELECT ct.id, ct.balance_after, ABS(ct.amount) AS applied_amount
+    SELECT ct.id,
+           ct.balance_before,
+           ct.balance_after,
+           COALESCE(NULLIF(ct.metadata->>'requiredClawbackAmount', '')::INTEGER, ABS(ct.amount))
+             AS required_amount,
+           COALESCE(NULLIF(ct.metadata->>'appliedClawbackAmount', '')::INTEGER, ABS(ct.amount))
+             AS applied_amount,
+           COALESCE(NULLIF(ct.metadata->>'shortfallAmount', '')::INTEGER, 0)
+             AS shortfall_amount
     INTO v_existing_transaction
     FROM credit_transactions AS ct
     WHERE ct.user_id = p_user_id
@@ -1719,13 +1727,13 @@ BEGIN
       RETURN QUERY SELECT
         v_existing_transaction.id,
         v_existing_transaction.balance_after,
-        0,
+        v_existing_transaction.required_amount,
         v_existing_transaction.applied_amount,
-        0,
+        v_existing_transaction.shortfall_amount,
         TRUE,
         FALSE,
         FALSE,
-        FALSE,
+        TRUE,
         FALSE,
         NULL::INTEGER,
         NULL::INTEGER;
@@ -1881,29 +1889,61 @@ BEGIN
       RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_UPDATE_MISS: %', p_user_id;
     END IF;
 
-    INSERT INTO credit_transactions (
-      user_id,
-      amount,
-      type,
-      description,
-      idempotency_key,
-      balance_before,
-      balance_after
-    ) VALUES (
-      p_user_id,
-      -v_applied,
-      'deduction',
-      format(
-        'Stripe subscription refund credit clawback [subscription:%s refund:%s grants:1]',
-        p_subscription_id,
-        COALESCE(NULLIF(btrim(COALESCE(p_refund_id, '')), ''), 'unknown')
-      ),
-      p_idempotency_key,
-      v_balance_before,
-      v_balance_before - v_applied
-    )
-    RETURNING id INTO v_transaction_id;
   END IF;
+
+  -- R1/B: persist the complete first-event result even when applied is zero.
+  -- A zero-amount refund_clawback row changes no balance and does not count as
+  -- spend, but its unique canonical key is the durable replay barrier.
+  INSERT INTO credit_transactions (
+    user_id,
+    amount,
+    type,
+    ledger_type,
+    reason_code,
+    counts_as_spend,
+    source_type,
+    source_id,
+    source_refund_id,
+    grant_period_key,
+    description,
+    idempotency_key,
+    balance_before,
+    balance_after,
+    metadata
+  ) VALUES (
+    p_user_id,
+    -v_applied,
+    'deduction',
+    'refund_clawback',
+    'refund_clawback',
+    FALSE,
+    'stripe_refund',
+    p_refund_id,
+    p_refund_id,
+    p_period_key,
+    format(
+      'Stripe subscription refund credit clawback [subscription:%s refund:%s grants:1]',
+      p_subscription_id,
+      COALESCE(NULLIF(btrim(COALESCE(p_refund_id, '')), ''), 'unknown')
+    ),
+    p_idempotency_key,
+    v_balance_before,
+    v_balance_before - v_applied,
+    jsonb_build_object(
+      'canonicalResult', 'refund_clawback',
+      'eventId', p_event_id,
+      'subscriptionId', p_subscription_id,
+      'periodKey', p_period_key,
+      'refundId', p_refund_id,
+      'idempotencyKey', p_idempotency_key,
+      'requiredClawbackAmount', v_clawback,
+      'appliedClawbackAmount', v_applied,
+      'shortfallAmount', v_shortfall,
+      'reviewRequired', (v_shortfall > 0),
+      'reversedGrantCount', 1
+    )
+  )
+  RETURNING id INTO v_transaction_id;
 
   RETURN QUERY SELECT
     v_transaction_id,

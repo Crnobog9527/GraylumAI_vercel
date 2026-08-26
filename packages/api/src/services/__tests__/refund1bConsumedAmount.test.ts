@@ -254,17 +254,29 @@ function applyRefundTerminationClawbackContract(
     const existing = tables.credit_transactions.find((row) =>
       row.user_id === payload.p_user_id && row.idempotency_key === payload.p_idempotency_key);
     if (existing) {
+      const existingMetadata = existing.metadata ?? {};
+      const existingApplied = Math.max(0, Math.floor(Number(
+        existingMetadata.appliedClawbackAmount ?? Math.abs(Number(existing.amount ?? 0)),
+      )));
+      const existingRequired = Math.max(0, Math.floor(Number(
+        existingMetadata.requiredClawbackAmount ?? existingApplied,
+      )));
+      const existingShortfall = Math.max(0, Math.floor(Number(
+        existingMetadata.shortfallAmount ?? Math.max(existingRequired - existingApplied, 0),
+      )));
       return {
         data: [{
           transaction_id: existing.id,
           balance_after: existing.balance_after ?? 0,
-          clawback_amount: 0,
-          applied_clawback_amount: Math.abs(Number(existing.amount ?? 0)),
-          shortfall_amount: 0,
+          clawback_amount: existingRequired,
+          applied_clawback_amount: existingApplied,
+          shortfall_amount: existingShortfall,
           already_applied: true,
           termination_written: false,
           already_terminated: false,
-          grant_reversed: false,
+          grant_reversed: existingMetadata.reversedGrantCount == null
+            ? true
+            : existingMetadata.reversedGrantCount === 1,
           already_reversed: false,
           credits_granted: null,
           consumed_amount: null,
@@ -365,23 +377,43 @@ function applyRefundTerminationClawbackContract(
   const applied = Math.min(clawback, Math.max(balanceBefore, 0));
   const shortfall = clawback - applied;
 
-  let transactionId: string | null = null;
   if (applied > 0) {
     profile!.credits = balanceBefore - applied;
-    const transaction = {
-      id: `txn-refund-clawback-${tables.credit_transactions.length + 1}`,
-      user_id: payload.p_user_id,
-      amount: -applied,
-      type: 'deduction',
-      description: 'Stripe subscription refund credit clawback',
-      idempotency_key: payload.p_idempotency_key,
-      balance_before: balanceBefore,
-      balance_after: balanceBefore - applied,
-    };
-    tables.credit_transactions.push(transaction);
-    writes.push({ table: 'credit_transactions', mode: 'insert' });
-    transactionId = transaction.id;
   }
+
+  const transaction = {
+    id: `txn-refund-clawback-${tables.credit_transactions.length + 1}`,
+    user_id: payload.p_user_id,
+    amount: applied === 0 ? 0 : -applied,
+    type: 'deduction',
+    ledger_type: 'refund_clawback',
+    reason_code: 'refund_clawback',
+    counts_as_spend: false,
+    source_type: 'stripe_refund',
+    source_id: payload.p_refund_id ?? subscriptionId,
+    source_refund_id: payload.p_refund_id ?? null,
+    grant_period_key: periodKey,
+    description: 'Stripe subscription refund credit clawback',
+    idempotency_key: payload.p_idempotency_key,
+    balance_before: balanceBefore,
+    balance_after: balanceBefore - applied,
+    metadata: {
+      canonicalResult: 'refund_clawback',
+      eventId: payload.p_event_id ?? null,
+      subscriptionId,
+      periodKey,
+      refundId: payload.p_refund_id ?? null,
+      idempotencyKey: payload.p_idempotency_key,
+      requiredClawbackAmount: clawback,
+      appliedClawbackAmount: applied,
+      shortfallAmount: shortfall,
+      reviewRequired: shortfall > 0,
+      reversedGrantCount: 1,
+    },
+  };
+  tables.credit_transactions.push(transaction);
+  writes.push({ table: 'credit_transactions', mode: 'insert' });
+  const transactionId = transaction.id;
 
   return {
     data: [{
@@ -850,6 +882,93 @@ describe('REFUND-1B refund reconciliation integration', () => {
       shortfallAmount: 700,
     });
     expect(supabase.tables.profiles[0].credits).toBe(0);
+  });
+
+  it('R1: exact shortfall replay restores the durable first-event result without completing review', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 0, balance: 100 });
+    const first = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(first).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 100,
+      shortfallAmount: 700,
+      alreadyReconciled: false,
+    });
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(replay).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 100,
+      shortfallAmount: 700,
+      alreadyReconciled: true,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -100,
+      ledger_type: 'refund_clawback',
+      counts_as_spend: false,
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 800,
+        appliedClawbackAmount: 100,
+        shortfallAmount: 700,
+        reviewRequired: true,
+      }),
+    });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 100,
+      shortfallAmount: 700,
+      reversalStatus: 'shortfall_review_required',
+    });
+  });
+
+  it('R1/B: exact zero-applied replay hits one durable zero-amount canonical marker', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 0, balance: 0 });
+    const first = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(first).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 800,
+      alreadyReconciled: false,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: 0,
+      type: 'deduction',
+      ledger_type: 'refund_clawback',
+      counts_as_spend: false,
+      metadata: expect.objectContaining({
+        requiredClawbackAmount: 800,
+        appliedClawbackAmount: 0,
+        shortfallAmount: 800,
+        reviewRequired: true,
+      }),
+    });
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(replay).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 800,
+      alreadyReconciled: true,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 800,
+      reversalStatus: 'shortfall_review_required',
+    });
   });
 
   it('stops future annual releases once termination is written', () => {
@@ -1344,6 +1463,18 @@ describe('REFUND-1B migration 0053 contract', () => {
       expect(findUndeclaredPlpgsqlVariables(extractMigrationFunction(migrationSql, functionName)))
         .toEqual([]);
     }
+  });
+
+  it('R1/B: persists a complete canonical result marker for every full-mode refund', () => {
+    const body = extractMigrationFunction(migrationSql, 'atomic_refund_termination_clawback');
+    expect(body).toContain('IF v_applied > 0 THEN');
+    expect(body).toContain('persist the complete first-event result even when applied is zero');
+    expect(body).toContain('ledger_type');
+    expect(body).toContain('counts_as_spend');
+    expect(body).toContain("'requiredClawbackAmount', v_clawback");
+    expect(body).toContain("'appliedClawbackAmount', v_applied");
+    expect(body).toContain("'shortfallAmount', v_shortfall");
+    expect(body).toContain("'reviewRequired', (v_shortfall > 0)");
   });
 
   it('R8: every bound terminal path requires the complete owner/period/mirror binding', () => {
