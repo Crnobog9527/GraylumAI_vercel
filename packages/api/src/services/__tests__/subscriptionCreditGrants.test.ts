@@ -40,6 +40,10 @@ type MockSupabaseHooks = {
     payload: Row;
     tables: Record<TableName, Row[]>;
   }) => void | Promise<void>;
+  afterInvoiceGrantAdmission?: (context: {
+    payload: Row;
+    tables: Record<TableName, Row[]>;
+  }) => void | Promise<void>;
 };
 
 class MockQuery {
@@ -726,7 +730,20 @@ function createMockSupabase(
             error: null,
           };
         }
-        return applyAnnualGrantAdmissionContract(tables, payload);
+        const admission = applyAnnualGrantAdmissionContract(tables, payload);
+        if (!admission.error && admission.data?.[0]?.granted && hooks.afterInvoiceGrantAdmission) {
+          await hooks.afterInvoiceGrantAdmission({ payload, tables });
+          const committedInvoiceOrder = tables.payment_orders.find((row) =>
+            row.stripe_invoice_id === payload.p_stripe_invoice_id) ?? null;
+          return {
+            data: admission.data.map((row: Row) => ({
+              ...row,
+              invoice_order_id: committedInvoiceOrder?.id ?? null,
+            })),
+            error: null,
+          };
+        }
+        return admission;
       }
 
       expect(name).toBe('atomic_apply_credit_ledger_entry');
@@ -951,7 +968,7 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.payment_orders[0]).toMatchObject({ status: 'refunded', payment_status: 'refunded' });
   });
 
-  it('CASE B: blocks a termination committed after the application precheck and before invoice admission', async () => {
+  it('blocks a termination committed after the application precheck and before invoice admission', async () => {
     const supabase = createInvoiceAdmissionRaceHarness({
       beforeInvoiceGrantAdmission: ({ tables }) => {
         tables.user_subscriptions.push({
@@ -973,7 +990,7 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.payment_orders[0].status).toBe('pending');
   });
 
-  it('CASE C: preserves a refunded invoice written after the legacy precheck without stale completion', async () => {
+  it('blocks a newly refunded invoice written after the legacy precheck', async () => {
     const supabase = createInvoiceAdmissionRaceHarness({
       beforeInvoiceGrantAdmission: ({ tables }) => {
         tables.payment_orders.push({
@@ -994,6 +1011,53 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.payment_orders.find((row) => row.id === 'order-v6-case-c-refunded'))
+      .toMatchObject({ status: 'refunded', payment_status: 'refunded' });
+  });
+
+  it('CASE B: lets a committed subscription invoice grant be observed and reversed by a later refund', async () => {
+    const supabase = createInvoiceAdmissionRaceHarness({});
+    const fulfillment = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v6_case_b_grant_first', subscriptionId: 'sub_v6_race', amountTotal: 9900,
+      paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
+      periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
+    });
+    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: fulfillment.invoiceOrderId!, subscriptionId: 'sub_v6_race',
+      invoiceId: 'in_v6_case_b_grant_first', refundId: 're_v6_case_b', eventId: 'evt_v6_case_b',
+      refundEventType: 'charge.refunded', refundStatus: 'succeeded', refundAmount: 9900,
+      refundCurrency: 'usd', isFullRefund: true, refundCreatedAt: '2026-08-02T00:00:00.000Z',
+      now: '2026-08-02T00:00:01.000Z',
+    });
+
+    expect(fulfillment.grantedCredits).toBe(100);
+    expect(refund).toMatchObject({ reviewRequired: false, reversedGrantCount: 1, clawbackAmount: 100 });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({ status: 'reversed', consumed_amount: 0 });
+    expect(supabase.tables.payment_orders.find((row) => row.id === fulfillment.invoiceOrderId))
+      .toMatchObject({ status: 'refunded', payment_status: 'refunded' });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+  });
+
+  it('CASE C: does not perform a stale completion write after a committed grant is followed by refund state', async () => {
+    const supabase = createInvoiceAdmissionRaceHarness({
+      afterInvoiceGrantAdmission: ({ tables }) => {
+        tables.payment_orders.push({
+          id: 'order-v6-case-c-after-grant', user_id: 'user-v6-race', item_id: 'plan-v6-race',
+          item_type: 'membership_plan', billing_cycle: 'monthly', stripe_invoice_id: 'in_v6_case_c_after_grant',
+          stripe_subscription_id: 'sub_v6_race', status: 'refunded', payment_status: 'refunded',
+          metadata: { subscriptionCreditGrantReversal: { refundId: 're_v6_case_c_after_grant' } },
+        });
+      },
+    });
+
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v6_case_c_after_grant', subscriptionId: 'sub_v6_race', amountTotal: 9900,
+      paymentStatus: 'paid', now: '2026-08-01T00:00:01.000Z',
+    });
+
+    expect(result.invoiceOrderId).toBe('order-v6-case-c-after-grant');
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.payment_orders.find((row) => row.id === result.invoiceOrderId))
       .toMatchObject({ status: 'refunded', payment_status: 'refunded' });
   });
 
