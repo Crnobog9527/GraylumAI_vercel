@@ -1961,6 +1961,247 @@ BEGIN
 END;
 $$;
 
+-- ============================================
+-- 10b. atomic_grant_annual_subscription_credits: termination-aware annual admission
+-- ============================================
+-- The cron-side subscription snapshot is only an eligibility hint. This RPC is
+-- the authoritative admission barrier for annual releases: it locks the
+-- profile first, then the subscription mirror, re-reads termination while the
+-- lock is held, and writes the credit transaction plus grant row in one
+-- transaction. A refund using the same profile -> subscription lock order
+-- therefore either commits termination first (the grant is blocked) or lets
+-- the already-committed grant be observed by the later refund transaction.
+
+CREATE OR REPLACE FUNCTION public.atomic_grant_annual_subscription_credits(
+  p_user_id UUID,
+  p_membership_plan_id UUID,
+  p_stripe_subscription_id TEXT,
+  p_stripe_invoice_id TEXT,
+  p_grant_period_key TEXT,
+  p_period_start TIMESTAMPTZ,
+  p_period_end TIMESTAMPTZ,
+  p_period_index INTEGER,
+  p_total_periods INTEGER,
+  p_credits_granted INTEGER,
+  p_idempotency_key TEXT,
+  p_description TEXT,
+  p_source_type TEXT,
+  p_source_id TEXT,
+  p_source_order_id UUID DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::JSONB,
+  p_grant_metadata JSONB DEFAULT '{}'::JSONB,
+  p_now TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+  transaction_id UUID,
+  balance_before INTEGER,
+  balance_after INTEGER,
+  amount INTEGER,
+  is_idempotent BOOLEAN,
+  granted BOOLEAN,
+  blocked_by_termination BOOLEAN,
+  grant_id UUID,
+  credits_granted INTEGER
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_now TIMESTAMPTZ := COALESCE(p_now, now());
+  v_balance_before INTEGER;
+  v_balance_after INTEGER;
+  v_subscription_termination_at TIMESTAMPTZ;
+  v_existing_grant_id UUID;
+  v_existing_grant_transaction_id UUID;
+  v_existing_grant_credits INTEGER;
+  v_transaction_id UUID;
+  v_grant_id UUID;
+BEGIN
+  IF p_user_id IS NULL THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_USER_REQUIRED';
+  END IF;
+
+  IF btrim(COALESCE(p_stripe_subscription_id, '')) = '' THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_SUBSCRIPTION_ID_REQUIRED';
+  END IF;
+
+  IF btrim(COALESCE(p_grant_period_key, '')) = ''
+     OR btrim(COALESCE(p_idempotency_key, '')) = '' THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_IDEMPOTENCY_REQUIRED';
+  END IF;
+
+  IF p_credits_granted IS NULL OR p_credits_granted <= 0 THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_AMOUNT_MUST_BE_POSITIVE';
+  END IF;
+
+  -- Lock order begins at the profile, matching the refund and existing billing
+  -- RPCs. No credit mutation occurs before the termination re-read below.
+  SELECT credits
+  INTO v_balance_before
+  FROM profiles
+  WHERE id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_PROFILE_MISSING: %', p_user_id;
+  END IF;
+
+  -- Lock the exact subscription mirror after the profile lock. This is the
+  -- fresh database state, not the cron's earlier application snapshot.
+  SELECT credit_release_terminated_at
+  INTO v_subscription_termination_at
+  FROM user_subscriptions
+  WHERE stripe_subscription_id = p_stripe_subscription_id
+    AND user_id = p_user_id
+  ORDER BY created_at ASC
+  LIMIT 1
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_SUBSCRIPTION_MIRROR_MISSING: %', p_stripe_subscription_id;
+  END IF;
+
+  IF v_subscription_termination_at IS NOT NULL THEN
+    RETURN QUERY SELECT
+      NULL::UUID,
+      v_balance_before,
+      v_balance_before,
+      0,
+      FALSE,
+      FALSE,
+      TRUE,
+      NULL::UUID,
+      0;
+    RETURN;
+  END IF;
+
+  -- Recheck both idempotency identities while the profile and subscription
+  -- locks are held. The subscription-period unique index remains the final
+  -- database constraint for any unexpected caller.
+  SELECT g.id, g.credit_transaction_id, g.credits_granted
+  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits
+  FROM subscription_credit_grants AS g
+  WHERE g.stripe_subscription_id = p_stripe_subscription_id
+    AND (g.idempotency_key = p_idempotency_key OR g.grant_period_key = p_grant_period_key)
+  ORDER BY (g.idempotency_key = p_idempotency_key) DESC, g.created_at ASC
+  LIMIT 1
+  FOR UPDATE;
+
+  IF FOUND THEN
+    RETURN QUERY SELECT
+      v_existing_grant_transaction_id,
+      v_balance_before,
+      v_balance_before,
+      COALESCE(v_existing_grant_credits, 0),
+      TRUE,
+      FALSE,
+      FALSE,
+      v_existing_grant_id,
+      COALESCE(v_existing_grant_credits, 0);
+    RETURN;
+  END IF;
+
+  v_balance_after := v_balance_before + p_credits_granted;
+
+  INSERT INTO credit_transactions (
+    user_id,
+    amount,
+    type,
+    description,
+    idempotency_key,
+    balance_before,
+    balance_after,
+    ledger_type,
+    reason_code,
+    counts_as_spend,
+    source_type,
+    source_id,
+    source_order_id,
+    grant_period_key,
+    metadata
+  ) VALUES (
+    p_user_id,
+    p_credits_granted,
+    'addition',
+    p_description,
+    p_idempotency_key,
+    v_balance_before,
+    v_balance_after,
+    'grant',
+    'annual_monthly_release',
+    FALSE,
+    p_source_type,
+    p_source_id,
+    p_source_order_id,
+    p_grant_period_key,
+    COALESCE(p_metadata, '{}'::JSONB)
+  )
+  RETURNING id INTO v_transaction_id;
+
+  UPDATE profiles
+  SET credits = v_balance_after,
+      updated_at = v_now
+  WHERE id = p_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_PROFILE_UPDATE_MISS: %', p_user_id;
+  END IF;
+
+  INSERT INTO subscription_credit_grants (
+    user_id,
+    membership_plan_id,
+    stripe_subscription_id,
+    stripe_invoice_id,
+    billing_cycle,
+    grant_type,
+    grant_period_key,
+    period_start,
+    period_end,
+    period_index,
+    total_periods,
+    credits_granted,
+    status,
+    idempotency_key,
+    credit_transaction_id,
+    metadata,
+    created_at,
+    updated_at
+  ) VALUES (
+    p_user_id,
+    p_membership_plan_id,
+    p_stripe_subscription_id,
+    p_stripe_invoice_id,
+    'yearly',
+    'annual_monthly_release',
+    p_grant_period_key,
+    p_period_start,
+    p_period_end,
+    p_period_index,
+    p_total_periods,
+    p_credits_granted,
+    'granted',
+    p_idempotency_key,
+    v_transaction_id,
+    COALESCE(p_grant_metadata, '{}'::JSONB),
+    v_now,
+    v_now
+  )
+  RETURNING id INTO v_grant_id;
+
+  RETURN QUERY SELECT
+    v_transaction_id,
+    v_balance_before,
+    v_balance_after,
+    p_credits_granted,
+    FALSE,
+    TRUE,
+    FALSE,
+    v_grant_id,
+    p_credits_granted;
+END;
+$$;
+
 
 
 -- ============================================
@@ -1975,6 +2216,7 @@ DECLARE
     'public.atomic_finalize_ai_abort(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
     'public.atomic_finalize_ai_failure(uuid,text,text,uuid,uuid,text,integer,integer,text,text,jsonb)',
     'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
+    'public.atomic_grant_annual_subscription_credits(uuid,uuid,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,text,text,uuid,jsonb,jsonb,timestamptz)',
     'public.atomic_pre_deduct(uuid,integer,text,uuid)',
     'public.atomic_refund(uuid,uuid,text)',
     'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',

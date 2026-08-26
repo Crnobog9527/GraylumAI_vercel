@@ -145,6 +145,10 @@ export interface AnnualReleaseResult {
   skippedSubscriptions: number;
 }
 
+interface AnnualGrantAdmissionInput extends GrantSubscriptionCreditsInput {
+  enforceTerminationBarrier?: boolean;
+}
+
 export interface ReconcileSubscriptionRefundCreditGrantsInput {
   orderId: string;
   subscriptionId: string;
@@ -2065,9 +2069,82 @@ async function insertSubscriptionCreditGrant(
   return result.data;
 }
 
+async function applyAnnualGrantAdmission(
+  supabase: SupabaseLikeClient,
+  input: GrantSubscriptionCreditsInput & { idempotencyKey: string },
+) {
+  const description = getGrantDescription(input);
+  const result = await supabase.rpc('atomic_grant_annual_subscription_credits', {
+    p_user_id: input.userId,
+    p_membership_plan_id: input.membershipPlanId,
+    p_stripe_subscription_id: input.stripeSubscriptionId,
+    p_stripe_invoice_id: input.stripeInvoiceId ?? null,
+    p_grant_period_key: input.grantPeriodKey,
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
+    p_period_index: input.periodIndex,
+    p_total_periods: input.totalPeriods,
+    p_credits_granted: input.creditsGranted,
+    p_idempotency_key: input.idempotencyKey,
+    p_description: description,
+    p_source_type: input.sourceType,
+    p_source_id: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
+    p_source_order_id: input.sourceOrderId ?? null,
+    p_metadata: {
+      subscriptionId: input.stripeSubscriptionId,
+      invoiceId: input.stripeInvoiceId ?? null,
+      grantType: input.grantType,
+      billingCycle: input.billingCycle,
+      periodIndex: input.periodIndex,
+      totalPeriods: input.totalPeriods,
+      idempotencyKey: input.idempotencyKey,
+    },
+    p_grant_metadata: {
+      sourceType: input.sourceType,
+      sourceId: input.sourceId ?? input.stripeInvoiceId ?? input.stripeSubscriptionId,
+    },
+    p_now: input.now ?? null,
+  });
+
+  if (result.error) {
+    throwGrantError(
+      'annual_subscription_credit_grant_admission',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
+      result.error,
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
+        grantPeriodKey: input.grantPeriodKey,
+      },
+    );
+  }
+
+  const row = getFirstRpcRow<{
+    transaction_id?: string | null;
+    credits_granted?: number | null;
+    grant_id?: string | null;
+    granted?: boolean | null;
+    blocked_by_termination?: boolean | null;
+  }>(result.data);
+  if (!row) {
+    throwGrantError(
+      'annual_subscription_credit_grant_admission_result',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
+      new Error('annual grant admission RPC returned no row'),
+      {
+        userId: maskIdentifier(input.userId),
+        subscriptionId: maskIdentifier(input.stripeSubscriptionId),
+        grantPeriodKey: input.grantPeriodKey,
+      },
+    );
+  }
+
+  return row;
+}
+
 export async function grantSubscriptionCredits(
   supabase: SupabaseLikeClient,
-  input: GrantSubscriptionCreditsInput,
+  input: AnnualGrantAdmissionInput,
 ) {
   if (input.creditsGranted <= 0) {
     return {
@@ -2088,6 +2165,27 @@ export async function grantSubscriptionCredits(
       creditTransactionId: existingGrant.credit_transaction_id ?? null,
       idempotencyKey,
       grantId: existingGrant.id ?? null,
+    };
+  }
+
+  if (
+    input.enforceTerminationBarrier
+    && input.billingCycle === 'yearly'
+    && input.grantType === 'annual_monthly_release'
+  ) {
+    const admission = await applyAnnualGrantAdmission(supabase, {
+      ...input,
+      idempotencyKey,
+    });
+
+    return {
+      granted: admission.granted === true,
+      creditsGranted: admission.granted === true
+        ? admission.credits_granted ?? input.creditsGranted
+        : 0,
+      creditTransactionId: admission.transaction_id ?? null,
+      idempotencyKey,
+      grantId: admission.grant_id ?? null,
     };
   }
 
@@ -2801,6 +2899,7 @@ export async function releaseDueAnnualSubscriptionCredits(
         sourceId: invoiceId ?? subscriptionId,
         planName: plan.name,
         now: now.toISOString(),
+        enforceTerminationBarrier: true,
       });
 
       if (grant.granted) {

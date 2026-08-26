@@ -433,6 +433,119 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
         return applyRefundTerminationClawbackContract(tables, payload);
       }
 
+      if (name === 'atomic_grant_annual_subscription_credits') {
+        const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
+        const subscription = tables.user_subscriptions.find((row) =>
+          row.user_id === payload.p_user_id
+          && row.stripe_subscription_id === payload.p_stripe_subscription_id,
+        );
+        if (!subscription) {
+          return { data: null, error: { message: 'ANNUAL_GRANT_SUBSCRIPTION_MIRROR_MISSING' } };
+        }
+
+        const balanceBefore = profile ? Math.floor(Number(profile.credits ?? 0)) : 0;
+        if (subscription.credit_release_terminated_at != null) {
+          return {
+            data: [{
+              transaction_id: null,
+              balance_before: balanceBefore,
+              balance_after: balanceBefore,
+              amount: 0,
+              is_idempotent: false,
+              granted: false,
+              blocked_by_termination: true,
+              grant_id: null,
+              credits_granted: 0,
+            }],
+            error: null,
+          };
+        }
+
+        const existing = tables.subscription_credit_grants.find((row) =>
+          row.stripe_subscription_id === payload.p_stripe_subscription_id
+          && (
+            row.idempotency_key === payload.p_idempotency_key
+            || row.grant_period_key === payload.p_grant_period_key
+          ),
+        );
+        if (existing) {
+          return {
+            data: [{
+              transaction_id: existing.credit_transaction_id ?? null,
+              balance_before: balanceBefore,
+              balance_after: balanceBefore,
+              amount: existing.credits_granted ?? 0,
+              is_idempotent: true,
+              granted: false,
+              blocked_by_termination: false,
+              grant_id: existing.id ?? null,
+              credits_granted: existing.credits_granted ?? 0,
+            }],
+            error: null,
+          };
+        }
+
+        const amount = Math.floor(Number(payload.p_credits_granted ?? 0));
+        const balanceAfter = balanceBefore + amount;
+        const transactionId = `txn-refund-webhook-${tables.credit_transactions.length + 1}`;
+        const grantId = `grant-refund-webhook-${tables.subscription_credit_grants.length + 1}`;
+        if (profile) {
+          profile.credits = balanceAfter;
+        }
+        tables.credit_transactions.push({
+          id: transactionId,
+          user_id: payload.p_user_id,
+          amount,
+          type: 'addition',
+          description: payload.p_description,
+          idempotency_key: payload.p_idempotency_key,
+          balance_before: balanceBefore,
+          balance_after: balanceAfter,
+          ledger_type: 'grant',
+          reason_code: 'annual_monthly_release',
+          counts_as_spend: false,
+          source_type: payload.p_source_type,
+          source_id: payload.p_source_id,
+          grant_period_key: payload.p_grant_period_key,
+          metadata: payload.p_metadata ?? {},
+        });
+        tables.subscription_credit_grants.push({
+          id: grantId,
+          user_id: payload.p_user_id,
+          membership_plan_id: payload.p_membership_plan_id,
+          stripe_subscription_id: payload.p_stripe_subscription_id,
+          stripe_invoice_id: payload.p_stripe_invoice_id ?? null,
+          billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release',
+          grant_period_key: payload.p_grant_period_key,
+          period_start: payload.p_period_start,
+          period_end: payload.p_period_end,
+          period_index: payload.p_period_index,
+          total_periods: payload.p_total_periods,
+          credits_granted: amount,
+          consumed_amount: 0,
+          status: 'granted',
+          idempotency_key: payload.p_idempotency_key,
+          credit_transaction_id: transactionId,
+          metadata: payload.p_grant_metadata ?? {},
+        });
+
+        return {
+          data: [{
+            transaction_id: transactionId,
+            balance_before: balanceBefore,
+            balance_after: balanceAfter,
+            amount,
+            is_idempotent: false,
+            granted: true,
+            blocked_by_termination: false,
+            grant_id: grantId,
+            credits_granted: amount,
+          }],
+          error: null,
+        };
+      }
+
       expect(name).toBe('atomic_apply_credit_ledger_entry');
       const existing = tables.credit_transactions.find((row) =>
         row.user_id === payload.p_user_id

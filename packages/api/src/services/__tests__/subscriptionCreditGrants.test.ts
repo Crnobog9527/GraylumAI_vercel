@@ -449,6 +449,124 @@ function applyRefundTerminationClawbackContract(
   };
 }
 
+function applyAnnualGrantAdmissionContract(
+  tables: Record<TableName, Row[]>,
+  payload: Row,
+) {
+  const profile = tables.profiles.find((row) => row.id === payload.p_user_id) ?? null;
+  const subscription = tables.user_subscriptions.find((row) =>
+    row.user_id === payload.p_user_id
+    && row.stripe_subscription_id === payload.p_stripe_subscription_id,
+  ) ?? null;
+
+  if (!subscription) {
+    return { data: null, error: { message: 'ANNUAL_GRANT_SUBSCRIPTION_MIRROR_MISSING' } };
+  }
+
+  const balanceBefore = profile ? Math.floor(Number(profile.credits ?? 0)) : 0;
+  if (subscription.credit_release_terminated_at != null) {
+    return {
+      data: [{
+        transaction_id: null,
+        balance_before: balanceBefore,
+        balance_after: balanceBefore,
+        amount: 0,
+        is_idempotent: false,
+        granted: false,
+        blocked_by_termination: true,
+        grant_id: null,
+        credits_granted: 0,
+      }],
+      error: null,
+    };
+  }
+
+  const existing = tables.subscription_credit_grants.find((row) =>
+    row.stripe_subscription_id === payload.p_stripe_subscription_id
+    && (
+      row.idempotency_key === payload.p_idempotency_key
+      || row.grant_period_key === payload.p_grant_period_key
+    ),
+  );
+  if (existing) {
+    return {
+      data: [{
+        transaction_id: existing.credit_transaction_id ?? null,
+        balance_before: balanceBefore,
+        balance_after: balanceBefore,
+        amount: existing.credits_granted ?? 0,
+        is_idempotent: true,
+        granted: false,
+        blocked_by_termination: false,
+        grant_id: existing.id ?? null,
+        credits_granted: existing.credits_granted ?? 0,
+      }],
+      error: null,
+    };
+  }
+
+  const amount = Math.floor(Number(payload.p_credits_granted ?? 0));
+  const balanceAfter = balanceBefore + amount;
+  const transactionId = `txn-${tables.credit_transactions.length + 1}`;
+  const grantId = `grant-${tables.subscription_credit_grants.length + 1}`;
+  if (profile) {
+    profile.credits = balanceAfter;
+  }
+  tables.credit_transactions.push({
+    id: transactionId,
+    user_id: payload.p_user_id,
+    amount,
+    type: 'addition',
+    description: payload.p_description,
+    idempotency_key: payload.p_idempotency_key,
+    balance_before: balanceBefore,
+    balance_after: balanceAfter,
+    ledger_type: 'grant',
+    reason_code: 'annual_monthly_release',
+    counts_as_spend: false,
+    source_type: payload.p_source_type,
+    source_id: payload.p_source_id,
+    source_order_id: payload.p_source_order_id ?? null,
+    grant_period_key: payload.p_grant_period_key,
+    metadata: payload.p_metadata ?? {},
+  });
+  tables.subscription_credit_grants.push({
+    id: grantId,
+    user_id: payload.p_user_id,
+    membership_plan_id: payload.p_membership_plan_id,
+    stripe_subscription_id: payload.p_stripe_subscription_id,
+    stripe_invoice_id: payload.p_stripe_invoice_id ?? null,
+    billing_cycle: 'yearly',
+    grant_type: 'annual_monthly_release',
+    grant_period_key: payload.p_grant_period_key,
+    period_start: payload.p_period_start,
+    period_end: payload.p_period_end,
+    period_index: payload.p_period_index,
+    total_periods: payload.p_total_periods,
+    credits_granted: amount,
+    consumed_amount: 0,
+    status: 'granted',
+    idempotency_key: payload.p_idempotency_key,
+    credit_transaction_id: transactionId,
+    metadata: payload.p_grant_metadata ?? {},
+  });
+
+  return {
+    data: [{
+      transaction_id: transactionId,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+      amount,
+      is_idempotent: false,
+      granted: true,
+      blocked_by_termination: false,
+      grant_id: grantId,
+      credits_granted: amount,
+    }],
+    error: null,
+  };
+}
+
 function createMockSupabase(
   seed: Partial<Record<TableName, Row[]>> = {},
   hooks: MockSupabaseHooks = {},
@@ -470,6 +588,10 @@ function createMockSupabase(
     async rpc(name: string, payload: Row) {
       if (name === 'atomic_refund_termination_clawback') {
         return applyRefundTerminationClawbackContract(tables, payload);
+      }
+
+      if (name === 'atomic_grant_annual_subscription_credits') {
+        return applyAnnualGrantAdmissionContract(tables, payload);
       }
 
       expect(name).toBe('atomic_apply_credit_ledger_entry');
@@ -2695,6 +2817,126 @@ describe('subscription credit grants', () => {
       credits_granted: 10,
       status: 'granted',
     });
+  });
+
+  it('blocks a stale annual cron snapshot after refund termination commits before grant admission', async () => {
+    let terminationCommitted = false;
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-annual-toctou',
+        user_id: 'user-annual-toctou',
+        membership_plan_id: 'plan-annual-toctou',
+        stripe_subscription_id: 'sub_annual_toctou',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_annual_toctou' },
+      }],
+      membership_plans: [{
+        id: 'plan-annual-toctou',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-annual-toctou',
+        credits: 0,
+      }],
+    }, {
+      beforeExecute: ({ table, mode, tables }) => {
+        if (!terminationCommitted && table === 'membership_plans' && mode === 'select') {
+          terminationCommitted = true;
+          tables.user_subscriptions[0].credit_release_terminated_at = '2026-03-15T00:00:00.000Z';
+        }
+      },
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+  });
+
+  it('keeps an annual grant and ledger row together before a later refund observes it', async () => {
+    const supabase = createMockSupabase({
+      payment_orders: [{
+        id: 'order-annual-toctou-refund',
+        user_id: 'user-annual-toctou-refund',
+        item_type: 'membership_plan',
+        billing_cycle: 'yearly',
+        stripe_subscription_id: 'sub_annual_toctou_refund',
+        stripe_invoice_id: 'in_annual_toctou_refund',
+        status: 'completed',
+        payment_status: 'paid',
+        amount_total: 9900,
+        currency: 'usd',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-annual-toctou-refund',
+        user_id: 'user-annual-toctou-refund',
+        membership_plan_id: 'plan-annual-toctou-refund',
+        stripe_subscription_id: 'sub_annual_toctou_refund',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_annual_toctou_refund' },
+      }],
+      membership_plans: [{
+        id: 'plan-annual-toctou-refund',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      profiles: [{
+        id: 'user-annual-toctou-refund',
+        credits: 10,
+      }],
+    });
+
+    const release = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-01-15T00:00:00.000Z'),
+    });
+
+    expect(release).toMatchObject({
+      releasedGrantCount: 1,
+      releasedCredits: 10,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0].credit_transaction_id)
+      .toBe(supabase.tables.credit_transactions[0].id);
+
+    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-annual-toctou-refund',
+      subscriptionId: 'sub_annual_toctou_refund',
+      refundId: 're_annual_toctou_refund',
+      refundEventType: 'charge.refunded',
+      refundStatus: 'succeeded',
+      refundAmount: 9900,
+      refundCurrency: 'usd',
+      invoiceId: 'in_annual_toctou_refund',
+      isFullRefund: true,
+      eventId: 'evt_annual_toctou_refund',
+      refundCreatedAt: '2026-01-20T00:00:00.000Z',
+      now: '2026-01-20T00:00:01.000Z',
+    });
+
+    expect(refund).toMatchObject({
+      reviewRequired: false,
+      reversedGrantCount: 1,
+      clawbackAmount: 10,
+      appliedClawbackAmount: 10,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(10);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
   });
 
   it('continues annual release before current_period_end for a normal cancel', () => {
