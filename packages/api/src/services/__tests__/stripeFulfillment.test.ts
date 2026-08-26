@@ -641,6 +641,28 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           metadata: payload.p_grant_metadata ?? {},
         });
 
+        if (name === 'atomic_grant_subscription_invoice_credits' && currentSubscription) {
+          currentSubscription.membership_plan_id = payload.p_membership_plan_id;
+          currentSubscription.stripe_customer_id = payload.p_stripe_customer_id
+            ?? sourceOrder?.stripe_customer_id
+            ?? currentSubscription.stripe_customer_id
+            ?? null;
+          currentSubscription.stripe_price_id = sourceOrder?.stripe_price_id
+            ?? currentSubscription.stripe_price_id
+            ?? null;
+          currentSubscription.billing_cycle = payload.p_billing_cycle;
+          currentSubscription.current_period_start = payload.p_period_start;
+          currentSubscription.current_period_end = payload.p_period_end;
+          currentSubscription.metadata = {
+            ...(currentSubscription.metadata ?? {}),
+            lastInvoiceId: payload.p_stripe_invoice_id,
+            lastInvoicePaymentStatus: payload.p_payment_status ?? 'paid',
+            transactionId,
+            subscriptionCreditGrantId: grantId,
+            fulfillmentSource: 'atomic_grant_subscription_invoice_credits',
+          };
+        }
+
         const completedInvoiceOrder = invoiceOrder ?? sourceOrder;
         if (name === 'atomic_grant_subscription_invoice_credits' && completedInvoiceOrder) {
           Object.assign(completedInvoiceOrder, {
@@ -1132,7 +1154,7 @@ describe('stripe fulfillment helpers', () => {
       status: 'active',
       metadata: expect.objectContaining({
         lastInvoiceId: 'in_paid_yearly_checkout',
-        fulfillmentSource: 'subscription_credit_grants',
+        fulfillmentSource: 'atomic_grant_subscription_invoice_credits',
       }),
     });
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);

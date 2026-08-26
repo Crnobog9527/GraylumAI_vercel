@@ -2453,6 +2453,8 @@ DECLARE
   v_invoice_status TEXT;
   v_invoice_payment_status TEXT;
   v_invoice_metadata JSONB;
+  v_mirror_id UUID;
+  v_mirror_metadata JSONB;
   v_terminated_at TIMESTAMPTZ;
   v_existing_grant_id UUID;
   v_existing_grant_transaction_id UUID;
@@ -2501,24 +2503,13 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT credit_release_terminated_at INTO v_terminated_at
+  SELECT id, credit_release_terminated_at, metadata
+  INTO v_mirror_id, v_terminated_at, v_mirror_metadata
   FROM user_subscriptions
   WHERE user_id = p_user_id AND stripe_subscription_id = p_stripe_subscription_id
   ORDER BY created_at ASC LIMIT 1 FOR UPDATE;
 
-  IF NOT FOUND THEN
-    INSERT INTO user_subscriptions (
-      user_id, membership_plan_id, stripe_customer_id, stripe_subscription_id,
-      stripe_price_id, billing_cycle, status, cancel_at_period_end,
-      current_period_start, current_period_end, metadata, updated_at
-    ) VALUES (
-      p_user_id, p_membership_plan_id, COALESCE(v_source_customer_id, p_stripe_customer_id), p_stripe_subscription_id,
-      v_source_price_id, CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END, 'active', 'false',
-      p_period_start, p_period_end,
-      jsonb_build_object('lastInvoiceId', p_stripe_invoice_id, 'lastInvoicePaymentStatus', COALESCE(p_payment_status, 'paid'), 'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'),
-      v_now
-    );
-  ELSIF v_terminated_at IS NOT NULL THEN
+  IF v_mirror_id IS NOT NULL AND v_terminated_at IS NOT NULL THEN
     RETURN QUERY SELECT NULL::UUID, v_balance_before, v_balance_before, 0, FALSE, FALSE, TRUE, NULL::UUID, 0, invoice_order_id;
     RETURN;
   END IF;
@@ -2565,6 +2556,44 @@ BEGIN
     p_grant_type, p_grant_period_key, p_period_start, p_period_end, p_period_index, p_total_periods,
     p_credits_granted, 'granted', p_idempotency_key, v_transaction_id, COALESCE(p_grant_metadata, '{}'::JSONB), v_now, v_now
   ) RETURNING id INTO v_grant_id;
+
+  IF v_mirror_id IS NULL THEN
+    INSERT INTO user_subscriptions (
+      user_id, membership_plan_id, stripe_customer_id, stripe_subscription_id,
+      stripe_price_id, billing_cycle, status, cancel_at_period_end,
+      current_period_start, current_period_end, metadata, updated_at
+    ) VALUES (
+      p_user_id, p_membership_plan_id, COALESCE(v_source_customer_id, p_stripe_customer_id), p_stripe_subscription_id,
+      v_source_price_id, CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END, 'active', 'false',
+      p_period_start, p_period_end,
+      jsonb_build_object(
+        'lastInvoiceId', p_stripe_invoice_id,
+        'lastInvoicePaymentStatus', COALESCE(p_payment_status, 'paid'),
+        'transactionId', v_transaction_id,
+        'subscriptionCreditGrantId', v_grant_id,
+        'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'
+      ),
+      v_now
+    );
+  ELSE
+    UPDATE user_subscriptions
+    SET membership_plan_id = p_membership_plan_id,
+        stripe_customer_id = COALESCE(v_source_customer_id, p_stripe_customer_id),
+        stripe_price_id = v_source_price_id,
+        billing_cycle = CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END,
+        current_period_start = p_period_start,
+        current_period_end = p_period_end,
+        metadata = COALESCE(v_mirror_metadata, '{}'::JSONB) || jsonb_build_object(
+          'lastInvoiceId', p_stripe_invoice_id,
+          'lastInvoicePaymentStatus', COALESCE(p_payment_status, 'paid'),
+          'transactionId', v_transaction_id,
+          'subscriptionCreditGrantId', v_grant_id,
+          'fulfillmentSource', 'atomic_grant_subscription_invoice_credits'
+        ),
+        updated_at = v_now
+    WHERE id = v_mirror_id
+      AND credit_release_terminated_at IS NULL;
+  END IF;
 
   IF invoice_order_id IS NOT NULL THEN
     UPDATE payment_orders SET

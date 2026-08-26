@@ -576,6 +576,24 @@ function applyAnnualGrantAdmissionContract(
     metadata: payload.p_grant_metadata ?? {},
   });
 
+  if (payload.p_billing_cycle) {
+    const sourceOrder = tables.payment_orders.find((row) => row.id === payload.p_source_order_id);
+    subscription.membership_plan_id = payload.p_membership_plan_id;
+    subscription.stripe_customer_id = payload.p_stripe_customer_id ?? sourceOrder?.stripe_customer_id ?? subscription.stripe_customer_id ?? null;
+    subscription.stripe_price_id = sourceOrder?.stripe_price_id ?? subscription.stripe_price_id ?? null;
+    subscription.billing_cycle = payload.p_billing_cycle;
+    subscription.current_period_start = payload.p_period_start;
+    subscription.current_period_end = payload.p_period_end;
+    subscription.metadata = {
+      ...(subscription.metadata ?? {}),
+      lastInvoiceId: payload.p_stripe_invoice_id,
+      lastInvoicePaymentStatus: payload.p_payment_status ?? 'paid',
+      transactionId: transactionId,
+      subscriptionCreditGrantId: grantId,
+      fulfillmentSource: 'atomic_grant_subscription_invoice_credits',
+    };
+  }
+
   return {
     data: [{
       transaction_id: transactionId,
@@ -834,6 +852,44 @@ function createInvoiceAdmissionRaceHarness(hooks: MockSupabaseHooks) {
   }, hooks);
 }
 
+function createRenewalHarness(input: {
+  billingCycle: 'monthly' | 'yearly';
+  oldStart: string;
+  oldEnd: string;
+  newPlanId: string;
+  newStart: string;
+  newEnd: string;
+  invoiceId: string;
+  terminated?: boolean;
+  mirrorStatus?: string;
+  cancelAtPeriodEnd?: string;
+}) {
+  const isYearly = input.billingCycle === 'yearly';
+  return createMockSupabase({
+    payment_orders: [{
+      id: `order-${input.invoiceId}`, user_id: 'user-v7-renewal', item_id: input.newPlanId,
+      item_type: 'membership_plan', billing_cycle: input.billingCycle,
+      stripe_subscription_id: 'sub_v7_renewal', stripe_customer_id: 'cus_v7_new',
+      stripe_price_id: 'price-v7-new', status: 'pending', payment_status: 'paid',
+      created_at: input.newStart,
+    }],
+    user_subscriptions: [{
+      id: 'subscription-v7-renewal', user_id: 'user-v7-renewal', membership_plan_id: 'plan-v7-old',
+      stripe_subscription_id: 'sub_v7_renewal', stripe_customer_id: 'cus_v7_old', stripe_price_id: 'price-v7-old',
+      billing_cycle: input.billingCycle, status: input.mirrorStatus ?? 'past_due',
+      cancel_at_period_end: input.cancelAtPeriodEnd ?? 'true',
+      current_period_start: input.oldStart, current_period_end: input.oldEnd,
+      credit_release_terminated_at: input.terminated ? '2027-01-01T00:00:00.000Z' : null,
+      metadata: { lastInvoiceId: 'in_v7_old', lastInvoicePaymentStatus: 'paid' },
+    }],
+    membership_plans: [{
+      id: input.newPlanId, name: 'Gold', level: 'gold',
+      yearly_credits: isYearly ? 120 : 0, monthly_credits: isYearly ? 0 : 100, monthly_bonus_credits: 0,
+    }],
+    profiles: [{ id: 'user-v7-renewal', membership_level: 'free', credits: 0 }],
+  });
+}
+
 function createAsyncBarrier(expectedArrivals: number) {
   let arrivals = 0;
   let release!: () => void;
@@ -1059,6 +1115,135 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.payment_orders.find((row) => row.id === result.invoiceOrderId))
       .toMatchObject({ status: 'refunded', payment_status: 'refunded' });
+  });
+
+  it('TEST 1: refreshes every existing annual mirror field to the successful renewal term', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'yearly', oldStart: '2026-01-01T00:00:00.000Z', oldEnd: '2027-01-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-new-annual', newStart: '2027-01-01T00:00:00.000Z', newEnd: '2028-01-01T00:00:00.000Z',
+      invoiceId: 'in_v7_annual_renewal',
+    });
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v7_annual_renewal', subscriptionId: 'sub_v7_renewal', amountTotal: 9900,
+      paymentStatus: 'paid', stripeCustomerId: 'cus_v7_new', periodStart: '2027-01-01T00:00:00.000Z',
+      periodEnd: '2028-01-01T00:00:00.000Z', now: '2027-01-01T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      membership_plan_id: 'plan-v7-new-annual', stripe_customer_id: 'cus_v7_new', stripe_price_id: 'price-v7-new',
+      billing_cycle: 'yearly', current_period_start: '2027-01-01T00:00:00.000Z',
+      current_period_end: '2028-01-01T00:00:00.000Z', status: 'past_due', cancel_at_period_end: 'true',
+      metadata: expect.objectContaining({ lastInvoiceId: 'in_v7_annual_renewal', transactionId: expect.any(String) }),
+    });
+  });
+
+  it('TEST 2: anchors the next annual release at the refreshed renewal term', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'yearly', oldStart: '2026-01-01T00:00:00.000Z', oldEnd: '2027-01-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-release', newStart: '2027-01-01T00:00:00.000Z', newEnd: '2028-01-01T00:00:00.000Z',
+      invoiceId: 'in_v7_release_renewal', mirrorStatus: 'active', cancelAtPeriodEnd: 'false',
+    });
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v7_release_renewal', subscriptionId: 'sub_v7_renewal', amountTotal: 9900,
+      paymentStatus: 'paid', periodStart: '2027-01-01T00:00:00.000Z', periodEnd: '2028-01-01T00:00:00.000Z',
+      now: '2027-01-01T00:00:01.000Z',
+    });
+    const release = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2027-02-01T00:00:00.000Z'),
+    });
+
+    expect(release).toMatchObject({ releasedGrantCount: 1, releasedCredits: 10 });
+    expect(supabase.tables.subscription_credit_grants.map((row) => row.grant_period_key))
+      .toContain('annual:2027-01-01T00:00:00.000Z:02');
+  });
+
+  it('TEST 3: resolves a new-term annual refund against the refreshed mirror period', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'yearly', oldStart: '2026-01-01T00:00:00.000Z', oldEnd: '2027-01-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-refund', newStart: '2027-01-01T00:00:00.000Z', newEnd: '2028-01-01T00:00:00.000Z',
+      invoiceId: 'in_v7_refund_renewal', mirrorStatus: 'active', cancelAtPeriodEnd: 'false',
+    });
+    const fulfillment = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v7_refund_renewal', subscriptionId: 'sub_v7_renewal', amountTotal: 9900,
+      paymentStatus: 'paid', periodStart: '2027-01-01T00:00:00.000Z', periodEnd: '2028-01-01T00:00:00.000Z',
+      now: '2027-01-01T00:00:01.000Z',
+    });
+    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: fulfillment.invoiceOrderId!, subscriptionId: 'sub_v7_renewal', invoiceId: 'in_v7_refund_renewal',
+      refundId: 're_v7_annual', eventId: 'evt_v7_annual', refundEventType: 'charge.refunded', refundStatus: 'succeeded',
+      refundAmount: 9900, refundCurrency: 'usd', isFullRefund: true,
+      refundCreatedAt: '2027-01-15T00:00:00.000Z', now: '2027-01-15T00:00:01.000Z',
+    });
+
+    expect(refund).toMatchObject({ reviewRequired: false, locatedPeriodKey: 'annual:2027-01-01T00:00:00.000Z:01', reversedGrantCount: 1 });
+  });
+
+  it('TEST 4: refreshes a monthly renewal mirror and locates its exact refund period', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'monthly', oldStart: '2027-01-01T00:00:00.000Z', oldEnd: '2027-02-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-monthly', newStart: '2027-02-01T00:00:00.000Z', newEnd: '2027-03-01T00:00:00.000Z',
+      invoiceId: 'in_v7_monthly_renewal', mirrorStatus: 'active', cancelAtPeriodEnd: 'false',
+    });
+    const fulfillment = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v7_monthly_renewal', subscriptionId: 'sub_v7_renewal', amountTotal: 1200,
+      paymentStatus: 'paid', periodStart: '2027-02-01T00:00:00.000Z', periodEnd: '2027-03-01T00:00:00.000Z',
+      now: '2027-02-01T00:00:01.000Z',
+    });
+    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: fulfillment.invoiceOrderId!, subscriptionId: 'sub_v7_renewal', invoiceId: 'in_v7_monthly_renewal',
+      refundId: 're_v7_monthly', eventId: 'evt_v7_monthly', refundEventType: 'charge.refunded', refundStatus: 'succeeded',
+      refundAmount: 1200, refundCurrency: 'usd', isFullRefund: true,
+      refundCreatedAt: '2027-02-15T00:00:00.000Z', now: '2027-02-15T00:00:01.000Z',
+    });
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      current_period_start: '2027-02-01T00:00:00.000Z', current_period_end: '2027-03-01T00:00:00.000Z',
+      billing_cycle: 'monthly',
+    });
+    expect(refund).toMatchObject({ reviewRequired: false, locatedPeriodKey: 'invoice:in_v7_monthly_renewal', reversedGrantCount: 1 });
+  });
+
+  it('TEST 5: leaves a terminated mirror completely unchanged and blocks renewal', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'yearly', oldStart: '2026-01-01T00:00:00.000Z', oldEnd: '2027-01-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-terminated', newStart: '2027-01-01T00:00:00.000Z', newEnd: '2028-01-01T00:00:00.000Z',
+      invoiceId: 'in_v7_terminated', terminated: true,
+    });
+    const before = JSON.parse(JSON.stringify(supabase.tables.user_subscriptions[0]));
+    const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+      invoiceId: 'in_v7_terminated', subscriptionId: 'sub_v7_renewal', amountTotal: 9900,
+      paymentStatus: 'paid', periodStart: '2027-01-01T00:00:00.000Z', periodEnd: '2028-01-01T00:00:00.000Z',
+      now: '2027-01-01T00:00:01.000Z',
+    });
+
+    expect(result).toMatchObject({ skippedReason: 'blocked_by_termination', grantedCredits: 0 });
+    expect(supabase.tables.user_subscriptions[0]).toEqual(before);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+    expect(supabase.tables.payment_orders).toHaveLength(1);
+  });
+
+  it('TEST 6: exact invoice replay keeps refreshed term and legitimate status/cancel state', async () => {
+    const supabase = createRenewalHarness({
+      billingCycle: 'monthly', oldStart: '2027-01-01T00:00:00.000Z', oldEnd: '2027-02-01T00:00:00.000Z',
+      newPlanId: 'plan-v7-replay', newStart: '2027-02-01T00:00:00.000Z', newEnd: '2027-03-01T00:00:00.000Z',
+      invoiceId: 'in_v7_replay', mirrorStatus: 'past_due', cancelAtPeriodEnd: 'true',
+    });
+    const input = {
+      invoiceId: 'in_v7_replay', subscriptionId: 'sub_v7_renewal', amountTotal: 1200,
+      paymentStatus: 'paid' as const, periodStart: '2027-02-01T00:00:00.000Z', periodEnd: '2027-03-01T00:00:00.000Z',
+      now: '2027-02-01T00:00:01.000Z',
+    };
+    await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+    const replay = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, input);
+
+    expect(replay).toMatchObject({ alreadyFulfilled: true, grantedCredits: 0 });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      current_period_start: input.periodStart, current_period_end: input.periodEnd,
+      status: 'past_due', cancel_at_period_end: 'true',
+    });
   });
 
   it('does not grant credits or complete an invoice order after full refund reconciliation wins the replay race', async () => {
