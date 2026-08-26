@@ -196,6 +196,7 @@ const SUBSCRIPTION_GRANT_ERRORS = {
   refundCreditTransactionLookup: 'Failed to look up subscription refund clawback transaction',
   refundCreditTransactionUpdate: 'Failed to update subscription refund clawback transaction semantics',
   refundCreditGrantReversal: 'Failed to mark subscription credit grants reversed',
+  refundTerminationClawbackRpc: 'Failed to apply the unified refund termination clawback transaction',
   missingSubscriptionOrder: 'Subscription source order is missing required billing fields',
   missingMembershipPlan: 'Membership plan is missing for subscription grant',
   missingMembershipPlanLevel: 'Membership plan level is missing for subscription grant',
@@ -1148,43 +1149,19 @@ function getAnnualReleaseInvoiceId(subscription: SubscriptionRow) {
     : null;
 }
 
-function buildSubscriptionRefundIdempotencyKey(
-  input: ReconcileSubscriptionRefundCreditGrantsInput,
-  scope: { invoiceId?: string | null } = {},
-) {
-  if (input.isFullRefund) {
-    const invoiceToken = scope.invoiceId?.trim() || input.invoiceId?.trim() || null;
-    const fullRefundToken = invoiceToken
-      ? `invoice:${invoiceToken}`
-      : `order:${input.orderId}`;
-    return `stripe_refund:subscription_grants:${fullRefundToken}:${input.subscriptionId}`;
-  }
-
-  const refundToken = input.refundId?.trim() || input.orderId;
-  return `stripe_refund:subscription_grants:${refundToken}:${input.subscriptionId}`;
-}
-
-function buildLegacySubscriptionRefundIdempotencyKey(
-  input: ReconcileSubscriptionRefundCreditGrantsInput,
-) {
-  if (!input.isFullRefund) {
-    return null;
-  }
-
-  const refundToken = input.refundId?.trim();
-  if (!refundToken) {
-    return null;
-  }
-
-  return `stripe_refund:subscription_grants:${refundToken}:${input.subscriptionId}`;
-}
-
-function getRefundClawbackDescription(input: {
+/**
+ * REFUND-1B canonical refund idempotency identity (R1):
+ * event_id + subscription_id + period_key. Invoice/order/refund tokens are
+ * never part of the canonical tuple; the same event replayed re-derives the
+ * same key, and a later different event on the same subscription/period is
+ * stopped by the termination first-event-wins guard instead of this key.
+ */
+function buildSubscriptionRefundIdempotencyKey(input: {
+  eventId: string;
   subscriptionId: string;
-  refundId?: string | null;
-  reversedGrantCount: number;
+  periodKey: string;
 }) {
-  return `Stripe subscription refund credit clawback [subscription:${input.subscriptionId} refund:${input.refundId ?? 'unknown'} grants:${input.reversedGrantCount}]`;
+  return `stripe_refund:subscription_grants:event:${input.eventId}:sub:${input.subscriptionId}:period:${input.periodKey}`;
 }
 
 function toNonNegativeInteger(value: unknown) {
@@ -1197,16 +1174,6 @@ function toNonNegativeInteger(value: unknown) {
     return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
   }
 
-  return 0;
-}
-
-function getTransactionAmount(value: CreditTransactionRow | null | undefined) {
-  if (!value) return 0;
-  if (typeof value.amount === 'number') return Math.abs(value.amount);
-  if (typeof value.amount === 'string') {
-    const parsed = Number(value.amount);
-    return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
-  }
   return 0;
 }
 
@@ -1232,6 +1199,7 @@ function buildSubscriptionRefundMetadata(input: {
   locatedPeriodKey?: string | null;
   consumedAtReversal?: number | null;
   alreadyReversed?: boolean;
+  alreadyTerminated?: boolean;
 }) {
   return {
     ...asRecord(input.existingMetadata),
@@ -1266,21 +1234,35 @@ function buildSubscriptionRefundMetadata(input: {
       locatedPeriodKey: input.locatedPeriodKey ?? null,
       consumedAtReversal: input.consumedAtReversal ?? null,
       alreadyReversed: input.alreadyReversed ?? false,
+      alreadyTerminated: input.alreadyTerminated ?? false,
     },
   };
 }
 
 /**
- * REFUND-1B: 由可信退款时间戳定位退款发生的周期 (start <= t < end)。
- * 缺可信时间戳 / 无窗口覆盖 → REVIEW_REQUIRED (不猜测)。
+ * REFUND-1B (R4): 由可信退款时间戳 + 订阅 term start + 周期窗口定位退款发生的
+ * 周期 (start <= t < end)，且窗口必须锚定在可信 term start 上:
+ *   - annual_monthly_release: period_start === addMonths(termStart, index - 1)
+ *   - monthly_invoice:        period_start === termStart
+ * 缺任一可信证据或锚定不成立 → REVIEW_REQUIRED (不猜测)。
  */
 function locateRefundPeriodGrant(input: {
   grants: SubscriptionCreditGrantRow[];
   refundCreatedAt?: string | null;
+  termStart?: string | null;
 }): { grant: SubscriptionCreditGrantRow | null; reviewReason: string | null } {
   const refundMs = parseTime(input.refundCreatedAt ?? null);
   if (refundMs === null) {
     return { grant: null, reviewReason: 'missing_trusted_refund_timestamp' };
+  }
+
+  const termStartMs = parseTime(input.termStart ?? null);
+  if (termStartMs === null) {
+    return { grant: null, reviewReason: 'missing_trusted_term_start' };
+  }
+
+  if (refundMs < termStartMs) {
+    return { grant: null, reviewReason: 'refund_timestamp_precedes_term_start' };
   }
 
   const candidates = input.grants
@@ -1302,96 +1284,70 @@ function locateRefundPeriodGrant(input: {
     return { grant: null, reviewReason: 'no_period_window_covers_refund_timestamp' };
   }
 
-  return { grant: candidates[0], reviewReason: null };
+  const located = candidates[0];
+  const expectedPeriodStartMs = getTrustedPeriodStartMs({
+    termStartMs,
+    grant: located,
+  });
+
+  if (expectedPeriodStartMs === null) {
+    return { grant: null, reviewReason: 'term_start_period_anchor_unknown' };
+  }
+
+  const locatedStartMs = parseTime(located.period_start);
+  if (locatedStartMs !== expectedPeriodStartMs) {
+    return { grant: null, reviewReason: 'term_start_period_mismatch' };
+  }
+
+  return { grant: located, reviewReason: null };
 }
 
 /**
- * REFUND-1B: 先写 termination（release cron 立即停发）。
- * 守卫写入：首个成功事件确立 termination；已存在 → written=false。
+ * term start 锚定推导: 仅对有可信推导规则的 grant 类型给出期望 period_start。
  */
-async function writeCreditReleaseTermination(input: {
-  supabase: SupabaseLikeClient;
-  subscriptionId: string;
-  now: string;
-  reason: string;
-  eventId: string | null;
-  periodKey: string | null;
-}): Promise<{
-  written: boolean;
-  mirrorMissing: boolean;
-  existing: {
-    terminatedAt: string | null;
-    reason: string | null;
-    eventId: string | null;
-    periodKey: string | null;
-  } | null;
-}> {
-  const writeResult = await input.supabase
-    .from('user_subscriptions')
-    .update({
-      credit_release_terminated_at: input.now,
-      credit_release_terminated_reason: input.reason,
-      credit_release_terminated_event_id: input.eventId,
-      credit_release_terminated_period_key: input.periodKey,
-      updated_at: input.now,
-    })
-    .eq('stripe_subscription_id', input.subscriptionId)
-    .is('credit_release_terminated_at', null)
-    .select('id, credit_release_terminated_at')
-    .maybeSingle();
-
-  if (writeResult.error) {
-    throwGrantError(
-      'subscription_credit_release_termination_write',
-      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-      writeResult.error,
-      { subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
+function getTrustedPeriodStartMs(input: {
+  termStartMs: number;
+  grant: SubscriptionCreditGrantRow;
+}): number | null {
+  if (input.grant.grant_type === 'annual_monthly_release') {
+    const periodIndex = input.grant.period_index;
+    if (typeof periodIndex !== 'number' || !Number.isInteger(periodIndex) || periodIndex < 1) {
+      return null;
+    }
+    return addUtcCalendarMonthsClamped(new Date(input.termStartMs), periodIndex - 1).getTime();
   }
 
-  if (writeResult.data?.id) {
-    return {
-      written: true,
-      mirrorMissing: false,
-      existing: {
-        terminatedAt: input.now,
-        reason: input.reason,
-        eventId: input.eventId,
-        periodKey: input.periodKey,
-      },
-    };
+  if (input.grant.grant_type === 'monthly_invoice') {
+    return input.termStartMs;
   }
 
-  const readResult = await input.supabase
+  return null;
+}
+
+/**
+ * REFUND-1B: 读取订阅 mirror (term start 证据 + 既有 termination 状态)。
+ * mirror 缺失由统一退款 RPC 失败关闭处理; 此处只读取。
+ */
+async function loadSubscriptionMirrorForRefund(
+  supabase: SupabaseLikeClient,
+  input: { subscriptionId: string },
+): Promise<SubscriptionRow | null> {
+  const result = await supabase
     .from('user_subscriptions')
-    .select('id, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key')
+    .select('id, user_id, billing_cycle, status, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key')
     .eq('stripe_subscription_id', input.subscriptionId)
     .limit(1);
 
-  if (readResult.error) {
+  if (result.error) {
     throwGrantError(
-      'subscription_credit_release_termination_lookup',
-      SUBSCRIPTION_GRANT_ERRORS.subscriptionWrite,
-      readResult.error,
+      'subscription_refund_mirror_lookup',
+      SUBSCRIPTION_GRANT_ERRORS.subscriptionLookup,
+      result.error,
       { subscriptionId: maskIdentifier(input.subscriptionId) },
     );
   }
 
-  const row = asSubscriptionRows(readResult.data as SubscriptionRow | SubscriptionRow[] | null)[0] ?? null;
-  if (!row?.id) {
-    return { written: false, mirrorMissing: true, existing: null };
-  }
-
-  return {
-    written: false,
-    mirrorMissing: false,
-    existing: {
-      terminatedAt: row.credit_release_terminated_at ?? null,
-      reason: row.credit_release_terminated_reason ?? null,
-      eventId: row.credit_release_terminated_event_id ?? null,
-      periodKey: row.credit_release_terminated_period_key ?? null,
-    },
-  };
+  return asSubscriptionRows(result.data as SubscriptionRow | SubscriptionRow[] | null)[0] ?? null;
 }
 
 async function getSubscriptionRefundOrder(
@@ -1457,6 +1413,7 @@ async function updateSubscriptionRefundOrder(input: {
   locatedPeriodKey?: string | null;
   consumedAtReversal?: number | null;
   alreadyReversed?: boolean;
+  alreadyTerminated?: boolean;
   orderStatus?: string;
   paymentStatus?: string;
 }) {
@@ -1486,11 +1443,12 @@ async function updateSubscriptionRefundOrder(input: {
         terminatedAt: input.terminatedAt,
         terminationReason: input.terminationReason,
         terminationEventId: input.terminationEventId,
-        locatedPeriodKey: input.locatedPeriodKey,
-        consumedAtReversal: input.consumedAtReversal,
-        alreadyReversed: input.alreadyReversed,
-      }),
-    })
+      locatedPeriodKey: input.locatedPeriodKey,
+      consumedAtReversal: input.consumedAtReversal,
+      alreadyReversed: input.alreadyReversed,
+      alreadyTerminated: input.alreadyTerminated,
+    }),
+  })
     .eq('id', input.order.id);
 
   if (result.error) {
@@ -1528,49 +1486,6 @@ async function getProfileCreditBalance(
   }
 
   return toNonNegativeInteger(row.credits);
-}
-
-async function getExistingRefundClawbackTransaction(
-  supabase: SupabaseLikeClient,
-  input: { userId: string; idempotencyKey: string },
-): Promise<CreditTransactionRow | null> {
-  const result = await supabase
-    .from('credit_transactions')
-    .select('id, amount')
-    .eq('user_id', input.userId)
-    .eq('idempotency_key', input.idempotencyKey)
-    .maybeSingle();
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_refund_clawback_lookup',
-      SUBSCRIPTION_GRANT_ERRORS.refundCreditTransactionLookup,
-      result.error,
-      { userId: maskIdentifier(input.userId), idempotencyKey: input.idempotencyKey },
-    );
-  }
-
-  return result.data ?? null;
-}
-
-async function getExistingRefundClawbackTransactionForKeys(
-  supabase: SupabaseLikeClient,
-  input: { userId: string; idempotencyKeys: string[] },
-): Promise<{ transaction: CreditTransactionRow | null; idempotencyKey: string | null }> {
-  const uniqueKeys = [...new Set(input.idempotencyKeys.filter(Boolean))];
-
-  for (const idempotencyKey of uniqueKeys) {
-    const transaction = await getExistingRefundClawbackTransaction(supabase, {
-      userId: input.userId,
-      idempotencyKey,
-    });
-
-    if (transaction?.id) {
-      return { transaction, idempotencyKey };
-    }
-  }
-
-  return { transaction: null, idempotencyKey: null };
 }
 
 async function loadAllSubscriptionCreditGrants(
@@ -1619,78 +1534,6 @@ function getRefundInvoiceScope(order: PaymentOrderRow, input: ReconcileSubscript
     status: 'scoped',
     reason: null,
   };
-}
-
-function collectSubscriptionRefundIdempotencyKeys(input: {
-  order: PaymentOrderRow;
-  grants: SubscriptionCreditGrantRow[];
-  idempotencyKey: string;
-  legacyIdempotencyKey?: string | null;
-  existingReversalIdempotencyKey?: string | null;
-}) {
-  const idempotencyKeys = [
-    input.idempotencyKey,
-    input.legacyIdempotencyKey,
-    input.existingReversalIdempotencyKey,
-  ];
-  const orderReversalKey = asRecord(
-    asRecord(input.order.metadata).subscriptionCreditGrantReversal,
-  ).idempotencyKey;
-
-  if (typeof orderReversalKey === 'string' && orderReversalKey.trim()) {
-    idempotencyKeys.push(orderReversalKey.trim());
-  }
-
-  input.grants.forEach((grant) => {
-    const reversalKey = asRecord(asRecord(grant.metadata).reversal).idempotencyKey;
-    if (typeof reversalKey === 'string' && reversalKey.trim()) {
-      idempotencyKeys.push(reversalKey.trim());
-    }
-  });
-
-  return [...new Set(idempotencyKeys.filter((value): value is string => Boolean(value)))];
-}
-
-async function applySubscriptionRefundClawback(input: {
-  supabase: SupabaseLikeClient;
-  userId: string;
-  amount: number;
-  refund: ReconcileSubscriptionRefundCreditGrantsInput;
-  idempotencyKey: string;
-  reversedGrantCount: number;
-}) {
-  const result = await input.supabase.rpc('atomic_apply_credit_ledger_entry', {
-    p_user_id: input.userId,
-    p_amount: -input.amount,
-    p_type: 'deduction',
-    p_description: getRefundClawbackDescription({
-      subscriptionId: input.refund.subscriptionId,
-      refundId: input.refund.refundId,
-      reversedGrantCount: input.reversedGrantCount,
-    }),
-    p_idempotency_key: input.idempotencyKey,
-  });
-
-  if (result.error) {
-    throwGrantError(
-      'subscription_refund_clawback_rpc',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
-      result.error,
-      { userId: maskIdentifier(input.userId), subscriptionId: maskIdentifier(input.refund.subscriptionId) },
-    );
-  }
-
-  const row = getFirstRpcRow<{ transaction_id?: string | null; amount?: number | null }>(result.data);
-  if (!row?.transaction_id) {
-    throwGrantError(
-      'subscription_refund_clawback_rpc_result',
-      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
-      new Error('refund clawback RPC returned no transaction id'),
-      { userId: maskIdentifier(input.userId), subscriptionId: maskIdentifier(input.refund.subscriptionId) },
-    );
-  }
-
-  return row.transaction_id;
 }
 
 async function updateRefundClawbackTransactionSemantics(input: {
@@ -1752,9 +1595,6 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const scopedRefund = invoiceScope.invoiceId && invoiceScope.invoiceId !== input.invoiceId
     ? { ...input, invoiceId: invoiceScope.invoiceId }
     : input;
-  const idempotencyKey = buildSubscriptionRefundIdempotencyKey(scopedRefund, {
-    invoiceId: invoiceScope.invoiceId,
-  });
 
   const priorReversal = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
   const priorReversalStatus = typeof priorReversal.reversalStatus === 'string'
@@ -1793,6 +1633,38 @@ export async function reconcileSubscriptionRefundCreditGrants(
     };
   }
 
+  // REFUND-1B (R4): 加载 grants + mirror (term start 证据), 用可信退款时间戳 +
+  // term start + 周期窗口定位退款周期; 缺任一可信证据即 REVIEW_REQUIRED
+  const grants = await loadAllSubscriptionCreditGrants(supabase, {
+    subscriptionId: input.subscriptionId,
+  });
+  const mirror = await loadSubscriptionMirrorForRefund(supabase, {
+    subscriptionId: input.subscriptionId,
+  });
+  const located = locateRefundPeriodGrant({
+    grants,
+    refundCreatedAt: input.refundCreatedAt,
+    termStart: mirror?.current_period_start ?? null,
+  });
+  const locatedPeriodKey = located.grant?.grant_period_key ?? null;
+
+  let reviewReason: string | null = located.reviewReason;
+  if (invoiceScope.status !== 'scoped') {
+    reviewReason ??= invoiceScope.reason;
+  }
+
+  // REFUND-1B (R1): canonical 幂等身份 = event_id + subscription_id + period_key。
+  // 缺 event_id 时不得猜测扣款 (仍写 termination 停止未来释放)。
+  const canonicalEventId = input.eventId?.trim() || null;
+  if (!canonicalEventId) {
+    reviewReason ??= 'missing_event_id';
+  }
+  const idempotencyKey = buildSubscriptionRefundIdempotencyKey({
+    eventId: canonicalEventId ?? 'unlocated',
+    subscriptionId: input.subscriptionId,
+    periodKey: locatedPeriodKey ?? 'unlocated',
+  });
+
   // 标记 pending (崩溃恢复锚点)
   await updateSubscriptionRefundOrder({
     supabase,
@@ -1804,38 +1676,105 @@ export async function reconcileSubscriptionRefundCreditGrants(
     reversalStatus: 'pending',
   });
 
-  // REFUND-1B: 可信退款时间戳定位周期 (start <= t < end)，缺证据即 REVIEW_REQUIRED
-  const grants = await loadAllSubscriptionCreditGrants(supabase, {
-    subscriptionId: input.subscriptionId,
-  });
-  const located = locateRefundPeriodGrant({
-    grants,
-    refundCreatedAt: input.refundCreatedAt,
-  });
-  const locatedPeriodKey = located.grant?.grant_period_key ?? null;
+  // REFUND-1B (R2/R5): 统一退款事务 RPC — profiles FOR UPDATE ->
+  // subscription_credit_grants FOR UPDATE 单事务内完成 termination 写入
+  // (mirror 缺失即失败关闭)、周期 grant 反转 (缺失/异常即失败关闭) 与
+  // granted - consumed clawback (余额封顶, 绝不为负)。
+  const terminationReason = `stripe_refund:${input.refundEventType ?? 'refund'}`;
+  const userId = order.user_id ?? mirror?.user_id ?? located.grant?.user_id ?? null;
+  const terminationOnly = Boolean(reviewReason) || !locatedPeriodKey;
 
-  let reviewReason: string | null = located.reviewReason;
-  if (invoiceScope.status !== 'scoped') {
-    reviewReason ??= invoiceScope.reason;
+  const clawbackResult = await supabase.rpc('atomic_refund_termination_clawback', {
+    p_user_id: userId,
+    p_subscription_id: input.subscriptionId,
+    p_event_id: canonicalEventId,
+    p_period_key: locatedPeriodKey,
+    p_idempotency_key: idempotencyKey,
+    p_reason: terminationReason,
+    p_termination_only: terminationOnly,
+    p_refund_id: input.refundId ?? null,
+    p_now: now,
+  });
+
+  if (clawbackResult.error) {
+    throwGrantError(
+      'subscription_refund_termination_clawback_rpc',
+      SUBSCRIPTION_GRANT_ERRORS.refundTerminationClawbackRpc,
+      clawbackResult.error,
+      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey },
+    );
   }
 
-  // REFUND-1B: 先写 termination (release cron 立即停发，即使 REVIEW_REQUIRED)
-  const terminationReason = `stripe_refund:${input.refundEventType ?? 'refund'}`;
-  const terminationEventId = input.eventId ?? input.refundId ?? null;
-  const termination = await writeCreditReleaseTermination({
-    supabase,
-    subscriptionId: input.subscriptionId,
-    now,
-    reason: terminationReason,
-    eventId: terminationEventId,
-    periodKey: locatedPeriodKey,
-  });
-  const terminatedAt = termination.written
-    ? now
-    : termination.existing?.terminatedAt ?? null;
+  const clawbackRow = getFirstRpcRow<{
+    transaction_id?: string | null;
+    balance_after?: number | null;
+    clawback_amount?: number | null;
+    applied_clawback_amount?: number | null;
+    shortfall_amount?: number | null;
+    already_applied?: boolean | null;
+    termination_written?: boolean | null;
+    already_terminated?: boolean | null;
+    grant_reversed?: boolean | null;
+    already_reversed?: boolean | null;
+    credits_granted?: number | null;
+    consumed_amount?: number | null;
+  }>(clawbackResult.data);
 
-  // termination 已被更早成功事件确立且无需恢复 → 本次事件不再扣
-  if (!termination.written && !termination.mirrorMissing && priorReversalStatus !== 'pending') {
+  if (!clawbackRow) {
+    throwGrantError(
+      'subscription_refund_termination_clawback_rpc_result',
+      SUBSCRIPTION_GRANT_ERRORS.refundTerminationClawbackRpc,
+      new Error('refund termination clawback RPC returned no row'),
+      { subscriptionId: maskIdentifier(input.subscriptionId), locatedPeriodKey },
+    );
+  }
+
+  const terminationWritten = clawbackRow.termination_written === true;
+  const alreadyTerminated = clawbackRow.already_terminated === true;
+  const terminatedAt = terminationWritten
+    ? now
+    : mirror?.credit_release_terminated_at ?? null;
+
+  // REVIEW_REQUIRED: 不自动扣、不猜测 (termination 已写, 未来释放已停止)
+  if (reviewReason) {
+    await updateSubscriptionRefundOrder({
+      supabase,
+      order,
+      refund: scopedRefund,
+      now,
+      idempotencyKey,
+      reviewRequired: true,
+      reviewReason,
+      reversalStatus: 'review_required',
+      terminationWritten,
+      terminatedAt,
+      terminationReason: terminationWritten ? terminationReason : mirror?.credit_release_terminated_reason ?? null,
+      terminationEventId: terminationWritten ? canonicalEventId : mirror?.credit_release_terminated_event_id ?? null,
+      locatedPeriodKey,
+    });
+
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: input.isFullRefund,
+      reviewRequired: true,
+      reviewReason,
+      terminationWritten,
+      terminatedAt,
+      locatedPeriodKey,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: false,
+    };
+  }
+
+  // 同一 canonical 事件精确重放 (幂等屏障命中): 返回既有结果, 不重复扣
+  if (clawbackRow.already_applied === true) {
+    const replayedClawback = toNonNegativeInteger(clawbackRow.applied_clawback_amount);
     await updateSubscriptionRefundOrder({
       supabase,
       order,
@@ -1843,13 +1782,62 @@ export async function reconcileSubscriptionRefundCreditGrants(
       now,
       idempotencyKey,
       reviewRequired: false,
+      clawbackAmount: replayedClawback,
+      appliedClawbackAmount: replayedClawback,
+      shortfallAmount: 0,
       reversalStatus: 'complete',
+      reversedGrantCount: 1,
+      creditTransactionId: clawbackRow.transaction_id ?? null,
+      alreadyReconciled: true,
       terminationWritten: false,
       terminatedAt,
-      terminationReason: termination.existing?.reason ?? null,
-      terminationEventId: termination.existing?.eventId ?? null,
+      terminationReason: mirror?.credit_release_terminated_reason ?? null,
+      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
       locatedPeriodKey,
+      alreadyTerminated,
+    });
+
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: input.isFullRefund,
+      reviewRequired: false,
+      reviewReason: null,
+      terminationWritten: false,
+      terminatedAt,
+      locatedPeriodKey,
+      reversedGrantCount: 1,
+      clawbackAmount: replayedClawback,
+      appliedClawbackAmount: replayedClawback,
+      shortfallAmount: 0,
+      creditTransactionId: clawbackRow.transaction_id ?? null,
       alreadyReconciled: true,
+    };
+  }
+
+  // 后续事件: termination 已被首个成功事件确立, 或周期已被先前尝试反转 → 不追历史
+  if (alreadyTerminated || clawbackRow.already_reversed === true) {
+    await updateSubscriptionRefundOrder({
+      supabase,
+      order,
+      refund: scopedRefund,
+      now,
+      idempotencyKey,
+      reviewRequired: false,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      reversalStatus: 'complete',
+      reversedGrantCount: 0,
+      alreadyReconciled: true,
+      terminationWritten: false,
+      terminatedAt,
+      terminationReason: mirror?.credit_release_terminated_reason ?? null,
+      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
+      locatedPeriodKey,
+      alreadyReversed: clawbackRow.already_reversed === true,
+      alreadyTerminated,
     });
 
     return {
@@ -1871,209 +1859,29 @@ export async function reconcileSubscriptionRefundCreditGrants(
     };
   }
 
-  // REVIEW_REQUIRED: 不自动扣、不猜测 (termination 已写，未来释放已停止)
-  if (reviewReason) {
-    await updateSubscriptionRefundOrder({
-      supabase,
-      order,
-      refund: scopedRefund,
-      now,
-      idempotencyKey,
-      reviewRequired: true,
-      reviewReason,
-      reversalStatus: 'review_required',
-      terminationWritten: termination.written,
-      terminatedAt,
-      terminationReason: termination.written ? terminationReason : termination.existing?.reason ?? null,
-      terminationEventId: termination.written ? terminationEventId : termination.existing?.eventId ?? null,
-      locatedPeriodKey,
-    });
-
-    return {
-      orderId: order.id as string,
-      subscriptionId: input.subscriptionId,
-      refundId: input.refundId ?? null,
-      fullRefund: input.isFullRefund,
-      reviewRequired: true,
-      reviewReason,
-      terminationWritten: termination.written,
-      terminatedAt,
-      locatedPeriodKey,
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
-      appliedClawbackAmount: 0,
-      shortfallAmount: 0,
-      creditTransactionId: null,
-      alreadyReconciled: false,
-    };
-  }
-
-  // 守卫反转定位周期 grant: clawback = credits_granted - consumed_amount (反转时原子读取)
-  const locatedGrant = located.grant as SubscriptionCreditGrantRow & { id: string };
-  const userId = order.user_id ?? locatedGrant.user_id ?? null;
-  let clawbackAmount = 0;
-  let consumedAtReversal: number | null = null;
-  let alreadyReversed = false;
-
-  const reversalResult = await supabase
-    .from('subscription_credit_grants')
-    .update({
-      status: 'reversed',
-      updated_at: now,
-      metadata: {
-        ...asRecord(locatedGrant.metadata),
-        reversal: {
-          refundId: input.refundId ?? null,
-          subscriptionId: input.subscriptionId,
-          invoiceId: input.invoiceId ?? null,
-          periodKey: locatedPeriodKey,
-          idempotencyKey,
-          reversedAt: now,
-          source: 'subscription_refund',
-        },
-      },
-    })
-    .eq('id', locatedGrant.id)
-    .eq('status', 'granted')
-    .select('id, credits_granted, consumed_amount')
-    .maybeSingle();
-
-  if (reversalResult.error) {
-    throwGrantError(
-      'subscription_refund_credit_grant_reversal',
-      SUBSCRIPTION_GRANT_ERRORS.refundCreditGrantReversal,
-      reversalResult.error,
-      { grantId: maskIdentifier(locatedGrant.id), subscriptionId: maskIdentifier(input.subscriptionId) },
-    );
-  }
-
-  if (reversalResult.data?.id) {
-    consumedAtReversal = toNonNegativeInteger(reversalResult.data.consumed_amount);
-    clawbackAmount = Math.max(
-      0,
-      toNonNegativeInteger(reversalResult.data.credits_granted) - consumedAtReversal,
-    );
-  } else {
-    const reread = await supabase
-      .from('subscription_credit_grants')
-      .select('id, status, credits_granted, consumed_amount, metadata')
-      .eq('id', locatedGrant.id)
-      .maybeSingle();
-
-    if (reread.error) {
-      throwGrantError(
-        'subscription_refund_credit_grant_reread',
-        SUBSCRIPTION_GRANT_ERRORS.creditGrantLookup,
-        reread.error,
-        { grantId: maskIdentifier(locatedGrant.id), subscriptionId: maskIdentifier(input.subscriptionId) },
-      );
-    }
-
-    alreadyReversed = reread.data?.status === 'reversed';
-    if (alreadyReversed) {
-      // 恢复路径: 已被先前尝试反转 → 采用先前记录的 clawback 金额，不重复扣
-      const priorGrantReversal = asRecord(asRecord(reread.data?.metadata).reversal);
-      const priorGrantClawback = toNonNegativeInteger(priorGrantReversal.clawbackAmount);
-      const priorGrantGranted = toNonNegativeInteger(reread.data?.credits_granted);
-      const priorGrantConsumed = toNonNegativeInteger(reread.data?.consumed_amount);
-      clawbackAmount = priorGrantClawback > 0
-        ? priorGrantClawback
-        : Math.max(0, priorGrantGranted - priorGrantConsumed);
-    }
-  }
-
-  const reversedGrantCount = alreadyReversed ? 0 : 1;
-  let creditTransactionId: string | null = null;
-  let alreadyReconciled = false;
-  let appliedClawbackAmount = 0;
-  let shortfallAmount = clawbackAmount;
-  let shortfallReason: string | null = clawbackAmount > 0 ? 'clawback_not_applied' : null;
-
-  if (userId) {
-    const legacyIdempotencyKey = buildLegacySubscriptionRefundIdempotencyKey(scopedRefund);
-    const existingReversalIdempotencyKey = typeof priorReversal.idempotencyKey === 'string'
-      ? priorReversal.idempotencyKey.trim()
-      : null;
-    const existingShortfallReason = typeof priorReversal.shortfallReason === 'string'
-      ? priorReversal.shortfallReason
-      : null;
-    const refundIdempotencyKeys = collectSubscriptionRefundIdempotencyKeys({
-      order,
-      grants: [locatedGrant],
-      idempotencyKey,
-      legacyIdempotencyKey,
-      existingReversalIdempotencyKey,
-    });
-    const existingTransactionResult = await getExistingRefundClawbackTransactionForKeys(supabase, {
-      userId,
-      idempotencyKeys: refundIdempotencyKeys,
-    });
-    const existingTransaction = existingTransactionResult.transaction;
-
-    if (existingTransaction?.id) {
-      creditTransactionId = existingTransaction.id;
-      alreadyReconciled = true;
-      appliedClawbackAmount = getTransactionAmount(existingTransaction);
-      shortfallAmount = Math.max(clawbackAmount - appliedClawbackAmount, 0);
-      shortfallReason = shortfallAmount > 0
-        ? existingShortfallReason ?? 'existing_clawback_shortfall'
-        : null;
-      if (
-        appliedClawbackAmount > 0
-        && existingTransactionResult.idempotencyKey === idempotencyKey
-      ) {
-        await updateRefundClawbackTransactionSemantics({
-          supabase,
-          transactionId: creditTransactionId,
-          refund: scopedRefund,
-          idempotencyKey,
-          amount: appliedClawbackAmount,
-          requiredAmount: clawbackAmount,
-          shortfallAmount,
-          reversedGrantCount,
-          reversedGrantPeriodKeys: locatedPeriodKey ? [locatedPeriodKey] : [],
-        });
-      }
-    } else if (clawbackAmount > 0) {
-      const currentBalance = await getProfileCreditBalance(supabase, userId);
-      appliedClawbackAmount = Math.min(clawbackAmount, currentBalance ?? 0);
-      shortfallAmount = clawbackAmount - appliedClawbackAmount;
-      shortfallReason = currentBalance === null
-        ? 'profile_missing'
-        : shortfallAmount > 0
-          ? 'insufficient_balance'
-          : null;
-
-      if (appliedClawbackAmount > 0) {
-        creditTransactionId = await applySubscriptionRefundClawback({
-          supabase,
-          userId,
-          amount: appliedClawbackAmount,
-          refund: scopedRefund,
-          idempotencyKey,
-          reversedGrantCount,
-        });
-        await updateRefundClawbackTransactionSemantics({
-          supabase,
-          transactionId: creditTransactionId,
-          refund: scopedRefund,
-          idempotencyKey,
-          amount: appliedClawbackAmount,
-          requiredAmount: clawbackAmount,
-          shortfallAmount,
-          reversedGrantCount,
-          reversedGrantPeriodKeys: locatedPeriodKey ? [locatedPeriodKey] : [],
-        });
-      }
-    }
-  } else if (clawbackAmount > 0) {
-    shortfallReason = 'user_missing';
-  } else {
-    shortfallAmount = 0;
-    shortfallReason = null;
-  }
-
+  // 守卫反转 + clawback 已在统一事务内完成; 记录语义与结果
+  const clawbackAmount = toNonNegativeInteger(clawbackRow.clawback_amount);
+  const appliedClawbackAmount = toNonNegativeInteger(clawbackRow.applied_clawback_amount);
+  const shortfallAmount = toNonNegativeInteger(clawbackRow.shortfall_amount);
+  const shortfallReason = shortfallAmount > 0 ? 'insufficient_balance' : null;
+  const reversedGrantCount = clawbackRow.grant_reversed === true ? 1 : 0;
+  const consumedAtReversal = clawbackRow.consumed_amount ?? null;
+  const creditTransactionId = clawbackRow.transaction_id ?? null;
   const reviewRequired = shortfallAmount > 0;
+
+  if (creditTransactionId) {
+    await updateRefundClawbackTransactionSemantics({
+      supabase,
+      transactionId: creditTransactionId,
+      refund: scopedRefund,
+      idempotencyKey,
+      amount: appliedClawbackAmount,
+      requiredAmount: clawbackAmount,
+      shortfallAmount,
+      reversedGrantCount,
+      reversedGrantPeriodKeys: locatedPeriodKey ? [locatedPeriodKey] : [],
+    });
+  }
 
   await updateSubscriptionRefundOrder({
     supabase,
@@ -2089,14 +1897,13 @@ export async function reconcileSubscriptionRefundCreditGrants(
     reversalStatus: reviewRequired ? 'shortfall_review_required' : 'complete',
     reversedGrantCount,
     creditTransactionId,
-    alreadyReconciled,
-    terminationWritten: termination.written,
+    alreadyReconciled: false,
+    terminationWritten,
     terminatedAt,
-    terminationReason: termination.written ? terminationReason : termination.existing?.reason ?? null,
-    terminationEventId: termination.written ? terminationEventId : termination.existing?.eventId ?? null,
+    terminationReason,
+    terminationEventId: canonicalEventId,
     locatedPeriodKey,
     consumedAtReversal,
-    alreadyReversed,
   });
 
   return {
@@ -2106,7 +1913,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
     fullRefund: input.isFullRefund,
     reviewRequired,
     reviewReason: null,
-    terminationWritten: termination.written,
+    terminationWritten,
     terminatedAt,
     locatedPeriodKey,
     reversedGrantCount,
@@ -2114,7 +1921,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
     appliedClawbackAmount,
     shortfallAmount,
     creditTransactionId,
-    alreadyReconciled,
+    alreadyReconciled: false,
   };
 }
 

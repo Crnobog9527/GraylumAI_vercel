@@ -26,6 +26,21 @@
 --      and reversed/consumed state is re-read under lock (no TOCTOU).
 --   5. SEC-1 service-role-only EXECUTE/search_path posture is re-established
 --      for every replaced function.
+--   6. Remediation hardening: duplicate settle/refund/abort/finalize calls
+--      are serialized by a post-lock recheck plus a UNIQUE partial index on
+--      the terminal billing_history record keyed by preDeductId; bound-grant
+--      rereads fail closed when the charged grant row is missing, deleted,
+--      or in an unexpected status; settle/abort/finalize re-read the
+--      user_subscriptions termination state under the grant lock so a
+--      committed termination intercepts restoration/overrun even before the
+--      grant row itself is marked reversed; every profile-debit path
+--      enforces credits >= 0 inside the SQL body.
+--   7. atomic_refund_termination_clawback: one unified refund transaction
+--      (profiles FOR UPDATE -> subscription_credit_grants FOR UPDATE) that
+--      writes credit-release termination (fail-closed when the mirror is
+--      missing), reverses the located period grant, and claws back
+--      granted - consumed under a canonical event_id + subscription_id +
+--      period_key idempotency barrier with LEAST(clawback, balance).
 
 -- ============================================
 -- 1. consumed_amount invariant
@@ -47,6 +62,20 @@ ALTER TABLE public.user_subscriptions
   ADD COLUMN credit_release_terminated_reason TEXT,
   ADD COLUMN credit_release_terminated_event_id TEXT,
   ADD COLUMN credit_release_terminated_period_key TEXT;
+
+-- ============================================
+-- 2b. deterministic terminal-record barrier
+-- ============================================
+-- R7: exactly one terminal billing_history record (settle/refund/abort_settle)
+-- may exist per pre-deduct. The pre-lock "already processed" checks below are
+-- advisory fast paths only; this unique partial index plus the post-lock
+-- rechecks make duplicate concurrent settle/finalize attempts fail closed
+-- instead of letting both callers mutate the profile.
+
+CREATE UNIQUE INDEX billing_history_terminal_pre_deduct_unique
+  ON public.billing_history ((metadata->>'preDeductId'))
+  WHERE operation_type IN ('settle', 'refund', 'abort_settle')
+    AND metadata->>'preDeductId' IS NOT NULL;
 
 -- ============================================
 -- 3. atomic_pre_deduct: bind the reservation to the charged grant/period
@@ -223,6 +252,8 @@ DECLARE
   v_grant_status TEXT;
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER;
   v_period_delta INTEGER := 0;
   v_overrun INTEGER;
@@ -259,6 +290,22 @@ BEGIN
   WHERE id = p_user_id
   FOR UPDATE;
 
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '用户不存在: %', p_user_id;
+  END IF;
+
+  -- 3a. R7: 持锁后复查重复结算 (并发双调用在此串行化后失败关闭;
+  --      billing_history_terminal_pre_deduct_unique 是最终硬屏障)
+  SELECT id INTO v_existing_settle
+  FROM billing_history
+  WHERE operation_type = 'settle'
+    AND metadata->>'preDeductId' = p_pre_deduct_id::TEXT
+  LIMIT 1;
+
+  IF v_existing_settle IS NOT NULL THEN
+    RAISE EXCEPTION '该预扣记录已结算: %', p_pre_deduct_id;
+  END IF;
+
   v_balance_delta := v_difference;
 
   -- 3b. REFUND-1B: 复用预扣绑定 (跨周期也在原绑定上操作), 状态在持锁下重读。
@@ -268,13 +315,28 @@ BEGIN
     v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
     v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-    SELECT status, credits_granted, consumed_amount
-    INTO v_grant_status, v_grant_granted, v_grant_consumed
-    FROM subscription_credit_grants
-    WHERE id = v_charged_grant_id
-    FOR UPDATE;
+    -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+    SELECT g.status, g.credits_granted, g.consumed_amount,
+           (us.credit_release_terminated_at IS NOT NULL) AS terminated
+    INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
+    FROM subscription_credit_grants AS g
+    LEFT JOIN user_subscriptions AS us
+      ON us.stripe_subscription_id = g.stripe_subscription_id
+    WHERE g.id = v_charged_grant_id
+    FOR UPDATE OF g;
 
-    IF v_grant_status = 'reversed' THEN
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+    END IF;
+
+    IF v_grant_status NOT IN ('granted', 'reversed') THEN
+      RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+    END IF;
+
+    -- R3: 已 reversed 或订阅 termination 已落库 (即使 grant 尚未反转) 都拦截
+    v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+    IF v_intercepted THEN
       -- 已退款的周期: 周期份额不返还/不追扣, 不从其他来源补扣
       IF v_difference >= 0 THEN
         v_balance_delta := LEAST(v_difference, GREATEST(v_to_other, 0));
@@ -301,10 +363,20 @@ BEGIN
       SET consumed_amount = consumed_amount + v_period_delta,
           updated_at = now()
       WHERE id = v_charged_grant_id;
+
+      -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+      END IF;
     END IF;
   END IF;
 
   v_balance_after := v_current_balance + v_balance_delta;
+
+  -- R6: SQL 侧非负余额守卫 (超用不得使 profiles.credits < 0)
+  IF v_balance_after < 0 THEN
+    RAISE EXCEPTION '积分不足: 结算将导致负余额 (当前 %, 变动 %)', v_current_balance, v_balance_delta;
+  END IF;
 
   IF v_balance_delta <> 0 THEN
     UPDATE profiles
@@ -373,6 +445,8 @@ DECLARE
   v_to_period INTEGER := 0;
   v_to_other INTEGER := 0;
   v_grant_status TEXT;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER;
   v_period_delta INTEGER := 0;
   v_intercepted_restoration INTEGER := 0;
@@ -405,6 +479,21 @@ BEGIN
   WHERE id = p_user_id
   FOR UPDATE;
 
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '用户不存在: %', p_user_id;
+  END IF;
+
+  -- 3a. R7: 持锁后复查重复处理 (唯一部分索引为最终硬屏障)
+  SELECT id INTO v_existing_process
+  FROM billing_history
+  WHERE (metadata->>'preDeductId' = p_pre_deduct_id::TEXT)
+    AND operation_type IN ('settle', 'refund', 'abort_settle')
+  LIMIT 1;
+
+  IF v_existing_process IS NOT NULL THEN
+    RAISE EXCEPTION '该预扣记录已处理: %', p_pre_deduct_id;
+  END IF;
+
   v_balance_delta := v_refund_amount;
 
   -- 3b. REFUND-1B: 预扣完全未用, 按绑定逆分配返还
@@ -413,12 +502,27 @@ BEGIN
     v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
     v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-    SELECT status INTO v_grant_status
-    FROM subscription_credit_grants
-    WHERE id = v_charged_grant_id
-    FOR UPDATE;
+    -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+    SELECT g.status,
+           (us.credit_release_terminated_at IS NOT NULL) AS terminated
+    INTO v_grant_status, v_grant_terminated
+    FROM subscription_credit_grants AS g
+    LEFT JOIN user_subscriptions AS us
+      ON us.stripe_subscription_id = g.stripe_subscription_id
+    WHERE g.id = v_charged_grant_id
+    FOR UPDATE OF g;
 
-    IF v_grant_status = 'reversed' THEN
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+    END IF;
+
+    IF v_grant_status NOT IN ('granted', 'reversed') THEN
+      RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+    END IF;
+
+    v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+    IF v_intercepted THEN
       v_balance_delta := LEAST(v_refund_amount, GREATEST(v_to_other, 0));
       v_intercepted_restoration := LEAST(GREATEST(v_refund_amount - GREATEST(v_to_other, 0), 0), v_to_period);
     ELSE
@@ -430,6 +534,11 @@ BEGIN
       SET consumed_amount = consumed_amount + v_period_delta,
           updated_at = now()
       WHERE id = v_charged_grant_id;
+
+      -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+      END IF;
     END IF;
   END IF;
 
@@ -501,6 +610,8 @@ DECLARE
   v_grant_status TEXT;
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER;
   v_period_delta INTEGER := 0;
   v_overrun INTEGER;
@@ -538,6 +649,21 @@ BEGIN
   WHERE id = p_user_id
   FOR UPDATE;
 
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '用户不存在: %', p_user_id;
+  END IF;
+
+  -- 4a. R7: 持锁后复查重复处理 (唯一部分索引为最终硬屏障)
+  SELECT id INTO v_existing_process
+  FROM billing_history
+  WHERE (metadata->>'preDeductId' = p_pre_deduct_id::TEXT)
+    AND operation_type IN ('settle', 'refund', 'abort_settle')
+  LIMIT 1;
+
+  IF v_existing_process IS NOT NULL THEN
+    RAISE EXCEPTION '该预扣记录已处理: %', p_pre_deduct_id;
+  END IF;
+
   v_balance_delta := v_refunded;
 
   -- 4b. REFUND-1B: 按绑定逆分配返还 / 超用吃当期剩余
@@ -547,13 +673,27 @@ BEGIN
     v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
     v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-    SELECT status, credits_granted, consumed_amount
-    INTO v_grant_status, v_grant_granted, v_grant_consumed
-    FROM subscription_credit_grants
-    WHERE id = v_charged_grant_id
-    FOR UPDATE;
+    -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+    SELECT g.status, g.credits_granted, g.consumed_amount,
+           (us.credit_release_terminated_at IS NOT NULL) AS terminated
+    INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
+    FROM subscription_credit_grants AS g
+    LEFT JOIN user_subscriptions AS us
+      ON us.stripe_subscription_id = g.stripe_subscription_id
+    WHERE g.id = v_charged_grant_id
+    FOR UPDATE OF g;
 
-    IF v_grant_status = 'reversed' THEN
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+    END IF;
+
+    IF v_grant_status NOT IN ('granted', 'reversed') THEN
+      RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+    END IF;
+
+    v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+    IF v_intercepted THEN
       v_balance_delta := LEAST(v_refunded, GREATEST(v_to_other, 0));
       v_intercepted_restoration := LEAST(GREATEST(v_refunded - GREATEST(v_to_other, 0), 0), v_to_period);
       IF p_consumed_credits > v_pre_deducted THEN
@@ -575,10 +715,20 @@ BEGIN
       SET consumed_amount = consumed_amount + v_period_delta,
           updated_at = now()
       WHERE id = v_charged_grant_id;
+
+      -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+      END IF;
     END IF;
   END IF;
 
   v_balance_after := v_current_balance + v_balance_delta;
+
+  -- R6: SQL 侧非负余额守卫 (超用不得使 profiles.credits < 0)
+  IF v_balance_after < 0 THEN
+    RAISE EXCEPTION '积分不足: 中断结算将导致负余额 (当前 %, 变动 %)', v_current_balance, v_balance_delta;
+  END IF;
 
   IF v_balance_delta <> 0 THEN
     UPDATE profiles
@@ -674,6 +824,8 @@ DECLARE
   v_grant_status TEXT;
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER := 0;
   v_period_delta INTEGER := 0;
   v_overrun INTEGER;
@@ -739,6 +891,21 @@ BEGIN
     WHERE id = p_user_id
     FOR UPDATE;
 
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '用户不存在: %', p_user_id;
+    END IF;
+
+    -- R7: 持锁后复查重复处理 (唯一部分索引为最终硬屏障)
+    SELECT id INTO v_existing_process
+    FROM billing_history
+    WHERE metadata->>'preDeductId' = p_pre_deduct_id::TEXT
+      AND operation_type IN ('settle', 'refund', 'abort_settle')
+    LIMIT 1;
+
+    IF v_existing_process IS NOT NULL THEN
+      RAISE EXCEPTION '该预扣记录已处理: %', p_pre_deduct_id;
+    END IF;
+
     v_balance_delta := v_difference;
 
     -- REFUND-1B: 复用预扣绑定 (锁序 profile -> grant, 持锁重读状态)
@@ -748,13 +915,27 @@ BEGIN
       v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
       v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-      SELECT status, credits_granted, consumed_amount
-      INTO v_grant_status, v_grant_granted, v_grant_consumed
-      FROM subscription_credit_grants
-      WHERE id = v_charged_grant_id
-      FOR UPDATE;
+      -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+      SELECT g.status, g.credits_granted, g.consumed_amount,
+             (us.credit_release_terminated_at IS NOT NULL) AS terminated
+      INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
+      FROM subscription_credit_grants AS g
+      LEFT JOIN user_subscriptions AS us
+        ON us.stripe_subscription_id = g.stripe_subscription_id
+      WHERE g.id = v_charged_grant_id
+      FOR UPDATE OF g;
 
-      IF v_grant_status = 'reversed' THEN
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+      END IF;
+
+      IF v_grant_status NOT IN ('granted', 'reversed') THEN
+        RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+      END IF;
+
+      v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+      IF v_intercepted THEN
         IF v_difference >= 0 THEN
           v_balance_delta := LEAST(v_difference, GREATEST(v_to_other, 0));
           v_intercepted_restoration := LEAST(GREATEST(v_difference - GREATEST(v_to_other, 0), 0), v_to_period);
@@ -778,10 +959,20 @@ BEGIN
         SET consumed_amount = consumed_amount + v_period_delta,
             updated_at = now()
         WHERE id = v_charged_grant_id;
+
+        -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+        END IF;
       END IF;
     END IF;
 
     v_balance_after := v_current_balance + v_balance_delta;
+
+    -- R6: SQL 侧非负余额守卫 (超用不得使 profiles.credits < 0)
+    IF v_balance_after < 0 THEN
+      RAISE EXCEPTION '积分不足: 结算将导致负余额 (当前 %, 变动 %)', v_current_balance, v_balance_delta;
+    END IF;
 
     IF v_balance_delta <> 0 THEN
       UPDATE profiles
@@ -946,6 +1137,8 @@ DECLARE
   v_to_period INTEGER := 0;
   v_to_other INTEGER := 0;
   v_grant_status TEXT;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER;
   v_period_delta INTEGER := 0;
   v_intercepted_restoration INTEGER := 0;
@@ -976,6 +1169,21 @@ BEGIN
     WHERE id = p_user_id
     FOR UPDATE;
 
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '用户不存在: %', p_user_id;
+    END IF;
+
+    -- R7: 持锁后复查重复处理 (唯一部分索引为最终硬屏障)
+    SELECT id INTO v_existing_process
+    FROM billing_history
+    WHERE metadata->>'preDeductId' = p_pre_deduct_id::TEXT
+      AND operation_type IN ('settle', 'refund', 'abort_settle')
+    LIMIT 1;
+
+    IF v_existing_process IS NOT NULL THEN
+      RAISE EXCEPTION '该预扣记录已处理: %', p_pre_deduct_id;
+    END IF;
+
     v_balance_delta := v_refund_amount;
 
     -- REFUND-1B: 预扣完全未用, 按绑定逆分配返还 (锁序 profile -> grant)
@@ -984,12 +1192,27 @@ BEGIN
       v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
       v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-      SELECT status INTO v_grant_status
-      FROM subscription_credit_grants
-      WHERE id = v_charged_grant_id
-      FOR UPDATE;
+      -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+      SELECT g.status,
+             (us.credit_release_terminated_at IS NOT NULL) AS terminated
+      INTO v_grant_status, v_grant_terminated
+      FROM subscription_credit_grants AS g
+      LEFT JOIN user_subscriptions AS us
+        ON us.stripe_subscription_id = g.stripe_subscription_id
+      WHERE g.id = v_charged_grant_id
+      FOR UPDATE OF g;
 
-      IF v_grant_status = 'reversed' THEN
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+      END IF;
+
+      IF v_grant_status NOT IN ('granted', 'reversed') THEN
+        RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+      END IF;
+
+      v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+      IF v_intercepted THEN
         v_balance_delta := LEAST(v_refund_amount, GREATEST(v_to_other, 0));
         v_intercepted_restoration := LEAST(GREATEST(v_refund_amount - GREATEST(v_to_other, 0), 0), v_to_period);
       ELSE
@@ -1001,6 +1224,11 @@ BEGIN
         SET consumed_amount = consumed_amount + v_period_delta,
             updated_at = now()
         WHERE id = v_charged_grant_id;
+
+        -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+        IF NOT FOUND THEN
+          RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+        END IF;
       END IF;
     END IF;
 
@@ -1130,6 +1358,8 @@ DECLARE
   v_grant_status TEXT;
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
+  v_grant_terminated BOOLEAN;
+  v_intercepted BOOLEAN;
   v_balance_delta INTEGER;
   v_period_delta INTEGER := 0;
   v_overrun INTEGER;
@@ -1163,6 +1393,21 @@ BEGIN
   WHERE id = p_user_id
   FOR UPDATE;
 
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '用户不存在: %', p_user_id;
+  END IF;
+
+  -- R7: 持锁后复查重复处理 (唯一部分索引为最终硬屏障)
+  SELECT id INTO v_existing_process
+  FROM billing_history
+  WHERE metadata->>'preDeductId' = p_pre_deduct_id::TEXT
+    AND operation_type IN ('settle', 'refund', 'abort_settle')
+  LIMIT 1;
+
+  IF v_existing_process IS NOT NULL THEN
+    RAISE EXCEPTION '该预扣记录已处理: %', p_pre_deduct_id;
+  END IF;
+
   v_balance_delta := v_refunded;
 
   -- REFUND-1B: 按绑定逆分配返还 / 超用吃当期剩余 (锁序 profile -> grant)
@@ -1172,13 +1417,27 @@ BEGIN
     v_to_period := COALESCE(NULLIF(v_pre_meta->>'amountToPeriod', '')::INTEGER, 0);
     v_to_other := COALESCE(NULLIF(v_pre_meta->>'amountToOther', '')::INTEGER, 0);
 
-    SELECT status, credits_granted, consumed_amount
-    INTO v_grant_status, v_grant_granted, v_grant_consumed
-    FROM subscription_credit_grants
-    WHERE id = v_charged_grant_id
-    FOR UPDATE;
+    -- R3/R8: 持锁重读 grant + 订阅 termination 状态; 行缺失/状态异常即失败关闭
+    SELECT g.status, g.credits_granted, g.consumed_amount,
+           (us.credit_release_terminated_at IS NOT NULL) AS terminated
+    INTO v_grant_status, v_grant_granted, v_grant_consumed, v_grant_terminated
+    FROM subscription_credit_grants AS g
+    LEFT JOIN user_subscriptions AS us
+      ON us.stripe_subscription_id = g.stripe_subscription_id
+    WHERE g.id = v_charged_grant_id
+    FOR UPDATE OF g;
 
-    IF v_grant_status = 'reversed' THEN
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '绑定积分发放记录缺失: %', v_charged_grant_id;
+    END IF;
+
+    IF v_grant_status NOT IN ('granted', 'reversed') THEN
+      RAISE EXCEPTION '绑定积分发放记录状态异常: % (%)', v_charged_grant_id, v_grant_status;
+    END IF;
+
+    v_intercepted := (v_grant_status = 'reversed') OR v_grant_terminated;
+
+    IF v_intercepted THEN
       v_balance_delta := LEAST(v_refunded, GREATEST(v_to_other, 0));
       v_intercepted_restoration := LEAST(GREATEST(v_refunded - GREATEST(v_to_other, 0), 0), v_to_period);
       IF p_consumed_credits > v_pre_deducted THEN
@@ -1200,10 +1459,20 @@ BEGIN
       SET consumed_amount = consumed_amount + v_period_delta,
           updated_at = now()
       WHERE id = v_charged_grant_id;
+
+      -- R8: 持锁下的 UPDATE 必须命中且仅命中一行, 否则失败关闭
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '积分发放记录消耗更新未命中: %', v_charged_grant_id;
+      END IF;
     END IF;
   END IF;
 
   v_balance_after := v_current_balance + v_balance_delta;
+
+  -- R6: SQL 侧非负余额守卫 (超用不得使 profiles.credits < 0)
+  IF v_balance_after < 0 THEN
+    RAISE EXCEPTION '积分不足: 中断结算将导致负余额 (当前 %, 变动 %)', v_current_balance, v_balance_delta;
+  END IF;
 
   IF v_balance_delta <> 0 THEN
     UPDATE profiles
@@ -1323,7 +1592,302 @@ END;
 $$;
 
 -- ============================================
--- 10. SEC-1 posture closure for every replaced function
+-- 10. atomic_refund_termination_clawback: unified refund transaction (R2/R5)
+-- ============================================
+-- One transaction (profiles FOR UPDATE -> subscription_credit_grants FOR
+-- UPDATE) that:
+--   * writes the credit-release termination FIRST with a first-event-wins
+--     guard and FAILS CLOSED when the user_subscriptions mirror row is
+--     missing (no grant reversal, no clawback may proceed);
+--   * re-reads the located period grant under the profile->grant lock,
+--     failing closed when the grant row is missing/deleted or in an
+--     unexpected status;
+--   * reverses exactly the located period grant (guarded on status);
+--   * claws back credits_granted - consumed_amount bounded by the current
+--     balance (LEAST), so profiles.credits can never go negative;
+--   * serializes replay/concurrent callers through a post-lock recheck of
+--     the canonical event_id + subscription_id + period_key idempotency key
+--     (backed by idx_credit_transactions_user_idempotency_key).
+-- p_termination_only = TRUE (or p_period_key IS NULL) stops after the
+-- termination write: REVIEW_REQUIRED flows must stop future releases
+-- without guessing a deduction.
+
+CREATE OR REPLACE FUNCTION public.atomic_refund_termination_clawback(
+  p_user_id UUID,
+  p_subscription_id TEXT,
+  p_event_id TEXT,
+  p_period_key TEXT DEFAULT NULL,
+  p_idempotency_key TEXT DEFAULT NULL,
+  p_reason TEXT DEFAULT 'stripe_refund',
+  p_termination_only BOOLEAN DEFAULT FALSE,
+  p_refund_id TEXT DEFAULT NULL,
+  p_now TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+  transaction_id UUID,
+  balance_after INTEGER,
+  clawback_amount INTEGER,
+  applied_clawback_amount INTEGER,
+  shortfall_amount INTEGER,
+  already_applied BOOLEAN,
+  termination_written BOOLEAN,
+  already_terminated BOOLEAN,
+  grant_reversed BOOLEAN,
+  already_reversed BOOLEAN,
+  credits_granted INTEGER,
+  consumed_amount INTEGER
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_now TIMESTAMPTZ := COALESCE(p_now, now());
+  v_full_mode BOOLEAN;
+  v_termination_written BOOLEAN := FALSE;
+  v_balance_before INTEGER;
+  v_mirror_id UUID;
+  v_grant_id UUID;
+  v_grant_status TEXT;
+  v_grant_granted INTEGER;
+  v_grant_consumed INTEGER;
+  v_clawback INTEGER := 0;
+  v_applied INTEGER := 0;
+  v_shortfall INTEGER := 0;
+  v_transaction_id UUID;
+  v_existing_transaction RECORD;
+BEGIN
+  IF btrim(COALESCE(p_subscription_id, '')) = '' THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_ID_REQUIRED';
+  END IF;
+
+  v_full_mode := (p_termination_only IS NOT TRUE) AND (btrim(COALESCE(p_period_key, '')) <> '');
+
+  IF v_full_mode THEN
+    IF btrim(COALESCE(p_idempotency_key, '')) = '' THEN
+      RAISE EXCEPTION 'REFUND_CLAWBACK_CANONICAL_IDEMPOTENCY_KEY_REQUIRED';
+    END IF;
+
+    IF p_user_id IS NULL THEN
+      RAISE EXCEPTION 'REFUND_CLAWBACK_USER_REQUIRED';
+    END IF;
+
+    -- R2: 锁序 profile -> grant; 该锁也是并发退款/结算调用的串行化点
+    SELECT credits INTO v_balance_before
+    FROM profiles
+    WHERE id = p_user_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_MISSING: %', p_user_id;
+    END IF;
+
+    -- R1: 持锁后复查 canonical (event_id + subscription_id + period_key) 幂等键;
+    --     唯一索引 idx_credit_transactions_user_idempotency_key 是最终硬屏障
+    SELECT ct.id, ct.balance_after, ABS(ct.amount) AS applied_amount
+    INTO v_existing_transaction
+    FROM credit_transactions AS ct
+    WHERE ct.user_id = p_user_id
+      AND ct.idempotency_key = p_idempotency_key
+    LIMIT 1;
+
+    IF FOUND THEN
+      RETURN QUERY SELECT
+        v_existing_transaction.id,
+        v_existing_transaction.balance_after,
+        0,
+        v_existing_transaction.applied_amount,
+        0,
+        TRUE,
+        FALSE,
+        FALSE,
+        FALSE,
+        FALSE,
+        NULL::INTEGER,
+        NULL::INTEGER;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- R5: 先写 termination (首个成功事件确立); mirror 缺失即失败关闭,
+  --     不得继续 grant reversal / clawback
+  UPDATE user_subscriptions
+  SET credit_release_terminated_at = v_now,
+      credit_release_terminated_reason = COALESCE(NULLIF(btrim(p_reason), ''), 'stripe_refund'),
+      credit_release_terminated_event_id = p_event_id,
+      credit_release_terminated_period_key = p_period_key,
+      updated_at = v_now
+  WHERE stripe_subscription_id = p_subscription_id
+    AND credit_release_terminated_at IS NULL
+  RETURNING id INTO v_mirror_id;
+
+  IF v_mirror_id IS NOT NULL THEN
+    v_termination_written := TRUE;
+  ELSE
+    SELECT id INTO v_mirror_id
+    FROM user_subscriptions
+    WHERE stripe_subscription_id = p_subscription_id
+    ORDER BY created_at ASC
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
+    END IF;
+  END IF;
+
+  -- REVIEW_REQUIRED / termination-only: 只停止未来释放, 不猜测扣款
+  IF NOT v_full_mode THEN
+    RETURN QUERY SELECT
+      NULL::UUID,
+      NULL::INTEGER,
+      0,
+      0,
+      0,
+      FALSE,
+      v_termination_written,
+      (NOT v_termination_written),
+      FALSE,
+      FALSE,
+      NULL::INTEGER,
+      NULL::INTEGER;
+    RETURN;
+  END IF;
+
+  -- 后续事件不得重复扣款 (首个成功事件已确立 termination 并完成其扣款)
+  IF NOT v_termination_written THEN
+    RETURN QUERY SELECT
+      NULL::UUID,
+      v_balance_before,
+      0,
+      0,
+      0,
+      FALSE,
+      FALSE,
+      TRUE,
+      FALSE,
+      FALSE,
+      NULL::INTEGER,
+      NULL::INTEGER;
+    RETURN;
+  END IF;
+
+  -- R8: 持锁 (profile 已锁) 定位周期 grant; 缺失/状态异常即失败关闭
+  SELECT g.id, g.status, g.credits_granted, g.consumed_amount
+  INTO v_grant_id, v_grant_status, v_grant_granted, v_grant_consumed
+  FROM subscription_credit_grants AS g
+  WHERE g.stripe_subscription_id = p_subscription_id
+    AND g.grant_period_key = p_period_key
+  ORDER BY g.created_at DESC
+  LIMIT 1
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_MISSING: % / %', p_subscription_id, p_period_key;
+  END IF;
+
+  IF v_grant_status NOT IN ('granted', 'reversed') THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS: % (%)', v_period_key, v_grant_status;
+  END IF;
+
+  IF v_grant_status = 'reversed' THEN
+    -- 该周期已被先前尝试反转: 不重复扣
+    RETURN QUERY SELECT
+      NULL::UUID,
+      v_balance_before,
+      0,
+      0,
+      0,
+      FALSE,
+      FALSE,
+      FALSE,
+      FALSE,
+      TRUE,
+      v_grant_granted,
+      v_grant_consumed;
+    RETURN;
+  END IF;
+
+  UPDATE subscription_credit_grants
+  SET status = 'reversed',
+      updated_at = v_now,
+      metadata = COALESCE(metadata, '{}'::JSONB) || jsonb_build_object(
+        'reversal',
+        jsonb_build_object(
+          'refundId', p_refund_id,
+          'eventId', p_event_id,
+          'subscriptionId', p_subscription_id,
+          'periodKey', p_period_key,
+          'idempotencyKey', p_idempotency_key,
+          'reversedAt', v_now,
+          'source', 'subscription_refund'
+        )
+      )
+  WHERE id = v_grant_id
+    AND status = 'granted';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REFUND_CLAWBACK_GRANT_REVERSAL_RACE: %', v_period_key;
+  END IF;
+
+  -- clawback = granted - consumed (持锁值); 以当前余额封顶, 绝不为负
+  v_clawback := GREATEST(v_grant_granted - v_grant_consumed, 0);
+  v_applied := LEAST(v_clawback, v_balance_before);
+  v_shortfall := v_clawback - v_applied;
+
+  IF v_applied > 0 THEN
+    UPDATE profiles
+    SET credits = v_balance_before - v_applied,
+        updated_at = v_now
+    WHERE id = p_user_id;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_UPDATE_MISS: %', p_user_id;
+    END IF;
+
+    INSERT INTO credit_transactions (
+      user_id,
+      amount,
+      type,
+      description,
+      idempotency_key,
+      balance_before,
+      balance_after
+    ) VALUES (
+      p_user_id,
+      -v_applied,
+      'deduction',
+      format(
+        'Stripe subscription refund credit clawback [subscription:%s refund:%s grants:1]',
+        p_subscription_id,
+        COALESCE(NULLIF(btrim(COALESCE(p_refund_id, '')), ''), 'unknown')
+      ),
+      p_idempotency_key,
+      v_balance_before,
+      v_balance_before - v_applied
+    )
+    RETURNING id INTO v_transaction_id;
+  END IF;
+
+  RETURN QUERY SELECT
+    v_transaction_id,
+    v_balance_before - v_applied,
+    v_clawback,
+    v_applied,
+    v_shortfall,
+    FALSE,
+    TRUE,
+    FALSE,
+    TRUE,
+    FALSE,
+    v_grant_granted,
+    v_grant_consumed;
+END;
+$$;
+
+
+
+-- ============================================
+-- 11. SEC-1 posture closure for every replaced/added function
 -- ============================================
 
 DO $$
@@ -1336,6 +1900,7 @@ DECLARE
     'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
     'public.atomic_pre_deduct(uuid,integer,text,uuid)',
     'public.atomic_refund(uuid,uuid,text)',
+    'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',
     'public.atomic_settle(uuid,uuid,integer,jsonb,jsonb)'
   ];
 BEGIN

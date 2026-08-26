@@ -2017,9 +2017,11 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     charge = await resolveRefundCharge(refund, retrieveCharge);
   }
 
-  // REFUND-1B: 可信退款时间戳 (Stripe refund/charge created) 用于周期定位
+  // REFUND-1B (R4): 可信退款时间戳只来自退款对象本身。charge.refunded 缺少
+  // 成功退款对象时不得回退 charge.created (预扣/支付时间), 缺失即
+  // missing_trusted_refund_timestamp → REVIEW_REQUIRED。
   const refundCreatedAt = event.type === 'charge.refunded'
-    ? asIsoTimestamp(getSuccessfulChargeRefund(charge)?.created ?? charge?.created ?? null)
+    ? asIsoTimestamp(getSuccessfulChargeRefund(charge)?.created ?? null)
     : asIsoTimestamp((event.data.object as Stripe.Refund).created);
 
   const chargeId = charge?.id ?? null;

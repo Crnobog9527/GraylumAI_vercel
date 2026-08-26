@@ -206,6 +206,199 @@ function containsValue(actual: unknown, expected: unknown): boolean {
   return actual === expected;
 }
 
+/**
+ * REFUND-1B: 独立实现 0053 atomic_refund_termination_clawback 的 SQL 合同
+ * (非复制 TS 公式): mirror 缺失/授权 grant 缺失/状态异常失败关闭、首个成功
+ * 事件确立 termination、后续事件不重复扣、canonical 幂等键重放返回既有交易、
+ * clawback 以当前余额封顶 (LEAST) 绝不为负。
+ */
+function applyRefundTerminationClawbackContract(
+  tables: Record<TableName, Row[]>,
+  writes: Array<{ table: TableName; mode: 'insert' | 'update' }>,
+  payload: Row,
+) {
+  // SQL 语义: 单事务, 任何异常路径整体回滚 — mock 用快照还原等价行为
+  const writesLength = writes.length;
+  const snapshot = {
+    user_subscriptions: tables.user_subscriptions.map((row) => ({ ...row })),
+    profiles: tables.profiles.map((row) => ({ ...row })),
+    subscription_credit_grants: tables.subscription_credit_grants.map((row) => ({
+      ...row,
+      metadata: row.metadata ? { ...row.metadata } : row.metadata,
+    })),
+    credit_transactions: tables.credit_transactions.map((row) => ({ ...row })),
+  };
+  const rollback = () => {
+    tables.user_subscriptions.splice(0, tables.user_subscriptions.length, ...snapshot.user_subscriptions);
+    tables.profiles.splice(0, tables.profiles.length, ...snapshot.profiles);
+    tables.subscription_credit_grants.splice(0, tables.subscription_credit_grants.length, ...snapshot.subscription_credit_grants);
+    tables.credit_transactions.splice(0, tables.credit_transactions.length, ...snapshot.credit_transactions);
+    writes.splice(writesLength, writes.length - writesLength);
+  };
+
+  const subscriptionId = String(payload.p_subscription_id ?? '');
+  const periodKey = typeof payload.p_period_key === 'string' && payload.p_period_key.trim()
+    ? payload.p_period_key.trim()
+    : null;
+  const fullMode = payload.p_termination_only !== true && periodKey !== null;
+  const now = typeof payload.p_now === 'string' ? payload.p_now : new Date().toISOString();
+
+  const profile = tables.profiles.find((row) => row.id === payload.p_user_id) ?? null;
+
+  if (fullMode) {
+    if (!payload.p_user_id || !profile) {
+      rollback();
+      return { data: null, error: { message: 'REFUND_CLAWBACK_PROFILE_MISSING' } };
+    }
+
+    const existing = tables.credit_transactions.find((row) =>
+      row.user_id === payload.p_user_id && row.idempotency_key === payload.p_idempotency_key);
+    if (existing) {
+      return {
+        data: [{
+          transaction_id: existing.id,
+          balance_after: existing.balance_after ?? 0,
+          clawback_amount: 0,
+          applied_clawback_amount: Math.abs(Number(existing.amount ?? 0)),
+          shortfall_amount: 0,
+          already_applied: true,
+          termination_written: false,
+          already_terminated: false,
+          grant_reversed: false,
+          already_reversed: false,
+          credits_granted: null,
+          consumed_amount: null,
+        }],
+        error: null,
+      };
+    }
+  }
+
+  const mirror = tables.user_subscriptions.find((row) =>
+    row.stripe_subscription_id === subscriptionId) ?? null;
+  if (!mirror) {
+    rollback();
+    return { data: null, error: { message: 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING' } };
+  }
+
+  let terminationWritten = false;
+  if (mirror.credit_release_terminated_at == null) {
+    mirror.credit_release_terminated_at = now;
+    mirror.credit_release_terminated_reason = payload.p_reason ?? 'stripe_refund';
+    mirror.credit_release_terminated_event_id = payload.p_event_id ?? null;
+    mirror.credit_release_terminated_period_key = periodKey;
+    mirror.updated_at = now;
+    terminationWritten = true;
+    writes.push({ table: 'user_subscriptions', mode: 'update' });
+  }
+
+  const baseRow = (extra: Row = {}) => ({
+    transaction_id: null,
+    balance_after: null,
+    clawback_amount: 0,
+    applied_clawback_amount: 0,
+    shortfall_amount: 0,
+    already_applied: false,
+    termination_written: terminationWritten,
+    already_terminated: !terminationWritten,
+    grant_reversed: false,
+    already_reversed: false,
+    credits_granted: null,
+    consumed_amount: null,
+    ...extra,
+  });
+
+  if (!fullMode) {
+    return { data: [baseRow()], error: null };
+  }
+
+  if (!terminationWritten) {
+    return { data: [baseRow({ balance_after: profile!.credits })], error: null };
+  }
+
+  const grant = tables.subscription_credit_grants
+    .filter((row) => row.stripe_subscription_id === subscriptionId && row.grant_period_key === periodKey)
+    .sort((left, right) => String(right.created_at ?? '').localeCompare(String(left.created_at ?? '')))[0];
+  if (!grant) {
+    rollback();
+    return { data: null, error: { message: 'REFUND_CLAWBACK_GRANT_MISSING' } };
+  }
+  if (grant.status !== 'granted' && grant.status !== 'reversed') {
+    rollback();
+    return { data: null, error: { message: 'REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS' } };
+  }
+  if (grant.status === 'reversed') {
+    return {
+      data: [baseRow({
+        balance_after: profile!.credits,
+        already_reversed: true,
+        credits_granted: grant.credits_granted ?? null,
+        consumed_amount: grant.consumed_amount ?? null,
+      })],
+      error: null,
+    };
+  }
+
+  grant.status = 'reversed';
+  grant.updated_at = now;
+  grant.metadata = {
+    ...(grant.metadata ?? {}),
+    reversal: {
+      refundId: payload.p_refund_id ?? null,
+      eventId: payload.p_event_id ?? null,
+      subscriptionId,
+      periodKey,
+      idempotencyKey: payload.p_idempotency_key,
+      reversedAt: now,
+      source: 'subscription_refund',
+    },
+  };
+  writes.push({ table: 'subscription_credit_grants', mode: 'update' });
+
+  const granted = Math.floor(Number(grant.credits_granted ?? 0));
+  const consumed = Math.floor(Number(grant.consumed_amount ?? 0));
+  const clawback = Math.max(granted - consumed, 0);
+  const balanceBefore = Math.floor(Number(profile!.credits ?? 0));
+  const applied = Math.min(clawback, Math.max(balanceBefore, 0));
+  const shortfall = clawback - applied;
+
+  let transactionId: string | null = null;
+  if (applied > 0) {
+    profile!.credits = balanceBefore - applied;
+    const transaction = {
+      id: `txn-refund-clawback-${tables.credit_transactions.length + 1}`,
+      user_id: payload.p_user_id,
+      amount: -applied,
+      type: 'deduction',
+      description: 'Stripe subscription refund credit clawback',
+      idempotency_key: payload.p_idempotency_key,
+      balance_before: balanceBefore,
+      balance_after: balanceBefore - applied,
+    };
+    tables.credit_transactions.push(transaction);
+    writes.push({ table: 'credit_transactions', mode: 'insert' });
+    transactionId = transaction.id;
+  }
+
+  return {
+    data: [{
+      transaction_id: transactionId,
+      balance_after: Math.floor(Number(profile!.credits ?? 0)),
+      clawback_amount: clawback,
+      applied_clawback_amount: applied,
+      shortfall_amount: shortfall,
+      already_applied: false,
+      termination_written: true,
+      already_terminated: false,
+      grant_reversed: true,
+      already_reversed: false,
+      credits_granted: granted,
+      consumed_amount: consumed,
+    }],
+    error: null,
+  };
+}
+
 function createRefund1bSupabase(
   seed: Partial<Record<TableName, Row[]>> = {},
 ) {
@@ -227,38 +420,8 @@ function createRefund1bSupabase(
       return new Refund1bMockQuery(tables, table, (event) => writes.push(event));
     },
     async rpc(name: string, payload: Row) {
-      expect(name).toBe('atomic_apply_credit_ledger_entry');
-      const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
-      const balanceBefore = typeof profile?.credits === 'number' ? profile.credits : 0;
-      const balanceAfter = balanceBefore + payload.p_amount;
-      if (balanceAfter < 0) {
-        return { data: null, error: { message: 'insufficient credits' } };
-      }
-      if (profile) {
-        profile.credits = balanceAfter;
-      }
-      const transaction = {
-        id: `txn-clawback-${tables.credit_transactions.length + 1}`,
-        user_id: payload.p_user_id,
-        amount: payload.p_amount,
-        type: payload.p_type,
-        description: payload.p_description,
-        idempotency_key: payload.p_idempotency_key,
-        balance_before: balanceBefore,
-        balance_after: balanceAfter,
-      };
-      tables.credit_transactions.push(transaction);
-      writes.push({ table: 'credit_transactions', mode: 'insert' });
-      return {
-        data: [{
-          transaction_id: transaction.id,
-          balance_before: balanceBefore,
-          balance_after: balanceAfter,
-          amount: payload.p_amount,
-          is_idempotent: false,
-        }],
-        error: null,
-      };
+      expect(name).toBe('atomic_refund_termination_clawback');
+      return applyRefundTerminationClawbackContract(tables, writes, payload);
     },
   };
 
@@ -671,6 +834,151 @@ describe('REFUND-1B refund reconciliation integration', () => {
       creditReleaseTerminatedAt: '2026-08-25T00:00:00.000Z',
     })).toBe(false);
   });
+
+  it('R1: derives the canonical idempotency key from event_id + subscription_id + period_key and replays exactly once through the RPC barrier', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    const first = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(first).toMatchObject({ reviewRequired: false, clawbackAmount: 500, alreadyReconciled: false });
+    expect(supabase.tables.credit_transactions[0].idempotency_key).toBe(
+      'stripe_refund:subscription_grants:event:evt_f3:sub:sub_f3:period:invoice:in_f3',
+    );
+    expect(supabase.tables.credit_transactions[0].idempotency_key).not.toContain('order:');
+    expect(supabase.tables.credit_transactions[0].idempotency_key).not.toContain('re_f3');
+
+    // 精确重放同一 event (订单 metadata 被清空模拟崩溃后恢复): canonical 幂等屏障
+    // 返回既有交易, 不重复扣、不重复反转
+    supabase.tables.payment_orders[0].metadata = {};
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(replay).toMatchObject({ alreadyReconciled: true, reviewRequired: false });
+    expect(supabase.tables.credit_transactions.filter((row) => row.type === 'deduction')).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(300);
+  });
+
+  it('R1: a later different full-refund event on the same subscription does not chase history even when order metadata is missing', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+
+    supabase.tables.payment_orders[0].metadata = {};
+    const laterFull = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...refundInput,
+      refundId: 're_f3_later_full',
+      eventId: 'evt_f3_later_full',
+      refundCreatedAt: '2026-01-16T00:00:00.000Z',
+    });
+    expect(laterFull).toMatchObject({ alreadyReconciled: true, clawbackAmount: 0, appliedClawbackAmount: 0 });
+    expect(supabase.tables.credit_transactions.filter((row) => row.type === 'deduction')).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(300);
+  });
+
+  it('R5: fails closed when the user_subscriptions mirror is missing — no grant reversal, no clawback', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    supabase.tables.user_subscriptions = [];
+
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, refundInput)).rejects.toThrow(
+      /Failed to apply the unified refund termination clawback transaction|REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING/i,
+    );
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(800);
+  });
+
+  it('R4: REVIEW_REQUIRED without auto-deduction when the trusted subscription term start is missing', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    supabase.tables.user_subscriptions[0].current_period_start = null;
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(result).toMatchObject({
+      reviewRequired: true,
+      reviewReason: 'missing_trusted_term_start',
+      terminationWritten: true,
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+  });
+
+  it('R4: REVIEW_REQUIRED when the refund timestamp is not covered by a term-start-anchored period window', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    // 月度 grant 的可信锚: period_start 必须等于 term start; 偏移即 REVIEW, 不猜测
+    supabase.tables.user_subscriptions[0].current_period_start = '2026-01-15T00:00:00.000Z';
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(result).toMatchObject({
+      reviewRequired: true,
+      reviewReason: 'term_start_period_mismatch',
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('R1: REVIEW_REQUIRED without auto-deduction when the canonical event id is missing', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...refundInput,
+      eventId: null,
+    });
+    expect(result).toMatchObject({
+      reviewRequired: true,
+      reviewReason: 'missing_event_id',
+      terminationWritten: true,
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
+  it('R8: fails closed when the located charged grant row is missing or deleted for the trusted period', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 300, balance: 800 });
+
+    // 定位出的周期 grant 行在统一事务读取时缺失 (并发删除/不一致) → 失败关闭
+    const missing = await supabase.rpc('atomic_refund_termination_clawback', {
+      p_user_id: 'user-f3',
+      p_subscription_id: 'sub_f3',
+      p_event_id: 'evt_f3',
+      p_period_key: 'invoice:missing-period',
+      p_idempotency_key: 'stripe_refund:subscription_grants:event:evt_f3:sub:sub_f3:period:invoice:missing-period',
+      p_reason: 'stripe_refund:refund.created',
+      p_termination_only: false,
+      p_refund_id: 're_f3',
+      p_now: '2026-01-20T00:00:00.000Z',
+    });
+    expect(missing.error).toMatchObject({ message: 'REFUND_CLAWBACK_GRANT_MISSING' });
+
+    // grant 行存在但状态异常 (failed) → 失败关闭, 不得继续 reversal/clawback
+    supabase.tables.subscription_credit_grants[0].status = 'failed';
+    const unexpected = await supabase.rpc('atomic_refund_termination_clawback', {
+      p_user_id: 'user-f3',
+      p_subscription_id: 'sub_f3',
+      p_event_id: 'evt_f3b',
+      p_period_key: 'invoice:in_f3',
+      p_idempotency_key: 'stripe_refund:subscription_grants:event:evt_f3b:sub:sub_f3:period:invoice:in_f3',
+      p_reason: 'stripe_refund:refund.created',
+      p_termination_only: false,
+      p_refund_id: 're_f3b',
+      p_now: '2026-01-20T00:00:00.000Z',
+    });
+    expect(unexpected.error).toMatchObject({ message: 'REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS' });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(800);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('failed');
+  });
+
+  it('R6: never applies more clawback than the current balance even in the unified transaction', async () => {
+    const supabase = seedSubscription({ creditsGranted: 800, consumedAmount: 0, balance: 250 });
+    const result = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(result).toMatchObject({
+      reviewRequired: true,
+      clawbackAmount: 800,
+      appliedClawbackAmount: 250,
+      shortfallAmount: 550,
+    });
+    expect(supabase.tables.profiles[0].credits).toBe(0);
+    expect(supabase.tables.credit_transactions[0]).toMatchObject({
+      amount: -250,
+      balance_before: 250,
+      balance_after: 0,
+    });
+  });
 });
 
 describe('REFUND-1B refund operator preview', () => {
@@ -820,6 +1128,10 @@ describe('REFUND-1B migration 0053 contract', () => {
     join(__dirname, '../../../../db/migrations/0053_refund_1b_consumed_amount_termination.sql'),
     'utf8',
   );
+  const stripeFulfillmentSource = readFileSync(
+    join(__dirname, '../stripeFulfillment.ts'),
+    'utf8',
+  );
 
   it('adds consumed_amount with the 0 <= consumed <= granted invariant', () => {
     expect(migrationSql).toContain('ADD COLUMN consumed_amount INTEGER NOT NULL DEFAULT 0');
@@ -859,6 +1171,85 @@ describe('REFUND-1B migration 0053 contract', () => {
     expect(migrationSql).toContain("'amountToOther', v_to_other");
   });
 
+  it('R7: serializes duplicate settle/finalize with a unique terminal-record barrier plus post-lock rechecks', () => {
+    expect(migrationSql).toContain('CREATE UNIQUE INDEX billing_history_terminal_pre_deduct_unique');
+    expect(migrationSql).toContain("ON public.billing_history ((metadata->>'preDeductId'))");
+    expect(migrationSql).toContain("WHERE operation_type IN ('settle', 'refund', 'abort_settle')");
+
+    const postLockRecheckCount = (migrationSql.match(/R7: 持锁后复查重复/g) ?? []).length;
+    expect(postLockRecheckCount).toBe(6);
+
+    for (const fn of [
+      'atomic_settle',
+      'atomic_refund',
+      'atomic_abort_settle',
+      'atomic_finalize_ai_success',
+      'atomic_finalize_ai_failure',
+      'atomic_finalize_ai_abort',
+    ]) {
+      const fnStart = migrationSql.indexOf(`CREATE OR REPLACE FUNCTION public.${fn}(`);
+      const fnEnd = migrationSql.indexOf('CREATE OR REPLACE FUNCTION', fnStart + 1);
+      const body = migrationSql.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+      const lockIndex = body.indexOf('FOR UPDATE;');
+      const recheckIndex = body.indexOf('R7: 持锁后复查重复');
+      expect(lockIndex).toBeGreaterThan(-1);
+      expect(recheckIndex).toBeGreaterThan(lockIndex);
+    }
+  });
+
+  it('R3: every settle/refund/abort path re-reads the subscription termination state under the grant lock', () => {
+    expect((migrationSql.match(/us\.credit_release_terminated_at IS NOT NULL/g) ?? []).length)
+      .toBeGreaterThanOrEqual(7);
+    expect((migrationSql.match(/v_intercepted := \(v_grant_status = 'reversed'\) OR v_grant_terminated;/g) ?? []).length)
+      .toBe(6);
+  });
+
+  it('R6: enforces credits >= 0 inside the SQL body of every profile-debit path', () => {
+    const guardCount = (migrationSql.match(/v_balance_after < 0/g) ?? []).length;
+    expect(guardCount).toBe(4);
+    expect(migrationSql).toContain('结算将导致负余额');
+    expect(migrationSql).toContain('中断结算将导致负余额');
+    expect(migrationSql).toContain('LEAST(v_clawback, v_balance_before)');
+  });
+
+  it('R8: bound-grant rereads fail closed on missing rows, unexpected statuses, and missed updates', () => {
+    expect((migrationSql.match(/绑定积分发放记录缺失/g) ?? []).length).toBe(6);
+    expect((migrationSql.match(/绑定积分发放记录状态异常/g) ?? []).length).toBe(6);
+    expect((migrationSql.match(/积分发放记录消耗更新未命中/g) ?? []).length).toBe(6);
+    expect(migrationSql).toContain("v_grant_status NOT IN ('granted', 'reversed')");
+  });
+
+  it('R2/R5: provides the unified refund transaction with mirror-missing fail-closed', () => {
+    expect(migrationSql).toContain('CREATE OR REPLACE FUNCTION public.atomic_refund_termination_clawback(');
+    expect(migrationSql).toContain('REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING');
+    expect(migrationSql).toContain('REFUND_CLAWBACK_GRANT_MISSING');
+    expect(migrationSql).toContain('REFUND_CLAWBACK_GRANT_UNEXPECTED_STATUS');
+    expect(migrationSql).toContain('REFUND_CLAWBACK_PROFILE_MISSING');
+
+    const fnStart = migrationSql.indexOf('CREATE OR REPLACE FUNCTION public.atomic_refund_termination_clawback(');
+    const body = migrationSql.slice(fnStart);
+    const profileLockIndex = body.indexOf('FROM profiles');
+    const terminationIndex = body.indexOf('UPDATE user_subscriptions');
+    const grantLockIndex = body.indexOf('FOR UPDATE;', terminationIndex);
+    expect(profileLockIndex).toBeGreaterThan(-1);
+    expect(terminationIndex).toBeGreaterThan(profileLockIndex);
+    expect(grantLockIndex).toBeGreaterThan(terminationIndex);
+  });
+
+  it('R1: the unified refund transaction rechecks the canonical idempotency key after taking the profile lock', () => {
+    const fnStart = migrationSql.indexOf('CREATE OR REPLACE FUNCTION public.atomic_refund_termination_clawback(');
+    const body = migrationSql.slice(fnStart);
+    const lockIndex = body.indexOf('FOR UPDATE;');
+    const canonicalRecheckIndex = body.indexOf('ct.idempotency_key = p_idempotency_key');
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(canonicalRecheckIndex).toBeGreaterThan(lockIndex);
+  });
+
+  it('R4: the subscription refund timestamp never falls back to charge.created', () => {
+    expect(stripeFulfillmentSource).toContain('getSuccessfulChargeRefund(charge)?.created ?? null');
+    expect(stripeFulfillmentSource).not.toContain('getSuccessfulChargeRefund(charge)?.created ?? charge?.created');
+  });
+
   it('re-establishes the SEC-1 service-role-only posture for every replaced function', () => {
     const serviceRoleOnly = [
       'public.atomic_abort_settle(uuid,uuid,integer,jsonb,text,text)',
@@ -867,6 +1258,7 @@ describe('REFUND-1B migration 0053 contract', () => {
       'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
       'public.atomic_pre_deduct(uuid,integer,text,uuid)',
       'public.atomic_refund(uuid,uuid,text)',
+      'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',
       'public.atomic_settle(uuid,uuid,integer,jsonb,jsonb)',
     ];
     for (const signature of serviceRoleOnly) {
