@@ -31,6 +31,11 @@ type Row = Record<string, any>;
 type MockFilter = { column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' | 'is' };
 
 type MockSupabaseHooks = {
+  beforeRpc?: (context: {
+    name: string;
+    payload: Row;
+    tables: Record<TableName, Row[]>;
+  }) => void | Promise<void>;
   beforeExecute?: (context: {
     table: TableName;
     mode: 'select' | 'insert' | 'update';
@@ -731,6 +736,7 @@ function createMockSupabase(
       return new MockQuery(tables, table, hooks);
     },
     async rpc(name: string, payload: Row) {
+      await hooks.beforeRpc?.({ name, payload, tables });
       if (name === 'atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
@@ -880,7 +886,7 @@ function createRenewalHarness(input: {
   terminated?: boolean;
   mirrorStatus?: string;
   cancelAtPeriodEnd?: string;
-}) {
+}, hooks: MockSupabaseHooks = {}) {
   const isYearly = input.billingCycle === 'yearly';
   return createMockSupabase({
     payment_orders: [{
@@ -904,7 +910,7 @@ function createRenewalHarness(input: {
       yearly_credits: isYearly ? 120 : 0, monthly_credits: isYearly ? 0 : 100, monthly_bonus_credits: 0,
     }],
     profiles: [{ id: 'user-v7-renewal', membership_level: 'free', credits: 0 }],
-  });
+  }, hooks);
 }
 
 function createAsyncBarrier(expectedArrivals: number) {
@@ -967,6 +973,7 @@ describe('subscription credit grants', () => {
   });
 
   it('grants only the first annual month for a paid yearly invoice', async () => {
+    const rpcCalls: Array<{ name: string; payload: Row }> = [];
     const supabase = createMockSupabase({
       payment_orders: [{
         id: 'order-source-yearly',
@@ -995,6 +1002,8 @@ describe('subscription credit grants', () => {
         id: 'user-yearly',
         membership_level: 'free',
       }],
+    }, {
+      beforeRpc: ({ name, payload }) => rpcCalls.push({ name, payload }),
     });
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
@@ -1011,6 +1020,13 @@ describe('subscription credit grants', () => {
     });
 
     expect(result.grantedCredits).toBe(1667);
+    expect(rpcCalls).toContainEqual(expect.objectContaining({
+      name: 'atomic_grant_subscription_invoice_credits',
+      payload: expect.objectContaining({
+        p_period_start: '2026-06-01T00:00:00.000Z',
+        p_period_end: '2027-06-01T00:00:00.000Z',
+      }),
+    }));
     expect(supabase.tables.profiles[0]).toMatchObject({
       id: 'user-yearly',
       membership_level: 'gold',
@@ -1044,6 +1060,58 @@ describe('subscription credit grants', () => {
       payment_status: 'paid',
       fulfilled_at: '2026-06-01T00:00:01.000Z',
     });
+  });
+
+  it('V8 direct boundary: annual cron sends one canonical grant window to its RPC', async () => {
+    const rpcCalls: Array<{ name: string; payload: Row }> = [];
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-cron-direct',
+        user_id: 'user-cron-direct',
+        membership_plan_id: 'plan-cron-direct',
+        stripe_subscription_id: 'sub-cron-direct',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+      }],
+      profiles: [{ id: 'user-cron-direct', credits: 0 }],
+    }, {
+      beforeRpc: ({ name, payload }) => rpcCalls.push({ name, payload }),
+    });
+
+    await grantSubscriptionCredits(supabase, {
+      userId: 'user-cron-direct',
+      membershipPlanId: 'plan-cron-direct',
+      stripeSubscriptionId: 'sub-cron-direct',
+      stripeInvoiceId: null,
+      billingCycle: 'yearly',
+      grantType: 'annual_monthly_release',
+      sourceType: 'system',
+      periodIndex: 2,
+      totalPeriods: 12,
+      periodStart: '2027-02-01T00:00:00.000Z',
+      periodEnd: '2027-03-01T00:00:00.000Z',
+      grantPeriodKey: 'annual:2027-01-01T00:00:00.000Z:02',
+      creditsGranted: 100,
+      subscriptionTermStart: '2027-01-01T00:00:00.000Z',
+      subscriptionTermEnd: '2028-01-01T00:00:00.000Z',
+      now: '2027-02-15T00:00:00.000Z',
+      enforceTerminationBarrier: true,
+    });
+
+    expect(rpcCalls).toContainEqual(expect.objectContaining({
+      name: 'atomic_grant_annual_subscription_credits',
+      payload: expect.objectContaining({
+        p_period_start: '2027-02-01T00:00:00.000Z',
+        p_period_end: '2027-03-01T00:00:00.000Z',
+      }),
+    }));
+    expect(rpcCalls.find((call) => call.name === 'atomic_grant_annual_subscription_credits')?.payload)
+      .not.toMatchObject({
+        p_period_start: '2027-01-01T00:00:00.000Z',
+        p_period_end: '2028-01-01T00:00:00.000Z',
+      });
   });
 
   it('CASE A: blocks a refund committed after the application precheck and before invoice admission', async () => {
@@ -1163,10 +1231,13 @@ describe('subscription credit grants', () => {
   });
 
   it('TEST 1: refreshes every existing annual mirror field to the successful renewal term', async () => {
+    const rpcCalls: Array<{ name: string; payload: Row }> = [];
     const supabase = createRenewalHarness({
       billingCycle: 'yearly', oldStart: '2026-01-01T00:00:00.000Z', oldEnd: '2027-01-01T00:00:00.000Z',
       newPlanId: 'plan-v7-new-annual', newStart: '2027-01-01T00:00:00.000Z', newEnd: '2028-01-01T00:00:00.000Z',
       invoiceId: 'in_v7_annual_renewal',
+    }, {
+      beforeRpc: ({ name, payload }) => rpcCalls.push({ name, payload }),
     });
     await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v7_annual_renewal', subscriptionId: 'sub_v7_renewal', amountTotal: 9900,
@@ -1180,6 +1251,13 @@ describe('subscription credit grants', () => {
       current_period_end: '2028-01-01T00:00:00.000Z', status: 'past_due', cancel_at_period_end: 'true',
       metadata: expect.objectContaining({ lastInvoiceId: 'in_v7_annual_renewal', transactionId: expect.any(String) }),
     });
+    expect(rpcCalls).toContainEqual(expect.objectContaining({
+      name: 'atomic_grant_subscription_invoice_credits',
+      payload: expect.objectContaining({
+        p_period_start: '2027-01-01T00:00:00.000Z',
+        p_period_end: '2028-01-01T00:00:00.000Z',
+      }),
+    }));
   });
 
   it('TEST 2: anchors the next annual release at the refreshed renewal term', async () => {

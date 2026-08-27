@@ -83,6 +83,7 @@ interface SubscriptionCreditGrantRow {
   period_start?: string | null;
   period_end?: string | null;
   period_index?: number | null;
+  total_periods?: number | null;
   credits_granted?: number | null;
   consumed_amount?: number | null;
   status?: string | null;
@@ -1533,7 +1534,7 @@ async function loadAllSubscriptionCreditGrants(
 ): Promise<SubscriptionCreditGrantRow[]> {
   const result = await supabase
     .from('subscription_credit_grants')
-    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, credits_granted, consumed_amount, status, credit_transaction_id, metadata, created_at')
+    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, status, credit_transaction_id, metadata, created_at')
     .eq('stripe_subscription_id', input.subscriptionId);
 
   if (result.error) {
@@ -2121,10 +2122,10 @@ async function applyAnnualGrantAdmission(
     p_stripe_subscription_id: input.stripeSubscriptionId,
     p_stripe_invoice_id: input.stripeInvoiceId ?? null,
     p_grant_period_key: input.grantPeriodKey,
-    // The invoice RPC receives the Stripe term, then derives its own annual
-    // grant window under the money-lane lock. Do not collapse these concepts.
-    p_period_start: input.subscriptionTermStart ?? input.periodStart,
-    p_period_end: input.subscriptionTermEnd ?? input.periodEnd,
+    // Annual cron admission receives one canonical individual grant window.
+    // The invoice path separately carries the full Stripe subscription term.
+    p_period_start: input.periodStart,
+    p_period_end: input.periodEnd,
     p_period_index: input.periodIndex,
     p_total_periods: input.totalPeriods,
     p_credits_granted: input.creditsGranted,
@@ -2201,8 +2202,10 @@ async function applyInvoiceGrantAdmission(
     p_payment_status: input.invoicePaymentStatus ?? 'paid',
     p_stripe_customer_id: input.invoiceStripeCustomerId ?? null,
     p_grant_period_key: input.grantPeriodKey,
-    p_period_start: input.periodStart,
-    p_period_end: input.periodEnd,
+    // The invoice RPC stores the authoritative full Stripe term on the
+    // subscription mirror and derives annual period-01 internally.
+    p_period_start: input.subscriptionTermStart ?? input.periodStart,
+    p_period_end: input.subscriptionTermEnd ?? input.periodEnd,
     p_period_index: input.periodIndex,
     p_total_periods: input.totalPeriods,
     p_credits_granted: input.creditsGranted,
@@ -3135,6 +3138,8 @@ export interface SubscriptionRefundOperatorPreview {
     consumed: number;
     remaining: number;
   } | null;
+  reviewRequired: boolean;
+  reviewReason: string | null;
   balance: number | null;
   otherCreditsTotal: number | null;
   futureReleases: {
@@ -3161,6 +3166,122 @@ export interface SubscriptionRefundOperatorPreview {
     amountToOther: number;
     preDeductIds: string[];
   };
+}
+
+type PreviewCurrentPeriodResolution = {
+  grant: SubscriptionCreditGrantRow | null;
+  reviewRequired: boolean;
+  reviewReason: string | null;
+};
+
+function resolveCanonicalPreviewCurrentPeriod(input: {
+  subscription: SubscriptionRow | null;
+  grants: SubscriptionCreditGrantRow[];
+  nowMs: number;
+}): PreviewCurrentPeriodResolution {
+  const termStartMs = parseTime(input.subscription?.current_period_start);
+  const termEndMs = parseTime(input.subscription?.current_period_end);
+  if (
+    !input.subscription
+    || termStartMs === null
+    || termEndMs === null
+    || termEndMs <= termStartMs
+  ) {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: 'missing_or_invalid_trusted_term',
+    };
+  }
+
+  const currentCandidates = input.grants
+    .filter((grant) => grant.status === 'granted')
+    .filter((grant) => {
+      const startMs = parseTime(grant.period_start);
+      const endMs = parseTime(grant.period_end);
+      return startMs !== null && endMs !== null && startMs <= input.nowMs && input.nowMs < endMs;
+    });
+
+  if (currentCandidates.length === 0) {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: 'no_canonical_current_period',
+    };
+  }
+
+  if (currentCandidates.length > 1) {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_or_overlapping_period_windows',
+    };
+  }
+
+  const candidate = currentCandidates[0];
+  const candidateStartMs = parseTime(candidate.period_start);
+  const candidateEndMs = parseTime(candidate.period_end);
+  const sameTermWindow = candidateStartMs !== null
+    && candidateEndMs !== null
+    && candidateStartMs >= termStartMs
+    && candidateEndMs <= termEndMs;
+  const sameMembershipPlan = candidate.membership_plan_id === input.subscription.membership_plan_id;
+
+  if (input.subscription.billing_cycle === 'yearly') {
+    const periodIndex = candidate.period_index;
+    const canonicalPeriod = typeof periodIndex === 'number'
+      && Number.isInteger(periodIndex) && periodIndex >= 1 && periodIndex <= 12
+      ? getCanonicalAnnualGrantPeriod({
+        yearlyCredits: 0,
+        termStart: input.subscription.current_period_start as string,
+        termEnd: input.subscription.current_period_end as string,
+        periodIndex,
+      })
+      : null;
+    const canonical = canonicalPeriod !== null
+      && candidate.grant_type === 'annual_monthly_release'
+      && candidate.total_periods === 12
+      && sameMembershipPlan
+      && sameTermWindow
+      && candidateStartMs === parseTime(canonicalPeriod.periodStart)
+      && candidateEndMs === parseTime(canonicalPeriod.periodEnd)
+      && candidate.grant_period_key === canonicalPeriod.grantPeriodKey;
+
+    if (!canonical) {
+      return {
+        grant: null,
+        reviewRequired: true,
+        reviewReason: 'noncanonical_annual_period_window',
+      };
+    }
+  } else if (input.subscription.billing_cycle === 'monthly') {
+    const expectedPeriodKey = candidate.stripe_invoice_id
+      ? buildMonthlyGrantPeriodKey(candidate.stripe_invoice_id)
+      : null;
+    const canonical = candidate.grant_type === 'monthly_invoice'
+      && sameMembershipPlan
+      && sameTermWindow
+      && candidateStartMs === termStartMs
+      && candidateEndMs === termEndMs
+      && expectedPeriodKey !== null
+      && candidate.grant_period_key === expectedPeriodKey;
+
+    if (!canonical) {
+      return {
+        grant: null,
+        reviewRequired: true,
+        reviewReason: 'noncanonical_monthly_period_window',
+      };
+    }
+  } else {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: 'unsupported_subscription_billing_cycle',
+    };
+  }
+
+  return { grant: candidate, reviewRequired: false, reviewReason: null };
 }
 
 async function loadSubscriptionMirrorForPreview(
@@ -3259,14 +3380,12 @@ export async function getSubscriptionRefundOperatorPreview(
   });
 
   const grantedGrants = grants.filter((grant) => grant.status === 'granted');
-  const currentGrant = grantedGrants
-    .filter((grant) => {
-      const startMs = parseTime(grant.period_start);
-      const endMs = parseTime(grant.period_end);
-      return startMs !== null && endMs !== null && startMs <= nowMs && nowMs < endMs;
-    })
-    .sort((left, right) =>
-      (parseTime(right.period_start) ?? 0) - (parseTime(left.period_start) ?? 0))[0] ?? null;
+  const currentPeriodResolution = resolveCanonicalPreviewCurrentPeriod({
+    subscription,
+    grants,
+    nowMs,
+  });
+  const currentGrant = currentPeriodResolution.grant;
 
   const userId = subscription?.user_id ?? grants[0]?.user_id ?? null;
   const balance = userId ? await getProfileCreditBalance(supabase, userId) : null;
@@ -3357,6 +3476,8 @@ export async function getSubscriptionRefundOperatorPreview(
         ),
       }
       : null,
+    reviewRequired: currentPeriodResolution.reviewRequired,
+    reviewReason: currentPeriodResolution.reviewReason,
     balance,
     otherCreditsTotal: balance === null ? null : balance - activeGrantsRemaining,
     futureReleases,

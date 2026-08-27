@@ -1445,6 +1445,7 @@ describe('REFUND-1B refund operator preview', () => {
           period_start: '2026-01-01T00:00:00.000Z',
           period_end: '2026-02-01T00:00:00.000Z',
           period_index: 1,
+          total_periods: 12,
           credits_granted: 100,
           consumed_amount: 100,
           status: 'granted',
@@ -1462,6 +1463,7 @@ describe('REFUND-1B refund operator preview', () => {
           period_start: '2026-02-01T00:00:00.000Z',
           period_end: '2026-03-01T00:00:00.000Z',
           period_index: 2,
+          total_periods: 12,
           credits_granted: 100,
           consumed_amount: 100,
           status: 'granted',
@@ -1524,6 +1526,8 @@ describe('REFUND-1B refund operator preview', () => {
       consumed: 100,
       remaining: 0,
     });
+    expect(preview.reviewRequired).toBe(false);
+    expect(preview.reviewReason).toBeNull();
     expect(preview.balance).toBe(260);
     expect(preview.otherCreditsTotal).toBe(260);
     expect(preview.termination).toMatchObject({ terminatedAt: null, reason: null });
@@ -1537,6 +1541,93 @@ describe('REFUND-1B refund operator preview', () => {
     expect(preview.futureReleases?.count).toBe(10);
     expect(preview.futureReleases?.credits).toBe(1000);
     expect(supabase.writes).toEqual([]);
+  });
+
+  it('fails closed for zero, overlapping, and noncanonical current windows without writes', async () => {
+    const base = {
+      user_subscriptions: [{
+        id: 'subscription-preview-classification',
+        user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification',
+        stripe_subscription_id: 'sub-preview-classification',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+      }],
+      membership_plans: [{
+        id: 'plan-preview-classification',
+        yearly_credits: 1200,
+      }],
+      profiles: [{ id: 'user-preview-classification', credits: 100 }],
+    };
+
+    const zero = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(zero, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-02-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'no_canonical_current_period',
+    });
+
+    const overlapping = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [
+        {
+          id: 'grant-preview-overlap-1', user_id: 'user-preview-classification',
+          membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+          stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release', grant_period_key: 'annual:2027-01-01T00:00:00.000Z:01',
+          period_start: '2027-01-01T00:00:00.000Z', period_end: '2027-03-01T00:00:00.000Z',
+          period_index: 1, total_periods: 12, credits_granted: 100, consumed_amount: 0, status: 'granted',
+        },
+        {
+          id: 'grant-preview-overlap-2', user_id: 'user-preview-classification',
+          membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+          stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+          grant_type: 'annual_monthly_release', grant_period_key: 'annual:2027-01-01T00:00:00.000Z:02',
+          period_start: '2027-02-01T00:00:00.000Z', period_end: '2027-03-01T00:00:00.000Z',
+          period_index: 2, total_periods: 12, credits_granted: 100, consumed_amount: 0, status: 'granted',
+        },
+      ],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(overlapping, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-02-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_or_overlapping_period_windows',
+    });
+
+    const noncanonical = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [{
+        id: 'grant-preview-noncanonical', user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+        stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release', grant_period_key: 'wrong-key',
+        period_start: '2027-01-01T00:00:00.000Z', period_end: '2027-02-01T00:00:00.000Z',
+        period_index: 1, total_periods: 12, credits_granted: 100, consumed_amount: 0, status: 'granted',
+      }],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(noncanonical, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-01-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'noncanonical_annual_period_window',
+    });
+
+    expect(zero.writes).toEqual([]);
+    expect(overlapping.writes).toEqual([]);
+    expect(noncanonical.writes).toEqual([]);
   });
 });
 
