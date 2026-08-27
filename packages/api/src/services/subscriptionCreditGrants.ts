@@ -112,6 +112,12 @@ interface GrantPeriod {
 }
 
 interface GrantSubscriptionCreditsInput extends GrantPeriod {
+  /**
+   * The Stripe-authoritative subscription term. For an annual invoice this is
+   * intentionally different from the period-01 grant window above.
+   */
+  subscriptionTermStart?: string | null;
+  subscriptionTermEnd?: string | null;
   userId: string;
   membershipPlanId: string | null;
   stripeSubscriptionId: string;
@@ -398,6 +404,47 @@ export function calculateAnnualMonthlyGrant(yearlyCredits: number, periodIndex: 
 }
 
 /**
+ * Produces one canonical annual grant window from the authoritative Stripe
+ * term. Keep this separate from the term stored on user_subscriptions: an
+ * annual period-01 is one calendar month, never the whole annual term.
+ */
+export function getCanonicalAnnualGrantPeriod(input: {
+  yearlyCredits: number;
+  termStart: string;
+  termEnd: string;
+  periodIndex: number;
+}): GrantPeriod | null {
+  if (!Number.isInteger(input.periodIndex) || input.periodIndex < 1 || input.periodIndex > 12) {
+    return null;
+  }
+
+  const startMs = parseTime(input.termStart);
+  const endMs = parseTime(input.termEnd);
+  if (startMs === null || endMs === null || endMs <= startMs) {
+    return null;
+  }
+
+  const anchor = new Date(startMs);
+  const periodStart = addUtcCalendarMonthsClamped(anchor, input.periodIndex - 1);
+  const uncappedEnd = input.periodIndex === 12
+    ? new Date(endMs)
+    : addUtcCalendarMonthsClamped(anchor, input.periodIndex);
+  const periodEnd = new Date(Math.min(uncappedEnd.getTime(), endMs));
+  if (periodStart.getTime() >= periodEnd.getTime()) {
+    return null;
+  }
+
+  return {
+    periodIndex: input.periodIndex,
+    totalPeriods: 12,
+    periodStart: periodStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+    creditsGranted: calculateAnnualMonthlyGrant(input.yearlyCredits, input.periodIndex),
+    grantPeriodKey: buildAnnualGrantPeriodKey(anchor.toISOString(), input.periodIndex),
+  };
+}
+
+/**
  * REFUND-1B: 预扣来源拆分（当期优先，封顶当期剩余额度）。
  * 与 0053 的 atomic_pre_deduct SQL 保持同一公式：
  *   amountToPeriod = min(amount, credits_granted - consumed)
@@ -551,27 +598,21 @@ export function getDueAnnualGrantPeriods(input: {
     return [];
   }
 
-  const anchor = new Date(startMs);
-  const termStartIso = anchor.toISOString();
   const schedule = calculateAnnualMonthlyGrantSchedule(input.yearlyCredits);
 
   return schedule.flatMap((creditsGranted, index): GrantPeriod[] => {
     const periodIndex = index + 1;
-    const periodStart = addUtcCalendarMonthsClamped(anchor, index);
-    if (periodStart.getTime() > nowMs) {
+    const period = getCanonicalAnnualGrantPeriod({
+      yearlyCredits: input.yearlyCredits,
+      termStart: input.currentPeriodStart,
+      termEnd: input.currentPeriodEnd,
+      periodIndex,
+    });
+    if (!period || parseTime(period.periodStart)! > nowMs) {
       return [];
     }
 
-    return [{
-      periodIndex,
-      totalPeriods: 12,
-      periodStart: periodStart.toISOString(),
-      periodEnd: periodIndex === 12
-        ? isoFromMs(endMs)
-        : addUtcCalendarMonthsClamped(anchor, periodIndex).toISOString(),
-      creditsGranted,
-      grantPeriodKey: buildAnnualGrantPeriodKey(termStartIso, periodIndex),
-    }];
+    return [{ ...period, creditsGranted }];
   });
 }
 
@@ -2080,8 +2121,10 @@ async function applyAnnualGrantAdmission(
     p_stripe_subscription_id: input.stripeSubscriptionId,
     p_stripe_invoice_id: input.stripeInvoiceId ?? null,
     p_grant_period_key: input.grantPeriodKey,
-    p_period_start: input.periodStart,
-    p_period_end: input.periodEnd,
+    // The invoice RPC receives the Stripe term, then derives its own annual
+    // grant window under the money-lane lock. Do not collapse these concepts.
+    p_period_start: input.subscriptionTermStart ?? input.periodStart,
+    p_period_end: input.subscriptionTermEnd ?? input.periodEnd,
     p_period_index: input.periodIndex,
     p_total_periods: input.totalPeriods,
     p_credits_granted: input.creditsGranted,
@@ -2829,26 +2872,33 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   });
   const billingCycle = normalizeBillingCycle(sourceOrder.billing_cycle);
   const fulfilledAt = input.now ?? new Date().toISOString();
-  const periodStart = input.periodStart ?? fulfilledAt;
-  const periodEnd = input.periodEnd ?? periodStart;
+  const termStart = input.periodStart ?? fulfilledAt;
+  const termEnd = input.periodEnd ?? termStart;
 
-  const grantPeriod: GrantPeriod = billingCycle === 'yearly'
-    ? {
+  const grantPeriod = billingCycle === 'yearly'
+    ? getCanonicalAnnualGrantPeriod({
+      yearlyCredits: plan.yearly_credits ?? 0,
+      termStart,
+      termEnd,
       periodIndex: 1,
-      totalPeriods: 12,
-      periodStart,
-      periodEnd,
-      creditsGranted: calculateAnnualMonthlyGrant(plan.yearly_credits ?? 0, 1),
-      grantPeriodKey: buildAnnualGrantPeriodKey(periodStart, 1),
-    }
+    })
     : {
       periodIndex: null,
       totalPeriods: 1,
-      periodStart,
-      periodEnd,
+      periodStart: termStart,
+      periodEnd: termEnd,
       creditsGranted: (plan.monthly_credits ?? 0) + (plan.monthly_bonus_credits ?? 0),
       grantPeriodKey: buildMonthlyGrantPeriodKey(input.invoiceId),
     };
+
+  if (!grantPeriod) {
+    throwGrantError(
+      'subscription_invoice_term_window_invalid',
+      SUBSCRIPTION_GRANT_ERRORS.creditGrantRpc,
+      new Error('subscription term cannot derive a canonical annual period-01'),
+      { subscriptionId: maskIdentifier(input.subscriptionId), invoiceId: maskIdentifier(input.invoiceId) },
+    );
+  }
 
   const grant = await grantSubscriptionCredits(supabase, {
     ...grantPeriod,
@@ -2866,6 +2916,8 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     invoiceCurrency: input.currency,
     invoicePaymentStatus: input.paymentStatus,
     invoiceStripeCustomerId: input.stripeCustomerId,
+    subscriptionTermStart: termStart,
+    subscriptionTermEnd: termEnd,
     membershipLevel,
     canPromoteCheckoutOrder: Boolean(
       sourceOrder.stripe_checkout_session_id

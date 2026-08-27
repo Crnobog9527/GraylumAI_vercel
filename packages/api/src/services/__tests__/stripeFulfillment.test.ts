@@ -27,7 +27,10 @@ import {
   syncSubscriptionState,
   upsertPaymentOrderBySession,
 } from '../stripeFulfillment';
-import { releaseDueAnnualSubscriptionCredits } from '../subscriptionCreditGrants';
+import {
+  getCanonicalAnnualGrantPeriod,
+  releaseDueAnnualSubscriptionCredits,
+} from '../subscriptionCreditGrants';
 
 type RefundWebhookTableName =
   | 'payment_orders'
@@ -572,11 +575,25 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           };
         }
 
+        const annualInvoiceGrantPeriod = name === 'atomic_grant_subscription_invoice_credits'
+          && payload.p_billing_cycle === 'yearly'
+          && payload.p_grant_type === 'annual_monthly_release'
+          ? getCanonicalAnnualGrantPeriod({
+            yearlyCredits: 0,
+            termStart: payload.p_period_start,
+            termEnd: payload.p_period_end,
+            periodIndex: 1,
+          })
+          : null;
+        const grantPeriodStart = annualInvoiceGrantPeriod?.periodStart ?? payload.p_period_start;
+        const grantPeriodEnd = annualInvoiceGrantPeriod?.periodEnd ?? payload.p_period_end;
+        const grantPeriodKey = annualInvoiceGrantPeriod?.grantPeriodKey ?? payload.p_grant_period_key;
+
         const existing = tables.subscription_credit_grants.find((row) =>
           row.stripe_subscription_id === payload.p_stripe_subscription_id
           && (
             row.idempotency_key === payload.p_idempotency_key
-            || row.grant_period_key === payload.p_grant_period_key
+            || row.grant_period_key === grantPeriodKey
           ),
         );
         if (existing) {
@@ -617,7 +634,7 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           counts_as_spend: false,
           source_type: payload.p_source_type,
           source_id: payload.p_source_id,
-          grant_period_key: payload.p_grant_period_key,
+          grant_period_key: grantPeriodKey,
           metadata: payload.p_metadata ?? {},
         });
         tables.subscription_credit_grants.push({
@@ -628,9 +645,9 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
           stripe_invoice_id: payload.p_stripe_invoice_id ?? null,
           billing_cycle: payload.p_billing_cycle ?? 'yearly',
           grant_type: payload.p_grant_type ?? 'annual_monthly_release',
-          grant_period_key: payload.p_grant_period_key,
-          period_start: payload.p_period_start,
-          period_end: payload.p_period_end,
+          grant_period_key: grantPeriodKey,
+          period_start: grantPeriodStart,
+          period_end: grantPeriodEnd,
           period_index: payload.p_period_index,
           total_periods: payload.p_total_periods,
           credits_granted: amount,
@@ -907,6 +924,42 @@ describe('stripe fulfillment helpers', () => {
         subscriptionCount: 2,
         canonicalSubscriptionId: 'subscrip...cate-a',
       }),
+    );
+  });
+
+  it('does not regress a renewed or terminated mirror when a stale Stripe term arrives', async () => {
+    const supabase = createRefundWebhookSupabase({
+      user_subscriptions: [{
+        id: 'subscription-stale-term',
+        user_id: 'user-stale-term',
+        membership_plan_id: 'plan-stale-term',
+        stripe_subscription_id: 'sub_stale_term',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2027-01-01T00:00:00.000Z',
+        current_period_end: '2028-01-01T00:00:00.000Z',
+        credit_release_terminated_at: '2027-04-01T00:00:00.000Z',
+        created_at: '2027-01-01T00:00:00.000Z',
+      }],
+    });
+    const staleSubscription = {
+      id: 'sub_stale_term',
+      status: 'active',
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: 1767225600, current_period_end: 1798761600 }] },
+    } as unknown as Stripe.Subscription;
+
+    await syncSubscriptionState(supabase, staleSubscription);
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      current_period_start: '2027-01-01T00:00:00.000Z',
+      current_period_end: '2028-01-01T00:00:00.000Z',
+      credit_release_terminated_at: '2027-04-01T00:00:00.000Z',
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_state_stale_term_ignored',
+      expect.objectContaining({ hasTermination: true }),
     );
   });
 

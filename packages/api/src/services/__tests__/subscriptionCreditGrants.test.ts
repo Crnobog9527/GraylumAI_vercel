@@ -9,6 +9,7 @@ import {
   addUtcCalendarMonthsClamped,
   calculateAnnualMonthlyGrantSchedule,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
+  getCanonicalAnnualGrantPeriod,
   getDueAnnualGrantPeriods,
   grantSubscriptionCredits,
   releaseDueAnnualSubscriptionCredits,
@@ -506,11 +507,27 @@ function applyAnnualGrantAdmissionContract(
     };
   }
 
+  // Invoice admission receives the full Stripe term, while its annual p01
+  // grant is a separate, calendar-clamped window. Cron rows already carry
+  // their own canonical grant window and intentionally bypass this branch.
+  const annualInvoiceGrantPeriod = payload.p_billing_cycle === 'yearly'
+    && payload.p_grant_type === 'annual_monthly_release'
+    ? getCanonicalAnnualGrantPeriod({
+      yearlyCredits: 0,
+      termStart: payload.p_period_start,
+      termEnd: payload.p_period_end,
+      periodIndex: 1,
+    })
+    : null;
+  const grantPeriodStart = annualInvoiceGrantPeriod?.periodStart ?? payload.p_period_start;
+  const grantPeriodEnd = annualInvoiceGrantPeriod?.periodEnd ?? payload.p_period_end;
+  const grantPeriodKey = annualInvoiceGrantPeriod?.grantPeriodKey ?? payload.p_grant_period_key;
+
   const existing = tables.subscription_credit_grants.find((row) =>
     row.stripe_subscription_id === payload.p_stripe_subscription_id
     && (
       row.idempotency_key === payload.p_idempotency_key
-      || row.grant_period_key === payload.p_grant_period_key
+      || row.grant_period_key === grantPeriodKey
     ),
   );
   if (existing) {
@@ -552,7 +569,7 @@ function applyAnnualGrantAdmissionContract(
     source_type: payload.p_source_type,
     source_id: payload.p_source_id,
     source_order_id: payload.p_source_order_id ?? null,
-    grant_period_key: payload.p_grant_period_key,
+    grant_period_key: grantPeriodKey,
     metadata: payload.p_metadata ?? {},
   });
   tables.subscription_credit_grants.push({
@@ -563,9 +580,9 @@ function applyAnnualGrantAdmissionContract(
     stripe_invoice_id: payload.p_stripe_invoice_id ?? null,
     billing_cycle: payload.p_billing_cycle ?? 'yearly',
     grant_type: payload.p_grant_type ?? 'annual_monthly_release',
-    grant_period_key: payload.p_grant_period_key,
-    period_start: payload.p_period_start,
-    period_end: payload.p_period_end,
+    grant_period_key: grantPeriodKey,
+    period_start: grantPeriodStart,
+    period_end: grantPeriodEnd,
     period_index: payload.p_period_index,
     total_periods: payload.p_total_periods,
     credits_granted: amount,
@@ -927,6 +944,28 @@ describe('subscription credit grants', () => {
     expect(schedule.reduce((sum, value) => sum + value, 0)).toBe(20_000);
   });
 
+  it('V8 CASE 1/7: derives canonical annual windows from the full Stripe term with UTC calendar clamping', () => {
+    expect(getCanonicalAnnualGrantPeriod({
+      yearlyCredits: 1200,
+      termStart: '2028-01-31T09:30:15.500Z',
+      termEnd: '2029-01-31T09:30:15.500Z',
+      periodIndex: 1,
+    })).toMatchObject({
+      periodStart: '2028-01-31T09:30:15.500Z',
+      periodEnd: '2028-02-29T09:30:15.500Z',
+      grantPeriodKey: 'annual:2028-01-31T09:30:15.500Z:01',
+    });
+    expect(getCanonicalAnnualGrantPeriod({
+      yearlyCredits: 1200,
+      termStart: '2026-01-31T00:00:00.000Z',
+      termEnd: '2026-02-15T00:00:00.000Z',
+      periodIndex: 1,
+    })).toMatchObject({
+      periodStart: '2026-01-31T00:00:00.000Z',
+      periodEnd: '2026-02-15T00:00:00.000Z',
+    });
+  });
+
   it('grants only the first annual month for a paid yearly invoice', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
@@ -980,10 +1019,16 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
       billing_cycle: 'yearly',
       grant_type: 'annual_monthly_release',
+      period_start: '2026-06-01T00:00:00.000Z',
+      period_end: '2026-07-01T00:00:00.000Z',
       period_index: 1,
       total_periods: 12,
       credits_granted: 1667,
       idempotency_key: expect.stringContaining('subscription_grant:annual_monthly_release:sub_yearly:'),
+    });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      current_period_start: '2026-06-01T00:00:00.000Z',
+      current_period_end: '2027-06-01T00:00:00.000Z',
     });
     expect(supabase.tables.credit_transactions[0]).toMatchObject({
       ledger_type: 'grant',

@@ -106,6 +106,7 @@ DECLARE
   v_period_key TEXT;
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
+  v_canonical_candidate_count INTEGER := 0;
   v_to_period INTEGER := 0;
   v_to_other INTEGER;
 BEGIN
@@ -159,6 +160,54 @@ BEGIN
 
   -- 4b. REFUND-1B: 绑定当期 grant 并记录来源拆分 (当期优先, 封顶当期剩余额度)。
   --     周期定位用预扣时刻, 定位一次即固定; 被退款终止的订阅不参与绑定。
+  -- Only a unique, canonical, currently-active grant window may be bound.
+  -- This keeps a yearly period-01 from remaining eligible after its first
+  -- calendar month and refuses to guess between multiple subscriptions.
+  SELECT count(*)
+  INTO v_canonical_candidate_count
+  FROM subscription_credit_grants AS g
+  WHERE g.user_id = p_user_id
+    AND g.status = 'granted'
+    AND g.period_start <= now()
+    AND g.period_end > now()
+    AND EXISTS (
+      SELECT 1
+      FROM user_subscriptions AS us
+      WHERE us.user_id = p_user_id
+        AND us.stripe_subscription_id = g.stripe_subscription_id
+        AND us.credit_release_terminated_at IS NULL
+        AND (
+          (
+            g.billing_cycle = 'yearly'
+            AND g.grant_type = 'annual_monthly_release'
+            AND g.period_index BETWEEN 1 AND 12
+            AND g.total_periods = 12
+            AND g.period_start = (((us.current_period_start AT TIME ZONE 'UTC') + make_interval(months => g.period_index - 1)) AT TIME ZONE 'UTC')
+            AND g.period_end = LEAST(
+              CASE WHEN g.period_index = 12 THEN us.current_period_end
+                ELSE (((us.current_period_start AT TIME ZONE 'UTC') + make_interval(months => g.period_index)) AT TIME ZONE 'UTC')
+              END,
+              us.current_period_end
+            )
+            AND g.grant_period_key = format(
+              'annual:%s:%s',
+              to_char(us.current_period_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+              lpad(g.period_index::TEXT, 2, '0')
+            )
+          )
+          OR (
+            g.billing_cycle = 'monthly'
+            AND g.grant_type = 'monthly_invoice'
+            AND g.period_start = us.current_period_start
+            AND g.period_end = us.current_period_end
+          )
+        )
+    );
+
+  IF v_canonical_candidate_count > 1 THEN
+    RAISE EXCEPTION 'PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS: %', v_canonical_candidate_count;
+  END IF;
+
   SELECT g.id, g.grant_period_key, g.credits_granted, g.consumed_amount
   INTO v_charged_grant_id, v_period_key, v_grant_granted, v_grant_consumed
   FROM subscription_credit_grants AS g
@@ -166,11 +215,38 @@ BEGIN
     AND g.status = 'granted'
     AND g.period_start <= now()
     AND g.period_end > now()
-    AND NOT EXISTS (
+    AND EXISTS (
       SELECT 1
       FROM user_subscriptions AS us
-      WHERE us.stripe_subscription_id = g.stripe_subscription_id
-        AND us.credit_release_terminated_at IS NOT NULL
+      WHERE us.user_id = p_user_id
+        AND us.stripe_subscription_id = g.stripe_subscription_id
+        AND us.credit_release_terminated_at IS NULL
+        AND (
+          (
+            g.billing_cycle = 'yearly'
+            AND g.grant_type = 'annual_monthly_release'
+            AND g.period_index BETWEEN 1 AND 12
+            AND g.total_periods = 12
+            AND g.period_start = (((us.current_period_start AT TIME ZONE 'UTC') + make_interval(months => g.period_index - 1)) AT TIME ZONE 'UTC')
+            AND g.period_end = LEAST(
+              CASE WHEN g.period_index = 12 THEN us.current_period_end
+                ELSE (((us.current_period_start AT TIME ZONE 'UTC') + make_interval(months => g.period_index)) AT TIME ZONE 'UTC')
+              END,
+              us.current_period_end
+            )
+            AND g.grant_period_key = format(
+              'annual:%s:%s',
+              to_char(us.current_period_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+              lpad(g.period_index::TEXT, 2, '0')
+            )
+          )
+          OR (
+            g.billing_cycle = 'monthly'
+            AND g.grant_type = 'monthly_invoice'
+            AND g.period_start = us.current_period_start
+            AND g.period_end = us.current_period_end
+          )
+        )
     )
   ORDER BY g.period_start DESC, g.created_at DESC
   LIMIT 1
@@ -2006,11 +2082,20 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_term_start TIMESTAMPTZ;
+  v_term_end TIMESTAMPTZ;
+  v_term_membership_plan_id UUID;
+  v_term_billing_cycle TEXT;
   v_grant_type TEXT;
   v_period_index INTEGER;
+  v_total_periods INTEGER;
   v_period_start TIMESTAMPTZ;
+  v_period_end TIMESTAMPTZ;
+  v_grant_membership_plan_id UUID;
   v_expected_period_start TIMESTAMPTZ;
+  v_expected_period_end TIMESTAMPTZ;
+  v_expected_period_key TEXT;
   v_period_key TEXT;
+  v_candidate_count INTEGER := 0;
   v_review_reason TEXT;
   v_event_id TEXT := NULLIF(btrim(p_event_id), '');
   v_idempotency_key TEXT;
@@ -2035,8 +2120,8 @@ BEGIN
     RAISE EXCEPTION 'REFUND_CLAWBACK_PROFILE_MISSING: %', p_user_id;
   END IF;
 
-  SELECT us.current_period_start
-  INTO v_term_start
+  SELECT us.membership_plan_id, us.billing_cycle, us.current_period_start, us.current_period_end
+  INTO v_term_membership_plan_id, v_term_billing_cycle, v_term_start, v_term_end
   FROM user_subscriptions AS us
   WHERE us.stripe_subscription_id = p_subscription_id
     AND us.user_id = p_user_id
@@ -2048,52 +2133,81 @@ BEGIN
     RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
   END IF;
 
-  -- R4: resolve only from trusted refund time + the freshly locked term start.
+  -- R4/V8: resolve only from trusted refund time + exactly one complete,
+  -- canonical grant window of the freshly locked authoritative term.
   IF p_refund_created_at IS NULL THEN
     v_review_reason := 'missing_trusted_refund_timestamp';
-  ELSIF v_term_start IS NULL THEN
-    v_review_reason := 'missing_trusted_term_start';
+  ELSIF v_term_start IS NULL OR v_term_end IS NULL OR v_term_end <= v_term_start THEN
+    v_review_reason := 'missing_or_invalid_trusted_term';
   ELSIF p_refund_created_at < v_term_start THEN
     v_review_reason := 'refund_timestamp_precedes_term_start';
   ELSE
-    -- The newest matching row mirrors the application hint ordering, but is
-    -- selected after the money-lane locks and is itself locked before use.
-    SELECT g.grant_type,
-           g.period_index,
-           g.period_start,
-           g.grant_period_key
-    INTO v_grant_type, v_period_index, v_period_start, v_period_key
+    SELECT count(*) INTO v_candidate_count
+    FROM subscription_credit_grants AS g
+    WHERE g.user_id = p_user_id
+      AND g.stripe_subscription_id = p_subscription_id
+      AND g.period_start <= p_refund_created_at
+      AND p_refund_created_at < g.period_end;
+
+    IF v_candidate_count = 0 THEN
+      v_review_reason := 'no_period_window_covers_refund_timestamp';
+    ELSIF v_candidate_count > 1 THEN
+      v_review_reason := 'ambiguous_or_overlapping_period_windows';
+    ELSE
+      SELECT g.grant_type,
+             g.period_index,
+             g.total_periods,
+             g.period_start,
+             g.period_end,
+             g.grant_period_key,
+             g.membership_plan_id
+      INTO v_grant_type, v_period_index, v_total_periods, v_period_start, v_period_end,
+           v_period_key, v_grant_membership_plan_id
     FROM subscription_credit_grants AS g
     WHERE g.user_id = p_user_id
       AND g.stripe_subscription_id = p_subscription_id
       AND g.period_start <= p_refund_created_at
       AND p_refund_created_at < g.period_end
-    ORDER BY g.period_start DESC, g.created_at DESC
-    LIMIT 1
     FOR UPDATE;
 
-    IF NOT FOUND THEN
-      v_period_key := NULL;
-      v_review_reason := 'no_period_window_covers_refund_timestamp';
-    ELSIF v_grant_type = 'annual_monthly_release'
+      IF v_grant_type = 'annual_monthly_release'
        AND v_period_index IS NOT NULL
-       AND v_period_index >= 1 THEN
+       AND v_period_index BETWEEN 1 AND 12 THEN
       v_expected_period_start := (
         (v_term_start AT TIME ZONE 'UTC') + make_interval(months => v_period_index - 1)
       ) AT TIME ZONE 'UTC';
-      IF v_period_start <> v_expected_period_start THEN
+      v_expected_period_end := LEAST(
+        CASE WHEN v_period_index = 12 THEN v_term_end
+          ELSE (((v_term_start AT TIME ZONE 'UTC') + make_interval(months => v_period_index)) AT TIME ZONE 'UTC')
+        END,
+        v_term_end
+      );
+      v_expected_period_key := format(
+        'annual:%s:%s',
+        to_char(v_term_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        lpad(v_period_index::TEXT, 2, '0')
+      );
+      IF v_term_billing_cycle IS DISTINCT FROM 'yearly'
+         OR v_grant_membership_plan_id IS DISTINCT FROM v_term_membership_plan_id
+         OR v_total_periods IS DISTINCT FROM 12
+         OR v_period_start IS DISTINCT FROM v_expected_period_start
+         OR v_period_end IS DISTINCT FROM v_expected_period_end
+         OR v_period_key IS DISTINCT FROM v_expected_period_key THEN
         v_period_key := NULL;
-        v_review_reason := 'term_start_period_mismatch';
+        v_review_reason := 'noncanonical_annual_period_window';
       END IF;
     ELSIF v_grant_type = 'monthly_invoice' THEN
-      v_expected_period_start := v_term_start;
-      IF v_period_start <> v_expected_period_start THEN
+      IF v_term_billing_cycle IS DISTINCT FROM 'monthly'
+         OR v_grant_membership_plan_id IS DISTINCT FROM v_term_membership_plan_id
+         OR v_period_start IS DISTINCT FROM v_term_start
+         OR v_period_end IS DISTINCT FROM v_term_end THEN
         v_period_key := NULL;
-        v_review_reason := 'term_start_period_mismatch';
+        v_review_reason := 'noncanonical_monthly_period_window';
       END IF;
     ELSE
       v_period_key := NULL;
       v_review_reason := 'term_start_period_anchor_unknown';
+    END IF;
     END IF;
   END IF;
 
@@ -2197,9 +2311,22 @@ DECLARE
   v_balance_before INTEGER;
   v_balance_after INTEGER;
   v_subscription_termination_at TIMESTAMPTZ;
+  v_term_membership_plan_id UUID;
+  v_term_billing_cycle TEXT;
+  v_term_start TIMESTAMPTZ;
+  v_term_end TIMESTAMPTZ;
+  v_expected_period_start TIMESTAMPTZ;
+  v_expected_period_end TIMESTAMPTZ;
+  v_expected_period_key TEXT;
   v_existing_grant_id UUID;
   v_existing_grant_transaction_id UUID;
   v_existing_grant_credits INTEGER;
+  v_existing_period_start TIMESTAMPTZ;
+  v_existing_period_end TIMESTAMPTZ;
+  v_existing_period_index INTEGER;
+  v_existing_total_periods INTEGER;
+  v_existing_period_key TEXT;
+  v_existing_membership_plan_id UUID;
   v_transaction_id UUID;
   v_grant_id UUID;
 BEGIN
@@ -2234,8 +2361,10 @@ BEGIN
 
   -- Lock the exact subscription mirror after the profile lock. This is the
   -- fresh database state, not the cron's earlier application snapshot.
-  SELECT credit_release_terminated_at
-  INTO v_subscription_termination_at
+  SELECT membership_plan_id, billing_cycle, current_period_start, current_period_end,
+         credit_release_terminated_at
+  INTO v_term_membership_plan_id, v_term_billing_cycle, v_term_start, v_term_end,
+       v_subscription_termination_at
   FROM user_subscriptions
   WHERE stripe_subscription_id = p_stripe_subscription_id
     AND user_id = p_user_id
@@ -2261,11 +2390,48 @@ BEGIN
     RETURN;
   END IF;
 
+  -- The cron input is only a hint. Under the profile -> subscription lock,
+  -- derive the one canonical annual period from the mirror and reject any
+  -- stale-term, malformed, or replay-poisoning request before ledger writes.
+  IF v_term_billing_cycle IS DISTINCT FROM 'yearly'
+     OR v_term_membership_plan_id IS DISTINCT FROM p_membership_plan_id
+     OR v_term_start IS NULL OR v_term_end IS NULL OR v_term_end <= v_term_start
+     OR p_period_index IS NULL OR p_period_index NOT BETWEEN 1 AND 12
+     OR p_total_periods IS NULL OR p_total_periods <> 12 THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_CURRENT_TERM_IDENTITY_INVALID';
+  END IF;
+
+  v_expected_period_start := (
+    (v_term_start AT TIME ZONE 'UTC') + make_interval(months => p_period_index - 1)
+  ) AT TIME ZONE 'UTC';
+  v_expected_period_end := LEAST(
+    CASE WHEN p_period_index = 12 THEN v_term_end
+      ELSE (((v_term_start AT TIME ZONE 'UTC') + make_interval(months => p_period_index)) AT TIME ZONE 'UTC')
+    END,
+    v_term_end
+  );
+  v_expected_period_key := format(
+    'annual:%s:%s',
+    to_char(v_term_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    lpad(p_period_index::TEXT, 2, '0')
+  );
+
+  IF v_expected_period_start >= v_expected_period_end
+     OR p_period_start IS NULL OR p_period_end IS NULL
+     OR p_period_start IS DISTINCT FROM v_expected_period_start
+     OR p_period_end IS DISTINCT FROM v_expected_period_end
+     OR p_grant_period_key IS DISTINCT FROM v_expected_period_key THEN
+    RAISE EXCEPTION 'ANNUAL_GRANT_STALE_OR_NONCANONICAL_PERIOD_INPUT';
+  END IF;
+
   -- Recheck both idempotency identities while the profile and subscription
   -- locks are held. The subscription-period unique index remains the final
   -- database constraint for any unexpected caller.
-  SELECT g.id, g.credit_transaction_id, g.credits_granted
-  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits
+  SELECT g.id, g.credit_transaction_id, g.credits_granted, g.period_start, g.period_end,
+         g.period_index, g.total_periods, g.grant_period_key, g.membership_plan_id
+  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits,
+       v_existing_period_start, v_existing_period_end, v_existing_period_index,
+       v_existing_total_periods, v_existing_period_key, v_existing_membership_plan_id
   FROM subscription_credit_grants AS g
   WHERE g.stripe_subscription_id = p_stripe_subscription_id
     AND (g.idempotency_key = p_idempotency_key OR g.grant_period_key = p_grant_period_key)
@@ -2274,6 +2440,14 @@ BEGIN
   FOR UPDATE;
 
   IF FOUND THEN
+    IF v_existing_membership_plan_id IS DISTINCT FROM v_term_membership_plan_id
+       OR v_existing_period_index IS DISTINCT FROM p_period_index
+       OR v_existing_total_periods IS DISTINCT FROM 12
+       OR v_existing_period_start IS DISTINCT FROM v_expected_period_start
+       OR v_existing_period_end IS DISTINCT FROM v_expected_period_end
+       OR v_existing_period_key IS DISTINCT FROM v_expected_period_key THEN
+      RAISE EXCEPTION 'ANNUAL_GRANT_EXISTING_REPLAY_ROW_NONCANONICAL';
+    END IF;
     RETURN QUERY SELECT
       v_existing_grant_transaction_id,
       v_balance_before,
@@ -2456,9 +2630,19 @@ DECLARE
   v_mirror_id UUID;
   v_mirror_metadata JSONB;
   v_terminated_at TIMESTAMPTZ;
+  v_grant_period_start TIMESTAMPTZ;
+  v_grant_period_end TIMESTAMPTZ;
+  v_grant_period_key TEXT;
+  v_grant_period_index INTEGER;
+  v_grant_total_periods INTEGER;
   v_existing_grant_id UUID;
   v_existing_grant_transaction_id UUID;
   v_existing_grant_credits INTEGER;
+  v_existing_grant_period_start TIMESTAMPTZ;
+  v_existing_grant_period_end TIMESTAMPTZ;
+  v_existing_grant_period_key TEXT;
+  v_existing_grant_period_index INTEGER;
+  v_existing_grant_total_periods INTEGER;
   v_transaction_id UUID;
   v_grant_id UUID;
 BEGIN
@@ -2468,6 +2652,7 @@ BEGIN
      OR p_source_order_id IS NULL
      OR NULLIF(btrim(COALESCE(p_grant_period_key, '')), '') IS NULL
      OR NULLIF(btrim(COALESCE(p_idempotency_key, '')), '') IS NULL
+     OR p_period_start IS NULL OR p_period_end IS NULL OR p_period_end <= p_period_start
      OR p_credits_granted IS NULL OR p_credits_granted <= 0 THEN
     RAISE EXCEPTION 'INVOICE_GRANT_ADMISSION_INPUT_INVALID';
   END IF;
@@ -2514,8 +2699,47 @@ BEGIN
     RETURN;
   END IF;
 
-  SELECT id, credit_transaction_id, credits_granted
-  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits
+  -- Invoice p_period_start/end are the full Stripe subscription term. The
+  -- annual grant row receives its own internally derived period-01 window.
+  IF p_billing_cycle = 'yearly' THEN
+    IF p_grant_type IS DISTINCT FROM 'annual_monthly_release'
+       OR p_period_index IS DISTINCT FROM 1
+       OR p_total_periods IS DISTINCT FROM 12 THEN
+      RAISE EXCEPTION 'INVOICE_GRANT_ANNUAL_PERIOD_INPUT_INVALID';
+    END IF;
+    v_grant_period_start := p_period_start;
+    v_grant_period_end := LEAST(
+      (((p_period_start AT TIME ZONE 'UTC') + make_interval(months => 1)) AT TIME ZONE 'UTC'),
+      p_period_end
+    );
+    v_grant_period_index := 1;
+    v_grant_total_periods := 12;
+    v_grant_period_key := format(
+      'annual:%s:01',
+      to_char(p_period_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+    IF v_grant_period_start >= v_grant_period_end
+       OR p_grant_period_key IS DISTINCT FROM v_grant_period_key THEN
+      RAISE EXCEPTION 'INVOICE_GRANT_ANNUAL_TERM_OR_KEY_NONCANONICAL';
+    END IF;
+  ELSIF p_billing_cycle = 'monthly' THEN
+    IF p_grant_type IS DISTINCT FROM 'monthly_invoice' THEN
+      RAISE EXCEPTION 'INVOICE_GRANT_MONTHLY_PERIOD_INPUT_INVALID';
+    END IF;
+    v_grant_period_start := p_period_start;
+    v_grant_period_end := p_period_end;
+    v_grant_period_index := p_period_index;
+    v_grant_total_periods := p_total_periods;
+    v_grant_period_key := p_grant_period_key;
+  ELSE
+    RAISE EXCEPTION 'INVOICE_GRANT_BILLING_CYCLE_INVALID';
+  END IF;
+
+  SELECT id, credit_transaction_id, credits_granted, period_start, period_end,
+         grant_period_key, period_index, total_periods
+  INTO v_existing_grant_id, v_existing_grant_transaction_id, v_existing_grant_credits,
+       v_existing_grant_period_start, v_existing_grant_period_end,
+       v_existing_grant_period_key, v_existing_grant_period_index, v_existing_grant_total_periods
   FROM subscription_credit_grants
   WHERE stripe_subscription_id = p_stripe_subscription_id
     AND (idempotency_key = p_idempotency_key OR grant_period_key = p_grant_period_key)
@@ -2523,6 +2747,13 @@ BEGIN
   LIMIT 1 FOR UPDATE;
 
   IF FOUND THEN
+    IF v_existing_grant_period_start IS DISTINCT FROM v_grant_period_start
+       OR v_existing_grant_period_end IS DISTINCT FROM v_grant_period_end
+       OR v_existing_grant_period_key IS DISTINCT FROM v_grant_period_key
+       OR v_existing_grant_period_index IS DISTINCT FROM v_grant_period_index
+       OR v_existing_grant_total_periods IS DISTINCT FROM v_grant_total_periods THEN
+      RAISE EXCEPTION 'INVOICE_GRANT_EXISTING_REPLAY_ROW_NONCANONICAL';
+    END IF;
     RETURN QUERY SELECT v_existing_grant_transaction_id, v_balance_before, v_balance_before,
       COALESCE(v_existing_grant_credits, 0), TRUE, FALSE, FALSE, v_existing_grant_id,
       COALESCE(v_existing_grant_credits, 0), invoice_order_id;
@@ -2537,7 +2768,7 @@ BEGIN
   ) VALUES (
     p_user_id, p_credits_granted, 'addition', p_description, p_idempotency_key, v_balance_before, v_balance_after,
     'grant', p_grant_type, FALSE, p_source_type, p_source_id, p_source_order_id,
-    p_grant_period_key, COALESCE(p_metadata, '{}'::JSONB)
+    v_grant_period_key, COALESCE(p_metadata, '{}'::JSONB)
   ) RETURNING id INTO v_transaction_id;
 
   UPDATE profiles
@@ -2553,7 +2784,7 @@ BEGIN
   ) VALUES (
     p_user_id, p_membership_plan_id, p_stripe_subscription_id, p_stripe_invoice_id,
     CASE WHEN p_billing_cycle = 'yearly' THEN 'yearly' ELSE 'monthly' END,
-    p_grant_type, p_grant_period_key, p_period_start, p_period_end, p_period_index, p_total_periods,
+    p_grant_type, v_grant_period_key, v_grant_period_start, v_grant_period_end, v_grant_period_index, v_grant_total_periods,
     p_credits_granted, 'granted', p_idempotency_key, v_transaction_id, COALESCE(p_grant_metadata, '{}'::JSONB), v_now, v_now
   ) RETURNING id INTO v_grant_id;
 
@@ -2641,6 +2872,37 @@ BEGIN
 END;
 $$;
 
+-- V8: the legacy privileged writer can directly credit a profile without a
+-- subscription_credit_grants row or REFUND-1B termination barrier. Keep its
+-- public signature and service-role posture for compatibility, but fail
+-- closed so all membership invoice fulfillment uses the canonical precise
+-- invoice admission above.
+CREATE OR REPLACE FUNCTION public.atomic_fulfill_membership_invoice(
+  p_invoice_id TEXT,
+  p_subscription_id TEXT,
+  p_amount_total INTEGER,
+  p_currency TEXT DEFAULT 'usd',
+  p_payment_status TEXT DEFAULT 'paid',
+  p_stripe_customer_id TEXT DEFAULT NULL,
+  p_period_start TIMESTAMPTZ DEFAULT NULL,
+  p_period_end TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+  invoice_order_id UUID,
+  user_id UUID,
+  granted_credits INTEGER,
+  fulfilled_at TIMESTAMPTZ,
+  already_fulfilled BOOLEAN
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  RAISE EXCEPTION 'LEGACY_MEMBERSHIP_INVOICE_FULFILLMENT_RETIRED_USE_CANONICAL_PRECISE_ADMISSION';
+END;
+$$;
+
 -- ============================================
 -- 11. SEC-1 posture closure for every replaced/added function
 -- ============================================
@@ -2653,6 +2915,7 @@ DECLARE
     'public.atomic_finalize_ai_abort(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
     'public.atomic_finalize_ai_failure(uuid,text,text,uuid,uuid,text,integer,integer,text,text,jsonb)',
     'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
+    'public.atomic_fulfill_membership_invoice(text,text,integer,text,text,text,timestamptz,timestamptz)',
     'public.atomic_grant_annual_subscription_credits(uuid,uuid,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,text,text,uuid,jsonb,jsonb,timestamptz)',
     'public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz)',
     'public.atomic_pre_deduct(uuid,integer,text,uuid)',

@@ -1616,9 +1616,47 @@ describe('REFUND-1B migration 0053 contract', () => {
 
   it('R3: every settle/refund/abort path re-reads the subscription termination state under the grant lock', () => {
     expect((migrationSql.match(/us\.credit_release_terminated_at IS NOT NULL/g) ?? []).length)
-      .toBeGreaterThanOrEqual(7);
+      .toBeGreaterThanOrEqual(6);
+    expect(migrationSql).toContain('AND us.credit_release_terminated_at IS NULL');
     expect((migrationSql.match(/v_intercepted := \(v_grant_status = 'reversed'\) OR v_grant_terminated;/g) ?? []).length)
       .toBe(6);
+  });
+
+  it('V8 CASE 2-6/8-10: binds the full mirror term to canonical grant windows and fails closed on ambiguity', () => {
+    const preDeduct = extractMigrationFunction(migrationSql, 'atomic_pre_deduct');
+    const freshRefund = extractMigrationFunction(migrationSql, 'atomic_refund_termination_clawback_fresh');
+    const annualRelease = extractMigrationFunction(migrationSql, 'atomic_grant_annual_subscription_credits');
+    const invoiceAdmission = extractMigrationFunction(migrationSql, 'atomic_grant_subscription_invoice_credits');
+
+    // CASE 2/4: pre-deduct can bind only an active canonical window and refuses ambiguity.
+    expect(preDeduct).toContain('PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS');
+    expect(preDeduct).toContain("g.grant_type = 'annual_monthly_release'");
+    expect(preDeduct).toContain('g.period_start = (');
+    expect(preDeduct).toContain('AND us.credit_release_terminated_at IS NULL');
+
+    // CASE 3/9: refund locks a unique matching grant and makes zero, overlap, and malformed rows review-only.
+    expect(freshRefund).toContain('no_period_window_covers_refund_timestamp');
+    expect(freshRefund).toContain('ambiguous_or_overlapping_period_windows');
+    expect(freshRefund).toContain('noncanonical_annual_period_window');
+    expect(freshRefund).toContain('noncanonical_monthly_period_window');
+    expect(freshRefund).toContain('FOR UPDATE;');
+
+    // CASE 5/6: annual cron derives current-term canonical values after its locks and rejects poisoned replay rows.
+    expect(annualRelease).toContain('ANNUAL_GRANT_CURRENT_TERM_IDENTITY_INVALID');
+    expect(annualRelease).toContain('ANNUAL_GRANT_STALE_OR_NONCANONICAL_PERIOD_INPUT');
+    expect(annualRelease).toContain('ANNUAL_GRANT_EXISTING_REPLAY_ROW_NONCANONICAL');
+    expect(annualRelease).toContain('v_term_billing_cycle IS DISTINCT FROM \'yearly\'');
+
+    // CASE 1/7/8: invoice inputs preserve the full term in the mirror but derive only p01 for annual grants.
+    expect(invoiceAdmission).toContain('Invoice p_period_start/end are the full Stripe subscription term');
+    expect(invoiceAdmission).toContain('v_grant_period_end := LEAST(');
+    expect(invoiceAdmission).toContain('INVOICE_GRANT_ANNUAL_TERM_OR_KEY_NONCANONICAL');
+    expect(invoiceAdmission).toContain('INVOICE_GRANT_EXISTING_REPLAY_ROW_NONCANONICAL');
+
+    // CASE 10: legacy service-role signature remains privilege-closed but cannot bypass the canonical writer.
+    expect(migrationSql).toContain('CREATE OR REPLACE FUNCTION public.atomic_fulfill_membership_invoice(');
+    expect(migrationSql).toContain('LEGACY_MEMBERSHIP_INVOICE_FULFILLMENT_RETIRED_USE_CANONICAL_PRECISE_ADMISSION');
+    expect(migrationSql).toContain("'public.atomic_fulfill_membership_invoice(text,text,integer,text,text,text,timestamptz,timestamptz)'");
   });
 
   it('R6: enforces credits >= 0 inside the SQL body of every profile-debit path', () => {
@@ -1647,6 +1685,9 @@ describe('REFUND-1B migration 0053 contract', () => {
       'atomic_finalize_ai_abort',
       'atomic_refund_termination_clawback',
       'atomic_refund_termination_clawback_fresh',
+      'atomic_grant_annual_subscription_credits',
+      'atomic_grant_subscription_invoice_credits',
+      'atomic_fulfill_membership_invoice',
     ];
 
     for (const functionName of functions) {

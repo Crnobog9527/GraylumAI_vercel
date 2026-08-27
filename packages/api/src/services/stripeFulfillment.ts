@@ -2489,7 +2489,7 @@ export async function syncSubscriptionState(
 
   const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, status, created_at')
+    .select('id, user_id, membership_plan_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
     .eq('stripe_subscription_id', subscriptionId);
   const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
     ? existingSubscriptionQuery.order('created_at', { ascending: true })
@@ -2523,6 +2523,32 @@ export async function syncSubscriptionState(
       subscriptionCount: existingSubscriptions.length,
       canonicalSubscriptionId: maskIdentifier(existingSubscription?.id),
     });
+  }
+
+  const incomingStartMs = currentPeriodStart ? Date.parse(currentPeriodStart) : Number.NaN;
+  const incomingEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN;
+  const existingStartMs = existingSubscription?.current_period_start
+    ? Date.parse(existingSubscription.current_period_start)
+    : Number.NaN;
+  const existingEndMs = existingSubscription?.current_period_end
+    ? Date.parse(existingSubscription.current_period_end)
+    : Number.NaN;
+  const staleTermSnapshot = Number.isFinite(incomingStartMs)
+    && Number.isFinite(incomingEndMs)
+    && Number.isFinite(existingStartMs)
+    && Number.isFinite(existingEndMs)
+    && (incomingStartMs < existingStartMs || incomingEndMs < existingEndMs);
+
+  // Stripe events are not guaranteed to arrive in subscription-term order.
+  // A stale snapshot must not regress a renewed mirror, and skipping the
+  // update also preserves REFUND-1B termination fields (which this writer
+  // never owns or clears).
+  if (staleTermSnapshot) {
+    logger.warn('billing', 'subscription_state_stale_term_ignored', {
+      subscriptionId: maskIdentifier(subscriptionId),
+      hasTermination: Boolean(existingSubscription?.credit_release_terminated_at),
+    });
+    return;
   }
 
   const updateResult = await supabase
