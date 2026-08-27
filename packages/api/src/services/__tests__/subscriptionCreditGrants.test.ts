@@ -10,6 +10,7 @@ import {
   calculateAnnualMonthlyGrantSchedule,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
   getCanonicalAnnualGrantPeriod,
+  getCanonicalMonthlyGrantPeriod,
   getDueAnnualGrantPeriods,
   grantSubscriptionCredits,
   releaseDueAnnualSubscriptionCredits,
@@ -972,6 +973,34 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('V8 canonical identity: derives a complete monthly invoice window and rejects invalid terms', () => {
+    expect(getCanonicalMonthlyGrantPeriod({
+      invoiceId: '  in_monthly_canonical  ',
+      termStart: '2028-01-31T09:30:15.500Z',
+      termEnd: '2028-02-29T09:30:15.500Z',
+      creditsGranted: 2100,
+    })).toEqual({
+      periodIndex: null,
+      totalPeriods: 1,
+      periodStart: '2028-01-31T09:30:15.500Z',
+      periodEnd: '2028-02-29T09:30:15.500Z',
+      creditsGranted: 2100,
+      grantPeriodKey: 'invoice:in_monthly_canonical',
+    });
+    expect(getCanonicalMonthlyGrantPeriod({
+      invoiceId: '   ',
+      termStart: '2028-01-01T00:00:00.000Z',
+      termEnd: '2028-02-01T00:00:00.000Z',
+      creditsGranted: 100,
+    })).toBeNull();
+    expect(getCanonicalMonthlyGrantPeriod({
+      invoiceId: 'in_monthly_invalid_term',
+      termStart: '2028-02-01T00:00:00.000Z',
+      termEnd: '2028-02-01T00:00:00.000Z',
+      creditsGranted: 100,
+    })).toBeNull();
+  });
+
   it('grants only the first annual month for a paid yearly invoice', async () => {
     const rpcCalls: Array<{ name: string; payload: Row }> = [];
     const supabase = createMockSupabase({
@@ -1127,7 +1156,8 @@ describe('subscription credit grants', () => {
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v6_case_a', subscriptionId: 'sub_v6_race', amountTotal: 9900,
-      paymentStatus: 'paid', now: '2026-08-01T00:00:01.000Z',
+      paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
+      periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
     });
 
     expect(result).toMatchObject({ skippedReason: 'blocked_by_termination', grantedCredits: 0 });
@@ -1149,7 +1179,8 @@ describe('subscription credit grants', () => {
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v6_case_b', subscriptionId: 'sub_v6_race', amountTotal: 9900,
-      paymentStatus: 'paid', now: '2026-08-01T00:00:01.000Z',
+      paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
+      periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
     });
 
     expect(result).toMatchObject({ skippedReason: 'blocked_by_termination', grantedCredits: 0 });
@@ -1173,7 +1204,8 @@ describe('subscription credit grants', () => {
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v6_case_c', subscriptionId: 'sub_v6_race', amountTotal: 9900,
-      paymentStatus: 'paid', now: '2026-08-01T00:00:01.000Z',
+      paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
+      periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
     });
 
     expect(result).toMatchObject({ skippedReason: 'blocked_by_termination', grantedCredits: 0 });
@@ -1220,7 +1252,8 @@ describe('subscription credit grants', () => {
 
     const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v6_case_c_after_grant', subscriptionId: 'sub_v6_race', amountTotal: 9900,
-      paymentStatus: 'paid', now: '2026-08-01T00:00:01.000Z',
+      paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
+      periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
     });
 
     expect(result.invoiceOrderId).toBe('order-v6-case-c-after-grant');

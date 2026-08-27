@@ -10,7 +10,10 @@ import { describe, expect, it } from 'vitest';
 import {
   computePreDeductPeriodBinding,
   computeSettleAllocation,
+  getCanonicalAnnualGrantPeriod,
+  getCanonicalMonthlyGrantPeriod,
   getSubscriptionRefundOperatorPreview,
+  isCanonicalSubscriptionCreditGrant,
   reconcileSubscriptionRefundCreditGrants,
   shouldReleaseAnnualSubscriptionCredits,
 } from '../subscriptionCreditGrants';
@@ -1399,6 +1402,96 @@ describe('REFUND-1B refund reconciliation integration', () => {
 });
 
 describe('REFUND-1B refund operator preview', () => {
+  it('uses one canonical identity predicate for annual and monthly grants', () => {
+    const yearlySubscription = {
+      user_id: 'user-canonical',
+      membership_plan_id: 'plan-canonical',
+      stripe_subscription_id: 'sub-canonical',
+      billing_cycle: 'yearly',
+      current_period_start: '2027-01-01T00:00:00.000Z',
+      current_period_end: '2028-01-01T00:00:00.000Z',
+    };
+    const yearlyPeriod = getCanonicalAnnualGrantPeriod({
+      yearlyCredits: 0,
+      termStart: yearlySubscription.current_period_start,
+      termEnd: yearlySubscription.current_period_end,
+      periodIndex: 2,
+    })!;
+    const yearlyGrant = {
+      user_id: 'user-canonical',
+      membership_plan_id: 'plan-canonical',
+      stripe_subscription_id: 'sub-canonical',
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      grant_period_key: yearlyPeriod.grantPeriodKey,
+      period_start: yearlyPeriod.periodStart,
+      period_end: yearlyPeriod.periodEnd,
+      period_index: 2,
+      total_periods: 12,
+      stripe_invoice_id: 'in-yearly-canonical',
+    };
+
+    expect(isCanonicalSubscriptionCreditGrant({ subscription: yearlySubscription, grant: yearlyGrant })).toBe(true);
+    for (const malformed of [
+      { user_id: 'other-user' },
+      { membership_plan_id: 'other-plan' },
+      { billing_cycle: 'monthly' },
+      { grant_type: 'monthly_invoice' },
+      { period_index: 0 },
+      { total_periods: 11 },
+      { period_start: '2027-01-01T00:00:00.000Z' },
+      { period_end: '2027-02-15T00:00:00.000Z' },
+      { grant_period_key: 'wrong-key' },
+    ]) {
+      expect(isCanonicalSubscriptionCreditGrant({
+        subscription: yearlySubscription,
+        grant: { ...yearlyGrant, ...malformed },
+      })).toBe(false);
+    }
+
+    const monthlySubscription = {
+      ...yearlySubscription,
+      billing_cycle: 'monthly',
+      current_period_start: '2027-02-01T00:00:00.000Z',
+      current_period_end: '2027-03-01T00:00:00.000Z',
+    };
+    const monthlyPeriod = getCanonicalMonthlyGrantPeriod({
+      invoiceId: ' in-monthly-canonical ',
+      termStart: monthlySubscription.current_period_start,
+      termEnd: monthlySubscription.current_period_end,
+      creditsGranted: 0,
+    })!;
+    const monthlyGrant = {
+      user_id: 'user-canonical',
+      membership_plan_id: 'plan-canonical',
+      stripe_subscription_id: 'sub-canonical',
+      billing_cycle: 'monthly',
+      grant_type: 'monthly_invoice',
+      grant_period_key: monthlyPeriod.grantPeriodKey,
+      period_start: monthlyPeriod.periodStart,
+      period_end: monthlyPeriod.periodEnd,
+      period_index: null,
+      total_periods: 1,
+      stripe_invoice_id: ' in-monthly-canonical ',
+    };
+
+    expect(isCanonicalSubscriptionCreditGrant({ subscription: monthlySubscription, grant: monthlyGrant })).toBe(true);
+    for (const malformed of [
+      { grant_type: 'annual_monthly_release' },
+      { period_index: 1 },
+      { total_periods: 12 },
+      { stripe_invoice_id: '   ' },
+      { grant_period_key: 'wrong-key' },
+      { period_start: '2027-02-02T00:00:00.000Z' },
+      { period_end: '2027-03-02T00:00:00.000Z' },
+    ]) {
+      expect(isCanonicalSubscriptionCreditGrant({
+        subscription: monthlySubscription,
+        grant: { ...monthlyGrant, ...malformed },
+      })).toBe(false);
+    }
+  });
+
   it('is read-only and reports current period, other credits, future releases, termination, and in-flight reservations', async () => {
     const supabase = createRefund1bSupabase({
       payment_orders: [{
@@ -1625,9 +1718,57 @@ describe('REFUND-1B refund operator preview', () => {
       reviewReason: 'noncanonical_annual_period_window',
     });
 
+    const unexpectedStatus = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [{
+        id: 'grant-preview-unexpected-status', user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+        stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release', grant_period_key: 'annual:2027-01-01T00:00:00.000Z:01',
+        period_start: '2027-01-01T00:00:00.000Z', period_end: '2027-02-01T00:00:00.000Z',
+        period_index: 1, total_periods: 12, credits_granted: 100, consumed_amount: 0, status: 'reversed',
+      }],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(unexpectedStatus, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-01-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'unexpected_current_period_status',
+    });
+
+    const malformedMonthly = createRefund1bSupabase({
+      ...base,
+      user_subscriptions: [{
+        ...base.user_subscriptions[0],
+        billing_cycle: 'monthly',
+        current_period_start: '2027-02-01T00:00:00.000Z',
+        current_period_end: '2027-03-01T00:00:00.000Z',
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-preview-monthly-malformed', user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+        stripe_invoice_id: 'in-preview-classification', billing_cycle: 'monthly',
+        grant_type: 'monthly_invoice', grant_period_key: 'invoice:in-preview-classification',
+        period_start: '2027-02-01T00:00:00.000Z', period_end: '2027-03-01T00:00:00.000Z',
+        period_index: 1, total_periods: 1, credits_granted: 100, consumed_amount: 0, status: 'granted',
+      }],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(malformedMonthly, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-02-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'noncanonical_monthly_period_window',
+    });
+
     expect(zero.writes).toEqual([]);
     expect(overlapping.writes).toEqual([]);
     expect(noncanonical.writes).toEqual([]);
+    expect(unexpectedStatus.writes).toEqual([]);
+    expect(malformedMonthly.writes).toEqual([]);
   });
 });
 
@@ -1714,6 +1855,7 @@ describe('REFUND-1B migration 0053 contract', () => {
   });
 
   it('V8 CASE 2-6/8-10: binds the full mirror term to canonical grant windows and fails closed on ambiguity', () => {
+    const canonicalIdentity = extractMigrationFunction(migrationSql, 'refund_1b_is_canonical_period_identity');
     const preDeduct = extractMigrationFunction(migrationSql, 'atomic_pre_deduct');
     const freshRefund = extractMigrationFunction(migrationSql, 'atomic_refund_termination_clawback_fresh');
     const annualRelease = extractMigrationFunction(migrationSql, 'atomic_grant_annual_subscription_credits');
@@ -1721,9 +1863,20 @@ describe('REFUND-1B migration 0053 contract', () => {
 
     // CASE 2/4: pre-deduct can bind only an active canonical window and refuses ambiguity.
     expect(preDeduct).toContain('PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS');
-    expect(preDeduct).toContain("g.grant_type = 'annual_monthly_release'");
-    expect(preDeduct).toContain('g.period_start = (');
+    expect(preDeduct).toContain('public.refund_1b_is_canonical_period_identity(');
+    expect(preDeduct).toContain('PRE_DEDUCT_NONCANONICAL_GRANT_WINDOW');
+    expect(preDeduct).toContain('PRE_DEDUCT_UNEXPECTED_GRANT_STATUS');
     expect(preDeduct).toContain('AND us.credit_release_terminated_at IS NULL');
+
+    // The same helper is the only period identity predicate and covers both
+    // annual calendar windows and the complete monthly invoice identity.
+    expect(canonicalIdentity).toContain("p_grant_type = 'annual_monthly_release'");
+    expect(canonicalIdentity).toContain('p_grant_period_index BETWEEN 1 AND 12');
+    expect(canonicalIdentity).toContain("p_grant_type = 'monthly_invoice'");
+    expect(canonicalIdentity).toContain('p_grant_period_index IS NULL');
+    expect(canonicalIdentity).toContain('p_grant_total_periods = 1');
+    expect(canonicalIdentity).toContain('p_grant_stripe_invoice_id');
+    expect(canonicalIdentity).toContain("'invoice:%s'");
 
     // CASE 3/9: refund locks a unique matching grant and makes zero, overlap, and malformed rows review-only.
     expect(freshRefund).toContain('no_period_window_covers_refund_timestamp');
@@ -1864,6 +2017,7 @@ describe('REFUND-1B migration 0053 contract', () => {
       'public.atomic_finalize_ai_failure(uuid,text,text,uuid,uuid,text,integer,integer,text,text,jsonb)',
       'public.atomic_finalize_ai_success(uuid,uuid,text,text,text,numeric,integer,uuid,jsonb,jsonb,jsonb,text,integer,integer,integer,text,text)',
       'public.atomic_pre_deduct(uuid,integer,text,uuid)',
+      'public.refund_1b_is_canonical_period_identity(uuid,text,uuid,text,timestamptz,timestamptz,uuid,text,uuid,text,text,text,timestamptz,timestamptz,integer,integer,text)',
       'public.atomic_refund(uuid,uuid,text)',
       'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',
       'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',

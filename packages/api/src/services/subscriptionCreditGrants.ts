@@ -446,6 +446,113 @@ export function getCanonicalAnnualGrantPeriod(input: {
 }
 
 /**
+ * Produces the canonical monthly grant window from the authoritative invoice
+ * term. Monthly grants never carry an annual period index and their period
+ * key is derived from the non-empty Stripe invoice id.
+ */
+export function getCanonicalMonthlyGrantPeriod(input: {
+  invoiceId: string;
+  termStart: string;
+  termEnd: string;
+  creditsGranted: number;
+}): GrantPeriod | null {
+  const invoiceId = input.invoiceId.trim();
+  const startMs = parseTime(input.termStart);
+  const endMs = parseTime(input.termEnd);
+  if (!invoiceId || startMs === null || endMs === null || endMs <= startMs) {
+    return null;
+  }
+
+  return {
+    periodIndex: null,
+    totalPeriods: 1,
+    periodStart: input.termStart,
+    periodEnd: input.termEnd,
+    creditsGranted: input.creditsGranted,
+    grantPeriodKey: buildMonthlyGrantPeriodKey(invoiceId),
+  };
+}
+
+function areSameInstant(left: string | null | undefined, right: string | null | undefined) {
+  const leftMs = parseTime(left);
+  const rightMs = parseTime(right);
+  return leftMs !== null && rightMs !== null && leftMs === rightMs;
+}
+
+export function isCanonicalSubscriptionCreditGrant(input: {
+  subscription: SubscriptionRow;
+  grant: SubscriptionCreditGrantRow;
+}): boolean {
+  const { subscription, grant } = input;
+  if (
+    !subscription.user_id
+    || !subscription.stripe_subscription_id
+    || !subscription.membership_plan_id
+    || !subscription.billing_cycle
+    || !grant.user_id
+    || !grant.stripe_subscription_id
+    || !grant.membership_plan_id
+    || grant.user_id !== subscription.user_id
+    || grant.stripe_subscription_id !== subscription.stripe_subscription_id
+    || grant.membership_plan_id !== subscription.membership_plan_id
+    || grant.billing_cycle !== subscription.billing_cycle
+  ) {
+    return false;
+  }
+
+  if (subscription.billing_cycle === 'yearly') {
+    if (
+      grant.grant_type !== 'annual_monthly_release'
+      || !Number.isInteger(grant.period_index)
+      || (grant.period_index as number) < 1
+      || (grant.period_index as number) > 12
+      || grant.total_periods !== 12
+      || !subscription.current_period_start
+      || !subscription.current_period_end
+    ) {
+      return false;
+    }
+
+    const canonicalPeriod = getCanonicalAnnualGrantPeriod({
+      yearlyCredits: 0,
+      termStart: subscription.current_period_start,
+      termEnd: subscription.current_period_end,
+      periodIndex: grant.period_index as number,
+    });
+    return canonicalPeriod !== null
+      && areSameInstant(grant.period_start, canonicalPeriod.periodStart)
+      && areSameInstant(grant.period_end, canonicalPeriod.periodEnd)
+      && grant.grant_period_key === canonicalPeriod.grantPeriodKey;
+  }
+
+  if (subscription.billing_cycle === 'monthly') {
+    const canonicalPeriod = subscription.current_period_start
+      && subscription.current_period_end
+      && typeof grant.stripe_invoice_id === 'string'
+      ? getCanonicalMonthlyGrantPeriod({
+        invoiceId: grant.stripe_invoice_id,
+        termStart: subscription.current_period_start,
+        termEnd: subscription.current_period_end,
+        creditsGranted: 0,
+      })
+      : null;
+    return canonicalPeriod !== null
+      && grant.grant_type === 'monthly_invoice'
+      && grant.period_index === null
+      && grant.total_periods === 1
+      && areSameInstant(grant.period_start, canonicalPeriod.periodStart)
+      && areSameInstant(grant.period_end, canonicalPeriod.periodEnd)
+      && grant.grant_period_key === canonicalPeriod.grantPeriodKey;
+  }
+
+  return false;
+}
+
+function isExpectedSubscriptionGrantStatus(status: string | null | undefined) {
+  return status === 'granted' || status === 'reversed';
+}
+
+/**
  * REFUND-1B: 预扣来源拆分（当期优先，封顶当期剩余额度）。
  * 与 0053 的 atomic_pre_deduct SQL 保持同一公式：
  *   amountToPeriod = min(amount, credits_granted - consumed)
@@ -1289,14 +1396,14 @@ function buildSubscriptionRefundMetadata(input: {
 function locateRefundPeriodGrant(input: {
   grants: SubscriptionCreditGrantRow[];
   refundCreatedAt?: string | null;
-  termStart?: string | null;
+  subscription: SubscriptionRow | null;
 }): { grant: SubscriptionCreditGrantRow | null; reviewReason: string | null } {
   const refundMs = parseTime(input.refundCreatedAt ?? null);
   if (refundMs === null) {
     return { grant: null, reviewReason: 'missing_trusted_refund_timestamp' };
   }
 
-  const termStartMs = parseTime(input.termStart ?? null);
+  const termStartMs = parseTime(input.subscription?.current_period_start ?? null);
   if (termStartMs === null) {
     return { grant: null, reviewReason: 'missing_trusted_term_start' };
   }
@@ -1310,58 +1417,34 @@ function locateRefundPeriodGrant(input: {
       const startMs = parseTime(grant.period_start);
       const endMs = parseTime(grant.period_end);
       return startMs !== null && endMs !== null && startMs <= refundMs && refundMs < endMs;
-    })
-    .sort((left, right) => {
-      const leftStart = parseTime(left.period_start) ?? 0;
-      const rightStart = parseTime(right.period_start) ?? 0;
-      if (leftStart !== rightStart) {
-        return rightStart - leftStart;
-      }
-      return (parseTime(right.created_at) ?? 0) - (parseTime(left.created_at) ?? 0);
     });
 
   if (candidates.length === 0) {
     return { grant: null, reviewReason: 'no_period_window_covers_refund_timestamp' };
   }
 
-  const located = candidates[0];
-  const expectedPeriodStartMs = getTrustedPeriodStartMs({
-    termStartMs,
-    grant: located,
-  });
-
-  if (expectedPeriodStartMs === null) {
-    return { grant: null, reviewReason: 'term_start_period_anchor_unknown' };
+  if (candidates.length > 1) {
+    return { grant: null, reviewReason: 'ambiguous_or_overlapping_period_windows' };
   }
 
-  const locatedStartMs = parseTime(located.period_start);
-  if (locatedStartMs !== expectedPeriodStartMs) {
-    return { grant: null, reviewReason: 'term_start_period_mismatch' };
+  const located = candidates[0];
+  if (!input.subscription || !isCanonicalSubscriptionCreditGrant({
+    subscription: input.subscription,
+    grant: located,
+  })) {
+    const reviewReason = input.subscription?.billing_cycle === 'monthly'
+      ? 'noncanonical_monthly_period_window'
+      : input.subscription?.billing_cycle === 'yearly'
+        ? 'noncanonical_annual_period_window'
+        : 'term_start_period_anchor_unknown';
+    return { grant: null, reviewReason };
+  }
+
+  if (!isExpectedSubscriptionGrantStatus(located.status)) {
+    return { grant: null, reviewReason: 'unexpected_grant_status' };
   }
 
   return { grant: located, reviewReason: null };
-}
-
-/**
- * term start 锚定推导: 仅对有可信推导规则的 grant 类型给出期望 period_start。
- */
-function getTrustedPeriodStartMs(input: {
-  termStartMs: number;
-  grant: SubscriptionCreditGrantRow;
-}): number | null {
-  if (input.grant.grant_type === 'annual_monthly_release') {
-    const periodIndex = input.grant.period_index;
-    if (typeof periodIndex !== 'number' || !Number.isInteger(periodIndex) || periodIndex < 1) {
-      return null;
-    }
-    return addUtcCalendarMonthsClamped(new Date(input.termStartMs), periodIndex - 1).getTime();
-  }
-
-  if (input.grant.grant_type === 'monthly_invoice') {
-    return input.termStartMs;
-  }
-
-  return null;
 }
 
 /**
@@ -1374,7 +1457,7 @@ async function loadSubscriptionMirrorForRefund(
 ): Promise<SubscriptionRow | null> {
   const result = await supabase
     .from('user_subscriptions')
-    .select('id, user_id, billing_cycle, status, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key')
+    .select('id, user_id, membership_plan_id, stripe_subscription_id, billing_cycle, status, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key')
     .eq('stripe_subscription_id', input.subscriptionId)
     .limit(1);
 
@@ -1656,7 +1739,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const located = locateRefundPeriodGrant({
     grants,
     refundCreatedAt: input.refundCreatedAt,
-    termStart: mirror?.current_period_start ?? null,
+    subscription: mirror,
   });
   const snapshotLocatedPeriodKey = located.grant?.grant_period_key ?? null;
 
@@ -2885,14 +2968,12 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       termEnd,
       periodIndex: 1,
     })
-    : {
-      periodIndex: null,
-      totalPeriods: 1,
-      periodStart: termStart,
-      periodEnd: termEnd,
+    : getCanonicalMonthlyGrantPeriod({
+      invoiceId: input.invoiceId,
+      termStart,
+      termEnd,
       creditsGranted: (plan.monthly_credits ?? 0) + (plan.monthly_bonus_credits ?? 0),
-      grantPeriodKey: buildMonthlyGrantPeriodKey(input.invoiceId),
-    };
+    });
 
   if (!grantPeriod) {
     throwGrantError(
@@ -3194,9 +3275,7 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
     };
   }
 
-  const currentCandidates = input.grants
-    .filter((grant) => grant.status === 'granted')
-    .filter((grant) => {
+  const currentCandidates = input.grants.filter((grant) => {
       const startMs = parseTime(grant.period_start);
       const endMs = parseTime(grant.period_end);
       return startMs !== null && endMs !== null && startMs <= input.nowMs && input.nowMs < endMs;
@@ -3219,65 +3298,27 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
   }
 
   const candidate = currentCandidates[0];
-  const candidateStartMs = parseTime(candidate.period_start);
-  const candidateEndMs = parseTime(candidate.period_end);
-  const sameTermWindow = candidateStartMs !== null
-    && candidateEndMs !== null
-    && candidateStartMs >= termStartMs
-    && candidateEndMs <= termEndMs;
-  const sameMembershipPlan = candidate.membership_plan_id === input.subscription.membership_plan_id;
-
-  if (input.subscription.billing_cycle === 'yearly') {
-    const periodIndex = candidate.period_index;
-    const canonicalPeriod = typeof periodIndex === 'number'
-      && Number.isInteger(periodIndex) && periodIndex >= 1 && periodIndex <= 12
-      ? getCanonicalAnnualGrantPeriod({
-        yearlyCredits: 0,
-        termStart: input.subscription.current_period_start as string,
-        termEnd: input.subscription.current_period_end as string,
-        periodIndex,
-      })
-      : null;
-    const canonical = canonicalPeriod !== null
-      && candidate.grant_type === 'annual_monthly_release'
-      && candidate.total_periods === 12
-      && sameMembershipPlan
-      && sameTermWindow
-      && candidateStartMs === parseTime(canonicalPeriod.periodStart)
-      && candidateEndMs === parseTime(canonicalPeriod.periodEnd)
-      && candidate.grant_period_key === canonicalPeriod.grantPeriodKey;
-
-    if (!canonical) {
-      return {
-        grant: null,
-        reviewRequired: true,
-        reviewReason: 'noncanonical_annual_period_window',
-      };
-    }
-  } else if (input.subscription.billing_cycle === 'monthly') {
-    const expectedPeriodKey = candidate.stripe_invoice_id
-      ? buildMonthlyGrantPeriodKey(candidate.stripe_invoice_id)
-      : null;
-    const canonical = candidate.grant_type === 'monthly_invoice'
-      && sameMembershipPlan
-      && sameTermWindow
-      && candidateStartMs === termStartMs
-      && candidateEndMs === termEndMs
-      && expectedPeriodKey !== null
-      && candidate.grant_period_key === expectedPeriodKey;
-
-    if (!canonical) {
-      return {
-        grant: null,
-        reviewRequired: true,
-        reviewReason: 'noncanonical_monthly_period_window',
-      };
-    }
-  } else {
+  if (!isCanonicalSubscriptionCreditGrant({
+    subscription: input.subscription,
+    grant: candidate,
+  })) {
+    const reviewReason = input.subscription.billing_cycle === 'monthly'
+      ? 'noncanonical_monthly_period_window'
+      : input.subscription.billing_cycle === 'yearly'
+        ? 'noncanonical_annual_period_window'
+        : 'unsupported_subscription_billing_cycle';
     return {
       grant: null,
       reviewRequired: true,
-      reviewReason: 'unsupported_subscription_billing_cycle',
+      reviewReason,
+    };
+  }
+
+  if (candidate.status !== 'granted') {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: 'unexpected_current_period_status',
     };
   }
 
