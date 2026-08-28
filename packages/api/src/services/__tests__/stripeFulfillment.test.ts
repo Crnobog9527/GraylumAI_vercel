@@ -540,6 +540,32 @@ function createRefundWebhookSupabase(
       }
 
       if (name === 'atomic_grant_annual_subscription_credits' || name === 'atomic_grant_subscription_invoice_credits') {
+        const invoiceId = typeof payload.p_stripe_invoice_id === 'string'
+          ? payload.p_stripe_invoice_id
+          : '';
+        const periodStart = typeof payload.p_period_start === 'string'
+          ? Date.parse(payload.p_period_start)
+          : Number.NaN;
+        const periodEnd = typeof payload.p_period_end === 'string'
+          ? Date.parse(payload.p_period_end)
+          : Number.NaN;
+        const hasCanonicalMonthlyInvoiceAdmission = name !== 'atomic_grant_subscription_invoice_credits'
+          || payload.p_billing_cycle !== 'monthly'
+          || (
+            payload.p_grant_type === 'monthly_invoice'
+            && invoiceId.trim().length > 0
+            && payload.p_grant_period_key === `invoice:${invoiceId}`
+            && payload.p_period_index === null
+            && payload.p_total_periods === 1
+            && payload.p_idempotency_key === `subscription_grant:monthly:${invoiceId}`
+            && Number.isFinite(periodStart)
+            && Number.isFinite(periodEnd)
+            && periodEnd > periodStart
+          );
+        if (!hasCanonicalMonthlyInvoiceAdmission) {
+          return { data: null, error: { message: 'INVOICE_GRANT_MONTHLY_PERIOD_INPUT_INVALID' } };
+        }
+
         const profile = tables.profiles.find((row) => row.id === payload.p_user_id);
         const subscription = tables.user_subscriptions.find((row) =>
           row.user_id === payload.p_user_id
@@ -986,6 +1012,7 @@ describe('stripe fulfillment helpers', () => {
 
   it('does not overwrite a canonical renewal that commits after the stale sync read', async () => {
     let renewalCommitted = false;
+    let staleReadPausedBeforeUpdate = false;
     const supabase = createRefundWebhookSupabase({
       user_subscriptions: [{
         id: 'subscription-term-cas',
@@ -1006,39 +1033,65 @@ describe('stripe fulfillment helpers', () => {
         }
 
         renewalCommitted = true;
+        staleReadPausedBeforeUpdate = true;
         expect(filters).toEqual(expect.arrayContaining([
           expect.objectContaining({ column: 'stripe_subscription_id', value: 'sub_term_cas', operator: 'eq' }),
           expect.objectContaining({ column: 'current_period_start', value: '2026-01-01T00:00:00.000Z', operator: 'eq' }),
           expect.objectContaining({ column: 'current_period_end', value: '2027-01-01T00:00:00.000Z', operator: 'eq' }),
         ]));
 
-        const renewalResult = await supabase.rpc('atomic_grant_subscription_invoice_credits', {
+        const canonicalRenewalPayload = {
           p_user_id: 'user-term-cas',
           p_membership_plan_id: 'plan-term-cas',
           p_stripe_subscription_id: 'sub_term_cas',
           p_stripe_invoice_id: 'in_term_cas_renewal',
           p_stripe_customer_id: 'cus_term_cas',
           p_billing_cycle: 'monthly',
-          p_grant_type: 'subscription_invoice',
+          p_grant_type: 'monthly_invoice',
           p_period_start: '2027-01-01T00:00:00.000Z',
           p_period_end: '2028-01-01T00:00:00.000Z',
-          p_grant_period_key: 'sub_term_cas:2027-01-01',
+          p_grant_period_key: 'invoice:in_term_cas_renewal',
           p_period_index: null,
           p_total_periods: 1,
           p_credits_granted: 100,
-          p_idempotency_key: 'invoice:in_term_cas_renewal',
+          p_idempotency_key: 'subscription_grant:monthly:in_term_cas_renewal',
           p_description: 'renewal',
           p_source_type: 'stripe_invoice',
           p_source_id: 'in_term_cas_renewal',
           p_now: '2027-01-01T00:00:01.000Z',
-        });
+        };
+        for (const invalidAdmission of [
+          { p_grant_type: 'subscription_invoice' },
+          { p_grant_period_key: 'sub_term_cas:2027-01-01' },
+          { p_idempotency_key: 'invoice:in_term_cas_renewal' },
+        ]) {
+          const invalidRenewalResult = await supabase.rpc('atomic_grant_subscription_invoice_credits', {
+            ...canonicalRenewalPayload,
+            ...invalidAdmission,
+          });
+          expect(invalidRenewalResult).toEqual({
+            data: null,
+            error: { message: 'INVOICE_GRANT_MONTHLY_PERIOD_INPUT_INVALID' },
+          });
+          expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+            current_period_start: '2026-01-01T00:00:00.000Z',
+            current_period_end: '2027-01-01T00:00:00.000Z',
+          });
+          expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+          expect(supabase.tables.credit_transactions).toHaveLength(0);
+        }
+
+        const renewalResult = await supabase.rpc(
+          'atomic_grant_subscription_invoice_credits',
+          canonicalRenewalPayload,
+        );
         expect(renewalResult.data?.[0]).toEqual(expect.objectContaining({ granted: true }));
 
         Object.assign(supabase.tables.user_subscriptions[0], {
           credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
           credit_release_terminated_reason: 'stripe_refund',
           credit_release_terminated_event_id: 'evt_term_cas',
-          credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+          credit_release_terminated_period_key: 'invoice:in_term_cas_renewal',
         });
       },
     });
@@ -1052,13 +1105,14 @@ describe('stripe fulfillment helpers', () => {
     await syncSubscriptionState(supabase, staleSubscription);
 
     expect(renewalCommitted).toBe(true);
+    expect(staleReadPausedBeforeUpdate).toBe(true);
     expect(supabase.tables.user_subscriptions[0]).toMatchObject({
       current_period_start: '2027-01-01T00:00:00.000Z',
       current_period_end: '2028-01-01T00:00:00.000Z',
       credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
       credit_release_terminated_reason: 'stripe_refund',
       credit_release_terminated_event_id: 'evt_term_cas',
-      credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+      credit_release_terminated_period_key: 'invoice:in_term_cas_renewal',
     });
     expect(loggerState.warn).toHaveBeenCalledWith(
       'billing',
@@ -1083,7 +1137,7 @@ describe('stripe fulfillment helpers', () => {
       credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
       credit_release_terminated_reason: 'stripe_refund',
       credit_release_terminated_event_id: 'evt_term_cas',
-      credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+      credit_release_terminated_period_key: 'invoice:in_term_cas_renewal',
     });
   });
 
