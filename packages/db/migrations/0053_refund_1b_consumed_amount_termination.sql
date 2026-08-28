@@ -185,6 +185,7 @@ DECLARE
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
   v_covering_count INTEGER := 0;
+  v_missing_mirror_count INTEGER := 0;
   v_malformed_covering_count INTEGER := 0;
   v_unexpected_status_count INTEGER := 0;
   v_canonical_candidate_count INTEGER := 0;
@@ -244,9 +245,12 @@ BEGIN
   -- Only a unique, canonical, currently-active grant window may be bound.
   -- This keeps a yearly period-01 from remaining eligible after its first
   -- calendar month and refuses to guess between multiple subscriptions.
-  SELECT count(*),
+  SELECT count(g.id),
+         count(g.id) FILTER (WHERE us.id IS NULL),
          count(*) FILTER (
-           WHERE g.status = 'granted'
+           WHERE us.id IS NOT NULL
+             AND us.credit_release_terminated_at IS NULL
+             AND g.status = 'granted'
              AND COALESCE(public.refund_1b_is_canonical_period_identity(
                us.user_id,
                us.stripe_subscription_id,
@@ -268,41 +272,50 @@ BEGIN
              ), FALSE)
          ),
          count(*) FILTER (
-           WHERE NOT COALESCE(public.refund_1b_is_canonical_period_identity(
-             us.user_id,
-             us.stripe_subscription_id,
-             us.membership_plan_id,
-             us.billing_cycle,
-             us.current_period_start,
-             us.current_period_end,
-             g.user_id,
-             g.stripe_subscription_id,
-             g.membership_plan_id,
-             g.billing_cycle,
-             g.grant_type,
-             g.grant_period_key,
-             g.period_start,
-             g.period_end,
-             g.period_index,
-             g.total_periods,
-             g.stripe_invoice_id
-           ), FALSE)
+           WHERE us.id IS NOT NULL
+             AND (
+               us.credit_release_terminated_at IS NOT NULL
+               OR NOT COALESCE(public.refund_1b_is_canonical_period_identity(
+                 us.user_id,
+                 us.stripe_subscription_id,
+                 us.membership_plan_id,
+                 us.billing_cycle,
+                 us.current_period_start,
+                 us.current_period_end,
+                 g.user_id,
+                 g.stripe_subscription_id,
+                 g.membership_plan_id,
+                 g.billing_cycle,
+                 g.grant_type,
+                 g.grant_period_key,
+                 g.period_start,
+                 g.period_end,
+                 g.period_index,
+                 g.total_periods,
+                 g.stripe_invoice_id
+               ), FALSE)
+             )
          ),
          count(*) FILTER (
            WHERE g.status IS NULL OR g.status NOT IN ('granted', 'reversed')
          )
-  INTO v_covering_count, v_canonical_candidate_count,
-       v_malformed_covering_count, v_unexpected_status_count
+  INTO v_covering_count, v_missing_mirror_count,
+       v_canonical_candidate_count, v_malformed_covering_count,
+       v_unexpected_status_count
   FROM subscription_credit_grants AS g
-  JOIN user_subscriptions AS us
+  LEFT JOIN user_subscriptions AS us
     ON us.stripe_subscription_id = g.stripe_subscription_id
    AND us.user_id = p_user_id
-  WHERE g.period_start <= now()
-    AND g.period_end > now()
-    AND us.credit_release_terminated_at IS NULL;
+  WHERE g.user_id = p_user_id
+    AND g.period_start <= now()
+    AND g.period_end > now();
 
   IF v_covering_count > 1 THEN
     RAISE EXCEPTION 'PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS: %', v_covering_count;
+  END IF;
+
+  IF v_missing_mirror_count > 0 THEN
+    RAISE EXCEPTION 'PRE_DEDUCT_SUBSCRIPTION_MIRROR_MISSING';
   END IF;
 
   IF v_malformed_covering_count > 0 THEN
@@ -317,13 +330,21 @@ BEGIN
     RAISE EXCEPTION 'PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS: %', v_canonical_candidate_count;
   END IF;
 
+  IF v_covering_count = 0 THEN
+    -- True zero covering rows preserve the existing safe other-credit behavior.
+    v_to_period := 0;
+  ELSIF v_canonical_candidate_count = 0 THEN
+    RAISE EXCEPTION 'PRE_DEDUCT_NONCANONICAL_GRANT_WINDOW';
+  END IF;
+
   SELECT g.id, g.grant_period_key, g.credits_granted, g.consumed_amount
   INTO v_charged_grant_id, v_period_key, v_grant_granted, v_grant_consumed
   FROM subscription_credit_grants AS g
   JOIN user_subscriptions AS us
     ON us.stripe_subscription_id = g.stripe_subscription_id
    AND us.user_id = p_user_id
-  WHERE g.status = 'granted'
+  WHERE g.user_id = p_user_id
+    AND g.status = 'granted'
     AND g.period_start <= now()
     AND g.period_end > now()
     AND us.credit_release_terminated_at IS NULL

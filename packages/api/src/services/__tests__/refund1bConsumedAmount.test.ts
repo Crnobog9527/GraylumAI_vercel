@@ -1903,6 +1903,53 @@ describe('REFUND-1B migration 0053 contract', () => {
     expect(migrationSql).toContain("'public.atomic_fulfill_membership_invoice(text,text,integer,text,text,text,timestamptz,timestamptz)'");
   });
 
+  it('R9: atomic_pre_deduct keeps orphan covering grants in the production census and fails closed before other-credit fallback', () => {
+    const preDeduct = extractMigrationFunction(migrationSql, 'atomic_pre_deduct');
+    const censusStart = preDeduct.indexOf('SELECT count(g.id),');
+    const censusEnd = preDeduct.indexOf('\n  IF v_covering_count > 1', censusStart);
+
+    expect(censusStart).toBeGreaterThanOrEqual(0);
+    expect(censusEnd).toBeGreaterThan(censusStart);
+
+    const census = preDeduct.slice(censusStart, censusEnd);
+    expect(census).toMatch(
+      /FROM subscription_credit_grants AS g\s+LEFT JOIN user_subscriptions AS us/,
+    );
+    expect(census).toContain('count(g.id) FILTER (WHERE us.id IS NULL)');
+    expect(census).toMatch(
+      /WHERE g\.user_id = p_user_id\s+AND g\.period_start <= now\(\)\s+AND g\.period_end > now\(\);/,
+    );
+    expect(census).not.toMatch(
+      /FROM subscription_credit_grants AS g\s+JOIN user_subscriptions AS us/,
+    );
+
+    const now = Date.parse('2027-02-15T00:00:00.000Z');
+    const orphanGrant = {
+      userId: 'user-orphan-covering-grant',
+      periodStart: '2027-01-01T00:00:00.000Z',
+      periodEnd: '2027-03-01T00:00:00.000Z',
+      mirror: null,
+    };
+    const orphanCoveringRows = [orphanGrant].filter((row) =>
+      row.userId === 'user-orphan-covering-grant'
+        && Date.parse(row.periodStart) <= now
+        && now < Date.parse(row.periodEnd),
+    );
+    expect(orphanCoveringRows).toHaveLength(1);
+    expect(orphanCoveringRows[0]?.mirror).toBeNull();
+
+    const missingMirrorIndex = preDeduct.indexOf('PRE_DEDUCT_SUBSCRIPTION_MIRROR_MISSING');
+    const fallbackIndex = preDeduct.indexOf('v_to_other := p_amount');
+    expect(missingMirrorIndex).toBeGreaterThan(censusEnd);
+    expect(missingMirrorIndex).toBeLessThan(fallbackIndex);
+    expect(preDeduct).toMatch(
+      /IF v_covering_count = 0 THEN[\s\S]*?v_to_period := 0;[\s\S]*?ELSIF v_canonical_candidate_count = 0 THEN[\s\S]*?PRE_DEDUCT_NONCANONICAL_GRANT_WINDOW/,
+    );
+    expect(preDeduct).toContain('PRE_DEDUCT_AMBIGUOUS_CANONICAL_GRANT_WINDOWS');
+    expect(preDeduct).toContain('PRE_DEDUCT_NONCANONICAL_GRANT_WINDOW');
+    expect(preDeduct).toContain('PRE_DEDUCT_UNEXPECTED_GRANT_STATUS');
+  });
+
   it('R6: enforces credits >= 0 inside the SQL body of every profile-debit path', () => {
     const guardCount = (migrationSql.match(/v_balance_after < 0/g) ?? []).length;
     expect(guardCount).toBe(4);
