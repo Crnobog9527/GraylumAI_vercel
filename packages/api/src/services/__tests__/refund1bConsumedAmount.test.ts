@@ -1781,6 +1781,14 @@ describe('REFUND-1B migration 0053 contract', () => {
     join(__dirname, '../stripeFulfillment.ts'),
     'utf8',
   );
+  const profilesColumnContractMigrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0054_refund_1b_profiles_column_contract_repair.sql'),
+    'utf8',
+  );
+  const dbSchemaSource = readFileSync(
+    join(__dirname, '../../../../db/schema.ts'),
+    'utf8',
+  );
 
   it('adds consumed_amount with the 0 <= consumed <= granted invariant', () => {
     expect(migrationSql).toContain('ADD COLUMN consumed_amount INTEGER NOT NULL DEFAULT 0');
@@ -2081,5 +2089,68 @@ describe('REFUND-1B migration 0053 contract', () => {
   it('edits no applied migration and creates no migration other than 0053', () => {
     expect(migrationSql).not.toMatch(/005[012]_/);
     expect(migrationSql).not.toMatch(/ALTER\s+TABLE[^;]*0052/);
+  });
+
+  it('0054 repairs the real profiles column contract for all affected RPCs', () => {
+    const affectedFunctions = [
+      {
+        name: 'atomic_refund_termination_clawback',
+        signature: 'public.atomic_refund_termination_clawback(uuid,text,text,text,text,text,boolean,text,timestamptz)',
+        profileColumns: ['credits'],
+      },
+      {
+        name: 'atomic_grant_annual_subscription_credits',
+        signature: 'public.atomic_grant_annual_subscription_credits(uuid,uuid,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,text,text,uuid,jsonb,jsonb,timestamptz)',
+        profileColumns: ['credits'],
+      },
+      {
+        name: 'atomic_grant_subscription_invoice_credits',
+        signature: 'public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz)',
+        profileColumns: ['credits', 'membership_level'],
+      },
+    ] as const;
+
+    const profilesStart = dbSchemaSource.indexOf("export const profiles = pgTable('profiles'");
+    const conversationsStart = dbSchemaSource.indexOf("export const conversations = pgTable('conversations'");
+    expect(profilesStart).toBeGreaterThanOrEqual(0);
+    expect(conversationsStart).toBeGreaterThan(profilesStart);
+    const profilesContract = dbSchemaSource.slice(profilesStart, conversationsStart);
+    expect(profilesContract).toContain("credits: integer('credits')");
+    expect(profilesContract).not.toContain('updatedAt');
+    expect(profilesContract).not.toContain("'updated_at'");
+
+    const createdFunctions = [...profilesColumnContractMigrationSql.matchAll(
+      /CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)\(/g,
+    )].map((match) => match[1]);
+    expect(createdFunctions).toEqual(affectedFunctions.map(({ name }) => name));
+    expect(profilesColumnContractMigrationSql).not.toMatch(
+      /\b(?:ADD COLUMN|ALTER TABLE|CREATE TABLE|CREATE INDEX|CREATE TRIGGER|CREATE EXTENSION)\b/i,
+    );
+
+    for (const affected of affectedFunctions) {
+      const body = extractMigrationFunction(profilesColumnContractMigrationSql, affected.name);
+      const profileUpdate = body.match(
+        /UPDATE profiles\s+SET\s+([\s\S]*?)\s+WHERE id = p_user_id;/,
+      );
+      expect(profileUpdate).not.toBeNull();
+      expect(profileUpdate?.[1]).not.toContain('updated_at');
+      const assignmentColumns = (profileUpdate?.[1] ?? '')
+        .split('\n')
+        .map((line) => line.trim().match(/^([a-z_]+)\s*=/)?.[1])
+        .filter((column): column is string => column !== undefined);
+      expect(assignmentColumns).toEqual(affected.profileColumns);
+
+      expect(body).toContain('SECURITY DEFINER');
+      expect(body).toContain('SET search_path = public, pg_temp');
+      expect(profilesColumnContractMigrationSql).toContain(
+        `ALTER FUNCTION ${affected.signature} SET search_path = public, pg_temp;`,
+      );
+      expect(profilesColumnContractMigrationSql).toContain(
+        `REVOKE ALL ON FUNCTION ${affected.signature} FROM PUBLIC, anon, authenticated;`,
+      );
+      expect(profilesColumnContractMigrationSql).toContain(
+        `GRANT EXECUTE ON FUNCTION ${affected.signature} TO service_role;`,
+      );
+    }
   });
 });
