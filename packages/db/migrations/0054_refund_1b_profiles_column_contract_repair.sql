@@ -941,4 +941,3 @@ GRANT EXECUTE ON FUNCTION public.atomic_grant_annual_subscription_credits(uuid,u
 ALTER FUNCTION public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz) SET search_path = public, pg_temp;
 REVOKE ALL ON FUNCTION public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz) TO service_role;
-
