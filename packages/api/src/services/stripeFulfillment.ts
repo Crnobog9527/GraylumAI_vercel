@@ -2551,7 +2551,13 @@ export async function syncSubscriptionState(
     return;
   }
 
-  const updateResult = await supabase
+  // Bind write eligibility to the exact mirror term that was read above. A
+  // concurrent invoice admission can advance the term while this webhook is
+  // waiting to update; PostgreSQL re-evaluates these predicates after it
+  // obtains the row lock, so the stale writer then safely matches zero rows.
+  const expectedCurrentPeriodStart = existingSubscription?.current_period_start ?? null;
+  const expectedCurrentPeriodEnd = existingSubscription?.current_period_end ?? null;
+  const updateQuery = supabase
     .from('user_subscriptions')
     .update({
       status: subscription.status,
@@ -2561,6 +2567,13 @@ export async function syncSubscriptionState(
       updated_at: new Date().toISOString(),
     })
     .eq('stripe_subscription_id', subscriptionId);
+  const startGuardedUpdateQuery = expectedCurrentPeriodStart === null
+    ? updateQuery.is('current_period_start', null)
+    : updateQuery.eq('current_period_start', expectedCurrentPeriodStart);
+  const termGuardedUpdateQuery = expectedCurrentPeriodEnd === null
+    ? startGuardedUpdateQuery.is('current_period_end', null)
+    : startGuardedUpdateQuery.eq('current_period_end', expectedCurrentPeriodEnd);
+  const updateResult = await termGuardedUpdateQuery.select('id');
 
   if (updateResult.error) {
     throwFulfillmentError(
@@ -2569,6 +2582,15 @@ export async function syncSubscriptionState(
       updateResult.error,
       { subscriptionId: maskIdentifier(subscriptionId) },
     );
+  }
+
+  if (!Array.isArray(updateResult.data) || updateResult.data.length === 0) {
+    logger.warn('billing', 'subscription_state_term_cas_lost', {
+      subscriptionId: maskIdentifier(subscriptionId),
+      expectedCurrentPeriodStart,
+      expectedCurrentPeriodEnd,
+    });
+    return;
   }
 
   if (subscription.status === 'canceled' && existingSubscription?.user_id) {

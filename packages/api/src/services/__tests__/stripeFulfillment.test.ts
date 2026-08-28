@@ -40,9 +40,21 @@ type RefundWebhookTableName =
   | 'user_subscriptions'
   | 'profiles';
 type RefundWebhookRow = Record<string, any>;
+type RefundWebhookFilter = {
+  column: string;
+  value: unknown;
+  operator: 'eq' | 'neq' | 'lte' | 'like' | 'is';
+};
+type RefundWebhookMockHooks = {
+  onBeforeUpdate?: (input: {
+    table: RefundWebhookTableName;
+    payload: RefundWebhookRow;
+    filters: ReadonlyArray<RefundWebhookFilter>;
+  }) => Promise<void> | void;
+};
 
 class RefundWebhookMockQuery {
-  private filters: Array<{ column: string; value: unknown; operator: 'eq' | 'neq' | 'lte' | 'like' | 'is' }> = [];
+  private filters: RefundWebhookFilter[] = [];
   private containsFilters: Array<{ column: string; value: unknown }> = [];
   private mode: 'select' | 'insert' | 'update' = 'select';
   private payload: RefundWebhookRow | null = null;
@@ -52,6 +64,7 @@ class RefundWebhookMockQuery {
   constructor(
     private readonly tables: Record<RefundWebhookTableName, RefundWebhookRow[]>,
     private readonly table: RefundWebhookTableName,
+    private readonly onBeforeUpdate?: RefundWebhookMockHooks['onBeforeUpdate'],
   ) {}
 
   select() {
@@ -148,6 +161,11 @@ class RefundWebhookMockQuery {
     }
 
     if (this.mode === 'update') {
+      await this.onBeforeUpdate?.({
+        table: this.table,
+        payload: this.payload ?? {},
+        filters: [...this.filters],
+      });
       const rows = this.matchingRows();
       rows.forEach((row) => Object.assign(row, this.payload));
       return { data: rows, error: null };
@@ -494,7 +512,10 @@ function applyFreshRefundTerminationClawbackContract(
   };
 }
 
-function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName, RefundWebhookRow[]>> = {}) {
+function createRefundWebhookSupabase(
+  seed: Partial<Record<RefundWebhookTableName, RefundWebhookRow[]>> = {},
+  hooks: RefundWebhookMockHooks = {},
+) {
   const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
     payment_orders: seed.payment_orders ?? [],
     membership_plans: seed.membership_plans ?? [],
@@ -507,7 +528,7 @@ function createRefundWebhookSupabase(seed: Partial<Record<RefundWebhookTableName
   const supabase = {
     tables,
     from(table: RefundWebhookTableName) {
-      return new RefundWebhookMockQuery(tables, table);
+      return new RefundWebhookMockQuery(tables, table, hooks.onBeforeUpdate);
     },
     async rpc(name: string, payload: RefundWebhookRow) {
       if (name === 'atomic_refund_termination_clawback_fresh') {
@@ -961,6 +982,109 @@ describe('stripe fulfillment helpers', () => {
       'subscription_state_stale_term_ignored',
       expect.objectContaining({ hasTermination: true }),
     );
+  });
+
+  it('does not overwrite a canonical renewal that commits after the stale sync read', async () => {
+    let renewalCommitted = false;
+    const supabase = createRefundWebhookSupabase({
+      user_subscriptions: [{
+        id: 'subscription-term-cas',
+        user_id: 'user-term-cas',
+        membership_plan_id: 'plan-term-cas',
+        stripe_subscription_id: 'sub_term_cas',
+        billing_cycle: 'monthly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        created_at: '2026-01-01T00:00:00.000Z',
+      }],
+      profiles: [{ id: 'user-term-cas', credits: 0 }],
+    }, {
+      onBeforeUpdate: async ({ table, filters }) => {
+        if (table !== 'user_subscriptions' || renewalCommitted) {
+          return;
+        }
+
+        renewalCommitted = true;
+        expect(filters).toEqual(expect.arrayContaining([
+          expect.objectContaining({ column: 'stripe_subscription_id', value: 'sub_term_cas', operator: 'eq' }),
+          expect.objectContaining({ column: 'current_period_start', value: '2026-01-01T00:00:00.000Z', operator: 'eq' }),
+          expect.objectContaining({ column: 'current_period_end', value: '2027-01-01T00:00:00.000Z', operator: 'eq' }),
+        ]));
+
+        const renewalResult = await supabase.rpc('atomic_grant_subscription_invoice_credits', {
+          p_user_id: 'user-term-cas',
+          p_membership_plan_id: 'plan-term-cas',
+          p_stripe_subscription_id: 'sub_term_cas',
+          p_stripe_invoice_id: 'in_term_cas_renewal',
+          p_stripe_customer_id: 'cus_term_cas',
+          p_billing_cycle: 'monthly',
+          p_grant_type: 'subscription_invoice',
+          p_period_start: '2027-01-01T00:00:00.000Z',
+          p_period_end: '2028-01-01T00:00:00.000Z',
+          p_grant_period_key: 'sub_term_cas:2027-01-01',
+          p_period_index: null,
+          p_total_periods: 1,
+          p_credits_granted: 100,
+          p_idempotency_key: 'invoice:in_term_cas_renewal',
+          p_description: 'renewal',
+          p_source_type: 'stripe_invoice',
+          p_source_id: 'in_term_cas_renewal',
+          p_now: '2027-01-01T00:00:01.000Z',
+        });
+        expect(renewalResult.data?.[0]).toEqual(expect.objectContaining({ granted: true }));
+
+        Object.assign(supabase.tables.user_subscriptions[0], {
+          credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
+          credit_release_terminated_reason: 'stripe_refund',
+          credit_release_terminated_event_id: 'evt_term_cas',
+          credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+        });
+      },
+    });
+    const staleSubscription = {
+      id: 'sub_term_cas',
+      status: 'active',
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: 1767225600, current_period_end: 1798761600 }] },
+    } as unknown as Stripe.Subscription;
+
+    await syncSubscriptionState(supabase, staleSubscription);
+
+    expect(renewalCommitted).toBe(true);
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      current_period_start: '2027-01-01T00:00:00.000Z',
+      current_period_end: '2028-01-01T00:00:00.000Z',
+      credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
+      credit_release_terminated_reason: 'stripe_refund',
+      credit_release_terminated_event_id: 'evt_term_cas',
+      credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+    });
+    expect(loggerState.warn).toHaveBeenCalledWith(
+      'billing',
+      'subscription_state_term_cas_lost',
+      expect.objectContaining({ subscriptionId: 'sub_...' }),
+    );
+
+    const newerSubscription = {
+      id: 'sub_term_cas',
+      status: 'past_due',
+      cancel_at_period_end: true,
+      items: { data: [{ current_period_start: 1830297600, current_period_end: 1861920000 }] },
+    } as unknown as Stripe.Subscription;
+
+    await syncSubscriptionState(supabase, newerSubscription);
+
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      status: 'past_due',
+      cancel_at_period_end: 'true',
+      current_period_start: '2028-01-01T00:00:00.000Z',
+      current_period_end: '2029-01-01T00:00:00.000Z',
+      credit_release_terminated_at: '2027-01-01T00:00:02.000Z',
+      credit_release_terminated_reason: 'stripe_refund',
+      credit_release_terminated_event_id: 'evt_term_cas',
+      credit_release_terminated_period_key: 'sub_term_cas:2027-01-01',
+    });
   });
 
   it('skips credit package fulfillment when the checkout session is already fulfilled', async () => {
