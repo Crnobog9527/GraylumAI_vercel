@@ -2154,3 +2154,62 @@ describe('REFUND-1B migration 0053 contract', () => {
     }
   });
 });
+
+describe('REFUND-1B migration 0055 invoice replay qualifier', () => {
+  const migration0054 = readFileSync(
+    join(__dirname, '../../../../db/migrations/0054_refund_1b_profiles_column_contract_repair.sql'),
+    'utf8',
+  );
+  const migration0055 = readFileSync(
+    join(__dirname, '../../../../db/migrations/0055_refund_1b_invoice_rpc_credits_granted_ambiguity_repair.sql'),
+    'utf8',
+  );
+  const invoiceFunctionPrefix = 'CREATE OR REPLACE FUNCTION public.atomic_grant_subscription_invoice_credits(';
+  const invoiceSignature = 'public.atomic_grant_subscription_invoice_credits(uuid,uuid,text,text,uuid,integer,text,text,text,text,timestamptz,timestamptz,integer,integer,integer,text,text,boolean,text,text,text,text,text,jsonb,jsonb,timestamptz)';
+  const unqualifiedReplaySelect = 'SELECT id, credit_transaction_id, credits_granted, period_start, period_end,\n';
+  const qualifiedReplaySelect = 'SELECT id, credit_transaction_id, subscription_credit_grants.credits_granted, period_start, period_end,\n';
+
+  function extractInvoiceFunction(sql: string) {
+    const start = sql.indexOf(invoiceFunctionPrefix);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = sql.indexOf('\n-- Reassert the SEC-1 service-role-only posture', start);
+    expect(end).toBeGreaterThan(start);
+    return sql.slice(start, end).replace(/\n+$/, '');
+  }
+
+  it('qualifies only the ambiguous replay column against the immutable 0054 source', () => {
+    const sourceFunction = extractInvoiceFunction(migration0054);
+    const repairedFunction = extractInvoiceFunction(migration0055);
+
+    expect((migration0054.match(new RegExp(unqualifiedReplaySelect, 'g')) ?? [])).toHaveLength(1);
+    expect(repairedFunction).toContain(qualifiedReplaySelect);
+    expect(repairedFunction).not.toContain(unqualifiedReplaySelect);
+    expect(repairedFunction.replace(qualifiedReplaySelect, unqualifiedReplaySelect)).toBe(sourceFunction);
+  });
+
+  it('recreates exactly one function with the preserved return/security contract and service-role ACL', () => {
+    const repairedFunction = extractInvoiceFunction(migration0055);
+    const createdFunctions = migration0055.match(/CREATE OR REPLACE FUNCTION public\.[a-z0-9_]+\(/g) ?? [];
+
+    expect(createdFunctions).toEqual([invoiceFunctionPrefix]);
+    expect(migration0055).toContain(`ALTER FUNCTION ${invoiceSignature} SET search_path = public, pg_temp;`);
+    expect(repairedFunction).toContain(`RETURNS TABLE (\n  transaction_id UUID,\n  balance_before INTEGER,\n  balance_after INTEGER,\n  amount INTEGER,\n  is_idempotent BOOLEAN,\n  granted BOOLEAN,\n  blocked_by_termination BOOLEAN,\n  grant_id UUID,\n  credits_granted INTEGER,\n  invoice_order_id UUID\n)`);
+    expect(repairedFunction).toContain('LANGUAGE plpgsql');
+    expect(repairedFunction).toContain('SECURITY DEFINER');
+    expect(repairedFunction).toContain('SET search_path = public, pg_temp');
+    expect(migration0055).toContain(
+      `REVOKE ALL ON FUNCTION ${invoiceSignature} FROM PUBLIC, anon, authenticated;`,
+    );
+    expect(migration0055).toContain(
+      `GRANT EXECUTE ON FUNCTION ${invoiceSignature} TO service_role;`,
+    );
+
+    const expectedTail = [
+      '-- Reassert the SEC-1 service-role-only posture for the repaired invoice RPC.',
+      `ALTER FUNCTION ${invoiceSignature} SET search_path = public, pg_temp;`,
+      `REVOKE ALL ON FUNCTION ${invoiceSignature} FROM PUBLIC, anon, authenticated;`,
+      `GRANT EXECUTE ON FUNCTION ${invoiceSignature} TO service_role;`,
+    ].join('\n');
+    expect(migration0055.slice(repairedFunction.length).trim()).toBe(expectedTail);
+  });
+});
