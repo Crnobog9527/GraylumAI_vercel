@@ -2453,3 +2453,66 @@ describe('REFUND-1B migration 0058 canonical metadata merge repair', () => {
     expect(withoutCollision).toEqual(merged);
   });
 });
+
+describe('REFUND-1B migration 0059 failure period metadata repair', () => {
+  const migration0058Sql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0058_refund_1b_canonical_metadata_merge_repair.sql'),
+    'utf8',
+  );
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0059_refund_1b_failure_period_metadata_repair.sql'),
+    'utf8',
+  );
+  const functionName = 'atomic_finalize_ai_failure';
+
+  const functionOnly = (sql: string) => {
+    const extracted = extractMigrationFunction(sql, functionName);
+    const end = extracted.indexOf('\n$$;');
+    expect(end).toBeGreaterThan(-1);
+    return extracted.slice(0, end + 4);
+  };
+
+  it('replaces only the failure finalizer and preserves its 0058 security posture', () => {
+    const createdFunctions = [...migrationSql.matchAll(
+      /CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)\(/g,
+    )].map((match) => match[1]);
+    expect(createdFunctions).toEqual([functionName]);
+    expect((migrationSql.match(/^SECURITY DEFINER$/gm) ?? [])).toHaveLength(1);
+    expect(migrationSql).toContain('SET search_path = public, pg_temp');
+    expect(migrationSql).toContain(
+      'public.atomic_finalize_ai_failure(uuid,text,text,uuid,uuid,text,integer,integer,text,text,jsonb)',
+    );
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+    expect(findUndeclaredPlpgsqlVariables(functionOnly(migrationSql))).toEqual([]);
+  });
+
+  it('changes the 0058 failure definition only by rightmost canonical chargedPeriodKey', () => {
+    const expected = functionOnly(migration0058Sql).replace(
+      "'chargedGrantId', v_charged_grant_id,\n          'amountToPeriod', v_to_period,",
+      "'chargedGrantId', v_charged_grant_id,\n          'chargedPeriodKey', v_period_key,\n          'amountToPeriod', v_to_period,",
+    );
+    const failure = functionOnly(migrationSql);
+    expect(failure).toBe(expected);
+
+    const callerMetadataIndex = failure.indexOf("COALESCE(p_usage_metadata, '{}'::JSONB)");
+    const canonicalMetadataIndex = failure.indexOf('|| jsonb_build_object(', callerMetadataIndex);
+    expect(canonicalMetadataIndex).toBeGreaterThan(callerMetadataIndex);
+    expect(failure.slice(canonicalMetadataIndex)).toContain("'chargedPeriodKey', v_period_key");
+  });
+
+  it('makes the trusted period key win a caller collision while retaining caller-only metadata', () => {
+    const callerMetadata = {
+      chargedPeriodKey: 'forged-period',
+      callerOnly: 'preserved',
+    };
+    const authoritative = {
+      chargedPeriodKey: 'real-bound-period',
+    };
+
+    expect({ ...callerMetadata, ...authoritative }).toEqual({
+      chargedPeriodKey: 'real-bound-period',
+      callerOnly: 'preserved',
+    });
+  });
+});
