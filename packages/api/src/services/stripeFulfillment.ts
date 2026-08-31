@@ -1161,6 +1161,39 @@ async function retrieveStripePaymentIntent(paymentIntentId: string) {
   }
 }
 
+async function listStripeInvoicePayments(paymentIntentId: string) {
+  try {
+    return await getStripeClient().invoicePayments.list({
+      payment: {
+        type: 'payment_intent',
+        payment_intent: paymentIntentId,
+      },
+      status: 'paid',
+      limit: 10,
+    });
+  } catch (error) {
+    throwFulfillmentError(
+      'refund_invoice_payment_lookup',
+      STRIPE_FULFILLMENT_ERRORS.refundInvoiceLookup,
+      error,
+      { paymentIntentId: maskIdentifier(paymentIntentId) },
+    );
+  }
+}
+
+function getUniquePaidInvoicePaymentInvoiceId(
+  invoicePayments: Stripe.ApiList<Stripe.InvoicePayment>,
+) {
+  const invoiceIds = new Set(
+    invoicePayments.data
+      .filter((invoicePayment) => invoicePayment.status === 'paid')
+      .map((invoicePayment) => getExpandableId(invoicePayment.invoice))
+      .filter((invoiceId): invoiceId is string => Boolean(invoiceId)),
+  );
+
+  return invoiceIds.size === 1 ? [...invoiceIds][0] ?? null : null;
+}
+
 async function resolveRefundCharge(
   refund: Stripe.Refund,
   retrieveCharge: (chargeId: string) => Promise<Stripe.Charge>,
@@ -1287,6 +1320,7 @@ async function resolveSubscriptionRefundInvoice(input: {
   chargeId: string | null;
   paymentIntentId: string | null;
   retrievePaymentIntent: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+  listInvoicePayments: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
 }): Promise<{ invoiceId: string | null; order: SubscriptionRefundOrderRow | null }> {
   const invoiceIdFromMetadata = getMetadataInvoiceId(input.refundMetadata)
     ?? getMetadataInvoiceId(input.charge?.metadata);
@@ -1296,6 +1330,7 @@ async function resolveSubscriptionRefundInvoice(input: {
   );
   let orderFromMetadata: SubscriptionRefundOrderRow | null = null;
   let invoiceIdFromRetrievedPaymentIntent: string | null = null;
+  let invoiceIdFromInvoicePayment: string | null = null;
 
   if (
     !invoiceIdFromMetadata
@@ -1326,12 +1361,18 @@ async function resolveSubscriptionRefundInvoice(input: {
 
     const paymentIntent = await input.retrievePaymentIntent(input.paymentIntentId);
     invoiceIdFromRetrievedPaymentIntent = getPaymentIntentInvoiceId(paymentIntent);
+
+    if (!invoiceIdFromRetrievedPaymentIntent) {
+      const invoicePayments = await input.listInvoicePayments(input.paymentIntentId);
+      invoiceIdFromInvoicePayment = getUniquePaidInvoicePaymentInvoiceId(invoicePayments);
+    }
   }
 
   const invoiceId = invoiceIdFromMetadata
     ?? invoiceIdFromCharge
     ?? invoiceIdFromExpandedPaymentIntent
-    ?? invoiceIdFromRetrievedPaymentIntent;
+    ?? invoiceIdFromRetrievedPaymentIntent
+    ?? invoiceIdFromInvoicePayment;
 
   if (invoiceId) {
     return {
@@ -2033,10 +2074,12 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     now?: string;
     retrieveCharge?: (chargeId: string) => Promise<Stripe.Charge>;
     retrievePaymentIntent?: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+    listInvoicePayments?: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
   } = {},
 ) {
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
   const retrievePaymentIntent = options.retrievePaymentIntent ?? retrieveStripePaymentIntent;
+  const listInvoicePayments = options.listInvoicePayments ?? listStripeInvoicePayments;
   const now = options.now ?? new Date().toISOString();
   let charge: Stripe.Charge | null = null;
   let refundId: string | null = null;
@@ -2090,6 +2133,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     chargeId: resolvedChargeId,
     paymentIntentId,
     retrievePaymentIntent,
+    listInvoicePayments,
   });
   const invoiceId = resolvedInvoice.invoiceId;
 

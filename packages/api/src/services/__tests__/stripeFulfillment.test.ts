@@ -3153,6 +3153,12 @@ describe('stripe fulfillment helpers', () => {
     const retrievePaymentIntent = vi.fn().mockResolvedValue({
       id: 'pi_webhook_invoice_unresolved',
     } as Stripe.PaymentIntent);
+    const listInvoicePayments = vi.fn().mockResolvedValue({
+      object: 'list',
+      data: [],
+      has_more: false,
+      url: '/v1/invoice_payments',
+    } as Stripe.ApiList<Stripe.InvoicePayment>);
     const supabase = createRefundWebhookSupabase();
 
     await expect(reconcileSubscriptionRefundFromStripeWebhook(
@@ -3175,12 +3181,14 @@ describe('stripe fulfillment helpers', () => {
       {
         retrieveCharge,
         retrievePaymentIntent,
+        listInvoicePayments,
       },
     )).rejects.toMatchObject({
       stage: 'refund_subscription_invoice_missing',
     });
     expect(retrieveCharge).toHaveBeenCalledWith('ch_webhook_invoice_unresolved');
     expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_unresolved');
+    expect(listInvoicePayments).toHaveBeenCalledWith('pi_webhook_invoice_unresolved');
     expect(supabase.tables.payment_orders).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
     expect(supabase.tables.credit_transactions).toHaveLength(0);
@@ -3191,6 +3199,138 @@ describe('stripe fulfillment helpers', () => {
         stage: 'refund_subscription_invoice_missing',
       }),
     );
+  });
+
+  it('resolves Clover subscription refunds through the unique paid InvoicePayment', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-invoice-payment',
+        user_id: 'user-webhook-invoice-payment',
+        item_id: 'plan-webhook-invoice-payment',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_webhook_invoice_payment',
+        stripe_invoice_id: 'in_webhook_invoice_payment',
+        amount_total: 990,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+        metadata: {},
+      }],
+      user_subscriptions: [{
+        id: 'subscription-webhook-invoice-payment',
+        user_id: 'user-webhook-invoice-payment',
+        membership_plan_id: 'plan-webhook-invoice-payment',
+        stripe_subscription_id: 'sub_webhook_invoice_payment',
+        billing_cycle: 'monthly',
+        status: 'active',
+        cancel_at_period_end: 'false',
+        current_period_start: '2026-08-30T21:39:31.000Z',
+        current_period_end: '2026-09-30T21:39:31.000Z',
+        metadata: { lastInvoiceId: 'in_webhook_invoice_payment' },
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-invoice-payment',
+        name: 'Pro',
+        monthly_credits: 1500,
+      }],
+      profiles: [{
+        id: 'user-webhook-invoice-payment',
+        credits: 1500,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-webhook-invoice-payment',
+        user_id: 'user-webhook-invoice-payment',
+        membership_plan_id: 'plan-webhook-invoice-payment',
+        stripe_subscription_id: 'sub_webhook_invoice_payment',
+        stripe_invoice_id: 'in_webhook_invoice_payment',
+        billing_cycle: 'monthly',
+        grant_type: 'monthly_invoice',
+        grant_period_key: 'invoice:in_webhook_invoice_payment',
+        period_start: '2026-08-30T21:39:31.000Z',
+        period_end: '2026-09-30T21:39:31.000Z',
+        period_index: null,
+        total_periods: 1,
+        credits_granted: 1500,
+        consumed_amount: 0,
+        status: 'granted',
+        metadata: { sourceType: 'stripe_invoice' },
+      }],
+    });
+    const retrieveCharge = vi.fn().mockResolvedValue({
+      id: 'ch_webhook_invoice_payment',
+      amount: 990,
+      amount_refunded: 495,
+      currency: 'usd',
+      refunded: false,
+      payment_intent: 'pi_webhook_invoice_payment',
+      metadata: {},
+    } as Stripe.Charge);
+    const retrievePaymentIntent = vi.fn().mockResolvedValue({
+      id: 'pi_webhook_invoice_payment',
+      invoice: null,
+    } as unknown as Stripe.PaymentIntent);
+    const listInvoicePayments = vi.fn().mockResolvedValue({
+      object: 'list',
+      data: [{
+        id: 'inpay_webhook_invoice_payment',
+        object: 'invoice_payment',
+        invoice: 'in_webhook_invoice_payment',
+        payment: {
+          type: 'payment_intent',
+          payment_intent: 'pi_webhook_invoice_payment',
+        },
+        status: 'paid',
+        livemode: false,
+      }],
+      has_more: false,
+      url: '/v1/invoice_payments',
+    } as unknown as Stripe.ApiList<Stripe.InvoicePayment>);
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_invoice_payment',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_invoice_payment_partial',
+            amount: 495,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_webhook_invoice_payment',
+            payment_intent: 'pi_webhook_invoice_payment',
+            metadata: {},
+            created: 1788178053,
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        now: '2026-08-31T12:07:41.000Z',
+        retrieveCharge,
+        retrievePaymentIntent,
+        listInvoicePayments,
+      },
+    );
+
+    expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_payment');
+    expect(listInvoicePayments).toHaveBeenCalledWith('pi_webhook_invoice_payment');
+    expect(result).toMatchObject({
+      reconciled: true,
+      fullRefund: false,
+      reviewRequired: false,
+      reversedGrantCount: 1,
+      clawbackAmount: 1500,
+      appliedClawbackAmount: 1500,
+      shortfallAmount: 0,
+    });
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      status: 'partially_refunded',
+      payment_status: 'partially_refunded',
+    });
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      status: 'reversed',
+    });
   });
 
   it.each(['pending', 'failed', 'canceled'])(
