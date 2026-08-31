@@ -4899,6 +4899,91 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
+  it('uses the matching subscription line service period when the invoice header window is zero-length', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-webhook-line-period-source',
+        user_id: 'user-webhook-line-period',
+        item_id: 'plan-webhook-line-period',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_webhook_line_period',
+        stripe_customer_id: 'cus_webhook_line_period',
+        stripe_price_id: 'price_webhook_line_period',
+        status: 'pending',
+        payment_status: 'paid',
+        created_at: '2026-08-30T21:39:31.000Z',
+        metadata: {},
+      }],
+      membership_plans: [{
+        id: 'plan-webhook-line-period',
+        name: 'Pro',
+        level: 'pro',
+        monthly_credits: 1500,
+        monthly_bonus_credits: 0,
+      }],
+      profiles: [{
+        id: 'user-webhook-line-period',
+        membership_level: 'free',
+        credits: 0,
+      }],
+    });
+
+    await fulfillMembershipInvoice(
+      supabase,
+      {
+        id: 'in_webhook_line_period',
+        amount_paid: 990,
+        currency: 'usd',
+        status: 'paid',
+        customer: 'cus_webhook_line_period',
+        created: 1_788_125_971,
+        period_start: 1_788_125_971,
+        period_end: 1_788_125_971,
+        parent: {
+          subscription_details: {
+            subscription: 'sub_webhook_line_period',
+          },
+        },
+        lines: {
+          data: [{
+            id: 'il_webhook_line_period',
+            period: {
+              start: 1_788_125_971,
+              end: 1_790_804_371,
+            },
+            parent: {
+              type: 'subscription_item_details',
+              subscription_item_details: {
+                proration: false,
+                subscription: 'sub_webhook_line_period',
+              },
+            },
+          }],
+        },
+      } as Stripe.Invoice,
+    );
+
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
+      stripe_subscription_id: 'sub_webhook_line_period',
+      stripe_invoice_id: 'in_webhook_line_period',
+      billing_cycle: 'monthly',
+      grant_type: 'monthly_invoice',
+      grant_period_key: 'invoice:in_webhook_line_period',
+      period_start: '2026-08-30T21:39:31.000Z',
+      period_end: '2026-09-30T21:39:31.000Z',
+      credits_granted: 1500,
+    });
+    expect(supabase.tables.payment_orders).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stripe_invoice_id: 'in_webhook_line_period',
+        status: 'completed',
+        payment_status: 'paid',
+      }),
+    ]));
+  });
+
   it('skips invoice payment replay when the invoice order is already blocked by a full-refund marker', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{

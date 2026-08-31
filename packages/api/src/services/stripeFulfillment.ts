@@ -599,6 +599,50 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   return null;
 }
 
+function getInvoiceSubscriptionServicePeriod(
+  invoice: Stripe.Invoice,
+  subscriptionId: string,
+) {
+  const periods = new Map<string, { start: number; end: number }>();
+
+  for (const line of invoice.lines?.data ?? []) {
+    const lineRecord = line as Stripe.InvoiceLineItem & {
+      parent?: {
+        subscription_item_details?: {
+          proration?: boolean | null;
+          subscription?: string | Stripe.Subscription | null;
+        } | null;
+      } | null;
+    };
+    const details = lineRecord.parent?.subscription_item_details;
+    const lineSubscriptionId = getExpandableId(details?.subscription);
+    const start = line.period?.start;
+    const end = line.period?.end;
+
+    if (lineSubscriptionId !== subscriptionId
+      || details?.proration === true
+      || typeof start !== 'number'
+      || typeof end !== 'number'
+      || end <= start) {
+      continue;
+    }
+
+    periods.set(`${start}:${end}`, { start, end });
+  }
+
+  if (periods.size === 1) {
+    return [...periods.values()][0];
+  }
+
+  if (typeof invoice.period_start === 'number'
+    && typeof invoice.period_end === 'number'
+    && invoice.period_end > invoice.period_start) {
+    return { start: invoice.period_start, end: invoice.period_end };
+  }
+
+  return null;
+}
+
 function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
   const invoiceRecord = invoice as Stripe.Invoice & {
     payment_intent?: string | Stripe.PaymentIntent | null;
@@ -2265,14 +2309,21 @@ export async function fulfillMembershipInvoice(
     );
   }
 
+  // Stripe documents invoice-level period_start/period_end as the usage
+  // collection window, not the service period for a subscription price. The
+  // service period is carried by the matching non-proration invoice line. In
+  // particular, subscription_create invoices can have a zero-length top-level
+  // window while their line has the complete monthly or annual term.
+  const servicePeriod = getInvoiceSubscriptionServicePeriod(invoice, subscriptionId);
+
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,
     invoiceCreatedAt: asIsoTimestamp(invoice.created),
     paymentStatus: invoice.status ?? 'paid',
-    periodEnd: asIsoTimestamp(invoice.period_end),
-    periodStart: asIsoTimestamp(invoice.period_start),
+    periodEnd: asIsoTimestamp(servicePeriod?.end ?? null),
+    periodStart: asIsoTimestamp(servicePeriod?.start ?? null),
     stripeCustomerId: typeof invoice.customer === 'string' ? invoice.customer : null,
     subscriptionId,
   });
