@@ -2365,3 +2365,91 @@ describe('REFUND-1B migration 0057 actual refund accounting', () => {
     );
   });
 });
+
+describe('REFUND-1B migration 0058 canonical metadata merge repair', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0058_refund_1b_canonical_metadata_merge_repair.sql'),
+    'utf8',
+  );
+  const functionNames = [
+    'atomic_finalize_ai_success',
+    'atomic_finalize_ai_failure',
+    'atomic_finalize_ai_abort',
+  ];
+
+  it('replaces exactly the three metadata-merging finalizers with unchanged security posture', () => {
+    const createdFunctions = [...migrationSql.matchAll(
+      /CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)\(/g,
+    )].map((match) => match[1]);
+    expect(createdFunctions).toEqual(functionNames);
+    expect((migrationSql.match(/^SECURITY DEFINER$/gm) ?? [])).toHaveLength(3);
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+
+    for (const functionName of functionNames) {
+      const extracted = extractMigrationFunction(migrationSql, functionName);
+      const functionBody = extracted.split('\n-- Preserve the exact service-role-only execution posture')[0] ?? extracted;
+      expect(findUndeclaredPlpgsqlVariables(functionBody)).toEqual([]);
+    }
+  });
+
+  it('places every authoritative accounting object after caller token and usage metadata', () => {
+    for (const functionName of functionNames) {
+      const body = extractMigrationFunction(migrationSql, functionName);
+      const usageMetadataIndex = body.indexOf("COALESCE(p_usage_metadata, '{}'::JSONB)");
+      const authoritativeObjectIndex = body.indexOf('|| jsonb_build_object(', usageMetadataIndex);
+      expect(usageMetadataIndex).toBeGreaterThan(-1);
+      expect(authoritativeObjectIndex).toBeGreaterThan(usageMetadataIndex);
+
+      const authoritativeObject = body.slice(authoritativeObjectIndex);
+      expect(authoritativeObject).toContain("'preDeductId'");
+      expect(authoritativeObject).toContain("'chargedGrantId'");
+      expect(authoritativeObject).toContain("'amountToPeriod'");
+      expect(authoritativeObject).toContain("'amountToOther'");
+      expect(authoritativeObject).toContain("'refundInterceptedRestoration'");
+    }
+
+    const success = extractMigrationFunction(migrationSql, 'atomic_finalize_ai_success');
+    expect(success).toMatch(
+      /COALESCE\(p_token_metadata,[\s\S]*?COALESCE\(p_usage_metadata,[\s\S]*?\|\| jsonb_build_object\([\s\S]*?'refundInterceptedOverrun',[\s\S]*?'refundInterceptedRestoration',[\s\S]*?'difference',[\s\S]*?'requestedDifference'/,
+    );
+
+    const abort = extractMigrationFunction(migrationSql, 'atomic_finalize_ai_abort');
+    expect(abort).toMatch(
+      /COALESCE\(p_token_metadata,[\s\S]*?COALESCE\(p_usage_metadata,[\s\S]*?\|\| jsonb_build_object\([\s\S]*?'refundInterceptedOverrun',[\s\S]*?'refundInterceptedRestoration',[\s\S]*?'refundedCredits',[\s\S]*?'requestedRefundedCredits'/,
+    );
+  });
+
+  it('makes authoritative refund metadata win collisions while preserving unrelated metadata', () => {
+    const callerMetadata = {
+      preDeductId: 'forged-pre-deduct',
+      refundAmount: 999,
+      requestedRefundAmount: 1,
+      refundedCredits: 999,
+      requestedRefundedCredits: 1,
+      refundInterceptedRestoration: 0,
+      refundInterceptedOverrun: 999,
+      callerOnly: 'preserved',
+    };
+    const authoritative = {
+      preDeductId: 'real-pre-deduct',
+      refundAmount: 40,
+      requestedRefundAmount: 100,
+      refundedCredits: 40,
+      requestedRefundedCredits: 100,
+      refundInterceptedRestoration: 60,
+      refundInterceptedOverrun: 0,
+    };
+
+    const merged = { ...callerMetadata, ...authoritative };
+    expect(merged).toEqual({
+      ...authoritative,
+      callerOnly: 'preserved',
+    });
+    expect(merged.refundAmount + merged.refundInterceptedRestoration)
+      .toBe(merged.requestedRefundAmount);
+
+    const withoutCollision = { callerOnly: 'preserved', ...authoritative };
+    expect(withoutCollision).toEqual(merged);
+  });
+});
