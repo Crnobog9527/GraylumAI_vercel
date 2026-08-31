@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex, boolean } from 'drizzle-orm/pg-core';
 
 // --- 核心表 ---
@@ -372,6 +373,11 @@ export const userSubscriptions = pgTable('user_subscriptions', {
   cancelAtPeriodEnd: text('cancel_at_period_end').default('false').notNull(),
   currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  // REFUND-1B: credit-release termination (first successful refund event wins)
+  creditReleaseTerminatedAt: timestamp('credit_release_terminated_at', { withTimezone: true }),
+  creditReleaseTerminatedReason: text('credit_release_terminated_reason'),
+  creditReleaseTerminatedEventId: text('credit_release_terminated_event_id'),
+  creditReleaseTerminatedPeriodKey: text('credit_release_terminated_period_key'),
   metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -393,6 +399,8 @@ export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
   periodIndex: integer('period_index'),
   totalPeriods: integer('total_periods'),
   creditsGranted: integer('credits_granted').notNull(),
+  // REFUND-1B: per-period consumed quota, invariant 0 <= consumedAmount <= creditsGranted
+  consumedAmount: integer('consumed_amount').default(0).notNull(),
   status: text('status', { enum: ['granted', 'skipped', 'reversed', 'failed'] }).default('granted').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   creditTransactionId: uuid('credit_transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
@@ -419,7 +427,12 @@ export const billingHistory = pgTable('billing_history', {
   reason: text('reason'), // 操作原因描述
   metadata: jsonb('metadata'), // 额外元数据 (如 usage 信息、preDeductId 等)
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  // REFUND-1B (R7): 每个预扣至多一条终态记录 (settle/refund/abort_settle) 的确定性屏障
+  terminalPreDeductUnique: uniqueIndex('billing_history_terminal_pre_deduct_unique')
+    .on(sql`(${table.metadata} ->> 'preDeductId')`)
+    .where(sql`${table.operationType} IN ('settle', 'refund', 'abort_settle') AND (${table.metadata} ->> 'preDeductId') IS NOT NULL`),
+}));
 
 /**
  * AI 使用日志表 - 详细记录每次 AI 调用

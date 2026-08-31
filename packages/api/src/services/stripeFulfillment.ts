@@ -599,6 +599,50 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   return null;
 }
 
+function getInvoiceSubscriptionServicePeriod(
+  invoice: Stripe.Invoice,
+  subscriptionId: string,
+) {
+  const periods = new Map<string, { start: number; end: number }>();
+
+  for (const line of invoice.lines?.data ?? []) {
+    const lineRecord = line as Stripe.InvoiceLineItem & {
+      parent?: {
+        subscription_item_details?: {
+          proration?: boolean | null;
+          subscription?: string | Stripe.Subscription | null;
+        } | null;
+      } | null;
+    };
+    const details = lineRecord.parent?.subscription_item_details;
+    const lineSubscriptionId = getExpandableId(details?.subscription);
+    const start = line.period?.start;
+    const end = line.period?.end;
+
+    if (lineSubscriptionId !== subscriptionId
+      || details?.proration === true
+      || typeof start !== 'number'
+      || typeof end !== 'number'
+      || end <= start) {
+      continue;
+    }
+
+    periods.set(`${start}:${end}`, { start, end });
+  }
+
+  if (periods.size === 1) {
+    return [...periods.values()][0];
+  }
+
+  if (typeof invoice.period_start === 'number'
+    && typeof invoice.period_end === 'number'
+    && invoice.period_end > invoice.period_start) {
+    return { start: invoice.period_start, end: invoice.period_end };
+  }
+
+  return null;
+}
+
 function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
   const invoiceRecord = invoice as Stripe.Invoice & {
     payment_intent?: string | Stripe.PaymentIntent | null;
@@ -1117,6 +1161,39 @@ async function retrieveStripePaymentIntent(paymentIntentId: string) {
   }
 }
 
+async function listStripeInvoicePayments(paymentIntentId: string) {
+  try {
+    return await getStripeClient().invoicePayments.list({
+      payment: {
+        type: 'payment_intent',
+        payment_intent: paymentIntentId,
+      },
+      status: 'paid',
+      limit: 10,
+    });
+  } catch (error) {
+    throwFulfillmentError(
+      'refund_invoice_payment_lookup',
+      STRIPE_FULFILLMENT_ERRORS.refundInvoiceLookup,
+      error,
+      { paymentIntentId: maskIdentifier(paymentIntentId) },
+    );
+  }
+}
+
+function getUniquePaidInvoicePaymentInvoiceId(
+  invoicePayments: Stripe.ApiList<Stripe.InvoicePayment>,
+) {
+  const invoiceIds = new Set(
+    invoicePayments.data
+      .filter((invoicePayment) => invoicePayment.status === 'paid')
+      .map((invoicePayment) => getExpandableId(invoicePayment.invoice))
+      .filter((invoiceId): invoiceId is string => Boolean(invoiceId)),
+  );
+
+  return invoiceIds.size === 1 ? [...invoiceIds][0] ?? null : null;
+}
+
 async function resolveRefundCharge(
   refund: Stripe.Refund,
   retrieveCharge: (chargeId: string) => Promise<Stripe.Charge>,
@@ -1243,6 +1320,7 @@ async function resolveSubscriptionRefundInvoice(input: {
   chargeId: string | null;
   paymentIntentId: string | null;
   retrievePaymentIntent: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+  listInvoicePayments: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
 }): Promise<{ invoiceId: string | null; order: SubscriptionRefundOrderRow | null }> {
   const invoiceIdFromMetadata = getMetadataInvoiceId(input.refundMetadata)
     ?? getMetadataInvoiceId(input.charge?.metadata);
@@ -1252,6 +1330,7 @@ async function resolveSubscriptionRefundInvoice(input: {
   );
   let orderFromMetadata: SubscriptionRefundOrderRow | null = null;
   let invoiceIdFromRetrievedPaymentIntent: string | null = null;
+  let invoiceIdFromInvoicePayment: string | null = null;
 
   if (
     !invoiceIdFromMetadata
@@ -1282,12 +1361,18 @@ async function resolveSubscriptionRefundInvoice(input: {
 
     const paymentIntent = await input.retrievePaymentIntent(input.paymentIntentId);
     invoiceIdFromRetrievedPaymentIntent = getPaymentIntentInvoiceId(paymentIntent);
+
+    if (!invoiceIdFromRetrievedPaymentIntent) {
+      const invoicePayments = await input.listInvoicePayments(input.paymentIntentId);
+      invoiceIdFromInvoicePayment = getUniquePaidInvoicePaymentInvoiceId(invoicePayments);
+    }
   }
 
   const invoiceId = invoiceIdFromMetadata
     ?? invoiceIdFromCharge
     ?? invoiceIdFromExpandedPaymentIntent
-    ?? invoiceIdFromRetrievedPaymentIntent;
+    ?? invoiceIdFromRetrievedPaymentIntent
+    ?? invoiceIdFromInvoicePayment;
 
   if (invoiceId) {
     return {
@@ -1989,10 +2074,12 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     now?: string;
     retrieveCharge?: (chargeId: string) => Promise<Stripe.Charge>;
     retrievePaymentIntent?: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
+    listInvoicePayments?: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
   } = {},
 ) {
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
   const retrievePaymentIntent = options.retrievePaymentIntent ?? retrieveStripePaymentIntent;
+  const listInvoicePayments = options.listInvoicePayments ?? listStripeInvoicePayments;
   const now = options.now ?? new Date().toISOString();
   let charge: Stripe.Charge | null = null;
   let refundId: string | null = null;
@@ -2017,6 +2104,13 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     charge = await resolveRefundCharge(refund, retrieveCharge);
   }
 
+  // REFUND-1B (R4): 可信退款时间戳只来自退款对象本身。charge.refunded 缺少
+  // 成功退款对象时不得回退 charge.created (预扣/支付时间), 缺失即
+  // missing_trusted_refund_timestamp → REVIEW_REQUIRED。
+  const refundCreatedAt = event.type === 'charge.refunded'
+    ? asIsoTimestamp(getSuccessfulChargeRefund(charge)?.created ?? null)
+    : asIsoTimestamp((event.data.object as Stripe.Refund).created);
+
   const chargeId = charge?.id ?? null;
   const paymentIntentId = getMetadataPaymentIntentId(refundMetadata)
     ?? getMetadataPaymentIntentId(charge?.metadata)
@@ -2039,6 +2133,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     chargeId: resolvedChargeId,
     paymentIntentId,
     retrievePaymentIntent,
+    listInvoicePayments,
   });
   const invoiceId = resolvedInvoice.invoiceId;
 
@@ -2194,6 +2289,8 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
         order,
         metadata: refundMetadata,
       }),
+      eventId: event.id,
+      refundCreatedAt,
       now,
     });
 
@@ -2256,14 +2353,21 @@ export async function fulfillMembershipInvoice(
     );
   }
 
+  // Stripe documents invoice-level period_start/period_end as the usage
+  // collection window, not the service period for a subscription price. The
+  // service period is carried by the matching non-proration invoice line. In
+  // particular, subscription_create invoices can have a zero-length top-level
+  // window while their line has the complete monthly or annual term.
+  const servicePeriod = getInvoiceSubscriptionServicePeriod(invoice, subscriptionId);
+
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,
     invoiceCreatedAt: asIsoTimestamp(invoice.created),
     paymentStatus: invoice.status ?? 'paid',
-    periodEnd: asIsoTimestamp(invoice.period_end),
-    periodStart: asIsoTimestamp(invoice.period_start),
+    periodEnd: asIsoTimestamp(servicePeriod?.end ?? null),
+    periodStart: asIsoTimestamp(servicePeriod?.start ?? null),
     stripeCustomerId: typeof invoice.customer === 'string' ? invoice.customer : null,
     subscriptionId,
   });
@@ -2480,7 +2584,7 @@ export async function syncSubscriptionState(
 
   const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, status, created_at')
+    .select('id, user_id, membership_plan_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
     .eq('stripe_subscription_id', subscriptionId);
   const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
     ? existingSubscriptionQuery.order('created_at', { ascending: true })
@@ -2516,7 +2620,39 @@ export async function syncSubscriptionState(
     });
   }
 
-  const updateResult = await supabase
+  const incomingStartMs = currentPeriodStart ? Date.parse(currentPeriodStart) : Number.NaN;
+  const incomingEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN;
+  const existingStartMs = existingSubscription?.current_period_start
+    ? Date.parse(existingSubscription.current_period_start)
+    : Number.NaN;
+  const existingEndMs = existingSubscription?.current_period_end
+    ? Date.parse(existingSubscription.current_period_end)
+    : Number.NaN;
+  const staleTermSnapshot = Number.isFinite(incomingStartMs)
+    && Number.isFinite(incomingEndMs)
+    && Number.isFinite(existingStartMs)
+    && Number.isFinite(existingEndMs)
+    && (incomingStartMs < existingStartMs || incomingEndMs < existingEndMs);
+
+  // Stripe events are not guaranteed to arrive in subscription-term order.
+  // A stale snapshot must not regress a renewed mirror, and skipping the
+  // update also preserves REFUND-1B termination fields (which this writer
+  // never owns or clears).
+  if (staleTermSnapshot) {
+    logger.warn('billing', 'subscription_state_stale_term_ignored', {
+      subscriptionId: maskIdentifier(subscriptionId),
+      hasTermination: Boolean(existingSubscription?.credit_release_terminated_at),
+    });
+    return;
+  }
+
+  // Bind write eligibility to the exact mirror term that was read above. A
+  // concurrent invoice admission can advance the term while this webhook is
+  // waiting to update; PostgreSQL re-evaluates these predicates after it
+  // obtains the row lock, so the stale writer then safely matches zero rows.
+  const expectedCurrentPeriodStart = existingSubscription?.current_period_start ?? null;
+  const expectedCurrentPeriodEnd = existingSubscription?.current_period_end ?? null;
+  const updateQuery = supabase
     .from('user_subscriptions')
     .update({
       status: subscription.status,
@@ -2526,6 +2662,13 @@ export async function syncSubscriptionState(
       updated_at: new Date().toISOString(),
     })
     .eq('stripe_subscription_id', subscriptionId);
+  const startGuardedUpdateQuery = expectedCurrentPeriodStart === null
+    ? updateQuery.is('current_period_start', null)
+    : updateQuery.eq('current_period_start', expectedCurrentPeriodStart);
+  const termGuardedUpdateQuery = expectedCurrentPeriodEnd === null
+    ? startGuardedUpdateQuery.is('current_period_end', null)
+    : startGuardedUpdateQuery.eq('current_period_end', expectedCurrentPeriodEnd);
+  const updateResult = await termGuardedUpdateQuery.select('id');
 
   if (updateResult.error) {
     throwFulfillmentError(
@@ -2534,6 +2677,15 @@ export async function syncSubscriptionState(
       updateResult.error,
       { subscriptionId: maskIdentifier(subscriptionId) },
     );
+  }
+
+  if (!Array.isArray(updateResult.data) || updateResult.data.length === 0) {
+    logger.warn('billing', 'subscription_state_term_cas_lost', {
+      subscriptionId: maskIdentifier(subscriptionId),
+      expectedCurrentPeriodStart,
+      expectedCurrentPeriodEnd,
+    });
+    return;
   }
 
   if (subscription.status === 'canceled' && existingSubscription?.user_id) {
