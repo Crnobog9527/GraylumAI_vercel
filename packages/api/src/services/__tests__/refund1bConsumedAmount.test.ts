@@ -2213,3 +2213,62 @@ describe('REFUND-1B migration 0055 invoice replay qualifier', () => {
     expect(migration0055.slice(repairedFunction.length).trim()).toBe(expectedTail);
   });
 });
+
+describe('REFUND-1B migration 0056 service-role select contract', () => {
+  const fulfillmentGrantMigration = readFileSync(
+    join(__dirname, '../../../../db/migrations/0047_subscription_fulfillment_service_role_grants.sql'),
+    'utf8',
+  );
+  const aclRepairMigration = readFileSync(
+    join(__dirname, '../../../../db/migrations/0056_refund_1b_service_role_select_contract_repair.sql'),
+    'utf8',
+  );
+  const serviceSource = readFileSync(
+    join(__dirname, '../subscriptionCreditGrants.ts'),
+    'utf8',
+  );
+
+  function extractGrantColumns(sql: string): string[] {
+    const match = sql.match(
+      /GRANT SELECT \(\s*([\s\S]*?)\s*\) ON TABLE public\.subscription_credit_grants TO service_role;/,
+    );
+    expect(match).not.toBeNull();
+    return (match?.[1] ?? '')
+      .split(',')
+      .map((column) => column.trim())
+      .filter(Boolean);
+  }
+
+  it('grants exactly the five columns added to the refund grant lookup', () => {
+    expect(extractGrantColumns(aclRepairMigration)).toEqual([
+      'period_start',
+      'period_end',
+      'total_periods',
+      'consumed_amount',
+      'created_at',
+    ]);
+    expect(aclRepairMigration).not.toMatch(/GRANT\s+SELECT\s+ON TABLE/i);
+    expect(aclRepairMigration).not.toMatch(/GRANT\s+(?:INSERT|UPDATE|DELETE|ALL)/i);
+    expect(aclRepairMigration).not.toMatch(/\bREVOKE\b/i);
+  });
+
+  it('keeps the runtime refund lookup inside the combined column grant contract', () => {
+    const lookupMatch = serviceSource.match(
+      /async function loadAllSubscriptionCreditGrants[\s\S]*?\.select\('([^']+)'\)/,
+    );
+    expect(lookupMatch).not.toBeNull();
+
+    const runtimeColumns = (lookupMatch?.[1] ?? '')
+      .split(',')
+      .map((column) => column.trim())
+      .filter(Boolean)
+      .sort();
+    const grantedColumns = new Set([
+      ...extractGrantColumns(fulfillmentGrantMigration),
+      ...extractGrantColumns(aclRepairMigration),
+    ]);
+
+    expect(runtimeColumns.filter((column) => !grantedColumns.has(column))).toEqual([]);
+    expect(extractGrantColumns(aclRepairMigration).every((column) => runtimeColumns.includes(column))).toBe(true);
+  });
+});
