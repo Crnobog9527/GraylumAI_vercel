@@ -2272,3 +2272,96 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
     expect(extractGrantColumns(aclRepairMigration).every((column) => runtimeColumns.includes(column))).toBe(true);
   });
 });
+
+describe('REFUND-1B migration 0057 actual refund accounting', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0057_refund_1b_actual_refund_accounting_repair.sql'),
+    'utf8',
+  );
+  const functionNames = [
+    'atomic_settle',
+    'atomic_refund',
+    'atomic_abort_settle',
+    'atomic_finalize_ai_success',
+    'atomic_finalize_ai_failure',
+    'atomic_finalize_ai_abort',
+  ];
+
+  it('replaces exactly the six terminal billing RPCs and preserves service-role-only execution', () => {
+    const createdFunctions = [...migrationSql.matchAll(
+      /CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)\(/g,
+    )].map((match) => match[1]);
+    expect(createdFunctions).toEqual(functionNames);
+    expect((migrationSql.match(/^SECURITY DEFINER$/gm) ?? [])).toHaveLength(6);
+    expect((migrationSql.match(/SET search_path = public, pg_temp/g) ?? []).length)
+      .toBeGreaterThanOrEqual(6);
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+
+    for (const functionName of functionNames) {
+      const extracted = extractMigrationFunction(migrationSql, functionName);
+      const functionBody = extracted.split('\n-- Preserve the exact service-role-only execution posture')[0] ?? extracted;
+      expect(findUndeclaredPlpgsqlVariables(functionBody))
+        .toEqual([]);
+    }
+  });
+
+  it('separates requested and actual refund accounting for every terminal path', () => {
+    const settle = extractMigrationFunction(migrationSql, 'atomic_settle');
+    expect(settle).toContain("'difference', v_balance_delta");
+    expect(settle).toContain("'requestedDifference', v_difference");
+    expect(settle).toContain('RETURN QUERY SELECT p_actual_credits, v_balance_delta, v_balance_after');
+
+    const refund = extractMigrationFunction(migrationSql, 'atomic_refund');
+    expect(refund).toContain("'refundAmount', GREATEST(v_balance_delta, 0)");
+    expect(refund).toContain("'requestedRefundAmount', v_refund_amount");
+    expect(refund).toContain('RETURN QUERY SELECT GREATEST(v_balance_delta, 0), v_balance_after');
+
+    const abort = extractMigrationFunction(migrationSql, 'atomic_abort_settle');
+    expect(abort).toContain("'refundedCredits', GREATEST(v_balance_delta, 0)");
+    expect(abort).toContain("'requestedRefundedCredits', v_refunded");
+    expect(abort).toContain('RETURN QUERY SELECT p_consumed_credits, GREATEST(v_balance_delta, 0), v_balance_after');
+
+    const success = extractMigrationFunction(migrationSql, 'atomic_finalize_ai_success');
+    expect(success).toContain("'difference', v_balance_delta");
+    expect(success).toContain("'requestedDifference', v_difference");
+    expect(success).toContain("'refundedCredits', GREATEST(v_balance_delta, 0)");
+    expect(success).toContain("'requestedRefundedCredits', GREATEST(v_difference, 0)");
+    expect(success).toContain('GREATEST(v_balance_delta, 0);');
+
+    const failure = extractMigrationFunction(migrationSql, 'atomic_finalize_ai_failure');
+    expect(failure).toContain("VALUES (p_user_id, GREATEST(v_balance_delta, 0), 'refund', p_reason)");
+    expect(failure).toContain("'refundAmount', GREATEST(v_balance_delta, 0)");
+    expect(failure).toContain("'requestedRefundAmount', v_refund_amount");
+    expect(failure).toContain('GREATEST(COALESCE(v_balance_delta, 0), 0)');
+
+    const finalizeAbort = extractMigrationFunction(migrationSql, 'atomic_finalize_ai_abort');
+    expect(finalizeAbort).toContain("'refundedCredits', GREATEST(v_balance_delta, 0)");
+    expect(finalizeAbort).toContain("'requestedRefundedCredits', v_refunded");
+    expect(finalizeAbort).toContain('GREATEST(v_balance_delta, 0);');
+  });
+
+  it('records the 100 requested / 40 restored / 60 intercepted case without overstating the refund', () => {
+    const requestedRefund = 100;
+    const amountToOther = 40;
+    const amountToPeriod = 60;
+    const actualRefund = Math.min(requestedRefund, Math.max(amountToOther, 0));
+    const interceptedRestoration = Math.min(
+      Math.max(requestedRefund - Math.max(amountToOther, 0), 0),
+      amountToPeriod,
+    );
+
+    expect({ requestedRefund, actualRefund, interceptedRestoration }).toEqual({
+      requestedRefund: 100,
+      actualRefund: 40,
+      interceptedRestoration: 60,
+    });
+    expect(actualRefund + interceptedRestoration).toBe(requestedRefund);
+    expect(migrationSql).toContain(
+      'v_balance_delta := LEAST(v_refund_amount, GREATEST(v_to_other, 0))',
+    );
+    expect(migrationSql).toContain(
+      'v_intercepted_restoration := LEAST(GREATEST(v_refund_amount - GREATEST(v_to_other, 0), 0), v_to_period)',
+    );
+  });
+});
