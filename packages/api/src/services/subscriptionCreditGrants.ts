@@ -1754,11 +1754,6 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const mirror = await loadSubscriptionMirrorForRefund(supabase, {
     subscriptionId: input.subscriptionId,
   });
-  // This pre-RPC value is retained only for the caller-facing diagnostic
-  // result of a later-event no-op. It never authorizes an evidence write.
-  const preexistingReconciliation = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
-  const preexistingAmbiguousReview = Boolean(mirror?.credit_release_terminated_at)
-    && preexistingReconciliation.reviewReason === 'ambiguous_charge_refunded_refund_identity';
   const located = locateRefundPeriodGrant({
     grants,
     refundCreatedAt: input.refundCreatedAt,
@@ -1853,6 +1848,8 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const freshTerminationReason = freshMirror?.credit_release_terminated_reason ?? null;
   const freshTerminationEventId = freshMirror?.credit_release_terminated_event_id ?? null;
   const terminationEvidenceWritten = terminatedAt !== null;
+  const freshReconciliation = asRecord(asRecord(freshOrder.metadata).subscriptionCreditGrantReversal);
+  const hasFreshReconciliationEvidence = Object.prototype.hasOwnProperty.call(freshReconciliation, 'reviewRequired');
   const sameEventOwnsTermination = terminationWritten
     || (canonicalEventId !== null && freshTerminationEventId === canonicalEventId);
 
@@ -1862,16 +1859,21 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // Keep exact canonical replay ahead of this guard so it can reconstruct its
   // own evidence after a post-transaction process crash.
   if (!sameEventOwnsTermination) {
-    const preservedAmbiguousReview = preexistingAmbiguousReview;
+    const preservedReviewRequired = hasFreshReconciliationEvidence
+      ? freshReconciliation.reviewRequired === true
+      : true;
+    const preservedReviewReason = hasFreshReconciliationEvidence
+      ? (typeof freshReconciliation.reviewReason === 'string'
+        ? freshReconciliation.reviewReason
+        : null)
+      : 'first_event_reconciliation_evidence_missing';
     return {
       orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
-      reviewRequired: preservedAmbiguousReview,
-      reviewReason: preservedAmbiguousReview
-        ? 'ambiguous_charge_refunded_refund_identity'
-        : null,
+      reviewRequired: preservedReviewRequired,
+      reviewReason: preservedReviewReason,
       terminationWritten: false,
       terminatedAt,
       locatedPeriodKey: freshMirror?.credit_release_terminated_period_key ?? null,

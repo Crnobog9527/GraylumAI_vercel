@@ -4052,7 +4052,8 @@ describe('subscription credit grants', () => {
 
     expect(laterPrecise).toMatchObject({
       alreadyReconciled: true,
-      reviewRequired: false,
+      reviewRequired: true,
+      reviewReason: 'first_event_reconciliation_evidence_missing',
       terminationWritten: false,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
@@ -4067,6 +4068,54 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toBeUndefined();
+  });
+
+  it('fails closed when a precise owner crashes before evidence and a different ambiguous event arrives', async () => {
+    const supabase = createRefundCrashRecoveryHarness();
+    const preciseInput = {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: 're-refund-crash-precise-owner',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-precise-owner',
+      refundCreatedAt: '2026-01-20T00:00:00.000Z',
+      now: '2026-01-20T00:00:01.000Z',
+    } as const;
+
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, preciseInput))
+      .rejects.toThrow('simulated post-rpc payment-order crash');
+
+    const laterAmbiguous = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...preciseInput,
+      refundId: null,
+      refundEventType: 'charge.refunded',
+      eventId: 'evt-refund-crash-different-ambiguous',
+      refundCreatedAt: null,
+      refundIdentityAmbiguous: true,
+      terminationReviewReason: 'ambiguous_charge_refunded_refund_identity',
+      now: '2026-01-20T00:06:01.000Z',
+    });
+
+    expect(laterAmbiguous).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reviewReason: 'first_event_reconciliation_evidence_missing',
+      terminationWritten: false,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      reversedGrantCount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.user_subscriptions[0].credit_release_terminated_event_id)
+      .toBe(preciseInput.eventId);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
       .toBeUndefined();
   });
@@ -4110,6 +4159,7 @@ describe('subscription credit grants', () => {
     expect(replay).toMatchObject({
       alreadyReconciled: true,
       reviewRequired: false,
+      reviewReason: null,
       terminationWritten: false,
       terminatedAt: input.now,
       locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:01',
@@ -4443,7 +4493,8 @@ describe('subscription credit grants', () => {
 
     expect(replay).toMatchObject({
       alreadyReconciled: true,
-      reviewRequired: false,
+      reviewRequired: true,
+      reviewReason: null,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
       shortfallAmount: 0,

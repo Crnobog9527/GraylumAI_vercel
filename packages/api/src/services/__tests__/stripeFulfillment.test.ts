@@ -4523,7 +4523,11 @@ describe('stripe fulfillment helpers', () => {
     allowPrecise.resolve();
     const preciseResult = await precise;
 
-    expect(preciseResult).toMatchObject({ alreadyReconciled: true, reviewRequired: false });
+    expect(preciseResult).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+    });
     expect(supabase.tables.user_subscriptions[0]).toMatchObject({
       credit_release_terminated_event_id: 'evt-concurrent-ambiguous',
       credit_release_terminated_reason: 'stripe_refund:charge.refunded',
@@ -4826,7 +4830,7 @@ describe('stripe fulfillment helpers', () => {
       reconciled: true,
       fullRefund: true,
       alreadyReconciled: true,
-      reviewRequired: false,
+      reviewRequired: true,
       reversedGrantCount: 0,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
