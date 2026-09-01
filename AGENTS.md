@@ -22,9 +22,25 @@ For ordinary product work, the Owner may authorize a bounded module/risk envelop
 
 A dedicated Task Issue, canonical Sprint Contract, persisted canonical Evaluator report, and persisted Release Auditor report are not prerequisites for ordinary work.
 
-High-risk work requires the durable lifecycle defined below. Authorization is per task and per transition and never carries forward automatically.
+High-risk work requires the durable lifecycle defined below. Authorization is bounded to one Task and its explicit transition envelope; it never carries into another Task, risk class, environment, service, or uncovered transition.
 
 Every implementation PR created under Owner authorization must record the Owner-authorized goal, scope/risk envelope, forbidden boundaries, base branch, and validation performed.
+
+## Pre-First-Launch MVP Engineering Bias
+
+Until Graylum completes its first official launch, prefer the smallest correct diff and the existing architecture. Do not add speculative architecture, drive-by refactors, unrelated technical-debt cleanup, or future-proofing without a current acceptance need.
+
+Complexity is a cost. Do not introduce a generalized framework, engine, registry, manager, orchestrator, ledger, or control-plane layer unless the current acceptance criteria genuinely require it. This bias does not lower risk classification or any required security, review, validation, release, or external-system boundary.
+
+## Task Envelopes and Owner Gate Economy
+
+An Owner Gate may authorize one bounded risk/transition envelope rather than one edit at a time. The envelope must bind the Owner goal, durable Task when high risk, risk class, allowed module/file/service scope, feature branch and Draft PR, environment, exactly-one-writer state, forbidden boundaries, required validation, bounded remediation budget, and stop conditions.
+
+While those bindings remain unchanged, the same Task Envelope may cover multiple in-scope edits, directly necessary callers/tests, non-force commits and pushes, creation or update of the one Draft PR, CI/test/typecheck correction, PR-body synchronization, same-scope finding remediation, and validation reruns. A changed candidate head or a same-scope finding is not by itself a new Task or a reason for another Gate.
+
+Gate count follows changes in authority or risk boundaries, not edit, commit, push, finding, test rerun, report, command, or review-cycle count. A new Owner decision is required when the goal changes; scope expands to a new module or service; the risk class changes; a new protected, dependency, workflow, database, auth, payment, external-system, environment, or resource-class surface is needed; a competing writer, branch, or equivalent PR appears; Ready is requested without express envelope preauthorization; merge, `staging -> main`, release, or production is requested; destructive impact materially increases; or the remediation budget or an explicit stop condition is exhausted.
+
+Every action remains subject to fresh GitHub-live verification, exactly-one-writer, fail-closed behavior, and the candidate-side self-authorization prohibition. A Task Envelope never implies another product task, merge, main, production, secret, provider, or external-system authority.
 
 ## Task Selection and Launch Non-Autonomy
 
@@ -34,7 +50,7 @@ Launch readiness is a mandatory eligibility gate for every Launch planning or im
 
 If the Owner-selected Launch task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY` and do not classify, create a branch, plan, or implement it. If readiness evidence is missing, stale, ambiguous, or conflicting, return `BLOCKED_CONTEXT_NOT_VERIFIED` and stop. This requirement applies equally to Planner-mediated flows, direct ordinary Owner authorization, and direct Generator invocation; no path may bypass it.
 
-No Agent may automatically select, start, or progress to another Launch task. The Owner must explicitly select the named Launch task before planning or implementation begins. After any task, PR, audit, merge, or closeout completes, stop unless the Owner has separately authorized the next exact action.
+No Agent may automatically select, start, or progress to another Launch task. The Owner must explicitly select the named Launch task before planning or implementation begins. Same-scope implementation, remediation, validation, audit, and evidence-only bookkeeping expressly covered by the current unchanged Task Envelope may continue; reaching an uncovered transition, stop condition, or another product task requires a new Owner decision.
 
 If current evidence yields multiple conflicting task identities or writers, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
 
@@ -88,7 +104,7 @@ A high-risk candidate advances only through all of the following:
 3. Independent adversarial Evaluator PASS bound to exact non-null base/head identity.
 4. The High-Risk Validation Floor below, with every required category-specific item present or explicitly recorded as `NOT_APPLICABLE` with a concrete reason for genuinely docs-only/non-runtime work.
 5. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
-6. Fresh explicit Owner authorization for the exact next GitHub transition.
+6. Applicable explicit Owner authorization for the exact next GitHub transition. Only a Ready transition for the same Draft PR may have been expressly preauthorized by the unchanged Task Envelope under the Branch and Release Policy below; merge, `staging -> main`, release, and production always require fresh explicit Owner authorization.
 
 A candidate that changes governance, `AGENTS.md`, Harness documents, or policy prompts must be reviewed and released under the authoritative rules from its exact PR base. Candidate-side proposed rules never authorize, audit, or weaken the lifecycle of that same candidate.
 
@@ -161,9 +177,9 @@ For high-risk work, output follows `docs/agent-harness/RELEASE_AUDITOR_REPORT_SC
 
 Canonical Evaluator or Release Auditor report persistence is evidence-only and is used when the high-risk task or exact Owner authorization requires a durable report comment.
 
-Posting a report comment requires explicit Owner authorization for persistence for that exact audit run. Generic `audit`, `review`, `read-only`, or silence does not authorize a GitHub write.
+Posting a report comment requires either explicit Owner authorization for that exact audit run or a Task Envelope that expressly preauthorizes evidence-only canonical report persistence for its exact Task, branch, and PR. If neither exists, generic `audit`, `review`, `read-only`, or silence does not authorize a GitHub write.
 
-A persisted report must bind the exact PR and audited base/head and conform to the applicable retained schema. It cannot authorize remediation, mark-ready, merge, deployment, production, Issue lifecycle mutation, or another task.
+A persisted report must bind the exact audit run, PR, and audited base/head and conform to the applicable retained schema. Head or authority drift invalidates the report rather than rebinding it. Per-Task persistence preauthorization never permits the implementation context to self-audit and cannot authorize out-of-scope remediation, mark-ready, merge, deployment, production, provider mutation, Issue lifecycle mutation, or another task.
 
 ## Branch and Release Policy
 
@@ -175,6 +191,8 @@ A persisted report must bind the exact PR and audited base/head and conform to t
 - Never force-push unless an exact later rule and Owner authorization explicitly permit it; ordinary and high-risk task flows do not.
 - Required CI/Security and branch protections must not be bypassed.
 - Before ready, merge, or release transitions, the current PR base SHA and head SHA must exactly match the identities bound by the latest applicable semantic review/audit evidence; for high-risk work they must match the latest applicable Evaluator PASS and Release Auditor PASS. Any base or head drift invalidates the prior review/audit evidence. Do not rebind old PASS records to the new state; run the required fresh review/audit again before proceeding.
+- A Task Envelope may expressly preauthorize marking its same Draft PR Ready only after the exact candidate head is frozen, repository-side validation passes, the PR body is synchronized, all pre-Ready conditions under the authoritative PR-base rules are satisfied, and unresolved actionable findings equal zero. Absent that express preauthorization, Ready requires a new Owner decision. A candidate changing these rules cannot use its candidate-side text to authorize its own Ready transition.
+- Ready is not merge authorization. Every merge remains a separate fresh explicit Owner decision bound to the exact current audited head.
 - Any Agent-executed merge must submit `expected_head_sha` equal to the exact audited/current head SHA, or use an equivalent atomic compare-and-swap. A mismatch fails closed; do not retry the merge against a new head until that head has been freshly reviewed/audited and the Owner has authorized the new exact transition.
 - `staging -> main` promotion is a separate Owner-authorized release transition.
 
@@ -196,11 +214,13 @@ If a competing writer or equivalent active PR appears, stop and fail closed. Rec
 
 ## Delegated Control-Plane Bookkeeping
 
-Delegated bookkeeping remains available for high-risk/governance tasks when the Owner has explicitly approved a specific next action and a durable handoff is useful.
+Delegated bookkeeping is an optional durable handoff, not the default path for direct current-session Owner authorization. Use `Bookkeeper -> one Gate -> STOP -> fresh executor` only when the Owner explicitly requests a durable handoff or genuinely separate execution context is required.
 
 It may create/update one bounded task record and append one bounded gate that records the current Owner decision plus technical bindings. It cannot invent Owner intent or broaden scope.
 
-A context that writes such a gate must stop and must not consume it. A fresh executor must re-read live repository identity, refs, this `AGENTS.md`, accepted policy/G2 binding, the task record, exact gate, and writer state before execution.
+A context whose bounded role is to create that handoff must stop and must not consume it. A fresh executor must re-read live repository identity, refs, this `AGENTS.md`, accepted policy/G2 binding, the task record, exact gate, and writer state before execution.
+
+When authoritative rules do not require role separation for the directly authorized bounded action, a fresh-verified active executor may record the exact current-session Owner decision as evidence and continue inside the same unchanged Task Envelope. The record does not create authority, broaden scope, revive historical authorization, or allow candidate-side self-authorization.
 
 This bookkeeping path is not a bot, service, ledger, dispatcher, reducer, receipt engine, automatic task selector, or second control plane.
 
@@ -235,6 +255,10 @@ The following require a separate exact Owner gate and fresh live verification of
 - auth, billing, payment, refund, cancel, checkout, or webhook actions affecting real state;
 - secrets, credentials, environment variables, project settings, or provider configuration;
 - Vercel, Supabase, Stripe, or any other external runtime mutation.
+
+One such Gate may authorize a bounded external-operation batch only when it binds the exact Task, service, environment, resource class, operation/validation plan, cleanup and read-back duties, destructive limits, and stop conditions. Within that unchanged batch, individual API calls, SQL statements, expressly planned retries, fixtures, smoke or concurrency steps, cleanup, and read-backs do not require one Gate each.
+
+A new Owner decision is required before changing service, environment, resource class, or materially expanding the plan or destructive impact, and before entering production, live payment, or real-user state. Supabase production, Stripe live, production, secrets/environment variables, and provider project settings remain separate protected boundaries; a repository or another external-operation Gate cannot silently include them.
 
 A repository PR, CI PASS, Evaluator PASS, Release Auditor PASS, issue state, or previous Owner authorization does not grant these permissions.
 
