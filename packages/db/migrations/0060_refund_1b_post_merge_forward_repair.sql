@@ -7,8 +7,9 @@
 -- REFUND-1B post-merge forward repair.
 -- Applied migrations 0053-0059 are immutable. This migration quarantines
 -- unproven legacy grant accounting, normalizes only uniquely provable annual
--- period-01 identities, reconstructs consumed_amount only from a complete
--- bound ledger chain, and closes the terminated/reversed pre-deduct blocker.
+-- period-01 identities, deliberately leaves legacy consumed_amount untrusted
+-- when full-lifetime canonical-writer provenance is unavailable, and closes
+-- the terminated/reversed pre-deduct blocker.
 
 BEGIN;
 
@@ -128,114 +129,19 @@ SET accounting_review_reason = 'legacy_consumption_unproven'
 FROM identity_proof AS proof
 WHERE g.id = proof.id;
 
--- A legacy consumed amount is trusted only if at least one bound pre-deduct
--- exists and every record in the chain is internally complete. A terminal
--- record, when present, must be unique and carry the explicit signed
--- periodConsumedDelta. Absence of ledger evidence never proves zero.
-WITH bound_pre_deduct AS (
-  SELECT
-    g.id AS grant_id,
-    pre.id AS pre_deduct_id,
-    CASE
-      WHEN jsonb_typeof(pre.metadata->'amountToPeriod') = 'number'
-       AND jsonb_typeof(pre.metadata->'amountToOther') = 'number'
-       AND (pre.metadata->>'amountToPeriod') ~ '^[0-9]+$'
-       AND (pre.metadata->>'amountToOther') ~ '^[0-9]+$'
-       AND pre.user_id = g.user_id
-       AND pre.metadata->>'chargedGrantId' = g.id::TEXT
-       AND pre.metadata->>'chargedPeriodKey' = g.grant_period_key
-       AND (pre.metadata->>'amountToPeriod')::NUMERIC
-           + (pre.metadata->>'amountToOther')::NUMERIC = ABS(pre.amount)::NUMERIC
-      THEN (pre.metadata->>'amountToPeriod')::NUMERIC
-      ELSE NULL
-    END AS initial_period_consumed
-  FROM public.subscription_credit_grants AS g
-  JOIN public.billing_history AS pre
-    ON pre.operation_type = 'pre_deduct'
-   AND pre.metadata->>'chargedGrantId' = g.id::TEXT
-), terminal_chain AS (
-  SELECT
-    pre.grant_id,
-    pre.pre_deduct_id,
-    pre.initial_period_consumed,
-    count(terminal.id) AS terminal_count,
-    CASE
-      WHEN count(terminal.id) = 0 THEN 0
-      WHEN count(terminal.id) = 1
-       AND bool_and(jsonb_typeof(terminal.metadata->'periodConsumedDelta') = 'number')
-       AND bool_and((terminal.metadata->>'periodConsumedDelta') ~ '^-?[0-9]+$')
-       AND bool_and(terminal.user_id = grant_row.user_id)
-       AND bool_and(terminal.metadata->>'chargedGrantId' = pre.grant_id::TEXT)
-       AND bool_and(terminal.metadata->>'chargedPeriodKey' = grant_row.grant_period_key)
-      THEN max(
-        CASE
-          WHEN (terminal.metadata->>'periodConsumedDelta') ~ '^-?[0-9]+$'
-          THEN (terminal.metadata->>'periodConsumedDelta')::NUMERIC
-          ELSE NULL
-        END
-      )
-      ELSE NULL
-    END AS terminal_period_delta
-  FROM bound_pre_deduct AS pre
-  JOIN public.subscription_credit_grants AS grant_row ON grant_row.id = pre.grant_id
-  LEFT JOIN public.billing_history AS terminal
-    ON terminal.metadata->>'preDeductId' = pre.pre_deduct_id::TEXT
-   AND terminal.operation_type IN ('settle', 'refund', 'abort_settle')
-  GROUP BY pre.grant_id, pre.pre_deduct_id, pre.initial_period_consumed, grant_row.grant_period_key
-), ledger_proof AS (
-  SELECT
-    chain.grant_id,
-    sum(chain.initial_period_consumed + chain.terminal_period_delta) AS exact_consumed
-  FROM terminal_chain AS chain
-  GROUP BY chain.grant_id
-  HAVING count(*) > 0
-     AND bool_and(chain.initial_period_consumed IS NOT NULL)
-     AND bool_and(chain.terminal_count <= 1)
-     AND bool_and(chain.terminal_period_delta IS NOT NULL)
-), identity_proof AS (
-  SELECT g.id
-  FROM public.subscription_credit_grants AS g
-  JOIN public.user_subscriptions AS us
-    ON us.stripe_subscription_id = g.stripe_subscription_id
-   AND us.user_id = g.user_id
-  GROUP BY g.id
-  HAVING count(*) = 1
-     AND bool_and(COALESCE(public.refund_1b_is_canonical_period_identity(
-       us.user_id,
-       us.stripe_subscription_id,
-       us.membership_plan_id,
-       us.billing_cycle,
-       us.current_period_start,
-       us.current_period_end,
-       g.user_id,
-       g.stripe_subscription_id,
-       g.membership_plan_id,
-       g.billing_cycle,
-       g.grant_type,
-       g.grant_period_key,
-       g.period_start,
-       g.period_end,
-       g.period_index,
-       g.total_periods,
-       g.stripe_invoice_id
-     ), FALSE))
-)
-UPDATE public.subscription_credit_grants AS g
-SET consumed_amount = ledger.exact_consumed::INTEGER,
-    accounting_state = 'trusted',
-    accounting_review_reason = NULL,
-    metadata = COALESCE(g.metadata, '{}'::JSONB) || jsonb_build_object(
-      'refund1bLegacyAccountingProof', jsonb_build_object(
-        'migration', '0060_refund_1b_post_merge_forward_repair',
-        'basis', 'unique_identity_and_complete_bound_ledger_chain',
-        'consumedAmount', ledger.exact_consumed::INTEGER
-      )
-    ),
-    updated_at = now()
-FROM ledger_proof AS ledger
-JOIN identity_proof AS identity ON identity.id = ledger.grant_id
-WHERE g.id = ledger.grant_id
-  AND ledger.exact_consumed BETWEEN 0 AND g.credits_granted;
+-- A post-0053 bound ledger chain cannot prove that a legacy grant had no
+-- earlier, unbound consumption. Nor can this schema prove that a terminal
+-- periodConsumedDelta was written after the 0058/0059 canonical metadata
+-- repairs rather than by an earlier caller-overridable writer. There is no
+-- database-durable full-lifetime, exact-grant, exact-period, canonical-writer
+-- provenance surface for pre-0060 history. Therefore this migration never
+-- derives a legacy consumed_amount and never upgrades a legacy row to trusted.
+--
+-- The initial column default quarantines every row present when 0060 starts;
+-- only the final default below applies to grants created after this forward
+-- repair. A later separately authorized migration may upgrade an individual
+-- row only when it introduces and verifies a genuine full-lifetime provenance
+-- record, not by inferring zero or accepting a partial bound chain.
 
 ALTER TABLE public.subscription_credit_grants
   ALTER COLUMN accounting_state SET DEFAULT 'trusted',

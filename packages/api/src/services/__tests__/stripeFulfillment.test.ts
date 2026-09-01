@@ -3975,6 +3975,144 @@ describe('stripe fulfillment helpers', () => {
     });
   });
 
+  it('keeps a multi-refund charge.refunded event non-mutating and leaves precise handling to refund.created', async () => {
+    const supabase = createRefundWebhookSupabase();
+    const listChargeRefunds = vi.fn().mockResolvedValue({
+      data: [{ id: 're_charge_partial_2', status: 'succeeded', created: 1_788_178_054 }],
+      has_more: false,
+    });
+
+    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_charge_multiple_partial_refunds',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_charge_multiple_partial_refunds',
+            amount: 1_000,
+            amount_refunded: 700,
+            currency: 'usd',
+            refunded: false,
+            refunds: {
+              data: [{ id: 're_charge_partial_1', status: 'succeeded', created: 1_788_178_053 }],
+              has_more: true,
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { listChargeRefunds },
+    );
+
+    expect(result).toEqual({
+      reconciled: false,
+      reason: 'charge_refunded_refund_identity_ambiguous',
+      chargeId: 'ch_charge_multiple_partial_refunds',
+      refundId: null,
+      refundStatus: null,
+    });
+    expect(listChargeRefunds).toHaveBeenCalledWith(
+      'ch_charge_multiple_partial_refunds',
+      're_charge_partial_1',
+    );
+    expect(supabase.tables.payment_orders).toHaveLength(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
+
+    const preciseSupabase = createRefundWebhookSupabase({
+      payment_orders: [{
+        id: 'order-charge-multiple-refunds',
+        user_id: 'user-charge-multiple-refunds',
+        membership_plan_id: 'plan-charge-multiple-refunds',
+        item_type: 'membership_plan',
+        billing_cycle: 'monthly',
+        stripe_subscription_id: 'sub_charge_multiple_refunds',
+        stripe_invoice_id: 'in_charge_multiple_refunds',
+        amount_total: 1_000,
+        currency: 'usd',
+        status: 'completed',
+        payment_status: 'paid',
+      }],
+      user_subscriptions: [{
+        id: 'subscription-charge-multiple-refunds',
+        user_id: 'user-charge-multiple-refunds',
+        membership_plan_id: 'plan-charge-multiple-refunds',
+        stripe_subscription_id: 'sub_charge_multiple_refunds',
+        billing_cycle: 'monthly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2026-02-01T00:00:00.000Z',
+      }],
+      profiles: [{ id: 'user-charge-multiple-refunds', credits: 100 }],
+      subscription_credit_grants: [{
+        id: 'grant-charge-multiple-refunds',
+        user_id: 'user-charge-multiple-refunds',
+        membership_plan_id: 'plan-charge-multiple-refunds',
+        stripe_subscription_id: 'sub_charge_multiple_refunds',
+        stripe_invoice_id: 'in_charge_multiple_refunds',
+        billing_cycle: 'monthly',
+        grant_type: 'monthly_invoice',
+        grant_period_key: 'invoice:in_charge_multiple_refunds',
+        period_start: '2026-01-01T00:00:00.000Z',
+        period_end: '2026-02-01T00:00:00.000Z',
+        period_index: null,
+        total_periods: 1,
+        credits_granted: 10,
+        consumed_amount: 4,
+        status: 'granted',
+      }],
+    });
+    const preciseEvent = {
+      id: 'evt_refund_created_later_full',
+      type: 'refund.created',
+      data: {
+        object: {
+          id: 're_charge_later_full',
+          amount: 1_000,
+          currency: 'usd',
+          status: 'succeeded',
+          created: 1_768_464_000,
+          charge: {
+            id: 'ch_charge_multiple_refunds',
+            amount: 1_000,
+            amount_refunded: 1_000,
+            currency: 'usd',
+            invoice: 'in_charge_multiple_refunds',
+            payment_intent: 'pi_charge_multiple_refunds',
+          },
+        } as Stripe.Refund,
+      },
+    } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } };
+
+    const precise = await reconcileSubscriptionRefundFromStripeWebhook(
+      preciseSupabase,
+      preciseEvent,
+      { now: '2026-01-20T00:00:00.000Z' },
+    );
+    expect(precise).toMatchObject({
+      reconciled: true,
+      reviewRequired: false,
+      clawbackAmount: 6,
+      appliedClawbackAmount: 6,
+      reversedGrantCount: 1,
+    });
+    expect(preciseSupabase.tables.profiles[0].credits).toBe(94);
+    expect(preciseSupabase.tables.credit_transactions).toHaveLength(1);
+
+    const replay = await reconcileSubscriptionRefundFromStripeWebhook(
+      preciseSupabase,
+      { ...preciseEvent, id: 'evt_refund_created_later_full_replay' },
+      { now: '2026-01-20T00:05:00.000Z' },
+    );
+    expect(replay).toMatchObject({
+      reconciled: true,
+      alreadyReconciled: true,
+      appliedClawbackAmount: 0,
+    });
+    expect(preciseSupabase.tables.profiles[0].credits).toBe(94);
+    expect(preciseSupabase.tables.credit_transactions).toHaveLength(1);
+  });
+
   it('R4: charge.refunded without a refund-object created timestamp never falls back to charge.created and stops for review', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{

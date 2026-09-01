@@ -2578,15 +2578,15 @@ describe('REFUND-1B migration 0060 post-merge forward repair', () => {
     expect(schemaSource).toContain("accountingReviewReason: text('accounting_review_reason')");
   });
 
-  it('trusts consumed_amount only from a complete, non-empty bound ledger chain and canonical identity', () => {
-    expect(migrationSql).toContain("pre.operation_type = 'pre_deduct'");
-    expect(migrationSql).toContain("pre.metadata->>'chargedGrantId' = g.id::TEXT");
-    expect(migrationSql).toContain("pre.metadata->>'chargedPeriodKey' = g.grant_period_key");
-    expect(migrationSql).toContain("count(*) > 0");
-    expect(migrationSql).toContain("chain.terminal_count <= 1");
-    expect(migrationSql).toContain("periodConsumedDelta");
-    expect(migrationSql).toContain('unique_identity_and_complete_bound_ledger_chain');
-    expect(migrationSql).toContain('ledger.exact_consumed BETWEEN 0 AND g.credits_granted');
+  it('never upgrades a legacy grant from partial bound history or caller-overridable terminal metadata', () => {
+    expect(migrationSql).toContain('database-durable full-lifetime, exact-grant, exact-period, canonical-writer');
+    expect(migrationSql).toMatch(/migration never\s+-- derives a legacy\s+consumed_amount/);
+    expect(migrationSql).toMatch(/never upgrades a legacy row to trusted/);
+    expect(migrationSql).toMatch(/only the final default below applies to grants created after this forward/);
+    expect(migrationSql).not.toContain("pre.operation_type = 'pre_deduct'");
+    expect(migrationSql).not.toContain("pre.metadata->>'chargedGrantId' = g.id::TEXT");
+    expect(migrationSql).not.toContain("metadata->>'periodConsumedDelta'");
+    expect(migrationSql).not.toContain('unique_identity_and_complete_bound_ledger_chain');
     expect(migrationSql).not.toMatch(/COALESCE\(ledger\.exact_consumed,\s*0\)/);
   });
 

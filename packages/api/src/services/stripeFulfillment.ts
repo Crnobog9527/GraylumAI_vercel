@@ -2238,12 +2238,21 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     }
     const successfulRefunds = refunds.filter((refund) => isSuccessfulRefundStatus(refund.status));
     if (successfulRefunds.length > 1) {
-      throwFulfillmentError(
-        'refund_charge_refund_not_unique',
-        STRIPE_FULFILLMENT_ERRORS.refundChargeLookup,
-        new Error('charge successful refund is not unique'),
-        { chargeId: maskIdentifier(charge.id), refundCount: successfulRefunds.length },
-      );
+      // A charge can have several legitimate partial refunds. This aggregate
+      // webhook cannot establish which refund caused the event, so it must not
+      // select one, derive a timestamp, or invoke the clawback path. The
+      // precise refund.created event remains the only per-refund path.
+      logger.warn('billing', 'stripe_charge_refunded_refund_identity_ambiguous', {
+        chargeId: maskIdentifier(charge.id),
+        successfulRefundCount: successfulRefunds.length,
+      });
+      return {
+        reconciled: false,
+        reason: 'charge_refunded_refund_identity_ambiguous',
+        chargeId: charge.id ?? null,
+        refundId: null,
+        refundStatus: null,
+      };
     }
     trustedChargeRefund = successfulRefunds[0] ?? null;
     const genericRefund = trustedChargeRefund ?? refunds[0] ?? null;
