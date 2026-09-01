@@ -53,6 +53,32 @@ type RefundWebhookMockHooks = {
   }) => Promise<void> | void;
 };
 
+function withInvoiceSubscriptionServiceLine(invoice: Record<string, any>): Stripe.Invoice {
+  const subscriptionId = invoice.parent?.subscription_details?.subscription
+    ?? invoice.subscription;
+  const start = invoice.period_start ?? invoice.created ?? 1_742_646_400;
+  const end = typeof invoice.period_end === 'number' && invoice.period_end > start
+    ? invoice.period_end
+    : start + 2_592_000;
+
+  return {
+    ...invoice,
+    lines: {
+      object: 'list',
+      data: [{
+        id: `il_${invoice.id}`,
+        period: { start, end },
+        parent: {
+          type: 'subscription_item_details',
+          subscription_item_details: { proration: false, subscription: subscriptionId },
+        },
+      }],
+      has_more: false,
+      url: `/v1/invoices/${invoice.id}/lines`,
+    },
+  } as unknown as Stripe.Invoice;
+}
+
 class RefundWebhookMockQuery {
   private filters: RefundWebhookFilter[] = [];
   private containsFilters: Array<{ column: string; value: unknown }> = [];
@@ -1102,7 +1128,11 @@ describe('stripe fulfillment helpers', () => {
       items: { data: [{ current_period_start: 1767225600, current_period_end: 1798761600 }] },
     } as unknown as Stripe.Subscription;
 
-    await syncSubscriptionState(supabase, staleSubscription);
+    await expect(syncSubscriptionState(supabase, staleSubscription)).rejects.toMatchObject({
+      name: 'StripeFulfillmentError',
+      stage: 'subscription_state_term_cas_lost',
+      safeContext: expect.objectContaining({ retryable: true }),
+    });
 
     expect(renewalCommitted).toBe(true);
     expect(staleReadPausedBeforeUpdate).toBe(true);
@@ -1303,7 +1333,7 @@ describe('stripe fulfillment helpers', () => {
         credits: 100,
       }],
     });
-    const paidInvoice = {
+    const paidInvoice = withInvoiceSubscriptionServiceLine({
       id: 'in_paid_yearly_checkout',
       status: 'paid',
       created: 1782627600,
@@ -1317,7 +1347,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_paid_yearly_checkout',
         },
       },
-    } as Stripe.Invoice;
+    });
     const subscription = {
       id: 'sub_paid_yearly_checkout',
       status: 'active',
@@ -1472,7 +1502,7 @@ describe('stripe fulfillment helpers', () => {
         credits: 100,
       }],
     });
-    const paidInvoice = {
+    const paidInvoice = withInvoiceSubscriptionServiceLine({
       id: 'in_expanded_latest_invoice',
       status: 'paid',
       created: 1782627600,
@@ -1486,7 +1516,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_expanded_latest_invoice',
         },
       },
-    } as Stripe.Invoice;
+    });
     const subscription = {
       id: 'sub_expanded_latest_invoice',
       status: 'active',
@@ -1578,7 +1608,7 @@ describe('stripe fulfillment helpers', () => {
         credits: 100,
       }],
     });
-    const paidInvoice = {
+    const paidInvoice = withInvoiceSubscriptionServiceLine({
       id: 'in_invoice_list_fallback',
       status: 'paid',
       created: 1782627600,
@@ -1592,7 +1622,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_invoice_list_fallback',
         },
       },
-    } as Stripe.Invoice;
+    });
     const subscription = {
       id: 'sub_invoice_list_fallback',
       status: 'active',
@@ -1918,7 +1948,7 @@ describe('stripe fulfillment helpers', () => {
         credits: 100,
       }],
     });
-    const paidInvoice = {
+    const paidInvoice = withInvoiceSubscriptionServiceLine({
       id: 'in_rpc_failure_audit',
       status: 'paid',
       created: 1782627600,
@@ -1932,7 +1962,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_rpc_failure_audit',
         },
       },
-    } as Stripe.Invoice;
+    });
     const subscription = {
       id: 'sub_rpc_failure_audit',
       status: 'active',
@@ -2447,7 +2477,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_123',
         customer: 'cus_test_123',
         status: 'paid',
@@ -2458,7 +2488,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_123',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(updates).toEqual([
@@ -2602,7 +2632,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_old',
         customer: 'cus_test_123',
         status: 'paid',
@@ -2613,7 +2643,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_123',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(tables.payment_orders[0]).toMatchObject({
@@ -2880,7 +2910,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_atomic',
         customer: 'cus_test_atomic',
         status: 'paid',
@@ -2893,7 +2923,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_atomic',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(tables.subscription_credit_grants).toHaveLength(1);
@@ -3270,10 +3300,22 @@ describe('stripe fulfillment helpers', () => {
       id: 'pi_webhook_invoice_payment',
       invoice: null,
     } as unknown as Stripe.PaymentIntent);
-    const listInvoicePayments = vi.fn().mockResolvedValue({
-      object: 'list',
-      data: [{
-        id: 'inpay_webhook_invoice_payment',
+    const listInvoicePayments = vi.fn()
+      .mockResolvedValueOnce({
+        object: 'list',
+        data: [{
+          id: 'inpay_webhook_invoice_payment_page_1',
+          object: 'invoice_payment',
+          invoice: null,
+          status: 'open',
+        }],
+        has_more: true,
+        url: '/v1/invoice_payments',
+      })
+      .mockResolvedValueOnce({
+        object: 'list',
+        data: [{
+        id: 'inpay_webhook_invoice_payment_page_2',
         object: 'invoice_payment',
         invoice: 'in_webhook_invoice_payment',
         payment: {
@@ -3283,9 +3325,9 @@ describe('stripe fulfillment helpers', () => {
         status: 'paid',
         livemode: false,
       }],
-      has_more: false,
-      url: '/v1/invoice_payments',
-    } as unknown as Stripe.ApiList<Stripe.InvoicePayment>);
+        has_more: false,
+        url: '/v1/invoice_payments',
+      } as unknown as Stripe.ApiList<Stripe.InvoicePayment>);
 
     const result = await reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
@@ -3314,7 +3356,12 @@ describe('stripe fulfillment helpers', () => {
     );
 
     expect(retrievePaymentIntent).toHaveBeenCalledWith('pi_webhook_invoice_payment');
-    expect(listInvoicePayments).toHaveBeenCalledWith('pi_webhook_invoice_payment');
+    expect(listInvoicePayments).toHaveBeenNthCalledWith(1, 'pi_webhook_invoice_payment');
+    expect(listInvoicePayments).toHaveBeenNthCalledWith(
+      2,
+      'pi_webhook_invoice_payment',
+      'inpay_webhook_invoice_payment_page_1',
+    );
     expect(result).toMatchObject({
       reconciled: true,
       fullRefund: false,
@@ -3330,6 +3377,65 @@ describe('stripe fulfillment helpers', () => {
     });
     expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
       status: 'reversed',
+    });
+  });
+
+  it('fails closed when paid InvoicePayments resolve to conflicting invoices across pages', async () => {
+    const listInvoicePayments = vi.fn()
+      .mockResolvedValueOnce({
+        data: [{
+          id: 'inpay_conflict_page_1',
+          invoice: 'in_conflict_a',
+          status: 'paid',
+        }],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          id: 'inpay_conflict_page_2',
+          invoice: 'in_conflict_b',
+          status: 'paid',
+        }],
+        has_more: false,
+      });
+
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(
+      createRefundWebhookSupabase(),
+      {
+        id: 'evt_invoice_payment_conflict',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_invoice_payment_conflict',
+            amount: 100,
+            currency: 'usd',
+            status: 'succeeded',
+            charge: 'ch_invoice_payment_conflict',
+            payment_intent: 'pi_invoice_payment_conflict',
+            metadata: {},
+            created: 1_788_178_053,
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      {
+        retrieveCharge: vi.fn().mockResolvedValue({
+          id: 'ch_invoice_payment_conflict',
+          payment_intent: 'pi_invoice_payment_conflict',
+          metadata: {},
+        } as Stripe.Charge),
+        retrievePaymentIntent: vi.fn().mockResolvedValue({
+          id: 'pi_invoice_payment_conflict',
+          invoice: null,
+        } as unknown as Stripe.PaymentIntent),
+        listInvoicePayments,
+      },
+    )).rejects.toMatchObject({
+      stage: 'refund_invoice_payment_pagination',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({
+          message: 'paid_invoice_payment_invoice_not_unique',
+        }),
+      }),
     });
   });
 
@@ -3682,6 +3788,14 @@ describe('stripe fulfillment helpers', () => {
       ],
     });
 
+    const listChargeRefunds = vi.fn().mockResolvedValue({
+      data: [{
+        id: 're_webhook_charge_refund_full',
+        status: 'succeeded',
+        created: 1802649700,
+      }],
+      has_more: false,
+    });
     const result = await reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
       {
@@ -3702,16 +3816,13 @@ describe('stripe fulfillment helpers', () => {
               data: [{
                 id: 're_webhook_charge_refund_pending',
                 status: 'pending',
-              }, {
-                id: 're_webhook_charge_refund_full',
-                status: 'succeeded',
-                created: 1802649700,
               }],
+              has_more: true,
             },
           } as Stripe.Charge,
         },
       } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
-      { now: '2027-03-01T00:00:00.000Z' },
+      { now: '2027-03-01T00:00:00.000Z', listChargeRefunds },
     );
 
     expect(result).toMatchObject({
@@ -3784,16 +3895,13 @@ describe('stripe fulfillment helpers', () => {
               data: [{
                 id: 're_webhook_charge_refund_pending',
                 status: 'pending',
-              }, {
-                id: 're_webhook_charge_refund_full',
-                status: 'succeeded',
-                created: 1802649700,
               }],
+              has_more: true,
             },
           } as Stripe.Charge,
         },
       } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
-      { now: '2027-03-01T00:05:00.000Z' },
+      { now: '2027-03-01T00:05:00.000Z', listChargeRefunds },
     );
 
     expect(replay).toMatchObject({
@@ -3806,6 +3914,65 @@ describe('stripe fulfillment helpers', () => {
       creditTransactionId: null,
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(listChargeRefunds).toHaveBeenCalledWith(
+      'ch_webhook_charge_refund',
+      're_webhook_charge_refund_pending',
+    );
+  });
+
+  it.each([
+    {
+      name: 'provider failure',
+      listChargeRefunds: vi.fn().mockRejectedValue(new Error('refund provider unavailable')),
+      paginationLimits: undefined,
+      reason: 'refund provider unavailable',
+    },
+    {
+      name: 'cursor non-progress',
+      listChargeRefunds: vi.fn().mockResolvedValue({
+        data: [{ id: 're_charge_cursor', status: 'pending' }],
+        has_more: true,
+      }),
+      paginationLimits: undefined,
+      reason: 'charge_refunds_cursor_did_not_advance',
+    },
+    {
+      name: 'page cap exhaustion',
+      listChargeRefunds: vi.fn(),
+      paginationLimits: { maxPages: 1 },
+      reason: 'charge_refunds_page_cap_exceeded',
+    },
+  ])('fails closed for charge refund $name', async ({
+    listChargeRefunds,
+    paginationLimits,
+    reason,
+  }) => {
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(
+      createRefundWebhookSupabase(),
+      {
+        id: 'evt_charge_refund_pagination_failure',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_charge_refund_pagination_failure',
+            amount: 100,
+            amount_refunded: 100,
+            currency: 'usd',
+            refunded: true,
+            refunds: {
+              data: [{ id: 're_charge_cursor', status: 'pending' }],
+              has_more: true,
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      { listChargeRefunds, paginationLimits },
+    )).rejects.toMatchObject({
+      stage: 'refund_charge_refund_list',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({ message: reason }),
+      }),
+    });
   });
 
   it('R4: charge.refunded without a refund-object created timestamp never falls back to charge.created and stops for review', async () => {
@@ -5039,7 +5206,7 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 
-  it('uses the matching subscription line service period when the invoice header window is zero-length', async () => {
+  it('finds the unique subscription service period on invoice line page 2 and replays idempotently', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{
         id: 'order-webhook-line-period-source',
@@ -5069,9 +5236,7 @@ describe('stripe fulfillment helpers', () => {
       }],
     });
 
-    await fulfillMembershipInvoice(
-      supabase,
-      {
+    const invoice = {
         id: 'in_webhook_line_period',
         amount_paid: 990,
         currency: 'usd',
@@ -5087,22 +5252,39 @@ describe('stripe fulfillment helpers', () => {
         },
         lines: {
           data: [{
-            id: 'il_webhook_line_period',
+            id: 'il_webhook_line_period_page_1',
             period: {
               start: 1_788_125_971,
-              end: 1_790_804_371,
+              end: 1_788_126_071,
             },
             parent: {
               type: 'subscription_item_details',
               subscription_item_details: {
-                proration: false,
-                subscription: 'sub_webhook_line_period',
+                proration: true,
+                subscription: 'sub_other_line_period',
               },
             },
           }],
+          has_more: true,
         },
-      } as Stripe.Invoice,
-    );
+      } as Stripe.Invoice;
+    const listInvoiceLines = vi.fn().mockResolvedValue({
+      data: [{
+        id: 'il_webhook_line_period_page_2',
+        period: { start: 1_788_125_971, end: 1_790_804_371 },
+        parent: {
+          type: 'subscription_item_details',
+          subscription_item_details: {
+            proration: false,
+            subscription: 'sub_webhook_line_period',
+          },
+        },
+      }],
+      has_more: false,
+    });
+
+    await fulfillMembershipInvoice(supabase, invoice, { listInvoiceLines });
+    await fulfillMembershipInvoice(supabase, invoice, { listInvoiceLines });
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
     expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({
@@ -5122,6 +5304,117 @@ describe('stripe fulfillment helpers', () => {
         payment_status: 'paid',
       }),
     ]));
+    expect(listInvoiceLines).toHaveBeenCalledTimes(2);
+    expect(listInvoiceLines).toHaveBeenNthCalledWith(
+      1,
+      'in_webhook_line_period',
+      'il_webhook_line_period_page_1',
+    );
+  });
+
+  it.each([
+    {
+      name: 'zero matching periods',
+      lines: { data: [], has_more: false },
+      listInvoiceLines: vi.fn(),
+      paginationLimits: undefined,
+      reason: 'invoice_subscription_service_period_missing',
+    },
+    {
+      name: 'provider failure',
+      lines: { data: [{ id: 'il_provider_failure' }], has_more: true },
+      listInvoiceLines: vi.fn().mockRejectedValue(new Error('provider unavailable')),
+      paginationLimits: undefined,
+      reason: 'provider unavailable',
+    },
+    {
+      name: 'cursor non-progress',
+      lines: { data: [{ id: 'il_same_cursor' }], has_more: true },
+      listInvoiceLines: vi.fn().mockResolvedValue({
+        data: [{ id: 'il_same_cursor' }],
+        has_more: true,
+      }),
+      paginationLimits: undefined,
+      reason: 'invoice_lines_cursor_did_not_advance',
+    },
+    {
+      name: 'page cap exhaustion',
+      lines: { data: [{ id: 'il_page_cap' }], has_more: true },
+      listInvoiceLines: vi.fn(),
+      paginationLimits: { maxPages: 1 },
+      reason: 'invoice_lines_page_cap_exceeded',
+    },
+  ])('fails closed for $name while resolving invoice lines', async ({
+    lines,
+    listInvoiceLines,
+    paginationLimits,
+    reason,
+  }) => {
+    await expect(fulfillMembershipInvoice(
+      {},
+      {
+        id: 'in_line_failure',
+        amount_paid: 990,
+        currency: 'usd',
+        status: 'paid',
+        parent: { subscription_details: { subscription: 'sub_line_failure' } },
+        lines,
+      } as Stripe.Invoice,
+      { listInvoiceLines, paginationLimits },
+    )).rejects.toMatchObject({
+      stage: 'invoice_subscription_service_period',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({ message: reason }),
+      }),
+    });
+  });
+
+  it('fails closed when complete invoice line traversal finds conflicting periods', async () => {
+    await expect(fulfillMembershipInvoice(
+      {},
+      {
+        id: 'in_line_conflict',
+        amount_paid: 990,
+        currency: 'usd',
+        status: 'paid',
+        parent: { subscription_details: { subscription: 'sub_line_conflict' } },
+        lines: {
+          data: [{
+            id: 'il_conflict_page_1',
+            period: { start: 1_788_125_971, end: 1_790_804_371 },
+            parent: {
+              subscription_item_details: {
+                proration: false,
+                subscription: 'sub_line_conflict',
+              },
+            },
+          }],
+          has_more: true,
+        },
+      } as Stripe.Invoice,
+      {
+        listInvoiceLines: vi.fn().mockResolvedValue({
+          data: [{
+            id: 'il_conflict_page_2',
+            period: { start: 1_790_804_371, end: 1_793_482_771 },
+            parent: {
+              subscription_item_details: {
+                proration: false,
+                subscription: 'sub_line_conflict',
+              },
+            },
+          }],
+          has_more: false,
+        }),
+      },
+    )).rejects.toMatchObject({
+      stage: 'invoice_subscription_service_period',
+      safeContext: expect.objectContaining({
+        supabaseError: expect.objectContaining({
+          message: 'invoice_subscription_service_period_not_unique',
+        }),
+      }),
+    });
   });
 
   it('skips invoice payment replay when the invoice order is already blocked by a full-refund marker', async () => {
@@ -5163,7 +5456,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_webhook_invoice_refunded_replay',
         amount_paid: 9900,
         currency: 'usd',
@@ -5177,7 +5470,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_webhook_invoice_refunded_replay',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
@@ -5253,7 +5546,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_webhook_invoice_partial_review_replay',
         amount_paid: 9900,
         currency: 'usd',
@@ -5267,7 +5560,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_webhook_invoice_partial_review_replay',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
@@ -5337,7 +5630,7 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_webhook_source_partial_review_replay',
         amount_paid: 9900,
         currency: 'usd',
@@ -5351,7 +5644,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_webhook_source_partial_review_only',
           },
         },
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
@@ -5684,14 +5977,14 @@ describe('stripe fulfillment helpers', () => {
 
     await fulfillMembershipInvoice(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_legacy_shape',
         customer: 'cus_test_legacy',
         status: 'paid',
         currency: 'usd',
         amount_paid: 990,
         subscription: 'sub_test_legacy_shape',
-      } as Stripe.Invoice,
+      }),
     );
 
     expect(updates).toEqual([
@@ -5750,7 +6043,7 @@ describe('stripe fulfillment helpers', () => {
     await expect(
       fulfillMembershipInvoice(
         supabase,
-        {
+        withInvoiceSubscriptionServiceLine({
           id: 'in_test_rpc_failure',
           customer: 'cus_test_rpc',
           status: 'paid',
@@ -5761,7 +6054,7 @@ describe('stripe fulfillment helpers', () => {
               subscription: 'sub_test_rpc_failure',
             },
           },
-        } as Stripe.Invoice,
+        }),
       ),
     ).rejects.toMatchObject({
       name: 'SubscriptionCreditGrantError',

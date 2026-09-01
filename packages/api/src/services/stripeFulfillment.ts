@@ -73,6 +73,19 @@ type StripeRefundWebhookEvent =
   | (Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } });
 
 const STRIPE_INVOICE_CREATED_SECOND_PRECISION_TOLERANCE_MS = 999;
+const STRIPE_LIST_PAGE_SIZE = 100;
+const STRIPE_LIST_MAX_PAGES = 10;
+const STRIPE_LIST_MAX_ITEMS = 1_000;
+
+type StripeListPage<T extends { id?: string | null }> = {
+  data: T[];
+  has_more?: boolean;
+};
+
+type StripePaginationLimits = {
+  maxItems?: number;
+  maxPages?: number;
+};
 const STRIPE_FULFILLMENT_ERRORS = {
   checkoutOrderLookup: 'Failed to look up checkout order',
   checkoutOrderUpdate: 'Failed to update checkout order from session',
@@ -599,13 +612,80 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
   return null;
 }
 
-function getInvoiceSubscriptionServicePeriod(
+async function collectBoundedStripeList<T extends { id?: string | null }>(input: {
+  fetchNextPage: (startingAfter: string) => Promise<StripeListPage<T>>;
+  initialPage: StripeListPage<T>;
+  limits?: StripePaginationLimits;
+  resource: string;
+}) {
+  const maxItems = input.limits?.maxItems ?? STRIPE_LIST_MAX_ITEMS;
+  const maxPages = input.limits?.maxPages ?? STRIPE_LIST_MAX_PAGES;
+  if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error(`${input.resource}_invalid_pagination_limits`);
+  }
+
+  const items = [...input.initialPage.data];
+  if (items.length > maxItems) {
+    throw new Error(`${input.resource}_item_cap_exceeded`);
+  }
+
+  let page = input.initialPage;
+  let pageCount = 1;
+  const seenCursors = new Set<string>();
+  while (page.has_more === true) {
+    if (pageCount >= maxPages) {
+      throw new Error(`${input.resource}_page_cap_exceeded`);
+    }
+
+    const cursor = page.data.at(-1)?.id;
+    if (!cursor || seenCursors.has(cursor)) {
+      throw new Error(`${input.resource}_cursor_did_not_advance`);
+    }
+    seenCursors.add(cursor);
+
+    page = await input.fetchNextPage(cursor);
+    pageCount += 1;
+    items.push(...page.data);
+    if (items.length > maxItems) {
+      throw new Error(`${input.resource}_item_cap_exceeded`);
+    }
+  }
+
+  return items;
+}
+
+async function listStripeInvoiceLines(invoiceId: string, startingAfter: string) {
+  return getStripeClient().invoices.listLineItems(invoiceId, {
+    limit: STRIPE_LIST_PAGE_SIZE,
+    starting_after: startingAfter,
+  });
+}
+
+async function getInvoiceSubscriptionServicePeriod(
   invoice: Stripe.Invoice,
   subscriptionId: string,
+  options: {
+    listInvoiceLines?: (
+      invoiceId: string,
+      startingAfter: string,
+    ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    paginationLimits?: StripePaginationLimits;
+  } = {},
 ) {
   const periods = new Map<string, { start: number; end: number }>();
+  const lines = await collectBoundedStripeList({
+    initialPage: {
+      data: invoice.lines?.data ?? [],
+      has_more: invoice.lines?.has_more ?? false,
+    },
+    fetchNextPage: (startingAfter) => (
+      options.listInvoiceLines ?? listStripeInvoiceLines
+    )(invoice.id, startingAfter),
+    limits: options.paginationLimits,
+    resource: 'invoice_lines',
+  });
 
-  for (const line of invoice.lines?.data ?? []) {
+  for (const line of lines) {
     const lineRecord = line as Stripe.InvoiceLineItem & {
       parent?: {
         subscription_item_details?: {
@@ -630,17 +710,15 @@ function getInvoiceSubscriptionServicePeriod(
     periods.set(`${start}:${end}`, { start, end });
   }
 
-  if (periods.size === 1) {
-    return [...periods.values()][0];
+  if (periods.size === 0) {
+    throw new Error('invoice_subscription_service_period_missing');
   }
 
-  if (typeof invoice.period_start === 'number'
-    && typeof invoice.period_end === 'number'
-    && invoice.period_end > invoice.period_start) {
-    return { start: invoice.period_start, end: invoice.period_end };
+  if (periods.size > 1) {
+    throw new Error('invoice_subscription_service_period_not_unique');
   }
 
-  return null;
+  return [...periods.values()][0];
 }
 
 function getInvoicePaymentIntentId(invoice: Stripe.Invoice) {
@@ -726,16 +804,6 @@ function getRefundCharge(refund: Stripe.Refund) {
 
 function getRefundChargeId(refund: Stripe.Refund) {
   return getExpandableId(refund.charge);
-}
-
-function getChargeRefundId(charge: Stripe.Charge) {
-  const refund = getSuccessfulChargeRefund(charge) ?? charge.refunds?.data?.[0];
-  return refund?.id ?? null;
-}
-
-function getChargeRefundStatus(charge: Stripe.Charge | null | undefined) {
-  const refund = getSuccessfulChargeRefund(charge) ?? getChargeRefunds(charge)[0];
-  return typeof refund?.status === 'string' ? refund.status : null;
 }
 
 function getChargeRefunds(charge: Stripe.Charge | null | undefined) {
@@ -1090,12 +1158,7 @@ function isSuccessfulRefundStatus(status: string | null | undefined) {
 function isRefundReadyForCreditReconciliation(input: {
   eventType: StripeRefundWebhookEvent['type'];
   refundStatus: string | null;
-  charge: Stripe.Charge | null;
 }) {
-  if (input.eventType === 'charge.refunded') {
-    return Boolean(getSuccessfulChargeRefund(input.charge));
-  }
-
   return isSuccessfulRefundStatus(input.refundStatus);
 }
 
@@ -1161,7 +1224,7 @@ async function retrieveStripePaymentIntent(paymentIntentId: string) {
   }
 }
 
-async function listStripeInvoicePayments(paymentIntentId: string) {
+async function listStripeInvoicePayments(paymentIntentId: string, startingAfter?: string) {
   try {
     return await getStripeClient().invoicePayments.list({
       payment: {
@@ -1169,7 +1232,8 @@ async function listStripeInvoicePayments(paymentIntentId: string) {
         payment_intent: paymentIntentId,
       },
       status: 'paid',
-      limit: 10,
+      limit: STRIPE_LIST_PAGE_SIZE,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
     });
   } catch (error) {
     throwFulfillmentError(
@@ -1177,6 +1241,23 @@ async function listStripeInvoicePayments(paymentIntentId: string) {
       STRIPE_FULFILLMENT_ERRORS.refundInvoiceLookup,
       error,
       { paymentIntentId: maskIdentifier(paymentIntentId) },
+    );
+  }
+}
+
+async function listStripeChargeRefunds(chargeId: string, startingAfter: string) {
+  try {
+    return await getStripeClient().refunds.list({
+      charge: chargeId,
+      limit: STRIPE_LIST_PAGE_SIZE,
+      starting_after: startingAfter,
+    });
+  } catch (error) {
+    throwFulfillmentError(
+      'refund_charge_refund_list',
+      STRIPE_FULFILLMENT_ERRORS.refundChargeLookup,
+      error,
+      { chargeId: maskIdentifier(chargeId) },
     );
   }
 }
@@ -1190,6 +1271,10 @@ function getUniquePaidInvoicePaymentInvoiceId(
       .map((invoicePayment) => getExpandableId(invoicePayment.invoice))
       .filter((invoiceId): invoiceId is string => Boolean(invoiceId)),
   );
+
+  if (invoiceIds.size > 1) {
+    throw new Error('paid_invoice_payment_invoice_not_unique');
+  }
 
   return invoiceIds.size === 1 ? [...invoiceIds][0] ?? null : null;
 }
@@ -1320,7 +1405,11 @@ async function resolveSubscriptionRefundInvoice(input: {
   chargeId: string | null;
   paymentIntentId: string | null;
   retrievePaymentIntent: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
-  listInvoicePayments: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
+  listInvoicePayments: (
+    paymentIntentId: string,
+    startingAfter?: string,
+  ) => Promise<StripeListPage<Stripe.InvoicePayment>>;
+  paginationLimits?: StripePaginationLimits;
 }): Promise<{ invoiceId: string | null; order: SubscriptionRefundOrderRow | null }> {
   const invoiceIdFromMetadata = getMetadataInvoiceId(input.refundMetadata)
     ?? getMetadataInvoiceId(input.charge?.metadata);
@@ -1363,8 +1452,32 @@ async function resolveSubscriptionRefundInvoice(input: {
     invoiceIdFromRetrievedPaymentIntent = getPaymentIntentInvoiceId(paymentIntent);
 
     if (!invoiceIdFromRetrievedPaymentIntent) {
-      const invoicePayments = await input.listInvoicePayments(input.paymentIntentId);
-      invoiceIdFromInvoicePayment = getUniquePaidInvoicePaymentInvoiceId(invoicePayments);
+      try {
+        const initialInvoicePayments = await input.listInvoicePayments(input.paymentIntentId);
+        const invoicePayments = await collectBoundedStripeList({
+          initialPage: initialInvoicePayments,
+          fetchNextPage: (startingAfter) => input.listInvoicePayments(
+            input.paymentIntentId as string,
+            startingAfter,
+          ),
+          limits: input.paginationLimits,
+          resource: 'invoice_payments',
+        });
+        invoiceIdFromInvoicePayment = getUniquePaidInvoicePaymentInvoiceId({
+          data: invoicePayments,
+          has_more: false,
+        } as Stripe.ApiList<Stripe.InvoicePayment>);
+      } catch (error) {
+        if (error instanceof StripeFulfillmentError) {
+          throw error;
+        }
+        throwFulfillmentError(
+          'refund_invoice_payment_pagination',
+          STRIPE_FULFILLMENT_ERRORS.refundInvoiceLookup,
+          error,
+          { paymentIntentId: maskIdentifier(input.paymentIntentId) },
+        );
+      }
     }
   }
 
@@ -2074,7 +2187,15 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     now?: string;
     retrieveCharge?: (chargeId: string) => Promise<Stripe.Charge>;
     retrievePaymentIntent?: (paymentIntentId: string) => Promise<Stripe.PaymentIntent>;
-    listInvoicePayments?: (paymentIntentId: string) => Promise<Stripe.ApiList<Stripe.InvoicePayment>>;
+    listChargeRefunds?: (
+      chargeId: string,
+      startingAfter: string,
+    ) => Promise<StripeListPage<Stripe.Refund>>;
+    listInvoicePayments?: (
+      paymentIntentId: string,
+      startingAfter?: string,
+    ) => Promise<StripeListPage<Stripe.InvoicePayment>>;
+    paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
@@ -2087,11 +2208,47 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   let refundAmount = 0;
   let refundCurrency: string | null = null;
   let refundMetadata: Stripe.Metadata | null = null;
+  let trustedChargeRefund: Stripe.Refund | null = null;
 
   if (event.type === 'charge.refunded') {
     charge = event.data.object;
-    refundId = getChargeRefundId(charge) ?? charge.id;
-    refundStatus = getChargeRefundStatus(charge) ?? null;
+    let refunds: Stripe.Refund[];
+    try {
+      refunds = await collectBoundedStripeList({
+        initialPage: {
+          data: getChargeRefunds(charge),
+          has_more: charge.refunds?.has_more ?? false,
+        },
+        fetchNextPage: (startingAfter) => (
+          options.listChargeRefunds ?? listStripeChargeRefunds
+        )(charge?.id as string, startingAfter),
+        limits: options.paginationLimits,
+        resource: 'charge_refunds',
+      });
+    } catch (error) {
+      if (error instanceof StripeFulfillmentError) {
+        throw error;
+      }
+      throwFulfillmentError(
+        'refund_charge_refund_list',
+        STRIPE_FULFILLMENT_ERRORS.refundChargeLookup,
+        error,
+        { chargeId: maskIdentifier(charge.id) },
+      );
+    }
+    const successfulRefunds = refunds.filter((refund) => isSuccessfulRefundStatus(refund.status));
+    if (successfulRefunds.length > 1) {
+      throwFulfillmentError(
+        'refund_charge_refund_not_unique',
+        STRIPE_FULFILLMENT_ERRORS.refundChargeLookup,
+        new Error('charge successful refund is not unique'),
+        { chargeId: maskIdentifier(charge.id), refundCount: successfulRefunds.length },
+      );
+    }
+    trustedChargeRefund = successfulRefunds[0] ?? null;
+    const genericRefund = trustedChargeRefund ?? refunds[0] ?? null;
+    refundId = genericRefund?.id ?? charge.id;
+    refundStatus = genericRefund?.status ?? null;
     refundAmount = toNonNegativeInteger(charge.amount_refunded);
     refundCurrency = charge.currency ?? null;
   } else {
@@ -2108,7 +2265,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   // 成功退款对象时不得回退 charge.created (预扣/支付时间), 缺失即
   // missing_trusted_refund_timestamp → REVIEW_REQUIRED。
   const refundCreatedAt = event.type === 'charge.refunded'
-    ? asIsoTimestamp(getSuccessfulChargeRefund(charge)?.created ?? null)
+    ? asIsoTimestamp(trustedChargeRefund?.created ?? null)
     : asIsoTimestamp((event.data.object as Stripe.Refund).created);
 
   const chargeId = charge?.id ?? null;
@@ -2134,6 +2291,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     paymentIntentId,
     retrievePaymentIntent,
     listInvoicePayments,
+    paginationLimits: options.paginationLimits,
   });
   const invoiceId = resolvedInvoice.invoiceId;
 
@@ -2238,7 +2396,6 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   if (!isRefundReadyForCreditReconciliation({
     eventType: event.type,
     refundStatus,
-    charge,
   })) {
     await recordSubscriptionRefundWebhookAudit({
       supabase,
@@ -2340,6 +2497,13 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
 export async function fulfillMembershipInvoice(
   supabase: SupabaseLikeClient,
   invoice: Stripe.Invoice,
+  options: {
+    listInvoiceLines?: (
+      invoiceId: string,
+      startingAfter: string,
+    ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    paginationLimits?: StripePaginationLimits;
+  } = {},
 ) {
   const subscriptionId = getInvoiceSubscriptionId(invoice);
   const invoiceId = invoice.id;
@@ -2358,7 +2522,17 @@ export async function fulfillMembershipInvoice(
   // service period is carried by the matching non-proration invoice line. In
   // particular, subscription_create invoices can have a zero-length top-level
   // window while their line has the complete monthly or annual term.
-  const servicePeriod = getInvoiceSubscriptionServicePeriod(invoice, subscriptionId);
+  let servicePeriod: { start: number; end: number };
+  try {
+    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options);
+  } catch (error) {
+    throwFulfillmentError(
+      'invoice_subscription_service_period',
+      STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice,
+      error,
+      { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
+    );
+  }
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     amountTotal: invoice.amount_paid,
@@ -2366,8 +2540,8 @@ export async function fulfillMembershipInvoice(
     invoiceId,
     invoiceCreatedAt: asIsoTimestamp(invoice.created),
     paymentStatus: invoice.status ?? 'paid',
-    periodEnd: asIsoTimestamp(servicePeriod?.end ?? null),
-    periodStart: asIsoTimestamp(servicePeriod?.start ?? null),
+    periodEnd: asIsoTimestamp(servicePeriod.end),
+    periodStart: asIsoTimestamp(servicePeriod.start),
     stripeCustomerId: typeof invoice.customer === 'string' ? invoice.customer : null,
     subscriptionId,
   });
@@ -2550,7 +2724,12 @@ export async function fulfillPaidMembershipCheckoutSession(
   }
 
   try {
-    await fulfillMembershipInvoice(supabase, paidInvoice);
+    await fulfillMembershipInvoice(supabase, paidInvoice, {
+      listInvoiceLines: (invoiceId, startingAfter) => stripe.invoices.listLineItems(
+        invoiceId,
+        { limit: STRIPE_LIST_PAGE_SIZE, starting_after: startingAfter },
+      ),
+    });
   } catch (error) {
     await recordCheckoutFulfillmentException({
       supabase,
@@ -2685,6 +2864,19 @@ export async function syncSubscriptionState(
       expectedCurrentPeriodStart,
       expectedCurrentPeriodEnd,
     });
+    if (existingSubscription) {
+      throwFulfillmentError(
+        'subscription_state_term_cas_lost',
+        STRIPE_FULFILLMENT_ERRORS.subscriptionUpdate,
+        new Error('subscription mirror term changed during compare-and-swap'),
+        {
+          subscriptionId: maskIdentifier(subscriptionId),
+          expectedCurrentPeriodStart,
+          expectedCurrentPeriodEnd,
+          retryable: true,
+        },
+      );
+    }
     return;
   }
 

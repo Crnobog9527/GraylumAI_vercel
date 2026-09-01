@@ -1432,6 +1432,10 @@ describe('REFUND-1B refund operator preview', () => {
     };
 
     expect(isCanonicalSubscriptionCreditGrant({ subscription: yearlySubscription, grant: yearlyGrant })).toBe(true);
+    expect(isCanonicalSubscriptionCreditGrant({
+      subscription: yearlySubscription,
+      grant: { ...yearlyGrant, accounting_state: 'review_required' },
+    })).toBe(false);
     for (const malformed of [
       { user_id: 'other-user' },
       { membership_plan_id: 'other-plan' },
@@ -1738,6 +1742,30 @@ describe('REFUND-1B refund operator preview', () => {
       reviewReason: 'unexpected_current_period_status',
     });
 
+    const accountingReview = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [{
+        id: 'grant-preview-accounting-review', user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+        stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release', grant_period_key: 'annual:2027-01-01T00:00:00.000Z:01',
+        period_start: '2027-01-01T00:00:00.000Z', period_end: '2027-02-01T00:00:00.000Z',
+        period_index: 1, total_periods: 12, credits_granted: 100, consumed_amount: 0,
+        accounting_state: 'review_required',
+        accounting_review_reason: 'legacy_consumption_unproven',
+        status: 'granted',
+      }],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(accountingReview, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-01-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'legacy_consumption_unproven',
+      otherCreditsTotal: null,
+    });
+
     const malformedMonthly = createRefund1bSupabase({
       ...base,
       user_subscriptions: [{
@@ -1768,6 +1796,7 @@ describe('REFUND-1B refund operator preview', () => {
     expect(overlapping.writes).toEqual([]);
     expect(noncanonical.writes).toEqual([]);
     expect(unexpectedStatus.writes).toEqual([]);
+    expect(accountingReview.writes).toEqual([]);
     expect(malformedMonthly.writes).toEqual([]);
   });
 });
@@ -2061,8 +2090,8 @@ describe('REFUND-1B migration 0053 contract', () => {
   });
 
   it('R4: the subscription refund timestamp never falls back to charge.created', () => {
-    expect(stripeFulfillmentSource).toContain('getSuccessfulChargeRefund(charge)?.created ?? null');
-    expect(stripeFulfillmentSource).not.toContain('getSuccessfulChargeRefund(charge)?.created ?? charge?.created');
+    expect(stripeFulfillmentSource).toContain('trustedChargeRefund?.created ?? null');
+    expect(stripeFulfillmentSource).not.toContain('trustedChargeRefund?.created ?? charge?.created');
   });
 
   it('re-establishes the SEC-1 service-role-only posture for every replaced function', () => {
@@ -2223,6 +2252,10 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
     join(__dirname, '../../../../db/migrations/0056_refund_1b_service_role_select_contract_repair.sql'),
     'utf8',
   );
+  const forwardRepairMigration = readFileSync(
+    join(__dirname, '../../../../db/migrations/0060_refund_1b_post_merge_forward_repair.sql'),
+    'utf8',
+  );
   const serviceSource = readFileSync(
     join(__dirname, '../subscriptionCreditGrants.ts'),
     'utf8',
@@ -2266,6 +2299,7 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
     const grantedColumns = new Set([
       ...extractGrantColumns(fulfillmentGrantMigration),
       ...extractGrantColumns(aclRepairMigration),
+      ...extractGrantColumns(forwardRepairMigration),
     ]);
 
     expect(runtimeColumns.filter((column) => !grantedColumns.has(column))).toEqual([]);
@@ -2514,5 +2548,83 @@ describe('REFUND-1B migration 0059 failure period metadata repair', () => {
       chargedPeriodKey: 'real-bound-period',
       callerOnly: 'preserved',
     });
+  });
+});
+
+describe('REFUND-1B migration 0060 post-merge forward repair', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0060_refund_1b_post_merge_forward_repair.sql'),
+    'utf8',
+  );
+  const schemaSource = readFileSync(
+    join(__dirname, '../../../../db/schema.ts'),
+    'utf8',
+  );
+
+  it('quarantines all legacy rows before allowing trusted defaults for new grants', () => {
+    const quarantineDefault = migrationSql.indexOf(
+      "ADD COLUMN accounting_state TEXT NOT NULL DEFAULT 'review_required'",
+    );
+    const trustUpdate = migrationSql.indexOf("accounting_state = 'trusted'");
+    const newGrantDefault = migrationSql.indexOf(
+      "ALTER COLUMN accounting_state SET DEFAULT 'trusted'",
+    );
+
+    expect(quarantineDefault).toBeGreaterThan(-1);
+    expect(trustUpdate).toBeGreaterThan(quarantineDefault);
+    expect(newGrantDefault).toBeGreaterThan(trustUpdate);
+    expect(schemaSource).toContain("enum: ['trusted', 'review_required']");
+    expect(schemaSource).toContain("accountingState: text('accounting_state'");
+    expect(schemaSource).toContain("accountingReviewReason: text('accounting_review_reason')");
+  });
+
+  it('trusts consumed_amount only from a complete, non-empty bound ledger chain and canonical identity', () => {
+    expect(migrationSql).toContain("pre.operation_type = 'pre_deduct'");
+    expect(migrationSql).toContain("pre.metadata->>'chargedGrantId' = g.id::TEXT");
+    expect(migrationSql).toContain("pre.metadata->>'chargedPeriodKey' = g.grant_period_key");
+    expect(migrationSql).toContain("count(*) > 0");
+    expect(migrationSql).toContain("chain.terminal_count <= 1");
+    expect(migrationSql).toContain("periodConsumedDelta");
+    expect(migrationSql).toContain('unique_identity_and_complete_bound_ledger_chain');
+    expect(migrationSql).toContain('ledger.exact_consumed BETWEEN 0 AND g.credits_granted');
+    expect(migrationSql).not.toMatch(/COALESCE\(ledger\.exact_consumed,\s*0\)/);
+  });
+
+  it('normalizes annual period-01 full-term rows only under unique exact identity proof', () => {
+    expect(migrationSql).toContain('annual_period_01_candidates');
+    expect(migrationSql).toContain("g.period_index = 1");
+    expect(migrationSql).toContain("g.total_periods = 12");
+    expect(migrationSql).toContain('g.period_start = us.current_period_start');
+    expect(migrationSql).toContain('g.period_end = us.current_period_end');
+    expect(migrationSql).toMatch(/SELECT count\(\*\)[\s\S]*FROM public\.user_subscriptions AS mirror/);
+    expect(migrationSql).toMatch(/SELECT count\(\*\)[\s\S]*FROM public\.subscription_credit_grants AS sibling/);
+    expect(migrationSql).toContain("'unique_annual_period_01_full_term_identity'");
+  });
+
+  it('blocks review-row mutation and keeps review grants out of pre-deduct and refund clawback', () => {
+    expect(migrationSql).toContain('subscription_credit_grants_accounting_review_guard');
+    expect(migrationSql).toContain('SUBSCRIPTION_GRANT_ACCOUNTING_REVIEW_REQUIRED');
+    expect(migrationSql).toContain('PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED');
+    expect(migrationSql).toContain("g.accounting_state = 'trusted'");
+    expect(migrationSql).toContain('PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED');
+    expect(migrationSql).toContain("g.status = 'granted'");
+    expect(migrationSql).toContain("g.status NOT IN ('granted', 'reversed')");
+    expect(migrationSql).toContain("IF v_accounting_state <> 'trusted' THEN");
+    expect(migrationSql).toContain("'grant_accounting_review_required'");
+  });
+
+  it('preserves column access and service-role-only function execution', () => {
+    expect(migrationSql).toMatch(
+      /GRANT SELECT \(\s*accounting_state,\s*accounting_review_reason\s*\) ON TABLE public\.subscription_credit_grants TO service_role;/,
+    );
+    for (const signature of [
+      'public.refund_1b_guard_accounting_review_row()',
+      'public.atomic_pre_deduct(uuid,integer,text,uuid)',
+      'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',
+    ]) {
+      expect(migrationSql).toContain(signature);
+    }
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
   });
 });

@@ -3452,6 +3452,59 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('does not release future annual credits while any legacy grant accounting is under review', async () => {
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-accounting-review',
+        user_id: 'user-accounting-review',
+        membership_plan_id: 'plan-accounting-review',
+        stripe_subscription_id: 'sub_accounting_review',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_accounting_review' },
+      }],
+      membership_plans: [{
+        id: 'plan-accounting-review',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-accounting-review',
+        user_id: 'user-accounting-review',
+        membership_plan_id: 'plan-accounting-review',
+        stripe_subscription_id: 'sub_accounting_review',
+        stripe_invoice_id: 'in_accounting_review',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+        period_start: '2026-01-01T00:00:00.000Z',
+        period_end: '2026-02-01T00:00:00.000Z',
+        period_index: 1,
+        total_periods: 12,
+        credits_granted: 10,
+        consumed_amount: 0,
+        accounting_state: 'review_required',
+        accounting_review_reason: 'legacy_consumption_unproven',
+        status: 'granted',
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
   it('blocks a stale annual cron snapshot after refund termination commits before grant admission', async () => {
     let terminationCommitted = false;
     const supabase = createMockSupabase({

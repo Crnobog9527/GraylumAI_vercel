@@ -86,6 +86,8 @@ interface SubscriptionCreditGrantRow {
   total_periods?: number | null;
   credits_granted?: number | null;
   consumed_amount?: number | null;
+  accounting_state?: 'trusted' | 'review_required' | null;
+  accounting_review_reason?: string | null;
   status?: string | null;
   credit_transaction_id?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -485,6 +487,8 @@ export function isCanonicalSubscriptionCreditGrant(input: {
 }): boolean {
   const { subscription, grant } = input;
   if (
+    (grant.accounting_state !== undefined && grant.accounting_state !== 'trusted')
+    ||
     !subscription.user_id
     || !subscription.stripe_subscription_id
     || !subscription.membership_plan_id
@@ -1428,6 +1432,13 @@ function locateRefundPeriodGrant(input: {
   }
 
   const located = candidates[0];
+  if (located.accounting_state !== undefined && located.accounting_state !== 'trusted') {
+    return {
+      grant: null,
+      reviewReason: located.accounting_review_reason || 'grant_accounting_review_required',
+    };
+  }
+
   if (!input.subscription || !isCanonicalSubscriptionCreditGrant({
     subscription: input.subscription,
     grant: located,
@@ -1617,7 +1628,7 @@ async function loadAllSubscriptionCreditGrants(
 ): Promise<SubscriptionCreditGrantRow[]> {
   const result = await supabase
     .from('subscription_credit_grants')
-    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, status, credit_transaction_id, metadata, created_at')
+    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, accounting_state, accounting_review_reason, status, credit_transaction_id, metadata, created_at')
     .eq('stripe_subscription_id', input.subscriptionId);
 
   if (result.error) {
@@ -3149,6 +3160,13 @@ export async function releaseDueAnnualSubscriptionCredits(
     }
 
     const invoiceId = getAnnualReleaseInvoiceId(subscription);
+    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId });
+    if (existingGrants.some((grant) =>
+      grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
+    )) {
+      summary.skippedSubscriptions += 1;
+      continue;
+    }
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
       subscriptionId,
       invoiceId,
@@ -3298,6 +3316,14 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
   }
 
   const candidate = currentCandidates[0];
+  if (candidate.accounting_state !== undefined && candidate.accounting_state !== 'trusted') {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: candidate.accounting_review_reason || 'grant_accounting_review_required',
+    };
+  }
+
   if (!isCanonicalSubscriptionCreditGrant({
     subscription: input.subscription,
     grant: candidate,
@@ -3421,6 +3447,9 @@ export async function getSubscriptionRefundOperatorPreview(
   });
 
   const grantedGrants = grants.filter((grant) => grant.status === 'granted');
+  const hasUntrustedAccounting = grants.some((grant) =>
+    grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
+  );
   const currentPeriodResolution = resolveCanonicalPreviewCurrentPeriod({
     subscription,
     grants,
@@ -3520,7 +3549,9 @@ export async function getSubscriptionRefundOperatorPreview(
     reviewRequired: currentPeriodResolution.reviewRequired,
     reviewReason: currentPeriodResolution.reviewReason,
     balance,
-    otherCreditsTotal: balance === null ? null : balance - activeGrantsRemaining,
+    otherCreditsTotal: balance === null || hasUntrustedAccounting
+      ? null
+      : balance - activeGrantsRemaining,
     futureReleases,
     termination: {
       terminatedAt: subscription?.credit_release_terminated_at ?? null,
