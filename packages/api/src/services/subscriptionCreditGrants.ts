@@ -1754,39 +1754,11 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const mirror = await loadSubscriptionMirrorForRefund(supabase, {
     subscriptionId: input.subscriptionId,
   });
-  const existingReconciliation = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
-  const existingReviewReason = typeof existingReconciliation.reviewReason === 'string'
-    ? existingReconciliation.reviewReason
-    : null;
-  const preserveExistingReconciliation = Boolean(mirror?.credit_release_terminated_at)
-    && (input.refundIdentityAmbiguous === true
-      || existingReviewReason === 'ambiguous_charge_refunded_refund_identity');
-
-  // An aggregate charge.refunded that arrives after a precise reconciliation
-  // must not overwrite its durable result. Likewise, once an ambiguous
-  // aggregate has established a termination-only review state, a later
-  // precise event must not chase history or clear that first-event evidence.
-  if (preserveExistingReconciliation) {
-    return {
-      orderId: order.id as string,
-      subscriptionId: input.subscriptionId,
-      refundId: input.refundId ?? null,
-      fullRefund: input.isFullRefund,
-      reviewRequired: existingReconciliation.reviewRequired === true,
-      reviewReason: existingReviewReason,
-      terminationWritten: false,
-      terminatedAt: mirror?.credit_release_terminated_at ?? null,
-      locatedPeriodKey: typeof existingReconciliation.locatedPeriodKey === 'string'
-        ? existingReconciliation.locatedPeriodKey
-        : mirror?.credit_release_terminated_period_key ?? null,
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
-      appliedClawbackAmount: 0,
-      shortfallAmount: 0,
-      creditTransactionId: null,
-      alreadyReconciled: true,
-    };
-  }
+  // This pre-RPC value is retained only for the caller-facing diagnostic
+  // result of a later-event no-op. It never authorizes an evidence write.
+  const preexistingReconciliation = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
+  const preexistingAmbiguousReview = Boolean(mirror?.credit_release_terminated_at)
+    && preexistingReconciliation.reviewReason === 'ambiguous_charge_refunded_refund_identity';
   const located = locateRefundPeriodGrant({
     grants,
     refundCreatedAt: input.refundCreatedAt,
@@ -1856,6 +1828,15 @@ export async function reconcileSubscriptionRefundCreditGrants(
     );
   }
 
+  // The RPC owns the first-event transaction. Any evidence reconstruction or
+  // payment-order write after it must use a new authoritative read; the
+  // pre-RPC snapshots can be stale when another request wins the lock or when
+  // this process is replaying after a post-commit crash.
+  const freshOrder = await getSubscriptionRefundOrder(supabase, scopedRefund);
+  const freshMirror = await loadSubscriptionMirrorForRefund(supabase, {
+    subscriptionId: input.subscriptionId,
+  });
+
   const locatedPeriodKey = clawbackRow.resolved_period_key ?? null;
   const idempotencyKey = clawbackRow.idempotency_key ?? buildSubscriptionRefundIdempotencyKey({
     eventId: canonicalEventId ?? 'unlocated',
@@ -1868,26 +1849,32 @@ export async function reconcileSubscriptionRefundCreditGrants(
 
   const terminationWritten = clawbackRow.termination_written === true;
   const alreadyTerminated = clawbackRow.already_terminated === true;
-  const terminatedAt = terminationWritten
-    ? now
-    : mirror?.credit_release_terminated_at ?? null;
+  const terminatedAt = freshMirror?.credit_release_terminated_at ?? null;
+  const freshTerminationReason = freshMirror?.credit_release_terminated_reason ?? null;
+  const freshTerminationEventId = freshMirror?.credit_release_terminated_event_id ?? null;
+  const terminationEvidenceWritten = terminatedAt !== null;
+  const sameEventOwnsTermination = terminationWritten
+    || (canonicalEventId !== null && freshTerminationEventId === canonicalEventId);
 
   // The database lock boundary, not the application snapshot, decides which
   // request established the first termination. A later event must never turn
   // its own review result into payment-order evidence for the winning event.
   // Keep exact canonical replay ahead of this guard so it can reconstruct its
   // own evidence after a post-transaction process crash.
-  if (alreadyTerminated && clawbackRow.already_applied !== true) {
+  if (!sameEventOwnsTermination) {
+    const preservedAmbiguousReview = preexistingAmbiguousReview;
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
-      reviewRequired: false,
-      reviewReason: null,
+      reviewRequired: preservedAmbiguousReview,
+      reviewReason: preservedAmbiguousReview
+        ? 'ambiguous_charge_refunded_refund_identity'
+        : null,
       terminationWritten: false,
       terminatedAt,
-      locatedPeriodKey,
+      locatedPeriodKey: freshMirror?.credit_release_terminated_period_key ?? null,
       reversedGrantCount: 0,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
@@ -1901,22 +1888,23 @@ export async function reconcileSubscriptionRefundCreditGrants(
   if (reviewReason) {
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
       reviewRequired: true,
       reviewReason,
       reversalStatus: 'review_required',
-      terminationWritten,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: terminationWritten ? terminationReason : mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: terminationWritten ? canonicalEventId : mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
+      alreadyReconciled: !terminationWritten,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -1930,7 +1918,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
       appliedClawbackAmount: 0,
       shortfallAmount: 0,
       creditTransactionId: null,
-      alreadyReconciled: false,
+      alreadyReconciled: !terminationWritten,
     };
   }
 
@@ -1942,7 +1930,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
     const replayedReviewRequired = replayedShortfall > 0;
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
@@ -1955,16 +1943,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
       reversedGrantCount: clawbackRow.grant_reversed === true ? 1 : 0,
       creditTransactionId: clawbackRow.transaction_id ?? null,
       alreadyReconciled: true,
-      terminationWritten: false,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
       alreadyTerminated,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -1987,7 +1975,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   if (clawbackRow.already_reversed === true) {
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
@@ -1998,17 +1986,17 @@ export async function reconcileSubscriptionRefundCreditGrants(
       reversalStatus: 'complete',
       reversedGrantCount: 0,
       alreadyReconciled: true,
-      terminationWritten: false,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
       alreadyReversed: clawbackRow.already_reversed === true,
       alreadyTerminated,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -2052,7 +2040,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
 
   await updateSubscriptionRefundOrder({
     supabase,
-    order,
+    order: freshOrder,
     refund: scopedRefund,
     now,
     idempotencyKey,
@@ -2065,16 +2053,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
     reversedGrantCount,
     creditTransactionId,
     alreadyReconciled: false,
-    terminationWritten,
+    terminationWritten: terminationEvidenceWritten,
     terminatedAt,
-    terminationReason,
-    terminationEventId: canonicalEventId,
+    terminationReason: freshTerminationReason,
+    terminationEventId: freshTerminationEventId,
     locatedPeriodKey,
     consumedAtReversal,
   });
 
   return {
-    orderId: order.id as string,
+    orderId: freshOrder.id as string,
     subscriptionId: input.subscriptionId,
     refundId: input.refundId ?? null,
     fullRefund: input.isFullRefund,

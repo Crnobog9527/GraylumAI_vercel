@@ -4211,6 +4211,12 @@ describe('stripe fulfillment helpers', () => {
       reviewRequired: false,
       clawbackAmount: 6,
       reversedGrantCount: 1,
+      termination: {
+        written: true,
+        terminatedAt: '2026-01-20T00:00:00.000Z',
+        reason: 'stripe_refund:refund.created',
+        eventId: 'evt_refund_created_later_full',
+      },
     });
 
     const replay = await reconcileSubscriptionRefundFromStripeWebhook(
@@ -4473,6 +4479,12 @@ describe('stripe fulfillment helpers', () => {
       reviewRequired: false,
       clawbackAmount: 6,
       reversalStatus: 'complete',
+      termination: {
+        written: true,
+        terminatedAt: '2026-01-20T00:00:01.000Z',
+        reason: 'stripe_refund:refund.created',
+        eventId: 'evt-concurrent-precise',
+      },
     });
   });
 
@@ -4525,6 +4537,12 @@ describe('stripe fulfillment helpers', () => {
       reviewReason: 'ambiguous_charge_refunded_refund_identity',
       clawbackAmount: 0,
       reversalStatus: 'review_required',
+      termination: {
+        written: true,
+        terminatedAt: '2026-01-20T00:00:01.000Z',
+        reason: 'stripe_refund:charge.refunded',
+        eventId: 'evt-concurrent-ambiguous',
+      },
     });
     await expect(releaseDueAnnualSubscriptionCredits(supabase, {
       now: new Date('2026-02-15T00:00:00.000Z'),
@@ -4572,6 +4590,12 @@ describe('stripe fulfillment helpers', () => {
       refundId: 're-concurrent-precise',
       reviewRequired: false,
       reversalStatus: 'complete',
+      termination: {
+        written: true,
+        terminatedAt: '2026-01-20T00:00:01.000Z',
+        reason: 'stripe_refund:refund.created',
+        eventId: 'evt-concurrent-precise-replay',
+      },
     });
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal.reversalStatus).not.toBe('pending');
   });
