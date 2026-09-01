@@ -511,13 +511,19 @@ BEGIN
     RAISE EXCEPTION 'REFUND_CLAWBACK_SUBSCRIPTION_MIRROR_MISSING: %', p_subscription_id;
   END IF;
 
-  IF p_refund_created_at IS NULL THEN
+  -- A trusted upstream resolution may already have established a concrete
+  -- fail-closed reason (for example an aggregate charge.refunded with more
+  -- than one successful refund). It must take the termination-only path
+  -- without deriving a refund timestamp or period.
+  v_review_reason := NULLIF(btrim(p_invoice_scope_review_reason), '');
+  IF v_review_reason IS NULL AND p_refund_created_at IS NULL THEN
     v_review_reason := 'missing_trusted_refund_timestamp';
-  ELSIF v_term_start IS NULL OR v_term_end IS NULL OR v_term_end <= v_term_start THEN
+  ELSIF v_review_reason IS NULL
+    AND (v_term_start IS NULL OR v_term_end IS NULL OR v_term_end <= v_term_start) THEN
     v_review_reason := 'missing_or_invalid_trusted_term';
-  ELSIF p_refund_created_at < v_term_start THEN
+  ELSIF v_review_reason IS NULL AND p_refund_created_at < v_term_start THEN
     v_review_reason := 'refund_timestamp_precedes_term_start';
-  ELSE
+  ELSIF v_review_reason IS NULL THEN
     SELECT count(*) INTO v_candidate_count
     FROM subscription_credit_grants AS g
     WHERE g.stripe_subscription_id = p_subscription_id
@@ -571,9 +577,6 @@ BEGIN
     END IF;
   END IF;
 
-  IF v_review_reason IS NULL THEN
-    v_review_reason := NULLIF(btrim(p_invoice_scope_review_reason), '');
-  END IF;
   IF v_review_reason IS NULL AND v_event_id IS NULL THEN
     v_review_reason := 'missing_event_id';
   END IF;

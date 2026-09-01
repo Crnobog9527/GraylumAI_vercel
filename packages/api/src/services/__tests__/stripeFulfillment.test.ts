@@ -472,15 +472,18 @@ function applyFreshRefundTerminationClawbackContract(
     ? Date.parse(String(subscription.current_period_start))
     : Number.NaN;
   let periodKey: string | null = null;
-  let reviewReason: string | null = null;
+  let reviewReason = typeof payload.p_invoice_scope_review_reason === 'string'
+    && payload.p_invoice_scope_review_reason.trim()
+    ? payload.p_invoice_scope_review_reason.trim()
+    : null;
 
-  if (!Number.isFinite(refundMs)) {
+  if (!reviewReason && !Number.isFinite(refundMs)) {
     reviewReason = 'missing_trusted_refund_timestamp';
-  } else if (!Number.isFinite(termStartMs)) {
+  } else if (!reviewReason && !Number.isFinite(termStartMs)) {
     reviewReason = 'missing_trusted_term_start';
-  } else if (refundMs < termStartMs) {
+  } else if (!reviewReason && refundMs < termStartMs) {
     reviewReason = 'refund_timestamp_precedes_term_start';
-  } else {
+  } else if (!reviewReason) {
     const candidate = tables.subscription_credit_grants
       .filter((row) => row.user_id === payload.p_user_id
         && row.stripe_subscription_id === payload.p_subscription_id
@@ -509,9 +512,6 @@ function applyFreshRefundTerminationClawbackContract(
     }
   }
 
-  if (!reviewReason && payload.p_invoice_scope_review_reason) {
-    reviewReason = String(payload.p_invoice_scope_review_reason);
-  }
   const eventId = typeof payload.p_event_id === 'string' && payload.p_event_id.trim()
     ? payload.p_event_id.trim()
     : null;
@@ -3942,6 +3942,15 @@ describe('stripe fulfillment helpers', () => {
       paginationLimits: { maxPages: 1 },
       reason: 'charge_refunds_page_cap_exceeded',
     },
+    {
+      name: 'item cap exhaustion',
+      listChargeRefunds: vi.fn().mockResolvedValue({
+        data: [{ id: 're_charge_item_cap_second_page', status: 'pending' }],
+        has_more: false,
+      }),
+      paginationLimits: { maxItems: 1 },
+      reason: 'charge_refunds_item_cap_exceeded',
+    },
   ])('fails closed for charge refund $name', async ({
     listChargeRefunds,
     paginationLimits,
@@ -3975,50 +3984,7 @@ describe('stripe fulfillment helpers', () => {
     });
   });
 
-  it('keeps a multi-refund charge.refunded event non-mutating and leaves precise handling to refund.created', async () => {
-    const supabase = createRefundWebhookSupabase();
-    const listChargeRefunds = vi.fn().mockResolvedValue({
-      data: [{ id: 're_charge_partial_2', status: 'succeeded', created: 1_788_178_054 }],
-      has_more: false,
-    });
-
-    const result = await reconcileSubscriptionRefundFromStripeWebhook(
-      supabase,
-      {
-        id: 'evt_charge_multiple_partial_refunds',
-        type: 'charge.refunded',
-        data: {
-          object: {
-            id: 'ch_charge_multiple_partial_refunds',
-            amount: 1_000,
-            amount_refunded: 700,
-            currency: 'usd',
-            refunded: false,
-            refunds: {
-              data: [{ id: 're_charge_partial_1', status: 'succeeded', created: 1_788_178_053 }],
-              has_more: true,
-            },
-          } as Stripe.Charge,
-        },
-      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
-      { listChargeRefunds },
-    );
-
-    expect(result).toEqual({
-      reconciled: false,
-      reason: 'charge_refunded_refund_identity_ambiguous',
-      chargeId: 'ch_charge_multiple_partial_refunds',
-      refundId: null,
-      refundStatus: null,
-    });
-    expect(listChargeRefunds).toHaveBeenCalledWith(
-      'ch_charge_multiple_partial_refunds',
-      're_charge_partial_1',
-    );
-    expect(supabase.tables.payment_orders).toHaveLength(0);
-    expect(supabase.tables.credit_transactions).toHaveLength(0);
-    expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
-
+  it('keeps a precise reconciliation authoritative when a later multi-refund aggregate arrives', async () => {
     const preciseSupabase = createRefundWebhookSupabase({
       payment_orders: [{
         id: 'order-charge-multiple-refunds',
@@ -4099,6 +4065,51 @@ describe('stripe fulfillment helpers', () => {
     expect(preciseSupabase.tables.profiles[0].credits).toBe(94);
     expect(preciseSupabase.tables.credit_transactions).toHaveLength(1);
 
+    const aggregateAfterPrecise = await reconcileSubscriptionRefundFromStripeWebhook(
+      preciseSupabase,
+      {
+        id: 'evt_charge_multiple_refunds_after_precise',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_charge_multiple_refunds',
+            amount: 1_000,
+            amount_refunded: 1_000,
+            currency: 'usd',
+            refunded: true,
+            invoice: 'in_charge_multiple_refunds',
+            refunds: {
+              data: [{ id: 're_charge_partial_1', status: 'succeeded', created: 1_768_464_000 }],
+              has_more: true,
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      {
+        now: '2026-01-20T00:03:00.000Z',
+        listChargeRefunds: vi.fn().mockResolvedValue({
+          data: [{ id: 're_charge_partial_2', status: 'succeeded', created: 1_768_464_001 }],
+          has_more: false,
+        }),
+      },
+    );
+    expect(aggregateAfterPrecise).toMatchObject({
+      reconciled: true,
+      reason: 'charge_refunded_already_terminated_aggregate_noop',
+      alreadyReconciled: true,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(preciseSupabase.tables.profiles[0].credits).toBe(94);
+    expect(preciseSupabase.tables.credit_transactions).toHaveLength(1);
+    expect(preciseSupabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're_charge_later_full',
+      reviewRequired: false,
+      clawbackAmount: 6,
+      reversedGrantCount: 1,
+    });
+
     const replay = await reconcileSubscriptionRefundFromStripeWebhook(
       preciseSupabase,
       { ...preciseEvent, id: 'evt_refund_created_later_full_replay' },
@@ -4113,7 +4124,7 @@ describe('stripe fulfillment helpers', () => {
     expect(preciseSupabase.tables.credit_transactions).toHaveLength(1);
   });
 
-  it('R4: charge.refunded without a refund-object created timestamp never falls back to charge.created and stops for review', async () => {
+  it('terminates and preserves REVIEW_REQUIRED for an ambiguous multi-refund aggregate without selecting a refund', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{
         id: 'order-webhook-charge-refund-no-ts',
@@ -4168,6 +4179,10 @@ describe('stripe fulfillment helpers', () => {
       })),
     });
 
+    const listChargeRefunds = vi.fn().mockResolvedValue({
+      data: [{ id: 're_webhook_charge_refund_partial_2', status: 'succeeded', created: 1769904001 }],
+      has_more: false,
+    });
     const result = await reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
       {
@@ -4185,22 +4200,23 @@ describe('stripe fulfillment helpers', () => {
             payment_intent: 'pi_webhook_charge_refund_no_ts',
             created: 1767225600,
             refunds: {
-              data: [{
-                id: 're_webhook_charge_refund_no_ts',
-                status: 'succeeded',
-              }],
+              data: [{ id: 're_webhook_charge_refund_partial_1', status: 'succeeded', created: 1769904000 }],
+              has_more: true,
             },
           } as Stripe.Charge,
         },
       } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
-      { now: '2026-02-01T00:00:00.000Z' },
+      {
+        now: '2026-02-01T00:00:00.000Z',
+        listChargeRefunds,
+      },
     );
 
     expect(result).toMatchObject({
       reconciled: true,
       fullRefund: true,
       reviewRequired: true,
-      reviewReason: 'missing_trusted_refund_timestamp',
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
       terminationWritten: true,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
@@ -4209,7 +4225,101 @@ describe('stripe fulfillment helpers', () => {
     expect(supabase.tables.credit_transactions).toHaveLength(0);
     expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
     expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(listChargeRefunds).toHaveBeenCalledWith(
+      'ch_webhook_charge_refund_no_ts',
+      're_webhook_charge_refund_partial_1',
+    );
     expect(supabase.tables.user_subscriptions[0].credit_release_terminated_at).toBe('2026-02-01T00:00:00.000Z');
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: null,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+      noPreciseRefundSelected: true,
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+
+    const releaseAfterAmbiguousRefund = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+    expect(releaseAfterAmbiguousRefund).toMatchObject({
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+
+    const preciseLater = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded_precise_later',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're_webhook_charge_refund_precise_later',
+            amount: 9900,
+            currency: 'usd',
+            status: 'succeeded',
+            created: 1769904002,
+            charge: {
+              id: 'ch_webhook_charge_refund_no_ts',
+              amount: 9900,
+              amount_refunded: 9900,
+              currency: 'usd',
+              invoice: 'in_webhook_charge_refund_no_ts',
+            },
+          } as Stripe.Refund,
+        },
+      } as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
+      { now: '2026-02-01T00:05:00.000Z' },
+    );
+    expect(preciseLater).toMatchObject({
+      reconciled: true,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+      alreadyReconciled: true,
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+
+    const aggregateReplay = await reconcileSubscriptionRefundFromStripeWebhook(
+      supabase,
+      {
+        id: 'evt_webhook_charge_refunded_ambiguous_replay',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_webhook_charge_refund_no_ts',
+            amount: 9900,
+            amount_refunded: 9900,
+            currency: 'usd',
+            refunded: true,
+            invoice: 'in_webhook_charge_refund_no_ts',
+            refunds: {
+              data: [{ id: 're_webhook_charge_refund_partial_1', status: 'succeeded', created: 1769904000 }],
+              has_more: true,
+            },
+          } as Stripe.Charge,
+        },
+      } as Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } },
+      {
+        now: '2026-02-01T00:10:00.000Z',
+        listChargeRefunds: vi.fn().mockResolvedValue({
+          data: [{ id: 're_webhook_charge_refund_partial_2', status: 'succeeded', created: 1769904001 }],
+          has_more: false,
+        }),
+      },
+    );
+    expect(aggregateReplay).toMatchObject({
+      reconciled: true,
+      reason: 'charge_refunded_already_terminated_aggregate_noop',
+      reviewRequired: true,
+      alreadyReconciled: true,
+      clawbackAmount: 0,
+      reversedGrantCount: 0,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
   });
 
   it('reconciles refund.created subscription webhooks into auditable shortfall markers', async () => {

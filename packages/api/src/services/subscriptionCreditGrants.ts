@@ -177,6 +177,11 @@ export interface ReconcileSubscriptionRefundCreditGrantsInput {
   isFullRefund: boolean;
   eventId?: string | null;
   refundCreatedAt?: string | null;
+  // An aggregate charge.refunded may prove that a successful refund signal
+  // exists without proving which refund or period is authoritative. Preserve
+  // that distinction so the database can terminate safely without guessing.
+  refundIdentityAmbiguous?: boolean;
+  terminationReviewReason?: string | null;
   now?: string;
 }
 
@@ -1358,6 +1363,8 @@ function buildSubscriptionRefundMetadata(input: {
       refundId: input.refund.refundId ?? null,
       eventType: input.refund.refundEventType ?? null,
       refundStatus: input.refund.refundStatus ?? null,
+      refundIdentityAmbiguous: input.refund.refundIdentityAmbiguous === true,
+      noPreciseRefundSelected: input.refund.refundIdentityAmbiguous === true,
       subscriptionId: input.refund.subscriptionId,
       invoiceId: input.refund.invoiceId ?? null,
       amountRefunded: input.refund.refundAmount ?? null,
@@ -1747,6 +1754,39 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const mirror = await loadSubscriptionMirrorForRefund(supabase, {
     subscriptionId: input.subscriptionId,
   });
+  const existingReconciliation = asRecord(asRecord(order.metadata).subscriptionCreditGrantReversal);
+  const existingReviewReason = typeof existingReconciliation.reviewReason === 'string'
+    ? existingReconciliation.reviewReason
+    : null;
+  const preserveExistingReconciliation = Boolean(mirror?.credit_release_terminated_at)
+    && (input.refundIdentityAmbiguous === true
+      || existingReviewReason === 'ambiguous_charge_refunded_refund_identity');
+
+  // An aggregate charge.refunded that arrives after a precise reconciliation
+  // must not overwrite its durable result. Likewise, once an ambiguous
+  // aggregate has established a termination-only review state, a later
+  // precise event must not chase history or clear that first-event evidence.
+  if (preserveExistingReconciliation) {
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: input.isFullRefund,
+      reviewRequired: existingReconciliation.reviewRequired === true,
+      reviewReason: existingReviewReason,
+      terminationWritten: false,
+      terminatedAt: mirror?.credit_release_terminated_at ?? null,
+      locatedPeriodKey: typeof existingReconciliation.locatedPeriodKey === 'string'
+        ? existingReconciliation.locatedPeriodKey
+        : mirror?.credit_release_terminated_period_key ?? null,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: true,
+    };
+  }
   const located = locateRefundPeriodGrant({
     grants,
     refundCreatedAt: input.refundCreatedAt,
@@ -1787,7 +1827,8 @@ export async function reconcileSubscriptionRefundCreditGrants(
     p_subscription_id: input.subscriptionId,
     p_event_id: canonicalEventId,
     p_refund_created_at: input.refundCreatedAt ?? null,
-    p_invoice_scope_review_reason: invoiceScope.status !== 'scoped' ? invoiceScope.reason : null,
+    p_invoice_scope_review_reason: input.terminationReviewReason
+      ?? (invoiceScope.status !== 'scoped' ? invoiceScope.reason : null),
     p_reason: terminationReason,
     p_refund_id: input.refundId ?? null,
     p_now: now,

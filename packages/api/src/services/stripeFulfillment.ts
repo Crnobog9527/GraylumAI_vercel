@@ -2209,6 +2209,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
   let refundCurrency: string | null = null;
   let refundMetadata: Stripe.Metadata | null = null;
   let trustedChargeRefund: Stripe.Refund | null = null;
+  let refundIdentityAmbiguous = false;
 
   if (event.type === 'charge.refunded') {
     charge = event.data.object;
@@ -2239,27 +2240,24 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     const successfulRefunds = refunds.filter((refund) => isSuccessfulRefundStatus(refund.status));
     if (successfulRefunds.length > 1) {
       // A charge can have several legitimate partial refunds. This aggregate
-      // webhook cannot establish which refund caused the event, so it must not
-      // select one, derive a timestamp, or invoke the clawback path. The
-      // precise refund.created event remains the only per-refund path.
+      // webhook cannot establish which refund caused the event. It must first
+      // establish a termination-only REVIEW_REQUIRED state, then leave precise
+      // clawback to refund.created; it must never select or timestamp a refund.
       logger.warn('billing', 'stripe_charge_refunded_refund_identity_ambiguous', {
         chargeId: maskIdentifier(charge.id),
         successfulRefundCount: successfulRefunds.length,
       });
-      return {
-        reconciled: false,
-        reason: 'charge_refunded_refund_identity_ambiguous',
-        chargeId: charge.id ?? null,
-        refundId: null,
-        refundStatus: null,
-      };
+      refundIdentityAmbiguous = true;
+      refundAmount = toNonNegativeInteger(charge.amount_refunded);
+      refundCurrency = charge.currency ?? null;
+    } else {
+      trustedChargeRefund = successfulRefunds[0] ?? null;
+      const genericRefund = trustedChargeRefund ?? refunds[0] ?? null;
+      refundId = genericRefund?.id ?? charge.id;
+      refundStatus = genericRefund?.status ?? null;
+      refundAmount = toNonNegativeInteger(charge.amount_refunded);
+      refundCurrency = charge.currency ?? null;
     }
-    trustedChargeRefund = successfulRefunds[0] ?? null;
-    const genericRefund = trustedChargeRefund ?? refunds[0] ?? null;
-    refundId = genericRefund?.id ?? charge.id;
-    refundStatus = genericRefund?.status ?? null;
-    refundAmount = toNonNegativeInteger(charge.amount_refunded);
-    refundCurrency = charge.currency ?? null;
   } else {
     const refund = event.data.object;
     refundId = refund.id;
@@ -2402,7 +2400,7 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     };
   }
 
-  if (!isRefundReadyForCreditReconciliation({
+  if (!refundIdentityAmbiguous && !isRefundReadyForCreditReconciliation({
     eventType: event.type,
     refundStatus,
   })) {
@@ -2457,6 +2455,10 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
       }),
       eventId: event.id,
       refundCreatedAt,
+      refundIdentityAmbiguous,
+      terminationReviewReason: refundIdentityAmbiguous
+        ? 'ambiguous_charge_refunded_refund_identity'
+        : null,
       now,
     });
 
@@ -2484,7 +2486,9 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
 
     return {
       reconciled: true,
-      reason: null,
+      reason: refundIdentityAmbiguous && reconciliation.alreadyReconciled
+        ? 'charge_refunded_already_terminated_aggregate_noop'
+        : null,
       ...reconciliation,
     };
   } catch (error) {
