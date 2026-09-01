@@ -1746,7 +1746,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // authority for replay and later-event behavior.
 
   // REFUND-1B (R4): this application read is only a non-authoritative hint for
-  // pending metadata and diagnostics. The refund transaction below must
+  // diagnostics. The refund transaction below must
   // resolve the period again after taking its database locks.
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
     subscriptionId: input.subscriptionId,
@@ -1795,25 +1795,10 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const snapshotLocatedPeriodKey = located.grant?.grant_period_key ?? null;
 
   // REFUND-1B (R1): canonical 幂等身份 = event_id + subscription_id + period_key。
-  // The pending marker may use the snapshot hint, but the final canonical key
-  // is returned by the locked transaction after fresh period resolution.
+  // Its final value is returned by the locked transaction after fresh period
+  // resolution; a pre-RPC payment-order write would be a stale, non-authoritative
+  // concurrent snapshot.
   const canonicalEventId = input.eventId?.trim() || null;
-  const pendingIdempotencyKey = buildSubscriptionRefundIdempotencyKey({
-    eventId: canonicalEventId ?? 'unlocated',
-    subscriptionId: input.subscriptionId,
-    periodKey: snapshotLocatedPeriodKey ?? 'unlocated',
-  });
-
-  // 标记 pending (崩溃恢复锚点)
-  await updateSubscriptionRefundOrder({
-    supabase,
-    order,
-    refund: scopedRefund,
-    now,
-    idempotencyKey: pendingIdempotencyKey,
-    reviewRequired: false,
-    reversalStatus: 'pending',
-  });
 
   // REFUND-1B (R2/R5): the fresh resolver takes the profile -> subscription ->
   // grant lock barrier, resolves the trusted period from locked state, and
@@ -1886,6 +1871,31 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const terminatedAt = terminationWritten
     ? now
     : mirror?.credit_release_terminated_at ?? null;
+
+  // The database lock boundary, not the application snapshot, decides which
+  // request established the first termination. A later event must never turn
+  // its own review result into payment-order evidence for the winning event.
+  // Keep exact canonical replay ahead of this guard so it can reconstruct its
+  // own evidence after a post-transaction process crash.
+  if (alreadyTerminated && clawbackRow.already_applied !== true) {
+    return {
+      orderId: order.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: input.isFullRefund,
+      reviewRequired: false,
+      reviewReason: null,
+      terminationWritten: false,
+      terminatedAt,
+      locatedPeriodKey,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: true,
+    };
+  }
 
   // REVIEW_REQUIRED: 不自动扣、不猜测 (termination 已写, 未来释放已停止)
   if (reviewReason) {
@@ -1972,8 +1982,9 @@ export async function reconcileSubscriptionRefundCreditGrants(
     };
   }
 
-  // 后续事件: termination 已被首个成功事件确立, 或周期已被先前尝试反转 → 不追历史
-  if (alreadyTerminated || clawbackRow.already_reversed === true) {
+  // 已经反转的 grant 不追历史。已终止的后续事件已在上面的 first-event
+  // ownership guard 无写入返回；这里保留首个 termination-owning invocation。
+  if (clawbackRow.already_reversed === true) {
     await updateSubscriptionRefundOrder({
       supabase,
       order,

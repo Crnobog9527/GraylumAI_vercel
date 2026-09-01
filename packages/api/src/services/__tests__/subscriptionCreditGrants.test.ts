@@ -4035,12 +4035,12 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_subscription_full_later_event',
-      eventType: 'refund.updated',
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
+      refundId: 're_subscription_full',
+      eventType: 'refund.created',
+      reversedGrantCount: 1,
+      clawbackAmount: 6,
       reviewRequired: false,
-      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_full_later:sub:sub_subscription_refund:period:annual:2026-01-01T00:00:00.000Z:03',
+      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_full:sub:sub_subscription_refund:period:annual:2026-01-01T00:00:00.000Z:03',
     });
   });
 
@@ -4197,12 +4197,12 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_subscription_shortfall_later_event',
-      eventType: 'refund.updated',
-      reversedGrantCount: 0,
-      shortfallAmount: 0,
-      reversalStatus: 'complete',
-      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_shortfall_later:sub:sub_subscription_refund_shortfall:period:annual:2026-01-01T00:00:00.000Z:03',
+      refundId: 're_subscription_shortfall',
+      eventType: 'refund.created',
+      reversedGrantCount: 1,
+      shortfallAmount: 5,
+      reversalStatus: 'shortfall_review_required',
+      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_shortfall:sub:sub_subscription_refund_shortfall:period:annual:2026-01-01T00:00:00.000Z:03',
     });
   });
 

@@ -29,6 +29,7 @@ import {
 } from '../stripeFulfillment';
 import {
   getCanonicalAnnualGrantPeriod,
+  reconcileSubscriptionRefundCreditGrants,
   releaseDueAnnualSubscriptionCredits,
 } from '../subscriptionCreditGrants';
 
@@ -46,6 +47,10 @@ type RefundWebhookFilter = {
   operator: 'eq' | 'neq' | 'lte' | 'like' | 'is';
 };
 type RefundWebhookMockHooks = {
+  onBeforeRpc?: (input: {
+    name: string;
+    payload: RefundWebhookRow;
+  }) => Promise<void> | void;
   onBeforeUpdate?: (input: {
     table: RefundWebhookTableName;
     payload: RefundWebhookRow;
@@ -557,6 +562,8 @@ function createRefundWebhookSupabase(
       return new RefundWebhookMockQuery(tables, table, hooks.onBeforeUpdate);
     },
     async rpc(name: string, payload: RefundWebhookRow) {
+      await hooks.onBeforeRpc?.({ name, payload });
+
       if (name === 'atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
@@ -924,6 +931,102 @@ function makeGenericRefundSupabase(options: {
   };
 
   return { lookups, order, rpc, supabase };
+}
+
+function createDeferred() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+
+  return { promise, resolve };
+}
+
+function createConcurrentRefundSupabase(hooks: RefundWebhookMockHooks = {}) {
+  return createRefundWebhookSupabase({
+    payment_orders: [{
+      id: 'order-concurrent-refund',
+      user_id: 'user-concurrent-refund',
+      item_type: 'membership_plan',
+      billing_cycle: 'yearly',
+      stripe_subscription_id: 'sub_concurrent_refund',
+      stripe_invoice_id: 'in_concurrent_refund',
+      amount_total: 1_000,
+      currency: 'usd',
+      status: 'completed',
+      payment_status: 'paid',
+      metadata: { source: 'invoice.payment_succeeded' },
+    }],
+    user_subscriptions: [{
+      id: 'subscription-concurrent-refund',
+      user_id: 'user-concurrent-refund',
+      membership_plan_id: 'plan-concurrent-refund',
+      stripe_subscription_id: 'sub_concurrent_refund',
+      billing_cycle: 'yearly',
+      status: 'active',
+      current_period_start: '2026-01-01T00:00:00.000Z',
+      current_period_end: '2027-01-01T00:00:00.000Z',
+    }],
+    membership_plans: [{
+      id: 'plan-concurrent-refund',
+      name: 'Concurrent refund plan',
+      yearly_credits: 120,
+    }],
+    profiles: [{ id: 'user-concurrent-refund', credits: 100 }],
+    subscription_credit_grants: [{
+      id: 'grant-concurrent-refund',
+      user_id: 'user-concurrent-refund',
+      membership_plan_id: 'plan-concurrent-refund',
+      stripe_subscription_id: 'sub_concurrent_refund',
+      stripe_invoice_id: 'in_concurrent_refund',
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+      period_start: '2026-01-01T00:00:00.000Z',
+      period_end: '2026-02-01T00:00:00.000Z',
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 10,
+      consumed_amount: 4,
+      status: 'granted',
+    }],
+  }, hooks);
+}
+
+function concurrentPreciseRefundInput(eventId = 'evt-concurrent-precise') {
+  return {
+    orderId: 'order-concurrent-refund',
+    subscriptionId: 'sub_concurrent_refund',
+    refundId: 're-concurrent-precise',
+    refundEventType: 'refund.created',
+    refundStatus: 'succeeded',
+    refundAmount: 1_000,
+    refundCurrency: 'usd',
+    invoiceId: 'in_concurrent_refund',
+    isFullRefund: true,
+    eventId,
+    refundCreatedAt: '2026-01-20T00:00:00.000Z',
+    now: '2026-01-20T00:00:01.000Z',
+  };
+}
+
+function concurrentAmbiguousRefundInput(eventId = 'evt-concurrent-ambiguous') {
+  return {
+    orderId: 'order-concurrent-refund',
+    subscriptionId: 'sub_concurrent_refund',
+    refundId: null,
+    refundEventType: 'charge.refunded',
+    refundStatus: 'succeeded',
+    refundAmount: 1_000,
+    refundCurrency: 'usd',
+    invoiceId: 'in_concurrent_refund',
+    isFullRefund: true,
+    eventId,
+    refundCreatedAt: null,
+    refundIdentityAmbiguous: true,
+    terminationReviewReason: 'ambiguous_charge_refunded_refund_identity',
+    now: '2026-01-20T00:00:01.000Z',
+  };
 }
 
 describe('stripe fulfillment helpers', () => {
@@ -4322,6 +4425,203 @@ describe('stripe fulfillment helpers', () => {
     expect(supabase.tables.credit_transactions).toHaveLength(0);
   });
 
+  it('CONCURRENT_PRECISE_WINS_AMBIGUOUS_LOSES keeps first-event evidence authoritative', async () => {
+    const preciseReached = createDeferred();
+    const ambiguousReached = createDeferred();
+    const allowPrecise = createDeferred();
+    const allowAmbiguous = createDeferred();
+    const supabase = createConcurrentRefundSupabase({
+      onBeforeRpc: async ({ name, payload }) => {
+        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (payload.p_event_id === 'evt-concurrent-precise') {
+          preciseReached.resolve();
+          await allowPrecise.promise;
+          return;
+        }
+
+        ambiguousReached.resolve();
+        await allowAmbiguous.promise;
+      },
+    });
+
+    const precise = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentPreciseRefundInput(),
+    );
+    const ambiguous = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentAmbiguousRefundInput(),
+    );
+    await Promise.all([preciseReached.promise, ambiguousReached.promise]);
+    expect(supabase.tables.user_subscriptions[0].credit_release_terminated_at).toBeUndefined();
+
+    allowPrecise.resolve();
+    await precise;
+    allowAmbiguous.resolve();
+    const ambiguousResult = await ambiguous;
+
+    expect(ambiguousResult).toMatchObject({ alreadyReconciled: true, reviewRequired: false });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_event_id: 'evt-concurrent-precise',
+      credit_release_terminated_reason: 'stripe_refund:refund.created',
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(94);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're-concurrent-precise',
+      reviewRequired: false,
+      clawbackAmount: 6,
+      reversalStatus: 'complete',
+    });
+  });
+
+  it('CONCURRENT_AMBIGUOUS_WINS_PRECISE_LOSES preserves termination-only review evidence', async () => {
+    const preciseReached = createDeferred();
+    const ambiguousReached = createDeferred();
+    const allowPrecise = createDeferred();
+    const allowAmbiguous = createDeferred();
+    const supabase = createConcurrentRefundSupabase({
+      onBeforeRpc: async ({ name, payload }) => {
+        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (payload.p_event_id === 'evt-concurrent-precise') {
+          preciseReached.resolve();
+          await allowPrecise.promise;
+          return;
+        }
+
+        ambiguousReached.resolve();
+        await allowAmbiguous.promise;
+      },
+    });
+
+    const ambiguous = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentAmbiguousRefundInput(),
+    );
+    const precise = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentPreciseRefundInput(),
+    );
+    await Promise.all([preciseReached.promise, ambiguousReached.promise]);
+    expect(supabase.tables.user_subscriptions[0].credit_release_terminated_at).toBeUndefined();
+
+    allowAmbiguous.resolve();
+    await ambiguous;
+    allowPrecise.resolve();
+    const preciseResult = await precise;
+
+    expect(preciseResult).toMatchObject({ alreadyReconciled: true, reviewRequired: false });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_event_id: 'evt-concurrent-ambiguous',
+      credit_release_terminated_reason: 'stripe_refund:charge.refunded',
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: null,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+      clawbackAmount: 0,
+      reversalStatus: 'review_required',
+    });
+    await expect(releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-02-15T00:00:00.000Z'),
+    })).resolves.toMatchObject({ releasedGrantCount: 0, skippedSubscriptions: 1 });
+  });
+
+  it('CONCURRENT_SAME_PRECISE_EVENT_REPLAY leaves one canonical financial result and no pending evidence', async () => {
+    const firstReached = createDeferred();
+    const secondReached = createDeferred();
+    const allowFirst = createDeferred();
+    const allowSecond = createDeferred();
+    let rpcCall = 0;
+    const supabase = createConcurrentRefundSupabase({
+      onBeforeRpc: async ({ name }) => {
+        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        rpcCall += 1;
+        if (rpcCall === 1) {
+          firstReached.resolve();
+          await allowFirst.promise;
+          return;
+        }
+
+        secondReached.resolve();
+        await allowSecond.promise;
+      },
+    });
+
+    const first = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentPreciseRefundInput('evt-concurrent-precise-replay'),
+    );
+    const second = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentPreciseRefundInput('evt-concurrent-precise-replay'),
+    );
+    await Promise.all([firstReached.promise, secondReached.promise]);
+    allowFirst.resolve();
+    await Promise.race([first, second]);
+    allowSecond.resolve();
+    await Promise.all([first, second]);
+
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(94);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      refundId: 're-concurrent-precise',
+      reviewRequired: false,
+      reversalStatus: 'complete',
+    });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal.reversalStatus).not.toBe('pending');
+  });
+
+  it('CONCURRENT_SAME_AMBIGUOUS_EVENT_REPLAY preserves one review-required termination and no pending evidence', async () => {
+    const firstReached = createDeferred();
+    const secondReached = createDeferred();
+    const allowFirst = createDeferred();
+    const allowSecond = createDeferred();
+    let rpcCall = 0;
+    const supabase = createConcurrentRefundSupabase({
+      onBeforeRpc: async ({ name }) => {
+        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        rpcCall += 1;
+        if (rpcCall === 1) {
+          firstReached.resolve();
+          await allowFirst.promise;
+          return;
+        }
+
+        secondReached.resolve();
+        await allowSecond.promise;
+      },
+    });
+
+    const first = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentAmbiguousRefundInput('evt-concurrent-ambiguous-replay'),
+    );
+    const second = reconcileSubscriptionRefundCreditGrants(
+      supabase,
+      concurrentAmbiguousRefundInput('evt-concurrent-ambiguous-replay'),
+    );
+    await Promise.all([firstReached.promise, secondReached.promise]);
+    allowFirst.resolve();
+    await Promise.race([first, second]);
+    allowSecond.resolve();
+    await Promise.all([first, second]);
+
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+      reversalStatus: 'review_required',
+    });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal.reversalStatus).not.toBe('pending');
+  });
+
   it('reconciles refund.created subscription webhooks into auditable shortfall markers', async () => {
     const supabase = createRefundWebhookSupabase({
       payment_orders: [{
@@ -4511,13 +4811,13 @@ describe('stripe fulfillment helpers', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_webhook_refund_created_charge_later',
-      eventType: 'charge.refunded',
+      refundId: 're_webhook_refund_created_full',
+      eventType: 'refund.created',
       invoiceId: 'in_webhook_refund_created',
-      reviewRequired: false,
-      shortfallAmount: 0,
-      reversalStatus: 'complete',
-      reversedGrantCount: 0,
+      reviewRequired: true,
+      shortfallAmount: 5,
+      reversalStatus: 'shortfall_review_required',
+      reversedGrantCount: 1,
     });
   });
 
@@ -4692,10 +4992,10 @@ describe('stripe fulfillment helpers', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_webhook_cumulative_full_update',
-      eventType: 'refund.updated',
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
+      refundId: 're_webhook_cumulative_full_second',
+      eventType: 'refund.created',
+      reversedGrantCount: 1,
+      clawbackAmount: 5,
       reviewRequired: false,
       reversalStatus: 'complete',
     });
