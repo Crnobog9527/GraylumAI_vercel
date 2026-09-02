@@ -2628,3 +2628,142 @@ describe('REFUND-1B migration 0060 post-merge forward repair', () => {
     expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
   });
 });
+
+describe('REFUND-1B migration 0061 expired quarantine forward repair', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0061_refund_1b_expired_quarantine_repair.sql'),
+    'utf8',
+  );
+  const preDeduct = extractMigrationFunction(migrationSql, 'atomic_pre_deduct');
+
+  type QuarantineGrant = {
+    status: string;
+    accountingState: string;
+    terminated: boolean;
+    periodStart: number;
+    periodEnd: number;
+    creditsGranted: number;
+    consumedAmount: number;
+  };
+
+  const simulatePreDeduct = (rows: QuarantineGrant[], now: number, balance: number, amount: number) => {
+    const reviewRequiredCount = rows.filter((row) => row.accountingState !== 'trusted').length;
+    const quarantinedTerminatedAmount = rows
+      .filter((row) => row.status === 'granted' && row.accountingState === 'trusted' && row.terminated)
+      .reduce((total, row) => total + Math.max(row.creditsGranted - row.consumedAmount, 0), 0);
+    const currentGrant = rows.find((row) =>
+      row.status === 'granted'
+        && row.accountingState === 'trusted'
+        && !row.terminated
+        && row.periodStart <= now
+        && now < row.periodEnd,
+    );
+    const amountToPeriod = Math.min(amount, currentGrant
+      ? Math.max(currentGrant.creditsGranted - currentGrant.consumedAmount, 0)
+      : 0);
+    const amountToOther = amount - amountToPeriod;
+
+    if (reviewRequiredCount > 0) {
+      return { error: 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED', balance, billingHistoryDelta: 0 };
+    }
+    if (amountToOther > Math.max(balance - amountToPeriod - quarantinedTerminatedAmount, 0)) {
+      return { error: 'PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED', balance, billingHistoryDelta: 0 };
+    }
+    return { error: null, balance: balance - amount, billingHistoryDelta: 1 };
+  };
+
+  it('separates current allocation windows from global unresolved quarantine', () => {
+    const currentCensusStart = preDeduct.indexOf('-- Current-grant census:');
+    const globalCensusStart = preDeduct.indexOf('-- Global unresolved quarantine:');
+    const currentCensus = preDeduct.slice(currentCensusStart, globalCensusStart);
+    const globalCensus = preDeduct.slice(globalCensusStart, preDeduct.indexOf('\n  IF v_review_required_count > 0', globalCensusStart));
+
+    expect(currentCensusStart).toBeGreaterThanOrEqual(0);
+    expect(globalCensusStart).toBeGreaterThan(currentCensusStart);
+    expect(currentCensus).toContain('g.period_start <= now()');
+    expect(currentCensus).toContain('g.period_end > now()');
+    expect(currentCensus).not.toContain('v_review_required_count');
+    expect(currentCensus).not.toContain('v_quarantined_terminated_amount');
+    expect(globalCensus).toContain('count(*) FILTER (WHERE g.accounting_state <> \'trusted\')');
+    expect(globalCensus).toContain('v_quarantined_terminated_amount');
+    expect(globalCensus).toContain('EXISTS (');
+    expect(globalCensus).toMatch(
+      /FROM subscription_credit_grants AS g\s+WHERE g\.user_id = p_user_id;/,
+    );
+    expect(globalCensus).not.toContain('g.period_end > now()');
+    expect(preDeduct).toContain('AND g.period_start <= now()');
+    expect(preDeduct).toContain('AND g.period_end > now()');
+  });
+
+  it('CASE 1: expired review_required remains fail closed without profile or billing history mutation', () => {
+    const result = simulatePreDeduct([{
+      status: 'granted',
+      accountingState: 'review_required',
+      terminated: false,
+      periodStart: 0,
+      periodEnd: 10,
+      creditsGranted: 100,
+      consumedAmount: 0,
+    }], 20, 100, 1);
+
+    expect(result).toEqual({
+      error: 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED',
+      balance: 100,
+      billingHistoryDelta: 0,
+    });
+  });
+
+  it('CASE 2/3: expired terminated remainder stays quarantined while unrelated credits remain spendable', () => {
+    const result = simulatePreDeduct([
+      {
+        status: 'granted', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 400, consumedAmount: 100,
+      },
+      {
+        status: 'granted', accountingState: 'trusted', terminated: false,
+        periodStart: 0, periodEnd: 10, creditsGranted: 200, consumedAmount: 200,
+      },
+    ], 20, 800, 500);
+
+    expect(result).toEqual({ error: null, balance: 300, billingHistoryDelta: 1 });
+  });
+
+  it('CASE 4/5: current trusted allocation survives old quarantine and reversed rows stay inert', () => {
+    const rows: QuarantineGrant[] = [
+      {
+        status: 'granted', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 400, consumedAmount: 100,
+      },
+      {
+        status: 'granted', accountingState: 'trusted', terminated: false,
+        periodStart: 10, periodEnd: 30, creditsGranted: 200, consumedAmount: 0,
+      },
+      {
+        status: 'reversed', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 900, consumedAmount: 0,
+      },
+    ];
+
+    expect(simulatePreDeduct(rows, 20, 400, 100)).toEqual({
+      error: null,
+      balance: 300,
+      billingHistoryDelta: 1,
+    });
+    expect(simulatePreDeduct(rows, 20, 400, 201)).toEqual({
+      error: 'PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED',
+      balance: 400,
+      billingHistoryDelta: 0,
+    });
+  });
+
+  it('CASE 6: preserves signature and service-role-only security posture', () => {
+    expect(migrationSql).toContain('CREATE OR REPLACE FUNCTION public.atomic_pre_deduct(');
+    expect(migrationSql).toContain('p_reason TEXT DEFAULT \'AI 对话预扣\'');
+    expect(migrationSql).toContain('p_request_id UUID DEFAULT NULL');
+    expect(migrationSql).toContain('SECURITY DEFINER');
+    expect(migrationSql).toContain('SET search_path = public, pg_temp');
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+    expect(migrationSql).not.toContain('CREATE OR REPLACE FUNCTION public.atomic_pre_deduct(uuid');
+  });
+});
