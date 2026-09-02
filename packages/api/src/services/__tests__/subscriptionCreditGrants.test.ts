@@ -322,17 +322,25 @@ function applyRefundTerminationClawbackContract(
     const existing = tables.credit_transactions.find((row) =>
       row.user_id === payload.p_user_id && row.idempotency_key === payload.p_idempotency_key);
     if (existing) {
+      const existingMetadata = existing.metadata ?? {};
+      const requiredAmount = Math.abs(Number(
+        existingMetadata.requiredClawbackAmount ?? existing.amount ?? 0,
+      ));
+      const appliedAmount = Math.abs(Number(
+        existingMetadata.appliedClawbackAmount ?? existing.amount ?? 0,
+      ));
+      const shortfallAmount = Number(existingMetadata.shortfallAmount ?? 0);
       return {
         data: [{
           transaction_id: existing.id,
           balance_after: existing.balance_after ?? 0,
-          clawback_amount: 0,
-          applied_clawback_amount: Math.abs(Number(existing.amount ?? 0)),
-          shortfall_amount: 0,
+          clawback_amount: requiredAmount,
+          applied_clawback_amount: appliedAmount,
+          shortfall_amount: shortfallAmount,
           already_applied: true,
           termination_written: false,
           already_terminated: false,
-          grant_reversed: false,
+          grant_reversed: true,
           already_reversed: false,
           credits_granted: null,
           consumed_amount: null,
@@ -657,15 +665,18 @@ function applyFreshRefundTerminationClawbackContract(
     ? Date.parse(String(subscription.current_period_start))
     : Number.NaN;
   let periodKey: string | null = null;
-  let reviewReason: string | null = null;
+  let reviewReason: string | null = typeof payload.p_invoice_scope_review_reason === 'string'
+    && payload.p_invoice_scope_review_reason.trim()
+    ? payload.p_invoice_scope_review_reason.trim()
+    : null;
 
-  if (!Number.isFinite(refundMs)) {
+  if (!reviewReason && !Number.isFinite(refundMs)) {
     reviewReason = 'missing_trusted_refund_timestamp';
-  } else if (!Number.isFinite(termStartMs)) {
+  } else if (!reviewReason && !Number.isFinite(termStartMs)) {
     reviewReason = 'missing_trusted_term_start';
-  } else if (refundMs < termStartMs) {
+  } else if (!reviewReason && refundMs < termStartMs) {
     reviewReason = 'refund_timestamp_precedes_term_start';
-  } else {
+  } else if (!reviewReason) {
     const candidate = tables.subscription_credit_grants
       .filter((row) => row.user_id === payload.p_user_id
         && row.stripe_subscription_id === payload.p_subscription_id
@@ -689,9 +700,6 @@ function applyFreshRefundTerminationClawbackContract(
     }
   }
 
-  if (!reviewReason && payload.p_invoice_scope_review_reason) {
-    reviewReason = String(payload.p_invoice_scope_review_reason);
-  }
   const eventId = typeof payload.p_event_id === 'string' && payload.p_event_id.trim()
     ? payload.p_event_id.trim()
     : null;
@@ -939,6 +947,58 @@ function createAsyncBarrier(expectedArrivals: number) {
       ]);
     },
   };
+}
+
+function createRefundCrashRecoveryHarness() {
+  let failNextPaymentOrderUpdate = true;
+  const supabase = createMockSupabase({
+    payment_orders: [{
+      id: 'order-refund-crash-recovery',
+      user_id: 'user-refund-crash-recovery',
+      stripe_subscription_id: 'sub_refund_crash_recovery',
+      stripe_invoice_id: 'in_refund_crash_recovery',
+      status: 'completed',
+      payment_status: 'paid',
+      metadata: { source: 'invoice.payment_succeeded' },
+    }],
+    user_subscriptions: [{
+      id: 'subscription-refund-crash-recovery',
+      user_id: 'user-refund-crash-recovery',
+      membership_plan_id: 'plan-refund-crash-recovery',
+      stripe_subscription_id: 'sub_refund_crash_recovery',
+      billing_cycle: 'yearly',
+      status: 'active',
+      current_period_start: '2026-01-01T00:00:00.000Z',
+      current_period_end: '2027-01-01T00:00:00.000Z',
+    }],
+    profiles: [{ id: 'user-refund-crash-recovery', credits: 100 }],
+    subscription_credit_grants: [{
+      id: 'grant-refund-crash-recovery',
+      user_id: 'user-refund-crash-recovery',
+      membership_plan_id: 'plan-refund-crash-recovery',
+      stripe_subscription_id: 'sub_refund_crash_recovery',
+      stripe_invoice_id: 'in_refund_crash_recovery',
+      billing_cycle: 'yearly',
+      grant_type: 'annual_monthly_release',
+      grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+      period_start: '2026-01-01T00:00:00.000Z',
+      period_end: '2026-02-01T00:00:00.000Z',
+      period_index: 1,
+      total_periods: 12,
+      credits_granted: 10,
+      consumed_amount: 4,
+      status: 'granted',
+    }],
+  }, {
+    beforeExecute: ({ table, mode }) => {
+      if (failNextPaymentOrderUpdate && table === 'payment_orders' && mode === 'update') {
+        failNextPaymentOrderUpdate = false;
+        throw new Error('simulated post-rpc payment-order crash');
+      }
+    },
+  });
+
+  return supabase;
 }
 
 describe('subscription credit grants', () => {
@@ -3452,6 +3512,59 @@ describe('subscription credit grants', () => {
     });
   });
 
+  it('does not release future annual credits while any legacy grant accounting is under review', async () => {
+    const supabase = createMockSupabase({
+      user_subscriptions: [{
+        id: 'subscription-accounting-review',
+        user_id: 'user-accounting-review',
+        membership_plan_id: 'plan-accounting-review',
+        stripe_subscription_id: 'sub_accounting_review',
+        billing_cycle: 'yearly',
+        status: 'active',
+        current_period_start: '2026-01-01T00:00:00.000Z',
+        current_period_end: '2027-01-01T00:00:00.000Z',
+        metadata: { lastInvoiceId: 'in_accounting_review' },
+      }],
+      membership_plans: [{
+        id: 'plan-accounting-review',
+        name: 'Gold',
+        yearly_credits: 120,
+      }],
+      subscription_credit_grants: [{
+        id: 'grant-accounting-review',
+        user_id: 'user-accounting-review',
+        membership_plan_id: 'plan-accounting-review',
+        stripe_subscription_id: 'sub_accounting_review',
+        stripe_invoice_id: 'in_accounting_review',
+        billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release',
+        grant_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+        period_start: '2026-01-01T00:00:00.000Z',
+        period_end: '2026-02-01T00:00:00.000Z',
+        period_index: 1,
+        total_periods: 12,
+        credits_granted: 10,
+        consumed_amount: 0,
+        accounting_state: 'review_required',
+        accounting_review_reason: 'legacy_consumption_unproven',
+        status: 'granted',
+      }],
+    });
+
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date('2026-03-15T00:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({
+      scannedSubscriptions: 1,
+      releasedGrantCount: 0,
+      releasedCredits: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+  });
+
   it('blocks a stale annual cron snapshot after refund termination commits before grant admission', async () => {
     let terminationCommitted = false;
     const supabase = createMockSupabase({
@@ -3829,6 +3942,250 @@ describe('subscription credit grants', () => {
     expect(supabase.tables.profiles[0].credits).toBe(10);
   });
 
+  it('recovers REVIEW_REQUIRED evidence after an ambiguous DB-commit crash on same-event replay', async () => {
+    const supabase = createRefundCrashRecoveryHarness();
+    const input = {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: null,
+      refundEventType: 'charge.refunded',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-ambiguous',
+      refundCreatedAt: null,
+      refundIdentityAmbiguous: true,
+      terminationReviewReason: 'ambiguous_charge_refunded_refund_identity',
+      now: '2026-01-20T00:00:01.000Z',
+    } as const;
+
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, input))
+      .rejects.toThrow('simulated post-rpc payment-order crash');
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_at: '2026-01-20T00:00:01.000Z',
+      credit_release_terminated_reason: 'stripe_refund:charge.refunded',
+      credit_release_terminated_event_id: input.eventId,
+      credit_release_terminated_period_key: null,
+    });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toBeUndefined();
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...input,
+      now: '2026-01-20T00:05:01.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reviewReason: 'ambiguous_charge_refunded_refund_identity',
+      terminationWritten: false,
+      terminatedAt: '2026-01-20T00:00:01.000Z',
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      reversedGrantCount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toMatchObject({
+        reviewRequired: true,
+        reviewReason: 'ambiguous_charge_refunded_refund_identity',
+        reversalStatus: 'review_required',
+        termination: {
+          written: true,
+          terminatedAt: '2026-01-20T00:00:01.000Z',
+          reason: 'stripe_refund:charge.refunded',
+          eventId: input.eventId,
+        },
+      });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal.reversalStatus)
+      .not.toBe('pending');
+    expect(shouldReleaseAnnualSubscriptionCredits({
+      billingCycle: 'yearly',
+      status: 'active',
+      currentPeriodEnd: '2027-01-01T00:00:00.000Z',
+      creditReleaseTerminatedAt: supabase.tables.user_subscriptions[0].credit_release_terminated_at,
+      now: new Date('2026-02-15T00:00:00.000Z'),
+    })).toBe(false);
+  });
+
+  it('does not let a different precise event claim evidence after an ambiguous DB-commit crash', async () => {
+    const supabase = createRefundCrashRecoveryHarness();
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: null,
+      refundEventType: 'charge.refunded',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-ambiguous-owner',
+      refundCreatedAt: null,
+      refundIdentityAmbiguous: true,
+      terminationReviewReason: 'ambiguous_charge_refunded_refund_identity',
+      now: '2026-01-20T00:00:01.000Z',
+    }))
+      .rejects.toThrow('simulated post-rpc payment-order crash');
+
+    const laterPrecise = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: 're-refund-crash-different-precise',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-different-precise',
+      refundCreatedAt: '2026-01-20T00:00:00.000Z',
+      now: '2026-01-20T00:06:01.000Z',
+    });
+
+    expect(laterPrecise).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reviewReason: 'first_event_reconciliation_evidence_missing',
+      terminationWritten: false,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      reversedGrantCount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_event_id: 'evt-refund-crash-ambiguous-owner',
+      credit_release_terminated_reason: 'stripe_refund:charge.refunded',
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('granted');
+    expect(supabase.tables.credit_transactions).toHaveLength(0);
+    expect(supabase.tables.profiles[0].credits).toBe(100);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toBeUndefined();
+  });
+
+  it('fails closed when a precise owner crashes before evidence and a different ambiguous event arrives', async () => {
+    const supabase = createRefundCrashRecoveryHarness();
+    const preciseInput = {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: 're-refund-crash-precise-owner',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-precise-owner',
+      refundCreatedAt: '2026-01-20T00:00:00.000Z',
+      now: '2026-01-20T00:00:01.000Z',
+    } as const;
+
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, preciseInput))
+      .rejects.toThrow('simulated post-rpc payment-order crash');
+
+    const laterAmbiguous = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...preciseInput,
+      refundId: null,
+      refundEventType: 'charge.refunded',
+      eventId: 'evt-refund-crash-different-ambiguous',
+      refundCreatedAt: null,
+      refundIdentityAmbiguous: true,
+      terminationReviewReason: 'ambiguous_charge_refunded_refund_identity',
+      now: '2026-01-20T00:06:01.000Z',
+    });
+
+    expect(laterAmbiguous).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: true,
+      reviewReason: 'first_event_reconciliation_evidence_missing',
+      terminationWritten: false,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      reversedGrantCount: 0,
+      creditTransactionId: null,
+    });
+    expect(supabase.tables.user_subscriptions[0].credit_release_terminated_event_id)
+      .toBe(preciseInput.eventId);
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toBeUndefined();
+  });
+
+  it('recovers complete precise evidence after a precise DB-commit crash on same-event replay', async () => {
+    const supabase = createRefundCrashRecoveryHarness();
+    const input = {
+      orderId: 'order-refund-crash-recovery',
+      subscriptionId: 'sub_refund_crash_recovery',
+      refundId: 're-refund-crash-precise',
+      refundEventType: 'refund.created',
+      refundStatus: 'succeeded',
+      refundAmount: 1_000,
+      refundCurrency: 'usd',
+      invoiceId: 'in_refund_crash_recovery',
+      isFullRefund: true,
+      eventId: 'evt-refund-crash-precise',
+      refundCreatedAt: '2026-01-20T00:00:00.000Z',
+      now: '2026-01-20T00:00:01.000Z',
+    } as const;
+
+    await expect(reconcileSubscriptionRefundCreditGrants(supabase, input))
+      .rejects.toThrow('simulated post-rpc payment-order crash');
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({
+      credit_release_terminated_at: input.now,
+      credit_release_terminated_event_id: input.eventId,
+      credit_release_terminated_reason: 'stripe_refund:refund.created',
+      credit_release_terminated_period_key: 'annual:2026-01-01T00:00:00.000Z:01',
+    });
+    expect(supabase.tables.subscription_credit_grants[0].status).toBe('reversed');
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(94);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toBeUndefined();
+
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, {
+      ...input,
+      now: '2026-01-20T00:05:01.000Z',
+    });
+
+    expect(replay).toMatchObject({
+      alreadyReconciled: true,
+      reviewRequired: false,
+      reviewReason: null,
+      terminationWritten: false,
+      terminatedAt: input.now,
+      locatedPeriodKey: 'annual:2026-01-01T00:00:00.000Z:01',
+      clawbackAmount: 6,
+      appliedClawbackAmount: 6,
+      shortfallAmount: 0,
+      reversedGrantCount: 1,
+      creditTransactionId: 'txn-refund-clawback-1',
+    });
+    expect(supabase.tables.credit_transactions).toHaveLength(1);
+    expect(supabase.tables.profiles[0].credits).toBe(94);
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal)
+      .toMatchObject({
+        reviewRequired: false,
+        reversalStatus: 'complete',
+        termination: {
+          written: true,
+          terminatedAt: input.now,
+          reason: 'stripe_refund:refund.created',
+          eventId: input.eventId,
+        },
+      });
+    expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal.reversalStatus)
+      .not.toBe('pending');
+  });
+
   it('claws back the located period as granted minus consumed on full refund and keeps the clawback out of spend', async () => {
     const supabase = createMockSupabase({
       payment_orders: [{
@@ -3982,12 +4339,12 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_subscription_full_later_event',
-      eventType: 'refund.updated',
-      reversedGrantCount: 0,
-      clawbackAmount: 0,
+      refundId: 're_subscription_full',
+      eventType: 'refund.created',
+      reversedGrantCount: 1,
+      clawbackAmount: 6,
       reviewRequired: false,
-      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_full_later:sub:sub_subscription_refund:period:annual:2026-01-01T00:00:00.000Z:03',
+      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_full:sub:sub_subscription_refund:period:annual:2026-01-01T00:00:00.000Z:03',
     });
   });
 
@@ -4136,7 +4493,8 @@ describe('subscription credit grants', () => {
 
     expect(replay).toMatchObject({
       alreadyReconciled: true,
-      reviewRequired: false,
+      reviewRequired: true,
+      reviewReason: null,
       clawbackAmount: 0,
       appliedClawbackAmount: 0,
       shortfallAmount: 0,
@@ -4144,12 +4502,12 @@ describe('subscription credit grants', () => {
     });
     expect(supabase.tables.credit_transactions).toHaveLength(1);
     expect(supabase.tables.payment_orders[0].metadata.subscriptionCreditGrantReversal).toMatchObject({
-      refundId: 're_subscription_shortfall_later_event',
-      eventType: 'refund.updated',
-      reversedGrantCount: 0,
-      shortfallAmount: 0,
-      reversalStatus: 'complete',
-      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_shortfall_later:sub:sub_subscription_refund_shortfall:period:annual:2026-01-01T00:00:00.000Z:03',
+      refundId: 're_subscription_shortfall',
+      eventType: 'refund.created',
+      reversedGrantCount: 1,
+      shortfallAmount: 5,
+      reversalStatus: 'shortfall_review_required',
+      idempotencyKey: 'stripe_refund:subscription_grants:event:evt_subscription_shortfall:sub:sub_subscription_refund_shortfall:period:annual:2026-01-01T00:00:00.000Z:03',
     });
   });
 

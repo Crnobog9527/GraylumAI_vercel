@@ -86,6 +86,8 @@ interface SubscriptionCreditGrantRow {
   total_periods?: number | null;
   credits_granted?: number | null;
   consumed_amount?: number | null;
+  accounting_state?: 'trusted' | 'review_required' | null;
+  accounting_review_reason?: string | null;
   status?: string | null;
   credit_transaction_id?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -175,6 +177,11 @@ export interface ReconcileSubscriptionRefundCreditGrantsInput {
   isFullRefund: boolean;
   eventId?: string | null;
   refundCreatedAt?: string | null;
+  // An aggregate charge.refunded may prove that a successful refund signal
+  // exists without proving which refund or period is authoritative. Preserve
+  // that distinction so the database can terminate safely without guessing.
+  refundIdentityAmbiguous?: boolean;
+  terminationReviewReason?: string | null;
   now?: string;
 }
 
@@ -485,6 +492,8 @@ export function isCanonicalSubscriptionCreditGrant(input: {
 }): boolean {
   const { subscription, grant } = input;
   if (
+    (grant.accounting_state !== undefined && grant.accounting_state !== 'trusted')
+    ||
     !subscription.user_id
     || !subscription.stripe_subscription_id
     || !subscription.membership_plan_id
@@ -1354,6 +1363,8 @@ function buildSubscriptionRefundMetadata(input: {
       refundId: input.refund.refundId ?? null,
       eventType: input.refund.refundEventType ?? null,
       refundStatus: input.refund.refundStatus ?? null,
+      refundIdentityAmbiguous: input.refund.refundIdentityAmbiguous === true,
+      noPreciseRefundSelected: input.refund.refundIdentityAmbiguous === true,
       subscriptionId: input.refund.subscriptionId,
       invoiceId: input.refund.invoiceId ?? null,
       amountRefunded: input.refund.refundAmount ?? null,
@@ -1428,6 +1439,13 @@ function locateRefundPeriodGrant(input: {
   }
 
   const located = candidates[0];
+  if (located.accounting_state !== undefined && located.accounting_state !== 'trusted') {
+    return {
+      grant: null,
+      reviewReason: located.accounting_review_reason || 'grant_accounting_review_required',
+    };
+  }
+
   if (!input.subscription || !isCanonicalSubscriptionCreditGrant({
     subscription: input.subscription,
     grant: located,
@@ -1617,7 +1635,7 @@ async function loadAllSubscriptionCreditGrants(
 ): Promise<SubscriptionCreditGrantRow[]> {
   const result = await supabase
     .from('subscription_credit_grants')
-    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, status, credit_transaction_id, metadata, created_at')
+    .select('id, user_id, membership_plan_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_start, period_end, period_index, total_periods, credits_granted, consumed_amount, accounting_state, accounting_review_reason, status, credit_transaction_id, metadata, created_at')
     .eq('stripe_subscription_id', input.subscriptionId);
 
   if (result.error) {
@@ -1728,7 +1746,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // authority for replay and later-event behavior.
 
   // REFUND-1B (R4): this application read is only a non-authoritative hint for
-  // pending metadata and diagnostics. The refund transaction below must
+  // diagnostics. The refund transaction below must
   // resolve the period again after taking its database locks.
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
     subscriptionId: input.subscriptionId,
@@ -1744,25 +1762,10 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const snapshotLocatedPeriodKey = located.grant?.grant_period_key ?? null;
 
   // REFUND-1B (R1): canonical 幂等身份 = event_id + subscription_id + period_key。
-  // The pending marker may use the snapshot hint, but the final canonical key
-  // is returned by the locked transaction after fresh period resolution.
+  // Its final value is returned by the locked transaction after fresh period
+  // resolution; a pre-RPC payment-order write would be a stale, non-authoritative
+  // concurrent snapshot.
   const canonicalEventId = input.eventId?.trim() || null;
-  const pendingIdempotencyKey = buildSubscriptionRefundIdempotencyKey({
-    eventId: canonicalEventId ?? 'unlocated',
-    subscriptionId: input.subscriptionId,
-    periodKey: snapshotLocatedPeriodKey ?? 'unlocated',
-  });
-
-  // 标记 pending (崩溃恢复锚点)
-  await updateSubscriptionRefundOrder({
-    supabase,
-    order,
-    refund: scopedRefund,
-    now,
-    idempotencyKey: pendingIdempotencyKey,
-    reviewRequired: false,
-    reversalStatus: 'pending',
-  });
 
   // REFUND-1B (R2/R5): the fresh resolver takes the profile -> subscription ->
   // grant lock barrier, resolves the trusted period from locked state, and
@@ -1776,7 +1779,8 @@ export async function reconcileSubscriptionRefundCreditGrants(
     p_subscription_id: input.subscriptionId,
     p_event_id: canonicalEventId,
     p_refund_created_at: input.refundCreatedAt ?? null,
-    p_invoice_scope_review_reason: invoiceScope.status !== 'scoped' ? invoiceScope.reason : null,
+    p_invoice_scope_review_reason: input.terminationReviewReason
+      ?? (invoiceScope.status !== 'scoped' ? invoiceScope.reason : null),
     p_reason: terminationReason,
     p_refund_id: input.refundId ?? null,
     p_now: now,
@@ -1819,6 +1823,15 @@ export async function reconcileSubscriptionRefundCreditGrants(
     );
   }
 
+  // The RPC owns the first-event transaction. Any evidence reconstruction or
+  // payment-order write after it must use a new authoritative read; the
+  // pre-RPC snapshots can be stale when another request wins the lock or when
+  // this process is replaying after a post-commit crash.
+  const freshOrder = await getSubscriptionRefundOrder(supabase, scopedRefund);
+  const freshMirror = await loadSubscriptionMirrorForRefund(supabase, {
+    subscriptionId: input.subscriptionId,
+  });
+
   const locatedPeriodKey = clawbackRow.resolved_period_key ?? null;
   const idempotencyKey = clawbackRow.idempotency_key ?? buildSubscriptionRefundIdempotencyKey({
     eventId: canonicalEventId ?? 'unlocated',
@@ -1831,30 +1844,69 @@ export async function reconcileSubscriptionRefundCreditGrants(
 
   const terminationWritten = clawbackRow.termination_written === true;
   const alreadyTerminated = clawbackRow.already_terminated === true;
-  const terminatedAt = terminationWritten
-    ? now
-    : mirror?.credit_release_terminated_at ?? null;
+  const terminatedAt = freshMirror?.credit_release_terminated_at ?? null;
+  const freshTerminationReason = freshMirror?.credit_release_terminated_reason ?? null;
+  const freshTerminationEventId = freshMirror?.credit_release_terminated_event_id ?? null;
+  const terminationEvidenceWritten = terminatedAt !== null;
+  const freshReconciliation = asRecord(asRecord(freshOrder.metadata).subscriptionCreditGrantReversal);
+  const hasFreshReconciliationEvidence = Object.prototype.hasOwnProperty.call(freshReconciliation, 'reviewRequired');
+  const sameEventOwnsTermination = terminationWritten
+    || (canonicalEventId !== null && freshTerminationEventId === canonicalEventId);
+
+  // The database lock boundary, not the application snapshot, decides which
+  // request established the first termination. A later event must never turn
+  // its own review result into payment-order evidence for the winning event.
+  // Keep exact canonical replay ahead of this guard so it can reconstruct its
+  // own evidence after a post-transaction process crash.
+  if (!sameEventOwnsTermination) {
+    const preservedReviewRequired = hasFreshReconciliationEvidence
+      ? freshReconciliation.reviewRequired === true
+      : true;
+    const preservedReviewReason = hasFreshReconciliationEvidence
+      ? (typeof freshReconciliation.reviewReason === 'string'
+        ? freshReconciliation.reviewReason
+        : null)
+      : 'first_event_reconciliation_evidence_missing';
+    return {
+      orderId: freshOrder.id as string,
+      subscriptionId: input.subscriptionId,
+      refundId: input.refundId ?? null,
+      fullRefund: input.isFullRefund,
+      reviewRequired: preservedReviewRequired,
+      reviewReason: preservedReviewReason,
+      terminationWritten: false,
+      terminatedAt,
+      locatedPeriodKey: freshMirror?.credit_release_terminated_period_key ?? null,
+      reversedGrantCount: 0,
+      clawbackAmount: 0,
+      appliedClawbackAmount: 0,
+      shortfallAmount: 0,
+      creditTransactionId: null,
+      alreadyReconciled: true,
+    };
+  }
 
   // REVIEW_REQUIRED: 不自动扣、不猜测 (termination 已写, 未来释放已停止)
   if (reviewReason) {
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
       reviewRequired: true,
       reviewReason,
       reversalStatus: 'review_required',
-      terminationWritten,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: terminationWritten ? terminationReason : mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: terminationWritten ? canonicalEventId : mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
+      alreadyReconciled: !terminationWritten,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -1868,7 +1920,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
       appliedClawbackAmount: 0,
       shortfallAmount: 0,
       creditTransactionId: null,
-      alreadyReconciled: false,
+      alreadyReconciled: !terminationWritten,
     };
   }
 
@@ -1880,7 +1932,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
     const replayedReviewRequired = replayedShortfall > 0;
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
@@ -1893,16 +1945,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
       reversedGrantCount: clawbackRow.grant_reversed === true ? 1 : 0,
       creditTransactionId: clawbackRow.transaction_id ?? null,
       alreadyReconciled: true,
-      terminationWritten: false,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
       alreadyTerminated,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -1920,11 +1972,12 @@ export async function reconcileSubscriptionRefundCreditGrants(
     };
   }
 
-  // 后续事件: termination 已被首个成功事件确立, 或周期已被先前尝试反转 → 不追历史
-  if (alreadyTerminated || clawbackRow.already_reversed === true) {
+  // 已经反转的 grant 不追历史。已终止的后续事件已在上面的 first-event
+  // ownership guard 无写入返回；这里保留首个 termination-owning invocation。
+  if (clawbackRow.already_reversed === true) {
     await updateSubscriptionRefundOrder({
       supabase,
-      order,
+      order: freshOrder,
       refund: scopedRefund,
       now,
       idempotencyKey,
@@ -1935,17 +1988,17 @@ export async function reconcileSubscriptionRefundCreditGrants(
       reversalStatus: 'complete',
       reversedGrantCount: 0,
       alreadyReconciled: true,
-      terminationWritten: false,
+      terminationWritten: terminationEvidenceWritten,
       terminatedAt,
-      terminationReason: mirror?.credit_release_terminated_reason ?? null,
-      terminationEventId: mirror?.credit_release_terminated_event_id ?? null,
+      terminationReason: freshTerminationReason,
+      terminationEventId: freshTerminationEventId,
       locatedPeriodKey,
       alreadyReversed: clawbackRow.already_reversed === true,
       alreadyTerminated,
     });
 
     return {
-      orderId: order.id as string,
+      orderId: freshOrder.id as string,
       subscriptionId: input.subscriptionId,
       refundId: input.refundId ?? null,
       fullRefund: input.isFullRefund,
@@ -1989,7 +2042,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
 
   await updateSubscriptionRefundOrder({
     supabase,
-    order,
+    order: freshOrder,
     refund: scopedRefund,
     now,
     idempotencyKey,
@@ -2002,16 +2055,16 @@ export async function reconcileSubscriptionRefundCreditGrants(
     reversedGrantCount,
     creditTransactionId,
     alreadyReconciled: false,
-    terminationWritten,
+    terminationWritten: terminationEvidenceWritten,
     terminatedAt,
-    terminationReason,
-    terminationEventId: canonicalEventId,
+    terminationReason: freshTerminationReason,
+    terminationEventId: freshTerminationEventId,
     locatedPeriodKey,
     consumedAtReversal,
   });
 
   return {
-    orderId: order.id as string,
+    orderId: freshOrder.id as string,
     subscriptionId: input.subscriptionId,
     refundId: input.refundId ?? null,
     fullRefund: input.isFullRefund,
@@ -3149,6 +3202,13 @@ export async function releaseDueAnnualSubscriptionCredits(
     }
 
     const invoiceId = getAnnualReleaseInvoiceId(subscription);
+    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId });
+    if (existingGrants.some((grant) =>
+      grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
+    )) {
+      summary.skippedSubscriptions += 1;
+      continue;
+    }
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
       subscriptionId,
       invoiceId,
@@ -3298,6 +3358,14 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
   }
 
   const candidate = currentCandidates[0];
+  if (candidate.accounting_state !== undefined && candidate.accounting_state !== 'trusted') {
+    return {
+      grant: null,
+      reviewRequired: true,
+      reviewReason: candidate.accounting_review_reason || 'grant_accounting_review_required',
+    };
+  }
+
   if (!isCanonicalSubscriptionCreditGrant({
     subscription: input.subscription,
     grant: candidate,
@@ -3421,6 +3489,9 @@ export async function getSubscriptionRefundOperatorPreview(
   });
 
   const grantedGrants = grants.filter((grant) => grant.status === 'granted');
+  const hasUntrustedAccounting = grants.some((grant) =>
+    grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
+  );
   const currentPeriodResolution = resolveCanonicalPreviewCurrentPeriod({
     subscription,
     grants,
@@ -3520,7 +3591,9 @@ export async function getSubscriptionRefundOperatorPreview(
     reviewRequired: currentPeriodResolution.reviewRequired,
     reviewReason: currentPeriodResolution.reviewReason,
     balance,
-    otherCreditsTotal: balance === null ? null : balance - activeGrantsRemaining,
+    otherCreditsTotal: balance === null || hasUntrustedAccounting
+      ? null
+      : balance - activeGrantsRemaining,
     futureReleases,
     termination: {
       terminatedAt: subscription?.credit_release_terminated_at ?? null,

@@ -1432,6 +1432,10 @@ describe('REFUND-1B refund operator preview', () => {
     };
 
     expect(isCanonicalSubscriptionCreditGrant({ subscription: yearlySubscription, grant: yearlyGrant })).toBe(true);
+    expect(isCanonicalSubscriptionCreditGrant({
+      subscription: yearlySubscription,
+      grant: { ...yearlyGrant, accounting_state: 'review_required' },
+    })).toBe(false);
     for (const malformed of [
       { user_id: 'other-user' },
       { membership_plan_id: 'other-plan' },
@@ -1738,6 +1742,30 @@ describe('REFUND-1B refund operator preview', () => {
       reviewReason: 'unexpected_current_period_status',
     });
 
+    const accountingReview = createRefund1bSupabase({
+      ...base,
+      subscription_credit_grants: [{
+        id: 'grant-preview-accounting-review', user_id: 'user-preview-classification',
+        membership_plan_id: 'plan-preview-classification', stripe_subscription_id: 'sub-preview-classification',
+        stripe_invoice_id: 'in-preview-classification', billing_cycle: 'yearly',
+        grant_type: 'annual_monthly_release', grant_period_key: 'annual:2027-01-01T00:00:00.000Z:01',
+        period_start: '2027-01-01T00:00:00.000Z', period_end: '2027-02-01T00:00:00.000Z',
+        period_index: 1, total_periods: 12, credits_granted: 100, consumed_amount: 0,
+        accounting_state: 'review_required',
+        accounting_review_reason: 'legacy_consumption_unproven',
+        status: 'granted',
+      }],
+    });
+    await expect(getSubscriptionRefundOperatorPreview(accountingReview, {
+      subscriptionId: 'sub-preview-classification',
+      now: '2027-01-15T00:00:00.000Z',
+    })).resolves.toMatchObject({
+      currentPeriod: null,
+      reviewRequired: true,
+      reviewReason: 'legacy_consumption_unproven',
+      otherCreditsTotal: null,
+    });
+
     const malformedMonthly = createRefund1bSupabase({
       ...base,
       user_subscriptions: [{
@@ -1768,6 +1796,7 @@ describe('REFUND-1B refund operator preview', () => {
     expect(overlapping.writes).toEqual([]);
     expect(noncanonical.writes).toEqual([]);
     expect(unexpectedStatus.writes).toEqual([]);
+    expect(accountingReview.writes).toEqual([]);
     expect(malformedMonthly.writes).toEqual([]);
   });
 });
@@ -2061,8 +2090,8 @@ describe('REFUND-1B migration 0053 contract', () => {
   });
 
   it('R4: the subscription refund timestamp never falls back to charge.created', () => {
-    expect(stripeFulfillmentSource).toContain('getSuccessfulChargeRefund(charge)?.created ?? null');
-    expect(stripeFulfillmentSource).not.toContain('getSuccessfulChargeRefund(charge)?.created ?? charge?.created');
+    expect(stripeFulfillmentSource).toContain('trustedChargeRefund?.created ?? null');
+    expect(stripeFulfillmentSource).not.toContain('trustedChargeRefund?.created ?? charge?.created');
   });
 
   it('re-establishes the SEC-1 service-role-only posture for every replaced function', () => {
@@ -2223,6 +2252,10 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
     join(__dirname, '../../../../db/migrations/0056_refund_1b_service_role_select_contract_repair.sql'),
     'utf8',
   );
+  const forwardRepairMigration = readFileSync(
+    join(__dirname, '../../../../db/migrations/0060_refund_1b_post_merge_forward_repair.sql'),
+    'utf8',
+  );
   const serviceSource = readFileSync(
     join(__dirname, '../subscriptionCreditGrants.ts'),
     'utf8',
@@ -2266,6 +2299,7 @@ describe('REFUND-1B migration 0056 service-role select contract', () => {
     const grantedColumns = new Set([
       ...extractGrantColumns(fulfillmentGrantMigration),
       ...extractGrantColumns(aclRepairMigration),
+      ...extractGrantColumns(forwardRepairMigration),
     ]);
 
     expect(runtimeColumns.filter((column) => !grantedColumns.has(column))).toEqual([]);
@@ -2514,5 +2548,222 @@ describe('REFUND-1B migration 0059 failure period metadata repair', () => {
       chargedPeriodKey: 'real-bound-period',
       callerOnly: 'preserved',
     });
+  });
+});
+
+describe('REFUND-1B migration 0060 post-merge forward repair', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0060_refund_1b_post_merge_forward_repair.sql'),
+    'utf8',
+  );
+  const schemaSource = readFileSync(
+    join(__dirname, '../../../../db/schema.ts'),
+    'utf8',
+  );
+
+  it('quarantines all legacy rows before allowing trusted defaults for new grants', () => {
+    const quarantineDefault = migrationSql.indexOf(
+      "ADD COLUMN accounting_state TEXT NOT NULL DEFAULT 'review_required'",
+    );
+    const trustUpdate = migrationSql.indexOf("accounting_state = 'trusted'");
+    const newGrantDefault = migrationSql.indexOf(
+      "ALTER COLUMN accounting_state SET DEFAULT 'trusted'",
+    );
+
+    expect(quarantineDefault).toBeGreaterThan(-1);
+    expect(trustUpdate).toBeGreaterThan(quarantineDefault);
+    expect(newGrantDefault).toBeGreaterThan(trustUpdate);
+    expect(schemaSource).toContain("enum: ['trusted', 'review_required']");
+    expect(schemaSource).toContain("accountingState: text('accounting_state'");
+    expect(schemaSource).toContain("accountingReviewReason: text('accounting_review_reason')");
+  });
+
+  it('never upgrades a legacy grant from partial bound history or caller-overridable terminal metadata', () => {
+    expect(migrationSql).toContain('database-durable full-lifetime, exact-grant, exact-period, canonical-writer');
+    expect(migrationSql).toMatch(/migration never\s+-- derives a legacy\s+consumed_amount/);
+    expect(migrationSql).toMatch(/never upgrades a legacy row to trusted/);
+    expect(migrationSql).toMatch(/only the final default below applies to grants created after this forward/);
+    expect(migrationSql).not.toContain("pre.operation_type = 'pre_deduct'");
+    expect(migrationSql).not.toContain("pre.metadata->>'chargedGrantId' = g.id::TEXT");
+    expect(migrationSql).not.toContain("metadata->>'periodConsumedDelta'");
+    expect(migrationSql).not.toContain('unique_identity_and_complete_bound_ledger_chain');
+    expect(migrationSql).not.toMatch(/COALESCE\(ledger\.exact_consumed,\s*0\)/);
+  });
+
+  it('normalizes annual period-01 full-term rows only under unique exact identity proof', () => {
+    expect(migrationSql).toContain('annual_period_01_candidates');
+    expect(migrationSql).toContain("g.period_index = 1");
+    expect(migrationSql).toContain("g.total_periods = 12");
+    expect(migrationSql).toContain('g.period_start = us.current_period_start');
+    expect(migrationSql).toContain('g.period_end = us.current_period_end');
+    expect(migrationSql).toMatch(/SELECT count\(\*\)[\s\S]*FROM public\.user_subscriptions AS mirror/);
+    expect(migrationSql).toMatch(/SELECT count\(\*\)[\s\S]*FROM public\.subscription_credit_grants AS sibling/);
+    expect(migrationSql).toContain("'unique_annual_period_01_full_term_identity'");
+  });
+
+  it('blocks review-row mutation and keeps review grants out of pre-deduct and refund clawback', () => {
+    expect(migrationSql).toContain('subscription_credit_grants_accounting_review_guard');
+    expect(migrationSql).toContain('SUBSCRIPTION_GRANT_ACCOUNTING_REVIEW_REQUIRED');
+    expect(migrationSql).toContain('PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED');
+    expect(migrationSql).toContain("g.accounting_state = 'trusted'");
+    expect(migrationSql).toContain('PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED');
+    expect(migrationSql).toContain("g.status = 'granted'");
+    expect(migrationSql).toContain("g.status NOT IN ('granted', 'reversed')");
+    expect(migrationSql).toContain("IF v_accounting_state <> 'trusted' THEN");
+    expect(migrationSql).toContain("'grant_accounting_review_required'");
+  });
+
+  it('preserves column access and service-role-only function execution', () => {
+    expect(migrationSql).toMatch(
+      /GRANT SELECT \(\s*accounting_state,\s*accounting_review_reason\s*\) ON TABLE public\.subscription_credit_grants TO service_role;/,
+    );
+    for (const signature of [
+      'public.refund_1b_guard_accounting_review_row()',
+      'public.atomic_pre_deduct(uuid,integer,text,uuid)',
+      'public.atomic_refund_termination_clawback_fresh(uuid,text,text,timestamptz,text,text,text,timestamptz)',
+    ]) {
+      expect(migrationSql).toContain(signature);
+    }
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+  });
+});
+
+describe('REFUND-1B migration 0061 expired quarantine forward repair', () => {
+  const migrationSql = readFileSync(
+    join(__dirname, '../../../../db/migrations/0061_refund_1b_expired_quarantine_repair.sql'),
+    'utf8',
+  );
+  const preDeduct = extractMigrationFunction(migrationSql, 'atomic_pre_deduct');
+
+  type QuarantineGrant = {
+    status: string;
+    accountingState: string;
+    terminated: boolean;
+    periodStart: number;
+    periodEnd: number;
+    creditsGranted: number;
+    consumedAmount: number;
+  };
+
+  const simulatePreDeduct = (rows: QuarantineGrant[], now: number, balance: number, amount: number) => {
+    const reviewRequiredCount = rows.filter((row) => row.accountingState !== 'trusted').length;
+    const quarantinedTerminatedAmount = rows
+      .filter((row) => row.status === 'granted' && row.accountingState === 'trusted' && row.terminated)
+      .reduce((total, row) => total + Math.max(row.creditsGranted - row.consumedAmount, 0), 0);
+    const currentGrant = rows.find((row) =>
+      row.status === 'granted'
+        && row.accountingState === 'trusted'
+        && !row.terminated
+        && row.periodStart <= now
+        && now < row.periodEnd,
+    );
+    const amountToPeriod = Math.min(amount, currentGrant
+      ? Math.max(currentGrant.creditsGranted - currentGrant.consumedAmount, 0)
+      : 0);
+    const amountToOther = amount - amountToPeriod;
+
+    if (reviewRequiredCount > 0) {
+      return { error: 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED', balance, billingHistoryDelta: 0 };
+    }
+    if (amountToOther > Math.max(balance - amountToPeriod - quarantinedTerminatedAmount, 0)) {
+      return { error: 'PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED', balance, billingHistoryDelta: 0 };
+    }
+    return { error: null, balance: balance - amount, billingHistoryDelta: 1 };
+  };
+
+  it('separates current allocation windows from global unresolved quarantine', () => {
+    const currentCensusStart = preDeduct.indexOf('-- Current-grant census:');
+    const globalCensusStart = preDeduct.indexOf('-- Global unresolved quarantine:');
+    const currentCensus = preDeduct.slice(currentCensusStart, globalCensusStart);
+    const globalCensus = preDeduct.slice(globalCensusStart, preDeduct.indexOf('\n  IF v_review_required_count > 0', globalCensusStart));
+
+    expect(currentCensusStart).toBeGreaterThanOrEqual(0);
+    expect(globalCensusStart).toBeGreaterThan(currentCensusStart);
+    expect(currentCensus).toContain('g.period_start <= now()');
+    expect(currentCensus).toContain('g.period_end > now()');
+    expect(currentCensus).not.toContain('v_review_required_count');
+    expect(currentCensus).not.toContain('v_quarantined_terminated_amount');
+    expect(globalCensus).toContain('count(*) FILTER (WHERE g.accounting_state <> \'trusted\')');
+    expect(globalCensus).toContain('v_quarantined_terminated_amount');
+    expect(globalCensus).toContain('EXISTS (');
+    expect(globalCensus).toMatch(
+      /FROM subscription_credit_grants AS g\s+WHERE g\.user_id = p_user_id;/,
+    );
+    expect(globalCensus).not.toContain('g.period_end > now()');
+    expect(preDeduct).toContain('AND g.period_start <= now()');
+    expect(preDeduct).toContain('AND g.period_end > now()');
+  });
+
+  it('CASE 1: expired review_required remains fail closed without profile or billing history mutation', () => {
+    const result = simulatePreDeduct([{
+      status: 'granted',
+      accountingState: 'review_required',
+      terminated: false,
+      periodStart: 0,
+      periodEnd: 10,
+      creditsGranted: 100,
+      consumedAmount: 0,
+    }], 20, 100, 1);
+
+    expect(result).toEqual({
+      error: 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED',
+      balance: 100,
+      billingHistoryDelta: 0,
+    });
+  });
+
+  it('CASE 2/3: expired terminated remainder stays quarantined while unrelated credits remain spendable', () => {
+    const result = simulatePreDeduct([
+      {
+        status: 'granted', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 400, consumedAmount: 100,
+      },
+      {
+        status: 'granted', accountingState: 'trusted', terminated: false,
+        periodStart: 0, periodEnd: 10, creditsGranted: 200, consumedAmount: 200,
+      },
+    ], 20, 800, 500);
+
+    expect(result).toEqual({ error: null, balance: 300, billingHistoryDelta: 1 });
+  });
+
+  it('CASE 4/5: current trusted allocation survives old quarantine and reversed rows stay inert', () => {
+    const rows: QuarantineGrant[] = [
+      {
+        status: 'granted', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 400, consumedAmount: 100,
+      },
+      {
+        status: 'granted', accountingState: 'trusted', terminated: false,
+        periodStart: 10, periodEnd: 30, creditsGranted: 200, consumedAmount: 0,
+      },
+      {
+        status: 'reversed', accountingState: 'trusted', terminated: true,
+        periodStart: 0, periodEnd: 10, creditsGranted: 900, consumedAmount: 0,
+      },
+    ];
+
+    expect(simulatePreDeduct(rows, 20, 400, 100)).toEqual({
+      error: null,
+      balance: 300,
+      billingHistoryDelta: 1,
+    });
+    expect(simulatePreDeduct(rows, 20, 400, 201)).toEqual({
+      error: 'PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED',
+      balance: 400,
+      billingHistoryDelta: 0,
+    });
+  });
+
+  it('CASE 6: preserves signature and service-role-only security posture', () => {
+    expect(migrationSql).toContain('CREATE OR REPLACE FUNCTION public.atomic_pre_deduct(');
+    expect(migrationSql).toContain('p_reason TEXT DEFAULT \'AI 对话预扣\'');
+    expect(migrationSql).toContain('p_request_id UUID DEFAULT NULL');
+    expect(migrationSql).toContain('SECURITY DEFINER');
+    expect(migrationSql).toContain('SET search_path = public, pg_temp');
+    expect(migrationSql).toContain('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated');
+    expect(migrationSql).toContain('GRANT EXECUTE ON FUNCTION %s TO service_role');
+    expect(migrationSql).not.toContain('CREATE OR REPLACE FUNCTION public.atomic_pre_deduct(uuid');
   });
 });

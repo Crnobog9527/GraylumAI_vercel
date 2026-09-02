@@ -401,6 +401,11 @@ export const subscriptionCreditGrants = pgTable('subscription_credit_grants', {
   creditsGranted: integer('credits_granted').notNull(),
   // REFUND-1B: per-period consumed quota, invariant 0 <= consumedAmount <= creditsGranted
   consumedAmount: integer('consumed_amount').default(0).notNull(),
+  // REFUND-1B forward repair: legacy accounting is quarantined until exact ledger proof exists.
+  accountingState: text('accounting_state', {
+    enum: ['trusted', 'review_required'],
+  }).default('trusted').notNull(),
+  accountingReviewReason: text('accounting_review_reason'),
   status: text('status', { enum: ['granted', 'skipped', 'reversed', 'failed'] }).default('granted').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   creditTransactionId: uuid('credit_transaction_id').references(() => creditTransactions.id, { onDelete: 'set null' }),
