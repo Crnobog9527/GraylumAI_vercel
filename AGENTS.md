@@ -221,7 +221,7 @@ fields and no required ceremony beyond them:
 
 While its goal, risk boundary, and scope remain unchanged, one Envelope may
 cover implementation, directly necessary callers/tests, commits, non-force
-feature-branch pushes, one Draft PR create/update, CI/test/typecheck
+feature-branch pushes, the necessary Draft PR create/update, CI/test/typecheck
 corrections, same-scope remediation, PR-body synchronization, Mark Ready,
 category validation, bounded recoverable retries, and exact cleanup/read-back.
 A changed head, same-scope finding, failed test, or recoverable retry does not
@@ -229,6 +229,10 @@ alone require a new technical Owner decision. Bookkeeper is optional only for an
 requested durable handoff or genuinely separate executor isolation. Evidence
 records facts; they are not a second state machine. No consumed flag, receipt
 chain, superseded receipt version, or replacement Gate is required.
+If an explicitly Owner-authorized emergency main hotfix requires the mandatory
+protected staging resync, the unchanged Envelope may cover both the direct-main
+hotfix PR and that exact resync PR; the resync still requires its separate Owner
+authorization and protected PR path.
 Technical risk classification, exact files, module boundaries, environment
 implications, and validation design may be refined by the Agent inside the
 same authorized real-world boundary. Same-boundary validation expansion,
