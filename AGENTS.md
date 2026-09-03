@@ -18,7 +18,8 @@ repository or external-system mutation, one fresh bootstrap must verify:
 - the exact `docs/governance/DEVELOPMENT_POLICY.md` blob, `authority_epoch`,
   and every applicable live `G2_POLICY_BINDING_ACCEPTED` record;
 - the current Owner authorization and, for high-risk work, its one durable
-  Task Envelope; and
+  Task Envelope, except that the narrowly bounded bootstrap mutation for
+  creating that Envelope may use the bootstrap predicate defined below; and
 - exactly-one-writer, intended branch, PR, and relevant occupancy.
 
 The G2 policy identity is `repository_id` plus the exact Development Policy
@@ -61,6 +62,21 @@ review-thread meaning, technical remediation, file scope, SQL correctness,
 test selection, and technical envelope fields from live evidence; the Owner
 does not need to provide them manually. If a high-risk envelope is needed,
 the Agent populates its technical fields.
+
+When the Owner explicitly authorizes a new high-risk business/product goal
+that has no durable Task Envelope yet, and live authority, task identity, and
+writer occupancy have been freshly verified with no competing or equivalent
+task, a fresh Agent may perform exactly one narrowly bounded bootstrap
+mutation: create that one durable Task Envelope. The Agent populates its
+technical fields (`goal`, `risk`, `scope`, `forbidden`, `validation`,
+`external_systems`, and `stop_conditions`) from the Owner's goal and verified
+boundaries. This bootstrap may not create a branch, edit files, create a
+commit or PR, perform external-system or production mutation, merge, or create
+another Task or Envelope. The Agent must read back and verify the exact new
+Envelope before any later repository or external-system mutation; its creation
+does not create a Gate, Bookkeeper, receipt lifecycle, or another Owner
+authorization requirement unless the goal, risk, scope, or environment
+changes.
 
 An Owner goal authorizes only its stated module, risk envelope, environment,
 and transition. A new goal, module/service, protected surface, risk class,
@@ -189,10 +205,13 @@ expansion.
 There is one mandatory independent semantic review layer. The MVP default is
 GitHub automatic Codex Review triggered by Ready or an explicit review request.
 It must be independent of the implementation context, review the full intended
-`base..head` diff, and bind to the exact current candidate head. `PENDING`
-review is not PASS; `reviews=[]` is not review completion; no review result is
-not zero findings. Any head change invalidates the prior verdict and requires a
-new review. Unresolved actionable findings must equal zero before merge.
+`base..head` diff, and bind to the exact repository, PR, base branch, base SHA,
+head branch, and head SHA. `PENDING` review is not PASS; `reviews=[]` is not
+review completion; no review result is not zero findings. Either base SHA drift
+or head SHA drift invalidates the prior verdict; stale evidence must not be
+reinterpreted or rebound, and a fresh review against the new exact base/head
+candidate is required. Unresolved actionable findings must equal zero before
+merge.
 Manual adversarial review is an optional Owner-selected extra, not a second
 mandatory Harness layer. Retained Evaluator and Release Auditor prompts or
 schemas are reference-only and non-execution authority.
@@ -204,16 +223,21 @@ Auditor service.
 
 Use this deterministic merge checklist; it is not an autonomous merge grant:
 
-1. exact repository, PR, current base, and current head are unambiguous;
-2. the semantic review binds the current exact head and is complete;
-3. required CI/Security succeeds on the current head;
-4. required category validation is complete and current;
-5. review completion is genuine and actionable findings equal zero;
-6. scope and forbidden boundaries are satisfied;
-7. exactly-one-writer still holds and no equivalent PR exists;
-8. branch posture and mergeability are valid;
-9. the Owner explicitly authorizes this exact merge;
-10. any Agent merge uses `expected_head_sha` CAS against the exact audited head.
+1. exact repository, PR, current base branch/SHA, and current head
+   branch/SHA are unambiguous;
+2. the semantic review binds the exact repository, PR, base branch/SHA, head
+   branch/SHA, and full intended base..head diff, and is complete;
+3. current PR base SHA equals the reviewed base SHA and current PR head SHA
+   equals the reviewed head SHA;
+4. required CI/Security succeeds on the current head;
+5. required category validation is complete and current;
+6. review completion is genuine and actionable findings equal zero;
+7. scope and forbidden boundaries are satisfied;
+8. exactly-one-writer still holds and no equivalent PR exists;
+9. branch posture and mergeability are valid;
+10. the Owner explicitly authorizes this exact base/head candidate;
+11. any Agent merge uses `expected_head_sha` CAS against the exact audited
+    head.
 
 Mark Ready is a review trigger inside an unchanged Envelope after relevant
 validation and synchronized PR-body evidence. `READY != MERGE_READY`,
@@ -238,9 +262,21 @@ restored.
 ## 8. Branch, Production, and External-System Boundaries
 
 `staging` is the required pre-production integration branch and `main` is the
-production release branch. Feature branches start from exact current
-`staging`, and feature PRs target `staging`. Never push directly to `main` or
-`staging`, force-push, bypass required checks, or bypass branch protection.
+production release branch. Normal feature branches start from exact current
+`staging`, and feature PRs target `staging`. When the Owner explicitly
+authorizes an emergency production hotfix and the current authoritative
+high-risk/production rules permit it, a hotfix branch may start from exact
+current `main` and its PR may target `main`; it must contain only the exact
+emergency fix, with no unrelated change bundled. The hotfix still requires
+protected-branch compliance, required checks, exact-base/head semantic review,
+exact-head merge authorization, and separate explicit production
+authorization. No direct push to `main` is permitted. After a protected main
+hotfix merge, the same exact fix must be synchronized back to `staging` through
+a protected PR path with separate Owner authorization, containing only that
+fix; direct push to `staging` remains forbidden.
+
+Never push directly to `main` or `staging`, force-push, bypass required
+checks, or bypass branch protection.
 
 Merging a PR, promoting `staging` to `main`, deploying or smoking production,
 accessing or mutating Supabase production, using Stripe live mode, affecting
