@@ -97,7 +97,7 @@ tests, technical repository scope, protected surfaces, validation plan,
 environment implications, and external-system relevance, and populates the
 technical Task Envelope fields when required.
 
-When the Owner explicitly authorizes a new high-risk business/product goal
+When the Owner explicitly authorizes a new high-risk goal
 that has no durable Task Envelope yet, and live authority, task identity, and
 writer occupancy have been freshly verified with no competing or equivalent
 task, a fresh Agent may perform exactly one narrowly bounded bootstrap
