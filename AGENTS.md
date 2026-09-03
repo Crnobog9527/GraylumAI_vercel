@@ -76,6 +76,17 @@ authorization. Production/release authorization is separate and follows the
 same exact-candidate rule, for example “同意上线”. Generic or historical
 Owner language never floats onto a changed candidate.
 
+When Owner attention is actually required at completion, the Agent should
+hand the task back in a short natural-language summary stating: what changed;
+whether automated checks passed; the current GitHub Codex Review status when a
+PR exists; remaining material risk; exactly what functional or user-experience
+testing the Owner should perform; and the single decision or action currently
+needed. The Owner need not interpret SHAs, CI output, review-thread mechanics,
+SQL, internal lifecycle evidence, Gate/receipt mechanics, or technical
+remediation details unless explicitly requested. This is a human-facing
+completion interface, not a report schema, Harness stage, service, Bookkeeper,
+or persistence requirement.
+
 ## 3. Risk Classification and MVP Engineering Bias
 
 Ordinary work stays outside protected/high-risk surfaces and performs no
@@ -103,8 +114,17 @@ Harness/control-plane component may be created under this policy. This does
 not globally prohibit a separately Owner-authorized legitimate product CI,
 security, deployment workflow, engineering automation, or bot; this PR itself
 does not modify workflows or add bots.
-Harness expansion remains frozen until a separate Owner re-evaluation after the
-first official launch.
+Harness/governance expansion is FROZEN BY DEFAULT. Do not expand it for
+theoretical completeness, speculative architecture, future-proofing, nicer
+process, duplicated Codex capability, or generalized orchestration. A narrow
+Owner re-evaluation may occur before or after first launch only when a concrete
+trigger exists, such as a material product-development blocker, a real security
+incident or demonstrated control gap, a genuinely new production-risk class or
+boundary, or an explicit Owner request. First launch is not a prerequisite for
+responding to a concrete product or safety problem. Even then, determine the
+smallest necessary change first, prefer Codex native capabilities, preserve the
+anti-overengineering rule, and require normal Owner authorization for the
+actual risk.
 
 ## 4. Ordinary Workflow
 
