@@ -1,18 +1,19 @@
 # Pull Request
 
-## Issue
+## Goal / Why
 
-- Issue:
+- Goal:
+- Why:
 
-## Contract
+## Risk
 
-- Contract path:
+- Classification: `ordinary` / `high`
+- High-risk surfaces, if any:
 
-## Branches
+## Candidate
 
-- Base branch:
-- Head branch:
-- Head SHA:
+- Base:
+- Head:
 
 ## Scope
 
@@ -21,52 +22,22 @@
 
 ## Validation
 
-- Tests/checks run:
-- Not run:
+- Checks/tests run:
+- Not run / `NOT_APPLICABLE`:
 
-## Owner Summary
+## External / Production Relevance
 
-- One-line Chinese summary:
+- External effects: `none` or describe
+- Production relevance: `none` or describe
 
-## Machine Decision
+## Remaining Risk
 
-- `machine_decision`: `PASS` / `FAIL` / `BLOCKED`
-- `risk_level`: `low` / `medium` / `high` / `production`
-- `can_merge_to_staging`: `true` / `false`
-- `can_release_to_production`: `true` / `false`
-- `forbidden_actions_observed`: `true` / `false`
-- `required_human_authorization`: `none` / `owner` / `production_owner_gate`
-- `stop_reason`:
+- Remaining material risk:
 
-## Owner Next Action
+## Product Spec / Issue
 
-- One-line Chinese next action:
+- Relevant specification / Issue, if useful:
 
-## Evaluator Result
+## Owner Merge Decision
 
-- Evaluator report path or link:
-- Result:
-
-## Release Auditor Result
-
-- Release Auditor report path or link:
-- Result:
-
-## Forbidden Actions Confirmation
-
-Confirm all that apply:
-
-- [ ] No production deployment or production smoke.
-- [ ] No Supabase production DB access.
-- [ ] No Stripe live action.
-- [ ] No real checkout/payment/refund/cancel/webhook replay.
-- [ ] No Vercel/Supabase/Stripe env or project settings change.
-- [ ] No uncontrolled DB migration/RPC/RLS/schema/grant change.
-- [ ] No cron trigger.
-- [ ] No high-risk issue closure.
-- [ ] No auto-merge workflow, Codex Action workflow, or `.codex/hooks.json` added.
-
-## Owner Gate
-
-- Production relevance:
-- Owner authorization required before production:
+- Status: `awaiting Owner` / `authorized`
