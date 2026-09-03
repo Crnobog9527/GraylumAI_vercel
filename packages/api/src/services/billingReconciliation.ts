@@ -91,6 +91,7 @@ export interface BillingReadinessAuditOptions {
 type ProfileRow = {
   id?: string | null;
   credits?: number | string | null;
+  updated_at?: string | null;
 };
 
 type CreditTransactionRow = {
@@ -121,6 +122,7 @@ type PaymentOrderRow = {
   amount_total?: number | string | null;
   fulfilled_at?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
   stripe_subscription_id?: string | null;
   stripe_invoice_id?: string | null;
   metadata?: unknown;
@@ -144,6 +146,7 @@ type SubscriptionCreditGrantRow = {
   credit_transaction_id?: string | null;
   metadata?: unknown;
   created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type SubscriptionRow = {
@@ -162,6 +165,7 @@ type SubscriptionRow = {
   credit_release_terminated_period_key?: string | null;
   metadata?: unknown;
   created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type MembershipPlanRow = {
@@ -604,10 +608,14 @@ function buildBlockedReadinessAudit(
   };
 }
 
-function getCreatedAtMs(value: { created_at?: string | null }): number | null {
-  if (!value.created_at) return null;
-  const parsed = Date.parse(value.created_at);
+function getTimestampMs(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getCreatedAtMs(value: { created_at?: string | null }): number | null {
+  return getTimestampMs(value.created_at);
 }
 
 function isProfileLedgerMismatchHistorical(
@@ -626,7 +634,10 @@ function isProfileLedgerMismatchHistorical(
     .filter((row) => (getCreatedAtMs(row) as number) >= baselineMs)
     .sort((left, right) => (getCreatedAtMs(left) as number) - (getCreatedAtMs(right) as number));
 
-  if (launchTransactions.length === 0) return true;
+  if (launchTransactions.length === 0) {
+    const profileUpdatedAtMs = getTimestampMs(profile.updated_at);
+    return profileUpdatedAtMs !== null && profileUpdatedAtMs < baselineMs;
+  }
 
   let previousBalanceAfter: number | null = null;
   for (const transaction of launchTransactions) {
@@ -648,7 +659,7 @@ function isProfileLedgerMismatchHistorical(
   return previousBalanceAfter === toInteger(profile.credits);
 }
 
-function rowsForFinding(
+function immutableRowsForFinding(
   finding: BillingReadinessFinding,
   rows: BillingReadinessRows,
 ): Array<{ created_at?: string | null }> {
@@ -688,7 +699,17 @@ function rowsForFinding(
     return rows.paymentOrders.filter((row) => row.id === finding.entityId);
   }
   if (finding.entityType === 'subscription_credit_grants') {
-    return rows.subscriptionCreditGrants.filter((row) => row.id === finding.entityId);
+    const grants = rows.subscriptionCreditGrants.filter((row) => row.id === finding.entityId);
+    if (finding.code !== 'subscription_grant_credit_transaction_mismatch') return grants;
+    const transactionIds = new Set(
+      grants
+        .map((grant) => grant.credit_transaction_id)
+        .filter((value): value is string => Boolean(value)),
+    );
+    return [
+      ...grants,
+      ...rows.creditTransactions.filter((row) => row.id && transactionIds.has(row.id)),
+    ];
   }
   if (finding.entityType === 'user_subscriptions') {
     return rows.subscriptions.filter((row) => row.id === finding.entityId);
@@ -696,20 +717,188 @@ function rowsForFinding(
   return [];
 }
 
+const CREATE_TIME_DEFINED_FINDINGS = new Set([
+  'refund_clawback_counts_as_spend',
+  'subscription_grant_missing_credit_transaction',
+  'subscription_grant_credit_transaction_mismatch',
+  'subscription_grant_transaction_orphaned',
+  'annual_monthly_release_period_invalid',
+  'duplicate_annual_grant_period',
+  'duplicate_subscription_grant',
+  'duplicate_idempotency_key',
+]);
+
+type TimestampProof = 'HISTORICAL' | 'LAUNCH' | 'UNKNOWN';
+
+function timestampFieldsProof(
+  record: Record<string, unknown>,
+  fieldNames: string[],
+  baselineMs: number,
+): TimestampProof {
+  const timestamps: number[] = [];
+  for (const fieldName of fieldNames) {
+    if (!Object.prototype.hasOwnProperty.call(record, fieldName)) continue;
+    const timestamp = getTimestampMs(record[fieldName]);
+    if (timestamp === null) return 'LAUNCH';
+    timestamps.push(timestamp);
+  }
+
+  if (timestamps.length === 0) return 'UNKNOWN';
+  return timestamps.every((timestamp) => timestamp < baselineMs)
+    ? 'HISTORICAL'
+    : 'LAUNCH';
+}
+
+function updatedAtProof(
+  row: { updated_at?: string | null },
+  baselineMs: number,
+): TimestampProof {
+  const updatedAtMs = getTimestampMs(row.updated_at);
+  if (updatedAtMs === null) return 'UNKNOWN';
+  return updatedAtMs < baselineMs ? 'HISTORICAL' : 'LAUNCH';
+}
+
+function paymentStatusProof(order: PaymentOrderRow, baselineMs: number): TimestampProof {
+  const metadata = asRecord(order.metadata);
+  if (
+    normalizeText(metadata.paymentStatus) === normalizeText(order.payment_status)
+    && normalizeText(metadata.lastPaymentOrderStatus) === normalizeText(order.status)
+    && Object.prototype.hasOwnProperty.call(metadata, 'lastPaymentOrderStatusAt')
+  ) {
+    return timestampFieldsProof(metadata, ['lastPaymentOrderStatusAt'], baselineMs);
+  }
+  return updatedAtProof(order, baselineMs);
+}
+
+function paymentOrderStateProof(order: PaymentOrderRow, baselineMs: number): TimestampProof {
+  const metadata = asRecord(order.metadata);
+  if (
+    normalizeText(metadata.lastPaymentOrderStatus) === normalizeText(order.status)
+    && Object.prototype.hasOwnProperty.call(metadata, 'lastPaymentOrderStatusAt')
+  ) {
+    return timestampFieldsProof(metadata, ['lastPaymentOrderStatusAt'], baselineMs);
+  }
+  return updatedAtProof(order, baselineMs);
+}
+
+function refundStateProof(order: PaymentOrderRow, baselineMs: number): TimestampProof {
+  const metadata = asRecord(order.metadata);
+  const candidates: Array<{ active: boolean; record: Record<string, unknown>; fields: string[] }> = [
+    {
+      active: hasSubscriptionGrantReversalAuditSignal(metadata.subscriptionCreditGrantReversal),
+      record: asRecord(metadata.subscriptionCreditGrantReversal),
+      fields: ['refundCreatedAt', 'reconciledAt'],
+    },
+    {
+      active: hasGenericRefundAuditSignal(metadata.stripeRefundReconciliation),
+      record: asRecord(metadata.stripeRefundReconciliation),
+      fields: ['refundCreatedAt', 'reconciledAt'],
+    },
+    {
+      active: hasGenericRefundAuditSignal(metadata.refundReconciliation),
+      record: asRecord(metadata.refundReconciliation),
+      fields: ['refundCreatedAt', 'reconciledAt'],
+    },
+    {
+      active: hasGenericRefundAuditSignal(metadata.refund),
+      record: asRecord(metadata.refund),
+      fields: ['refundCreatedAt', 'createdAt', 'reconciledAt'],
+    },
+  ];
+
+  const candidate = candidates.find((entry) => entry.active);
+  if (candidate) {
+    const proof = timestampFieldsProof(candidate.record, candidate.fields, baselineMs);
+    if (proof !== 'UNKNOWN') return proof;
+  }
+
+  // updated_at is only an upper-bound proof here: a pre-baseline last mutation
+  // proves the current refund state predates Launch. A missing or later value is
+  // ambiguous and therefore remains Launch-blocking.
+  return updatedAtProof(order, baselineMs);
+}
+
+function findPaymentOrder(
+  finding: BillingReadinessFinding,
+  rows: BillingReadinessRows,
+): PaymentOrderRow | null {
+  if (finding.entityType !== 'payment_orders' || !finding.entityId) return null;
+  return rows.paymentOrders.find((row) => row.id === finding.entityId) ?? null;
+}
+
+function findGrant(
+  finding: BillingReadinessFinding,
+  rows: BillingReadinessRows,
+): SubscriptionCreditGrantRow | null {
+  if (finding.entityType !== 'subscription_credit_grants' || !finding.entityId) return null;
+  return rows.subscriptionCreditGrants.find((row) => row.id === finding.entityId) ?? null;
+}
+
 function isHistoricalFinding(
   finding: BillingReadinessFinding,
   rows: BillingReadinessRows,
   launchBaselineAt: Date,
+  pendingOrderMaxAgeHours: number,
 ): boolean {
   if (finding.severity === 'warning') return false;
+  const baselineMs = launchBaselineAt.getTime();
   if (finding.code === 'profile_ledger_balance_mismatch' && finding.entityId) {
     return isProfileLedgerMismatchHistorical(finding.entityId, rows, launchBaselineAt);
   }
 
-  const sourceRows = rowsForFinding(finding, rows);
-  if (sourceRows.length === 0) return false;
-  const timestamps = sourceRows.map(getCreatedAtMs);
-  return timestamps.every((timestamp) => timestamp !== null && timestamp < launchBaselineAt.getTime());
+  if (CREATE_TIME_DEFINED_FINDINGS.has(finding.code)) {
+    const sourceRows = immutableRowsForFinding(finding, rows);
+    if (sourceRows.length === 0) return false;
+    const timestamps = sourceRows.map(getCreatedAtMs);
+    return timestamps.every((timestamp) => timestamp !== null && timestamp < baselineMs);
+  }
+
+  const paymentOrder = findPaymentOrder(finding, rows);
+  if (finding.code === 'stale_pending_payment_order' && paymentOrder) {
+    const createdAtMs = getCreatedAtMs(paymentOrder);
+    if (createdAtMs === null) return false;
+    const staleAtMs = createdAtMs + pendingOrderMaxAgeHours * 60 * 60 * 1000;
+    return staleAtMs < baselineMs
+      && paymentOrderStateProof(paymentOrder, baselineMs) === 'HISTORICAL';
+  }
+
+  if (finding.code === 'payment_order_paid_unfulfilled' && paymentOrder) {
+    return paymentStatusProof(paymentOrder, baselineMs) === 'HISTORICAL';
+  }
+
+  if (finding.code === 'refund_termination_gap' && paymentOrder) {
+    return refundStateProof(paymentOrder, baselineMs) === 'HISTORICAL';
+  }
+
+  if (
+    (finding.code === 'invalid_payment_order_status'
+      || finding.code === 'subscription_refund_audit_metadata_missing')
+    && paymentOrder
+  ) {
+    return paymentOrderStateProof(paymentOrder, baselineMs) === 'HISTORICAL';
+  }
+
+  if (finding.code === 'subscription_grant_consumed_amount_invalid') {
+    const grant = findGrant(finding, rows);
+    // Every known consumed_amount mutation updates this row's updated_at. A
+    // pre-baseline value therefore proves the invalid state is legacy; a
+    // missing or later value cannot prove that and remains Launch-blocking.
+    return grant !== null && updatedAtProof(grant, baselineMs) === 'HISTORICAL';
+  }
+
+  if (finding.code === 'duplicate_active_subscription') {
+    const ids = Array.isArray(finding.metadata?.subscriptionIds)
+      ? finding.metadata.subscriptionIds
+      : [];
+    const subscriptions = rows.subscriptions.filter((row) => row.id && ids.includes(row.id));
+    return subscriptions.length > 0 && subscriptions.every((row) => (
+      updatedAtProof(row, baselineMs) === 'HISTORICAL'
+    ));
+  }
+
+  // Dynamic readiness findings (for example, a currently due annual grant)
+  // have no trustworthy pre-baseline formation timestamp. Fail closed.
+  return false;
 }
 
 export function buildBillingEngineV15ReadinessAudit(
@@ -1271,7 +1460,12 @@ export function buildBillingEngineV15ReadinessAudit(
 
   const historicalSourceFindings = options.launchBaselineAt
     ? findings
-      .filter((finding) => isHistoricalFinding(finding, rows, options.launchBaselineAt as Date))
+      .filter((finding) => isHistoricalFinding(
+        finding,
+        rows,
+        options.launchBaselineAt as Date,
+        pendingOrderMaxAgeHours,
+      ))
     : [];
   const historicalFindingSet = new Set(historicalSourceFindings);
   const historicalFindings = historicalSourceFindings
@@ -1354,7 +1548,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionsResult,
     membershipPlansResult,
   ] = await Promise.all([
-    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits', rowLimit),
+    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits, updated_at', rowLimit),
     readLimitedRows<CreditTransactionRow>(
       supabase,
       'credit_transactions',
@@ -1364,19 +1558,19 @@ export async function runBillingEngineV15ReadinessAudit(
     readLimitedRows<PaymentOrderRow>(
       supabase,
       'payment_orders',
-      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, stripe_subscription_id, stripe_invoice_id, metadata',
+      'id, user_id, item_type, mode, status, payment_status, amount_total, fulfilled_at, created_at, updated_at, stripe_subscription_id, stripe_invoice_id, metadata',
       rowLimit,
     ),
     readLimitedRows<SubscriptionCreditGrantRow>(
       supabase,
       'subscription_credit_grants',
-      'id, user_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_index, total_periods, credits_granted, consumed_amount, accounting_state, status, idempotency_key, credit_transaction_id, metadata, created_at',
+      'id, user_id, stripe_subscription_id, stripe_invoice_id, billing_cycle, grant_type, grant_period_key, period_index, total_periods, credits_granted, consumed_amount, accounting_state, status, idempotency_key, credit_transaction_id, metadata, created_at, updated_at',
       rowLimit,
     ),
     readLimitedRows<SubscriptionRow>(
       supabase,
       'user_subscriptions',
-      'id, user_id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key, metadata, created_at',
+      'id, user_id, membership_plan_id, stripe_subscription_id, status, cancel_at_period_end, billing_cycle, current_period_start, current_period_end, credit_release_terminated_at, credit_release_terminated_reason, credit_release_terminated_event_id, credit_release_terminated_period_key, metadata, created_at, updated_at',
       rowLimit,
     ),
     readLimitedRows<MembershipPlanRow>(

@@ -36,11 +36,6 @@ export async function GET(request: Request) {
       runBillingEngineV15ReadinessAudit(supabase),
     ]);
     const success = result.success && readinessAudit.success;
-    const status = result.status === 'BLOCKED' || readinessAudit.status === 'BLOCKED'
-      ? 'BLOCKED'
-      : success
-        ? 'SUCCESS'
-        : 'FAILED';
 
     if (!success) {
       logger.system.cronJob(
@@ -76,11 +71,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success,
-      status,
-      launchBaselineAt: result.launchBaselineAt ?? readinessAudit.launchBaselineAt,
       periodStart: result.periodStart,
       periodEnd: result.periodEnd,
-      enforcementStart: result.enforcementStart,
       mismatches: result.mismatches,
       summary: result.summary,
       readinessAudit,

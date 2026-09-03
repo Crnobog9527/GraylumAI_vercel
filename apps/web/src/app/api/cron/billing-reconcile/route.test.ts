@@ -112,7 +112,7 @@ describe('/api/cron/billing-reconcile', () => {
     );
   });
 
-  it('returns the explicit BLOCKED status when launch_baseline_at is unavailable', async () => {
+  it('returns 500 and preserves service BLOCKED details when launch_baseline_at is unavailable', async () => {
     mocks.runDailyBillingReconciliation.mockResolvedValue({
       ...dailySuccess,
       success: false,
@@ -134,8 +134,11 @@ describe('/api/cron/billing-reconcile', () => {
     expect(response.status).toBe(500);
     expect(body).toMatchObject({
       success: false,
-      status: 'BLOCKED',
-      launchBaselineAt: null,
+      mismatches: ['BLOCKED: launch_baseline_at is missing'],
+      readinessAudit: {
+        status: 'BLOCKED',
+        launchBaselineAt: null,
+      },
     });
     expect(mocks.cronJob).toHaveBeenCalledWith(
       'billing-reconcile',

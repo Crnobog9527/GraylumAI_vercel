@@ -265,7 +265,7 @@ describe('runDailyBillingReconciliation', () => {
 function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEngineV15ReadinessAudit>[0]> = {}) {
   const baseRows: Parameters<typeof buildBillingEngineV15ReadinessAudit>[0] = {
     profiles: [
-      { id: 'user-ready', credits: 120 },
+      { id: 'user-ready', credits: 120, updated_at: '2026-06-15T00:03:00.000Z' },
     ],
     creditTransactions: [
       {
@@ -326,6 +326,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         payment_status: 'paid',
         fulfilled_at: '2026-06-15T00:00:00.000Z',
         created_at: '2026-06-15T00:00:00.000Z',
+        updated_at: '2026-06-15T00:00:00.000Z',
         stripe_subscription_id: 'sub-ready',
         stripe_invoice_id: 'in-ready',
       },
@@ -338,6 +339,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         payment_status: 'refunded',
         fulfilled_at: '2026-06-10T00:00:00.000Z',
         created_at: '2026-06-10T00:00:00.000Z',
+        updated_at: '2026-06-10T00:00:00.000Z',
         stripe_subscription_id: 'sub-ready',
         stripe_invoice_id: 'in-refunded',
         metadata: {
@@ -347,6 +349,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
             refundId: 're-ready',
             reversalStatus: 'complete',
             idempotencyKey: 'stripe_refund:subscription_grants:invoice:in-refunded:sub-ready',
+            reconciledAt: '2026-06-10T00:00:00.000Z',
           },
         },
       },
@@ -368,6 +371,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         idempotency_key: 'subscription_grant:annual_monthly_release:sub-ready:annual:2026-06-15T00:00:00.000Z:01',
         credit_transaction_id: 'txn-subscription-grant',
         created_at: '2026-06-15T00:00:00.000Z',
+        updated_at: '2026-06-15T00:00:00.000Z',
       },
     ],
     subscriptions: [
@@ -383,6 +387,7 @@ function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEn
         current_period_end: '2027-06-15T00:00:00.000Z',
         credit_release_terminated_at: '2026-06-10T00:00:00.000Z',
         created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-10T00:00:00.000Z',
         metadata: {
           lastInvoiceId: 'in-ready',
         },
@@ -1607,6 +1612,12 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
             payment_status: 'paid',
             fulfilled_at: null,
             created_at: '2026-05-31T23:59:59.999Z',
+            updated_at: '2026-05-31T23:59:59.999Z',
+            metadata: {
+              paymentStatus: 'paid',
+              lastPaymentOrderStatus: 'completed',
+              lastPaymentOrderStatusAt: '2026-05-31T23:59:59.999Z',
+            },
           },
         ],
       }), { now, launchBaselineAt: baseline });
@@ -1620,6 +1631,183 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
           scope: 'historical',
           entityId: 'legacy-paid-unfulfilled',
         }),
+      ]));
+    });
+
+    it('fails a pre-baseline order whose refund transition occurred after baseline', () => {
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        paymentOrders: [
+          ...createReadinessRows().paymentOrders,
+          {
+            id: 'post-baseline-refund-gap',
+            user_id: 'user-ready',
+            item_type: 'membership_plan',
+            mode: 'subscription',
+            status: 'refunded',
+            payment_status: 'refunded',
+            fulfilled_at: '2026-05-20T00:00:00.000Z',
+            created_at: '2026-05-20T00:00:00.000Z',
+            updated_at: '2026-06-02T00:00:00.000Z',
+            stripe_subscription_id: 'sub-post-baseline-refund-gap',
+            metadata: {
+              subscriptionCreditGrantReversal: {
+                fullRefund: true,
+                reviewRequired: false,
+                refundId: 're-post-baseline',
+                reversalStatus: 'complete',
+                refundCreatedAt: '2026-06-02T00:00:00.000Z',
+                reconciledAt: '2026-06-02T00:00:00.000Z',
+              },
+            },
+          },
+        ],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(false);
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'refund_termination_gap',
+          scope: 'launch',
+          entityId: 'post-baseline-refund-gap',
+        }),
+      ]));
+    });
+
+    it('keeps a provably pre-baseline refund gap historical despite a later unrelated row update', () => {
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        paymentOrders: [
+          ...createReadinessRows().paymentOrders,
+          {
+            id: 'pre-baseline-refund-gap',
+            user_id: 'user-ready',
+            item_type: 'membership_plan',
+            mode: 'subscription',
+            status: 'refunded',
+            payment_status: 'refunded',
+            fulfilled_at: '2026-05-20T00:00:00.000Z',
+            created_at: '2026-05-20T00:00:00.000Z',
+            updated_at: '2026-06-10T00:00:00.000Z',
+            stripe_subscription_id: 'sub-pre-baseline-refund-gap',
+            metadata: {
+              subscriptionCreditGrantReversal: {
+                fullRefund: true,
+                reviewRequired: false,
+                refundId: 're-pre-baseline',
+                reversalStatus: 'complete',
+                refundCreatedAt: '2026-05-31T22:59:00.000Z',
+                reconciledAt: '2026-05-31T23:00:00.000Z',
+              },
+            },
+          },
+        ],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(true);
+      expect(result.historicalFindings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'refund_termination_gap',
+          scope: 'historical',
+          entityId: 'pre-baseline-refund-gap',
+        }),
+      ]));
+    });
+
+    it('fails a pre-baseline order whose paid-unfulfilled transition occurred after baseline', () => {
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        paymentOrders: [
+          ...createReadinessRows().paymentOrders,
+          {
+            id: 'post-baseline-paid-unfulfilled',
+            user_id: 'user-ready',
+            item_type: 'credit_package',
+            mode: 'payment',
+            status: 'completed',
+            payment_status: 'paid',
+            fulfilled_at: null,
+            created_at: '2026-05-20T00:00:00.000Z',
+            updated_at: '2026-06-02T00:00:00.000Z',
+            metadata: {
+              paymentStatus: 'paid',
+              lastPaymentOrderStatus: 'completed',
+              lastPaymentOrderStatusAt: '2026-06-02T00:00:00.000Z',
+            },
+          },
+        ],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(false);
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'payment_order_paid_unfulfilled',
+          scope: 'launch',
+          entityId: 'post-baseline-paid-unfulfilled',
+        }),
+      ]));
+    });
+
+    it('fails a pre-baseline grant whose invalid consumed amount was mutated after baseline', () => {
+      const rows = createReadinessRows();
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        subscriptionCreditGrants: [{
+          ...rows.subscriptionCreditGrants[0],
+          consumed_amount: 101,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-06-02T00:00:00.000Z',
+        }],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(false);
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'subscription_grant_consumed_amount_invalid',
+          scope: 'launch',
+          entityId: 'grant-ready',
+        }),
+      ]));
+    });
+
+    it('keeps an invalid consumed amount historical when its last mutation is provably pre-baseline', () => {
+      const rows = createReadinessRows();
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        subscriptionCreditGrants: [{
+          ...rows.subscriptionCreditGrants[0],
+          consumed_amount: 101,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: '2026-05-31T23:00:00.000Z',
+        }],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(true);
+      expect(result.historicalFindings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'subscription_grant_consumed_amount_invalid',
+          scope: 'historical',
+          entityId: 'grant-ready',
+        }),
+      ]));
+    });
+
+    it('fails closed when a mutable anomaly has no trustworthy mutation timestamp', () => {
+      const rows = createReadinessRows();
+      const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
+        subscriptionCreditGrants: [{
+          ...rows.subscriptionCreditGrants[0],
+          consumed_amount: 101,
+          created_at: '2026-05-20T00:00:00.000Z',
+          updated_at: null,
+        }],
+      }), { now, launchBaselineAt: baseline });
+
+      expect(result.success).toBe(false);
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          code: 'subscription_grant_consumed_amount_invalid',
+          scope: 'launch',
+          entityId: 'grant-ready',
+        }),
+      ]));
+      expect(result.historicalFindings).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'subscription_grant_consumed_amount_invalid' }),
       ]));
     });
 
@@ -1685,7 +1873,11 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
 
     it('treats a cumulative balance mismatch as historical when all post-baseline ledger links are valid', () => {
       const rows = createReadinessRows({
-        profiles: [{ id: 'user-ready', credits: 999 }],
+        profiles: [{
+          id: 'user-ready',
+          credits: 999,
+          updated_at: '2026-06-15T00:03:00.000Z',
+        }],
       });
       const result = buildBillingEngineV15ReadinessAudit(rows, {
         now,
@@ -1700,7 +1892,11 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
 
     it('fails a cumulative balance mismatch that persists after valid post-baseline ledger entries', () => {
       const result = buildBillingEngineV15ReadinessAudit(createReadinessRows({
-        profiles: [{ id: 'user-ready', credits: 119 }],
+        profiles: [{
+          id: 'user-ready',
+          credits: 119,
+          updated_at: '2026-06-15T00:03:00.000Z',
+        }],
       }), { now, launchBaselineAt: baseline });
 
       expect(result.success).toBe(false);
