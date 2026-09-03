@@ -91,7 +91,6 @@ export interface BillingReadinessAuditOptions {
 type ProfileRow = {
   id?: string | null;
   credits?: number | string | null;
-  updated_at?: string | null;
 };
 
 type CreditTransactionRow = {
@@ -626,37 +625,63 @@ function isProfileLedgerMismatchHistorical(
   const profile = rows.profiles.find((row) => row.id === profileId);
   if (!profile) return false;
 
+  // profiles has no mutation timestamp. Only ledger snapshots can establish a
+  // pre-baseline offset; old rows or a valid Launch-only chain are not proof.
+  const ledgerInteger = (value: number | string | null | undefined): number | null => {
+    if (typeof value === 'string' && !value.trim()) return null;
+    const parsed = toFiniteNumber(value);
+    return parsed !== null && Number.isSafeInteger(parsed) ? parsed : null;
+  };
+  const profileCredits = ledgerInteger(profile.credits);
+  if (profileCredits === null) return false;
+
   const baselineMs = launchBaselineAt.getTime();
-  const transactions = rows.creditTransactions.filter((row) => row.user_id === profileId);
-  if (transactions.some((row) => getCreatedAtMs(row) === null)) return false;
-
-  const launchTransactions = transactions
-    .filter((row) => (getCreatedAtMs(row) as number) >= baselineMs)
-    .sort((left, right) => (getCreatedAtMs(left) as number) - (getCreatedAtMs(right) as number));
-
-  if (launchTransactions.length === 0) {
-    const profileUpdatedAtMs = getTimestampMs(profile.updated_at);
-    return profileUpdatedAtMs !== null && profileUpdatedAtMs < baselineMs;
+  const transactions = rows.creditTransactions
+    .filter((row) => row.user_id === profileId)
+    .map((row) => ({ row, timestamp: getCreatedAtMs(row), amount: ledgerInteger(row.amount) }));
+  if (transactions.some(({ timestamp, amount }) => timestamp === null || amount === null)) return false;
+  transactions.sort((left, right) => (left.timestamp as number) - (right.timestamp as number));
+  // Equal timestamps have no authoritative ordering in this schema. Do not
+  // invent one from query order or UUIDs when proving balance continuity.
+  if (transactions.some((entry, index) => index > 0 && entry.timestamp === transactions[index - 1].timestamp)) {
+    return false;
   }
 
-  let previousBalanceAfter: number | null = null;
-  for (const transaction of launchTransactions) {
-    const balanceBefore = toFiniteNumber(transaction.balance_before);
-    const balanceAfter = toFiniteNumber(transaction.balance_after);
-    const amount = toFiniteNumber(transaction.amount);
+  const historicalTransactions = transactions.filter(({ timestamp }) => (timestamp as number) < baselineMs);
+  const anchor = historicalTransactions[historicalTransactions.length - 1];
+  if (!anchor) return false;
+  const anchorBefore = ledgerInteger(anchor.row.balance_before);
+  const anchorAfter = ledgerInteger(anchor.row.balance_after);
+  const historicalTotal = historicalTransactions.reduce((total, entry) => total + (entry.amount as number), 0);
+  if (
+    anchorBefore === null || anchorAfter === null
+    || anchorAfter !== anchorBefore + (anchor.amount as number)
+    || !Number.isSafeInteger(historicalTotal)
+  ) return false;
+  const historicalOffset = anchorAfter - historicalTotal;
+  if (!Number.isSafeInteger(historicalOffset) || historicalOffset === 0) return false;
+
+  let previousBalanceAfter = anchorAfter;
+  let ledgerTotal = historicalTotal;
+  for (const { row: transaction, amount } of transactions.filter(({ timestamp }) => (timestamp as number) >= baselineMs)) {
+    const balanceBefore = ledgerInteger(transaction.balance_before);
+    const balanceAfter = ledgerInteger(transaction.balance_after);
     if (
       balanceBefore === null
       || balanceAfter === null
       || amount === null
       || balanceAfter !== balanceBefore + amount
-      || (previousBalanceAfter !== null && balanceBefore !== previousBalanceAfter)
+      || balanceBefore !== previousBalanceAfter
     ) {
       return false;
     }
+    ledgerTotal += amount;
+    if (!Number.isSafeInteger(ledgerTotal)) return false;
     previousBalanceAfter = balanceAfter;
   }
 
-  return previousBalanceAfter === toInteger(profile.credits);
+  return previousBalanceAfter === profileCredits
+    && profileCredits - ledgerTotal === historicalOffset;
 }
 
 function immutableRowsForFinding(
@@ -1548,7 +1573,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionsResult,
     membershipPlansResult,
   ] = await Promise.all([
-    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits, updated_at', rowLimit),
+    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits', rowLimit),
     readLimitedRows<CreditTransactionRow>(
       supabase,
       'credit_transactions',

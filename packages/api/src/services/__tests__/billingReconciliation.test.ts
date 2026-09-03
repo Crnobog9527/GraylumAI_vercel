@@ -265,7 +265,7 @@ describe('runDailyBillingReconciliation', () => {
 function createReadinessRows(overrides: Partial<Parameters<typeof buildBillingEngineV15ReadinessAudit>[0]> = {}) {
   const baseRows: Parameters<typeof buildBillingEngineV15ReadinessAudit>[0] = {
     profiles: [
-      { id: 'user-ready', credits: 120, updated_at: '2026-06-15T00:03:00.000Z' },
+      { id: 'user-ready', credits: 120 },
     ],
     creditTransactions: [
       {
@@ -438,23 +438,39 @@ function createReadinessAuditSupabase(
       }
 
       return {
-        select: (_columns: string, _options?: Record<string, unknown>) => ({
-          limit: async (limit: number) => {
-            const allRows = tables[table] ?? [];
-            const serverCap = serverCaps[table] ?? limit;
-            return {
-              data: allRows.slice(0, Math.min(limit, serverCap)),
-              count: exactCounts[table] ?? allRows.length,
-              error: null,
-            };
-          },
-        }),
+        select: (columns: string, _options?: Record<string, unknown>) => {
+          if (table === 'profiles' && columns.split(',').some((column) => column.trim() === 'updated_at')) {
+            throw new Error('column profiles.updated_at does not exist');
+          }
+          return {
+            limit: async (limit: number) => {
+              const allRows = tables[table] ?? [];
+              const serverCap = serverCaps[table] ?? limit;
+              return {
+                data: allRows.slice(0, Math.min(limit, serverCap)),
+                count: exactCounts[table] ?? allRows.length,
+                error: null,
+              };
+            },
+          };
+        },
       };
     },
   } as any;
 }
 
 describe('runBillingEngineV15ReadinessAudit', () => {
+  it('respects the profiles column contract without requesting updated_at', async () => {
+    const supabase = createReadinessAuditSupabase(createReadinessRows());
+    expect(() => supabase.from('profiles').select('id, credits, updated_at'))
+      .toThrow('column profiles.updated_at does not exist');
+
+    const result = await runBillingEngineV15ReadinessAudit(supabase, {
+      now: new Date('2026-06-15T12:00:00.000Z'),
+    });
+    expect(result.status).toBe('SUCCESS');
+  });
+
   it.each([
     ['missing', null, 'launch_baseline_missing'],
     ['invalid', 'not-a-timestamp', 'launch_baseline_invalid'],
@@ -1871,12 +1887,11 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       });
     });
 
-    it('treats a cumulative balance mismatch as historical when all post-baseline ledger links are valid', () => {
+    it('fails closed for an old ledger with no temporal proof of the current profile mismatch', () => {
       const rows = createReadinessRows({
         profiles: [{
           id: 'user-ready',
           credits: 999,
-          updated_at: '2026-06-15T00:03:00.000Z',
         }],
       });
       const result = buildBillingEngineV15ReadinessAudit(rows, {
@@ -1884,9 +1899,9 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         launchBaselineAt: new Date('2026-07-01T00:00:00.000Z'),
       });
 
-      expect(result.success).toBe(true);
-      expect(result.historicalFindings).toEqual(expect.arrayContaining([
-        expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'historical' }),
+      expect(result.status).toBe('FAILED');
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'launch' }),
       ]));
     });
 
@@ -1895,7 +1910,6 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
         profiles: [{
           id: 'user-ready',
           credits: 119,
-          updated_at: '2026-06-15T00:03:00.000Z',
         }],
       }), { now, launchBaselineAt: baseline });
 
@@ -1903,6 +1917,81 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       expect(result.findings).toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'launch' }),
       ]));
+    });
+
+    function offsetLedgerRows() {
+      return createReadinessRows({
+        profiles: [{ id: 'offset-user', credits: 135 }],
+        creditTransactions: [
+          { id: 'legacy-anchor', user_id: 'offset-user', amount: 100, balance_before: 20, balance_after: 120, created_at: '2026-05-31T23:00:00.000Z' },
+          { id: 'launch-a', user_id: 'offset-user', amount: -10, balance_before: 120, balance_after: 110, created_at: '2026-06-01T00:00:00.000Z' },
+          { id: 'launch-b', user_id: 'offset-user', amount: 25, balance_before: 110, balance_after: 135, created_at: '2026-06-02T00:00:00.000Z' },
+        ],
+        paymentOrders: [],
+        subscriptionCreditGrants: [],
+        subscriptions: [],
+      });
+    }
+
+    it('preserves a proven pre-baseline offset through a valid Launch ledger chain', () => {
+      const rows = offsetLedgerRows();
+      rows.creditTransactions.reverse(); // Query order is not evidence of ledger order.
+      const result = buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+
+      expect(result.status).toBe('SUCCESS');
+      expect(result.historicalFindings).toEqual([
+        expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'historical' }),
+      ]);
+    });
+
+    it('requires an actual nonzero pre-baseline offset, not just a valid Launch-only chain', () => {
+      const rows = offsetLedgerRows();
+      rows.creditTransactions[0].balance_before = 0;
+      rows.creditTransactions[0].balance_after = 100;
+      const result = buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+      expect(result.status).toBe('FAILED');
+      expect(result.historicalFindings).toEqual([]);
+    });
+
+    it.each([
+      ['anchor-to-Launch discontinuity', 1, { balance_before: 125, balance_after: 115 }],
+      ['Launch-to-Launch discontinuity', 2, { balance_before: 115, balance_after: 140 }],
+      ['invalid Launch arithmetic', 2, { balance_after: 136 }],
+      ['invalid anchor arithmetic', 0, { balance_before: 21 }],
+      ['missing anchor snapshot', 0, { balance_after: null }],
+      ['missing Launch snapshot', 1, { balance_before: null }],
+      ['unparseable snapshot', 2, { balance_after: 'invalid' }],
+      ['blank snapshot', 2, { balance_before: ' ' }],
+      ['missing amount', 0, { amount: null }],
+      ['missing timestamp', 0, { created_at: null }],
+      ['invalid timestamp', 2, { created_at: 'invalid' }],
+      ['ambiguous timestamp order', 2, { created_at: '2026-06-01T00:00:00.000Z' }],
+    ] as const)('fails closed for %s in the offset proof', (_label, index, mutation) => {
+      const rows = offsetLedgerRows();
+      Object.assign(rows.creditTransactions[index], mutation);
+      const result = buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+
+      expect(result.status).toBe('FAILED');
+      expect(result.findings).toEqual([
+        expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'launch' }),
+      ]);
+      expect(result.historicalFindings).toEqual([]);
+    });
+
+    it('fails closed without a pre-baseline anchor even if the Launch chain is valid', () => {
+      const rows = offsetLedgerRows();
+      rows.creditTransactions.shift();
+      const result = buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+      expect(result.status).toBe('FAILED');
+      expect(result.historicalFindings).toEqual([]);
+    });
+
+    it('fails closed if current profile credits no longer match the anchored final snapshot', () => {
+      const rows = offsetLedgerRows();
+      rows.profiles[0].credits = 136;
+      const result = buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+      expect(result.status).toBe('FAILED');
+      expect(result.historicalFindings).toEqual([]);
     });
   });
 });
