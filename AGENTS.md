@@ -220,10 +220,14 @@ fields and no required ceremony beyond them:
 `stop_conditions`.
 
 While its goal, risk boundary, and scope remain unchanged, one Envelope may
-cover implementation, directly necessary callers/tests, commits, non-force
-feature-branch pushes, the necessary Draft PR create/update, CI/test/typecheck
-corrections, same-scope remediation, PR-body synchronization, Mark Ready,
-category validation, bounded recoverable retries, and exact cleanup/read-back.
+cover the following directly necessary work:
+
+- implementation, callers/tests, and commits;
+- non-force feature-branch pushes and the necessary Draft PR create/update;
+- CI/test/typecheck corrections, same-scope remediation, and PR-body
+  synchronization;
+- Mark Ready, category validation, bounded recoverable retries, and exact
+  cleanup/read-back.
 A changed head, same-scope finding, failed test, or recoverable retry does not
 alone require a new technical Owner decision. Bookkeeper is optional only for an explicitly
 requested durable handoff or genuinely separate executor isolation. Evidence
