@@ -5,6 +5,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ModuleSkillUnavailableError, resolvePublishedSkillSnapshot, type PublishedSkillSnapshot } from './skillRuntime';
+export { skillSnapshotMetadata } from './skillRuntime';
 
 export interface ChatRuntimeSettings {
   siteName?: string;
@@ -29,6 +31,7 @@ export interface ChatRuntimeSettings {
 }
 
 export interface ActiveChatPrompt {
+  readonly skillSnapshot: PublishedSkillSnapshot;
   id: string;
   name: string;
   content: string;
@@ -42,8 +45,7 @@ export interface ActiveChatPrompt {
 export type ModulePromptResolutionCode =
   | 'MODULE_NOT_FOUND'
   | 'MODULE_INACTIVE'
-  | 'MODULE_PLATFORM_UNSUPPORTED'
-  | 'MODULE_PROMPT_MISSING';
+  | 'MODULE_PLATFORM_UNSUPPORTED';
 
 export class ModulePromptResolutionError extends Error {
   code: ModulePromptResolutionCode;
@@ -57,8 +59,8 @@ export class ModulePromptResolutionError extends Error {
   }
 }
 
-export function isModulePromptResolutionError(error: unknown): error is ModulePromptResolutionError {
-  return error instanceof ModulePromptResolutionError;
+export function isModulePromptResolutionError(error: unknown): error is ModulePromptResolutionError | ModuleSkillUnavailableError {
+  return error instanceof ModulePromptResolutionError || error instanceof ModuleSkillUnavailableError;
 }
 
 function normalizeOptionalText(value: unknown): string | null {
@@ -84,10 +86,13 @@ export async function resolveActiveModulePrompt(
   const moduleId = options.moduleId.trim();
   const { data, error } = await supabase
     .from('modules')
-    .select('id, title, description, prompt_content, system_prompt, user_prompt_template, model_id, platform, category, active')
+    .select('id, title, skill_id, model_id, platform, category, active')
     .eq('id', moduleId)
-    .single();
+    .single().then((result) => result, () => { throw new ModuleSkillUnavailableError(); });
 
+  if (error && error.code !== 'PGRST116') {
+    throw new ModuleSkillUnavailableError();
+  }
   if (error || !data) {
     throw new ModulePromptResolutionError(
       'MODULE_NOT_FOUND',
@@ -114,33 +119,19 @@ export async function resolveActiveModulePrompt(
   }
 
   const title = normalizeOptionalText(data.title) ?? '未命名功能模块';
-  const description = normalizeOptionalText(data.description);
-  const promptContent = normalizeOptionalText(data.prompt_content);
-  const systemPrompt = normalizeOptionalText(data.system_prompt);
-  const userPromptTemplate = normalizeOptionalText(data.user_prompt_template);
-  const fallbackPrompt = description
-    ? `你正在作为「${title}」功能模块处理用户请求。\n模块说明：${description}`
-    : null;
-  const resolvedContent = promptContent ?? fallbackPrompt;
+  const skillSnapshot = await resolvePublishedSkillSnapshot(supabase, { id: data.id, skill_id: data.skill_id });
 
-  if (!resolvedContent && !systemPrompt && !userPromptTemplate) {
-    throw new ModulePromptResolutionError(
-      'MODULE_PROMPT_MISSING',
-      '功能模块提示词未配置，请联系管理员完善模块配置',
-      400,
-    );
-  }
-
-  return {
+  return Object.freeze({
     id: data.id,
     name: title,
-    content: resolvedContent ?? '',
-    systemPrompt,
-    userPromptTemplate,
+    content: skillSnapshot.publishedContent,
+    systemPrompt: null,
+    userPromptTemplate: null,
+    skillSnapshot,
     modelId: data.model_id ?? null,
     platform: modulePlatform,
     category: normalizeOptionalText(data.category) ?? 'other',
-  };
+  });
 }
 
 function parseBooleanValue(value: unknown, fallback: boolean): boolean {
@@ -235,25 +226,9 @@ export async function getChatRuntimeSettings(
 }
 
 export function buildRuntimeSystemPrompt(prompt: ActiveChatPrompt | null): string | undefined {
-  if (!prompt) return undefined;
-  const parts = [prompt.systemPrompt, prompt.content]
-    .map((part) => part?.trim())
-    .filter((part): part is string => Boolean(part));
-
-  return parts.length > 0 ? parts.join('\n\n') : undefined;
+  return prompt?.skillSnapshot.publishedContent;
 }
 
-export function applyUserPromptTemplate(prompt: ActiveChatPrompt | null, input: string): string {
-  const template = prompt?.userPromptTemplate?.trim();
-  if (!template) return input;
-
-  if (template.includes('{{input}}')) {
-    return template.replaceAll('{{input}}', input);
-  }
-
-  if (template.includes('{input}')) {
-    return template.replaceAll('{input}', input);
-  }
-
-  return `${template}\n\n${input}`;
+export function applyUserPromptTemplate(_prompt: ActiveChatPrompt | null, input: string): string {
+  return input;
 }

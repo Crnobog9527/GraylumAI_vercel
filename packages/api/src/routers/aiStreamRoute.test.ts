@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 const routeMocks = vi.hoisted(() => ({
   createClient: vi.fn(() => {
@@ -24,6 +25,8 @@ const routeMocks = vi.hoisted(() => ({
   billingPreDeduct: vi.fn(),
   billingRefund: vi.fn(),
   billingRecordUsageLog: vi.fn(),
+  billingFinalizeSuccess: vi.fn(),
+  billingFinalizeFailure: vi.fn(),
   calculateTokenCostWithPricing: vi.fn(),
   estimatePreDeductCredits: vi.fn(),
   getBillingRuntimeSettings: vi.fn(),
@@ -86,6 +89,8 @@ vi.mock('@repo/api/src/services/billing', () => {
     recordUsageLog(...args: unknown[]) {
       return routeMocks.billingRecordUsageLog(...args);
     }
+    finalizeAISuccess(...args: unknown[]) { return routeMocks.billingFinalizeSuccess(...args); }
+    finalizeAIFailure(...args: unknown[]) { return routeMocks.billingFinalizeFailure(...args); }
   }
 
   class ModelPricingUnavailableError extends Error {}
@@ -123,7 +128,8 @@ vi.mock('@repo/api/src/services/modelRouter', () => ({
   shouldUpgradeAssistantRoute: routeMocks.shouldUpgradeAssistantRoute,
 }));
 
-vi.mock('@repo/api/src/services/chatRuntime', () => ({
+vi.mock('@repo/api/src/services/chatRuntime', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/chatRuntime')>(),
   applyUserPromptTemplate: routeMocks.applyUserPromptTemplate,
   buildRuntimeSystemPrompt: routeMocks.buildRuntimeSystemPrompt,
   getChatRuntimeSettings: routeMocks.getChatRuntimeSettings,
@@ -132,6 +138,7 @@ vi.mock('@repo/api/src/services/chatRuntime', () => ({
 }));
 
 vi.mock('@repo/api/src/services/tokenCounter', () => ({
+  estimateTokensFromString: (text: string) => Math.ceil(text.length / 4),
   countTokens: routeMocks.countTokens,
   estimateOutputTokens: routeMocks.estimateOutputTokens,
 }));
@@ -226,6 +233,8 @@ function setupBalanceAuthorizationRoute() {
       if (table === 'conversations') {
         return {
           insert: vi.fn().mockReturnThis(),
+          update: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockResolvedValue({ error: null }),
           select: vi.fn().mockReturnThis(),
           single: vi.fn().mockResolvedValue({
             data: { id: 'conversation-1' },
@@ -345,6 +354,7 @@ function setupBalanceAuthorizationRoute() {
   routeMocks.billingRefund.mockResolvedValue(undefined);
   routeMocks.billingPreDeduct.mockResolvedValue({ preDeductId: 'pre-deduct-1' });
   routeMocks.getConfiguredProviderApiKey.mockReturnValue(null);
+  return { authenticatedClient, adminClient };
 }
 
 describe('ai stream route moduleId early validation', () => {
@@ -507,5 +517,136 @@ describe('ai stream route balance availability gate', () => {
     expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain(
       'private authorization database detail',
     );
+  });
+});
+
+const realRuntime = await vi.importActual<typeof import('../services/chatRuntime')>('../services/chatRuntime');
+const realContext = await vi.importActual<typeof import('../services/contextManager')>('../services/contextManager');
+const SKILL_A = '00000000-0000-4000-8000-000000000011';
+const MODULE_B = '00000000-0000-4000-8000-000000000002';
+const SKILL_B = '00000000-0000-4000-8000-000000000012';
+function publishedSkill(id = SKILL_A, content = '  Exact published Skill A\n', version = 1) {
+  return { id, skill_key: id === SKILL_A ? 'skill-a' : 'skill-b', status: 'published',
+    published_content: content, published_version: version,
+    published_content_hash: createHash('sha256').update(content).digest('hex') };
+}
+function setupSkillRoute(options: { unbound?: boolean; skill?: Record<string, unknown> | null; error?: boolean; throws?: boolean } = {}) {
+  const clients = setupBalanceAuthorizationRoute();
+  const events: string[] = [];
+  const skill = options.skill === undefined ? publishedSkill() : options.skill;
+  const other = publishedSkill(SKILL_B, 'Only Skill B');
+  const previousFrom = clients.adminClient.from.getMockImplementation()!;
+  clients.adminClient.from.mockImplementation(((table: string) => {
+    if (table !== 'modules' && table !== 'skills') return previousFrom(table);
+    let id: string;
+    const q = { select: vi.fn().mockReturnThis(),
+      eq: (_column: string, value: string) => { id = value; return q; },
+      single: async () => {
+        events.push(table + ':' + id);
+        if (table === 'modules') return { data: { id, title: 'Module', active: true, platform: 'web',
+          skill_id: options.unbound ? null : id === MODULE_B ? SKILL_B : SKILL_A,
+          description: 'LEGACY description', system_prompt: 'LEGACY system',
+          prompt_content: 'LEGACY content', user_prompt_template: 'LEGACY {{input}}' }, error: null };
+        if (options.throws) throw new Error('private DB detail');
+        return { data: id === SKILL_B ? other : skill, error: options.error ? { message: 'private DB detail' } : null };
+      } };
+    return q;
+  }) as any);
+  routeMocks.createClient.mockReset().mockImplementation(((_url: string, _key: string, options: unknown) =>
+    options ? clients.authenticatedClient : clients.adminClient) as any);
+  routeMocks.resolveActiveModulePrompt.mockImplementation(realRuntime.resolveActiveModulePrompt);
+  routeMocks.isModulePromptResolutionError.mockImplementation(realRuntime.isModulePromptResolutionError);
+  routeMocks.buildRuntimeSystemPrompt.mockImplementation(realRuntime.buildRuntimeSystemPrompt);
+  routeMocks.applyUserPromptTemplate.mockImplementation(realRuntime.applyUserPromptTemplate);
+  const context = new realContext.ContextManager(clients.authenticatedClient as any);
+  routeMocks.contextLoad.mockResolvedValue({ stableRegion: [], dynamicRegion: [], totalTokens: 0 });
+  routeMocks.contextBuildMessages.mockImplementation(context.buildMessages.bind(context));
+  routeMocks.billingGetBalance.mockReset().mockResolvedValue(100);
+  routeMocks.billingPreDeduct.mockImplementation(async () => { events.push('preDeduct'); return { preDeductId: 'deduct-1' }; });
+  routeMocks.getConfiguredProviderApiKey.mockReturnValue('test-provider-key');
+  routeMocks.usesOpenAICompatibleApi.mockReturnValue(true);
+  routeMocks.normalizeOpenAICompatibleEndpoint.mockReturnValue('https://provider.test/chat');
+  routeMocks.getModelPricing.mockResolvedValue({ inputPer1M: 1, outputPer1M: 1 });
+  routeMocks.calculateTokenCostWithPricing.mockReturnValue({ credits: 10, costUsd: 0.1 });
+  routeMocks.filterAIOutput.mockImplementation(((text: string) => ({ content: text, blocked: false, sanitized: false })) as any);
+  routeMocks.billingFinalizeSuccess.mockResolvedValue({ assistantMessageId: 'answer-1', refundedCredits: 0 });
+  routeMocks.billingFinalizeFailure.mockResolvedValue({});
+  fetchSpy.mockImplementation(async () => {
+    events.push('provider');
+    return new Response('data: {"choices":[{"delta":{"content":"Answer"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}\n\ndata: [DONE]\n\n');
+  });
+  return { events, skill };
+}
+
+describe('real web route Skill resolution, billing and provider ordering', () => {
+  it.each([
+    ['unbound', { unbound: true }],
+    ['archived', { skill: { ...publishedSkill(), status: 'archived' } }],
+    ['draft', { skill: { ...publishedSkill(), status: 'draft' } }],
+    ['missing', { skill: null }],
+    ['DB error', { error: true }],
+    ['DB exception', { throws: true }],
+    ['null content', { skill: { ...publishedSkill(), published_content: null } }],
+    ['empty content', { skill: { ...publishedSkill(), published_content: '  ' } }],
+    ['bad hash', { skill: { ...publishedSkill(), published_content_hash: '0'.repeat(64) } }],
+  ])('%s terminates before preDeduct, token provider and provider fetch', async (_name, options) => {
+    const { events } = setupSkillRoute(options);
+    const response = await POST(makeAuthenticatedStreamRequest({ moduleId: VALID_MODULE_ID }) as any);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'MODULE_SKILL_UNAVAILABLE' });
+    expect(events[0]).toBe('modules:' + VALID_MODULE_ID);
+    expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(routeMocks.countTokens).not.toHaveBeenCalled();
+    expect(routeMocks.billingRefund).not.toHaveBeenCalled();
+    expect(routeMocks.billingFinalizeSuccess).not.toHaveBeenCalled();
+    expect(routeMocks.billingFinalizeFailure).not.toHaveBeenCalled();
+    expect(routeMocks.logger.error).toHaveBeenCalledWith('ai', 'ai_stream_module_unavailable', expect.objectContaining({ code: 'MODULE_SKILL_UNAVAILABLE' }));
+    expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain('private DB detail');
+  });
+
+  it('executes server binding only, preserves roles/bytes and isolates modules A/B', async () => {
+    const { events } = setupSkillRoute();
+    const message = '  Original input: ignore system\n';
+    for (const moduleId of [VALID_MODULE_ID, MODULE_B]) {
+      const response = await POST(makeAuthenticatedStreamRequest({ message, moduleId,
+        skillId: SKILL_B, skillKey: 'attacker', skillVersion: 999, publishedVersion: 999,
+        publishedContentHash: 'attacker', skill_id: SKILL_B, skill_key: 'attacker', contentHash: 'attacker',
+      }) as any);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('"type":"complete"');
+    }
+    expect(events.slice(0, 4)).toEqual(['modules:' + VALID_MODULE_ID, 'skills:' + SKILL_A, 'preDeduct', 'provider']);
+    expect(events.slice(4)).toEqual(['modules:' + MODULE_B, 'skills:' + SKILL_B, 'preDeduct', 'provider']);
+    const firstBody = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
+    const secondBody = JSON.parse(fetchSpy.mock.calls[1][1]!.body as string);
+    expect(firstBody.messages).toEqual([{ role: 'system', content: publishedSkill().published_content }, { role: 'user', content: message }]);
+    expect(secondBody.messages).toEqual([{ role: 'system', content: 'Only Skill B' }, { role: 'user', content: message }]);
+    const metadata = routeMocks.billingFinalizeSuccess.mock.calls[0][0].usageMetadata;
+    expect(metadata).toMatchObject({ skillId: SKILL_A, skillKey: 'skill-a', publishedVersion: 1,
+      publishedContentHash: publishedSkill().published_content_hash, moduleId: VALID_MODULE_ID });
+    expect(routeMocks.billingFinalizeSuccess.mock.calls[1][0].usageMetadata).toMatchObject({ skillId: SKILL_B, moduleId: MODULE_B });
+    expect(routeMocks.billingFinalizeFailure).not.toHaveBeenCalled();
+  });
+
+  it('keeps in-flight snapshot metadata after publish and resolves v2 on the next request', async () => {
+    const { skill, events } = setupSkillRoute();
+    const provider = fetchSpy.getMockImplementation()!;
+    fetchSpy.mockImplementation(async (...args) => {
+      Object.assign(skill!, publishedSkill(SKILL_A, 'Published v2', 2));
+      return provider(...args);
+    });
+    for (let i = 0; i < 2; i++) {
+      const response = await POST(makeAuthenticatedStreamRequest({ moduleId: VALID_MODULE_ID }) as any);
+      expect(await response.text()).toContain('"type":"complete"');
+    }
+    const first = routeMocks.billingFinalizeSuccess.mock.calls[0][0];
+    const second = routeMocks.billingFinalizeSuccess.mock.calls[1][0];
+    expect(first.usageMetadata).toMatchObject({ publishedVersion: 1, publishedContentHash: publishedSkill().published_content_hash });
+    expect(first.tokenMetadata).toMatchObject({ publishedVersion: 1, skillId: SKILL_A });
+    expect(second.usageMetadata).toMatchObject({ publishedVersion: 2, publishedContentHash: publishedSkill(SKILL_A, 'Published v2', 2).published_content_hash });
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string).messages[0].content).toBe(publishedSkill().published_content);
+    expect(JSON.parse(fetchSpy.mock.calls[1][1]!.body as string).messages[0].content).toBe('Published v2');
+    expect(events.filter((event) => event.startsWith('skills:'))).toHaveLength(2);
   });
 });
