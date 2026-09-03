@@ -462,11 +462,54 @@ export const aiUsageLogs = pgTable('ai_usage_logs', {
 // --- 功能模块表 ---
 
 /**
+ * Skill CMS - draft and current published state.
+ * Published revisions are stored separately in skillRevisions.
+ */
+export const skills = pgTable('skills', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  skillKey: text('skill_key').notNull(),
+  draftContent: text('draft_content').default('').notNull(),
+  publishedContent: text('published_content'),
+  status: text('status', { enum: ['draft', 'published', 'archived'] }).default('draft').notNull(),
+  publishedVersion: integer('published_version').default(0).notNull(),
+  publishedContentHash: text('published_content_hash'),
+  createdBy: uuid('created_by').references(() => profiles.id),
+  updatedBy: uuid('updated_by').references(() => profiles.id),
+  publishedBy: uuid('published_by').references(() => profiles.id),
+  archivedBy: uuid('archived_by').references(() => profiles.id),
+  auditMetadata: jsonb('audit_metadata').default({}).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+}, (table) => ({
+  skillKeyUnique: uniqueIndex('skills_skill_key_key').on(table.skillKey),
+}));
+
+/**
+ * Immutable snapshots created only by the atomic publish RPC.
+ */
+export const skillRevisions = pgTable('skill_revisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'restrict' }).notNull(),
+  version: integer('version').notNull(),
+  content: text('content').notNull(),
+  contentHash: text('content_hash').notNull(),
+  publishedBy: uuid('published_by').references(() => profiles.id).notNull(),
+  publishMetadata: jsonb('publish_metadata').default({}).notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  skillVersionUnique: uniqueIndex('skill_revisions_skill_id_version_key')
+    .on(table.skillId, table.version),
+}));
+
+/**
  * 功能模块表 - 在功能广场中展示的 AI 功能模块
  * 每个模块包含预设的提示词，用户选择后可直接使用
  */
 export const modules = pgTable('modules', {
   id: uuid('id').primaryKey().defaultRandom(),
+  skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'set null' }),
   title: text('title').notNull(), // 模块标题
   description: text('description'), // 简短描述
   fullDescription: text('full_description'), // 详细介绍
@@ -492,7 +535,7 @@ export const modules = pgTable('modules', {
   creditsMultiplier: decimal('credits_multiplier', { precision: 4, scale: 2 }).default('1.00'), // 积分倍率
   sortOrder: integer('sort_order').default(0).notNull(), // 排序权重
   isFeatured: boolean('is_featured').default(false).notNull(), // 是否精选
-  active: boolean('active').default(true).notNull(), // 是否启用
+  active: boolean('active').default(false).notNull(), // 新模块默认停用，显式验收后再启用
 
   // 公开展示字段
   imageUrl: text('image_url'), // 精选模块展示图
