@@ -33,6 +33,7 @@ import {
   getChatRuntimeSettings,
   isModulePromptResolutionError,
   resolveActiveModulePrompt,
+  skillSnapshotMetadata,
 } from '@repo/api/src/services/chatRuntime';
 import { countTokens, estimateOutputTokens } from '@repo/api/src/services/tokenCounter';
 import {
@@ -349,10 +350,10 @@ export async function POST(request: NextRequest) {
     const body: StreamRequest = await request.json();
     const { conversationId, modelId } = body;
     const moduleId = normalizeModuleId(body.moduleId);
-    const message = body.message?.trim();
+    const message = typeof body.message === 'string' ? body.message : '';
     const requestId = normalizeRequestId(body.requestId) ?? crypto.randomUUID();
 
-    if (!message) {
+    if (!message.trim()) {
       return new Response(
         JSON.stringify({ error: '消息内容不能为空' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -503,6 +504,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         if (isModulePromptResolutionError(error)) {
+          logAiStreamError('ai_stream_module_unavailable', { moduleId, code: error.code, requestId });
           return new Response(
             JSON.stringify({ error: error.message, code: error.code }),
             { status: error.statusCode, headers: { 'Content-Type': 'application/json' } }
@@ -513,6 +515,7 @@ export async function POST(request: NextRequest) {
       }
     }
     recordStageTiming(stageTimings, 'module_prompt_resolution', modulePromptStartedAt);
+    const skillMetadata = skillSnapshotMetadata(activePrompt?.skillSnapshot);
 
     const defaultModelsStartedAt = Date.now();
     const defaultModelsPromise = getSystemDefaultModels(supabaseAdmin, { runtimeSettings });
@@ -1151,6 +1154,7 @@ export async function POST(request: NextRequest) {
             ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
             userAgent: request.headers.get('user-agent') ?? undefined,
             tokenMetadata: {
+              ...skillMetadata,
               count_method: runtimeModel.tokenCountingMethod,
               count_source: countedInput.countSource,
               counter_version: countedInput.counterVersion,
@@ -1165,6 +1169,7 @@ export async function POST(request: NextRequest) {
               },
             },
             usageMetadata: {
+              ...skillMetadata,
               routingReason,
               routingDecision,
               pricing: pricingMetadata,
@@ -1263,6 +1268,7 @@ export async function POST(request: NextRequest) {
             ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
             userAgent: request.headers.get('user-agent') ?? undefined,
             usageMetadata: {
+              ...skillMetadata,
               routingReason,
               routingDecision,
               promptId: activePrompt?.id ?? null,

@@ -13,6 +13,7 @@ import { aiRouter } from './routers/ai';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
+import { skillsRouter } from './routers/skills';
 
 /**
  * 主路由器
@@ -34,9 +35,11 @@ export const appRouter = router({
   diagnostics: diagnosticsRouter,
   costs: costsRouter,
   payments: paymentsRouter,
+  skills: skillsRouter,
 });
 
 /**
  * 导出类型供客户端使用
  */
 export type AppRouter = typeof appRouter;
+export type { AdminSkill } from './routers/skills';
