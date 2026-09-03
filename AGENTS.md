@@ -265,7 +265,8 @@ Do not ask the Owner again for same-scope technical remediation.
 Ask again only when the product decision, material scope/risk, target, or
 external authorization has changed.
 
-A staging merge never implies authorization to promote or modify `main`.
+Do not enable auto-merge. A staging merge is an explicit Owner-authorized
+transition and never implies authorization to promote or modify `main`.
 
 ## 10. Main, Production, and Durable External Effects
 
@@ -275,11 +276,10 @@ Explicit Owner approval is required before:
 
 - promotion or merge to `main`;
 - production deployment or production smoke;
-- mutation of real-user state;
+- access to or mutation of production databases or real-user data;
 - secrets or credential changes;
 - real payment, refund, cancellation, or checkout actions;
-- production database mutation;
-- production auth changes; or
+- production auth or account-state changes; or
 - provider, project, environment, or configuration changes with real external
   effect.
 
