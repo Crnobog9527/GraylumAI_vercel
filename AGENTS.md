@@ -53,11 +53,28 @@ live completion evidence. If it is not ready, return
 evidence is missing, stale, ambiguous, or conflicting, return
 `BLOCKED_CONTEXT_NOT_VERIFIED`. No Agent may select, start, or progress to a
 Launch task autonomously, and completion never selects the next task.
-For this readiness check, current `staging` Launch authority means only the
-authoritative task graph/readiness data and live completion evidence; retained
-Launch plans, contracts, gates, Evaluator or Release Auditor instructions, and
-other `docs/launch/**` material do not add execution requirements unless the
-current `AGENTS.md` explicitly reactivates a narrow role.
+For this readiness check, current `staging` Launch execution authority is
+limited to the authoritative task graph/readiness data and live completion
+evidence: these narrow Owner choices, but do not select, authorize, or start a
+task. After the Owner selects an eligible named Launch task, the Agent must
+read and use the Frozen Master Plan, the applicable stable task specification,
+and current live repository/product evidence as product/specification inputs
+for the business/product goal, locked product decisions, dependencies,
+intended product scope, acceptance criteria or Definition of Done, required
+validation, and product constraints/invariants. These specifications say what
+the selected task must accomplish, not whether or how it may execute. They
+cannot select a task, authorize repository/branch/PR/external mutation,
+merge, main, production, payment, auth, database, or provider action, or
+override current `AGENTS.md` safety and lifecycle rules. Historical or
+retained lifecycle text inside `docs/launch/**`—including Contracts, Gates,
+Bookkeeper, Planner, Generator, Evaluator, Release Auditor, receipts, stale
+exact bindings, and old orchestration—remains reference/history unless current
+`AGENTS.md` explicitly assigns a narrow current role; retaining valid product
+requirements does not reactivate that old Harness. If a product/specification
+requirement is stale, conflicting, or impossible, the Agent must distinguish
+obsolete process wording from a genuine business/acceptance conflict and
+return to the Owner only for the latter, not for technical lifecycle
+mechanics.
 
 The Owner is a natural-language operator. The Owner supplies the
 product/business goal, acceptance intent, genuine real-world boundary
