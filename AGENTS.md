@@ -53,6 +53,11 @@ live completion evidence. If it is not ready, return
 evidence is missing, stale, ambiguous, or conflicting, return
 `BLOCKED_CONTEXT_NOT_VERIFIED`. No Agent may select, start, or progress to a
 Launch task autonomously, and completion never selects the next task.
+For this readiness check, current `staging` Launch authority means only the
+authoritative task graph/readiness data and live completion evidence; retained
+Launch plans, contracts, gates, Evaluator or Release Auditor instructions, and
+other `docs/launch/**` material do not add execution requirements unless the
+current `AGENTS.md` explicitly reactivates a narrow role.
 
 The Owner is a natural-language operator. The Owner supplies the
 product/business goal, acceptance intent, genuine real-world boundary
