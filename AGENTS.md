@@ -9,7 +9,8 @@ conditions. Do not recreate a planning engine, orchestration layer,
 dispatcher, repair engine, ledger, receipt engine, context manager, control
 plane, or duplicate Harness service.
 
-GitHub live state is the sole repository execution authority. Before any
+GitHub live state is the sole repository execution authority. It does not
+replace the Owner's current-session natural-language authorization. Before any
 repository or external-system mutation, one fresh bootstrap must verify:
 
 - repository identity and repository id;
@@ -21,6 +22,12 @@ repository or external-system mutation, one fresh bootstrap must verify:
   Task Envelope, except that the narrowly bounded bootstrap mutation for
   creating that Envelope may use the bootstrap predicate defined below; and
 - exactly-one-writer, intended branch, PR, and relevant occupancy.
+
+Current-session Owner authorization is verified from the active Codex Goal/turn
+context as a separate, explicit input bound to the stated goal and genuine
+real-world boundary. GitHub live state verifies repository identity, refs,
+policy, and occupancy; it never substitutes for or fabricates that Owner
+authorization, and Owner language never substitutes for GitHub live state.
 
 The G2 policy identity is `repository_id` plus the exact Development Policy
 blob, `authority_epoch`, and exact authoritative `AGENTS.md` blob. A routine
