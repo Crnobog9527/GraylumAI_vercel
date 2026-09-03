@@ -63,6 +63,18 @@ test selection, and technical envelope fields from live evidence; the Owner
 does not need to provide them manually. If a high-risk envelope is needed,
 the Agent populates its technical fields.
 
+The Agent determines technical risk classification from the Owner's
+natural-language business/product goal, affected code/data/system surfaces,
+current GitHub live state, and authoritative risk rules. The Owner does not
+choose whether work is ordinary or high-risk, production, billing, auth,
+database, security, or another technical class. Technical uncertainty fails
+closed by treating the work as high-risk; it never creates a technical
+question for the Owner or permits a lower-risk default. The Agent
+conservatively derives affected modules, directly necessary callers and
+tests, technical repository scope, protected surfaces, validation plan,
+environment implications, and external-system relevance, and populates the
+technical Task Envelope fields when required.
+
 When the Owner explicitly authorizes a new high-risk business/product goal
 that has no durable Task Envelope yet, and live authority, task identity, and
 writer occupancy have been freshly verified with no competing or equivalent
@@ -78,11 +90,17 @@ does not create a Gate, Bookkeeper, receipt lifecycle, or another Owner
 authorization requirement unless the goal, risk, scope, or environment
 changes.
 
-An Owner goal authorizes only its stated module, risk envelope, environment,
-and transition. A new goal, module/service, protected surface, risk class,
-external service/environment, real-user or production boundary, materially
-greater destructive impact, competing writer, merge/main/production action,
-or explicit stop condition requires a new Owner decision.
+An Owner goal authorizes only its intended business/product outcome and
+genuine real-world boundaries. The Agent derives the smallest technically
+sufficient module, scope, risk class, validation, environment, and transition
+from that goal and live state; this derivation does not authorize arbitrary
+scope growth. A new business goal, materially different product outcome,
+service, protected surface, production/real-user boundary, materially greater
+destructive impact, competing writer, merge/main/production action, or other
+genuine Owner decision that cannot be inferred requires returning to the
+Owner. Technical choices such as risk class, exact files, module
+implementation, test selection, SQL mechanics, and technical environment
+classification do not by themselves require Owner clarification.
 
 An Agent may freshly verify and present one exact merge-ready PR/head. A
 same-session natural-language response such as “同意合并” binds only to that
@@ -111,7 +129,11 @@ workflows/branch policy/supply chain, dependencies, database/schema/migration/
 RLS/RPC, auth, billing/payment/refund, secrets/env, provider mutation,
 `main`/production, real-user or production data, and changes whose failure
 could materially affect security, authorization, payment, or data isolation.
-Uncertain risk is high-risk until the Owner resolves it.
+The Agent derives the technical risk class from the Owner goal, affected
+surfaces, live repository state, and these rules. If that technical
+classification is uncertain, the Agent fails closed to high-risk and applies
+the corresponding Envelope and validation requirements; the Owner is not
+asked to classify the risk.
 
 Every change uses the smallest correct diff, existing architecture first, and
 no speculative architecture, drive-by refactor, unrelated cleanup, or
