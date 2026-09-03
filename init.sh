@@ -96,7 +96,7 @@ fi
 echo ""
 echo "========================================"
 if [ $FAIL -eq 0 ]; then
-    echo -e "${GREEN}✓ 本地环境检查完成；GitHub live policy binding、当前专用 Task Issue 和单独的显式 Owner receipt 仍待验证；本脚本不构成开始执行工作的授权，授权缺失、过期或冲突时保持 fail-closed。${NC}"
+    echo -e "${GREEN}✓ 本地环境检查完成；本脚本仅检查本地环境。开始仓库工作前仍须按当前 staging 的 AGENTS.md fresh-read GitHub live state 与 Owner 授权；本脚本本身不构成执行授权。${NC}"
 else
     echo -e "${RED}✗ 存在问题，请先修复上述错误${NC}"
 fi

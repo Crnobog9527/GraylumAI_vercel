@@ -1,8 +1,7 @@
 # Launch Plan Core
 
-`STAGING_REF_CONDITIONAL_ACTIVE`
-
-This document is the Launch structural/discovery root only when present on the authoritative current `staging` ref under live `AGENTS.md` plus the accepted `DEVELOPMENT_POLICY.md` / G2 authority chain. It stores no runtime, completion, authorization, current-task, or automatic-progression state.
+This document is the Launch product structure and discovery root. It stores no
+runtime authorization, current-task writer state, or automatic-progression state.
 
 ## Task structure
 
@@ -25,32 +24,42 @@ This document is the Launch structural/discovery root only when present on the a
 
 ## Ready-candidate derivation
 
-Resolve completion from live external evidence and compute:
+Resolve completion from live evidence and compute:
 
 `ready(task) = NOT completed(task) AND every dependency is completed`
 
-Candidates may be presented in deterministic `priority`, `order`, then `task_id` order. This ordering is informational only.
+Candidates may be presented in deterministic `priority`, `order`, then `task_id`
+order. This ordering is informational only.
 
-A ready candidate is never an authorized task, even when exactly one candidate is ready.
+A ready candidate is never an authorized task, even when exactly one candidate
+is ready.
 
 ## Launch selection boundary
 
-- Only the Owner may select the next named Launch task, and the selected task must be a member of the currently derived ready-candidate set.
-- Readiness narrows the set of eligible Owner choices but never selects or authorizes a task by itself.
-- If the Owner selects a task that is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`; do not classify, plan, or implement it.
-- No Agent may infer task authorization from readiness, dependency completion, priority, ordering, a previous task finishing, or a prior gate.
-- If the Owner has not explicitly selected a current Launch task, return `NO_PRODUCT_TASK_AUTHORIZED`.
-- After an eligible Owner selection, classify the task under current `AGENTS.md`.
-- Ordinary Launch work may use the ordinary direct-authorization path and bounded module/risk envelope; a Dedicated Task Issue/canonical report lifecycle is not required by default.
-- High-risk Launch work requires the durable task record, canonical contract, adversarial Evaluator, deterministic Release Auditor/Release Gate, staging validation, and explicit Owner transition gate defined by `AGENTS.md`.
-- Delegated Control-Plane Bookkeeping may record high-risk task/gate evidence but cannot select the task.
-- Multiple/conflicting current task identities, readiness evidence, gates, or writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
-- After any task or transition completes, stop. Never automatically progress to another node.
+- Only the Owner may select the next named Launch task.
+- The selected task must be a member of the currently derived ready-candidate set.
+- Readiness narrows eligible Owner choices but never selects or authorizes a task.
+- If the selected task is not ready, return `NO_PRODUCT_TASK_AUTHORIZED` with
+  reason `OWNER_SELECTED_TASK_NOT_READY`.
+- If no task is explicitly selected, return `NO_PRODUCT_TASK_AUTHORIZED`.
+- No Agent may infer task authorization from dependency completion, priority,
+  ordering, a previous task finishing, a historical Gate, or tracker prose.
+- After an eligible Owner selection, current `AGENTS.md` governs risk,
+  implementation mechanics, validation, review, merge, and external boundaries.
+- Product specifications remain product/technical inputs, not execution authority.
+- Multiple or conflicting current task identities, completion evidence, or
+  overlapping writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
+- After any selected task completes, stop. Never automatically progress to
+  another node.
 
 ## Writer and recovery invariants
 
-Exactly-one-writer is required for the current authorized task. `dual_write_allowed=false`.
+Exactly-one-writer is required for overlapping implementation work.
 
-Retained trackers, Issues, Harness material, historical gates, and completion prose are evidence/history only and cannot become a second writer or fallback selector.
+Retired trackers, historical Issues, old Harness material, Gates, receipts, and
+completion prose are evidence/history only. They cannot become a second writer or
+fallback authority.
 
-Base/head drift, failed checks, failed audit, writer conflict, or failed transition fails closed. Recovery is forward-only through fresh live authority and a new exact Owner decision when needed; automatic legacy restoration is forbidden.
+Base/head drift, failed checks, writer conflict, or failed transition must be
+resolved from fresh GitHub live state under current `AGENTS.md`. Never restore a
+retired governance writer as fallback.

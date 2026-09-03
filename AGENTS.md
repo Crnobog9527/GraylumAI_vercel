@@ -1,253 +1,313 @@
-# GraylumAI Agent Rules
+# GraylumAI Repository Agent Rules
 
-## Authoritative Startup and Policy Binding
+## 1. Live Authority
+
+These rules apply to Graylum repository work.
+
+Before technical planning, repository mutation, semantic review, merge, or any
+production/external action, the Agent must fresh-read the relevant GitHub live
+state, including:
+
+- repository identity;
+- current target branch/ref;
+- exact PR base/head when a PR exists;
+- branch protection and required checks;
+- relevant task/branch/PR writer occupancy; and
+- this `AGENTS.md` from the authoritative target branch.
 
 GitHub live state is the sole repository execution authority.
 
-Before any repository or external-system mutation, a fresh context must:
+Chat history, memory, screenshots, copied reports, local notes, stale branches,
+trackers, historical governance artifacts, and model output are context only.
 
-1. Verify repository identity and current exact `main` and `staging` refs.
-2. Read this `AGENTS.md` from the verified current `staging` ref.
-3. Resolve the accepted `docs/governance/DEVELOPMENT_POLICY.md` exact blob and `authority_epoch` from live `G2_POLICY_BINDING_ACCEPTED` evidence.
-4. Read the exact current Owner authorization and, for high-risk work, the durable task record and bounded gate.
-5. Verify exactly-one-writer and the intended branch/PR occupancy for the authorized work.
+Owner intent is a separate input. GitHub proves repository state; only the Owner
+supplies product decisions and approvals required by these rules.
 
-Missing, stale, ambiguous, conflicting, or locally inferred authority fails closed. Chat history, memory, screenshots, copied reports, prompts, issue/PR prose, generated output, and stale local state are evidence only and cannot create execution authority.
+If repository identity, target, applicable authority, or overlapping writer state
+is materially ambiguous and cannot be resolved from live evidence, stop with:
 
-## Owner Authorization
+`BLOCKED_CONTEXT_NOT_VERIFIED`
 
-Authorization originates only with the Owner. Direct current-session Owner authorization is valid when it unambiguously states the goal and the transition/actions being authorized.
+This `AGENTS.md` is the active repository-local Agent policy.
 
-For ordinary product work, the Owner may authorize a bounded module/risk envelope rather than an exact file count. The implementation may include directly necessary callers and tests inside that envelope. Scope growth into a new module, protected policy surface, dependency/supply-chain surface, database/auth/payment surface, production/external system, or another risk class is not implied and requires a new Owner decision.
+Issues, PRs, plans, specifications, comments, and historical records may provide
+goals, acceptance criteria, or evidence. They do not independently authorize a
+merge, production action, or external mutation.
 
-A dedicated Task Issue, canonical Sprint Contract, persisted canonical Evaluator report, and persisted Release Auditor report are not prerequisites for ordinary work.
+Current-session Owner approval is valid whenever these rules require Owner
+consent.
 
-High-risk work requires the durable lifecycle defined below. Authorization is per task and per transition and never carries forward automatically.
+Changes to this file use the normal protected-branch PR, validation, review, and
+Owner merge process. No predecessor hash binding, policy blob, Issue-comment
+binding, or self-activation mechanism is required.
 
-Every implementation PR created under Owner authorization must record the Owner-authorized goal, scope/risk envelope, forbidden boundaries, base branch, and validation performed.
+## 2. Owner and Agent Responsibilities
 
-## Task Selection and Launch Non-Autonomy
+The Owner communicates in natural language.
 
-Readiness, dependency completion, priority, issue state, plan ordering, tracker state, and model recommendations are data only. They never authorize a task.
+The Owner:
 
-Launch readiness is a mandatory eligibility gate for every Launch planning or implementation entry point. Explicit Owner selection is necessary but not sufficient: before risk classification, branch creation, planning, or Generator implementation for any named Launch task, derive the current ready-candidate set from authoritative current `staging` `docs/launch/START_HERE.md` + `docs/launch/plan-core.md` using live completion evidence and verify that the exact Owner-selected task is a member.
+- states the desired outcome;
+- explicitly selects a Launch task when Launch work is requested;
+- decides business or product questions that cannot be derived technically;
+- performs product-level browser testing when applicable;
+- explicitly approves merge when ready; and
+- separately approves production or real external effects.
 
-If the Owner-selected Launch task is not currently ready, return `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY` and do not classify, create a branch, plan, or implement it. If readiness evidence is missing, stale, ambiguous, or conflicting, return `BLOCKED_CONTEXT_NOT_VERIFIED` and stop. This requirement applies equally to Planner-mediated flows, direct ordinary Owner authorization, and direct Generator invocation; no path may bypass it.
+The Agent determines all technical mechanics, including:
 
-No Agent may automatically select, start, or progress to another Launch task. The Owner must explicitly select the named Launch task before planning or implementation begins. After any task, PR, audit, merge, or closeout completes, stop unless the Owner has separately authorized the next exact action.
+- refs and candidate identity;
+- branch and PR mechanics;
+- risk classification;
+- implementation scope and files;
+- SQL and migration details;
+- validation and test selection;
+- CI and review interpretation;
+- technical remediation; and
+- safe merge mechanics.
 
-If current evidence yields multiple conflicting task identities or writers, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
+Do not require the Owner to interpret or choose SHA values, CI jobs, review
+threads, migration identifiers, SQL, file scope, risk class, validation plans,
+or other implementation mechanics.
 
-## Risk Classification
+When Owner input is genuinely required, explain concisely:
 
-An ordinary task is work that stays outside protected/high-risk surfaces and has no production or external-system mutation.
+1. what happened;
+2. the real blocker or material risk;
+3. the decision the Owner must actually make; and
+4. the recommended action and reason.
 
-Treat work as high risk when it touches or materially changes any of the following:
+If authorization is required, provide one exact copyable natural-language
+authorization sentence.
 
-- repository governance, authority, Agent Harness rules, Codex policy prompts, or protected policy surfaces;
-- `.github/workflows/**`, branch protection, Rulesets, repository/security settings, or required-check configuration;
-- dependencies, manifests, lockfiles, supply-chain configuration, or security policy;
-- database schema, migrations, RLS, grants, RPC, auth, billing, payments, secrets, credentials, or environment configuration;
-- `main`, production release/promotion, real user data, or production/external service state;
-- Vercel, Supabase, Stripe, or other project/environment settings;
-- any task whose failure could materially weaken security, authorization, release, payment, auth, or data-isolation controls.
+## 3. Branches, Isolation, and Parallel Work
 
-When risk is uncertain, fail closed to high risk until the Owner resolves the classification.
+Repository implementation normally starts from fresh current `staging`.
 
-## Ordinary Product Workflow
+Use a dedicated task branch and pull request targeting `staging`, unless the
+Owner explicitly authorizes an emergency production procedure.
 
-The default ordinary flow is intentionally short:
+Never push directly to a protected branch.
 
-`Owner goal -> Codex Draft PR -> required CI/Security -> ChatGPT adversarial semantic review -> browser/staging validation when applicable -> Owner-authorized merge`
+Never force-push.
 
-For ordinary work:
+Exactly one writer is allowed per overlapping task, branch, pull request, or
+protected mutation surface.
 
-1. Fresh-read live authority and the Owner-selected goal. If the goal names a Launch task, satisfy the mandatory Launch ready-candidate eligibility gate above before risk classification or any mutation.
-2. Create a feature branch from current exact `staging`.
-3. Implement only the allowed modules/risk envelope plus directly necessary callers/tests.
-4. Run relevant validation and create a Draft PR to `staging`.
-5. Required CI/Security must pass for the exact head.
-6. ChatGPT performs an independent adversarial semantic review of the exact base/head.
-7. Perform browser/staging validation when the change affects runtime behavior or UI.
-8. The Owner decides whether to authorize the exact merge transition.
+Clearly disjoint tasks may run in parallel.
 
-Ordinary work does not require a dedicated Task Issue, canonical Sprint Contract, canonical report persistence, or Release Auditor pass by default.
+If overlap cannot be resolved from GitHub live evidence, fail closed before
+mutation.
 
-There is no low-risk staging auto-merge exception. Auto-merge is not an ordinary workflow capability.
+Do not bundle unrelated work into a task PR.
 
-## High-Risk Lifecycle
+## 4. Risk and Authorization
 
-High-risk work requires a durable task record and must remain staging-first.
+The Agent classifies risk before mutation and records the result in the PR.
 
-Before high-risk implementation begins, the durable task record must bind the Owner goal, risk class, current base/target, allowed repository scope/actions/services, forbidden actions, required validation, stop conditions, and the exact current Owner gate. The canonical `docs/agent-harness/SPRINT_CONTRACT_SCHEMA.md` remains the high-risk contract format.
+`ordinary` means reversible branch-local code, documentation, or tests with no
+privileged, production, real-user, monetary, destructive, or durable external
+effect.
 
-A high-risk candidate advances only through all of the following:
+`high` includes work that materially touches:
 
-1. Bounded Generator implementation on a feature branch from exact current `staging`.
-2. Required CI/Security and contract validation on the exact head.
-3. Independent adversarial Evaluator PASS bound to exact non-null base/head identity.
-4. The High-Risk Validation Floor below, with every required category-specific item present or explicitly recorded as `NOT_APPLICABLE` with a concrete reason for genuinely docs-only/non-runtime work.
-5. Deterministic Release Auditor/Release Gate PASS bound to the same exact base/head.
-6. Fresh explicit Owner authorization for the exact next GitHub transition.
+- repository governance or security controls;
+- GitHub workflows, required checks, dependencies, or supply-chain controls;
+- authentication, authorization, permissions, secrets, or credentials;
+- database schema, migrations, RLS, grants, RPC, or destructive data changes;
+- billing, payments, refunds, cancellation, or real monetary state;
+- `main`, production deployment, or real-user state;
+- provider, project, environment, or production configuration; or
+- another irreversible or durable external effect.
 
-A candidate that changes governance, `AGENTS.md`, Harness documents, or policy prompts must be reviewed and released under the authoritative rules from its exact PR base. Candidate-side proposed rules never authorize, audit, or weaken the lifecycle of that same candidate.
+When classification is technically uncertain, the Agent investigates and
+resolves it. Do not ask the Owner to classify technical risk.
 
-## High-Risk Validation Floor
+High-risk repository code may be implemented and safely tested on a task branch
+using the validation rules below.
 
-The high-risk lifecycle has a mandatory validation floor. A generic `applicable` label is not a waiver and cannot make a required category-specific validation discretionary.
+Any actual high-risk production or external effect requires explicit Owner
+approval immediately before that effect.
 
-Before any `staging` to `main` promotion, verify and report:
+No separate Task Issue, Sprint Contract, Owner Gate, receipt, Bookkeeper,
+Evaluator pipeline, or Release Auditor is required by default.
 
-- current GitHub CI status;
-- relevant local or CI lint, typecheck, and test results;
-- Vercel staging deployment status for runtime changes;
-- affected-flow smoke or browser evidence;
-- rollback plan; and
-- remaining risks.
+## 5. Native Execution and Remediation
 
-Category-specific staging validation is mandatory when the change touches the corresponding surface:
+Codex native Goal, planning, iterative implementation, testing, correction, and
+same-task remediation are Graylum's execution harness.
 
-- DB/RLS/RPC/migration/Supabase work: Supabase staging validation;
-- payment/billing/Stripe work: Stripe test-mode validation;
-- auth work: staging auth-flow validation using non-production/test identities and staging-only state; and
-- runtime environment or configuration work: applicable Vercel staging environment/configuration validation.
+The Agent may plan, implement, test, inspect CI and review findings, and repair
+same-scope defects repeatedly until the candidate is clean.
 
-A genuinely docs-only, non-runtime governance change may record runtime, browser, or staging-service validation as `NOT_APPLICABLE` only with a concrete reason. Planner/high-risk contract guidance must carry these category-specific requirements, and the Release Auditor must return `FAIL` or `BLOCKED` when a required floor item is absent rather than reinterpret it as optional.
+Same-scope technical remediation does not require repeated Owner approval unless
+the product goal, risk category, protected surface, or external effect materially
+expands.
 
-## Adversarial Evaluator
+Create an additional durable task note only when a concrete current need requires
+one. Keep it short and do not turn it into a lifecycle state machine.
 
-The Evaluator is independent and `AUDITED_STATE_READ_ONLY`. It must actively try to falsify the implementation rather than search for reasons to approve it.
+Launch tasks are never selected automatically by an Agent.
 
-The review must attempt to prove, as applicable, that:
+Launch readiness may narrow the set of eligible Owner choices, but readiness,
+priority, dependency completion, or prior task completion never selects or
+authorizes the next task.
 
-- the implementation does not satisfy the Owner goal;
-- the changed behavior is incomplete or incorrect;
-- the implementation escaped the allowed scope/risk envelope;
-- required callers/tests were missed;
-- a forbidden action or protected surface was touched;
-- validation is stale, insufficient, or unrelated to the exact head;
-- security, auth, payment, data-isolation, or failure-mode assumptions are wrong;
-- exact base/head identity drifted;
-- the candidate weakens its own review/release controls;
-- a simpler failure case, regression, or adversarial input breaks the claimed result.
+Product specifications define WHAT to build and the applicable acceptance
+criteria. They do not grant repository mutation, merge, or production authority.
 
-For ordinary work, the Evaluator may return a concise semantic verdict and findings. A canonical persisted report is not required by default.
+After a Launch task completes, do not automatically start another Launch task.
 
-For high-risk work, the Evaluator must produce the canonical structured result defined by `docs/agent-harness/EVALUATOR_REPORT_SCHEMA.md`, bind exact base/head, and return `PASS`, `FAIL`, or `BLOCKED`. Only `PASS` satisfies the high-risk Evaluator gate.
+## 6. Required Validation
 
-The Evaluator does not fix the candidate, merge it, deploy it, mutate issues, or change external systems.
+Run validation relevant to the changed scope plus all repository-required remote
+checks.
 
-## Deterministic Release Auditor / Release Gate
+Required CI and Security checks must pass on the exact current candidate.
 
-The Release Auditor is a deterministic release-state gate for high-risk work. It must not repeat the Evaluator's semantic code review.
+Never claim a check that was not actually run.
 
-Its decision is limited to verifiable release-state predicates:
+Runtime or UI changes require appropriate preview, staging, smoke, or browser
+validation.
 
-- exact repository, PR, base branch/base SHA, head branch/head SHA, and current `staging` identity are unambiguous;
-- the Evaluator PASS binds the same exact base/head;
-- required CI/Security and contract validation for the exact head are successful;
-- changed scope remains within the high-risk contract and forbidden-action checks pass;
-- High-Risk Validation Floor evidence is present and current; a missing required item yields `FAIL` or `BLOCKED`, while only genuinely docs-only/non-runtime work may record `NOT_APPLICABLE` with a concrete reason;
-- unresolved actionable review findings equal zero;
-- exactly-one-writer still holds and no equivalent competing PR exists;
-- mergeability/branch posture is valid for the requested transition;
-- production relevance and the required Owner gate are explicit.
+Auth or permission changes must test both allowed and denied paths using
+non-production or test identities.
 
-Any missing, stale, failed, ambiguous, or drifted predicate yields `FAIL` or `BLOCKED`; it must never trigger semantic re-review, automatic repair, scope expansion, or automatic merge.
+Database, schema, RLS, RPC, or migration changes must be validated in
+non-production and must address compatibility, idempotency, data-loss risk, and
+recovery or rollback as applicable.
 
-For high-risk work, output follows `docs/agent-harness/RELEASE_AUDITOR_REPORT_SCHEMA.md`. A Release Auditor PASS is evidence only and never merge or production authorization.
+Payment, billing, or refund changes must use test mode and appropriate
+idempotency protections before any real-money action.
 
-## Report Persistence
+Secrets and security-control changes must run the applicable leak, static, and
+security checks.
 
-Canonical Evaluator or Release Auditor report persistence is evidence-only and is used when the high-risk task or exact Owner authorization requires a durable report comment.
+Provider or runtime configuration changes must be validated in preview, staging,
+or test environments first when available.
 
-Posting a report comment requires explicit Owner authorization for persistence for that exact audit run. Generic `audit`, `review`, `read-only`, or silence does not authorize a GitHub write.
+After a timeout, error, or uncertain result from payment, refund, deployment, or
+another durable external action, inspect the actual remote state before retrying.
 
-A persisted report must bind the exact PR and audited base/head and conform to the applicable retained schema. It cannot authorize remediation, mark-ready, merge, deployment, production, Issue lifecycle mutation, or another task.
+Never blindly retry an ambiguous durable external result.
 
-## Branch and Release Policy
+## 7. Pull Requests and Semantic Review
 
-- `main` is the production release branch.
-- `staging` is the required pre-production integration branch.
-- Feature branches start from fresh exact `staging` unless the Owner explicitly authorizes a production hotfix.
-- Feature PRs target `staging` first.
-- Never push directly to `main` or `staging`.
-- Never force-push unless an exact later rule and Owner authorization explicitly permit it; ordinary and high-risk task flows do not.
-- Required CI/Security and branch protections must not be bypassed.
-- Before ready, merge, or release transitions, the current PR base SHA and head SHA must exactly match the identities bound by the latest applicable semantic review/audit evidence; for high-risk work they must match the latest applicable Evaluator PASS and Release Auditor PASS. Any base or head drift invalidates the prior review/audit evidence. Do not rebind old PASS records to the new state; run the required fresh review/audit again before proceeding.
-- Any Agent-executed merge must submit `expected_head_sha` equal to the exact audited/current head SHA, or use an equivalent atomic compare-and-swap. A mismatch fails closed; do not retry the merge against a new head until that head has been freshly reviewed/audited and the Owner has authorized the new exact transition.
-- `staging -> main` promotion is a separate Owner-authorized release transition.
+Every implementation PR should minimally record:
 
-## Production Hotfix Staging Resync Guard
+- Goal / Why;
+- Risk;
+- Scope;
+- Validation;
+- External / Production relevance;
+- Remaining risk; and
+- relevant product specification or Issue when useful.
 
-An emergency production hotfix that goes directly to `main` requires explicit Owner authorization. After that direct-main hotfix, the same exact fix must be synchronized back into `staging` through the protected PR path; no direct protected-branch push or unrelated change may be bundled.
+GitHub Codex Review is mandatory semantic review for the exact current
+candidate.
 
-The staging resync is a mandatory lifecycle step, but it does not create autonomous permission: the exact sync transition still requires fresh Owner authorization and current live checks. The direct-main hotfix lifecycle is not complete while the corresponding staging synchronization remains unresolved.
+Review must cover the complete intended base-to-head change, not only the latest
+patch.
 
-Owner authorization is a decision gate, not a requirement that the Owner personally click GitHub. A fresh-context Agent may execute an exact GitHub transition only when the Owner explicitly authorizes that transition and all applicable live predicates pass. There is no autonomous merge path.
+If candidate content changes after semantic review, obtain a fresh semantic
+review for the new exact candidate.
 
-## Exactly-One-Writer
+The Agent handles same-scope CI, test, and review remediation until no concrete
+blocker remains.
 
-Every mutation-capable task or transition must have exactly one active writer.
+The Owner operating workflow may additionally request one fresh independent
+ChatGPT web audit immediately before merge.
 
-Before branch creation and before later state-changing transitions, verify that the intended branch, equivalent task, and overlapping PR do not create writer ambiguity. `dual_write_allowed=false`.
+That ChatGPT audit is not repository runtime authority, a Gate, a persisted
+canonical report, or a separate lifecycle stage.
 
-If a competing writer or equivalent active PR appears, stop and fail closed. Recovery is forward-only; stale or legacy authority is never restored.
+## 8. Candidate Clean and Owner Handoff
 
-## Delegated Control-Plane Bookkeeping
+A candidate is clean when:
 
-Delegated bookkeeping remains available for high-risk/governance tasks when the Owner has explicitly approved a specific next action and a durable handoff is useful.
+- required CI and Security checks pass;
+- GitHub Codex Review covers the exact current candidate;
+- no concrete actionable blocker remains; and
+- remaining material risk is stated accurately.
 
-It may create/update one bounded task record and append one bounded gate that records the current Owner decision plus technical bindings. It cannot invent Owner intent or broaden scope.
+When the candidate is clean, tell the Owner:
 
-A context that writes such a gate must stop and must not consume it. A fresh executor must re-read live repository identity, refs, this `AGENTS.md`, accepted policy/G2 binding, the task record, exact gate, and writer state before execution.
+- what changed;
+- automatic-check status;
+- Codex Review status;
+- remaining real risk;
+- what the Owner should actually test; and
+- the exact next reply required.
 
-This bookkeeping path is not a bot, service, ledger, dispatcher, reducer, receipt engine, automatic task selector, or second control plane.
+Do not make the Owner handle technical lifecycle mechanics.
 
-## Harness Freeze
+## 9. Merge
 
-Agent Harness / Orchestrator expansion is frozen until both conditions are true:
+`同意合并` authorizes merge of the clearly identified current PR into `staging`
+only, provided the exact live candidate remains clean.
 
-1. Graylum has completed its first official launch; and
-2. the Owner explicitly re-evaluates and authorizes renewed Harness work.
+Immediately before merge, the Agent must fresh-check:
 
-Until then, do not build or advance:
+- current base/head;
+- required CI and Security;
+- current semantic review;
+- mergeability;
+- current Owner authorization; and
+- overlapping writer state.
 
-- Phase 0.6 or later Harness expansion;
-- `control-plane-sync`;
-- automatic repair/remediation loops;
-- low-risk auto-merge;
-- OpenSpec integration;
-- new Harness services, bots, ledgers, dispatchers, receipt engines, orchestrators, or equivalent subsystems.
+An Agent-executed merge must use `expected_head_sha`, compare-and-swap, or an
+equivalent stale-head protection mechanism.
 
-Retained Harness schemas and security/trust/threat documents remain reference material for the bounded high-risk lifecycle and security posture. Their presence is not roadmap or implementation authority.
+Candidate drift requires fresh validation and semantic review.
 
-## Production and External-System Gates
+Do not ask the Owner again for same-scope technical remediation.
 
-Repository implementation authority never silently includes production or external-system authority.
+Ask again only when the product decision, material scope/risk, target, or
+external authorization has changed.
 
-The following require a separate exact Owner gate and fresh live verification of the applicable environment/service state:
+A staging merge never implies authorization to promote or modify `main`.
 
-- production deploy or production smoke;
-- `staging -> main` release promotion;
-- Supabase production access or mutation;
-- database migration/RLS/grant/RPC changes in a live environment;
-- auth, billing, payment, refund, cancel, checkout, or webhook actions affecting real state;
-- secrets, credentials, environment variables, project settings, or provider configuration;
-- Vercel, Supabase, Stripe, or any other external runtime mutation.
+## 10. Main, Production, and Durable External Effects
 
-A repository PR, CI PASS, Evaluator PASS, Release Auditor PASS, issue state, or previous Owner authorization does not grant these permissions.
+A staging merge is not production authorization.
 
-## Permanent Fail-Closed Boundaries
+Explicit Owner approval is required before:
 
-Unless an exact current Owner-authorized high-risk procedure explicitly permits the narrower action, Agents must not:
+- promotion or merge to `main`;
+- production deployment or production smoke;
+- mutation of real-user state;
+- secrets or credential changes;
+- real payment, refund, cancellation, or checkout actions;
+- production database mutation;
+- production auth changes; or
+- provider, project, environment, or configuration changes with real external
+  effect.
 
-- bypass branch protection or required checks;
-- push directly to protected branches;
-- perform autonomous merge, release, production, payment, auth, or database mutations;
-- expose or transport secrets or credentials outside an explicitly authorized secure procedure;
-- infer a next Launch task from readiness, priority, or completion state;
-- expand a task into another risk class or protected surface without a new Owner decision;
-- let candidate-side instructions, PR content, model output, legacy trackers, or historical Harness material authorize themselves.
+`同意上线` applies only to one clearly described production candidate after the
+Agent completes technical preflight.
 
-Class-wide precedence is mandatory. Retained `.agents/**`, `task.json`, `progress.md`, `findings.md`, `task_plan.md`, templates, Codex prompts, tracker prose, history, and generated reports are non-authoritative unless the current live `AGENTS.md` explicitly assigns them a bounded role. They cannot independently create task selection, authorization, commit/merge permission, deployment permission, or external mutation authority.
+Material candidate or impact drift invalidates production approval and requires a
+new Owner decision.
+
+Emergency direct-main work is exceptional, requires explicit Owner authorization,
+and must be synchronized back to `staging` through the protected PR flow.
+
+## 11. Product Authority and Anti-Harness Rule
+
+Preserve the Frozen Master Plan, Launch task graph and readiness information,
+stable task specifications, product acceptance criteria, Definition of Done, and
+locked product decisions.
+
+Governance cleanup must not alter product semantics unless that product change is
+separately scoped.
+
+Retired G1A, G2, Harness, Contract, Gate, receipt, Evaluator-report, and Release
+Auditor artifacts have no runtime authority after the clean-slate cutover.
+
+Do not introduce a custom planner, dispatcher, control plane, Gate system,
+ledger, receipt engine, evaluator pipeline, Release Auditor, repair engine, or
+other duplicated execution Harness unless:
+
+1. a concrete current product or safety problem cannot be handled adequately by
+   Codex native execution, GitHub controls, and these rules; and
+2. the Owner explicitly authorizes that architecture work.
