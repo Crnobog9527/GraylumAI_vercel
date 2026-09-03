@@ -294,9 +294,13 @@ or transition predicates cannot be proved from current live evidence, return
 `BLOCKED_CONTEXT_NOT_VERIFIED`. A task-specific allowlist or forbidden
 boundary is binding for that task; do not expand it. Ordinary product scope is
 derived from the relevant Owner-authorized goal/risk envelope and is not
-globally limited to this PR's three files. If the current task needs a fourth
-file or another forbidden boundary, return `STOP_SCOPE_EXPANSION`; do not work
-around the stop.
+globally limited to this PR's three files. The exact three-file restriction
+belongs only to Issue #359 / PR #360. A task returns `STOP_SCOPE_EXPANSION`
+only when the work would exceed that current task's Owner-authorized goal,
+Task Envelope or scope, module/service, risk, forbidden actions,
+environment/resource, protected surface, or other explicit stop condition;
+the number of repository files alone is not a global stop. Do not work around
+the applicable task boundary.
 
 `.agents/**`, task/progress/findings/plan files, `docs/agent-harness/**`,
 `.github/codex/prompts/**`, historical Harness Issues/trackers/schemas,
