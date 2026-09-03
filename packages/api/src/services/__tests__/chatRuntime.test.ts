@@ -1,124 +1,40 @@
-import { describe, expect, it } from 'vitest';
-import {
-  ModulePromptResolutionError,
-  applyUserPromptTemplate,
-  buildRuntimeSystemPrompt,
-  resolveActiveModulePrompt,
-} from '../chatRuntime';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { applyUserPromptTemplate, buildRuntimeSystemPrompt, resolveActiveModulePrompt } from '../chatRuntime';
 
-function createModuleSupabase(row: Record<string, unknown> | null, error: unknown = null) {
-  return {
-    from(table: string) {
-      expect(table).toBe('modules');
-
-      const builder = {
-        select() {
-          return builder;
-        },
-        eq() {
-          return builder;
-        },
-        single() {
-          return Promise.resolve({ data: row, error });
-        },
-      };
-
-      return builder;
-    },
-  };
+const content = '  Published system\n';
+function client(module: Record<string, unknown> | null, error: unknown = null) {
+  const select = vi.fn();
+  return { select, from: (table: string) => {
+    const query = {
+      select: (columns: string) => { select(table, columns); return query; },
+      eq: () => query,
+      single: async () => table === 'modules' ? { data: module, error } : { data: {
+        id: 'skill-a', skill_key: 'a', status: 'published', published_content: content,
+        published_version: 1, published_content_hash: createHash('sha256').update(content).digest('hex'),
+      }, error: null },
+    };
+    return query;
+  } };
 }
-
-describe('resolveActiveModulePrompt', () => {
-  it('uses the selected active module prompt, system prompt, user template, and model', async () => {
-    const prompt = await resolveActiveModulePrompt(createModuleSupabase({
-      id: '00000000-0000-4000-8000-000000000001',
-      title: '短视频脚本',
-      description: '生成短视频脚本',
-      prompt_content: '只输出脚本结构',
-      system_prompt: '你是短视频策划',
-      user_prompt_template: '主题：{{input}}',
-      model_id: '00000000-0000-4000-8000-000000000101',
-      platform: 'web',
-      category: 'video',
-      active: true,
-    }) as any, {
-      moduleId: '00000000-0000-4000-8000-000000000001',
-      platform: 'web',
-    });
-
-    expect(prompt).toMatchObject({
-      id: '00000000-0000-4000-8000-000000000001',
-      name: '短视频脚本',
-      content: '只输出脚本结构',
-      systemPrompt: '你是短视频策划',
-      userPromptTemplate: '主题：{{input}}',
-      modelId: '00000000-0000-4000-8000-000000000101',
-      category: 'video',
-    });
-    expect(buildRuntimeSystemPrompt(prompt)).toBe('你是短视频策划\n\n只输出脚本结构');
-    expect(applyUserPromptTemplate(prompt, '新品发布')).toBe('主题：新品发布');
+describe('active module Skill prompt', () => {
+  it('uses exact published bytes and ignores every legacy field', async () => {
+    const db = client({ id: 'module-a', active: true, skill_id: 'skill-a', title: 'A', platform: 'web',
+      description: 'BAD description', prompt_content: 'BAD content', system_prompt: 'BAD system', user_prompt_template: 'BAD {{input}}' });
+    const prompt = await resolveActiveModulePrompt(db as any, { moduleId: 'module-a' });
+    expect(buildRuntimeSystemPrompt(prompt)).toBe(content);
+    expect(applyUserPromptTemplate(prompt, '  Original user\n')).toBe('  Original user\n');
+    expect(Object.isFrozen(prompt)).toBe(true);
+    expect(prompt.skillSnapshot?.moduleId).toBe('module-a');
+    expect(db.select.mock.calls[0][1]).not.toMatch(/description|prompt_content|system_prompt|user_prompt_template/);
   });
-
-  it('falls back to module-owned title and description when prompt text is missing', async () => {
-    const prompt = await resolveActiveModulePrompt(createModuleSupabase({
-      id: '00000000-0000-4000-8000-000000000002',
-      title: '营销文案',
-      description: '为活动生成营销文案',
-      prompt_content: null,
-      system_prompt: null,
-      user_prompt_template: null,
-      model_id: null,
-      platform: 'all',
-      category: 'marketing',
-      active: true,
-    }) as any, {
-      moduleId: '00000000-0000-4000-8000-000000000002',
-      platform: 'web',
-    });
-
-    expect(prompt.content).toContain('「营销文案」功能模块');
-    expect(prompt.content).toContain('为活动生成营销文案');
-  });
-
-  it('rejects inactive modules instead of falling back to a global prompt', async () => {
-    await expect(resolveActiveModulePrompt(createModuleSupabase({
-      id: '00000000-0000-4000-8000-000000000003',
-      title: '已下架',
-      description: 'hidden',
-      prompt_content: 'hidden',
-      system_prompt: null,
-      user_prompt_template: null,
-      model_id: null,
-      platform: 'all',
-      category: 'other',
-      active: false,
-    }) as any, {
-      moduleId: '00000000-0000-4000-8000-000000000003',
-      platform: 'web',
-    })).rejects.toMatchObject<Partial<ModulePromptResolutionError>>({
-      code: 'MODULE_INACTIVE',
-      statusCode: 404,
-    });
-  });
-
-  it('rejects modules with no prompt fields and no safe module description fallback', async () => {
-    await expect(resolveActiveModulePrompt(createModuleSupabase({
-      id: '00000000-0000-4000-8000-000000000004',
-      title: '空配置',
-      description: null,
-      prompt_content: null,
-      system_prompt: null,
-      user_prompt_template: null,
-      model_id: null,
-      platform: 'all',
-      category: 'other',
-      active: true,
-    }) as any, {
-      moduleId: '00000000-0000-4000-8000-000000000004',
-      platform: 'web',
-    })).rejects.toMatchObject<Partial<ModulePromptResolutionError>>({
-      code: 'MODULE_PROMPT_MISSING',
-      statusCode: 400,
-    });
+  it.each([
+    [{ id: 'module-a', active: false }, null, 'MODULE_INACTIVE'],
+    [{ id: 'module-a', active: true, platform: 'mobile' }, null, 'MODULE_PLATFORM_UNSUPPORTED'],
+    [{ id: 'module-a', active: true, description: 'must not fallback' }, null, 'MODULE_SKILL_UNAVAILABLE'],
+    [null, null, 'MODULE_NOT_FOUND'],
+    [null, { code: '08006' }, 'MODULE_SKILL_UNAVAILABLE'],
+  ])('rejects unavailable modules (%j)', async (module, error, code) => {
+    await expect(resolveActiveModulePrompt(client(module, error) as any, { moduleId: 'module-a' })).rejects.toMatchObject({ code });
   });
 });
