@@ -47,8 +47,8 @@ state, plan order, tracker text, and model recommendations never authorize a
 task.
 
 For any named Launch task, the exact Owner-selected task must first be a member
-of the ready-candidate set derived from current `staging` Launch authority and
-live completion evidence. If it is not ready, return
+of the ready-candidate set derived from current `staging`'s authoritative
+Launch task-graph/readiness data and live completion evidence. If it is not ready, return
 `NO_PRODUCT_TASK_AUTHORIZED` with `OWNER_SELECTED_TASK_NOT_READY`. If readiness
 evidence is missing, stale, ambiguous, or conflicting, return
 `BLOCKED_CONTEXT_NOT_VERIFIED`. No Agent may select, start, or progress to a
@@ -59,7 +59,8 @@ evidence: these narrow Owner choices, but do not select, authorize, or start a
 task. After the Owner selects an eligible named Launch task, the Agent must
 read and use the Frozen Master Plan, the applicable stable task specification,
 and current live repository/product evidence as product/specification inputs
-for the business/product goal, locked product decisions, dependencies,
+for the selected task's product or business goal, locked product decisions,
+dependencies,
 intended product scope, acceptance criteria or Definition of Done, required
 validation, and product constraints/invariants. These specifications say what
 the selected task must accomplish, not whether or how it may execute. They
@@ -76,17 +77,18 @@ obsolete process wording from a genuine business/acceptance conflict and
 return to the Owner only for the latter, not for technical lifecycle
 mechanics.
 
-The Owner is a natural-language operator. The Owner supplies the
-product/business goal, acceptance intent, genuine real-world boundary
-decisions, merge authorization, production authorization, and final
-functional/user-experience testing. Agents derive SHAs, drift, CI meaning,
+The Owner is a natural-language operator. The Owner supplies an
+Owner-authorized natural-language goal, acceptance intent when applicable,
+genuine real-world boundary decisions, merge authorization, production
+authorization, and final functional/user-experience testing. Agents derive SHAs,
+drift, CI meaning,
 review-thread meaning, technical remediation, file scope, SQL correctness,
 test selection, and technical envelope fields from live evidence; the Owner
 does not need to provide them manually. If a high-risk envelope is needed,
 the Agent populates its technical fields.
 
 The Agent determines technical risk classification from the Owner's
-natural-language business/product goal, affected code/data/system surfaces,
+natural-language Owner-authorized goal, affected code/data/system surfaces,
 current GitHub live state, and authoritative risk rules. The Owner does not
 choose whether work is ordinary or high-risk, production, billing, auth,
 database, security, or another technical class. Technical uncertainty fails
@@ -97,7 +99,8 @@ tests, technical repository scope, protected surfaces, validation plan,
 environment implications, and external-system relevance, and populates the
 technical Task Envelope fields when required.
 
-When the Owner explicitly authorizes a new high-risk goal
+When the Owner explicitly authorizes a new high-risk goal of any legitimate
+type
 that has no durable Task Envelope yet, and live authority, task identity, and
 writer occupancy have been freshly verified with no competing or equivalent
 task, a fresh Agent may perform exactly one narrowly bounded bootstrap
@@ -109,14 +112,15 @@ commit or PR, perform external-system or production mutation, merge, or create
 another Task or Envelope. The Agent must read back and verify the exact new
 Envelope before any later repository or external-system mutation; its creation
 does not create a Gate, Bookkeeper, receipt lifecycle, or another Owner
-authorization requirement unless the goal, risk, scope, or environment
-changes.
+authorization requirement. Technical refinement inside the same authorized
+boundary remains Agent work; a new Owner decision is required only when the
+goal, genuine real-world boundary, or materially greater impact changes.
 
-An Owner goal authorizes only its intended business/product outcome and
-genuine real-world boundaries. The Agent derives the smallest technically
+An Owner-authorized natural-language goal authorizes only its intended outcome
+and genuine real-world boundaries. The Agent derives the smallest technically
 sufficient module, scope, risk class, validation, environment, and transition
 from that goal and live state; this derivation does not authorize arbitrary
-scope growth. A new business goal, materially different product outcome,
+scope growth. A materially different Owner-authorized goal or outcome, new
 service, protected surface, production/real-user boundary, materially greater
 destructive impact, competing writer, merge/main/production action, or other
 genuine Owner decision that cannot be inferred requires returning to the
@@ -218,6 +222,12 @@ alone require a new technical Owner decision. Bookkeeper is optional only for an
 requested durable handoff or genuinely separate executor isolation. Evidence
 records facts; they are not a second state machine. No consumed flag, receipt
 chain, superseded receipt version, or replacement Gate is required.
+Technical risk classification, exact files, module boundaries, environment
+implications, and validation design may be refined by the Agent inside the
+same authorized real-world boundary. Same-boundary validation expansion,
+including additional tests, checks, negative cases, repeated category
+validation, read-only verification, or cleanup evidence, is also Agent work
+and does not by itself require a new Owner decision.
 There is no mandatory per-finding Gate, per-retry Gate, separate Mark Ready
 Gate, canonical Evaluator or Release Auditor report, report persistence, or
 mandatory Bookkeeper runtime stage.
@@ -240,9 +250,11 @@ payment/refund outcomes always stop for the Owner to prevent duplicate durable
 operations.
 
 Stop for a new Owner decision on ambiguous payment/refund results,
-real-user/production state, unproven cleanup, service/environment boundary
-change, materially greater destructive impact, or material validation-plan
-expansion.
+real-user/production state, unproven cleanup, service/environment/resource
+boundary change, materially greater destructive impact, or another explicit
+real-world stop condition. A validation change requires Owner input only when
+the validation itself would cross a new service, environment class,
+real-user/production state, protected surface, or destructive-impact boundary.
 
 ## 6. Independent Review and Deterministic Merge Checklist
 
