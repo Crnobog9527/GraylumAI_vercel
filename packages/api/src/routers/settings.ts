@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
+import {
+  LAUNCH_BASELINE_SETTING_KEY,
+  parseLaunchBaselineAt,
+  readLaunchBaselineAt,
+} from '../services/billingReconciliation';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 
@@ -55,6 +60,20 @@ const membershipPlanCatalogRowSchema = z.object({
 }).passthrough();
 
 const CATALOG_UNAVAILABLE_MESSAGE = '套餐服务暂不可用，请稍后重试';
+
+const systemSettingInputSchema = z.object({
+  key: z.string().trim().min(1),
+  value: z.any(),
+}).superRefine((setting, ctx) => {
+  if (setting.key !== LAUNCH_BASELINE_SETTING_KEY) return;
+  if (parseLaunchBaselineAt(setting.value).status === 'BLOCKED') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['value'],
+      message: 'launch_baseline_at 必须是可解析的时间戳',
+    });
+  }
+});
 
 function hasConfiguredStripePriceId(value: string | null): boolean {
   return Boolean(value?.trim());
@@ -197,9 +216,17 @@ export const settingsRouter = router({
     return reduceSettings(data ?? []);
   }),
 
+  getLaunchBaseline: adminProcedure.query(async ({ ctx }) => {
+    const result = await readLaunchBaselineAt(ctx.supabase);
+    if (result.status === 'BLOCKED' && result.reason === 'READ_FAILED') {
+      throw createSafeInternalError(new Error('launch baseline read failed'), '读取 Launch baseline 失败，请稍后重试');
+    }
+    return result;
+  }),
+
   // Admin only: Update system settings
   updateSystemSettings: adminProcedure
-    .input(z.object({ key: z.string(), value: z.any() }))
+    .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('system_settings')
@@ -213,7 +240,7 @@ export const settingsRouter = router({
     }),
 
   updateSystemSettingsBulk: adminProcedure
-    .input(z.array(z.object({ key: z.string(), value: z.any() })).min(1))
+    .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('system_settings')
