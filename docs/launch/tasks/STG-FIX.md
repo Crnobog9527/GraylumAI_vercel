@@ -20,10 +20,12 @@ intended_repository_scope:
     - docs/launch/evidence/STG-FIX-STRUCTURE-COMPARISON.md
 technical_requirements:
   - Resolve migration identity from live repository state; do not edit an already-applied migration.
+  - If the intended migration identity is occupied, ambiguous, or conflicting, resolve a fresh valid identity before writing.
   - Do not use db:push or an uncontrolled migration path.
   - Keep the migration expand-only and idempotent.
   - Restore the required claim_daily_checkin function, application_logs table, and diagnostic_results table without altering unrelated definitions.
   - Preserve unrelated function, table, policy, grant, index, trigger, and ownership definitions.
+  - Treat any staging/production structure-fingerprint difference as evidence; never rewrite production merely to force parity.
 validation_requirements:
   - git diff --check
   - exact changed-file inspection
@@ -37,6 +39,7 @@ external_boundaries:
   - Production mutation is forbidden unless separately and explicitly Owner-authorized.
   - Any production read-only parity inspection requires explicit Owner approval before that production access.
   - Merge, main promotion, provider configuration, and production release are separate decisions under current AGENTS.md.
+  - Evidence must contain no secret values.
 ```
 
 ## Definition of Done
