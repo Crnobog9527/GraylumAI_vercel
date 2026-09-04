@@ -693,7 +693,7 @@ async function getInvoiceSubscriptionServicePeriod(
     requiredBillingCycle?: 'monthly' | 'yearly';
   } = {},
 ) {
-  const periods = new Map<string, { start: number; end: number }>();
+  const periods = new Map<string, { start: number; end: number; priceId: string }>();
   const lines = await collectBoundedStripeList({
     initialPage: {
       data: invoice.lines?.data ?? [],
@@ -735,12 +735,13 @@ async function getInvoiceSubscriptionServicePeriod(
     const lineSubscriptionId = getExpandableId(details?.subscription);
     const start = line.period?.start;
     const end = line.period?.end;
+    const linePriceId = line.pricing?.price_details?.price;
 
     if (options.requiredPriceId) {
       const exactPeriod = typeof start === 'number' && typeof end === 'number' && options.requiredBillingCycle
         && addUtcCalendarMonthsClamped(new Date(start * 1000), options.requiredBillingCycle === 'yearly' ? 12 : 1).getTime() === end * 1000;
       if (lineSubscriptionId !== subscriptionId || details?.proration !== false
-        || line.pricing?.price_details?.price !== options.requiredPriceId
+        || linePriceId !== options.requiredPriceId
         || line.amount !== options.requiredAmount || line.currency !== options.requiredCurrency
         || line.subtotal !== options.requiredAmount || line.quantity !== 1 || !exactPeriod
         || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
@@ -748,11 +749,12 @@ async function getInvoiceSubscriptionServicePeriod(
         throw new Error('upgrade_invoice_full_target_line_mismatch');
       }
     } else if (lineSubscriptionId !== subscriptionId || details?.proration === true
+      || typeof linePriceId !== 'string'
       || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
       continue;
     }
 
-    periods.set(`${start}:${end}`, { start, end });
+    periods.set(`${start}:${end}:${linePriceId}`, { start, end, priceId: linePriceId });
   }
 
   if (periods.size === 0) {
@@ -1800,6 +1802,7 @@ async function findInvoiceFailureOrders(
   supabase: SupabaseLikeClient,
   invoice: Stripe.Invoice,
   subscriptionId: string | null,
+  sourcePriceId?: string,
 ) {
   const invoiceId = invoice.id;
   const existingInvoiceOrder = await supabase
@@ -1847,9 +1850,12 @@ async function findInvoiceFailureOrders(
     .from('payment_orders')
     .select(FAILED_INVOICE_ORDER_SELECT)
     .eq('stripe_subscription_id', subscriptionId);
-  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof subscriptionOrderQuery.lte === 'function'
-    ? subscriptionOrderQuery.lte('created_at', sourceCutoff)
+  const priceSubscriptionOrderQuery = sourcePriceId
+    ? subscriptionOrderQuery.eq('stripe_price_id', sourcePriceId)
     : subscriptionOrderQuery;
+  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof priceSubscriptionOrderQuery.lte === 'function'
+    ? priceSubscriptionOrderQuery.lte('created_at', sourceCutoff)
+    : priceSubscriptionOrderQuery;
   const filteredSubscriptionOrderQuery = typeof cutoffSubscriptionOrderQuery.neq === 'function'
     ? cutoffSubscriptionOrderQuery.neq('status', 'failed')
     : cutoffSubscriptionOrderQuery;
@@ -1872,6 +1878,17 @@ async function findInvoiceFailureOrders(
         subscriptionId: maskIdentifier(subscriptionId),
       },
     );
+  }
+
+  if (isSubscriptionPlanChangeOrder(subscriptionOrder.data)) {
+    logger.info('billing', 'stripe_invoice_payment_failed_plan_change_lock_preserved', {
+      invoiceId: maskIdentifier(invoiceId),
+      subscriptionId: maskIdentifier(subscriptionId),
+      orderId: maskIdentifier(subscriptionOrder.data.id),
+      sourceOrderCreatedAt: subscriptionOrder.data.created_at ?? null,
+      invoiceCreatedAt: getFailedInvoiceSourceCutoff(invoice),
+    });
+    return { invoiceOrder: null, subscriptionOrder: null };
   }
 
   return {
@@ -2053,13 +2070,34 @@ async function insertFailedInvoiceOrder(
 export async function markMembershipInvoicePaymentFailed(
   supabase: SupabaseLikeClient,
   invoice: Stripe.Invoice,
+  options: {
+    listInvoiceLines?: (
+      invoiceId: string,
+      startingAfter: string,
+    ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    paginationLimits?: StripePaginationLimits;
+  } = {},
 ) {
   const invoiceId = invoice.id;
   const subscriptionId = getInvoiceSubscriptionId(invoice);
+  let sourcePriceId: string | undefined;
+  if (subscriptionId && invoice.billing_reason !== 'subscription_update') {
+    try {
+      sourcePriceId = (await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options)).priceId;
+    } catch (error) {
+      throwFulfillmentError(
+        'invoice_payment_failed_service_period',
+        STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
+        error,
+        { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
+      );
+    }
+  }
   const { invoiceOrder, subscriptionOrder } = await findInvoiceFailureOrders(
     supabase,
     invoice,
     subscriptionId,
+    sourcePriceId,
   );
   const existingOrder = invoiceOrder ?? subscriptionOrder;
 
@@ -2687,7 +2725,7 @@ export async function fulfillMembershipInvoice(
   // one full-price target line; old-price credits or prorations are rejected before entitlement admission. In
   // particular, subscription_create invoices can have a zero-length top-level
   // window while their line has the complete monthly or annual term.
-  let servicePeriod: { start: number; end: number };
+  let servicePeriod: { start: number; end: number; priceId: string };
   try {
     servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options,
       requiredPriceId: upgradeSource?.stripe_price_id, requiredAmount: upgradeSource?.amountDue,
@@ -2703,6 +2741,7 @@ export async function fulfillMembershipInvoice(
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     expectedSourceOrderId: upgradeSource?.id,
+    expectedSourcePriceId: servicePeriod.priceId,
     excludeSubscriptionPlanChangeSources: !upgradeSource,
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',

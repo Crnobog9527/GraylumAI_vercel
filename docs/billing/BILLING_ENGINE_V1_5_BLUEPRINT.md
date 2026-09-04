@@ -394,7 +394,7 @@ subscription_grant:monthly:{stripe_invoice_id}
 7. 创建一个持久 plan-change source/lock，以其 id 派生稳定 Stripe idempotency key。
 8. 更新同一 Stripe subscription 的现有 item：目标 Price + `billing_cycle_anchor=now` + `proration_behavior=none` + `payment_behavior=error_if_incomplete`。不得发送 `proration_date`，不得清除到期取消，也不得创建第二个 Checkout/subscription。
 9. 目标套餐/周期收取当前配置的完整价格；旧套餐不退款、不按未使用时间抵扣、不计算差价，也不根据剩余或已用积分改价。新的完整目标 term 从付款成功对应的 Stripe 目标周期开始。
-10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user，且在履约时再次确认目标 Stripe Price 是精确 `month × 1` / `year × 1` cadence、精确 1/12 个 UTC 日历月的完整目标 service period、全价 `amount_due/amount_paid/subtotal/total`，且无任何折扣、税、credit note 或余额调整的 paid invoice 可以更新本地 subscription、plan、billing_cycle；普通续费发票的 source 查找必须排除未完成的 plan-change source，防止旧续费发票误用目标套餐 source。
+10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user，且在履约时再次确认目标 Stripe Price 是精确 `month × 1` / `year × 1` cadence、精确 1/12 个 UTC 日历月的完整目标 service period、全价 `amount_due/amount_paid/subtotal/total`，且无任何折扣、税、credit note 或余额调整的 paid invoice 可以更新本地 subscription、plan、billing_cycle；普通续费发票必须按 invoice line 的 exact Price 选择 source，并排除 plan-change source，防止延迟旧续费误用目标套餐的 lock 或派生 invoice order；普通续费失败也不得消费或释放 plan-change lock。
 11. 已有积分及历史 grant 全部保留，不反转、不扣减：
     - 月付目标：在现有余额上完整追加 `monthly_credits + monthly_bonus_credits`，恰好一次。
     - 年付目标：开始新的 12 期计划，仅追加 canonical period 1；period 2–12 继续由 YEAR-1 按月释放。

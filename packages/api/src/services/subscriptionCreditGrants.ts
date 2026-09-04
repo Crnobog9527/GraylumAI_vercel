@@ -142,6 +142,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
   expectedSourceOrderId?: string;
+  expectedSourcePriceId?: string;
   excludeSubscriptionPlanChangeSources?: boolean;
   invoiceId: string;
   invoiceCreatedAt?: string | null;
@@ -960,6 +961,7 @@ function pickSubscriptionSourceOrder(
   options: {
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
+    expectedSourcePriceId?: string;
     excludeSubscriptionPlanChangeOrders?: boolean;
   },
 ): SubscriptionSourceOrderLookupResult {
@@ -968,6 +970,7 @@ function pickSubscriptionSourceOrder(
 
   for (const order of orders) {
     if (order.status === 'failed'
+      || (options.expectedSourcePriceId && order.stripe_price_id !== options.expectedSourcePriceId)
       || (options.excludeSubscriptionPlanChangeOrders && isSubscriptionPlanChangeOrder(order))
       || !isUsableSourceForInvoice(order, options)) {
       continue;
@@ -999,6 +1002,7 @@ async function getLatestSubscriptionOrder(
   subscriptionId: string,
   options: {
     expectedSourceOrderId?: string;
+    expectedSourcePriceId?: string;
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
     excludeSubscriptionPlanChangeOrders?: boolean;
@@ -1009,8 +1013,9 @@ async function getLatestSubscriptionOrder(
     .from('payment_orders')
     .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
     .eq('stripe_subscription_id', subscriptionId);
-  const exactSourceQuery = options.expectedSourceOrderId ? query.eq('id', options.expectedSourceOrderId) : query;
-  const cutoffQuery = sourceCutoff && typeof query.lte === 'function'
+  const priceQuery = options.expectedSourcePriceId ? query.eq('stripe_price_id', options.expectedSourcePriceId) : query;
+  const exactSourceQuery = options.expectedSourceOrderId ? priceQuery.eq('id', options.expectedSourceOrderId) : priceQuery;
+  const cutoffQuery = sourceCutoff && typeof priceQuery.lte === 'function'
     ? exactSourceQuery.lte('created_at', sourceCutoff)
     : exactSourceQuery;
   const filteredQuery = typeof cutoffQuery.neq === 'function'
@@ -1018,7 +1023,7 @@ async function getLatestSubscriptionOrder(
     : cutoffQuery;
   const orderedQuery = filteredQuery
     .order('created_at', { ascending: false });
-  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof query.lte === 'function';
+  const canApplyLimitBeforeInvoiceFilter = !sourceCutoff || typeof priceQuery.lte === 'function';
   const limitedQuery = canApplyLimitBeforeInvoiceFilter && typeof orderedQuery.limit === 'function'
     ? orderedQuery.limit(10)
     : orderedQuery;
@@ -2972,6 +2977,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   }
 
   const sourceLookup = !input.expectedSourceOrderId && isUsableMembershipSourceOrder(existingInvoiceOrder)
+    && (!input.expectedSourcePriceId || existingInvoiceOrder?.stripe_price_id === input.expectedSourcePriceId)
     ? {
       order: existingInvoiceOrder,
       blockedOrder: null,
@@ -2979,6 +2985,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     }
     : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
       expectedSourceOrderId: input.expectedSourceOrderId,
+      expectedSourcePriceId: input.expectedSourcePriceId,
       invoiceCreatedAt: input.invoiceCreatedAt,
       periodStart: input.periodStart,
       excludeSubscriptionPlanChangeOrders: input.excludeSubscriptionPlanChangeSources,

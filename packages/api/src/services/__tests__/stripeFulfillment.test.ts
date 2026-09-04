@@ -58,7 +58,10 @@ type RefundWebhookMockHooks = {
   }) => Promise<void> | void;
 };
 
-function withInvoiceSubscriptionServiceLine(invoice: Record<string, any>): Stripe.Invoice {
+function withInvoiceSubscriptionServiceLine(
+  invoice: Record<string, any>,
+  linePriceId = 'price_test_monthly',
+): Stripe.Invoice {
   const subscriptionId = invoice.parent?.subscription_details?.subscription
     ?? invoice.subscription;
   const start = invoice.period_start ?? invoice.created ?? 1_742_646_400;
@@ -73,6 +76,7 @@ function withInvoiceSubscriptionServiceLine(invoice: Record<string, any>): Strip
       data: [{
         id: `il_${invoice.id}`,
         period: { start, end },
+        pricing: { price_details: { price: linePriceId } },
         parent: {
           type: 'subscription_item_details',
           subscription_item_details: { proration: false, subscription: subscriptionId },
@@ -1452,7 +1456,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_paid_yearly_checkout',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_paid_yearly_checkout',
       status: 'active',
@@ -1621,7 +1625,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_expanded_latest_invoice',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_expanded_latest_invoice',
       status: 'active',
@@ -1727,7 +1731,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_invoice_list_fallback',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_invoice_list_fallback',
       status: 'active',
@@ -2067,7 +2071,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_rpc_failure_audit',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_rpc_failure_audit',
       status: 'active',
@@ -2583,7 +2587,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_123',
           },
         },
-      }),
+      }, 'price_monthly'),
     );
 
     expect(updates).toEqual([
@@ -3018,7 +3022,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_atomic',
           },
         },
-      }),
+      }, 'price_yearly'),
     );
 
     expect(tables.subscription_credit_grants).toHaveLength(1);
@@ -5162,7 +5166,7 @@ describe('stripe fulfillment helpers', () => {
     expect(supabase.tables.profiles[0].credits).toBe(94);
   });
 
-  it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
+  it('does not let a timestamp-adjacent generic renewal failure release a pending plan-change lock', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 
     const supabase = {
@@ -5187,6 +5191,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_failed');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_upgrade');
               return this;
             }
 
@@ -5234,7 +5243,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_failed',
         created: 1781346300,
         status: 'open',
@@ -5246,32 +5255,15 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_failed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_upgrade'),
     );
 
-    expect(updates).toEqual([
-      {
-        table: 'payment_orders',
-        orderId: 'order-pending-subscription',
-        payload: expect.objectContaining({
-          stripe_invoice_id: 'in_test_failed',
-          stripe_checkout_session_id: null,
-          stripe_subscription_id: 'sub_test_failed',
-          amount_total: 2990,
-          currency: 'usd',
-          status: 'failed',
-          payment_status: 'open',
-          metadata: expect.objectContaining({
-            existing: 'kept',
-            source: 'invoice.payment_failed',
-            invoiceId: 'in_test_failed',
-            subscriptionId: 'sub_test_failed',
-            lastPaymentOrderStatus: 'failed',
-            lastPaymentOrderStatusSource: 'invoice.payment_failed',
-          }),
-        }),
-      },
-    ]);
+    expect(updates).toEqual([]);
+    expect(loggerState.info).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_payment_failed_plan_change_lock_preserved',
+      expect.objectContaining({ orderId: 'order-pe...iption' }),
+    );
   });
 
   it('preserves a newer pending plan-change lock during stale failed invoice replay', async () => {
@@ -5300,6 +5292,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_stale_failed');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_upgrade');
               return this;
             }
 
@@ -5355,7 +5352,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_stale_failed',
         created: 1781344800,
         status: 'open',
@@ -5367,7 +5364,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_stale_failed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_upgrade'),
     );
 
     expect(updates).toEqual([]);
@@ -5507,7 +5504,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_stale_failed_completed',
         created: Date.parse('2026-06-13T10:00:00.000Z') / 1000,
         status: 'open',
@@ -5520,7 +5517,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_stale_failed_completed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_pro_monthly'),
     );
 
     expect(lteFilters).toEqual([['created_at', '2026-06-13T10:00:00.999Z']]);
@@ -5572,6 +5569,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_renewal');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_yearly');
               return this;
             }
 
@@ -5628,7 +5630,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_renewal_failed',
         status: 'open',
         amount_due: 2990,
@@ -5640,7 +5642,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_renewal',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_test_yearly'),
     );
 
     expect(updates).toEqual([]);
@@ -5705,6 +5707,11 @@ describe('stripe fulfillment helpers', () => {
               return this;
             }
 
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_monthly');
+              return this;
+            }
+
             throw new Error(`Unexpected eq(${column}, ${value})`);
           },
           order() {
@@ -5746,7 +5753,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_renewal_missing_plan',
         status: 'open',
         amount_due: 2990,
@@ -5756,7 +5763,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_missing_plan',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_test_monthly'),
     );
 
     expect(updates).toEqual([]);
@@ -5840,6 +5847,7 @@ describe('stripe fulfillment helpers', () => {
       data: [{
         id: 'il_webhook_line_period_page_2',
         period: { start: 1_788_125_971, end: 1_790_804_371 },
+        pricing: { price_details: { price: 'price_webhook_line_period' } },
         parent: {
           type: 'subscription_item_details',
           subscription_item_details: {
@@ -5950,6 +5958,7 @@ describe('stripe fulfillment helpers', () => {
           data: [{
             id: 'il_conflict_page_1',
             period: { start: 1_788_125_971, end: 1_790_804_371 },
+            pricing: { price_details: { price: 'price_conflict' } },
             parent: {
               subscription_item_details: {
                 proration: false,
@@ -5965,6 +5974,7 @@ describe('stripe fulfillment helpers', () => {
           data: [{
             id: 'il_conflict_page_2',
             period: { start: 1_790_804_371, end: 1_793_482_771 },
+            pricing: { price_details: { price: 'price_conflict' } },
             parent: {
               subscription_item_details: {
                 proration: false,
@@ -6212,7 +6222,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_webhook_source_partial_review_only',
           },
         },
-      }),
+      }, 'price_webhook_source_partial_review_only'),
     );
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
@@ -6554,7 +6564,7 @@ describe('stripe fulfillment helpers', () => {
         currency: 'usd',
         amount_paid: 990,
         subscription: 'sub_test_legacy_shape',
-      }),
+      }, 'price_legacy'),
     );
 
     expect(updates).toEqual([
@@ -6586,6 +6596,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_rpc_failure');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_monthly');
               return this;
             }
 
@@ -7045,12 +7060,17 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
     expect(supabase.tables.payment_orders.find(r => r.id === 'new-lock')).toMatchObject({ status: 'pending', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade' });
   });
-  it('does not let a pending upgrade source fulfill an older generic renewal invoice', async () => {
+  it('binds an older generic renewal to its exact Price instead of pending or derived upgrade sources', async () => {
     const { supabase, invoice, retrievePrice } = fixture('monthly');
     supabase.tables.membership_plans.push({ id: 'old-plan', name: 'Pro', level: 'pro', monthly_credits: 1000, monthly_bonus_credits: 0 });
     supabase.tables.payment_orders.push({ id: 'old-source', user_id: 'upgrade-user', item_id: 'old-plan', item_type: 'membership_plan',
       billing_cycle: 'monthly', stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade', stripe_price_id: 'price_old',
       stripe_checkout_session_id: 'cs_old', status: 'completed', created_at: '2026-09-03T23:59:59.500Z' });
+    supabase.tables.payment_orders.push({ id: 'completed-upgrade-invoice', user_id: 'upgrade-user', item_id: 'upgrade-plan',
+      item_type: 'membership_plan', billing_cycle: 'monthly', stripe_subscription_id: 'sub_upgrade',
+      stripe_customer_id: 'cus_upgrade', stripe_price_id: 'price_upgrade', stripe_invoice_id: 'in_newer_upgrade',
+      status: 'completed', payment_status: 'paid', fulfilled_at: '2026-09-04T00:00:00.500Z',
+      created_at: '2026-09-04T00:00:00.500Z', metadata: { source: 'invoice.payment_succeeded' } });
     invoice.billing_reason = 'subscription_cycle'; invoice.amount_due = 990; invoice.amount_paid = 990;
     invoice.parent!.subscription_details!.metadata = {};
     invoice.lines.data[0].amount = 990; invoice.lines.data[0].pricing!.price_details!.price = 'price_old';
@@ -7058,5 +7078,8 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 1417 });
     expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'old-plan', billing_cycle: 'monthly' });
     expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'pending' });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'completed-upgrade-invoice')).toMatchObject({
+      item_id: 'upgrade-plan', stripe_price_id: 'price_upgrade', fulfilled_at: '2026-09-04T00:00:00.500Z',
+    });
   });
 });
