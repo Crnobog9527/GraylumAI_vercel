@@ -7017,4 +7017,18 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     await fulfillMembershipInvoice(supabase, invoice);
     expect(supabase.tables.payment_orders.find(r => r.id === 'new-lock')).toMatchObject({ status: 'pending', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade' });
   });
+  it('does not let a pending upgrade source fulfill an older generic renewal invoice', async () => {
+    const { supabase, invoice } = fixture('monthly');
+    supabase.tables.membership_plans.push({ id: 'old-plan', name: 'Pro', level: 'pro', monthly_credits: 1000, monthly_bonus_credits: 0 });
+    supabase.tables.payment_orders.push({ id: 'old-source', user_id: 'upgrade-user', item_id: 'old-plan', item_type: 'membership_plan',
+      billing_cycle: 'monthly', stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade', stripe_price_id: 'price_old',
+      stripe_checkout_session_id: 'cs_old', status: 'completed', created_at: '2026-09-03T23:59:59.500Z' });
+    invoice.billing_reason = 'subscription_cycle'; invoice.amount_due = 990; invoice.amount_paid = 990;
+    invoice.parent!.subscription_details!.metadata = {};
+    invoice.lines.data[0].amount = 990; invoice.lines.data[0].pricing!.price_details!.price = 'price_old';
+    await fulfillMembershipInvoice(supabase, invoice);
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 1417 });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'old-plan', billing_cycle: 'monthly' });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'pending' });
+  });
 });

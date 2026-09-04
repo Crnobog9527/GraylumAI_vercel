@@ -2644,6 +2644,7 @@ export async function fulfillMembershipInvoice(
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
     expectedSourceOrderId: upgradeSource?.id,
+    excludeSubscriptionPlanChangeSources: !upgradeSource,
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,

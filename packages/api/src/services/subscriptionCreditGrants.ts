@@ -142,6 +142,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
   expectedSourceOrderId?: string;
+  excludeSubscriptionPlanChangeSources?: boolean;
   invoiceId: string;
   invoiceCreatedAt?: string | null;
   subscriptionId: string;
@@ -959,13 +960,16 @@ function pickSubscriptionSourceOrder(
   options: {
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
+    excludeSubscriptionPlanChangeOrders?: boolean;
   },
 ): SubscriptionSourceOrderLookupResult {
   let blockedOrder: PaymentOrderRow | null = null;
   let blockedReason: string | null = null;
 
   for (const order of orders) {
-    if (order.status === 'failed' || !isUsableSourceForInvoice(order, options)) {
+    if (order.status === 'failed'
+      || (options.excludeSubscriptionPlanChangeOrders && isSubscriptionPlanChangeOrder(order))
+      || !isUsableSourceForInvoice(order, options)) {
       continue;
     }
 
@@ -997,6 +1001,7 @@ async function getLatestSubscriptionOrder(
     expectedSourceOrderId?: string;
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
+    excludeSubscriptionPlanChangeOrders?: boolean;
   } = {},
 ): Promise<SubscriptionSourceOrderLookupResult> {
   const sourceCutoff = getInvoiceSourceQueryCutoff(options);
@@ -2976,6 +2981,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       expectedSourceOrderId: input.expectedSourceOrderId,
       invoiceCreatedAt: input.invoiceCreatedAt,
       periodStart: input.periodStart,
+      excludeSubscriptionPlanChangeOrders: input.excludeSubscriptionPlanChangeSources,
     });
   const sourceOrder = sourceLookup.order;
   if (!isUsableMembershipSourceOrder(sourceOrder)) {

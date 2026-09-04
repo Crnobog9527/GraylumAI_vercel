@@ -322,16 +322,18 @@ function createSubscriptionChangeGuardHarness(options: {
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-function fakeQuote() { return { amountDue: 2990, currency: 'usd', quotedAt: Math.floor(Date.now() / 1000), fingerprint: 'a'.repeat(64) }; }
+function fakeQuote() { return { amountDue: 2990, currency: 'usd', quotedAt: Math.floor(Date.now() / 1000),
+  fingerprint: 'a'.repeat(64), freshnessProof: 'b'.repeat(64) }; }
 async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarness>, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) {
   const preview = await h.caller.previewSubscriptionPlanChange(input);
   if (preview.status !== 'quote') throw new Error('Expected financial quote');
-  const { amountDue, currency, quotedAt, fingerprint } = preview;
-  return { amountDue, currency, quotedAt, fingerprint };
+  const { amountDue, currency, quotedAt, fingerprint, freshnessProof } = preview;
+  return { amountDue, currency, quotedAt, fingerprint, freshnessProof };
 }
 
 describe('paymentsRouter error sanitization', () => {
   beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_pay1_quote_signing';
     stripeState.assertCheckoutRateLimit.mockReset();
     stripeState.assertSubscriptionChangeRateLimit.mockReset();
     stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
@@ -1211,8 +1213,8 @@ describe('paymentsRouter error sanitization', () => {
     } }));
     expect(h.invoicePreview.mock.calls[0][0].subscription_details).not.toHaveProperty('proration_date');
     if (quote.status !== 'quote') throw new Error('Expected financial quote');
-    const { amountDue, currency, quotedAt, fingerprint } = quote;
-    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, quotedAt, fingerprint } }))
+    const { amountDue, currency, quotedAt, fingerprint, freshnessProof } = quote;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, quotedAt, fingerprint, freshnessProof } }))
       .resolves.toMatchObject({ status: 'pending_fulfillment' });
     expect(h.orderInserts).toHaveLength(1);
     expect(h.subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
@@ -1255,6 +1257,15 @@ describe('paymentsRouter error sanitization', () => {
     const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
     const first = await getQuote(h, input); vi.advanceTimersByTime(1000); const second = await getQuote(h, input);
     expect(second.quotedAt).toBe(first.quotedAt + 1); expect(second.fingerprint).toBe(first.fingerprint);
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a refreshed quotedAt without its server-authenticated freshness proof', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const issued = await getQuote(h, input); vi.advanceTimersByTime(1000);
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { ...issued, quotedAt: issued.quotedAt + 1 } }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 

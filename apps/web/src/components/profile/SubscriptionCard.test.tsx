@@ -253,7 +253,8 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
         if (state.previewMode === 'applied') return { status: 'pending_fulfillment' };
         return { status: 'quote',
         planName: 'Gold', billingCycle: input.billingCycle, amountDue: input.billingCycle === 'yearly' ? 29900 : 2990,
-        currency: 'usd', annualAmount: input.billingCycle === 'yearly' ? 29900 : null, quotedAt: 1788535181, fingerprint: 'a'.repeat(64) }; }),
+        currency: 'usd', annualAmount: input.billingCycle === 'yearly' ? 29900 : null, quotedAt: 1788535181,
+        fingerprint: 'a'.repeat(64), freshnessProof: 'b'.repeat(64) }; }),
       changeSubscriptionPlan: mutation(async input => { state.changes.push(input); if (state.drift) { state.drift = false; throw new Error('价格已变化，请重新预览并确认。'); } return { status: 'pending_fulfillment' }; }),
       createCheckoutSession: mutation(async input => { state.checkouts.push(input); throw new Error('unexpected checkout'); }),
       createCustomerPortalSession: mutation(async () => ({})), syncCheckoutSession: mutation(async () => ({}))

@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
 import { z } from 'zod';
@@ -70,6 +70,7 @@ const upgradeQuoteSchema = z.object({
   currency: z.string().regex(/^[a-z]{3}$/),
   quotedAt: z.number().int().positive(),
   fingerprint: z.string().length(64),
+  freshnessProof: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 type UpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
 
@@ -776,6 +777,17 @@ function quoteIsFresh(quote: UpgradeQuote) {
   const age = Math.floor(Date.now() / 1000) - quote.quotedAt;
   return age >= 0 && age <= UPGRADE_QUOTE_TTL_SECONDS;
 }
+function createUpgradeQuoteFreshnessProof(fingerprint: string, quotedAt: number) {
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecret) throw toSubscriptionChangeUnavailableError();
+  const signingKey = createHash('sha256').update('graylum:pay1:upgrade-quote:v1\0').update(stripeSecret).digest();
+  return createHmac('sha256', signingKey).update(`${fingerprint}:${quotedAt}`).digest('hex');
+}
+function quoteHasValidFreshnessProof(quote: UpgradeQuote) {
+  const expected = Buffer.from(createUpgradeQuoteFreshnessProof(quote.fingerprint, quote.quotedAt), 'hex');
+  const actual = Buffer.from(quote.freshnessProof, 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
 function quoteExpiredError() {
   return new TRPCError({ code: 'CONFLICT', message: '升级报价已过期，请重新预览并确认。' });
 }
@@ -785,7 +797,8 @@ function priceChangedError() {
 }
 function sameUpgradeQuote(a: UpgradeQuote, b: UpgradeQuote) {
   return a.amountDue === b.amountDue && a.currency === b.currency
-    && a.quotedAt === b.quotedAt && a.fingerprint === b.fingerprint;
+    && a.quotedAt === b.quotedAt && a.fingerprint === b.fingerprint
+    && a.freshnessProof === b.freshnessProof;
 }
 function upgradeAccepted() {
   return { action: 'changeSubscriptionPlan' as const, status: 'pending_fulfillment' as const };
@@ -919,7 +932,8 @@ async function previewFullPriceUpgrade(change: ValidatedUpgrade, quotedAt: numbe
     plan: change.plan.id, price: change.priceId, cycle: change.input.billingCycle, amount: change.amount,
     amountDue: invoice.amount_due, currency: invoice.currency,
   })).digest('hex');
-  return { amountDue: invoice.amount_due, currency: invoice.currency, quotedAt, fingerprint };
+  return { amountDue: invoice.amount_due, currency: invoice.currency, quotedAt, fingerprint,
+    freshnessProof: createUpgradeQuoteFreshnessProof(fingerprint, quotedAt) };
 }
 async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, attempt: UpgradeAttempt) {
   try {
@@ -1315,7 +1329,10 @@ export const paymentsRouter = router({
         if (attempt) {
           if (await recoverUpgradeAttempt(change, ctx.supabaseAdmin, claim!) === 'applied') return upgradeAccepted();
           if (!sameUpgradeQuote(attempt.quote, input.expected)) throw priceChangedError();
-        } else if (!quoteIsFresh(input.expected)) { throw quoteExpiredError(); }
+        } else {
+          if (!quoteHasValidFreshnessProof(input.expected)) throw priceChangedError();
+          if (!quoteIsFresh(input.expected)) throw quoteExpiredError();
+        }
         const quote = await previewFullPriceUpgrade(change, input.expected.quotedAt);
         if (!sameUpgradeQuote(quote, input.expected)) throw priceChangedError();
         if (!quoteIsFresh(quote)) throw quoteExpiredError();

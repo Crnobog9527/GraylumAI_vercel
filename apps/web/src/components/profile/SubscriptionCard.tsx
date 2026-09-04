@@ -304,7 +304,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [upgrade, setUpgrade] = useState<{
     planId: string; billingCycle: 'monthly' | 'yearly'; planName: string;
     amountDue: number; currency: string; annualAmount: number | null;
-    quotedAt: number; fingerprint: string;
+    quotedAt: number; fingerprint: string; freshnessProof: string;
   } | null>(null);
   const confirmingUpgrade = useRef(false);
   const confirmUpgrade = async () => {
@@ -313,7 +313,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     try {
       await changePlan.mutateAsync({ planId: upgrade.planId, billingCycle: upgrade.billingCycle,
         expected: { amountDue: upgrade.amountDue, currency: upgrade.currency,
-          quotedAt: upgrade.quotedAt, fingerprint: upgrade.fingerprint } });
+          quotedAt: upgrade.quotedAt, fingerprint: upgrade.fingerprint,
+          freshnessProof: upgrade.freshnessProof } });
       setUpgrade(null);
       void invalidatePostCheckoutMembershipQueries(utils);
       void utils.payments.getSubscriptionManagement.invalidate();
