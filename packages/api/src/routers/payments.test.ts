@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isDeepStrictEqual } from 'node:util';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stripeState = vi.hoisted(() => ({
   assertStripeCheckoutConfigured: vi.fn(),
@@ -248,6 +249,7 @@ function createSubscriptionChangeGuardHarness(options: {
       price: { id: 'price_test_old' }, current_period_start: 1700000000, current_period_end: 2000000000 }] } };
   const subscriptionRetrieve = vi.fn().mockImplementation(async () => structuredClone(remote));
   const subscriptionUpdate = vi.fn().mockResolvedValue(remote);
+  const invoiceList = vi.fn().mockResolvedValue({ data: [], has_more: false });
   const invoicePreview = vi.fn().mockResolvedValue({ amount_due: 1990, currency: 'usd' });
   const invoiceRetrieve = vi.fn().mockResolvedValue({ customer: 'cus_test_active', status: 'paid',
     parent: { subscription_details: { subscription: remote.id } }, billing_reason: 'subscription_update',
@@ -256,16 +258,18 @@ function createSubscriptionChangeGuardHarness(options: {
   const userTableReads: string[] = []; let profileReadCount = 0;
   let insertError: any = null;
   stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate },
-    invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve } });
+    invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve, list: invoiceList } });
   function ordersBuilder() {
     const filters: Array<[string, unknown]> = []; let values: any = null;
     const result = () => {
-      const found = rows.filter(row => filters.every(([key, value]) => row[key] === value));
+      const found = rows.filter(row => filters.every(([key, value]) => key === 'metadata'
+        ? isDeepStrictEqual(row.metadata, JSON.parse(value as string)) : value === null ? row[key] == null : row[key] === value));
       if (values) { orderUpdates.push(values); found.forEach(row => Object.assign(row, values)); }
-      return { data: found, error: null };
+      return { data: structuredClone(found), error: null };
     };
     return {
       select() { return this; }, eq(k: string, v: unknown) { filters.push([k, v]); return this; },
+      is(k: string, v: unknown) { filters.push([k, v]); return this; },
       order() { return this; }, limit() { return this; },
       update(v: any) { values = v; return this; },
       maybeSingle: async () => options.eligibilityOrderResult?.() ?? { ...result(), data: result().data[0] ?? null },
@@ -273,8 +277,9 @@ function createSubscriptionChangeGuardHarness(options: {
       insert(payload: any) {
         const conflict = rows.some(r => r.stripe_checkout_session_id === payload.stripe_checkout_session_id);
         const error = insertError ?? (conflict ? { code: '23505' } : null);
-        if (!error) { orderInserts.push(payload); rows.push({ ...payload, id: 'order-change-1' }); }
-        return createSingleQueryBuilder(Promise.resolve({ data: error ? null : { id: 'order-change-1' }, error }));
+        const id = `order-change-${rows.length + 1}`;
+        if (!error) { orderInserts.push(payload); rows.push(structuredClone({ ...payload, id })); }
+        return createSingleQueryBuilder(Promise.resolve({ data: error ? null : { id }, error }));
       },
     };
   }
@@ -293,13 +298,17 @@ function createSubscriptionChangeGuardHarness(options: {
     throw new Error(`Unexpected admin write ${table}`);
   } };
   return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
-    targetPlanId, subscriptionRetrieve, subscriptionUpdate, invoicePreview, invoiceRetrieve, remote, local, plan,
+    targetPlanId, subscriptionRetrieve, subscriptionUpdate, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
     rows, orderInserts, orderUpdates, userTableReads, adminSupabase, setInsertError: (e: any) => { insertError = e; } };
 }
 
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
 function fakeQuote() { return { amountDue: 1990, currency: 'usd', prorationDate: Math.floor(Date.now() / 1000), fingerprint: 'a'.repeat(64) }; }
 async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarness>, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) {
-  const { amountDue, currency, prorationDate, fingerprint } = await h.caller.previewSubscriptionPlanChange(input);
+  const preview = await h.caller.previewSubscriptionPlanChange(input);
+  if (preview.status !== 'quote') throw new Error('Expected financial quote');
+  const { amountDue, currency, prorationDate, fingerprint } = preview;
   return { amountDue, currency, prorationDate, fingerprint };
 }
 
@@ -1177,6 +1186,7 @@ describe('paymentsRouter error sanitization', () => {
     expect(quote).toMatchObject({ amountDue: 1990, currency: 'usd', annualAmount: billingCycle === 'yearly' ? 29900 : null });
     expect(quote).not.toHaveProperty('subscriptionId'); expect(quote).not.toHaveProperty('customerId');
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    if (quote.status !== 'quote') throw new Error('Expected financial quote');
     const { amountDue, currency, prorationDate, fingerprint } = quote;
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, prorationDate, fingerprint } }))
       .resolves.toMatchObject({ status: 'pending_fulfillment' });
@@ -1285,7 +1295,7 @@ describe('paymentsRouter error sanitization', () => {
     const expected = await getQuote(h, input);
     h.subscriptionUpdate.mockRejectedValueOnce({ type: 'StripeConnectionError' });
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-    expect(h.rows[0].status).toBe('pending'); expect(h.orderUpdates).toHaveLength(0);
+    expect(h.rows[0].status).toBe('pending'); expect(h.orderUpdates.filter(u => u.status === 'failed')).toHaveLength(0);
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
     expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
     expect(h.subscriptionUpdate.mock.calls[0]).toEqual(h.subscriptionUpdate.mock.calls[1]);
@@ -1313,6 +1323,127 @@ describe('paymentsRouter error sanitization', () => {
     h.subscriptionRetrieve.mockResolvedValue(h.remote); h.rows[0].metadata.upgradeAttempt.createdAt -= 24 * 3600000;
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
     expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1); expect(h.orderInserts).toHaveLength(1);
+  });
+
+  it.each(['preview', 'confirm'])('retires expired proven-old attempts via %s and requires a separately confirmed fresh attempt', async endpoint => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce(new Error('transport-before-apply'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    vi.advanceTimersByTime(301000);
+    await expect(endpoint === 'preview' ? h.caller.previewSubscriptionPlanChange(input)
+      : h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('报价已过期') });
+    expect(h.rows[0]).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(h.invoiceList).toHaveBeenCalled(); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+    h.invoicePreview.mockResolvedValue({ amount_due: 2000, currency: 'usd' });
+    const fresh = await getQuote(h, input);
+    expect(fresh.prorationDate).toBe(expected.prorationDate + 301); expect(fresh.amountDue).toBe(2000);
+    expect(h.orderInserts).toHaveLength(1); // Preview alone does not replace the attempt.
+    await h.caller.changeSubscriptionPlan({ ...input, expected: fresh });
+    expect(h.orderInserts).toHaveLength(2); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
+    expect(h.subscriptionUpdate.mock.calls[1][1].proration_date).toBe(fresh.prorationDate);
+    expect(h.subscriptionUpdate.mock.calls[1][2].idempotencyKey).not.toBe(h.subscriptionUpdate.mock.calls[0][2].idempotencyKey);
+    expect(h.rows.filter(r => r.status === 'pending')).toHaveLength(1);
+  });
+
+  it('allows recovery at the TTL boundary with identical parameters and returns the fresh stored preview', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    vi.advanceTimersByTime(300000);
+    expect(await getQuote(h, input)).toEqual(expected);
+    await h.caller.changeSubscriptionPlan({ ...input, expected });
+    expect(h.subscriptionUpdate.mock.calls[1]).toEqual(h.subscriptionUpdate.mock.calls[0]);
+    expect(h.orderInserts).toHaveLength(1);
+  });
+
+  it.each(['preview', 'confirm'])('returns pending fulfillment for an applied expired attempt via %s without showing a quote', async endpoint => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async (_id, params) => {
+      h.remote.items.data[0].price.id = 'price_test_gold_monthly'; h.remote.metadata = params.metadata;
+      h.remote.latest_invoice = 'in_upgrade'; throw new Error('transport-after-apply');
+    });
+    await h.caller.changeSubscriptionPlan({ ...input, expected }); vi.advanceTimersByTime(86400000);
+    const result = await (endpoint === 'preview' ? h.caller.previewSubscriptionPlanChange(input)
+      : h.caller.changeSubscriptionPlan({ ...input, expected }));
+    expect(result).toEqual({ action: 'changeSubscriptionPlan', status: 'pending_fulfillment' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+    expect(h.orderInserts).toHaveLength(1); expect(syncSubscriptionState).not.toHaveBeenCalled();
+  });
+
+  it.each(['list-error', 'partial-history', 'target-invoice', 'latest-target', 'attempt-metadata', 'partial-lines', 'read-error'])('retains an expired lock when old-price evidence is ambiguous: %s', async evidence => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined(); vi.advanceTimersByTime(3600000);
+    const invoice: any = { id: 'in_target', customer: h.remote.customer, parent: { subscription_details: { subscription: h.remote.id } },
+      lines: { has_more: false, data: [{ pricing: { price_details: { price: 'price_test_gold_monthly' } } }] } };
+    if (evidence === 'list-error') h.invoiceList.mockRejectedValue(new Error('timeout'));
+    if (evidence === 'partial-history') h.invoiceList.mockResolvedValue({ data: [], has_more: true });
+    if (evidence === 'target-invoice') h.invoiceList.mockResolvedValue({ data: [invoice], has_more: false });
+    if (evidence === 'latest-target') { h.remote.latest_invoice = invoice.id; h.invoiceRetrieve.mockResolvedValue(invoice); }
+    if (evidence === 'attempt-metadata') { h.remote.metadata.upgradeAttemptId = h.rows[0].id; }
+    if (evidence === 'partial-lines') { invoice.lines = { has_more: true, data: [] }; h.invoiceList.mockResolvedValue({ data: [invoice], has_more: false }); }
+    if (evidence === 'read-error') h.subscriptionRetrieve.mockRejectedValue(new Error('timeout'));
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.rows[0].stripe_checkout_session_id).not.toBeNull();
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes concurrent stale retirement and replacement, including an in-flight recovery crossing TTL', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    vi.advanceTimersByTime(299000);
+    let enter!: () => void; let finish!: () => void;
+    const entered = new Promise<void>(r => { enter = r; }); const blocked = new Promise<void>(r => { finish = r; });
+    h.subscriptionUpdate.mockImplementationOnce(async () => { enter(); await blocked; throw new Error('timeout'); });
+    const recovery = h.caller.changeSubscriptionPlan({ ...input, expected }).catch(e => e);
+    await entered; vi.advanceTimersByTime(2000);
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); finish(); await recovery;
+    const expirations = await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected }), h.caller.previewSubscriptionPlanChange(input)]);
+    expect(expirations.every(r => r.status === 'rejected')).toBe(true);
+    expect(h.rows[0].status).toBe('failed');
+    const fresh = await getQuote(h, input);
+    await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected: fresh }), h.caller.changeSubscriptionPlan({ ...input, expected: fresh })]);
+    expect(h.orderInserts).toHaveLength(2); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(3);
+    expect(h.rows.filter(r => r.status === 'pending')).toHaveLength(1);
+  });
+
+  it('does not overwrite a webhook transition that wins during stale retirement', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined(); vi.advanceTimersByTime(301000);
+    h.invoiceList.mockImplementationOnce(async () => {
+      h.rows[0].status = 'completed'; h.rows[0].fulfilled_at = '2026-09-05T00:05:01Z';
+      return { data: [], has_more: false };
+    });
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('completed'); expect(h.orderInserts).toHaveLength(1);
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('never ages out a crashed execution holder or sends a quote that expires during re-preview', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.invoicePreview.mockImplementationOnce(async () => { vi.advanceTimersByTime(301000); return { amount_due: 1990, currency: 'usd' }; });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    const fresh = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: fresh })).rejects.toBeDefined();
+    h.rows[0].metadata.upgradeExecution = 'crashed-process'; vi.advanceTimersByTime(86400000);
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('preserves durable lock conflicts and insert failure before update', async () => {

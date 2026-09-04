@@ -539,6 +539,13 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     try {
       if (buttonState.canChangeSubscriptionPlan) {
         const quote = await previewUpgrade.mutateAsync({ planId: plan.id, billingCycle });
+        if (quote.status === 'pending_fulfillment') {
+          setUpgrade(null);
+          void invalidatePostCheckoutMembershipQueries(utils);
+          void utils.payments.getSubscriptionManagement.invalidate();
+          setCheckoutNotice({ tone: 'warning', message: '升级请求已受理，正在确认账单，请勿重复付款。' });
+          return;
+        }
         setUpgrade({ ...quote, planId: plan.id });
         return;
       }

@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
 import { z } from 'zod';
@@ -770,6 +770,14 @@ type PendingUpgradeOrder = {
   stripe_price_id: string; stripe_checkout_session_id: string | null;
   metadata: Record<string, unknown> | null;
 };
+const UPGRADE_QUOTE_TTL_SECONDS = 300;
+function quoteIsFresh(quote: UpgradeQuote) {
+  const age = Math.floor(Date.now() / 1000) - quote.prorationDate;
+  return age >= 0 && age <= UPGRADE_QUOTE_TTL_SECONDS;
+}
+function quoteExpiredError() {
+  return new TRPCError({ code: 'CONFLICT', message: '升级报价已过期，请重新预览并确认。' });
+}
 const renewalRestoreMessage = '已安排到期取消，请先通过订阅管理恢复续费后再升级套餐。';
 function priceChangedError() {
   return new TRPCError({ code: 'CONFLICT', message: '价格或订阅状态已变化，请重新预览并确认。' });
@@ -884,7 +892,27 @@ async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, 
     assertUpgradeableRemote(remote, change.local, change.userId);
     const item = remote.items.data[0];
     if (item.id !== attempt.itemId) return 'unknown';
-    if (item.price.id === attempt.originalPrice && remote.metadata?.upgradeAttemptId !== orderId) return 'old';
+    if (item.price.id === attempt.originalPrice && remote.metadata?.upgradeAttemptId !== orderId) {
+      // Price alone cannot exclude an applied/reverted upgrade or an in-flight invoice.
+      // Incomplete history is ambiguous; never release a lock based on a partial page.
+      const invoices = await change.stripe.invoices.list({ subscription: remote.id,
+        created: { gte: Math.floor(attempt.createdAt / 1000) - 1 }, limit: 100 });
+      if (invoices.has_more) return 'unknown';
+      const latestId = stripeObjectId(remote.latest_invoice);
+      const evidence = [...invoices.data];
+      if (latestId && !evidence.some(invoice => invoice.id === latestId)) {
+        evidence.push(await change.stripe.invoices.retrieve(latestId));
+      }
+      for (const invoice of evidence) {
+        if (stripeObjectId(invoice.customer) !== change.local.stripe_customer_id
+          || stripeObjectId(invoice.parent?.subscription_details?.subscription) !== remote.id
+          || invoice.lines.has_more
+          || invoice.parent?.subscription_details?.metadata?.upgradeAttemptId === orderId
+          || invoice.lines.data.some(line => !line.pricing?.price_details?.price
+            || line.pricing.price_details.price === change.priceId)) return 'unknown';
+      }
+      return 'old';
+    }
     if (item.price.id !== change.priceId || remote.metadata?.upgradeAttemptId !== orderId) return 'unknown';
     const invoiceId = stripeObjectId(remote.latest_invoice);
     if (!invoiceId) return 'unknown';
@@ -896,6 +924,46 @@ async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, 
       || !invoice.lines.data.some(line => line.pricing?.price_details?.price === change.priceId)) return 'unknown';
     return 'applied';
   } catch { return 'unknown'; }
+}
+
+// Serialize recovery/retirement against active calls using the existing durable row.
+// A crashed holder stays locked for inspection; a timeout must never imply a lease expiry.
+async function claimUpgradeRecovery(change: ValidatedUpgrade, supabase: any) {
+  const pending = change.pending!;
+  const previous = pending.metadata!;
+  if (previous.upgradeExecution) throw toSubscriptionChangeUnavailableError();
+  const claimed = { ...previous, upgradeExecution: randomUUID() };
+  const result = await supabase.from('payment_orders').update({ metadata: claimed })
+    .eq('id', pending.id).eq('status', 'pending').is('fulfilled_at', null)
+    .eq('stripe_checkout_session_id', buildSubscriptionPlanChangeLockKey(change.remote.id))
+    .eq('metadata', JSON.stringify(previous)).select('id');
+  if (result.error || result.data?.length !== 1) throw toSubscriptionChangeUnavailableError();
+  return { previous, claimed };
+}
+async function finishUpgradeRecovery(change: ValidatedUpgrade, supabase: any,
+  claim: { previous: Record<string, unknown>; claimed: Record<string, unknown> }, retire = false) {
+  const result = await supabase.from('payment_orders').update({ metadata: claim.previous,
+    ...(retire ? { status: 'failed', payment_status: 'failed', stripe_checkout_session_id: null,
+      updated_at: new Date().toISOString() } : {}) })
+    .eq('id', change.pending!.id).eq('status', 'pending').is('fulfilled_at', null)
+    .eq('stripe_checkout_session_id', buildSubscriptionPlanChangeLockKey(change.remote.id))
+    .eq('metadata', JSON.stringify(claim.claimed)).select('id');
+  if (result.error) throw toSubscriptionChangeUnavailableError();
+  // A webhook or another state transition may have won; never overwrite it.
+  if (retire && result.data?.length !== 1) throw toSubscriptionChangeUnavailableError();
+}
+async function recoverUpgradeAttempt(change: ValidatedUpgrade, supabase: any,
+  claim: Awaited<ReturnType<typeof claimUpgradeRecovery>>) {
+  const outcome = await inspectUpgradeOutcome(change, change.pending!.id, change.attempt!);
+  if (outcome === 'applied') return 'applied';
+  if (outcome !== 'old') throw toSubscriptionChangeUnavailableError();
+  if (!quoteIsFresh(change.attempt!.quote)) {
+    await finishUpgradeRecovery(change, supabase, claim, true);
+    throw quoteExpiredError();
+  }
+  // Independent safety bound for malformed/historical attempt identities.
+  if (Date.now() - change.attempt!.createdAt >= 23 * 60 * 60 * 1000) throw toSubscriptionChangeUnavailableError();
+  return 'old';
 }
 
 async function loadPaymentItemNames(
@@ -1189,8 +1257,14 @@ export const paymentsRouter = router({
     .input(changeSubscriptionPlanInput)
     .mutation(async ({ ctx, input }) => {
       const change = await validateSubscriptionUpgrade(ctx, input);
+      if (change.attempt) {
+        const claim = await claimUpgradeRecovery(change, ctx.supabaseAdmin);
+        try {
+          if (await recoverUpgradeAttempt(change, ctx.supabaseAdmin, claim) === 'applied') return upgradeAccepted();
+        } finally { await finishUpgradeRecovery(change, ctx.supabaseAdmin, claim); }
+      }
       const quote = change.attempt?.quote ?? await previewUpgrade(change, Math.floor(Date.now() / 1000));
-      return { ...quote, planName: change.plan.name, planLevel: change.plan.level,
+      return { status: 'quote' as const, ...quote, planName: change.plan.name, planLevel: change.plan.level,
         billingCycle: input.billingCycle,
         // Catalog prices are full billed cents, not the card's monthly equivalent.
         annualAmount: input.billingCycle === 'yearly' ? change.amount : null };
@@ -1201,58 +1275,65 @@ export const paymentsRouter = router({
       const change = await validateSubscriptionUpgrade(ctx, input);
       let orderId = change.pending?.id;
       let attempt = change.attempt;
-      if (attempt) {
-        if (!sameUpgradeQuote(attempt.quote, input.expected)) throw priceChangedError();
-        // Always inspect remote state before recovering an existing durable attempt.
-        const outcome = await inspectUpgradeOutcome(change, orderId!, attempt);
-        if (outcome === 'applied') return upgradeAccepted();
-        if (outcome !== 'old') throw toSubscriptionChangeUnavailableError();
-        // Stripe retains idempotency keys for at least 24h. Never reapply an aged attempt.
-        if (Date.now() - attempt.createdAt >= 23 * 60 * 60 * 1000) throw toSubscriptionChangeUnavailableError();
-      } else {
-        if (Math.abs(Math.floor(Date.now() / 1000) - input.expected.prorationDate) > 300) throw priceChangedError();
-      }
-      const quote = await previewUpgrade(change, input.expected.prorationDate);
-      if (!sameUpgradeQuote(quote, input.expected)) throw priceChangedError();
-      if (!attempt) {
-        attempt = { quote, originalPrice: change.item.price.id, itemId: change.item.id,
-          createdAt: Date.now(), stripeMetadata: {
-            ...change.remote.metadata,
-            ...buildStripeMetadata({ itemType: 'membership_plan', itemId: change.plan.id,
-              userId: ctx.profileId, priceId: change.priceId, billingCycle: input.billingCycle }),
-            changeSource: 'graylum_change_subscription_plan',
-          } };
-        orderId = await recordSubscriptionPlanChangeOrder({ supabase: ctx.supabaseAdmin,
-          userId: ctx.profileId, plan: change.plan, billingCycle: input.billingCycle,
-          subscription: change.local, stripePriceId: change.priceId, stripeSubscription: change.remote,
-          metadata: { ...attempt.stripeMetadata, upgradeAttempt: attempt } });
-      }
+      const claim = attempt ? await claimUpgradeRecovery(change, ctx.supabaseAdmin) : null;
       try {
-        await change.stripe.subscriptions.update(change.remote.id, {
-          items: [{ id: attempt.itemId, price: change.priceId }],
-          // Start a full target term: yearly grants require a new 12-month term.
-          billing_cycle_anchor: 'now',
-          proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete',
-          proration_date: attempt.quote.prorationDate,
-          metadata: { ...attempt.stripeMetadata, upgradeAttemptId: orderId! },
-        }, { idempotencyKey: `subscription-change:${orderId}` });
-      } catch (error) {
-        logSubscriptionChangeStageFailure('stripe_subscription_update', input, error);
-        // Only Stripe's explicit payment rejection proves error_if_incomplete did not apply.
-        const rejected = error as { type?: string; statusCode?: number };
-        if (rejected?.type === 'StripeCardError' && rejected.statusCode === 402) {
-          await markSubscriptionPlanChangeOrderFailed({ supabase: ctx.supabaseAdmin,
-            orderId: orderId!, stripeSubscriptionId: change.remote.id });
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '升级付款未完成，原套餐保持不变。请先在订阅管理中处理付款方式。' });
+        if (attempt) {
+          if (await recoverUpgradeAttempt(change, ctx.supabaseAdmin, claim!) === 'applied') return upgradeAccepted();
+          if (!sameUpgradeQuote(attempt.quote, input.expected)) throw priceChangedError();
+        } else if (!quoteIsFresh(input.expected)) { throw quoteExpiredError(); }
+        const quote = await previewUpgrade(change, input.expected.prorationDate);
+        if (!sameUpgradeQuote(quote, input.expected)) throw priceChangedError();
+        if (!quoteIsFresh(quote)) throw quoteExpiredError();
+        if (!attempt) {
+          attempt = { quote, originalPrice: change.item.price.id, itemId: change.item.id,
+            createdAt: Date.now(), stripeMetadata: {
+              ...change.remote.metadata,
+              ...buildStripeMetadata({ itemType: 'membership_plan', itemId: change.plan.id,
+                userId: ctx.profileId, priceId: change.priceId, billingCycle: input.billingCycle }),
+              changeSource: 'graylum_change_subscription_plan',
+            } };
+          orderId = await recordSubscriptionPlanChangeOrder({ supabase: ctx.supabaseAdmin,
+            userId: ctx.profileId, plan: change.plan, billingCycle: input.billingCycle,
+            subscription: change.local, stripePriceId: change.priceId, stripeSubscription: change.remote,
+            metadata: { ...attempt.stripeMetadata, upgradeAttempt: attempt, upgradeExecution: 'initial_request' } });
         }
-        // Transport/5xx/unknown outcomes keep the lock. A later identical request can
-        // recover using this SAME order/key after a fresh remote inspection.
-        if (await inspectUpgradeOutcome(change, orderId!, attempt) !== 'applied') {
-          throw toSubscriptionChangeUnavailableError();
+        if (!quoteIsFresh(attempt.quote)) throw quoteExpiredError();
+        try {
+          await change.stripe.subscriptions.update(change.remote.id, {
+            items: [{ id: attempt.itemId, price: change.priceId }],
+            // Start a full target term: yearly grants require a new 12-month term.
+            billing_cycle_anchor: 'now',
+            proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete',
+            proration_date: attempt.quote.prorationDate,
+            metadata: { ...attempt.stripeMetadata, upgradeAttemptId: orderId! },
+          }, { idempotencyKey: `subscription-change:${orderId}` });
+        } catch (error) {
+          logSubscriptionChangeStageFailure('stripe_subscription_update', input, error);
+          // Only Stripe's explicit payment rejection proves error_if_incomplete did not apply.
+          const rejected = error as { type?: string; statusCode?: number };
+          if (rejected?.type === 'StripeCardError' && rejected.statusCode === 402) {
+            await markSubscriptionPlanChangeOrderFailed({ supabase: ctx.supabaseAdmin,
+              orderId: orderId!, stripeSubscriptionId: change.remote.id });
+            throw new TRPCError({ code: 'BAD_REQUEST', message: '升级付款未完成，原套餐保持不变。请先在订阅管理中处理付款方式。' });
+          }
+          // Transport/5xx/unknown outcomes keep the lock. A later identical request can
+          // recover using this SAME order/key after a fresh remote inspection.
+          if (await inspectUpgradeOutcome(change, orderId!, attempt) !== 'applied') {
+            throw toSubscriptionChangeUnavailableError();
+          }
+        }
+        // Only the existing paid-invoice webhook owns plan/cycle/rights/credit admission.
+        return upgradeAccepted();
+      } finally {
+        if (claim) await finishUpgradeRecovery(change, ctx.supabaseAdmin, claim);
+        else if (orderId && attempt) {
+          const previous = { ...attempt.stripeMetadata, upgradeAttempt: attempt,
+            source: 'changeSubscriptionPlan', previousMembershipPlanId: change.local.membership_plan_id,
+            previousBillingCycle: change.local.billing_cycle };
+          await finishUpgradeRecovery({ ...change, pending: { id: orderId } as PendingUpgradeOrder },
+            ctx.supabaseAdmin, { previous, claimed: { ...previous, upgradeExecution: 'initial_request' } });
         }
       }
-      // Only the existing paid-invoice webhook owns plan/cycle/rights/credit admission.
-      return upgradeAccepted();
     }),
   createCheckoutSession: protectedProcedure
     .input(createCheckoutInput)

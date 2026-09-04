@@ -237,7 +237,7 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
   const mockId = '\0pay1-upgrade-trpc';
   const source = fileURLToPath(new URL('./SubscriptionCard.tsx', import.meta.url));
   const mock = `
-    const state = window.__pay1 = { previews: [], changes: [], checkouts: [], invalidations: 0, drift: true };
+    const state = window.__pay1 = { previews: [], changes: [], checkouts: [], invalidations: 0, drift: true, previewMode: 'quote' };
     const inv = { invalidate: async () => { state.invalidations++; } };
     const utils = { user: { getUserProfile: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
       payments: { getMembershipEligibilityMatrix: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
@@ -248,7 +248,10 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
       getMembershipEligibilityMatrix: { useQuery: () => query({ entries: ['monthly','yearly'].map(billingCycle => ({
         planId: 'plan-gold', billingCycle, action: 'changeSubscriptionPlan', allowed: false, reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION' })) }) },
       getSubscriptionManagement: { useQuery: () => query({ available: true }) },
-      previewSubscriptionPlanChange: mutation(async input => { state.previews.push(input); return {
+      previewSubscriptionPlanChange: mutation(async input => { state.previews.push(input);
+        if (state.previewMode === 'expired') throw new Error('升级报价已过期，请重新预览并确认。');
+        if (state.previewMode === 'applied') return { status: 'pending_fulfillment' };
+        return { status: 'quote',
         planName: 'Gold', billingCycle: input.billingCycle, amountDue: state.previews.length === 1 ? 18765 : 18766,
         currency: 'usd', annualAmount: 29900, prorationDate: 1788535181, fingerprint: 'a'.repeat(64) }; }),
       changeSubscriptionPlan: mutation(async input => { state.changes.push(input); if (state.drift) { state.drift = false; throw new Error('价格已变化，请重新预览并确认。'); } return { status: 'pending_fulfillment' }; }),
@@ -295,5 +298,16 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
     expect(state.previews).toHaveLength(2); expect(state.changes).toHaveLength(2); expect(state.checkouts).toHaveLength(0);
     expect(state.changes[1].expected.amountDue).toBe(18766); expect(state.invalidations).toBeGreaterThanOrEqual(6);
     expect(await page.getByText('升级请求已受理，付款及账单确认后套餐和积分才会更新。请稍后刷新查看。').count()).toBe(1);
+    await page.evaluate(() => { (window as any).__pay1.previewMode = 'expired'; });
+    await page.getByRole('button', { name: '升级套餐', exact: true }).click();
+    expect(await page.getByText('升级报价已过期，请重新预览并确认。').count()).toBe(1);
+    expect(await page.getByRole('button', { name: '确认付款并升级' }).count()).toBe(0);
+    await page.getByRole('button', { name: '稍后再说' }).click();
+    await page.evaluate(() => { (window as any).__pay1.previewMode = 'applied'; });
+    await page.getByRole('button', { name: '升级套餐', exact: true }).click();
+    expect(await page.getByText('升级请求已受理，正在确认账单，请勿重复付款。').count()).toBe(1);
+    expect(await page.getByRole('button', { name: '确认付款并升级' }).count()).toBe(0);
+    expect(await page.evaluate(() => (window as any).__pay1.changes.length)).toBe(2);
+
   } finally { await browser.close(); }
 }, 60_000);
