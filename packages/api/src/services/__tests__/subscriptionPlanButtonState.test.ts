@@ -60,7 +60,7 @@ describe('getMembershipPlanButtonState', () => {
     });
   });
 
-  it('disables Launch subscription changes even when backend suggests an upgrade', () => {
+  it('enables only ready legal upgrades without Checkout', () => {
     const result = getMembershipPlanButtonState({
       eligibility: {
         ...baseEligibility,
@@ -74,14 +74,15 @@ describe('getMembershipPlanButtonState', () => {
     });
 
     expect(result).toMatchObject({
-      disabled: true,
-      label: '暂不支持套餐变更',
+      disabled: false,
+      label: '升级套餐',
       canCreateCheckout: false,
-      canChangeSubscriptionPlan: false,
+      canChangeSubscriptionPlan: true,
     });
   });
 
   it.each([
+    ['RENEWAL_RESTORE_REQUIRED', 'none', '请先恢复续费'],
     ['CURRENT_PLAN', 'none', '当前套餐'],
     ['DOWNGRADE_NOT_ALLOWED', 'none', '暂不支持降级'],
     ['PAYMENT_ATTENTION_REQUIRED', 'resolvePaymentIssue', '请先处理付款异常'],

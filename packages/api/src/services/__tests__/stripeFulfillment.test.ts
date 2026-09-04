@@ -6778,6 +6778,20 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
     });
   });
 
+  it('subscription.updated cannot advance paid term before upgrade invoice admission, even for the same tier', async () => {
+    const { tables, supabase } = makeCancellationFixture();
+    tables.user_subscriptions[0].membership_plan_id = 'plan-pro';
+    tables.user_subscriptions[0].stripe_price_id = 'price_pro_monthly';
+    const before = structuredClone(tables);
+    await syncSubscriptionState(supabase, { id: 'sub_pay1', status: 'active', cancel_at_period_end: false, cancel_at: null,
+      metadata: { upgradeAttemptId: 'order-upgrade', itemId: 'plan-pro', priceId: 'price_pro_yearly' },
+      items: { data: [{ current_period_start: paidTermStart + 100, current_period_end: paidTermEnd + 1000 }] },
+    } as unknown as Stripe.Subscription);
+    expect(tables.user_subscriptions[0].current_period_start).toEqual(before.user_subscriptions[0].current_period_start);
+    expect(tables.user_subscriptions[0].current_period_end).toEqual(before.user_subscriptions[0].current_period_end);
+    for (const table of ['profiles', 'credit_transactions', 'subscription_credit_grants'] as const) expect(tables[table]).toEqual(before[table]);
+  });
+
   it.each([undefined, null, 0])('does not infer period-end cancellation without a valid boundary (%s)', async (periodEnd) => {
     const { tables, supabase } = makeCancellationFixture();
     await syncSubscriptionState(supabase, {
@@ -6900,5 +6914,80 @@ describe('PAY-1 refund waits for committed credit fulfillment', () => {
       fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'refunded', payment_status: 'refunded',
       metadata: { paymentIntentId: 'pi_stale', grantedCredits: 100, transactionId: 'txn-stale', refundStatus: 'succeeded' },
     });
+  });
+});
+
+
+describe('PAY-1 exact-source paid upgrade invoices', () => {
+  function fixture(billingCycle: 'monthly' | 'yearly') {
+    const source = { id: 'upgrade-source', user_id: 'upgrade-user', item_id: 'upgrade-plan', item_type: 'membership_plan',
+      billing_cycle: billingCycle, stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade',
+      stripe_price_id: 'price_upgrade', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade',
+      status: 'pending', created_at: '2026-09-04T00:00:00.000Z',
+      metadata: { source: 'changeSubscriptionPlan', upgradeAttempt: { quote: { amountDue: 1990, currency: 'usd' } } } };
+    const supabase = createRefundWebhookSupabase({ payment_orders: [source], profiles: [{ id: 'upgrade-user', credits: 100, membership_level: 'pro' }],
+      membership_plans: [{ id: 'upgrade-plan', name: 'Gold', level: 'gold', monthly_credits: 300, monthly_bonus_credits: 0, yearly_credits: 3600 }] });
+    const start = 1788480000; const end = billingCycle === 'yearly' ? 1820016000 : 1791072000;
+    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: 1990, amount_due: 1990, currency: 'usd',
+      created: start + 1, customer: 'cus_upgrade',
+      parent: { subscription_details: { subscription: 'sub_upgrade', metadata: { upgradeAttemptId: 'upgrade-source', userId: 'upgrade-user', itemId: 'upgrade-plan', priceId: 'price_upgrade' } } },
+      lines: { has_more: false, data: [
+        { id: 'il_credit', amount: -1000, pricing: { price_details: { price: 'price_old' } }, period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } },
+        { id: 'il_target', amount: 2990, pricing: { price_details: { price: 'price_upgrade' } }, period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } },
+      ] } } as unknown as Stripe.Invoice;
+    return { supabase, invoice, source, start, end };
+  }
+  it.each(['monthly', 'yearly'] as const)('fulfills paid %s target once from proration lines and preserves replay safety', async billingCycle => {
+    const { supabase, invoice } = fixture(billingCycle);
+    await fulfillMembershipInvoice(supabase, invoice);
+    const before = structuredClone(supabase.tables);
+    await fulfillMembershipInvoice(supabase, invoice);
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'gold', credits: 400 });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({ credits_granted: 300, billing_cycle: billingCycle,
+      ...(billingCycle === 'yearly' ? { period_index: 1, total_periods: 12 } : {}) });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'upgrade-plan', billing_cycle: billingCycle });
+    expect(supabase.tables.profiles).toEqual(before.profiles);
+    expect(supabase.tables.credit_transactions).toEqual(before.credit_transactions);
+    expect(supabase.tables.subscription_credit_grants).toEqual(before.subscription_credit_grants);
+  });
+  it.each(['wrong-price', 'wrong-customer', 'failed-source', 'missing-source', 'unpaid', 'changed-amount'])('rejects %s before grants or rights writes', async problem => {
+    const { supabase, invoice } = fixture('monthly');
+    if (problem === 'wrong-price') invoice.parent!.subscription_details!.metadata!.priceId = 'price_wrong';
+    if (problem === 'wrong-customer') invoice.customer = 'cus_wrong';
+    if (problem === 'failed-source') supabase.tables.payment_orders[0].status = 'failed';
+    if (problem === 'missing-source') delete invoice.parent!.subscription_details!.metadata!.upgradeAttemptId;
+    if (problem === 'unpaid') invoice.status = 'open';
+    if (problem === 'changed-amount') invoice.amount_due++;
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
+    expect(supabase.tables).toEqual(before);
+  });
+  it('failed upgrade invoice targets its own source and cannot seed a later paid upgrade or release another attempt', async () => {
+    const { supabase, invoice } = fixture('monthly');
+    supabase.tables.payment_orders.push({ ...structuredClone(supabase.tables.payment_orders[0]), id: 'new-source', created_at: '2026-09-04T00:00:01.500Z' });
+    const failed = { ...invoice, status: 'open' } as Stripe.Invoice;
+    await markMembershipInvoicePaymentFailed(supabase, failed);
+    expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'new-source')?.status).toBe('pending');
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
+    expect(supabase.tables).toEqual(before);
+  });
+  it('accepts a full new target period while ignoring the old-price proration credit', async () => {
+    const { supabase, invoice } = fixture('yearly');
+    invoice.lines.data[1].parent!.subscription_item_details!.proration = false;
+    await fulfillMembershipInvoice(supabase, invoice);
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
+    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({ credits_granted: 300, period_index: 1, total_periods: 12 });
+  });
+  it('old upgrade replay does not release a newer residual lock', async () => {
+    const { supabase, invoice } = fixture('monthly');
+    await fulfillMembershipInvoice(supabase, invoice);
+    supabase.tables.payment_orders.push({ id: 'new-lock', user_id: 'upgrade-user', item_id: 'another-plan', item_type: 'membership_plan',
+      stripe_subscription_id: 'sub_upgrade', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade', status: 'pending',
+      created_at: '2026-09-04T00:00:00.500Z', metadata: { source: 'changeSubscriptionPlan' } });
+    await fulfillMembershipInvoice(supabase, invoice);
+    expect(supabase.tables.payment_orders.find(r => r.id === 'new-lock')).toMatchObject({ status: 'pending', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade' });
   });
 });

@@ -209,7 +209,7 @@ describe('resolveMembershipEligibility', () => {
         action: 'changeSubscriptionPlan',
         reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
       });
-      expect(result.safeMessage).toContain('changeSubscriptionPlan');
+      expect(result.safeMessage).toContain('升级套餐');
     },
   );
 
@@ -435,7 +435,7 @@ describe('resolveMembershipEligibility', () => {
     });
   });
 
-  it('treats cancel-at-period-end before period end as active and only exposes upgrade action', async () => {
+  it('retains paid cancellation state but requires explicit renewal restoration before upgrading', async () => {
     const result = await resolveMembershipEligibility({
       supabase: createEligibilitySupabase({
         subscription: {
@@ -459,8 +459,8 @@ describe('resolveMembershipEligibility', () => {
       allowed: false,
       state: 'cancel_at_period_end',
       level: 'pro',
-      action: 'changeSubscriptionPlan',
-      reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION',
+      action: 'none',
+      reasonCode: 'RENEWAL_RESTORE_REQUIRED',
     });
   });
 

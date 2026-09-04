@@ -14,6 +14,14 @@ import { checkRateLimit } from './redisRateLimiter';
 // Reuse the existing distributed windows with checkout-specific key namespaces:
 // 5 per user / 5 minutes, 20 per IP / minute. No in-memory fallback for payments.
 export async function assertCheckoutRateLimit(userId: string, headers: Headers) {
+  return assertPaymentRateLimit(userId, headers, 'checkout');
+}
+
+export async function assertSubscriptionChangeRateLimit(userId: string, headers: Headers) {
+  return assertPaymentRateLimit(userId, headers, 'subscription-change');
+}
+
+async function assertPaymentRateLimit(userId: string, headers: Headers, namespace: string) {
   const rawIp = process.env.VERCEL === '1'
     ? headers.get('x-vercel-forwarded-for')
     : process.env.NODE_ENV !== 'production'
@@ -25,12 +33,14 @@ export async function assertCheckoutRateLimit(userId: string, headers: Headers) 
   }
   const normalizedIp = isIP(ip) === 6 ? new URL(`http://[${ip}]/`).hostname : ip;
   for (const [key, type] of [
-    [`checkout:user:${userId}`, 'auth'],
-    [`checkout:ip:${normalizedIp}`, 'anonymous'],
+    [`${namespace}:user:${userId}`, 'auth'],
+    [`${namespace}:ip:${normalizedIp}`, 'anonymous'],
   ] as const) {
-    const result = await checkRateLimit(key, type);
+    const result = await checkRateLimit(key, type).catch(() => {
+      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付限流服务暂不可用，请稍后重试' });
+    });
     // The shared service reports limit=0 when it falls back to fail-open.
-    if (result.limit <= 0 || result.reason === 'unavailable') {
+    if (!Number.isFinite(result.limit) || result.limit <= 0 || result.reason === 'unavailable') {
       throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付限流服务暂不可用，请稍后重试' });
     }
     if (!result.success) {

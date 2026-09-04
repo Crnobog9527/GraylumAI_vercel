@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const stripeState = vi.hoisted(() => ({
   assertStripeCheckoutConfigured: vi.fn(),
   assertCheckoutRateLimit: vi.fn(),
+  assertSubscriptionChangeRateLimit: vi.fn(),
   getStripePortalReturnUrl: vi.fn(),
   getOrCreateStripeCustomerId: vi.fn(),
   getStripeAppUrl: vi.fn(),
@@ -21,6 +22,7 @@ const loggerState = vi.hoisted(() => ({
 vi.mock('../services/stripe', () => ({
   assertStripeCheckoutConfigured: stripeState.assertStripeCheckoutConfigured,
   assertCheckoutRateLimit: stripeState.assertCheckoutRateLimit,
+  assertSubscriptionChangeRateLimit: stripeState.assertSubscriptionChangeRateLimit,
   getStripePortalReturnUrl: stripeState.getStripePortalReturnUrl,
   buildStripeMetadata: stripeState.buildStripeMetadata,
   calculateDiscountedAmountCents: stripeState.calculateDiscountedAmountCents,
@@ -224,154 +226,87 @@ function createProtectedCaller(options: {
 }
 
 function createSubscriptionChangeGuardHarness(options: {
-  monthlyPrice?: unknown;
-  yearlyPrice?: unknown;
-  profileResult?: () => Promise<unknown>;
-  planResult?: () => Promise<unknown>;
-  eligibilitySubscriptionResult?: () => Promise<unknown>;
-  eligibilityOrderResult?: () => Promise<unknown>;
+  monthlyPrice?: unknown; yearlyPrice?: unknown;
+  currentLevel?: string; currentCycle?: string; targetLevel?: string;
+  profileResult?: () => Promise<unknown>; planResult?: () => Promise<unknown>;
+  eligibilitySubscriptionResult?: () => Promise<unknown>; eligibilityOrderResult?: () => Promise<unknown>;
 } = {}) {
   const targetPlanId = '123e4567-e89b-42d3-a456-426614174222';
-  const subscriptionRetrieve = vi.fn().mockResolvedValue({
-    id: 'sub_test_active',
-    status: 'active',
-    cancel_at_period_end: false,
-    metadata: { userId: 'user-1' },
-    items: {
-      data: [{ id: 'si_test_current' }],
-    },
-  });
-  const updatedSubscription = {
-    id: 'sub_test_active',
-    status: 'active',
-    cancel_at_period_end: false,
-    metadata: { userId: 'user-1' },
-    items: {
-      data: [{ id: 'si_test_current' }],
-    },
-  };
-  const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
-  const orderInserts: unknown[] = [];
-  const userTableReads: string[] = [];
-  let profileReadCount = 0;
+  const currentPlanId = (options.currentLevel ?? 'pro') === (options.targetLevel ?? 'gold') ? targetPlanId : '123e4567-e89b-42d3-a456-426614174111';
+  const profile = { id: 'user-1', role: 'user', status: 'active', email: 'user@example.com',
+    nickname: 'User', membership_level: options.currentLevel ?? 'pro' };
+  const plan: any = { id: targetPlanId, name: 'Gold', level: options.targetLevel ?? 'gold', is_active: 'true',
+    monthly_price: 2990, yearly_price: 29900,
+    stripe_monthly_price_id: 'monthlyPrice' in options ? options.monthlyPrice : 'price_test_gold_monthly',
+    stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : 'price_test_gold_yearly' };
+  const local: any = { id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
+    stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
+    billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
+  const remote: any = { id: 'sub_test_active', customer: 'cus_test_active', status: 'active',
+    cancel_at_period_end: false, cancel_at: null, collection_method: 'charge_automatically',
+    metadata: { userId: 'user-1' }, items: { has_more: false, data: [{ id: 'si_test_current', quantity: 1,
+      price: { id: 'price_test_old' }, current_period_start: 1700000000, current_period_end: 2000000000 }] } };
+  const subscriptionRetrieve = vi.fn().mockImplementation(async () => structuredClone(remote));
+  const subscriptionUpdate = vi.fn().mockResolvedValue(remote);
+  const invoicePreview = vi.fn().mockResolvedValue({ amount_due: 1990, currency: 'usd' });
+  const invoiceRetrieve = vi.fn().mockResolvedValue({ customer: 'cus_test_active', status: 'paid',
+    parent: { subscription_details: { subscription: remote.id } }, billing_reason: 'subscription_update',
+    lines: { has_more: false, data: [{ pricing: { price_details: { price: 'price_test_gold_monthly' } } }] } });
+  const orderInserts: any[] = []; const rows: any[] = []; const orderUpdates: any[] = [];
+  const userTableReads: string[] = []; let profileReadCount = 0;
+  let insertError: any = null;
+  stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate },
+    invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve } });
+  function ordersBuilder() {
+    const filters: Array<[string, unknown]> = []; let values: any = null;
+    const result = () => {
+      const found = rows.filter(row => filters.every(([key, value]) => row[key] === value));
+      if (values) { orderUpdates.push(values); found.forEach(row => Object.assign(row, values)); }
+      return { data: found, error: null };
+    };
+    return {
+      select() { return this; }, eq(k: string, v: unknown) { filters.push([k, v]); return this; },
+      order() { return this; }, limit() { return this; },
+      update(v: any) { values = v; return this; },
+      maybeSingle: async () => options.eligibilityOrderResult?.() ?? { ...result(), data: result().data[0] ?? null },
+      then(resolve: any, reject: any) { return Promise.resolve(result()).then(resolve, reject); },
+      insert(payload: any) {
+        const conflict = rows.some(r => r.stripe_checkout_session_id === payload.stripe_checkout_session_id);
+        const error = insertError ?? (conflict ? { code: '23505' } : null);
+        if (!error) { orderInserts.push(payload); rows.push({ ...payload, id: 'order-change-1' }); }
+        return createSingleQueryBuilder(Promise.resolve({ data: error ? null : { id: 'order-change-1' }, error }));
+      },
+    };
+  }
+  const userSupabase = { from(table: string) {
+    userTableReads.push(table);
+    if (table === 'profiles') { profileReadCount++; return createSingleQueryBuilder(profileReadCount === 1
+      ? Promise.resolve({ data: profile, error: null }) : options.profileResult?.() ?? Promise.resolve({ data: profile, error: null })); }
+    if (table === 'membership_plans') return createSingleQueryBuilder(options.planResult?.() ?? Promise.resolve({ data: plan, error: null }));
+    if (table === 'user_subscriptions') return createListQueryBuilder(options.eligibilitySubscriptionResult?.()
+      ?? Promise.resolve({ data: options.currentLevel === 'free' ? [] : [local], error: null }));
+    if (table === 'payment_orders') return ordersBuilder();
+    throw new Error(`Unexpected user table ${table}`);
+  } };
+  const adminSupabase = { from(table: string) {
+    if (table === 'payment_orders') return ordersBuilder();
+    throw new Error(`Unexpected admin write ${table}`);
+  } };
+  return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
+    targetPlanId, subscriptionRetrieve, subscriptionUpdate, invoicePreview, invoiceRetrieve, remote, local, plan,
+    rows, orderInserts, orderUpdates, userTableReads, adminSupabase, setInsertError: (e: any) => { insertError = e; } };
+}
 
-  stripeState.getStripeClient.mockReturnValue({
-    subscriptions: {
-      retrieve: subscriptionRetrieve,
-      update: subscriptionUpdate,
-    },
-  });
-
-  const userSupabase = {
-    from(table: string) {
-      userTableReads.push(table);
-
-      if (table === 'profiles') {
-        profileReadCount += 1;
-        const result = profileReadCount === 1
-          ? Promise.resolve({
-            data: {
-              id: 'user-1',
-              role: 'user',
-              status: 'active',
-              email: 'user@example.com',
-              nickname: 'User',
-              membership_level: 'pro',
-            },
-            error: null,
-          })
-          : options.profileResult?.() ?? Promise.resolve({
-            data: {
-              id: 'user-1',
-              email: 'user@example.com',
-              nickname: 'User',
-              membership_level: 'pro',
-            },
-            error: null,
-          });
-
-        return createSingleQueryBuilder(result);
-      }
-
-      if (table === 'membership_plans') {
-        return createSingleQueryBuilder(
-          options.planResult?.() ?? Promise.resolve({
-            data: {
-              id: targetPlanId,
-              name: 'Gold',
-              level: 'gold',
-              is_active: 'true',
-              stripe_monthly_price_id: 'monthlyPrice' in options
-                ? options.monthlyPrice
-                : 'price_test_gold_monthly',
-              stripe_yearly_price_id: 'yearlyPrice' in options
-                ? options.yearlyPrice
-                : 'price_test_gold_yearly',
-            },
-            error: null,
-          }),
-        );
-      }
-
-      if (table === 'user_subscriptions') {
-        return createListQueryBuilder(
-          options.eligibilitySubscriptionResult?.() ?? Promise.resolve({
-            data: [{
-              id: 'sub-row-1',
-              membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-              stripe_subscription_id: 'sub_test_active',
-              stripe_customer_id: 'cus_test_active',
-              status: 'active',
-              billing_cycle: 'monthly',
-              cancel_at_period_end: 'false',
-              metadata: {},
-            }],
-            error: null,
-          }),
-        );
-      }
-
-      if (table === 'payment_orders') {
-        return createMaybeSingleQueryBuilder(
-          options.eligibilityOrderResult?.() ?? Promise.resolve({ data: null, error: null }),
-        );
-      }
-
-      throw new Error(`Unexpected user table ${table}`);
-    },
-  };
-
-  const adminSupabase = {
-    from(table: string) {
-      if (table === 'payment_orders') {
-        return createInsertBuilder(
-          Promise.resolve({ data: { id: 'order-change-1' }, error: null }),
-          orderInserts,
-        );
-      }
-
-      throw new Error(`Unexpected admin table ${table}`);
-    },
-  };
-
-  return {
-    caller: createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    }),
-    targetPlanId,
-    subscriptionRetrieve,
-    subscriptionUpdate,
-    updatedSubscription,
-    orderInserts,
-    userTableReads,
-    adminSupabase,
-  };
+function fakeQuote() { return { amountDue: 1990, currency: 'usd', prorationDate: Math.floor(Date.now() / 1000), fingerprint: 'a'.repeat(64) }; }
+async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarness>, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) {
+  const { amountDue, currency, prorationDate, fingerprint } = await h.caller.previewSubscriptionPlanChange(input);
+  return { amountDue, currency, prorationDate, fingerprint };
 }
 
 describe('paymentsRouter error sanitization', () => {
   beforeEach(() => {
     stripeState.assertCheckoutRateLimit.mockReset();
+    stripeState.assertSubscriptionChangeRateLimit.mockReset();
     stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
     stripeState.assertStripeCheckoutConfigured.mockReset();
     stripeState.getOrCreateStripeCustomerId.mockReset();
@@ -1101,7 +1036,7 @@ describe('paymentsRouter error sanitization', () => {
       }),
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'BAD_REQUEST',
-      message: '当前会员订阅仍有效，升级套餐需要通过 changeSubscriptionPlan 处理；该能力将在 PR5 实现，本次不会创建新的 Checkout。',
+      message: '当前会员订阅仍有效，请通过升级套餐调整现有订阅，不会创建新的 Checkout。',
     });
 
     expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
@@ -1109,14 +1044,289 @@ describe('paymentsRouter error sanitization', () => {
     expect(orderInserts).toHaveLength(0);
   });
 
-  it.each(['monthly', 'yearly'] as const)('disables Launch plan changes for %s before Stripe or order writes', async (billingCycle) => {
-    const harness = createSubscriptionChangeGuardHarness();
-    await expect(harness.caller.changeSubscriptionPlan({ planId: harness.targetPlanId, billingCycle }))
-      .rejects.toMatchObject({ code: 'FORBIDDEN', message: '首发暂不支持升级或降级套餐' });
-    expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
-    expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
-    expect(harness.orderInserts).toEqual([]);
-    expect(syncSubscriptionState).not.toHaveBeenCalled();
+  it.each([
+    'user_subscriptions',
+    'payment_orders',
+  ] as const)(
+    'sanitizes rejected %s eligibility facts before subscription change side effects',
+    async (rejectedTable) => {
+      const rejectedResult = () => Promise.reject(new Error(`${rejectedTable} facts timeout`));
+      const harness = createSubscriptionChangeGuardHarness(
+        rejectedTable === 'user_subscriptions'
+          ? { eligibilitySubscriptionResult: rejectedResult }
+          : { eligibilityOrderResult: rejectedResult },
+      );
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+          expected: fakeQuote(),
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '会员状态暂不可用，请稍后重试',
+      });
+
+      expect(loggerState.error).toHaveBeenCalledWith(
+        'billing',
+        'payments_change_subscription_plan_stage_failed',
+        expect.objectContaining({ stage: 'eligibility_read' }),
+      );
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+      expect(harness.userTableReads.filter((table) => table === 'user_subscriptions')).toHaveLength(1);
+      expect(harness.userTableReads.filter((table) => table === 'payment_orders')).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    [
+      'database error',
+      () => Promise.resolve({ data: null, error: { code: '42501' } }),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+    [
+      'rejected query',
+      () => Promise.reject(new Error('profile network timeout')),
+      'SERVICE_UNAVAILABLE',
+      '用户资料服务暂不可用，请稍后重试',
+    ],
+    [
+      'successful not-found',
+      () => Promise.resolve({ data: null, error: null }),
+      'NOT_FOUND',
+      '用户资料不存在，无法升级订阅',
+    ],
+  ] as const)(
+    'distinguishes profile %s before subscription change side effects',
+    async (_caseName, profileResult, errorCode, message) => {
+      const harness = createSubscriptionChangeGuardHarness({ profileResult });
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+          expected: fakeQuote(),
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: errorCode,
+        message,
+      });
+
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      'database error',
+      () => Promise.resolve({ data: null, error: { code: '57014' } }),
+      'SERVICE_UNAVAILABLE',
+      '会员套餐服务暂不可用，请稍后重试',
+    ],
+    [
+      'rejected query',
+      () => Promise.reject(new Error('membership plan network timeout')),
+      'SERVICE_UNAVAILABLE',
+      '会员套餐服务暂不可用，请稍后重试',
+    ],
+    [
+      'successful not-found',
+      () => Promise.resolve({ data: null, error: null }),
+      'NOT_FOUND',
+      '会员套餐不存在',
+    ],
+  ] as const)(
+    'distinguishes membership plan %s before subscription change side effects',
+    async (_caseName, planResult, errorCode, message) => {
+      const harness = createSubscriptionChangeGuardHarness({ planResult });
+
+      await expect(
+        harness.caller.changeSubscriptionPlan({
+          planId: harness.targetPlanId,
+          billingCycle: 'yearly',
+          expected: fakeQuote(),
+        }),
+      ).rejects.toMatchObject<Partial<TRPCError>>({
+        code: errorCode,
+        message,
+      });
+
+      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
+      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
+      expect(harness.orderInserts).toHaveLength(0);
+      expect(syncSubscriptionState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['pro', 'monthly', 'gold', 'monthly'], ['pro', 'monthly', 'pro', 'yearly'],
+    ['pro', 'monthly', 'gold', 'yearly'], ['pro', 'yearly', 'gold', 'yearly'],
+    ['gold', 'monthly', 'gold', 'yearly'],
+  ] as const)('previews and upgrades %s %s -> %s %s on the existing subscription', async (currentLevel, currentCycle, targetLevel, billingCycle) => {
+    const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
+    const input = { planId: h.targetPlanId, billingCycle };
+    const quote = await h.caller.previewSubscriptionPlanChange(input);
+    expect(quote).toMatchObject({ amountDue: 1990, currency: 'usd', annualAmount: billingCycle === 'yearly' ? 29900 : null });
+    expect(quote).not.toHaveProperty('subscriptionId'); expect(quote).not.toHaveProperty('customerId');
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    const { amountDue, currency, prorationDate, fingerprint } = quote;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, prorationDate, fingerprint } }))
+      .resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.orderInserts).toHaveLength(1);
+    expect(h.subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
+      items: [{ id: 'si_test_current', price: billingCycle === 'yearly' ? 'price_test_gold_yearly' : 'price_test_gold_monthly' }],
+      billing_cycle_anchor: 'now', proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete', proration_date: prorationDate,
+    }), { idempotencyKey: 'subscription-change:order-change-1' });
+    expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('cancel_at_period_end');
+    expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['gold', 'monthly', 'pro', 'monthly'], ['pro', 'yearly', 'gold', 'monthly'],
+    ['pro', 'monthly', 'pro', 'monthly'], ['free', 'monthly', 'gold', 'monthly'],
+  ] as const)('denies illegal transition %s %s -> %s %s before provider calls', async (currentLevel, currentCycle, targetLevel, billingCycle) => {
+    const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
+    for (const method of ['previewSubscriptionPlanChange', 'changeSubscriptionPlan'] as const) {
+      await expect(h.caller[method]({ planId: h.targetPlanId, billingCycle, ...(method === 'changeSubscriptionPlan' ? { expected: fakeQuote() } : {}) } as any)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+  });
+
+  it.each(['monthly', 'yearly'] as const)('fails closed for malformed %s catalog configuration', async (billingCycle) => {
+    for (const amount of [0, -1, null, undefined, '2990', 1.5, NaN]) {
+      const h = createSubscriptionChangeGuardHarness(); h.plan[billingCycle + '_price'] = amount;
+      await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle })).rejects.toBeDefined();
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle, expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    }
+    for (const price of [null, '', '   ']) {
+      const h = createSubscriptionChangeGuardHarness(); h.plan['stripe_' + billingCycle + '_price_id'] = price;
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle, expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+    }
+  });
+
+  it.each(['customer', 'metadata', 'id', 'cancel_at_period_end', 'cancel_at', 'past_due', 'incomplete', 'unpaid', 'items', 'quantity'])(
+    'rejects remote %s before preview/order/update', async (problem) => {
+      const h = createSubscriptionChangeGuardHarness();
+      if (problem === 'customer') h.remote.customer = 'cus_wrong';
+      else if (problem === 'metadata') h.remote.metadata.userId = 'wrong-user';
+      else if (problem === 'id') h.remote.id = 'sub_wrong';
+      else if (problem === 'cancel_at_period_end') h.remote.cancel_at_period_end = true;
+      else if (problem === 'cancel_at') h.remote.cancel_at = 2000000000;
+      else if (problem === 'items') h.remote.items.data.push(h.remote.items.data[0]);
+      else if (problem === 'quantity') h.remote.items.data[0].quantity = 2;
+      else h.remote.status = problem;
+      await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toBeDefined();
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle: 'monthly', expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.invoicePreview).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    });
+
+  it('requires restoration for local scheduled cancellation without altering rights', async () => {
+    const h = createSubscriptionChangeGuardHarness(); h.local.cancel_at_period_end = 'true';
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toMatchObject({ message: expect.stringContaining('恢复续费') });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionRetrieve).not.toHaveBeenCalled();
+  });
+
+  it.each(['TOO_MANY_REQUESTS', 'SERVICE_UNAVAILABLE'] as const)('rate limit %s blocks preview and mutation before Stripe', async code => {
+    const h = createSubscriptionChangeGuardHarness(); stripeState.assertSubscriptionChangeRateLimit.mockRejectedValue(new TRPCError({ code }));
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toMatchObject({ code });
+    await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle: 'monthly', expected: fakeQuote() })).rejects.toMatchObject({ code });
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+  });
+
+  it.each(['amount', 'currency', 'catalog', 'term', 'expired'])('requires reconfirmation on %s drift before any durable write', async field => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    if (field === 'amount') h.invoicePreview.mockResolvedValue({ amount_due: 1991, currency: 'usd' });
+    if (field === 'currency') h.invoicePreview.mockResolvedValue({ amount_due: 1990, currency: 'eur' });
+    if (field === 'catalog') h.plan.monthly_price++;
+    if (field === 'term') h.remote.items.data[0].current_period_end++;
+    if (field === 'expired') expected.prorationDate -= 301;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['inactive', 'free', 'missing-profile', 'missing-plan', 'local-payment-attention'])('rejects %s before provider effects', async problem => {
+    const h = createSubscriptionChangeGuardHarness(problem === 'missing-profile' ? { profileResult: async () => ({ data: null, error: null }) }
+      : problem === 'missing-plan' ? { planResult: async () => ({ data: null, error: null }) } : {});
+    if (problem === 'inactive') h.plan.is_active = 'false';
+    if (problem === 'free') h.plan.level = 'free';
+    if (problem === 'local-payment-attention') h.local.status = 'past_due';
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toBeDefined();
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+  });
+
+  it('rejects client-controlled subscription/customer identifiers', async () => {
+    const h = createSubscriptionChangeGuardHarness();
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly', customerId: 'cus_other' } as any)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled();
+  });
+
+  it.each(['card_declined', 'authentication_required'])('releases only explicitly rejected %s payment without rights or credit writes', async code => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValue({ type: 'StripeCardError', statusCode: 402, code });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.rows[0]).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+  });
+
+  it('keeps transport-before-apply pending and recovers with the same order and idempotency key', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce({ type: 'StripeConnectionError' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.orderUpdates).toHaveLength(0);
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
+    expect(h.subscriptionUpdate.mock.calls[0]).toEqual(h.subscriptionUpdate.mock.calls[1]);
+  });
+
+  it('recovers applied transport timeout without a second update or direct entitlement sync', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async (_id, params) => {
+      h.remote.items.data[0].price.id = 'price_test_gold_monthly'; h.remote.metadata = params.metadata; h.remote.latest_invoice = 'in_upgrade';
+      throw { type: 'StripeConnectionError' };
+    });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1); expect(h.orderInserts).toHaveLength(1); expect(syncSubscriptionState).not.toHaveBeenCalled();
+  });
+
+  it('retains unprovable outcomes and blocks a different target and aged retry', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async () => { h.subscriptionRetrieve.mockRejectedValue(new Error('read timeout')); throw new Error('timeout'); });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    expect(h.rows[0].status).toBe('pending');
+    await expect(h.caller.changeSubscriptionPlan({ ...input, billingCycle: 'yearly', expected })).rejects.toMatchObject({ message: expect.stringContaining('正在处理中') });
+    h.subscriptionRetrieve.mockResolvedValue(h.remote); h.rows[0].metadata.upgradeAttempt.createdAt -= 24 * 3600000;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1); expect(h.orderInserts).toHaveLength(1);
+  });
+
+  it('preserves durable lock conflicts and insert failure before update', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.setInsertError({ code: '23505' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ message: expect.stringContaining('正在处理中') });
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent clicks with one durable row and identical Stripe attempt parameters', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected }), h.caller.changeSubscriptionPlan({ ...input, expected })]);
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('returns a membership eligibility matrix that matches checkout guard actions', async () => {
@@ -2564,6 +2774,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
 
   beforeEach(() => {
     stripeState.assertCheckoutRateLimit.mockReset();
+    stripeState.assertSubscriptionChangeRateLimit.mockReset();
     stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
     stripeState.assertStripeCheckoutConfigured.mockReset();
     stripeState.getOrCreateStripeCustomerId.mockReset().mockResolvedValue('cus_test_guard');
@@ -2900,9 +3111,9 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
 });
 
 describe('PAY-1 Customer Portal', () => {
-  function portalHarness(options: { noSubscription?: boolean; wrongCustomer?: boolean; immediateCancel?: boolean; upgrades?: boolean; readError?: boolean } = {}) {
+  function portalHarness(options: { noSubscription?: boolean; wrongCustomer?: boolean; immediateCancel?: boolean; upgrades?: boolean; scheduled?: boolean; readError?: boolean } = {}) {
     const create = vi.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session/test' });
-    const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1', metadata: { userId: 'user-1' } });
+    const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', cancel_at: options.scheduled ? 2000000000 : null, customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1', metadata: { userId: 'user-1' } });
     const filters: Array<[string, unknown]> = [];
     const supabase = {
       from(table: string) {
@@ -2927,6 +3138,12 @@ describe('PAY-1 Customer Portal', () => {
   beforeEach(() => {
     stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
     stripeState.getStripeClient.mockReset();
+  });
+  it('opens Portal home for explicit renewal restoration on scheduled cancellations', async () => {
+    const h = portalHarness({ scheduled: true });
+    await h.caller.createCustomerPortalSession({});
+    expect(h.create.mock.calls[0][0].flow_data).toBeUndefined();
+    expect(h.create.mock.calls[0][0].customer).toBe('cus_pay1');
   });
   it.each([false, true])('reports Portal availability independently of catalog state (missing subscription=%s)', async (noSubscription) => {
     const h = portalHarness({ noSubscription });

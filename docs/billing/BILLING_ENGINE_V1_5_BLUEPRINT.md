@@ -51,7 +51,7 @@
 6. 同级同周期不允许重复购买。
 7. active 订阅用户不得通过新 checkout 创建第二个 active subscription。
 8. 订阅升级必须走 Stripe subscription update / pending update / schedule，不得用新 checkout 创建第二份订阅。
-9. `cancel_at_period_end` 但未到期的用户仍按 active 权益处理；可恢复取消或升级，不允许降级立即生效。
+9. `cancel_at_period_end` 但未到期的用户仍按 active 权益处理；必须先明确恢复续费后才可升级，升级操作不得隐式恢复续费；不允许降级立即生效。
 10. `past_due / incomplete / unpaid` 用户必须先处理付款异常，不允许购买/切换套餐以绕过账单问题。
 
 ### 1.4 订单状态规则
@@ -492,7 +492,7 @@ SUM(abs(amount)) WHERE ledger_type = 'spend' AND counts_as_spend = true AND crea
 | 当前套餐 | 当前套餐 |
 | 禁止降级 | 当前会员有效，暂不支持降级 |
 | 支付异常 | 请先处理付款异常 |
-| cancel_at_period_end | 当前权益仍有效，可恢复续订或升级 |
+| cancel_at_period_end | 当前权益仍有效；升级前须先通过订阅管理恢复续费 |
 
 ### 5.5 年付文案
 

@@ -672,6 +672,7 @@ async function getInvoiceSubscriptionServicePeriod(
       startingAfter: string,
     ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
     paginationLimits?: StripePaginationLimits;
+    upgradePriceId?: string;
   } = {},
 ) {
   const periods = new Map<string, { start: number; end: number }>();
@@ -702,7 +703,9 @@ async function getInvoiceSubscriptionServicePeriod(
     const end = line.period?.end;
 
     if (lineSubscriptionId !== subscriptionId
-      || details?.proration === true
+      || (options.upgradePriceId
+        ? line.pricing?.price_details?.price !== options.upgradePriceId || line.amount < 0
+        : details?.proration === true)
       || typeof start !== 'number'
       || typeof end !== 'number'
       || end <= start) {
@@ -1780,6 +1783,21 @@ async function findInvoiceFailureOrders(
     };
   }
 
+  if (invoice.billing_reason === 'subscription_update') {
+    const details = invoice.parent?.subscription_details;
+    const attemptId = details?.metadata?.upgradeAttemptId;
+    if (!attemptId) return { invoiceOrder: null, subscriptionOrder: null };
+    const exact = await supabase.from('payment_orders').select(FAILED_INVOICE_ORDER_SELECT)
+      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
+    if (exact.error) throw new Error('upgrade_failed_invoice_source_read');
+    const order = exact.data;
+    if (!order || order.stripe_price_id !== details.metadata?.priceId
+      || order.user_id !== details.metadata?.userId || order.stripe_customer_id !== getInvoiceCustomerId(invoice)) {
+      return { invoiceOrder: null, subscriptionOrder: null };
+    }
+    return { invoiceOrder: null, subscriptionOrder: order };
+  }
+
   const sourceCutoff = getFailedInvoiceSourceQueryCutoff(invoice);
   const subscriptionOrderQuery = supabase
     .from('payment_orders')
@@ -2567,14 +2585,41 @@ export async function fulfillMembershipInvoice(
     );
   }
 
+  // Upgrade invoices must bind to the exact durable source, never whichever
+  // attempt happens to be newest when a delayed invoice is delivered.
+  let upgradeSource: { id: string; stripe_price_id: string } | undefined;
+  if (invoice.billing_reason === 'subscription_update') {
+    const details = invoice.parent?.subscription_details;
+    const attemptId = details?.metadata?.upgradeAttemptId;
+    if (!attemptId || invoice.status !== 'paid') {
+      throw new Error('upgrade_invoice_paid_source_missing');
+    }
+    const lookup = await supabase.from('payment_orders')
+      .select('id, user_id, item_id, stripe_price_id, stripe_customer_id, status, created_at, metadata')
+      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
+    const source = lookup.data;
+    if (lookup.error || !source || source.status === 'failed' || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
+      || source.stripe_price_id !== details.metadata?.priceId
+      || source.user_id !== details.metadata?.userId || source.item_id !== details.metadata?.itemId
+      || source.stripe_customer_id !== getExpandableId(invoice.customer)) {
+      throw new Error('upgrade_invoice_source_mismatch');
+    }
+    const attempt = asRecord(asRecord(source.metadata).upgradeAttempt);
+    const quote = asRecord(attempt.quote);
+    if (quote.amountDue !== invoice.amount_due || quote.currency !== invoice.currency) {
+      throw new Error('upgrade_invoice_quote_mismatch');
+    }
+    upgradeSource = source;
+  }
+
   // Stripe documents invoice-level period_start/period_end as the usage
   // collection window, not the service period for a subscription price. The
-  // service period is carried by the matching non-proration invoice line. In
+  // service period is carried by the matching non-proration invoice line (or the proven target upgrade line). In
   // particular, subscription_create invoices can have a zero-length top-level
   // window while their line has the complete monthly or annual term.
   let servicePeriod: { start: number; end: number };
   try {
-    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options);
+    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options, upgradePriceId: upgradeSource?.stripe_price_id });
   } catch (error) {
     throwFulfillmentError(
       'invoice_subscription_service_period',
@@ -2585,6 +2630,7 @@ export async function fulfillMembershipInvoice(
   }
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+    expectedSourceOrderId: upgradeSource?.id,
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,
@@ -2829,7 +2875,7 @@ export async function syncSubscriptionState(
 
   const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
+    .select('id, user_id, membership_plan_id, stripe_price_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
     .eq('stripe_subscription_id', subscriptionId);
   const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
     ? existingSubscriptionQuery.order('created_at', { ascending: true })
@@ -2864,6 +2910,10 @@ export async function syncSubscriptionState(
       canonicalSubscriptionId: maskIdentifier(existingSubscription?.id),
     });
   }
+
+  const pendingPaidUpgrade = Boolean(subscription.metadata?.upgradeAttemptId
+    && (subscription.metadata?.itemId !== existingSubscription?.membership_plan_id
+      || subscription.metadata?.priceId !== existingSubscription?.stripe_price_id));
 
   const incomingStartMs = currentPeriodStart ? Date.parse(currentPeriodStart) : Number.NaN;
   const incomingEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN;
@@ -2902,8 +2952,10 @@ export async function syncSubscriptionState(
     .update({
       status: subscription.status,
       cancel_at_period_end: cancelAtPeriodEnd,
-      current_period_start: currentPeriodStart,
-      current_period_end: currentPeriodEnd,
+      // A subscription.updated event can beat the paid invoice. Keep the paid
+      // term (and annual release authority) until invoice admission promotes it.
+      current_period_start: pendingPaidUpgrade ? existingSubscription?.current_period_start : currentPeriodStart,
+      current_period_end: pendingPaidUpgrade ? existingSubscription?.current_period_end : currentPeriodEnd,
       updated_at: new Date().toISOString(),
     })
     .eq('stripe_subscription_id', subscriptionId);

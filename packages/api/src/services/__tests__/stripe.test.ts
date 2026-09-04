@@ -326,6 +326,29 @@ describe('PAY-1 payment boundaries', () => {
     }
     expect(limitState.check.mock.calls[1]).toEqual(limitState.check.mock.calls[3]);
   });
+  it('isolates subscription-change user/IP windows from Checkout', async () => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    await assertSubscriptionChangeRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' }));
+    expect(limitState.check.mock.calls).toEqual([
+      ['subscription-change:user:user-a', 'auth'], ['subscription-change:ip:203.0.113.7', 'anonymous'],
+    ]);
+  });
+  it.each([0, 1])('rejects subscription-change dimension %s', async dimension => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    if (dimension) limitState.check.mockResolvedValueOnce({ success: true, limit: 5 });
+    limitState.check.mockResolvedValueOnce({ success: false, limit: 5, reason: 'rate_limited' });
+    await expect(assertSubscriptionChangeRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' })))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+  });
+  it.each(['timeout', 'fallback', 'unavailable', 'missing-ip', 'invalid-ip'])('fails closed for upgrade %s', async problem => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    if (problem === 'timeout') limitState.check.mockRejectedValue(new Error('timeout'));
+    if (problem === 'fallback') limitState.check.mockResolvedValue({ success: true, limit: 0 });
+    if (problem === 'unavailable') limitState.check.mockResolvedValue({ success: false, limit: 5, reason: 'unavailable' });
+    const headers = new Headers();
+    if (problem !== 'missing-ip') headers.set('x-vercel-forwarded-for', problem === 'invalid-ip' ? 'unknown' : '203.0.113.7');
+    await expect(assertSubscriptionChangeRateLimit('user-a', headers)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
   it('allows only the exact server-configured Profile return URL', async () => {
     const { getStripePortalReturnUrl } = await import('../stripe');
     expect(getStripePortalReturnUrl()).toBe('https://app.example.com/profile?tab=subscription');

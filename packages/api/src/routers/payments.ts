@@ -4,6 +4,7 @@
  * This code is proprietary and confidential.
  */
 
+import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
 import { z } from 'zod';
@@ -13,6 +14,7 @@ import { createSafeInternalError, createSafeServiceUnavailableError } from '../l
 import {
   assertStripeCheckoutConfigured,
   assertCheckoutRateLimit,
+  assertSubscriptionChangeRateLimit,
   buildStripeMetadata,
   calculateDiscountedAmountCents,
   getOrCreateStripeCustomerId,
@@ -61,7 +63,15 @@ const syncCheckoutInput = z.object({
 const changeSubscriptionPlanInput = z.object({
   planId: z.string().uuid(),
   billingCycle: z.enum(['monthly', 'yearly']),
-});
+}).strict();
+
+const upgradeQuoteSchema = z.object({
+  amountDue: z.number().int().nonnegative(),
+  currency: z.string().regex(/^[a-z]{3}$/),
+  prorationDate: z.number().int().positive(),
+  fingerprint: z.string().length(64),
+}).strict();
+type UpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
 
 type BillingRecord = {
   id: string;
@@ -106,6 +116,8 @@ type MembershipPlanPaymentRow = {
   is_active: string;
   stripe_monthly_price_id: string | null;
   stripe_yearly_price_id: string | null;
+  monthly_price: unknown;
+  yearly_price: unknown;
 };
 
 type StripeManagedSubscriptionRow = {
@@ -115,6 +127,8 @@ type StripeManagedSubscriptionRow = {
   stripe_customer_id: string | null;
   status: string | null;
   billing_cycle: MembershipBillingCycle | null;
+  stripe_price_id: string | null;
+  cancel_at_period_end: string | boolean | null;
 };
 
 function maskIdentifier(value: string | null | undefined) {
@@ -565,7 +579,7 @@ function toItemUnavailableError(message = '该商品暂不可购买，请稍后�
 }
 
 function toSubscriptionChangeUnavailableError() {
-  return toCheckoutConfigError('订阅升级暂不可用，请稍后重试');
+  return new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '订阅升级状态暂无法确认，请稍后重试同一升级。' });
 }
 
 function assertPaymentPersistenceConfigured(hasSupabaseAdminPrivileges: boolean) {
@@ -618,7 +632,7 @@ function normalizeSubscriptionRows(value: unknown): StripeManagedSubscriptionRow
 async function loadCurrentStripeManagedSubscription(supabase: any, userId: string) {
   const result = await supabase
     .from('user_subscriptions')
-    .select('id, membership_plan_id, stripe_subscription_id, stripe_customer_id, status, billing_cycle')
+    .select('id, membership_plan_id, stripe_subscription_id, stripe_customer_id, stripe_price_id, status, billing_cycle, cancel_at_period_end')
     .eq('user_id', userId)
     .not('stripe_subscription_id', 'is', null)
     .order('updated_at', { ascending: false })
@@ -633,10 +647,6 @@ async function loadCurrentStripeManagedSubscription(supabase: any, userId: strin
       stripeSubscriptionId: subscription.stripe_subscription_id,
       status: subscription.status,
     })) ?? null;
-}
-
-function getPrimarySubscriptionItemId(subscription: Stripe.Subscription) {
-  return subscription.items.data[0]?.id ?? null;
 }
 
 function isUniqueConstraintViolation(error: unknown) {
@@ -696,7 +706,8 @@ async function recordSubscriptionPlanChangeOrder(input: {
     throw createPaymentOperationError('保存订阅升级记录', result.error);
   }
 
-  return typeof result.data?.id === 'string' ? result.data.id : null;
+  if (typeof result.data?.id !== 'string') throw toSubscriptionChangeUnavailableError();
+  return result.data.id;
 }
 
 async function markSubscriptionPlanChangeOrderFailed(input: {
@@ -715,7 +726,8 @@ async function markSubscriptionPlanChangeOrderFailed(input: {
       updated_at: new Date().toISOString(),
     })
     .eq('id', input.orderId)
-    .eq('stripe_subscription_id', input.stripeSubscriptionId);
+    .eq('stripe_subscription_id', input.stripeSubscriptionId)
+    .eq('status', 'pending');
 
   if (result.error) {
     throw createPaymentOperationError('标记订阅升级记录失败', result.error);
@@ -725,10 +737,10 @@ async function markSubscriptionPlanChangeOrderFailed(input: {
 async function loadPendingSubscriptionPlanChangeOrder(
   supabase: any,
   subscriptionId: string,
-): Promise<Array<{ item_id?: string | null; billing_cycle?: MembershipBillingCycle | null }>> {
+): Promise<PendingUpgradeOrder[]> {
   const query = supabase
     .from('payment_orders')
-    .select('id, item_id, billing_cycle, status')
+    .select('id, item_id, billing_cycle, status, stripe_price_id, stripe_checkout_session_id, metadata')
     .eq('stripe_subscription_id', subscriptionId)
     .eq('item_type', 'membership_plan')
     .eq('status', 'pending')
@@ -747,6 +759,143 @@ async function loadPendingSubscriptionPlanChangeOrder(
   }
 
   return result.data ? [result.data] : [];
+}
+
+type UpgradeAttempt = {
+  quote: UpgradeQuote; originalPrice: string; itemId: string; createdAt: number;
+  stripeMetadata: Record<string, string>;
+};
+type PendingUpgradeOrder = {
+  id: string; item_id: string; billing_cycle: MembershipBillingCycle;
+  stripe_price_id: string; stripe_checkout_session_id: string | null;
+  metadata: Record<string, unknown> | null;
+};
+const renewalRestoreMessage = '已安排到期取消，请先通过订阅管理恢复续费后再升级套餐。';
+function priceChangedError() {
+  return new TRPCError({ code: 'CONFLICT', message: '价格或订阅状态已变化，请重新预览并确认。' });
+}
+function sameUpgradeQuote(a: UpgradeQuote, b: UpgradeQuote) {
+  return a.amountDue === b.amountDue && a.currency === b.currency
+    && a.prorationDate === b.prorationDate && a.fingerprint === b.fingerprint;
+}
+function upgradeAccepted() {
+  return { action: 'changeSubscriptionPlan' as const, status: 'pending_fulfillment' as const };
+}
+function stripeObjectId(value: string | { id: string } | null | undefined) {
+  return typeof value === 'string' ? value : value?.id;
+}
+function assertUpgradeableRemote(remote: Stripe.Subscription, local: StripeManagedSubscriptionRow, userId: string) {
+  if (remote.id !== local.stripe_subscription_id || !local.stripe_customer_id
+    || stripeObjectId(remote.customer) !== local.stripe_customer_id
+    || (remote.metadata?.userId !== undefined && remote.metadata.userId !== userId)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: '无法确认订阅归属，请联系支持。' });
+  }
+  if (remote.cancel_at_period_end || remote.cancel_at != null) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: renewalRestoreMessage });
+  }
+  if (remote.status !== 'active' || remote.pending_update || remote.pause_collection || remote.schedule
+    || remote.collection_method !== 'charge_automatically'
+    || remote.items.has_more || remote.items.data.length !== 1
+    || !remote.items.data[0]?.id || !remote.items.data[0]?.price?.id
+    || remote.items.data[0].quantity !== 1) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: '当前订阅暂不可升级，请先在订阅管理中确认付款和订阅状态。' });
+  }
+}
+async function validateSubscriptionUpgrade(ctx: {
+  supabase: any; supabaseAdmin: any; profileId: string; headers: Headers; hasSupabaseAdminPrivileges: boolean;
+}, input: ChangeSubscriptionPlanInput) {
+  assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
+  const profile = await readSubscriptionChangeData<{ membership_level: string }>({
+    query: ctx.supabase.from('profiles').select('membership_level').eq('id', ctx.profileId).maybeSingle(),
+    changeInput: input, stage: 'profile_read', operation: '用户资料服务' });
+  if (!profile) throw new TRPCError({ code: 'NOT_FOUND', message: '用户资料不存在，无法升级订阅' });
+  const plan = await readSubscriptionChangeData<MembershipPlanPaymentRow>({
+    query: ctx.supabase.from('membership_plans')
+      .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id, monthly_price, yearly_price')
+      .eq('id', input.planId).maybeSingle(), changeInput: input, stage: 'plan_read', operation: '会员套餐服务' });
+  if (!plan) throw new TRPCError({ code: 'NOT_FOUND', message: '会员套餐不存在' });
+  const priceId = normalizeCheckoutPriceId(getMembershipPlanPriceId(plan, input.billingCycle));
+  const amount = input.billingCycle === 'monthly' ? plan.monthly_price : plan.yearly_price;
+  if (plan.is_active !== 'true' || plan.level === 'free' || !priceId
+    || typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount <= 0) throw toItemUnavailableError();
+  let eligibility: MembershipEligibilityResult;
+  try {
+    eligibility = await resolveMembershipEligibility({ supabase: ctx.supabase, userId: ctx.profileId,
+      profile, action: 'create_membership_checkout', targetPlan: plan, targetBillingCycle: input.billingCycle });
+  } catch (error) {
+    logSubscriptionChangeStageFailure('eligibility_read', input, error);
+    throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试');
+  }
+  if (eligibility.action !== 'changeSubscriptionPlan') throwNonUpgradeEligibilityError(eligibility);
+  const local = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+  if (!local?.stripe_subscription_id || !local.stripe_price_id) throw toSubscriptionChangeUnavailableError();
+  if (local.cancel_at_period_end === 'true' || local.cancel_at_period_end === true) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: renewalRestoreMessage });
+  }
+  if (local.membership_plan_id === plan.id && local.billing_cycle === input.billingCycle) throw priceChangedError();
+  const pendingOrders = await loadPendingSubscriptionPlanChangeOrder(ctx.supabase, local.stripe_subscription_id);
+  const pending = pendingOrders[0];
+  if (pendingOrders.length > 1 || (pending && (pending.item_id !== plan.id
+    || pending.billing_cycle !== input.billingCycle || pending.stripe_price_id !== priceId
+    || pending.stripe_checkout_session_id !== buildSubscriptionPlanChangeLockKey(local.stripe_subscription_id)))) {
+    throw toPendingSubscriptionPlanChangeError();
+  }
+  const attemptSchema = z.object({ quote: upgradeQuoteSchema, originalPrice: z.string().min(1),
+    itemId: z.string().min(1), createdAt: z.number().int().positive(), stripeMetadata: z.record(z.string(), z.string()) });
+  const parsed = pending ? attemptSchema.safeParse(pending.metadata?.upgradeAttempt) : null;
+  if (pending && !parsed?.success) throw toPendingSubscriptionPlanChangeError();
+  const attempt = parsed?.success ? parsed.data : undefined;
+  await assertSubscriptionChangeRateLimit(ctx.profileId, ctx.headers);
+  let stripe: ReturnType<typeof getStripeClient>;
+  try { stripe = getStripeClient(); } catch { throw toSubscriptionChangeUnavailableError(); }
+  let remote: Stripe.Subscription;
+  try { remote = await stripe.subscriptions.retrieve(local.stripe_subscription_id); }
+  catch { throw toSubscriptionChangeUnavailableError(); }
+  assertUpgradeableRemote(remote, local, ctx.profileId);
+  const item = remote.items.data[0];
+  if (item.price.id !== local.stripe_price_id && !(attempt && item.price.id === priceId)) throw priceChangedError();
+  if (attempt && (attempt.itemId !== item.id || attempt.originalPrice !== local.stripe_price_id)) throw priceChangedError();
+  return { stripe, remote, local, item, plan, priceId, amount, input, pending, attempt, userId: ctx.profileId };
+}
+type ValidatedUpgrade = Awaited<ReturnType<typeof validateSubscriptionUpgrade>>;
+async function previewUpgrade(change: ValidatedUpgrade, prorationDate: number): Promise<UpgradeQuote> {
+  let invoice: Stripe.Invoice;
+  try {
+    invoice = await change.stripe.invoices.createPreview({ customer: change.local.stripe_customer_id!,
+      subscription: change.remote.id, subscription_details: {
+        items: [{ id: change.item.id, price: change.priceId }],
+        billing_cycle_anchor: 'now', proration_behavior: 'always_invoice', proration_date: prorationDate,
+      } });
+  } catch { throw toSubscriptionChangeUnavailableError(); }
+  if (!Number.isSafeInteger(invoice.amount_due) || invoice.amount_due < 0 || !/^[a-z]{3}$/.test(invoice.currency)) {
+    throw toSubscriptionChangeUnavailableError();
+  }
+  const fingerprint = createHash('sha256').update(JSON.stringify({
+    user: change.userId, subscription: change.remote.id, item: change.item.id, oldPrice: change.item.price.id,
+    start: change.item.current_period_start, end: change.item.current_period_end,
+    plan: change.plan.id, price: change.priceId, cycle: change.input.billingCycle, amount: change.amount,
+    amountDue: invoice.amount_due, currency: invoice.currency, prorationDate,
+  })).digest('hex');
+  return { amountDue: invoice.amount_due, currency: invoice.currency, prorationDate, fingerprint };
+}
+async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, attempt: UpgradeAttempt) {
+  try {
+    const remote = await change.stripe.subscriptions.retrieve(change.remote.id);
+    assertUpgradeableRemote(remote, change.local, change.userId);
+    const item = remote.items.data[0];
+    if (item.id !== attempt.itemId) return 'unknown';
+    if (item.price.id === attempt.originalPrice && remote.metadata?.upgradeAttemptId !== orderId) return 'old';
+    if (item.price.id !== change.priceId || remote.metadata?.upgradeAttemptId !== orderId) return 'unknown';
+    const invoiceId = stripeObjectId(remote.latest_invoice);
+    if (!invoiceId) return 'unknown';
+    const invoice = await change.stripe.invoices.retrieve(invoiceId);
+    if (stripeObjectId(invoice.customer) !== change.local.stripe_customer_id
+      || stripeObjectId(invoice.parent?.subscription_details?.subscription) !== remote.id
+      || invoice.billing_reason !== 'subscription_update'
+      || !['paid', 'open'].includes(invoice.status ?? '') || invoice.lines.has_more
+      || !invoice.lines.data.some(line => line.pricing?.price_details?.price === change.priceId)) return 'unknown';
+    return 'applied';
+  } catch { return 'unknown'; }
 }
 
 async function loadPaymentItemNames(
@@ -939,7 +1088,9 @@ export const paymentsRouter = router({
           customer: customerId,
           configuration: configuration.id,
           return_url: returnUrl,
-          flow_data: {
+          // Scheduled cancellations go to Portal home, where the customer can
+          // explicitly restore renewal. Upgrade itself never restores it.
+          flow_data: remote.cancel_at_period_end || remote.cancel_at != null ? undefined : {
             type: 'subscription_cancel',
             subscription_cancel: { subscription: remote.id },
             after_completion: { type: 'redirect', redirect: { return_url: returnUrl } },
@@ -1034,233 +1185,74 @@ export const paymentsRouter = router({
         entries,
       };
     }),
-  changeSubscriptionPlan: protectedProcedure
-    .use(() => {
-      throw new TRPCError({ code: 'FORBIDDEN', message: '首发暂不支持升级或降级套餐' });
-    })
+  previewSubscriptionPlanChange: protectedProcedure
     .input(changeSubscriptionPlanInput)
     .mutation(async ({ ctx, input }) => {
-      assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
-
-      let stripe: ReturnType<typeof getStripeClient>;
-      try {
-        stripe = getStripeClient();
-      } catch (error) {
-        logSubscriptionChangeStageFailure('stripe_config', input, error);
-        throw toSubscriptionChangeUnavailableError();
-      }
-
-      const profile = await readSubscriptionChangeData<{
-        email: string | null;
-        nickname: string | null;
-        membership_level: string | null;
-      }>({
-        query: ctx.supabase
-          .from('profiles')
-          .select('email, nickname, membership_level')
-          .eq('id', ctx.profileId)
-          .maybeSingle(),
-        changeInput: input,
-        stage: 'profile_read',
-        operation: '用户资料服务',
-      });
-
-      if (!profile) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '用户资料不存在，无法切换订阅套餐',
-        });
-      }
-
-      const plan = await readSubscriptionChangeData<MembershipPlanPaymentRow>({
-        query: ctx.supabase
-          .from('membership_plans')
-          .select('id, name, level, is_active, stripe_monthly_price_id, stripe_yearly_price_id')
-          .eq('id', input.planId)
-          .maybeSingle(),
-        changeInput: input,
-        stage: 'plan_read',
-        operation: '会员套餐服务',
-      });
-
-      if (!plan) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '会员套餐不存在',
-        });
-      }
-
-      if (plan.is_active !== 'true') {
-        throw toCheckoutConfigError('该会员套餐当前未启用');
-      }
-
-      const selectedPriceId = normalizeCheckoutPriceId(
-        getMembershipPlanPriceId(plan, input.billingCycle),
-      );
-      if (!selectedPriceId || plan.level === 'free') {
-        throw toItemUnavailableError('该会员套餐暂不可升级，请稍后重试');
-      }
-
-      let eligibility: MembershipEligibilityResult;
-      try {
-        eligibility = await resolveMembershipEligibility({
-          supabase: ctx.supabase,
-          userId: ctx.profileId,
-          profile,
-          action: 'create_membership_checkout',
-          targetPlan: plan,
-          targetBillingCycle: input.billingCycle,
-        });
-      } catch (error) {
-        logSubscriptionChangeStageFailure('eligibility_read', input, error);
-        throw createSafeServiceUnavailableError(
-          error,
-          '会员状态暂不可用，请稍后重试',
-        );
-      }
-
-      if (eligibility.action !== 'changeSubscriptionPlan') {
-        throwNonUpgradeEligibilityError(eligibility);
-      }
-
-      let currentSubscription;
-      try {
-        currentSubscription = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
-      } catch (error) {
-        logSubscriptionChangeStageFailure('subscription_read', input, error);
-        throw error;
-      }
-
-      if (!currentSubscription?.stripe_subscription_id) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '当前没有可升级的有效订阅，请联系管理员处理。',
-        });
-      }
-
-      if (
-        currentSubscription.membership_plan_id === plan.id &&
-        currentSubscription.billing_cycle === input.billingCycle
-      ) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '当前套餐仍有效，无需重复购买。',
-        });
-      }
-
-      const pendingPlanChangeOrders = await loadPendingSubscriptionPlanChangeOrder(
-        ctx.supabase,
-        currentSubscription.stripe_subscription_id,
-      );
-      if (pendingPlanChangeOrders.length > 0) {
-        throw toPendingSubscriptionPlanChangeError();
-      }
-
-      let stripeSubscription: Stripe.Subscription;
-      try {
-        stripeSubscription = await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id);
-      } catch (error) {
-        logSubscriptionChangeStageFailure('stripe_subscription_retrieve', input, error, {
-          subscriptionId: maskIdentifier(currentSubscription.stripe_subscription_id),
-        });
-        throw createPaymentOperationError('读取 Stripe 订阅', error);
-      }
-
-      const subscriptionItemId = getPrimarySubscriptionItemId(stripeSubscription);
-      if (!subscriptionItemId) {
-        logSubscriptionChangeStageFailure(
-          'stripe_subscription_item_parse',
-          input,
-          new Error('Stripe subscription item missing'),
-          {
-            subscriptionId: maskIdentifier(currentSubscription.stripe_subscription_id),
-          },
-        );
-        throw toSubscriptionChangeUnavailableError();
-      }
-
-      const metadata = {
-        ...stripeSubscription.metadata,
-        ...buildStripeMetadata({
-          itemType: 'membership_plan',
-          itemId: plan.id,
-          userId: ctx.profileId,
-          priceId: selectedPriceId,
-          billingCycle: input.billingCycle,
-        }),
-        changeSource: 'graylum_change_subscription_plan',
-      };
-
-      let planChangeOrderId: string | null = null;
-      try {
-        planChangeOrderId = await recordSubscriptionPlanChangeOrder({
-          supabase: ctx.supabaseAdmin,
-          userId: ctx.profileId,
-          plan,
-          billingCycle: input.billingCycle,
-          subscription: currentSubscription,
-          stripePriceId: selectedPriceId,
-          stripeSubscription,
-          metadata,
-        });
-      } catch (error) {
-        logSubscriptionChangeStageFailure('plan_change_order_insert', input, error, {
-          subscriptionId: maskIdentifier(stripeSubscription.id),
-          priceId: maskIdentifier(selectedPriceId),
-        });
-        throw error;
-      }
-
-      let updatedSubscription: Stripe.Subscription;
-      try {
-        updatedSubscription = await stripe.subscriptions.update(stripeSubscription.id, {
-          items: [
-            {
-              id: subscriptionItemId,
-              price: selectedPriceId,
-            },
-          ],
-          proration_behavior: 'always_invoice',
-          cancel_at_period_end: false,
-          metadata,
-        });
-      } catch (error) {
-        logSubscriptionChangeStageFailure('stripe_subscription_update', input, error, {
-          subscriptionId: maskIdentifier(stripeSubscription.id),
-          priceId: maskIdentifier(selectedPriceId),
-        });
-        try {
-          await markSubscriptionPlanChangeOrderFailed({
-            supabase: ctx.supabaseAdmin,
-            orderId: planChangeOrderId,
-            stripeSubscriptionId: stripeSubscription.id,
-          });
-        } catch (markFailedError) {
-          logSubscriptionChangeStageFailure('plan_change_order_mark_failed', input, markFailedError, {
-            subscriptionId: maskIdentifier(stripeSubscription.id),
-            priceId: maskIdentifier(selectedPriceId),
-          });
-        }
-        throw createPaymentOperationError('切换订阅套餐', error);
-      }
-
-      try {
-        await syncSubscriptionState(ctx.supabaseAdmin, updatedSubscription);
-      } catch (error) {
-        logSubscriptionChangeStageFailure('subscription_state_sync', input, error, {
-          subscriptionId: maskIdentifier(updatedSubscription.id),
-        });
-        throw createPaymentOperationError('同步订阅状态', error);
-      }
-
-      return {
-        subscriptionId: updatedSubscription.id,
-        status: updatedSubscription.status,
-        planId: plan.id,
-        planLevel: plan.level,
+      const change = await validateSubscriptionUpgrade(ctx, input);
+      const quote = change.attempt?.quote ?? await previewUpgrade(change, Math.floor(Date.now() / 1000));
+      return { ...quote, planName: change.plan.name, planLevel: change.plan.level,
         billingCycle: input.billingCycle,
-        action: 'changeSubscriptionPlan' as const,
-      };
+        // Catalog prices are full billed cents, not the card's monthly equivalent.
+        annualAmount: input.billingCycle === 'yearly' ? change.amount : null };
+    }),
+  changeSubscriptionPlan: protectedProcedure
+    .input(changeSubscriptionPlanInput.extend({ expected: upgradeQuoteSchema }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const change = await validateSubscriptionUpgrade(ctx, input);
+      let orderId = change.pending?.id;
+      let attempt = change.attempt;
+      if (attempt) {
+        if (!sameUpgradeQuote(attempt.quote, input.expected)) throw priceChangedError();
+        // Always inspect remote state before recovering an existing durable attempt.
+        const outcome = await inspectUpgradeOutcome(change, orderId!, attempt);
+        if (outcome === 'applied') return upgradeAccepted();
+        if (outcome !== 'old') throw toSubscriptionChangeUnavailableError();
+        // Stripe retains idempotency keys for at least 24h. Never reapply an aged attempt.
+        if (Date.now() - attempt.createdAt >= 23 * 60 * 60 * 1000) throw toSubscriptionChangeUnavailableError();
+      } else {
+        if (Math.abs(Math.floor(Date.now() / 1000) - input.expected.prorationDate) > 300) throw priceChangedError();
+      }
+      const quote = await previewUpgrade(change, input.expected.prorationDate);
+      if (!sameUpgradeQuote(quote, input.expected)) throw priceChangedError();
+      if (!attempt) {
+        attempt = { quote, originalPrice: change.item.price.id, itemId: change.item.id,
+          createdAt: Date.now(), stripeMetadata: {
+            ...change.remote.metadata,
+            ...buildStripeMetadata({ itemType: 'membership_plan', itemId: change.plan.id,
+              userId: ctx.profileId, priceId: change.priceId, billingCycle: input.billingCycle }),
+            changeSource: 'graylum_change_subscription_plan',
+          } };
+        orderId = await recordSubscriptionPlanChangeOrder({ supabase: ctx.supabaseAdmin,
+          userId: ctx.profileId, plan: change.plan, billingCycle: input.billingCycle,
+          subscription: change.local, stripePriceId: change.priceId, stripeSubscription: change.remote,
+          metadata: { ...attempt.stripeMetadata, upgradeAttempt: attempt } });
+      }
+      try {
+        await change.stripe.subscriptions.update(change.remote.id, {
+          items: [{ id: attempt.itemId, price: change.priceId }],
+          // Start a full target term: yearly grants require a new 12-month term.
+          billing_cycle_anchor: 'now',
+          proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete',
+          proration_date: attempt.quote.prorationDate,
+          metadata: { ...attempt.stripeMetadata, upgradeAttemptId: orderId! },
+        }, { idempotencyKey: `subscription-change:${orderId}` });
+      } catch (error) {
+        logSubscriptionChangeStageFailure('stripe_subscription_update', input, error);
+        // Only Stripe's explicit payment rejection proves error_if_incomplete did not apply.
+        const rejected = error as { type?: string; statusCode?: number };
+        if (rejected?.type === 'StripeCardError' && rejected.statusCode === 402) {
+          await markSubscriptionPlanChangeOrderFailed({ supabase: ctx.supabaseAdmin,
+            orderId: orderId!, stripeSubscriptionId: change.remote.id });
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '升级付款未完成，原套餐保持不变。请先在订阅管理中处理付款方式。' });
+        }
+        // Transport/5xx/unknown outcomes keep the lock. A later identical request can
+        // recover using this SAME order/key after a fresh remote inspection.
+        if (await inspectUpgradeOutcome(change, orderId!, attempt) !== 'applied') {
+          throw toSubscriptionChangeUnavailableError();
+        }
+      }
+      // Only the existing paid-invoice webhook owns plan/cycle/rights/credit admission.
+      return upgradeAccepted();
     }),
   createCheckoutSession: protectedProcedure
     .input(createCheckoutInput)

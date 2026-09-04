@@ -39,6 +39,7 @@ export type MembershipEligibilityReasonCode =
   | 'ACTIVE_SUBSCRIPTION_EXISTS'
   | 'CURRENT_PLAN'
   | 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION'
+  | 'RENEWAL_RESTORE_REQUIRED'
   | 'DOWNGRADE_NOT_ALLOWED'
   | 'PAYMENT_ATTENTION_REQUIRED'
   | 'UPGRADE_DOWNGRADE_UNSUPPORTED'
@@ -298,12 +299,12 @@ function getManagedSubscriptionMessage(action: MembershipEligibilityAction) {
 }
 
 function getUpgradeRequiredMessage() {
-  return '当前会员订阅仍有效，升级套餐需要通过 changeSubscriptionPlan 处理；该能力将在 PR5 实现，本次不会创建新的 Checkout。';
+  return '当前会员订阅仍有效，请通过升级套餐调整现有订阅，不会创建新的 Checkout。';
 }
 
 function getDowngradeBlockedMessage(state: EntitlementState) {
   if (state === 'cancel_at_period_end') {
-    return '当前权益在本周期结束前仍有效，可恢复续订或升级，暂不支持降级。';
+    return '当前权益在本周期结束前仍有效，暂不支持降级。';
   }
 
   return '当前会员有效，暂不支持降级。';
@@ -610,6 +611,10 @@ function evaluateAction(input: {
   });
 
   if (state === 'active' || state === 'cancel_at_period_end') {
+    if (transition === 'upgrade' && state === 'cancel_at_period_end') {
+      return deniedResult({ state, level, source, reasonCode: 'RENEWAL_RESTORE_REQUIRED',
+        safeMessage: '已安排到期取消，请先通过订阅管理恢复续费后再升级套餐。', diagnostics });
+    }
     if (transition === 'upgrade') {
       return deniedResult({
         state,

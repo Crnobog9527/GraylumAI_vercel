@@ -141,6 +141,7 @@ interface GrantSubscriptionCreditsInput extends GrantPeriod {
 }
 
 export interface FulfillMembershipInvoiceWithCreditGrantsInput {
+  expectedSourceOrderId?: string;
   invoiceId: string;
   invoiceCreatedAt?: string | null;
   subscriptionId: string;
@@ -993,6 +994,7 @@ async function getLatestSubscriptionOrder(
   supabase: SupabaseLikeClient,
   subscriptionId: string,
   options: {
+    expectedSourceOrderId?: string;
     invoiceCreatedAt?: string | null;
     periodStart?: string | null;
   } = {},
@@ -1002,9 +1004,10 @@ async function getLatestSubscriptionOrder(
     .from('payment_orders')
     .select('id, user_id, item_id, item_type, billing_cycle, status, stripe_customer_id, stripe_price_id, stripe_checkout_session_id, payment_status, created_at, metadata')
     .eq('stripe_subscription_id', subscriptionId);
+  const exactSourceQuery = options.expectedSourceOrderId ? query.eq('id', options.expectedSourceOrderId) : query;
   const cutoffQuery = sourceCutoff && typeof query.lte === 'function'
-    ? query.lte('created_at', sourceCutoff)
-    : query;
+    ? exactSourceQuery.lte('created_at', sourceCutoff)
+    : exactSourceQuery;
   const filteredQuery = typeof cutoffQuery.neq === 'function'
     ? cutoffQuery.neq('status', 'failed')
     : cutoffQuery;
@@ -2945,7 +2948,7 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
       subscriptionId: input.subscriptionId,
       sourceCutoff: getInvoiceSourceCutoff(input),
     });
-    if (residualPlanChangeLock) {
+    if (residualPlanChangeLock && (!input.expectedSourceOrderId || residualPlanChangeLock.id === input.expectedSourceOrderId)) {
       await releaseSubscriptionPlanChangeLock({
         supabase,
         sourceOrder: residualPlanChangeLock,
@@ -2963,13 +2966,14 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
     };
   }
 
-  const sourceLookup = isUsableMembershipSourceOrder(existingInvoiceOrder)
+  const sourceLookup = !input.expectedSourceOrderId && isUsableMembershipSourceOrder(existingInvoiceOrder)
     ? {
       order: existingInvoiceOrder,
       blockedOrder: null,
       blockedReason: null,
     }
     : await getLatestSubscriptionOrder(supabase, input.subscriptionId, {
+      expectedSourceOrderId: input.expectedSourceOrderId,
       invoiceCreatedAt: input.invoiceCreatedAt,
       periodStart: input.periodStart,
     });
