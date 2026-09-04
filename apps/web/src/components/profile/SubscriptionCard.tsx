@@ -173,7 +173,7 @@ export function ProfileCatalogState({
 }
 
 // 积分加油包区块
-const CreditPackagesSection = memo(function CreditPackagesSection({
+export const CreditPackagesSection = memo(function CreditPackagesSection({
   onBuyClick,
   pendingPackageId,
 }: {
@@ -259,7 +259,7 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
               </div>
             )}
             <div className="text-lg font-medium mb-3" style={{ color: 'var(--text-secondary)' }}>
-              ${pkg.price.toFixed(1)}
+              ${Number.isFinite(pkg.price) ? pkg.price.toFixed(1) : '—'}
             </div>
             <div
               data-testid="profile-credit-package-name"
@@ -271,14 +271,14 @@ const CreditPackagesSection = memo(function CreditPackagesSection({
             <Button
               onClick={() => onBuyClick?.(pkg)}
               size="sm"
-              disabled={pendingPackageId === pkg.id}
+              disabled={pendingPackageId === pkg.id || !pkg.checkout_ready || !Number.isFinite(pkg.price) || pkg.price <= 0}
               className="w-full gap-2"
               style={{
                 background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
                 color: 'var(--bg-primary)'
               }}
             >
-              {pendingPackageId === pkg.id ? '跳转中...' : '购买'}
+              {pendingPackageId === pkg.id ? '跳转中...' : pkg.checkout_ready && pkg.price > 0 ? '购买' : '暂不可购买'}
             </Button>
           </div>
         ))}
@@ -299,7 +299,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const syncedCheckoutSessionRef = useRef<string | null>(null);
 
   const createCheckoutSession = trpc.payments.createCheckoutSession.useMutation();
-  const changeSubscriptionPlan = trpc.payments.changeSubscriptionPlan.useMutation();
+  const customerPortal = trpc.payments.createCustomerPortalSession.useMutation();
+  const subscriptionManagement = trpc.payments.getSubscriptionManagement.useQuery();
   const syncCheckoutSession = trpc.payments.syncCheckoutSession.useMutation();
   const syncCheckoutSessionMutation = syncCheckoutSession.mutateAsync;
   const checkoutState = searchParams.get('checkout');
@@ -365,6 +366,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     void syncCheckoutSessionMutation({ sessionId: checkoutSessionId })
       .then(async (result) => {
         void invalidatePostCheckoutMembershipQueries(utils);
+        void utils.payments.getSubscriptionManagement.invalidate();
 
         if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
@@ -465,7 +467,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   }
 
   const handleSelectPlan = async (plan: PlanConfig) => {
-    const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
+    const price = Number(billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly);
     const unit = billingCycle === 'monthly' ? '/月' : '/年';
     const eligibility = eligibilityByPlanCycle.get(getPlanEligibilityKey(plan.id, billingCycle));
     const ready = billingCycle === 'monthly'
@@ -480,15 +482,13 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       : getMembershipPlanButtonState({
           eligibility,
           eligibilityLoading,
-          checkoutReady: Boolean(ready),
+          checkoutReady: Boolean(ready) && Number.isFinite(price) && price > 0 && plan.level !== 'free',
           pending: pendingCheckoutKey === `plan:${plan.id}:${billingCycle}`,
         });
 
     if (!buttonState.canCreateCheckout && !buttonState.canChangeSubscriptionPlan) {
       const summary = eligibility?.action === 'createCheckoutSession' && !ready
         ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会按最新配置协助你完成开通。`
-        : eligibility?.action === 'changeSubscriptionPlan' && !ready
-          ? `当前展示价格为 $${price.toFixed(1)}${unit}，但该套餐的 Stripe 支付配置尚未完整启用。你可以先提交工单，我们会协助处理升级。`
         : buttonState.message ?? '正在确认当前会员状态，请稍后再试。';
 
       setPurchaseIntent({
@@ -496,38 +496,6 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         title: plan.name,
         summary,
       });
-      return;
-    }
-
-    if (buttonState.canChangeSubscriptionPlan) {
-      const checkoutKey = `plan:${plan.id}:${billingCycle}`;
-      setPendingCheckoutKey(checkoutKey);
-
-      try {
-        const result = await changeSubscriptionPlan.mutateAsync({
-          planId: plan.id,
-          billingCycle,
-        });
-
-        await Promise.all([
-          utils.user.getUserProfile.invalidate(),
-          utils.payments.getMembershipEligibilityMatrix.invalidate(),
-          utils.payments.listBillingRecords.invalidate(),
-        ]);
-
-        setCheckoutNotice({
-          tone: 'success',
-          message: `${plan.name} 升级请求已提交，当前订阅状态为 ${result.status}。`,
-        });
-      } catch (error) {
-        setPurchaseIntent({
-          kind: 'plan',
-          title: plan.name,
-          summary: getSafeErrorMessage(error, '切换订阅套餐失败，请稍后重试。'),
-        });
-      } finally {
-        setPendingCheckoutKey(null);
-      }
       return;
     }
 
@@ -587,6 +555,24 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>会员订阅</h3>
         </div>
 
+        {subscriptionManagement.data?.available && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={customerPortal.isPending}
+            onClick={async () => {
+              try {
+                const result = await customerPortal.mutateAsync({});
+                window.location.assign(result.portalUrl);
+              } catch (error) {
+                setCheckoutNotice({ tone: 'error', message: getSafeErrorMessage(error, '订阅管理暂不可用，请稍后重试') });
+              }
+            }}
+          >
+            {customerPortal.isPending ? '跳转中...' : '管理订阅 / 取消续费'}
+          </Button>
+        )}
+
         {/* Billing Toggle */}
         <div className="flex items-center justify-end gap-2">
           <button
@@ -615,7 +601,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         </div>
 
         <div className="mb-6 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          年付积分按月释放，未使用积分可累积，不按月清零。
+          年付积分按月释放，未使用积分可累积，不按月清零。取消续费后，已付周期权益保留至到期。
         </div>
 
         {checkoutNotice && (
@@ -661,7 +647,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           <ProfileCatalogState status="empty" />
         ) : displayPlans.map((plan) => {
           const isHighlight = plan.recommended || plan.highlight;
-          const price = billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly;
+          const price = Number(billingCycle === 'monthly' ? plan.price.monthly : plan.price.yearly);
           const warmHighlightBackground = 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(249, 115, 22, 0.14) 100%)';
           const warmHighlightBorder = '2px solid rgba(245, 158, 11, 0.45)';
           const warmHighlightShadow = '0 0 30px rgba(249, 115, 22, 0.16)';
@@ -680,7 +666,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
             : getMembershipPlanButtonState({
                 eligibility,
                 eligibilityLoading,
-                checkoutReady: Boolean(ready),
+                checkoutReady: Boolean(ready) && Number.isFinite(price) && price > 0 && plan.level !== 'free',
                 pending: isPendingPlan,
               });
 
@@ -855,11 +841,11 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
   const handlePackageBuy = async (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => {
     const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0);
 
-    if (!pkg.checkout_ready) {
+    if (!pkg.checkout_ready || !Number.isFinite(pkg.price) || pkg.price <= 0) {
       setPurchaseIntent({
         kind: 'package',
         title: pkg.name || `${pkg.credits.toLocaleString()} 积分包`,
-        summary: `当前展示价格为 $${pkg.price.toFixed(1)}，共 ${totalCredits.toLocaleString()} 积分（含赠送），但该积分包的 Stripe 支付配置尚未完整启用。`,
+        summary: `当前展示价格为 $${Number.isFinite(pkg.price) ? pkg.price.toFixed(1) : '—'}，共 ${totalCredits.toLocaleString()} 积分（含赠送），但该积分包的 Stripe 支付配置尚未完整启用。`,
       });
       return;
     }

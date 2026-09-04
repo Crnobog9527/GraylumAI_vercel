@@ -6657,3 +6657,87 @@ describe('stripe fulfillment helpers', () => {
     );
   });
 });
+
+describe('PAY-1 card and Alipay fulfillment compatibility', () => {
+  it.each(['card', 'alipay'])('completed-paid %s replay and later async success invoke fulfillment only once', async (method) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-pay1', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    const rpc = vi.fn(async (name: string, params: Record<string, unknown>) => {
+      expect(name).toBe('atomic_fulfill_credit_package');
+      expect(params).toEqual({ p_checkout_session_id: 'cs_test_pay1', p_payment_status: 'paid' });
+      tables.payment_orders[0].fulfilled_at = '2026-09-04T00:00:00Z';
+      tables.payment_orders[0].status = 'completed';
+      tables.payment_orders[0].metadata.grantedCredits = 100;
+      return { data: [{ fulfilled_at: tables.payment_orders[0].fulfilled_at }], error: null };
+    });
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    const session = {
+      id: 'cs_test_pay1', mode: 'payment', payment_status: 'paid', status: 'complete', amount_total: 1000,
+      payment_method_types: [method], payment_intent: 'pi_test_pay1',
+      metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package', billingCycle: 'one_time' },
+    };
+    for (const type of ['checkout.session.completed', 'checkout.session.completed', 'checkout.session.async_payment_succeeded']) {
+      await handleStripeWebhookEvent(supabase as any, { type, data: { object: session } } as any);
+    }
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(tables.payment_orders[0]).toMatchObject({ status: 'completed', metadata: { grantedCredits: 100, paymentIntentId: 'pi_test_pay1' } });
+  });
+  it.each(['checkout.session.completed', 'checkout.session.async_payment_failed', 'checkout.session.async_payment_succeeded'])('unpaid %s does not fulfill', async (type) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-pay1', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    const rpc = vi.fn();
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+      id: 'cs_test_pay1', mode: 'payment', payment_status: 'unpaid', metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package' },
+    } } } as any);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(tables.payment_orders[0].fulfilled_at).toBeNull();
+  });
+  it.each(['card', 'alipay'])('matches %s refunds using the stored payment intent, with pending/failure/success and stable replay keys', async (method) => {
+    const { rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_pay1_refund' },
+      order: { id: 'order-pay1', amount_total: 1000, metadata: { itemType: 'credit_package', paymentIntentId: 'pi_pay1_refund', grantedCredits: 100 } },
+    });
+    const charge = { id: 'ch_pay1', amount: 1000, amount_refunded: 1000, currency: 'usd', payment_intent: 'pi_pay1_refund', metadata: {}, payment_method_details: { type: method } };
+    const event = (type: string, status: string) => ({ id: `evt_${status}`, type, data: { object: {
+      id: 're_pay1', amount: 1000, currency: 'usd', status, created: 1788470400,
+      charge, payment_intent: 'pi_pay1_refund', metadata: {},
+    } } });
+    await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.updated', 'pending') as any);
+    expect(rpc).not.toHaveBeenCalled();
+    await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.failed', 'failed') as any);
+    expect(rpc).toHaveBeenLastCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({ p_is_failed: true, p_is_full_refund: false }));
+    for (let i = 0; i < 2; i++) await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.updated', 'succeeded') as any);
+    const successCalls = rpc.mock.calls.slice(1);
+    expect(successCalls).toHaveLength(2);
+    for (const call of successCalls) expect(call).toEqual(['atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-pay1', p_is_failed: false, p_is_full_refund: true, p_idempotency_key: 'stripe_refund:re_pay1',
+    })]);
+  });
+  it('Portal period-end cancellation preserves the current paid term and annual grant schedule', async () => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const start = 1788470400;
+    const end = start + 31536000;
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [], profiles: [{ id: 'user-pay1', membership_level: 'pro', credits: 100 }], credit_transactions: [], membership_plans: [],
+      user_subscriptions: [{ id: 'mirror-pay1', user_id: 'user-pay1', stripe_subscription_id: 'sub_pay1', status: 'active', current_period_start: new Date(start * 1000).toISOString(), current_period_end: new Date(end * 1000).toISOString() }],
+      subscription_credit_grants: [{ id: 'grant-pay1', status: 'scheduled' }],
+    };
+    const rpc = vi.fn();
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    await handleStripeWebhookEvent(supabase as any, { type: 'customer.subscription.updated', data: { object: {
+      id: 'sub_pay1', status: 'active', cancel_at_period_end: true,
+      items: { data: [{ current_period_start: start, current_period_end: end }] },
+    } } } as any);
+    expect(tables.user_subscriptions[0]).toMatchObject({ status: 'active', cancel_at_period_end: 'true', current_period_end: new Date(end * 1000).toISOString() });
+    expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 100 });
+    expect(tables.subscription_credit_grants).toEqual([{ id: 'grant-pay1', status: 'scheduled' }]);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});

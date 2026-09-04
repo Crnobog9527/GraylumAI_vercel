@@ -1645,6 +1645,9 @@ export async function upsertPaymentOrderBySession(
   const orderMetadata = {
     ...asRecord(existing.data?.metadata),
     ...metadata,
+    ...(getExpandableId(session.payment_intent)
+      ? { paymentIntentId: getExpandableId(session.payment_intent) }
+      : {}),
     checkoutStatus: session.status ?? null,
     paymentStatus: session.payment_status ?? null,
     lastPaymentOrderStatus: nextStatus,
@@ -2075,6 +2078,7 @@ export async function fulfillCreditPackageOrder(
   supabase: SupabaseLikeClient,
   session: Stripe.Checkout.Session,
 ) {
+  if (session.mode !== 'payment' || session.payment_status !== 'paid') return;
   const metadata = session.metadata ?? {};
   const userId = metadata.userId ?? session.client_reference_id;
   const packageId = metadata.itemId;
@@ -2127,6 +2131,9 @@ export async function reconcileStripeRefund(
   input: RefundReconciliationInput,
 ) {
   const facts = 'charge' in input ? buildChargeRefundFacts(input) : buildRefundFacts(input);
+  // Alipay refunds are asynchronous. Pending/canceled refunds must not mark
+  // an order refunded or consume the existing financial idempotency key.
+  if (!facts.failed && !isSuccessfulRefundStatus(facts.refundStatus)) return null;
   const order = await findRefundPaymentOrder(supabase, facts);
 
   if (!order) {

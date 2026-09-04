@@ -71,6 +71,12 @@ describe('PricingSection catalog availability', () => {
     expect(markup).not.toContain('action=signup');
   });
 
+  it.each([0, -1, null, undefined])('has no purchase link for invalid amounts %j despite stale readiness flags', (amount) => {
+    const markup = renderPricing('available', [{ ...plan, price: { monthly: amount, yearly: amount } } as any]);
+    expect(markup).not.toContain('立即订阅');
+    expect(markup).not.toContain('action=signup');
+  });
+
   it.skipIf(!existsSync(localChromePath))(
     'keeps the unavailable state safe in a local mobile browser',
     async () => {

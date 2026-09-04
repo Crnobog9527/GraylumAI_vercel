@@ -12,11 +12,13 @@ import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import {
   assertStripeCheckoutConfigured,
+  assertCheckoutRateLimit,
   buildStripeMetadata,
   calculateDiscountedAmountCents,
   getOrCreateStripeCustomerId,
   getStripeAppUrl,
   getStripeClient,
+  getStripePortalReturnUrl,
 } from '../services/stripe';
 import {
   fulfillCreditPackageOrder,
@@ -904,6 +906,50 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 }
 
 export const paymentsRouter = router({
+  getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
+    const subscription = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+    return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
+  }),
+  createCustomerPortalSession: protectedProcedure
+    .input(z.object({ returnUrl: z.string().url().optional() }).strict().optional())
+    .mutation(async ({ ctx, input }) => {
+      const returnUrl = getStripePortalReturnUrl(input?.returnUrl);
+      assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
+      const subscription = await loadCurrentStripeManagedSubscription(ctx.supabase, ctx.profileId);
+      if (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '当前没有可管理的订阅' });
+      }
+      try {
+        const stripe = getStripeClient();
+        const remote = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
+        const customerId = typeof remote.customer === 'string' ? remote.customer : remote.customer.id;
+        if (customerId !== subscription.stripe_customer_id
+          || (remote.metadata.userId && remote.metadata.userId !== ctx.profileId)) {
+          throw new Error('Portal subscription ownership mismatch');
+        }
+        const configurations = await stripe.billingPortal.configurations.list({ is_default: true, limit: 1 });
+        const configuration = configurations.data[0];
+        if (!configuration?.active
+          || !configuration.features.subscription_cancel.enabled
+          || configuration.features.subscription_cancel.mode !== 'at_period_end'
+          || configuration.features.subscription_update.enabled) {
+          throw new Error('Portal configuration must allow period-end cancellation and disable plan changes');
+        }
+        const session = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          configuration: configuration.id,
+          return_url: returnUrl,
+          flow_data: {
+            type: 'subscription_cancel',
+            subscription_cancel: { subscription: remote.id },
+            after_completion: { type: 'redirect', redirect: { return_url: returnUrl } },
+          },
+        });
+        return { portalUrl: session.url };
+      } catch (error) {
+        throw createSafeServiceUnavailableError(error, '订阅管理暂不可用，请稍后重试');
+      }
+    }),
   getMembershipEligibilityMatrix: protectedProcedure
     .query(async ({ ctx }) => {
       const profile = await readMembershipEligibilityData<{
@@ -989,6 +1035,9 @@ export const paymentsRouter = router({
       };
     }),
   changeSubscriptionPlan: protectedProcedure
+    .use(() => {
+      throw new TRPCError({ code: 'FORBIDDEN', message: '首发暂不支持升级或降级套餐' });
+    })
     .input(changeSubscriptionPlanInput)
     .mutation(async ({ ctx, input }) => {
       assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
@@ -1259,6 +1308,8 @@ export const paymentsRouter = router({
           return checkoutContext;
         }
 
+        await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
+
         let customerId;
         try {
           customerId = await getOrCreateStripeCustomerId({
@@ -1434,12 +1485,14 @@ export const paymentsRouter = router({
         try {
           session = await stripe.checkout.sessions.create({
             mode: 'payment',
+            payment_method_types: ['card', 'alipay'],
             customer: checkout.customerId,
             client_reference_id: ctx.profileId,
             line_items: lineItems,
             success_url: checkout.successUrl,
             cancel_url: checkout.cancelUrl,
             metadata,
+            payment_intent_data: { metadata },
           });
         } catch (error) {
           logCheckoutStageFailure('stripe_session_create', input, error, {
@@ -1579,6 +1632,8 @@ export const paymentsRouter = router({
       try {
         session = await stripe.checkout.sessions.create({
           mode: 'subscription',
+          // alipay_subscription_enabled is a future placeholder, never a recurring payment switch.
+          payment_method_types: ['card'],
           customer: checkout.customerId,
           client_reference_id: ctx.profileId,
           line_items: [

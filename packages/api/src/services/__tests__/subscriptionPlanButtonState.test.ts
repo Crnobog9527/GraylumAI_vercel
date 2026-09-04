@@ -60,7 +60,7 @@ describe('getMembershipPlanButtonState', () => {
     });
   });
 
-  it('enables subscription change for backend upgrade actions without allowing checkout creation', () => {
+  it('disables Launch subscription changes even when backend suggests an upgrade', () => {
     const result = getMembershipPlanButtonState({
       eligibility: {
         ...baseEligibility,
@@ -74,10 +74,10 @@ describe('getMembershipPlanButtonState', () => {
     });
 
     expect(result).toMatchObject({
-      disabled: false,
-      label: '升级套餐',
+      disabled: true,
+      label: '暂不支持套餐变更',
       canCreateCheckout: false,
-      canChangeSubscriptionPlan: true,
+      canChangeSubscriptionPlan: false,
     });
   });
 

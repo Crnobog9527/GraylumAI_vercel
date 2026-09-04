@@ -71,11 +71,11 @@ export function getMembershipPlanButtonState(input: {
 
   if (eligibility.action === 'changeSubscriptionPlan') {
     return {
-      disabled: false,
-      label: checkoutReady ? '升级套餐' : '联系我们',
+      disabled: true,
+      label: '暂不支持套餐变更',
       canCreateCheckout: false,
-      canChangeSubscriptionPlan: checkoutReady,
-      message: eligibility.safeMessage,
+      canChangeSubscriptionPlan: false,
+      message: '首发暂不支持升级或降级，当前订阅权益保持不变。',
     };
   }
 

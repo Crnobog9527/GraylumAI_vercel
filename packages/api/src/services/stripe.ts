@@ -6,7 +6,51 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { isIP } from 'node:net';
+import { TRPCError } from '@trpc/server';
 import { ensureWorkspaceServerEnv } from '../lib/serverEnv';
+import { checkRateLimit } from './redisRateLimiter';
+
+// Reuse the existing distributed windows with checkout-specific key namespaces:
+// 5 per user / 5 minutes, 20 per IP / minute. No in-memory fallback for payments.
+export async function assertCheckoutRateLimit(userId: string, headers: Headers) {
+  const rawIp = process.env.VERCEL === '1'
+    ? headers.get('x-vercel-forwarded-for')
+    : process.env.NODE_ENV !== 'production'
+      ? headers.get('x-forwarded-for')
+      : null;
+  const ip = rawIp?.trim();
+  if (!ip || !isIP(ip)) {
+    throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付请求来源暂无法验证，请稍后重试' });
+  }
+  const normalizedIp = isIP(ip) === 6 ? new URL(`http://[${ip}]/`).hostname : ip;
+  for (const [key, type] of [
+    [`checkout:user:${userId}`, 'auth'],
+    [`checkout:ip:${normalizedIp}`, 'anonymous'],
+  ] as const) {
+    const result = await checkRateLimit(key, type);
+    // The shared service reports limit=0 when it falls back to fail-open.
+    if (result.limit <= 0 || result.reason === 'unavailable') {
+      throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: '支付限流服务暂不可用，请稍后重试' });
+    }
+    if (!result.success) {
+      throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: '支付请求过于频繁，请稍后重试' });
+    }
+  }
+}
+
+export function getStripePortalReturnUrl(requestedUrl?: string): string {
+  // Only the server-configured origin and this exact Profile destination are allowed.
+  const appUrl = new URL(getStripeAppUrl());
+  if (appUrl.username || appUrl.password || !['http:', 'https:'].includes(appUrl.protocol)) {
+    throw new Error('Invalid portal application URL');
+  }
+  const allowedUrl = new URL('/profile?tab=subscription', appUrl.origin).href;
+  if (requestedUrl !== undefined && requestedUrl !== allowedUrl) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: '无效的返回地址' });
+  }
+  return allowedUrl;
+}
 
 export type StripeCheckoutItemType = 'credit_package' | 'membership_plan';
 export type StripeBillingCycle = 'one_time' | 'monthly' | 'yearly';
