@@ -68,7 +68,7 @@ const changeSubscriptionPlanInput = z.object({
 const upgradeQuoteSchema = z.object({
   amountDue: z.number().int().nonnegative(),
   currency: z.string().regex(/^[a-z]{3}$/),
-  prorationDate: z.number().int().positive(),
+  quotedAt: z.number().int().positive(),
   fingerprint: z.string().length(64),
 }).strict();
 type UpgradeQuote = z.infer<typeof upgradeQuoteSchema>;
@@ -771,8 +771,9 @@ type PendingUpgradeOrder = {
   metadata: Record<string, unknown> | null;
 };
 const UPGRADE_QUOTE_TTL_SECONDS = 300;
+const UPGRADE_CURRENCY = 'usd';
 function quoteIsFresh(quote: UpgradeQuote) {
-  const age = Math.floor(Date.now() / 1000) - quote.prorationDate;
+  const age = Math.floor(Date.now() / 1000) - quote.quotedAt;
   return age >= 0 && age <= UPGRADE_QUOTE_TTL_SECONDS;
 }
 function quoteExpiredError() {
@@ -784,7 +785,7 @@ function priceChangedError() {
 }
 function sameUpgradeQuote(a: UpgradeQuote, b: UpgradeQuote) {
   return a.amountDue === b.amountDue && a.currency === b.currency
-    && a.prorationDate === b.prorationDate && a.fingerprint === b.fingerprint;
+    && a.quotedAt === b.quotedAt && a.fingerprint === b.fingerprint;
 }
 function upgradeAccepted() {
   return { action: 'changeSubscriptionPlan' as const, status: 'pending_fulfillment' as const };
@@ -866,25 +867,59 @@ async function validateSubscriptionUpgrade(ctx: {
   return { stripe, remote, local, item, plan, priceId, amount, input, pending, attempt, userId: ctx.profileId };
 }
 type ValidatedUpgrade = Awaited<ReturnType<typeof validateSubscriptionUpgrade>>;
-async function previewUpgrade(change: ValidatedUpgrade, prorationDate: number): Promise<UpgradeQuote> {
+function hasNonZeroAmount(values: Array<{ amount?: number | null }> | null | undefined) {
+  return Boolean(values?.some((value) => value.amount !== 0));
+}
+
+function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: ValidatedUpgrade) {
+  const lines = invoice.lines?.data ?? [];
+  const invoiceRecord = invoice as Stripe.Invoice & {
+    subtotal?: number | null; total?: number | null; starting_balance?: number | null;
+    pre_payment_credit_notes_amount?: number | null; post_payment_credit_notes_amount?: number | null;
+    total_discount_amounts?: Array<{ amount?: number | null }> | null;
+    total_taxes?: Array<{ amount?: number | null }> | null;
+  };
+  const line = lines[0];
+  const details = line?.parent?.subscription_item_details;
+  const priceId = line?.pricing?.price_details?.price;
+  const periodStart = line?.period?.start;
+  const periodEnd = line?.period?.end;
+  const adjustedInvoice = [invoiceRecord.starting_balance, invoiceRecord.pre_payment_credit_notes_amount,
+    invoiceRecord.post_payment_credit_notes_amount].some((value) => typeof value === 'number' && value !== 0);
+
+  if (invoice.lines?.has_more || lines.length !== 1 || !line
+    || invoice.amount_due !== change.amount || invoice.currency !== UPGRADE_CURRENCY
+    || (typeof invoiceRecord.subtotal === 'number' && invoiceRecord.subtotal !== change.amount)
+    || (typeof invoiceRecord.total === 'number' && invoiceRecord.total !== change.amount)
+    || adjustedInvoice || hasNonZeroAmount(invoiceRecord.total_discount_amounts)
+    || hasNonZeroAmount(invoiceRecord.total_taxes)
+    || stripeObjectId(details?.subscription) !== change.remote.id || details?.proration !== false
+    || priceId !== change.priceId || line.amount !== change.amount || line.subtotal !== change.amount
+    || line.currency !== UPGRADE_CURRENCY || line.quantity !== 1
+    || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
+    || Boolean(line.pretax_credit_amounts?.length) || hasNonZeroAmount(line.taxes)
+    || typeof periodStart !== 'number' || typeof periodEnd !== 'number' || periodEnd <= periodStart) {
+    throw priceChangedError();
+  }
+}
+
+async function previewFullPriceUpgrade(change: ValidatedUpgrade, quotedAt: number): Promise<UpgradeQuote> {
   let invoice: Stripe.Invoice;
   try {
     invoice = await change.stripe.invoices.createPreview({ customer: change.local.stripe_customer_id!,
       subscription: change.remote.id, subscription_details: {
         items: [{ id: change.item.id, price: change.priceId }],
-        billing_cycle_anchor: 'now', proration_behavior: 'always_invoice', proration_date: prorationDate,
+        billing_cycle_anchor: 'now', proration_behavior: 'none',
       } });
   } catch { throw toSubscriptionChangeUnavailableError(); }
-  if (!Number.isSafeInteger(invoice.amount_due) || invoice.amount_due < 0 || !/^[a-z]{3}$/.test(invoice.currency)) {
-    throw toSubscriptionChangeUnavailableError();
-  }
+  assertFullPriceUpgradePreview(invoice, change);
   const fingerprint = createHash('sha256').update(JSON.stringify({
     user: change.userId, subscription: change.remote.id, item: change.item.id, oldPrice: change.item.price.id,
     start: change.item.current_period_start, end: change.item.current_period_end,
     plan: change.plan.id, price: change.priceId, cycle: change.input.billingCycle, amount: change.amount,
-    amountDue: invoice.amount_due, currency: invoice.currency, prorationDate,
+    amountDue: invoice.amount_due, currency: invoice.currency,
   })).digest('hex');
-  return { amountDue: invoice.amount_due, currency: invoice.currency, prorationDate, fingerprint };
+  return { amountDue: invoice.amount_due, currency: invoice.currency, quotedAt, fingerprint };
 }
 async function inspectUpgradeOutcome(change: ValidatedUpgrade, orderId: string, attempt: UpgradeAttempt) {
   try {
@@ -1263,7 +1298,7 @@ export const paymentsRouter = router({
           if (await recoverUpgradeAttempt(change, ctx.supabaseAdmin, claim) === 'applied') return upgradeAccepted();
         } finally { await finishUpgradeRecovery(change, ctx.supabaseAdmin, claim); }
       }
-      const quote = change.attempt?.quote ?? await previewUpgrade(change, Math.floor(Date.now() / 1000));
+      const quote = change.attempt?.quote ?? await previewFullPriceUpgrade(change, Math.floor(Date.now() / 1000));
       return { status: 'quote' as const, ...quote, planName: change.plan.name, planLevel: change.plan.level,
         billingCycle: input.billingCycle,
         // Catalog prices are full billed cents, not the card's monthly equivalent.
@@ -1281,7 +1316,7 @@ export const paymentsRouter = router({
           if (await recoverUpgradeAttempt(change, ctx.supabaseAdmin, claim!) === 'applied') return upgradeAccepted();
           if (!sameUpgradeQuote(attempt.quote, input.expected)) throw priceChangedError();
         } else if (!quoteIsFresh(input.expected)) { throw quoteExpiredError(); }
-        const quote = await previewUpgrade(change, input.expected.prorationDate);
+        const quote = await previewFullPriceUpgrade(change, input.expected.quotedAt);
         if (!sameUpgradeQuote(quote, input.expected)) throw priceChangedError();
         if (!quoteIsFresh(quote)) throw quoteExpiredError();
         if (!attempt) {
@@ -1302,9 +1337,7 @@ export const paymentsRouter = router({
           await change.stripe.subscriptions.update(change.remote.id, {
             items: [{ id: attempt.itemId, price: change.priceId }],
             // Start a full target term: yearly grants require a new 12-month term.
-            billing_cycle_anchor: 'now',
-            proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete',
-            proration_date: attempt.quote.prorationDate,
+            billing_cycle_anchor: 'now', proration_behavior: 'none', payment_behavior: 'error_if_incomplete',
             metadata: { ...attempt.stripeMetadata, upgradeAttemptId: orderId! },
           }, { idempotencyKey: `subscription-change:${orderId}` });
         } catch (error) {

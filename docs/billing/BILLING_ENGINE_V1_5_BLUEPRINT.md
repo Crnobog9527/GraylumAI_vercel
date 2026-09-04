@@ -388,15 +388,18 @@ subscription_grant:monthly:{stripe_invoice_id}
 1. 前端调用新的 `changeSubscriptionPlan` API，而不是 `createCheckoutSession`。
 2. 后端读取当前 `user_subscriptions` 与目标 plan。
 3. membership eligibility 判断是否允许升级。
-4. 创建 `subscription_change_requests`。
-5. 调用 Stripe subscription update / pending update / schedule 替换现有 subscription item 的 price。
-6. 如果需要立即收费，必须确保支付成功后才应用本地权益。
-7. Stripe webhook 到达后更新本地 subscription、plan、billing_cycle。
-8. 按新的订阅周期释放积分：
-   - 月付目标：发放目标套餐当期月度积分。
-   - 年付目标：立即释放年付第 1 个月积分，然后后续按月释放。
-9. 写入 `subscription_credit_grants` 与 `credit_transactions`。
-10. `subscription_change_requests.status = applied`。
+4. 受保护预览以同一 subscription、现有 item、目标 Price、`billing_cycle_anchor=now`、`proration_behavior=none` 建模；预览不得发送 `proration_date`。
+5. 预览发票必须只有完整目标周期的目标 Price line，分页完整且无 proration、旧 Price 负数抵扣、折扣、税或余额调整；`amount_due` 与当前本地目标套餐/周期目录价及 USD 币种必须完全一致，否则 fail closed。
+6. 报价仅包含 `amountDue`、`currency`、`quotedAt` 与语义 fingerprint；`quotedAt` 只用于 300 秒确认时效，不参与按时间计价。确认时重新读取本地/Stripe 状态并再次执行同一全价预览；金额、币种或语义状态变化时要求重新确认。
+7. 创建一个持久 plan-change source/lock，以其 id 派生稳定 Stripe idempotency key。
+8. 更新同一 Stripe subscription 的现有 item：目标 Price + `billing_cycle_anchor=now` + `proration_behavior=none` + `payment_behavior=error_if_incomplete`。不得发送 `proration_date`，不得清除到期取消，也不得创建第二个 Checkout/subscription。
+9. 目标套餐/周期收取当前配置的完整价格；旧套餐不退款、不按未使用时间抵扣、不计算差价，也不根据剩余或已用积分改价。新的完整目标 term 从付款成功对应的 Stripe 目标周期开始。
+10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user、完整目标 service period 和全价金额的 paid invoice 可以更新本地 subscription、plan、billing_cycle。
+11. 已有积分及历史 grant 全部保留，不反转、不扣减：
+    - 月付目标：在现有余额上完整追加 `monthly_credits + monthly_bonus_credits`，恰好一次。
+    - 年付目标：开始新的 12 期计划，仅追加 canonical period 1；period 2–12 继续由 YEAR-1 按月释放。
+12. 写入 `subscription_credit_grants` 与 `credit_transactions`，完成并释放精确 plan-change source；paid invoice 重放不得重复 term、权益或积分。
+13. 明确的付款失败保持原套餐/term/积分并安全释放失败 source；传输不确定时先读取远端，applied 不重试、unknown 保持锁，proven old 且报价过期时才退休旧 source 并要求新预览与重新确认。
 
 ### 4.5 退款流程
 
@@ -681,9 +684,10 @@ SUM(abs(amount)) WHERE ledger_type = 'spend' AND counts_as_spend = true AND crea
 1. active 用户升级不创建第二个 subscription。
 2. Pro -> Gold 可升级。
 3. 月付 -> 年付可升级。
-4. 支付成功后才更新本地权益。
-5. 升级到年付后只释放第 1 个月年付积分。
-6. 失败回滚/不应用本地权益。
+4. 同一 subscription 以目标完整价格、无旧套餐退款/未使用时间抵扣/差价计算的方式开始完整目标 term。
+5. 支付成功后才更新本地权益；已有积分保留，目标月付完整追加一期积分。
+6. 升级到年付后只释放第 1 个月年付积分，后续期间仍可按月释放。
+7. 明确付款失败保持原套餐；不确定结果保留锁并先读取远端。
 
 禁止范围：
 

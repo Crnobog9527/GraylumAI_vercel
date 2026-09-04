@@ -672,7 +672,9 @@ async function getInvoiceSubscriptionServicePeriod(
       startingAfter: string,
     ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
     paginationLimits?: StripePaginationLimits;
-    upgradePriceId?: string;
+    requiredPriceId?: string;
+    requiredAmount?: number;
+    requiredCurrency?: string;
   } = {},
 ) {
   const periods = new Map<string, { start: number; end: number }>();
@@ -702,13 +704,15 @@ async function getInvoiceSubscriptionServicePeriod(
     const start = line.period?.start;
     const end = line.period?.end;
 
-    if (lineSubscriptionId !== subscriptionId
-      || (options.upgradePriceId
-        ? line.pricing?.price_details?.price !== options.upgradePriceId || line.amount < 0
-        : details?.proration === true)
-      || typeof start !== 'number'
-      || typeof end !== 'number'
-      || end <= start) {
+    if (options.requiredPriceId) {
+      if (lineSubscriptionId !== subscriptionId || details?.proration !== false
+        || line.pricing?.price_details?.price !== options.requiredPriceId
+        || line.amount !== options.requiredAmount || line.currency !== options.requiredCurrency
+        || line.quantity !== 1 || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+        throw new Error('upgrade_invoice_full_target_line_mismatch');
+      }
+    } else if (lineSubscriptionId !== subscriptionId || details?.proration === true
+      || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
       continue;
     }
 
@@ -721,6 +725,10 @@ async function getInvoiceSubscriptionServicePeriod(
 
   if (periods.size > 1) {
     throw new Error('invoice_subscription_service_period_not_unique');
+  }
+
+  if (options.requiredPriceId && lines.length !== 1) {
+    throw new Error('upgrade_invoice_full_target_line_not_unique');
   }
 
   return [...periods.values()][0];
@@ -2587,7 +2595,7 @@ export async function fulfillMembershipInvoice(
 
   // Upgrade invoices must bind to the exact durable source, never whichever
   // attempt happens to be newest when a delayed invoice is delivered.
-  let upgradeSource: { id: string; stripe_price_id: string } | undefined;
+  let upgradeSource: { id: string; stripe_price_id: string; amountDue: number; currency: string } | undefined;
   if (invoice.billing_reason === 'subscription_update') {
     const details = invoice.parent?.subscription_details;
     const attemptId = details?.metadata?.upgradeAttemptId;
@@ -2606,20 +2614,25 @@ export async function fulfillMembershipInvoice(
     }
     const attempt = asRecord(asRecord(source.metadata).upgradeAttempt);
     const quote = asRecord(attempt.quote);
-    if (quote.amountDue !== invoice.amount_due || quote.currency !== invoice.currency) {
+    if (!Number.isSafeInteger(quote.amountDue) || (quote.amountDue as number) <= 0 || quote.currency !== 'usd'
+      || quote.amountDue !== invoice.amount_due || quote.amountDue !== invoice.amount_paid
+      || quote.currency !== invoice.currency) {
       throw new Error('upgrade_invoice_quote_mismatch');
     }
-    upgradeSource = source;
+    upgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency };
   }
 
   // Stripe documents invoice-level period_start/period_end as the usage
   // collection window, not the service period for a subscription price. The
-  // service period is carried by the matching non-proration invoice line (or the proven target upgrade line). In
+  // service period is carried by the matching non-proration invoice line. Upgrade invoices must contain exactly
+  // one full-price target line; old-price credits or prorations are rejected before entitlement admission. In
   // particular, subscription_create invoices can have a zero-length top-level
   // window while their line has the complete monthly or annual term.
   let servicePeriod: { start: number; end: number };
   try {
-    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options, upgradePriceId: upgradeSource?.stripe_price_id });
+    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options,
+      requiredPriceId: upgradeSource?.stripe_price_id, requiredAmount: upgradeSource?.amountDue,
+      requiredCurrency: upgradeSource?.currency });
   } catch (error) {
     throwFulfillmentError(
       'invoice_subscription_service_period',

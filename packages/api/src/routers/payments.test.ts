@@ -233,13 +233,15 @@ function createSubscriptionChangeGuardHarness(options: {
   eligibilitySubscriptionResult?: () => Promise<unknown>; eligibilityOrderResult?: () => Promise<unknown>;
 } = {}) {
   const targetPlanId = '123e4567-e89b-42d3-a456-426614174222';
-  const currentPlanId = (options.currentLevel ?? 'pro') === (options.targetLevel ?? 'gold') ? targetPlanId : '123e4567-e89b-42d3-a456-426614174111';
+  const targetLevel = options.targetLevel ?? 'gold';
+  const currentPlanId = (options.currentLevel ?? 'pro') === targetLevel ? targetPlanId : '123e4567-e89b-42d3-a456-426614174111';
   const profile = { id: 'user-1', role: 'user', status: 'active', email: 'user@example.com',
     nickname: 'User', membership_level: options.currentLevel ?? 'pro' };
-  const plan: any = { id: targetPlanId, name: 'Gold', level: options.targetLevel ?? 'gold', is_active: 'true',
-    monthly_price: 2990, yearly_price: 29900,
-    stripe_monthly_price_id: 'monthlyPrice' in options ? options.monthlyPrice : 'price_test_gold_monthly',
-    stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : 'price_test_gold_yearly' };
+  const targetPriceIds = { monthly: `price_test_${targetLevel}_monthly`, yearly: `price_test_${targetLevel}_yearly` };
+  const plan: any = { id: targetPlanId, name: targetLevel === 'gold' ? 'Gold' : 'Pro', level: targetLevel, is_active: 'true',
+    monthly_price: targetLevel === 'gold' ? 2990 : 990, yearly_price: targetLevel === 'gold' ? 29900 : 9900,
+    stripe_monthly_price_id: 'monthlyPrice' in options ? options.monthlyPrice : targetPriceIds.monthly,
+    stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : targetPriceIds.yearly };
   const local: any = { id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
     stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
     billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
@@ -250,10 +252,25 @@ function createSubscriptionChangeGuardHarness(options: {
   const subscriptionRetrieve = vi.fn().mockImplementation(async () => structuredClone(remote));
   const subscriptionUpdate = vi.fn().mockResolvedValue(remote);
   const invoiceList = vi.fn().mockResolvedValue({ data: [], has_more: false });
-  const invoicePreview = vi.fn().mockResolvedValue({ amount_due: 1990, currency: 'usd' });
+  const fullPricePreview = (billingCycle: 'monthly' | 'yearly' = 'monthly', overrides: Record<string, unknown> = {}) => {
+    const amount = billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price;
+    const price = billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id;
+    const start = 2100000000; const end = start + (billingCycle === 'yearly' ? 31536000 : 2592000);
+    return { amount_due: amount, currency: 'usd', subtotal: amount, total: amount, starting_balance: 0,
+      pre_payment_credit_notes_amount: 0, post_payment_credit_notes_amount: 0,
+      total_discount_amounts: [], total_taxes: [], lines: { has_more: false, data: [{
+        id: 'il_full_target', amount, subtotal: amount, currency: 'usd', quantity: 1,
+        discount_amounts: [], discounts: [], pretax_credit_amounts: [], taxes: [],
+        pricing: { price_details: { price } }, period: { start, end },
+        parent: { subscription_item_details: { subscription: remote.id, subscription_item: 'si_test_current', proration: false } },
+      }] }, ...overrides };
+  };
+  const invoicePreview = vi.fn().mockImplementation(async (params: any) => fullPricePreview(
+    params.subscription_details.items[0].price === plan.stripe_yearly_price_id ? 'yearly' : 'monthly',
+  ));
   const invoiceRetrieve = vi.fn().mockResolvedValue({ customer: 'cus_test_active', status: 'paid',
     parent: { subscription_details: { subscription: remote.id } }, billing_reason: 'subscription_update',
-    lines: { has_more: false, data: [{ pricing: { price_details: { price: 'price_test_gold_monthly' } } }] } });
+    lines: { has_more: false, data: [{ pricing: { price_details: { price: targetPriceIds.monthly } } }] } });
   const orderInserts: any[] = []; const rows: any[] = []; const orderUpdates: any[] = [];
   const userTableReads: string[] = []; let profileReadCount = 0;
   let insertError: any = null;
@@ -299,17 +316,18 @@ function createSubscriptionChangeGuardHarness(options: {
   } };
   return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
     targetPlanId, subscriptionRetrieve, subscriptionUpdate, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
-    rows, orderInserts, orderUpdates, userTableReads, adminSupabase, setInsertError: (e: any) => { insertError = e; } };
+    rows, orderInserts, orderUpdates, userTableReads, adminSupabase, targetPriceIds, fullPricePreview,
+    setInsertError: (e: any) => { insertError = e; } };
 }
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-function fakeQuote() { return { amountDue: 1990, currency: 'usd', prorationDate: Math.floor(Date.now() / 1000), fingerprint: 'a'.repeat(64) }; }
+function fakeQuote() { return { amountDue: 2990, currency: 'usd', quotedAt: Math.floor(Date.now() / 1000), fingerprint: 'a'.repeat(64) }; }
 async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarness>, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) {
   const preview = await h.caller.previewSubscriptionPlanChange(input);
   if (preview.status !== 'quote') throw new Error('Expected financial quote');
-  const { amountDue, currency, prorationDate, fingerprint } = preview;
-  return { amountDue, currency, prorationDate, fingerprint };
+  const { amountDue, currency, quotedAt, fingerprint } = preview;
+  return { amountDue, currency, quotedAt, fingerprint };
 }
 
 describe('paymentsRouter error sanitization', () => {
@@ -1183,20 +1201,61 @@ describe('paymentsRouter error sanitization', () => {
     const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
     const input = { planId: h.targetPlanId, billingCycle };
     const quote = await h.caller.previewSubscriptionPlanChange(input);
-    expect(quote).toMatchObject({ amountDue: 1990, currency: 'usd', annualAmount: billingCycle === 'yearly' ? 29900 : null });
+    const targetAmount = billingCycle === 'yearly' ? h.plan.yearly_price : h.plan.monthly_price;
+    const targetPrice = billingCycle === 'yearly' ? h.plan.stripe_yearly_price_id : h.plan.stripe_monthly_price_id;
+    expect(quote).toMatchObject({ amountDue: targetAmount, currency: 'usd', annualAmount: billingCycle === 'yearly' ? targetAmount : null });
     expect(quote).not.toHaveProperty('subscriptionId'); expect(quote).not.toHaveProperty('customerId');
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    expect(h.invoicePreview).toHaveBeenCalledWith(expect.objectContaining({ subscription: 'sub_test_active', subscription_details: {
+      items: [{ id: 'si_test_current', price: targetPrice }], billing_cycle_anchor: 'now', proration_behavior: 'none',
+    } }));
+    expect(h.invoicePreview.mock.calls[0][0].subscription_details).not.toHaveProperty('proration_date');
     if (quote.status !== 'quote') throw new Error('Expected financial quote');
-    const { amountDue, currency, prorationDate, fingerprint } = quote;
-    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, prorationDate, fingerprint } }))
+    const { amountDue, currency, quotedAt, fingerprint } = quote;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, quotedAt, fingerprint } }))
       .resolves.toMatchObject({ status: 'pending_fulfillment' });
     expect(h.orderInserts).toHaveLength(1);
     expect(h.subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
-      items: [{ id: 'si_test_current', price: billingCycle === 'yearly' ? 'price_test_gold_yearly' : 'price_test_gold_monthly' }],
-      billing_cycle_anchor: 'now', proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete', proration_date: prorationDate,
+      items: [{ id: 'si_test_current', price: targetPrice }],
+      billing_cycle_anchor: 'now', proration_behavior: 'none', payment_behavior: 'error_if_incomplete',
     }), { idempotencyKey: 'subscription-change:order-change-1' });
+    expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('proration_date');
     expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('cancel_at_period_end');
     expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'amount-below-catalog', 'amount-above-catalog', 'currency', 'partial-lines', 'old-price-credit',
+    'target-proration', 'missing-target-price', 'discount', 'tax', 'customer-balance',
+  ])('rejects non-full-price preview evidence: %s', async problem => {
+    const h = createSubscriptionChangeGuardHarness();
+    const preview: any = h.fullPricePreview('monthly');
+    if (problem === 'amount-below-catalog') preview.amount_due--;
+    if (problem === 'amount-above-catalog') preview.amount_due++;
+    if (problem === 'currency') preview.currency = 'eur';
+    if (problem === 'partial-lines') preview.lines.has_more = true;
+    if (problem === 'old-price-credit') preview.lines.data.push({
+      ...structuredClone(preview.lines.data[0]), id: 'il_old_credit', amount: -100,
+      subtotal: -100, pricing: { price_details: { price: 'price_test_old' } },
+      parent: { subscription_item_details: { subscription: h.remote.id, subscription_item: 'si_test_current', proration: true } },
+    });
+    if (problem === 'target-proration') preview.lines.data[0].parent.subscription_item_details.proration = true;
+    if (problem === 'missing-target-price') preview.lines.data[0].pricing.price_details.price = 'price_test_old';
+    if (problem === 'discount') preview.lines.data[0].discount_amounts = [{ amount: 1 }];
+    if (problem === 'tax') preview.lines.data[0].taxes = [{ amount: 1 }];
+    if (problem === 'customer-balance') preview.starting_balance = -1;
+    h.invoicePreview.mockResolvedValue(preview);
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps quote time outside the semantic fingerprint', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const first = await getQuote(h, input); vi.advanceTimersByTime(1000); const second = await getQuote(h, input);
+    expect(second.quotedAt).toBe(first.quotedAt + 1); expect(second.fingerprint).toBe(first.fingerprint);
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1256,11 +1315,11 @@ describe('paymentsRouter error sanitization', () => {
   it.each(['amount', 'currency', 'catalog', 'term', 'expired'])('requires reconfirmation on %s drift before any durable write', async field => {
     const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
     const expected = await getQuote(h, input);
-    if (field === 'amount') h.invoicePreview.mockResolvedValue({ amount_due: 1991, currency: 'usd' });
-    if (field === 'currency') h.invoicePreview.mockResolvedValue({ amount_due: 1990, currency: 'eur' });
+    if (field === 'amount') h.invoicePreview.mockResolvedValue(h.fullPricePreview('monthly', { amount_due: 2991 }));
+    if (field === 'currency') h.invoicePreview.mockResolvedValue(h.fullPricePreview('monthly', { currency: 'eur' }));
     if (field === 'catalog') h.plan.monthly_price++;
     if (field === 'term') h.remote.items.data[0].current_period_end++;
-    if (field === 'expired') expected.prorationDate -= 301;
+    if (field === 'expired') expected.quotedAt -= 301;
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
@@ -1336,13 +1395,12 @@ describe('paymentsRouter error sanitization', () => {
       : h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('报价已过期') });
     expect(h.rows[0]).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
     expect(h.invoiceList).toHaveBeenCalled(); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
-    h.invoicePreview.mockResolvedValue({ amount_due: 2000, currency: 'usd' });
     const fresh = await getQuote(h, input);
-    expect(fresh.prorationDate).toBe(expected.prorationDate + 301); expect(fresh.amountDue).toBe(2000);
+    expect(fresh.quotedAt).toBe(expected.quotedAt + 301); expect(fresh.amountDue).toBe(2990);
     expect(h.orderInserts).toHaveLength(1); // Preview alone does not replace the attempt.
     await h.caller.changeSubscriptionPlan({ ...input, expected: fresh });
     expect(h.orderInserts).toHaveLength(2); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
-    expect(h.subscriptionUpdate.mock.calls[1][1].proration_date).toBe(fresh.prorationDate);
+    expect(h.subscriptionUpdate.mock.calls[1][1]).not.toHaveProperty('proration_date');
     expect(h.subscriptionUpdate.mock.calls[1][2].idempotencyKey).not.toBe(h.subscriptionUpdate.mock.calls[0][2].idempotencyKey);
     expect(h.rows.filter(r => r.status === 'pending')).toHaveLength(1);
   });
@@ -1436,7 +1494,7 @@ describe('paymentsRouter error sanitization', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
     const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
     const expected = await getQuote(h, input);
-    h.invoicePreview.mockImplementationOnce(async () => { vi.advanceTimersByTime(301000); return { amount_due: 1990, currency: 'usd' }; });
+    h.invoicePreview.mockImplementationOnce(async () => { vi.advanceTimersByTime(301000); return h.fullPricePreview('monthly'); });
     await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
     const fresh = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));

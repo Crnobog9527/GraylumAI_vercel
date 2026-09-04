@@ -252,8 +252,8 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
         if (state.previewMode === 'expired') throw new Error('升级报价已过期，请重新预览并确认。');
         if (state.previewMode === 'applied') return { status: 'pending_fulfillment' };
         return { status: 'quote',
-        planName: 'Gold', billingCycle: input.billingCycle, amountDue: state.previews.length === 1 ? 18765 : 18766,
-        currency: 'usd', annualAmount: 29900, prorationDate: 1788535181, fingerprint: 'a'.repeat(64) }; }),
+        planName: 'Gold', billingCycle: input.billingCycle, amountDue: input.billingCycle === 'yearly' ? 29900 : 2990,
+        currency: 'usd', annualAmount: input.billingCycle === 'yearly' ? 29900 : null, quotedAt: 1788535181, fingerprint: 'a'.repeat(64) }; }),
       changeSubscriptionPlan: mutation(async input => { state.changes.push(input); if (state.drift) { state.drift = false; throw new Error('价格已变化，请重新预览并确认。'); } return { status: 'pending_fulfillment' }; }),
       createCheckoutSession: mutation(async input => { state.checkouts.push(input); throw new Error('unexpected checkout'); }),
       createCustomerPortalSession: mutation(async () => ({})), syncCheckoutSession: mutation(async () => ({}))
@@ -283,21 +283,33 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
     await page.getByRole('button', { name: '按年', exact: true }).click({ timeout: 5000 }).catch(error => { throw new Error(pageErrors.join('; ') || String(error)); });
     await page.getByRole('button', { name: '升级套餐', exact: true }).click();
     const dialog = page.getByRole('dialog'); await dialog.waitFor();
-    expect(await dialog.textContent()).toContain('187.65');
     expect(await dialog.textContent()).toContain('299.00');
-    expect(await dialog.textContent()).toContain('年付按全年计费');
+    expect(await dialog.textContent()).toContain('升级到 Gold 年付');
+    expect(await dialog.textContent()).toContain('年付完整套餐价格');
+    expect(await dialog.textContent()).toContain('原套餐费用不退款、不抵扣');
+    expect(await dialog.textContent()).toContain('已有积分全部保留');
+    expect(await dialog.textContent()).toContain('先发放第 1 期积分');
+    expect(await dialog.textContent()).not.toContain('补差价');
+    expect(await dialog.textContent()).not.toContain('未使用');
     expect(await page.evaluate(() => (window as any).__pay1.changes.length)).toBe(0);
     await page.getByRole('button', { name: '确认付款并升级' }).click();
     await dialog.waitFor({ state: 'hidden' });
     expect(await page.getByText('价格已变化，请重新预览并确认。').count()).toBe(1);
     await page.getByRole('button', { name: '升级套餐', exact: true }).click();
-    await dialog.waitFor(); expect(await dialog.textContent()).toContain('187.66');
+    await dialog.waitFor(); expect(await dialog.textContent()).toContain('299.00');
     await page.getByRole('button', { name: '确认付款并升级' }).click();
     await dialog.waitFor({ state: 'hidden' });
     const state = await page.evaluate(() => (window as any).__pay1);
     expect(state.previews).toHaveLength(2); expect(state.changes).toHaveLength(2); expect(state.checkouts).toHaveLength(0);
-    expect(state.changes[1].expected.amountDue).toBe(18766); expect(state.invalidations).toBeGreaterThanOrEqual(6);
+    expect(state.changes[1].expected.amountDue).toBe(29900); expect(state.invalidations).toBeGreaterThanOrEqual(6);
     expect(await page.getByText('升级请求已受理，付款及账单确认后套餐和积分才会更新。请稍后刷新查看。').count()).toBe(1);
+    await page.getByRole('button', { name: '按月', exact: true }).click();
+    await page.getByRole('button', { name: '升级套餐', exact: true }).click(); await dialog.waitFor();
+    expect(await dialog.textContent()).toContain('升级到 Gold 月付');
+    expect(await dialog.textContent()).toContain('29.90');
+    expect(await dialog.textContent()).toContain('完整一期积分');
+    expect(await dialog.textContent()).toContain('新的 Gold 月付周期从升级成功后开始');
+    await page.getByRole('button', { name: '暂不升级' }).click();
     await page.evaluate(() => { (window as any).__pay1.previewMode = 'expired'; });
     await page.getByRole('button', { name: '升级套餐', exact: true }).click();
     expect(await page.getByText('升级报价已过期，请重新预览并确认。').count()).toBe(1);

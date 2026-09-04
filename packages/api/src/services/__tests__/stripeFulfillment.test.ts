@@ -6920,36 +6920,56 @@ describe('PAY-1 refund waits for committed credit fulfillment', () => {
 
 describe('PAY-1 exact-source paid upgrade invoices', () => {
   function fixture(billingCycle: 'monthly' | 'yearly') {
+    const targetAmount = billingCycle === 'yearly' ? 29900 : 2990;
     const source = { id: 'upgrade-source', user_id: 'upgrade-user', item_id: 'upgrade-plan', item_type: 'membership_plan',
       billing_cycle: billingCycle, stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade',
       stripe_price_id: 'price_upgrade', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade',
       status: 'pending', created_at: '2026-09-04T00:00:00.000Z',
-      metadata: { source: 'changeSubscriptionPlan', upgradeAttempt: { quote: { amountDue: 1990, currency: 'usd' } } } };
-    const supabase = createRefundWebhookSupabase({ payment_orders: [source], profiles: [{ id: 'upgrade-user', credits: 100, membership_level: 'pro' }],
-      membership_plans: [{ id: 'upgrade-plan', name: 'Gold', level: 'gold', monthly_credits: 300, monthly_bonus_credits: 0, yearly_credits: 3600 }] });
+      metadata: { source: 'changeSubscriptionPlan', upgradeAttempt: { quote: { amountDue: targetAmount, currency: 'usd' } } } };
+    const historicalGrant = { id: 'grant-old', user_id: 'upgrade-user', membership_plan_id: 'old-plan', stripe_subscription_id: 'sub_old',
+      stripe_invoice_id: 'in_old', billing_cycle: 'monthly', grant_type: 'monthly_invoice', grant_period_key: 'invoice:in_old',
+      period_start: '2026-08-01T00:00:00.000Z', period_end: '2026-09-01T00:00:00.000Z', period_index: null,
+      total_periods: 1, credits_granted: 1000, consumed_amount: 583, accounting_state: 'trusted', status: 'granted' };
+    const historicalTransaction = { id: 'txn-old', user_id: 'upgrade-user', amount: 1000, type: 'addition',
+      ledger_type: 'grant', reason_code: 'monthly_invoice', source_type: 'stripe_invoice', source_id: 'in_old' };
+    const supabase = createRefundWebhookSupabase({ payment_orders: [source], profiles: [{ id: 'upgrade-user', credits: 417, membership_level: 'pro' }],
+      membership_plans: [{ id: 'upgrade-plan', name: 'Gold', level: 'gold', monthly_credits: 300, monthly_bonus_credits: 0, yearly_credits: 3600 }],
+      subscription_credit_grants: [historicalGrant], credit_transactions: [historicalTransaction] });
     const start = 1788480000; const end = billingCycle === 'yearly' ? 1820016000 : 1791072000;
-    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: 1990, amount_due: 1990, currency: 'usd',
+    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: targetAmount, amount_due: targetAmount, currency: 'usd',
       created: start + 1, customer: 'cus_upgrade',
       parent: { subscription_details: { subscription: 'sub_upgrade', metadata: { upgradeAttemptId: 'upgrade-source', userId: 'upgrade-user', itemId: 'upgrade-plan', priceId: 'price_upgrade' } } },
       lines: { has_more: false, data: [
-        { id: 'il_credit', amount: -1000, pricing: { price_details: { price: 'price_old' } }, period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } },
-        { id: 'il_target', amount: 2990, pricing: { price_details: { price: 'price_upgrade' } }, period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } },
+        { id: 'il_target', amount: targetAmount, currency: 'usd', quantity: 1, pricing: { price_details: { price: 'price_upgrade' } },
+          period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: false } } },
       ] } } as unknown as Stripe.Invoice;
-    return { supabase, invoice, source, start, end };
+    return { supabase, invoice, source, start, end, targetAmount, historicalGrant, historicalTransaction };
   }
-  it.each(['monthly', 'yearly'] as const)('fulfills paid %s target once from proration lines and preserves replay safety', async billingCycle => {
-    const { supabase, invoice } = fixture(billingCycle);
+  it.each(['monthly', 'yearly'] as const)('adds the paid full-price %s target grant once and preserves historical credits and replay safety', async billingCycle => {
+    const { supabase, invoice, historicalGrant, historicalTransaction } = fixture(billingCycle);
     await fulfillMembershipInvoice(supabase, invoice);
     const before = structuredClone(supabase.tables);
     await fulfillMembershipInvoice(supabase, invoice);
-    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'gold', credits: 400 });
-    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
-    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({ credits_granted: 300, billing_cycle: billingCycle,
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'gold', credits: 717 });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(2);
+    expect(supabase.tables.subscription_credit_grants[0]).toEqual(historicalGrant);
+    expect(supabase.tables.credit_transactions[0]).toEqual(historicalTransaction);
+    expect(supabase.tables.subscription_credit_grants[1]).toMatchObject({ credits_granted: 300, billing_cycle: billingCycle,
       ...(billingCycle === 'yearly' ? { period_index: 1, total_periods: 12 } : {}) });
     expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'upgrade-plan', billing_cycle: billingCycle });
     expect(supabase.tables.profiles).toEqual(before.profiles);
     expect(supabase.tables.credit_transactions).toEqual(before.credit_transactions);
     expect(supabase.tables.subscription_credit_grants).toEqual(before.subscription_credit_grants);
+  });
+  it('keeps yearly upgrade periods 2 through 12 releasable from the new target term', async () => {
+    const { supabase, invoice, start } = fixture('yearly');
+    await fulfillMembershipInvoice(supabase, invoice);
+    const release = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date((start + (31 * 24 * 60 * 60)) * 1000),
+    });
+    expect(release).toMatchObject({ releasedGrantCount: 1, releasedCredits: 300 });
+    expect(supabase.tables.subscription_credit_grants.map(row => row.period_index)).toEqual([null, 1, 2]);
+    expect(supabase.tables.profiles[0]).toMatchObject({ credits: 1017 });
   });
   it.each(['wrong-price', 'wrong-customer', 'failed-source', 'missing-source', 'unpaid', 'changed-amount'])('rejects %s before grants or rights writes', async problem => {
     const { supabase, invoice } = fixture('monthly');
@@ -6974,13 +6994,20 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
     expect(supabase.tables).toEqual(before);
   });
-  it('accepts a full new target period while ignoring the old-price proration credit', async () => {
-    const { supabase, invoice } = fixture('yearly');
-    invoice.lines.data[1].parent!.subscription_item_details!.proration = false;
-    await fulfillMembershipInvoice(supabase, invoice);
-    expect(supabase.tables.subscription_credit_grants).toHaveLength(1);
-    expect(supabase.tables.subscription_credit_grants[0]).toMatchObject({ credits_granted: 300, period_index: 1, total_periods: 12 });
-  });
+  it.each(['target-proration', 'old-price-credit', 'partial-lines', 'wrong-line-amount', 'unpaid-amount'])(
+    'rejects non-full-price paid upgrade invoice evidence: %s', async problem => {
+      const { supabase, invoice } = fixture('yearly');
+      if (problem === 'target-proration') invoice.lines.data[0].parent!.subscription_item_details!.proration = true;
+      if (problem === 'old-price-credit') invoice.lines.data.unshift({ ...structuredClone(invoice.lines.data[0]), id: 'il_credit',
+        amount: -1000, pricing: { price_details: { price: 'price_old' } },
+        parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } } as any);
+      if (problem === 'partial-lines') invoice.lines.has_more = true;
+      if (problem === 'wrong-line-amount') invoice.lines.data[0].amount--;
+      if (problem === 'unpaid-amount') invoice.amount_paid--;
+      const before = structuredClone(supabase.tables);
+      await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
+      expect(supabase.tables).toEqual(before);
+    });
   it('old upgrade replay does not release a newer residual lock', async () => {
     const { supabase, invoice } = fixture('monthly');
     await fulfillMembershipInvoice(supabase, invoice);

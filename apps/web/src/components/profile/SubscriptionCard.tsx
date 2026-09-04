@@ -304,7 +304,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [upgrade, setUpgrade] = useState<{
     planId: string; billingCycle: 'monthly' | 'yearly'; planName: string;
     amountDue: number; currency: string; annualAmount: number | null;
-    prorationDate: number; fingerprint: string;
+    quotedAt: number; fingerprint: string;
   } | null>(null);
   const confirmingUpgrade = useRef(false);
   const confirmUpgrade = async () => {
@@ -313,7 +313,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     try {
       await changePlan.mutateAsync({ planId: upgrade.planId, billingCycle: upgrade.billingCycle,
         expected: { amountDue: upgrade.amountDue, currency: upgrade.currency,
-          prorationDate: upgrade.prorationDate, fingerprint: upgrade.fingerprint } });
+          quotedAt: upgrade.quotedAt, fingerprint: upgrade.fingerprint } });
       setUpgrade(null);
       void invalidatePostCheckoutMembershipQueries(utils);
       void utils.payments.getSubscriptionManagement.invalidate();
@@ -583,13 +583,25 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         <Dialog open={upgrade !== null} onOpenChange={(open) => { if (!open && !changePlan.isPending) setUpgrade(null); }}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>确认升级套餐</DialogTitle>
-              <DialogDescription>升级现有订阅并开始新的计费周期，付款及账单确认后生效。原周期未使用金额的折抵已计入本次预览。</DialogDescription>
+              <DialogTitle>{upgrade ? `升级到 ${upgrade.planName} ${upgrade.billingCycle === 'yearly' ? '年付' : '月付'}` : '确认升级套餐'}</DialogTitle>
+              <DialogDescription>本次按目标套餐完整价格收费。付款及账单确认后，新的完整订阅周期和套餐权益才会生效。</DialogDescription>
             </DialogHeader>
             {upgrade && <div>
-              <p>{upgrade.planName} · {upgrade.billingCycle === 'yearly' ? '年付' : '月付'}</p>
-              <p>本次立即应付：{new Intl.NumberFormat('zh-CN', { style: 'currency', currency: upgrade.currency }).format(upgrade.amountDue / 100)}</p>
-              {upgrade.annualAmount !== null && <p>年付按全年计费，目录全年价格：{new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD' }).format(upgrade.annualAmount / 100)}；本次补款以上述预览为准，积分按月释放。</p>}
+              <p className="font-semibold">本次立即支付：{new Intl.NumberFormat('zh-CN', { style: 'currency', currency: upgrade.currency }).format(upgrade.amountDue / 100)}</p>
+              {upgrade.annualAmount !== null && <p>年付完整套餐价格：{new Intl.NumberFormat('zh-CN', { style: 'currency', currency: upgrade.currency }).format(upgrade.annualAmount / 100)}</p>}
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
+                <li>原套餐费用不退款、不抵扣。</li>
+                <li>已有积分全部保留。</li>
+                {upgrade.billingCycle === 'yearly'
+                  ? <>
+                    <li>年付积分不会一次发完；支付成功后先发放第 1 期积分，之后继续按月释放。</li>
+                    <li>新的 {upgrade.planName} 年付周期从升级成功后开始。</li>
+                  </>
+                  : <>
+                    <li>支付成功后会另外发放 {upgrade.planName} 月付当前配置的完整一期积分。</li>
+                    <li>新的 {upgrade.planName} 月付周期从升级成功后开始。</li>
+                  </>}
+              </ul>
             </div>}
             <DialogFooter>
               <Button variant="outline" disabled={changePlan.isPending} onClick={() => setUpgrade(null)}>暂不升级</Button>
