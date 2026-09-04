@@ -855,11 +855,13 @@ function createRefundWebhookSupabase(
 
 function makeGenericRefundSupabase(options: {
   match: { column: string; value: string };
-  order?: { id: string; amount_total: number | string | null; metadata: Record<string, unknown> | null };
+  order?: { id: string; item_type: string; fulfilled_at: string | null; amount_total: number | string | null; metadata: Record<string, unknown> | null };
   rpcData?: unknown[];
 }) {
   const order = options.order ?? {
     id: '00000000-0000-4000-8000-000000000100',
+    item_type: 'credit_package',
+    fulfilled_at: '2026-09-04T00:00:00.000Z',
     amount_total: 990,
     metadata: { grantedCredits: 100 },
   };
@@ -2197,19 +2199,7 @@ describe('stripe fulfillment helpers', () => {
       },
     );
 
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toEqual(
-      expect.objectContaining({
-        status: 'completed',
-        payment_status: 'paid',
-        metadata: expect.objectContaining({
-          transactionId: 'txn-1',
-          grantedCredits: 100,
-          lastPaymentOrderStatus: 'completed',
-          lastPaymentOrderStatusSource: 'checkout.session.completed',
-        }),
-      }),
-    );
+    expect(updates).toEqual([]);
   });
 
   it('marks expired checkout sessions as terminal without fulfillment', async () => {
@@ -2240,7 +2230,9 @@ describe('stripe fulfillment helpers', () => {
           update(payload: unknown) {
             updates.push(payload);
             return {
-              eq() {
+              eq() { return this; },
+              is(column: string, value: null) {
+                expect([column, value]).toEqual(['fulfilled_at', null]);
                 return Promise.resolve({ error: null });
               },
             };
@@ -6249,6 +6241,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000300',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           checkoutSessionId: 'cs_test_credit_package_refund',
@@ -6310,6 +6304,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_webhook_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000310',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           itemType: 'credit_package',
@@ -6355,6 +6351,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'stripe_checkout_session_id', value: 'cs_test_checkout_metadata_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000320',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           itemType: 'credit_package',
@@ -6698,7 +6696,7 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
   it.each(['card', 'alipay'])('matches %s refunds using the stored payment intent, with pending/failure/success and stable replay keys', async (method) => {
     const { rpc, supabase } = makeGenericRefundSupabase({
       match: { column: 'metadata->>paymentIntentId', value: 'pi_pay1_refund' },
-      order: { id: 'order-pay1', amount_total: 1000, metadata: { itemType: 'credit_package', paymentIntentId: 'pi_pay1_refund', grantedCredits: 100 } },
+      order: { id: 'order-pay1', item_type: 'credit_package', fulfilled_at: '2026-09-04T00:00:00.000Z', amount_total: 1000, metadata: { itemType: 'credit_package', paymentIntentId: 'pi_pay1_refund', grantedCredits: 100 } },
     });
     const charge = { id: 'ch_pay1', amount: 1000, amount_refunded: 1000, currency: 'usd', payment_intent: 'pi_pay1_refund', metadata: {}, payment_method_details: { type: method } };
     const event = (type: string, status: string) => ({ id: `evt_${status}`, type, data: { object: {
@@ -6743,7 +6741,7 @@ describe('PAY-1 early refund delivery', () => {
     const match = { column: 'metadata->>paymentIntentId', value: 'not-bound-yet' };
     const { rpc, supabase } = makeGenericRefundSupabase({
       match,
-      order: { id: 'order-early-refund', amount_total: 1000, metadata: { itemType: 'credit_package', grantedCredits: 100 } },
+      order: { id: 'order-early-refund', item_type: 'credit_package', fulfilled_at: '2026-09-04T00:00:00.000Z', amount_total: 1000, metadata: { itemType: 'credit_package', grantedCredits: 100 } },
     });
     const event = { id: 'evt_early_refund', type: 'refund.updated', data: { object: {
       id: 're_early', amount: 1000, currency: 'usd', status: 'succeeded', created: 1788470400,
@@ -6765,5 +6763,76 @@ describe('PAY-1 early refund delivery', () => {
     expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
       p_order_id: 'order-early-refund', p_idempotency_key: 'stripe_refund:re_early', p_is_full_refund: true,
     }));
+  });
+});
+
+describe('PAY-1 refund waits for committed credit fulfillment', () => {
+  it.each(['card', 'alipay'])('defers a bound %s refund after failed fulfillment, then reconciles after checkout retry', async (method) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-bound', item_type: 'credit_package', amount_total: 1000, stripe_checkout_session_id: 'cs_bound', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    let failFulfillment = true;
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'atomic_fulfill_credit_package') {
+        if (failFulfillment) return { data: null, error: new Error('transaction rolled back') };
+        // Fixture for the existing RPC's single committed fulfillment snapshot.
+        Object.assign(tables.payment_orders[0], {
+          fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'completed',
+          metadata: { ...tables.payment_orders[0].metadata, grantedCredits: 100, transactionId: 'txn-bound' },
+        });
+        return { data: [{ fulfilled_at: tables.payment_orders[0].fulfilled_at }], error: null };
+      }
+      expect(name).toBe('atomic_reconcile_stripe_refund');
+      expect(tables.payment_orders[0]).toMatchObject({ fulfilled_at: expect.any(String), metadata: { grantedCredits: 100 } });
+      return { data: [{ reconciled: true }], error: null };
+    });
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    const checkoutEvent = { type: 'checkout.session.completed', data: { object: {
+      id: 'cs_bound', mode: 'payment', payment_status: 'paid', amount_total: 1000,
+      payment_intent: 'pi_bound', payment_method_types: [method],
+      metadata: { userId: 'user-bound', itemId: 'package-bound', itemType: 'credit_package' },
+    } } } as any;
+    const refundInput = { eventType: 'refund.updated', refund: {
+      id: 're_bound', status: 'succeeded', amount: 1000, currency: 'usd', payment_intent: 'pi_bound',
+      metadata: { checkoutSessionId: 'cs_bound' },
+    } } as any;
+    await expect(handleStripeWebhookEvent(supabase, checkoutEvent)).rejects.toMatchObject({ stage: 'fulfill_credit_package_rpc' });
+    expect(tables.payment_orders[0]).toMatchObject({ fulfilled_at: null, metadata: { paymentIntentId: 'pi_bound' } });
+    await expect(reconcileStripeRefund(supabase, refundInput)).rejects.toMatchObject({ stage: 'refund_order_unfulfilled' });
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['atomic_fulfill_credit_package']);
+    failFulfillment = false;
+    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    await expect(reconcileStripeRefund(supabase, refundInput)).resolves.toMatchObject({ reconciled: true });
+    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'atomic_fulfill_credit_package', 'atomic_fulfill_credit_package', 'atomic_reconcile_stripe_refund',
+    ]);
+    expect(rpc).toHaveBeenLastCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-bound', p_idempotency_key: 'stripe_refund:re_bound', p_is_full_refund: true,
+    }));
+  });
+
+  it('does not let an in-flight checkout upsert erase a concurrently committed credit snapshot', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{ id: 'order-stale-checkout', stripe_checkout_session_id: 'cs_stale', fulfilled_at: null, status: 'pending', metadata: { paymentIntentId: 'pi_stale' } }],
+    }, {
+      onBeforeUpdate: async ({ table }) => {
+        if (table !== 'payment_orders') return;
+        Object.assign(supabase.tables.payment_orders[0], {
+          fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'refunded', payment_status: 'refunded',
+          metadata: { paymentIntentId: 'pi_stale', grantedCredits: 100, transactionId: 'txn-stale', refundStatus: 'succeeded' },
+        });
+      },
+    });
+    await upsertPaymentOrderBySession(supabase, {
+      id: 'cs_stale', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_stale',
+      metadata: { userId: 'user-stale', itemId: 'package-stale', itemType: 'credit_package' },
+    } as unknown as Stripe.Checkout.Session);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'refunded', payment_status: 'refunded',
+      metadata: { paymentIntentId: 'pi_stale', grantedCredits: 100, transactionId: 'txn-stale', refundStatus: 'succeeded' },
+    });
   });
 });

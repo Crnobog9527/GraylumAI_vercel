@@ -35,6 +35,8 @@ type SubscriptionRefundOrderRow = {
 };
 type RefundPaymentOrder = {
   id: string;
+  item_type?: string | null;
+  fulfilled_at?: string | null;
   amount_total?: number | string | null;
   metadata?: Record<string, unknown> | null;
 };
@@ -1009,7 +1011,7 @@ async function findRefundPaymentOrder(
       'order_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('id', facts.orderId)
         .maybeSingle(),
       safeContext,
@@ -1022,7 +1024,7 @@ async function findRefundPaymentOrder(
       'invoice_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('stripe_invoice_id', facts.invoiceId)
         .maybeSingle(),
       safeContext,
@@ -1035,7 +1037,7 @@ async function findRefundPaymentOrder(
       'checkout_session_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('stripe_checkout_session_id', facts.checkoutSessionId)
         .maybeSingle(),
       safeContext,
@@ -1048,7 +1050,7 @@ async function findRefundPaymentOrder(
       'payment_intent_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('metadata->>paymentIntentId', facts.paymentIntentId)
         .maybeSingle(),
       safeContext,
@@ -1061,7 +1063,7 @@ async function findRefundPaymentOrder(
       'charge_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('metadata->>chargeId', facts.chargeId)
         .maybeSingle(),
       safeContext,
@@ -1674,10 +1676,17 @@ export async function upsertPaymentOrderBySession(
   };
 
   if (existing.data?.id) {
-    const result = await supabase
+    const isCreditPackage = session.mode === 'payment' && metadata.itemType === 'credit_package';
+    // The fulfillment RPC commits credits, ledger, metadata and fulfilled_at
+    // together. A Checkout replay must never replace that financial snapshot.
+    if (isCreditPackage && existing.data.fulfilled_at) return;
+    const query = supabase
       .from('payment_orders')
       .update(payload)
       .eq('id', existing.data.id);
+    const result = isCreditPackage
+      ? await query.is('fulfilled_at', null)
+      : await query;
 
     if (result.error) {
       throwFulfillmentError(
@@ -2156,6 +2165,19 @@ export async function reconcileStripeRefund(
       );
     }
     return null;
+  }
+
+  // A bound Checkout may still be waiting on atomic credit fulfillment.
+  // Its monotonic fulfilled_at is committed with grantedCredits and the ledger;
+  // defer successful refunds until that snapshot exists, including when a
+  // concurrent fulfillment has not committed yet. Failed refunds only audit.
+  if (!facts.failed && order.item_type === 'credit_package' && !order.fulfilled_at) {
+    throwFulfillmentError(
+      'refund_order_unfulfilled',
+      STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+      new Error('Credit fulfillment not committed; retry refund webhook'),
+      { orderId: maskIdentifier(order.id), refundId: maskIdentifier(facts.refundId) },
+    );
   }
 
   const isFullRefund = isFullStripeRefundForOrder(facts, order);
