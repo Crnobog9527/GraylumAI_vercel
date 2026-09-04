@@ -6714,24 +6714,90 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
       p_order_id: 'order-pay1', p_is_failed: false, p_is_full_refund: true, p_idempotency_key: 'stripe_refund:re_pay1',
     })]);
   });
-  it('Portal period-end cancellation preserves the current paid term and annual grant schedule', async () => {
-    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
-    const start = 1788470400;
-    const end = start + 31536000;
+  const paidTermStart = 1788532484;
+  const paidTermEnd = 1820068484;
+
+  function makeCancellationFixture() {
     const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
-      payment_orders: [], profiles: [{ id: 'user-pay1', membership_level: 'pro', credits: 100 }], credit_transactions: [], membership_plans: [],
-      user_subscriptions: [{ id: 'mirror-pay1', user_id: 'user-pay1', stripe_subscription_id: 'sub_pay1', status: 'active', current_period_start: new Date(start * 1000).toISOString(), current_period_end: new Date(end * 1000).toISOString() }],
-      subscription_credit_grants: [{ id: 'grant-pay1', status: 'scheduled' }],
+      payment_orders: [{ id: 'order-pay1', status: 'completed' }],
+      profiles: [{ id: 'user-pay1', membership_level: 'pro', credits: 1767 }],
+      credit_transactions: [{ id: 'paid-grant-tx', amount: 1667 }], membership_plans: [],
+      user_subscriptions: [{
+        id: 'mirror-pay1', user_id: 'user-pay1', stripe_subscription_id: 'sub_pay1',
+        status: 'active', billing_cycle: 'yearly', cancel_at_period_end: 'false',
+        current_period_start: new Date(paidTermStart * 1000).toISOString(),
+        current_period_end: new Date(paidTermEnd * 1000).toISOString(),
+        credit_release_terminated_at: null,
+      }],
+      subscription_credit_grants: [
+        { id: 'grant-pay1', status: 'granted', credits_granted: 1667, total_periods: 12 },
+        { id: 'future-grant-pay1', status: 'scheduled', credits_granted: 1667 },
+      ],
     };
     const rpc = vi.fn();
-    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
-    await handleStripeWebhookEvent(supabase as any, { type: 'customer.subscription.updated', data: { object: {
-      id: 'sub_pay1', status: 'active', cancel_at_period_end: true,
-      items: { data: [{ current_period_start: start, current_period_end: end }] },
-    } } } as any);
-    expect(tables.user_subscriptions[0]).toMatchObject({ status: 'active', cancel_at_period_end: 'true', current_period_end: new Date(end * 1000).toISOString() });
-    expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 100 });
-    expect(tables.subscription_credit_grants).toEqual([{ id: 'grant-pay1', status: 'scheduled' }]);
+    const from = vi.fn((table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table));
+    return { tables, rpc, supabase: { from, rpc } };
+  }
+
+  const cancellationCases = [
+    { name: 'legacy cancellation', legacy: true, cancelAt: null, expected: 'true' },
+    { name: 'Portal flexible cancellation', legacy: false, cancelAt: paidTermEnd, expected: 'true' },
+    { name: 'normal renewal', legacy: false, cancelAt: null, expected: 'false' },
+    { name: 'one second before period end', legacy: false, cancelAt: paidTermEnd - 1, expected: 'false' },
+    { name: 'one second after period end', legacy: false, cancelAt: paidTermEnd + 1, expected: 'false' },
+    ...[0, -1, paidTermEnd + 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map((cancelAt) => ({
+      name: `invalid cancel_at ${cancelAt}`, legacy: false, cancelAt, expected: 'false',
+    })),
+  ];
+
+  describe.each(['sync', 'webhook'] as const)('Portal cancellation through %s', (entryPoint) => {
+    it.each(cancellationCases)('$name preserves paid rights and annual releases', async ({ legacy, cancelAt, expected }) => {
+      const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+      const { tables, rpc, supabase } = makeCancellationFixture();
+      const before = structuredClone(tables);
+      const subscription = {
+        id: 'sub_pay1', status: 'active', billing_mode: { type: 'flexible' },
+        cancel_at_period_end: legacy, cancel_at: cancelAt,
+        items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] },
+      } as Stripe.Subscription;
+      if (entryPoint === 'sync') {
+        await syncSubscriptionState(supabase, subscription);
+      } else {
+        await handleStripeWebhookEvent(supabase as any, {
+          type: 'customer.subscription.updated', data: { object: subscription },
+        } as Stripe.Event);
+      }
+      expect(tables.user_subscriptions[0]).toMatchObject({
+        ...before.user_subscriptions[0], cancel_at_period_end: expected,
+      });
+      for (const table of ['profiles', 'credit_transactions', 'payment_orders', 'subscription_credit_grants'] as const) {
+        expect(tables[table]).toEqual(before[table]);
+        expect(supabase.from).not.toHaveBeenCalledWith(table);
+      }
+      expect(rpc).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([undefined, null, 0])('does not infer period-end cancellation without a valid boundary (%s)', async (periodEnd) => {
+    const { tables, supabase } = makeCancellationFixture();
+    await syncSubscriptionState(supabase, {
+      id: 'sub_pay1', status: 'active', cancel_at_period_end: false, cancel_at: paidTermEnd,
+      items: { data: [{ current_period_start: paidTermStart, current_period_end: periodEnd }] },
+    } as unknown as Stripe.Subscription);
+    expect(tables.user_subscriptions[0].cancel_at_period_end).toBe('false');
+  });
+
+  it.each(['customer.subscription.updated', 'customer.subscription.deleted'])('%s still downgrades an actually canceled subscription', async (type) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const { tables, rpc, supabase } = makeCancellationFixture();
+    const grantsBefore = structuredClone(tables.subscription_credit_grants);
+    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+      id: 'sub_pay1', status: 'canceled', cancel_at_period_end: false, cancel_at: paidTermEnd,
+      items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] },
+    } } } as Stripe.Event);
+    expect(tables.user_subscriptions[0]).toMatchObject({ status: 'canceled', cancel_at_period_end: 'true', credit_release_terminated_at: null });
+    expect(tables.profiles[0]).toEqual({ id: 'user-pay1', membership_level: 'free', credits: 1767 });
+    expect(tables.subscription_credit_grants).toEqual(grantsBefore);
     expect(rpc).not.toHaveBeenCalled();
   });
 });

@@ -2801,6 +2801,22 @@ export async function fulfillPaidMembershipCheckoutSession(
   };
 }
 
+function isScheduledAtCurrentPeriodEnd(subscription: Stripe.Subscription): boolean {
+  if (subscription.cancel_at_period_end === true) return true;
+
+  // Portal can schedule cancellation using cancel_at without setting the
+  // legacy flag. Only an exact, valid paid-period boundary is equivalent.
+  const cancelAt = subscription.cancel_at;
+  const periodEnd = subscription.items.data[0]?.current_period_end;
+  return typeof cancelAt === 'number'
+    && Number.isSafeInteger(cancelAt)
+    && cancelAt > 0
+    && typeof periodEnd === 'number'
+    && Number.isSafeInteger(periodEnd)
+    && periodEnd > 0
+    && cancelAt === periodEnd;
+}
+
 export async function syncSubscriptionState(
   supabase: SupabaseLikeClient,
   subscription: Stripe.Subscription,
@@ -2809,7 +2825,7 @@ export async function syncSubscriptionState(
   const primaryItem = subscription.items.data[0];
   const currentPeriodStart = asIsoTimestamp(primaryItem?.current_period_start ?? null);
   const currentPeriodEnd = asIsoTimestamp(primaryItem?.current_period_end ?? null);
-  const cancelAtPeriodEnd = subscription.cancel_at_period_end ? 'true' : 'false';
+  const cancelAtPeriodEnd = isScheduledAtCurrentPeriodEnd(subscription) ? 'true' : 'false';
 
   const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
