@@ -333,7 +333,7 @@ async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarnes
 
 describe('paymentsRouter error sanitization', () => {
   beforeEach(() => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_pay1_quote_signing';
+    process.env.STRIPE_SECRET_KEY = 'local-noncredential-pay1-quote-signing';
     stripeState.assertCheckoutRateLimit.mockReset();
     stripeState.assertSubscriptionChangeRateLimit.mockReset();
     stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
