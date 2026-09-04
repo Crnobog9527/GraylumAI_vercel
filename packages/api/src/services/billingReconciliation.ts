@@ -91,6 +91,7 @@ export interface BillingReadinessAuditOptions {
 type ProfileRow = {
   id?: string | null;
   credits?: number | string | null;
+  created_at?: string | null;
 };
 
 type CreditTransactionRow = {
@@ -622,16 +623,77 @@ function isProfileLedgerMismatchHistorical(
   rows: BillingReadinessRows,
   launchBaselineAt: Date,
 ): boolean {
+  return isSnapshotAnchoredProfileMismatchHistorical(profileId, rows, launchBaselineAt)
+    || isLegacyOpeningBalanceHistorical(profileId, rows, launchBaselineAt);
+}
+
+// Repository bootstrap contract: pre-PR #250 profiles defaulted to 100 without
+// a ledger entry. Keep aligned with trpc.ts's recovery cutoff/opening amount,
+// without importing the tRPC runtime into this service.
+const LEGACY_PROFILE_BOOTSTRAP_CUTOFF = Date.parse('2026-06-25T00:00:00.000Z');
+const LEGACY_OPENING_GRANT_CREDITS = 100;
+
+function ledgerInteger(value: number | string | null | undefined): number | null {
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = toFiniteNumber(value);
+  return parsed !== null && Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function isLegacyOpeningBalanceHistorical(
+  profileId: string,
+  rows: BillingReadinessRows,
+  launchBaselineAt: Date,
+): boolean {
+  const profile = rows.profiles.find((row) => row.id === profileId);
+  if (!profile) return false;
+  const createdAt = getCreatedAtMs(profile);
+  const profileCredits = ledgerInteger(profile.credits);
+  const baselineMs = launchBaselineAt.getTime();
+  if (createdAt === null || createdAt >= LEGACY_PROFILE_BOOTSTRAP_CUTOFF
+    || !Number.isFinite(baselineMs) || baselineMs <= LEGACY_PROFILE_BOOTSTRAP_CUTOFF
+    || profileCredits === null) return false;
+
+  const transactions = rows.creditTransactions.filter((row) => row.user_id === profileId);
+  if (transactions.some((row) => row.idempotency_key === `opening_grant:${profileId}`)) return false;
+  const ordered = transactions.map((row) => ({
+    row, timestamp: getCreatedAtMs(row), amount: ledgerInteger(row.amount),
+  }));
+  if (ordered.some(({ timestamp, amount }) => timestamp === null || amount === null)) return false;
+  ordered.sort((left, right) => left.timestamp! - right.timestamp!);
+
+  let ledgerTotal = 0;
+  for (const entry of ordered.filter(({ timestamp }) => timestamp! < baselineMs)) {
+    ledgerTotal += entry.amount!;
+    if (!Number.isSafeInteger(ledgerTotal)) return false;
+  }
+  let provenBalance = LEGACY_OPENING_GRANT_CREDITS + ledgerTotal;
+  if (!Number.isSafeInteger(provenBalance)) return false;
+  let previousTimestamp: number | null = null;
+  for (const { row, timestamp, amount } of ordered.filter((entry) => entry.timestamp! >= baselineMs)) {
+    const before = ledgerInteger(row.balance_before);
+    const after = ledgerInteger(row.balance_after);
+    if (timestamp === previousTimestamp || before === null || after === null
+      || before !== provenBalance || !Number.isSafeInteger(before + amount!)
+      || after !== before + amount!) return false;
+    ledgerTotal += amount!;
+    if (!Number.isSafeInteger(ledgerTotal)) return false;
+    provenBalance = after;
+    previousTimestamp = timestamp;
+  }
+  return provenBalance === profileCredits
+    && profileCredits - ledgerTotal === LEGACY_OPENING_GRANT_CREDITS;
+}
+
+function isSnapshotAnchoredProfileMismatchHistorical(
+  profileId: string,
+  rows: BillingReadinessRows,
+  launchBaselineAt: Date,
+): boolean {
   const profile = rows.profiles.find((row) => row.id === profileId);
   if (!profile) return false;
 
   // profiles has no mutation timestamp. Only ledger snapshots can establish a
   // pre-baseline offset; old rows or a valid Launch-only chain are not proof.
-  const ledgerInteger = (value: number | string | null | undefined): number | null => {
-    if (typeof value === 'string' && !value.trim()) return null;
-    const parsed = toFiniteNumber(value);
-    return parsed !== null && Number.isSafeInteger(parsed) ? parsed : null;
-  };
   const profileCredits = ledgerInteger(profile.credits);
   if (profileCredits === null) return false;
 
@@ -1573,7 +1635,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionsResult,
     membershipPlansResult,
   ] = await Promise.all([
-    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits', rowLimit),
+    readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits, created_at', rowLimit),
     readLimitedRows<CreditTransactionRow>(
       supabase,
       'credit_transactions',

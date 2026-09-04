@@ -442,6 +442,7 @@ function createReadinessAuditSupabase(
           if (table === 'profiles' && columns.split(',').some((column) => column.trim() === 'updated_at')) {
             throw new Error('column profiles.updated_at does not exist');
           }
+          if (table === 'profiles') expect(columns).toBe('id, credits, created_at');
           return {
             limit: async (limit: number) => {
               const allRows = tables[table] ?? [];
@@ -1993,6 +1994,125 @@ describe('buildBillingEngineV15ReadinessAudit', () => {
       expect(result.status).toBe('FAILED');
       expect(result.historicalFindings).toEqual([]);
     });
+  });
+});
+
+describe('legacy pre-ledger opening balance proof', () => {
+  const launchBaselineAt = new Date('2026-09-04T05:16:53.394Z');
+  const now = new Date('2026-09-04T08:00:00.000Z');
+  function legacyRows(postBaseline = false) {
+    return createReadinessRows({
+      profiles: [{ id: 'legacy-opening-user', credits: postBaseline ? 7112 : 7097, created_at: '2026-06-01T00:00:00.000Z' }],
+      creditTransactions: [
+        ...[5500, -1, -1, 1500, -1].map((amount, index) => ({
+          id: `legacy-${index}`, user_id: 'legacy-opening-user', amount,
+          created_at: `2026-06-${10 + index}T00:00:00.000Z`,
+          balance_before: null, balance_after: null,
+        })),
+        ...(postBaseline ? [
+          { id: 'post-a', user_id: 'legacy-opening-user', amount: -10, balance_before: 7097, balance_after: 7087, created_at: launchBaselineAt.toISOString() },
+          { id: 'post-b', user_id: 'legacy-opening-user', amount: 25, balance_before: 7087, balance_after: 7112, created_at: '2026-09-04T06:00:00.000Z' },
+        ] : []),
+      ],
+      paymentOrders: [], subscriptionCreditGrants: [], subscriptions: [], membershipPlans: [],
+    });
+  }
+  function audit(rows: ReturnType<typeof legacyRows>, baseline = launchBaselineAt) {
+    return buildBillingEngineV15ReadinessAudit(rows, { now, launchBaselineAt: baseline });
+  }
+  function expectLaunchFailure(rows: ReturnType<typeof legacyRows>, baseline = launchBaselineAt) {
+    const result = audit(rows, baseline);
+    expect(result.status).toBe('FAILED');
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'launch' }),
+    ]));
+    expect(result.historicalFindings).toEqual([]);
+  }
+
+  it.each([false, true])('proves the legacy 100 offset with post-baseline chain=%s', (postBaseline) => {
+    const rows = legacyRows(postBaseline);
+    rows.creditTransactions.reverse();
+    const result = audit(rows);
+    expect(result.status).toBe('SUCCESS');
+    expect(result.findings).toEqual([]);
+    expect(result.historicalFindings).toEqual([
+      expect.objectContaining({ code: 'profile_ledger_balance_mismatch', scope: 'historical' }),
+    ]);
+  });
+
+  it('reads created_at through the actual readiness projection', async () => {
+    const result = await runBillingEngineV15ReadinessAudit(
+      createReadinessAuditSupabase(legacyRows(), {}, {}, launchBaselineAt.toISOString()), { now },
+    );
+    expect(result.status).toBe('SUCCESS');
+    expect(result.summary.historicalFindings).toBe(1);
+  });
+
+  it.each([null, undefined, '', 'invalid', '2026-06-25T00:00:00.000Z', '2026-06-26T00:00:00.000Z'])(
+    'rejects missing/invalid/nonlegacy profile date %s', (created_at) => {
+      const rows = legacyRows();
+      rows.profiles[0].created_at = created_at;
+      expectLaunchFailure(rows);
+    },
+  );
+  it.each([50, 101, 1000])('does not waive offset %s', (offset) => {
+    const rows = legacyRows();
+    rows.profiles[0].credits = 6997 + offset;
+    expectLaunchFailure(rows);
+  });
+  it('rejects an already ledger-backed opening grant with a remaining offset', () => {
+    const rows = legacyRows();
+    rows.creditTransactions.push({ user_id: 'legacy-opening-user', amount: 100,
+      idempotency_key: 'opening_grant:legacy-opening-user', created_at: '2026-06-02T00:00:00.000Z' });
+    rows.profiles[0].credits = 7197;
+    expectLaunchFailure(rows);
+  });
+  it.each(['2026-06-24T00:00:00.000Z', '2026-06-25T00:00:00.000Z'])(
+    'requires the cutoff itself to precede baseline %s', (baseline) => {
+      expectLaunchFailure(legacyRows(), new Date(baseline));
+    },
+  );
+  it.each([
+    ['missing timestamp', { created_at: null }],
+    ['invalid timestamp', { created_at: 'invalid' }],
+    ['missing amount', { amount: null }],
+    ['blank amount', { amount: ' ' }],
+    ['fractional amount', { amount: 1.5 }],
+    ['unsafe amount', { amount: Number.MAX_SAFE_INTEGER + 1 }],
+  ] as const)('fails closed on %s', (_label, mutation) => {
+    const rows = legacyRows();
+    Object.assign(rows.creditTransactions[0], mutation);
+    expectLaunchFailure(rows);
+  });
+  it.each([
+    ['wrong baseline anchor', 5, { balance_before: 7098, balance_after: 7088 }],
+    ['discontinuous chain', 6, { balance_before: 7088, balance_after: 7113 }],
+    ['invalid arithmetic', 6, { balance_after: 7113 }],
+    ['missing before', 5, { balance_before: null }],
+    ['missing after', 6, { balance_after: null }],
+    ['invalid snapshot', 5, { balance_before: 'invalid' }],
+    ['fractional snapshot', 6, { balance_after: 7112.5 }],
+    ['ambiguous timestamp', 6, { created_at: launchBaselineAt.toISOString() }],
+    ['missing post timestamp', 6, { created_at: null }],
+    ['invalid post amount', 6, { amount: 'invalid' }],
+  ] as const)('rejects post-baseline %s', (_label, index, mutation) => {
+    const rows = legacyRows(true);
+    Object.assign(rows.creditTransactions[index], mutation);
+    expectLaunchFailure(rows);
+  });
+  it('requires current credits to equal the final proven snapshot', () => {
+    const rows = legacyRows(true);
+    rows.profiles[0].credits = 7113;
+    expectLaunchFailure(rows);
+  });
+  it.each(['profiles', 'credit_transactions'])('preserves the existing truncated %s warning', (table) => {
+    const rows = legacyRows();
+    rows.truncatedTables = [table];
+    const result = audit(rows);
+    expect(result.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'readiness_scan_truncated', severity: 'warning' }),
+    ]));
+    expect(result.historicalFindings).toEqual([]);
   });
 });
 

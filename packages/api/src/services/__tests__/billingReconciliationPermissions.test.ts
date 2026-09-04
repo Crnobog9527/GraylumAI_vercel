@@ -142,6 +142,12 @@ describe('BILL-1 column SELECT permission contract', () => {
       'amount', 'type', 'ledger_type', 'reason_code', 'counts_as_spend', 'source_type',
       'description', 'idempotency_key', 'created_at',
     ]);
+    const profileColumns = selections.find((selection) => selection.table === 'profiles')?.columns;
+    expect(profileColumns).toEqual(['id', 'credits', 'created_at']);
+    const existingProfileGrant = priorSql.match(/GRANT SELECT \(\s*([^)]*?)\s*\) ON TABLE public\.profiles TO service_role;/);
+    expect(existingProfileGrant).not.toBeNull();
+    expect(profileColumns!.every((column) => existingProfileGrant![1].split(',').map((value) => value.trim()).includes(column))).toBe(true);
+    expect(profileColumns).not.toContain('updated_at');
   });
 
   it('preserves legacy spend, refund, adjustment and top-up classification under projection', async () => {
