@@ -276,6 +276,131 @@ describe('getPublicReadClient', () => {
       { key: 'support_email', value: 'support@example.com' },
     ]);
   });
+
+  it('rejects an invalid launch_baseline_at before any write', async () => {
+    const upsert = vi.fn();
+    const caller = settingsRouter.createCaller({
+      headers: new Headers(),
+      user: {
+        id: 'admin-user',
+        email: 'admin@example.com',
+        app_metadata: { provider: 'email' },
+        user_metadata: { email_verified: true },
+      },
+      isEmailVerified: true,
+      authProvider: 'email',
+      supabase: {
+        from(table: string) {
+          if (table === 'profiles') {
+            return {
+              select() { return this; },
+              eq() { return this; },
+              single: async () => ({
+                data: {
+                  id: 'admin-user',
+                  role: 'admin',
+                  status: 'active',
+                  nickname: 'Admin',
+                  email: 'admin@example.com',
+                },
+                error: null,
+              }),
+            };
+          }
+          return { upsert };
+        },
+      },
+      supabasePublic: {},
+      supabaseAdmin: {
+        from(table: string) {
+          expect(table).toBe('system_settings');
+          const builder = {
+            select: () => builder,
+            eq: () => builder,
+            maybeSingle: async () => ({
+              data: { value: '2026-09-04T00:00:00+08:00' },
+              error: null,
+            }),
+          };
+          return builder;
+        },
+      },
+      hasSupabaseAdminPrivileges: true,
+    } as any);
+
+    await expect(caller.updateSystemSettings({
+      key: 'launch_baseline_at',
+      value: 'not-a-timestamp',
+    })).rejects.toMatchObject<Partial<TRPCError>>({ code: 'BAD_REQUEST' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('reads launch_baseline_at only through the admin procedure', async () => {
+    const caller = settingsRouter.createCaller({
+      headers: new Headers(),
+      user: {
+        id: 'admin-user',
+        email: 'admin@example.com',
+        app_metadata: { provider: 'email' },
+        user_metadata: { email_verified: true },
+      },
+      isEmailVerified: true,
+      authProvider: 'email',
+      supabase: {
+        from(table: string) {
+          if (table === 'profiles') {
+            return {
+              select() { return this; },
+              eq() { return this; },
+              single: async () => ({
+                data: {
+                  id: 'admin-user',
+                  role: 'admin',
+                  status: 'active',
+                  nickname: 'Admin',
+                  email: 'admin@example.com',
+                },
+                error: null,
+              }),
+            };
+          }
+          if (table === 'system_settings') {
+            const builder = {
+              select: () => builder,
+              eq: () => builder,
+              maybeSingle: async () => ({
+                data: { value: '2026-09-04T00:00:00+08:00' },
+                error: null,
+              }),
+            };
+            return builder;
+          }
+          throw new Error(`Unexpected table ${table}`);
+        },
+      },
+      supabasePublic: {},
+      supabaseAdmin: {
+        from(table: string) {
+          expect(table).toBe('system_settings');
+          const builder = {
+            select: () => builder,
+            eq: () => builder,
+            maybeSingle: async () => ({
+              data: { value: '2026-09-04T00:00:00+08:00' },
+              error: null,
+            }),
+          };
+          return builder;
+        },
+      },
+      hasSupabaseAdminPrivileges: true,
+    } as any);
+
+    await expect(caller.getLaunchBaseline()).resolves.toMatchObject({
+      status: 'READY',
+      launchBaselineAtIso: '2026-09-03T16:00:00.000Z',
+    });
+  });
 });
 
 describe('public catalog availability', () => {

@@ -21,6 +21,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron/billing-reconcile",
+      "schedule": "0 4 * * *"
+    },
+    {
       "path": "/api/cron/diagnostics",
       "schedule": "0 10 * * *"
     }
