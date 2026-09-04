@@ -1691,7 +1691,7 @@ export async function runDailyBillingReconciliation(
         .lt('created_at', end),
       supabase
         .from('credit_transactions')
-        .select('*')
+        .select('amount, type, ledger_type, reason_code, counts_as_spend, source_type, description, idempotency_key, created_at')
         .gte('created_at', enforcementStart)
         .lt('created_at', end),
       supabase
