@@ -6936,11 +6936,14 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
       membership_plans: [{ id: 'upgrade-plan', name: 'Gold', level: 'gold', monthly_credits: 300, monthly_bonus_credits: 0, yearly_credits: 3600 }],
       subscription_credit_grants: [historicalGrant], credit_transactions: [historicalTransaction] });
     const start = 1788480000; const end = billingCycle === 'yearly' ? 1820016000 : 1791072000;
-    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: targetAmount, amount_due: targetAmount, currency: 'usd',
+    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: targetAmount, amount_due: targetAmount,
+      subtotal: targetAmount, total: targetAmount, starting_balance: 0, pre_payment_credit_notes_amount: 0,
+      post_payment_credit_notes_amount: 0, total_discount_amounts: [], total_taxes: [], currency: 'usd',
       created: start + 1, customer: 'cus_upgrade',
       parent: { subscription_details: { subscription: 'sub_upgrade', metadata: { upgradeAttemptId: 'upgrade-source', userId: 'upgrade-user', itemId: 'upgrade-plan', priceId: 'price_upgrade' } } },
       lines: { has_more: false, data: [
-        { id: 'il_target', amount: targetAmount, currency: 'usd', quantity: 1, pricing: { price_details: { price: 'price_upgrade' } },
+        { id: 'il_target', amount: targetAmount, subtotal: targetAmount, currency: 'usd', quantity: 1,
+          discount_amounts: [], discounts: [], pretax_credit_amounts: [], taxes: [], pricing: { price_details: { price: 'price_upgrade' } },
           period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: false } } },
       ] } } as unknown as Stripe.Invoice;
     return { supabase, invoice, source, start, end, targetAmount, historicalGrant, historicalTransaction };
@@ -6994,7 +6997,8 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
     await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
     expect(supabase.tables).toEqual(before);
   });
-  it.each(['target-proration', 'old-price-credit', 'partial-lines', 'wrong-line-amount', 'unpaid-amount'])(
+  it.each(['target-proration', 'old-price-credit', 'partial-lines', 'wrong-line-amount', 'wrong-period', 'unpaid-amount',
+    'discount', 'tax', 'customer-balance', 'credit-note'])(
     'rejects non-full-price paid upgrade invoice evidence: %s', async problem => {
       const { supabase, invoice } = fixture('yearly');
       if (problem === 'target-proration') invoice.lines.data[0].parent!.subscription_item_details!.proration = true;
@@ -7003,7 +7007,12 @@ describe('PAY-1 exact-source paid upgrade invoices', () => {
         parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } } as any);
       if (problem === 'partial-lines') invoice.lines.has_more = true;
       if (problem === 'wrong-line-amount') invoice.lines.data[0].amount--;
+      if (problem === 'wrong-period') invoice.lines.data[0].period!.end = invoice.lines.data[0].period!.start + (30 * 24 * 60 * 60);
       if (problem === 'unpaid-amount') invoice.amount_paid--;
+      if (problem === 'discount') invoice.lines.data[0].discount_amounts = [{ amount: 1 }] as any;
+      if (problem === 'tax') invoice.total_taxes = [{ amount: 1000 }] as any;
+      if (problem === 'customer-balance') invoice.starting_balance = -1000;
+      if (problem === 'credit-note') invoice.pre_payment_credit_notes_amount = 1000;
       const before = structuredClone(supabase.tables);
       await expect(fulfillMembershipInvoice(supabase, invoice)).rejects.toBeDefined();
       expect(supabase.tables).toEqual(before);

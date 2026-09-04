@@ -42,6 +42,7 @@ import {
   isSubscriptionPlanChangeOrder,
 } from '../services/subscriptionPlanChangeLock';
 import { isStripeManagedSubscriptionActive } from '../services/subscriptionOverrides';
+import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 
 const createCheckoutInput = z.discriminatedUnion('kind', [
   z.object({
@@ -883,6 +884,10 @@ type ValidatedUpgrade = Awaited<ReturnType<typeof validateSubscriptionUpgrade>>;
 function hasNonZeroAmount(values: Array<{ amount?: number | null }> | null | undefined) {
   return Boolean(values?.some((value) => value.amount !== 0));
 }
+function isCompleteTargetBillingPeriod(start: number, end: number, billingCycle: MembershipBillingCycle) {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return false;
+  return addUtcCalendarMonthsClamped(new Date(start * 1000), billingCycle === 'yearly' ? 12 : 1).getTime() === end * 1000;
+}
 
 function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: ValidatedUpgrade) {
   const lines = invoice.lines?.data ?? [];
@@ -911,7 +916,8 @@ function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: Validate
     || line.currency !== UPGRADE_CURRENCY || line.quantity !== 1
     || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
     || Boolean(line.pretax_credit_amounts?.length) || hasNonZeroAmount(line.taxes)
-    || typeof periodStart !== 'number' || typeof periodEnd !== 'number' || periodEnd <= periodStart) {
+    || typeof periodStart !== 'number' || typeof periodEnd !== 'number'
+    || !isCompleteTargetBillingPeriod(periodStart, periodEnd, change.input.billingCycle)) {
     throw priceChangedError();
   }
 }

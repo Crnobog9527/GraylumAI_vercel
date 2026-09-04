@@ -255,7 +255,8 @@ function createSubscriptionChangeGuardHarness(options: {
   const fullPricePreview = (billingCycle: 'monthly' | 'yearly' = 'monthly', overrides: Record<string, unknown> = {}) => {
     const amount = billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price;
     const price = billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id;
-    const start = 2100000000; const end = start + (billingCycle === 'yearly' ? 31536000 : 2592000);
+    const start = Date.UTC(2026, 8, 1) / 1000;
+    const end = Date.UTC(billingCycle === 'yearly' ? 2027 : 2026, billingCycle === 'yearly' ? 8 : 9, 1) / 1000;
     return { amount_due: amount, currency: 'usd', subtotal: amount, total: amount, starting_balance: 0,
       pre_payment_credit_notes_amount: 0, post_payment_credit_notes_amount: 0,
       total_discount_amounts: [], total_taxes: [], lines: { has_more: false, data: [{
@@ -1228,7 +1229,7 @@ describe('paymentsRouter error sanitization', () => {
 
   it.each([
     'amount-below-catalog', 'amount-above-catalog', 'currency', 'partial-lines', 'old-price-credit',
-    'target-proration', 'missing-target-price', 'discount', 'tax', 'customer-balance',
+    'target-proration', 'missing-target-price', 'wrong-period', 'discount', 'tax', 'customer-balance',
   ])('rejects non-full-price preview evidence: %s', async problem => {
     const h = createSubscriptionChangeGuardHarness();
     const preview: any = h.fullPricePreview('monthly');
@@ -1243,6 +1244,7 @@ describe('paymentsRouter error sanitization', () => {
     });
     if (problem === 'target-proration') preview.lines.data[0].parent.subscription_item_details.proration = true;
     if (problem === 'missing-target-price') preview.lines.data[0].pricing.price_details.price = 'price_test_old';
+    if (problem === 'wrong-period') preview.lines.data[0].period.end = preview.lines.data[0].period.start + (31 * 24 * 60 * 60);
     if (problem === 'discount') preview.lines.data[0].discount_amounts = [{ amount: 1 }];
     if (problem === 'tax') preview.lines.data[0].taxes = [{ amount: 1 }];
     if (problem === 'customer-balance') preview.starting_balance = -1;

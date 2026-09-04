@@ -14,6 +14,7 @@ import {
 } from './paymentOrderStatus';
 import { getStripeClient } from './stripe';
 import {
+  addUtcCalendarMonthsClamped,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
   reconcileSubscriptionRefundCreditGrants,
 } from './subscriptionCreditGrants';
@@ -675,6 +676,7 @@ async function getInvoiceSubscriptionServicePeriod(
     requiredPriceId?: string;
     requiredAmount?: number;
     requiredCurrency?: string;
+    requiredBillingCycle?: 'monthly' | 'yearly';
   } = {},
 ) {
   const periods = new Map<string, { start: number; end: number }>();
@@ -689,6 +691,22 @@ async function getInvoiceSubscriptionServicePeriod(
     limits: options.paginationLimits,
     resource: 'invoice_lines',
   });
+
+  if (options.requiredPriceId) {
+    const invoiceRecord = invoice as Stripe.Invoice & {
+      subtotal?: number | null; total?: number | null; starting_balance?: number | null;
+      pre_payment_credit_notes_amount?: number | null; post_payment_credit_notes_amount?: number | null;
+      total_discount_amounts?: Array<{ amount?: number | null }> | null;
+      total_taxes?: Array<{ amount?: number | null }> | null;
+    };
+    const adjustedInvoice = [invoiceRecord.starting_balance, invoiceRecord.pre_payment_credit_notes_amount,
+      invoiceRecord.post_payment_credit_notes_amount].some(value => typeof value === 'number' && value !== 0);
+    if (invoiceRecord.subtotal !== options.requiredAmount || invoiceRecord.total !== options.requiredAmount
+      || adjustedInvoice || Boolean(invoiceRecord.total_discount_amounts?.length)
+      || Boolean(invoiceRecord.total_taxes?.length)) {
+      throw new Error('upgrade_invoice_adjustment_mismatch');
+    }
+  }
 
   for (const line of lines) {
     const lineRecord = line as Stripe.InvoiceLineItem & {
@@ -705,10 +723,14 @@ async function getInvoiceSubscriptionServicePeriod(
     const end = line.period?.end;
 
     if (options.requiredPriceId) {
+      const exactPeriod = typeof start === 'number' && typeof end === 'number' && options.requiredBillingCycle
+        && addUtcCalendarMonthsClamped(new Date(start * 1000), options.requiredBillingCycle === 'yearly' ? 12 : 1).getTime() === end * 1000;
       if (lineSubscriptionId !== subscriptionId || details?.proration !== false
         || line.pricing?.price_details?.price !== options.requiredPriceId
         || line.amount !== options.requiredAmount || line.currency !== options.requiredCurrency
-        || line.quantity !== 1 || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+        || line.subtotal !== options.requiredAmount || line.quantity !== 1 || !exactPeriod
+        || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
+        || Boolean(line.pretax_credit_amounts?.length) || Boolean(line.taxes?.length)) {
         throw new Error('upgrade_invoice_full_target_line_mismatch');
       }
     } else if (lineSubscriptionId !== subscriptionId || details?.proration === true
@@ -2595,7 +2617,7 @@ export async function fulfillMembershipInvoice(
 
   // Upgrade invoices must bind to the exact durable source, never whichever
   // attempt happens to be newest when a delayed invoice is delivered.
-  let upgradeSource: { id: string; stripe_price_id: string; amountDue: number; currency: string } | undefined;
+  let upgradeSource: { id: string; stripe_price_id: string; amountDue: number; currency: string; billingCycle: 'monthly' | 'yearly' } | undefined;
   if (invoice.billing_reason === 'subscription_update') {
     const details = invoice.parent?.subscription_details;
     const attemptId = details?.metadata?.upgradeAttemptId;
@@ -2603,11 +2625,12 @@ export async function fulfillMembershipInvoice(
       throw new Error('upgrade_invoice_paid_source_missing');
     }
     const lookup = await supabase.from('payment_orders')
-      .select('id, user_id, item_id, stripe_price_id, stripe_customer_id, status, created_at, metadata')
+      .select('id, user_id, item_id, billing_cycle, stripe_price_id, stripe_customer_id, status, created_at, metadata')
       .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
     const source = lookup.data;
     if (lookup.error || !source || source.status === 'failed' || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
       || source.stripe_price_id !== details.metadata?.priceId
+      || (source.billing_cycle !== 'monthly' && source.billing_cycle !== 'yearly')
       || source.user_id !== details.metadata?.userId || source.item_id !== details.metadata?.itemId
       || source.stripe_customer_id !== getExpandableId(invoice.customer)) {
       throw new Error('upgrade_invoice_source_mismatch');
@@ -2619,7 +2642,8 @@ export async function fulfillMembershipInvoice(
       || quote.currency !== invoice.currency) {
       throw new Error('upgrade_invoice_quote_mismatch');
     }
-    upgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency };
+    upgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency,
+      billingCycle: source.billing_cycle as 'monthly' | 'yearly' };
   }
 
   // Stripe documents invoice-level period_start/period_end as the usage
@@ -2632,7 +2656,7 @@ export async function fulfillMembershipInvoice(
   try {
     servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options,
       requiredPriceId: upgradeSource?.stripe_price_id, requiredAmount: upgradeSource?.amountDue,
-      requiredCurrency: upgradeSource?.currency });
+      requiredCurrency: upgradeSource?.currency, requiredBillingCycle: upgradeSource?.billingCycle });
   } catch (error) {
     throwFulfillmentError(
       'invoice_subscription_service_period',
