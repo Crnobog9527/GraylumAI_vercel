@@ -2147,6 +2147,14 @@ export async function reconcileStripeRefund(
       checkoutSessionId: maskIdentifier(facts.checkoutSessionId),
       subscriptionId: maskIdentifier(facts.subscriptionId),
     });
+    if (!facts.failed) {
+      throwFulfillmentError(
+        'refund_order_lookup',
+        STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+        new Error('Payment order binding missing; retry webhook'),
+        { refundId: maskIdentifier(facts.refundId), paymentIntentId: maskIdentifier(facts.paymentIntentId) },
+      );
+    }
     return null;
   }
 

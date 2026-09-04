@@ -6404,10 +6404,10 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
-  it('returns unreconciled for non-invoice refund webhooks that have no generic order match', async () => {
+  it('retries successful non-invoice refund webhooks that have no generic order match', async () => {
     const supabase = createRefundWebhookSupabase();
 
-    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+    const result = reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
       {
         id: 'evt_test_unknown_checkout_refund',
@@ -6430,11 +6430,7 @@ describe('stripe fulfillment helpers', () => {
       } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
     );
 
-    expect(result).toMatchObject({
-      reconciled: false,
-      reason: 'non_subscription_order_not_found',
-      orderId: null,
-    });
+    await expect(result).rejects.toMatchObject({ stage: 'refund_order_lookup' });
     expect(loggerState.warn).toHaveBeenCalledWith(
       'billing',
       'stripe_refund_order_not_found',
@@ -6739,5 +6735,35 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
     expect(tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 100 });
     expect(tables.subscription_credit_grants).toEqual([{ id: 'grant-pay1', status: 'scheduled' }]);
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe('PAY-1 early refund delivery', () => {
+  it('retries a successful refund arriving before the checkout binding, then reconciles its redelivery', async () => {
+    const match = { column: 'metadata->>paymentIntentId', value: 'not-bound-yet' };
+    const { rpc, supabase } = makeGenericRefundSupabase({
+      match,
+      order: { id: 'order-early-refund', amount_total: 1000, metadata: { itemType: 'credit_package', grantedCredits: 100 } },
+    });
+    const event = { id: 'evt_early_refund', type: 'refund.updated', data: { object: {
+      id: 're_early', amount: 1000, currency: 'usd', status: 'succeeded', created: 1788470400,
+      payment_intent: 'pi_early', metadata: {},
+      charge: { id: 'ch_early', amount: 1000, payment_intent: 'pi_early', metadata: { itemType: 'credit_package' }, payment_method_details: { type: 'alipay' } },
+    } } } as any;
+    const options = {
+      retrievePaymentIntent: vi.fn().mockResolvedValue({ id: 'pi_early', metadata: { itemType: 'credit_package' } }),
+      listInvoicePayments: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+    };
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(supabase, event, options))
+      .rejects.toMatchObject({ stage: 'refund_order_lookup' });
+    expect(rpc).not.toHaveBeenCalled();
+    // A delayed Checkout delivery establishes the binding. The same Stripe
+    // refund must still be delivered and retain the same financial key.
+    match.value = 'pi_early';
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(supabase, event, options))
+      .resolves.toMatchObject({ reconciled: true });
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-early-refund', p_idempotency_key: 'stripe_refund:re_early', p_is_full_refund: true,
+    }));
   });
 });
