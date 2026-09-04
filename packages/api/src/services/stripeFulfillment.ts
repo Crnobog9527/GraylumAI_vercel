@@ -664,6 +664,20 @@ async function listStripeInvoiceLines(invoiceId: string, startingAfter: string) 
   });
 }
 
+function isExpectedRecurringUpgradePrice(price: Stripe.Price, input: {
+  priceId: string;
+  amount: number;
+  currency: string;
+  billingCycle: 'monthly' | 'yearly';
+}) {
+  return price.id === input.priceId
+    && price.type === 'recurring'
+    && price.currency === input.currency
+    && price.unit_amount === input.amount
+    && price.recurring?.interval === (input.billingCycle === 'yearly' ? 'year' : 'month')
+    && price.recurring.interval_count === 1;
+}
+
 async function getInvoiceSubscriptionServicePeriod(
   invoice: Stripe.Invoice,
   subscriptionId: string,
@@ -2600,6 +2614,7 @@ export async function fulfillMembershipInvoice(
       invoiceId: string,
       startingAfter: string,
     ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    retrievePrice?: (priceId: string) => Promise<Stripe.Price>;
     paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
@@ -2642,8 +2657,28 @@ export async function fulfillMembershipInvoice(
       || quote.currency !== invoice.currency) {
       throw new Error('upgrade_invoice_quote_mismatch');
     }
-    upgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency,
-      billingCycle: source.billing_cycle as 'monthly' | 'yearly' };
+    const validatedUpgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency,
+      billingCycle: source.billing_cycle as 'monthly' | 'yearly' } as NonNullable<typeof upgradeSource>;
+    upgradeSource = validatedUpgradeSource;
+    try {
+      const targetPrice = await (options.retrievePrice
+        ?? ((priceId: string) => getStripeClient().prices.retrieve(priceId)))(validatedUpgradeSource.stripe_price_id);
+      if (!isExpectedRecurringUpgradePrice(targetPrice, {
+        priceId: validatedUpgradeSource.stripe_price_id,
+        amount: validatedUpgradeSource.amountDue,
+        currency: validatedUpgradeSource.currency,
+        billingCycle: validatedUpgradeSource.billingCycle,
+      })) {
+        throw new Error('upgrade_price_cadence_mismatch');
+      }
+    } catch (error) {
+      throwFulfillmentError(
+        'upgrade_invoice_price_cadence',
+        STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice,
+        error,
+        { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
+      );
+    }
   }
 
   // Stripe documents invoice-level period_start/period_end as the usage

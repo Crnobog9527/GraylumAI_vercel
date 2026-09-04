@@ -878,15 +878,32 @@ async function validateSubscriptionUpgrade(ctx: {
   const item = remote.items.data[0];
   if (item.price.id !== local.stripe_price_id && !(attempt && item.price.id === priceId)) throw priceChangedError();
   if (attempt && (attempt.itemId !== item.id || attempt.originalPrice !== local.stripe_price_id)) throw priceChangedError();
+  let targetPrice: Stripe.Price;
+  try { targetPrice = await stripe.prices.retrieve(priceId); }
+  catch { throw toSubscriptionChangeUnavailableError(); }
+  if (!isExpectedRecurringUpgradePrice(targetPrice, { priceId, amount, billingCycle: input.billingCycle }, true)) {
+    throw priceChangedError();
+  }
   return { stripe, remote, local, item, plan, priceId, amount, input, pending, attempt, userId: ctx.profileId };
 }
 type ValidatedUpgrade = Awaited<ReturnType<typeof validateSubscriptionUpgrade>>;
-function hasNonZeroAmount(values: Array<{ amount?: number | null }> | null | undefined) {
-  return Boolean(values?.some((value) => value.amount !== 0));
-}
 function isCompleteTargetBillingPeriod(start: number, end: number, billingCycle: MembershipBillingCycle) {
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return false;
   return addUtcCalendarMonthsClamped(new Date(start * 1000), billingCycle === 'yearly' ? 12 : 1).getTime() === end * 1000;
+}
+
+function isExpectedRecurringUpgradePrice(price: Stripe.Price, change: {
+  priceId: string;
+  amount: number;
+  billingCycle: MembershipBillingCycle;
+}, requireActive: boolean) {
+  return price.id === change.priceId
+    && (!requireActive || price.active)
+    && price.type === 'recurring'
+    && price.currency === UPGRADE_CURRENCY
+    && price.unit_amount === change.amount
+    && price.recurring?.interval === (change.billingCycle === 'yearly' ? 'year' : 'month')
+    && price.recurring.interval_count === 1;
 }
 
 function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: ValidatedUpgrade) {
@@ -909,13 +926,13 @@ function assertFullPriceUpgradePreview(invoice: Stripe.Invoice, change: Validate
     || invoice.amount_due !== change.amount || invoice.currency !== UPGRADE_CURRENCY
     || (typeof invoiceRecord.subtotal === 'number' && invoiceRecord.subtotal !== change.amount)
     || (typeof invoiceRecord.total === 'number' && invoiceRecord.total !== change.amount)
-    || adjustedInvoice || hasNonZeroAmount(invoiceRecord.total_discount_amounts)
-    || hasNonZeroAmount(invoiceRecord.total_taxes)
+    || adjustedInvoice || Boolean(invoiceRecord.total_discount_amounts?.length)
+    || Boolean(invoiceRecord.total_taxes?.length)
     || stripeObjectId(details?.subscription) !== change.remote.id || details?.proration !== false
     || priceId !== change.priceId || line.amount !== change.amount || line.subtotal !== change.amount
     || line.currency !== UPGRADE_CURRENCY || line.quantity !== 1
     || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
-    || Boolean(line.pretax_credit_amounts?.length) || hasNonZeroAmount(line.taxes)
+    || Boolean(line.pretax_credit_amounts?.length) || Boolean(line.taxes?.length)
     || typeof periodStart !== 'number' || typeof periodEnd !== 'number'
     || !isCompleteTargetBillingPeriod(periodStart, periodEnd, change.input.billingCycle)) {
     throw priceChangedError();

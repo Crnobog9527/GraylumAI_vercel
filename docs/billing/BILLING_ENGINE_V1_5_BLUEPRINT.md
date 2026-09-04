@@ -389,12 +389,12 @@ subscription_grant:monthly:{stripe_invoice_id}
 2. 后端读取当前 `user_subscriptions` 与目标 plan。
 3. membership eligibility 判断是否允许升级。
 4. 受保护预览以同一 subscription、现有 item、目标 Price、`billing_cycle_anchor=now`、`proration_behavior=none` 建模；预览不得发送 `proration_date`。
-5. 预览发票必须只有完整目标周期的目标 Price line，月付 line 必须精确覆盖 1 个 UTC 日历月，年付 line 必须精确覆盖 12 个 UTC 日历月；分页完整且无 proration、旧 Price 负数抵扣、折扣、税或余额调整；`amount_due` 与当前本地目标套餐/周期目录价及 USD 币种必须完全一致，否则 fail closed。
+5. 更新前必须读取目标 Stripe Price，并要求月付为 `month × 1`、年付为 `year × 1` 的 recurring cadence，Price 金额/币种也必须与本地目录一致；预览发票必须只有完整目标周期的目标 Price line，月付 line 必须精确覆盖 1 个 UTC 日历月，年付 line 必须精确覆盖 12 个 UTC 日历月；分页完整且不得出现任何 proration、旧 Price 负数抵扣、discount/tax 条目（包括零金额条目）或余额调整；`amount_due` 与当前本地目标套餐/周期目录价及 USD 币种必须完全一致，否则 fail closed。
 6. 报价的财务语义字段为 `amountDue`、`currency`、`quotedAt` 与语义 fingerprint；另用服务端认证的 freshness proof 将 `quotedAt` 绑定到该 fingerprint，防止客户端刷新时间绕过 300 秒重新确认。`quotedAt` 不进入财务语义 fingerprint，也不参与按时间计价。确认时重新读取本地/Stripe 状态并再次执行同一全价预览；金额、币种、时间证明或语义状态变化时要求重新确认。
 7. 创建一个持久 plan-change source/lock，以其 id 派生稳定 Stripe idempotency key。
 8. 更新同一 Stripe subscription 的现有 item：目标 Price + `billing_cycle_anchor=now` + `proration_behavior=none` + `payment_behavior=error_if_incomplete`。不得发送 `proration_date`，不得清除到期取消，也不得创建第二个 Checkout/subscription。
 9. 目标套餐/周期收取当前配置的完整价格；旧套餐不退款、不按未使用时间抵扣、不计算差价，也不根据剩余或已用积分改价。新的完整目标 term 从付款成功对应的 Stripe 目标周期开始。
-10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user、精确 1/12 个 UTC 日历月的完整目标 service period、全价 `amount_due/amount_paid/subtotal/total`，且无折扣、税、credit note 或余额调整的 paid invoice 可以更新本地 subscription、plan、billing_cycle；普通续费发票的 source 查找必须排除未完成的 plan-change source，防止旧续费发票误用目标套餐 source。
+10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user，且在履约时再次确认目标 Stripe Price 是精确 `month × 1` / `year × 1` cadence、精确 1/12 个 UTC 日历月的完整目标 service period、全价 `amount_due/amount_paid/subtotal/total`，且无任何折扣、税、credit note 或余额调整的 paid invoice 可以更新本地 subscription、plan、billing_cycle；普通续费发票的 source 查找必须排除未完成的 plan-change source，防止旧续费发票误用目标套餐 source。
 11. 已有积分及历史 grant 全部保留，不反转、不扣减：
     - 月付目标：在现有余额上完整追加 `monthly_credits + monthly_bonus_credits`，恰好一次。
     - 年付目标：开始新的 12 期计划，仅追加 canonical period 1；period 2–12 继续由 YEAR-1 按月释放。

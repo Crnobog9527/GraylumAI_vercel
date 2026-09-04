@@ -242,6 +242,17 @@ function createSubscriptionChangeGuardHarness(options: {
     monthly_price: targetLevel === 'gold' ? 2990 : 990, yearly_price: targetLevel === 'gold' ? 29900 : 9900,
     stripe_monthly_price_id: 'monthlyPrice' in options ? options.monthlyPrice : targetPriceIds.monthly,
     stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : targetPriceIds.yearly };
+  const targetPrice = (billingCycle: 'monthly' | 'yearly') => ({
+    id: billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id,
+    active: true,
+    type: 'recurring',
+    currency: 'usd',
+    unit_amount: billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price,
+    recurring: { interval: billingCycle === 'yearly' ? 'year' : 'month', interval_count: 1 },
+  });
+  const priceRetrieve = vi.fn().mockImplementation(async (priceId: string) => structuredClone(targetPrice(
+    priceId === plan.stripe_yearly_price_id ? 'yearly' : 'monthly',
+  )));
   const local: any = { id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
     stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
     billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
@@ -275,7 +286,7 @@ function createSubscriptionChangeGuardHarness(options: {
   const orderInserts: any[] = []; const rows: any[] = []; const orderUpdates: any[] = [];
   const userTableReads: string[] = []; let profileReadCount = 0;
   let insertError: any = null;
-  stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate },
+  stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate }, prices: { retrieve: priceRetrieve },
     invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve, list: invoiceList } });
   function ordersBuilder() {
     const filters: Array<[string, unknown]> = []; let values: any = null;
@@ -316,7 +327,7 @@ function createSubscriptionChangeGuardHarness(options: {
     throw new Error(`Unexpected admin write ${table}`);
   } };
   return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
-    targetPlanId, subscriptionRetrieve, subscriptionUpdate, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
+    targetPlanId, subscriptionRetrieve, subscriptionUpdate, priceRetrieve, targetPrice, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
     rows, orderInserts, orderUpdates, userTableReads, adminSupabase, targetPriceIds, fullPricePreview,
     setInsertError: (e: any) => { insertError = e; } };
 }
@@ -1222,6 +1233,9 @@ describe('paymentsRouter error sanitization', () => {
       items: [{ id: 'si_test_current', price: targetPrice }],
       billing_cycle_anchor: 'now', proration_behavior: 'none', payment_behavior: 'error_if_incomplete',
     }), { idempotencyKey: 'subscription-change:order-change-1' });
+    expect(h.priceRetrieve).toHaveBeenCalledTimes(2);
+    expect(h.priceRetrieve).toHaveBeenNthCalledWith(1, targetPrice);
+    expect(h.priceRetrieve).toHaveBeenNthCalledWith(2, targetPrice);
     expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('proration_date');
     expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('cancel_at_period_end');
     expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
@@ -1229,7 +1243,8 @@ describe('paymentsRouter error sanitization', () => {
 
   it.each([
     'amount-below-catalog', 'amount-above-catalog', 'currency', 'partial-lines', 'old-price-credit',
-    'target-proration', 'missing-target-price', 'wrong-period', 'discount', 'tax', 'customer-balance',
+    'target-proration', 'missing-target-price', 'wrong-period', 'discount', 'tax', 'zero-tax', 'zero-total-tax',
+    'customer-balance',
   ])('rejects non-full-price preview evidence: %s', async problem => {
     const h = createSubscriptionChangeGuardHarness();
     const preview: any = h.fullPricePreview('monthly');
@@ -1247,11 +1262,29 @@ describe('paymentsRouter error sanitization', () => {
     if (problem === 'wrong-period') preview.lines.data[0].period.end = preview.lines.data[0].period.start + (31 * 24 * 60 * 60);
     if (problem === 'discount') preview.lines.data[0].discount_amounts = [{ amount: 1 }];
     if (problem === 'tax') preview.lines.data[0].taxes = [{ amount: 1 }];
+    if (problem === 'zero-tax') preview.lines.data[0].taxes = [{ amount: 0 }];
+    if (problem === 'zero-total-tax') preview.total_taxes = [{ amount: 0 }];
     if (problem === 'customer-balance') preview.starting_balance = -1;
     h.invoicePreview.mockResolvedValue(preview);
     await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' }))
       .rejects.toMatchObject({ code: 'CONFLICT' });
     expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each(['monthly', 'yearly'] as const)('rejects a target Price whose configured cadence is not exact %s before preview or update', async billingCycle => {
+    const h = createSubscriptionChangeGuardHarness();
+    const target = h.targetPrice(billingCycle);
+    h.priceRetrieve.mockResolvedValue({
+      ...target,
+      recurring: billingCycle === 'monthly'
+        ? { interval: 'day', interval_count: 28 }
+        : { interval: 'month', interval_count: 12 },
+    });
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.invoicePreview).not.toHaveBeenCalled();
+    expect(h.orderInserts).toHaveLength(0);
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
   it('keeps quote time outside the semantic fingerprint', async () => {
