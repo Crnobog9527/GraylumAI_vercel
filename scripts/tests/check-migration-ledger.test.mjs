@@ -33,6 +33,16 @@ test('rejects a duplicate migration number after the historical baseline', async
   }
 });
 
+test('rejects a gap in the post-baseline migration sequence', async () => {
+  const fixture = await copiedMigrations();
+  try {
+    await rm(path.join(fixture, '0062_skill_1a_db_publish_contract.sql'));
+    assert.throws(() => runChecker(fixture), (error) => /Missing post-baseline migration number 0062/.test(error.stderr));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test('rejects malformed migration-like SQL filenames', async () => {
   const fixture = await copiedMigrations();
   try {

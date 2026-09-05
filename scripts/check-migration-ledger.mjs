@@ -4,6 +4,7 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const LEGAL_MIGRATION_FILENAME = /^(?<number>\d{4})_(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)\.sql$/;
+const POST_BASELINE_START = 48;
 
 // These two already-applied migrations predate the ledger rule and must remain
 // byte-for-byte untouched. No other duplicate number is permitted.
@@ -43,6 +44,21 @@ export async function checkMigrationLedger(directory) {
       && files.every((file) => allowlisted.has(file));
     if (!isExactHistoricalPair) {
       errors.push(`Duplicate migration number ${number}: ${files.sort().join(', ')}`);
+    }
+  }
+
+  const postBaselineNumbers = [...migrationsByNumber.keys()]
+    .map(Number)
+    .filter((number) => number >= POST_BASELINE_START)
+    .sort((left, right) => left - right);
+
+  if (postBaselineNumbers.length > 0) {
+    const highestNumber = postBaselineNumbers.at(-1);
+    for (let number = POST_BASELINE_START; number <= highestNumber; number += 1) {
+      const paddedNumber = String(number).padStart(4, '0');
+      if (!migrationsByNumber.has(paddedNumber)) {
+        errors.push(`Missing post-baseline migration number ${paddedNumber}`);
+      }
     }
   }
 
