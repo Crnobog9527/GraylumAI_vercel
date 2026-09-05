@@ -343,7 +343,7 @@ progress_refresh_v10_1:
 - **年付**：Jan-31 全链；闰年；月末 clamp；首期即时；12 期总和精确；webhook/cron 同期不重复；正常取消继续释放、period end 停止；退款立即终止。
 - **退款**：partial 与 full 同语义；当期剩余只扣一次；历史期/开户/签到/管理员/其他订阅/积分包全部保留；重放与 later-full 不二次扣；缺 timestamp→REVIEW_REQUIRED；Stripe 侧仍 active→告警。
 - **Skill**：draft 不进 runtime；发布原子；下个请求即新版本；模块隔离；**active+unbound 失败且不扣费**；active+archived Skill 失败且不扣费；普通用户读不到 draft；长历史截断不截 Skill；用户不能指定 skill。
-- **付费**：积分包/Pro/Gold 月年全部走通；零/负/空无 CTA；success/cancel/expired；订单落库；webhook 重放只履约一次；Portal 取消；升级入口双侧关闭；package discount 正确；**checkout 超频被限流**；**积分包支付宝端到端（test-mode）：发起→回跳→`checkout.session.completed(paid)`→履约一次；重放不二次；（若收到）async_failed 不履约；退款走 `refund.updated` 对支付宝 charge 对账成立**。
+- **付费**：积分包/Pro/Gold 月年全部走通；零/负/空无 CTA；success/cancel/expired；订单落库；webhook 重放只履约一次；Portal 取消；PAY-1 合法升级矩阵通过（FULL_TARGET_NO_PRORATION：按目标周期完整价格收费、no proration）；降级、年付→月付、同级同周期重复均拒绝；scheduled cancellation 必须先恢复续费，直接升级拒绝；package discount 正确；**checkout 超频被限流**；**积分包支付宝端到端（test-mode）：发起→回跳→`checkout.session.completed(paid)`→履约一次；重放不二次；（若收到）async_failed 不履约；退款走 `refund.updated` 对支付宝 charge 对账成立**。
 - **Cron/对账**：5 cron 授权通过、unauthorized 拒绝；release 幂等；reconcile success 且 baseline 之后 paid-unfulfilled=0、重复发放=0、termination gap=0；日志无 secret。
 
 ---
