@@ -23,7 +23,16 @@
     "stripe:readiness:staging": "node ./scripts/check-stripe-readiness.mjs --env .env.staging.local --confirm-staging --require-test-mode",
     "test": "turbo test",
     "test:api": "pnpm --filter @repo/api test:run",
-    "db:push": "drizzle-kit push --config=packages/db/drizzle.config.ts"
+    "test:ci:auth-bootstrap": "pnpm --filter @repo/api exec vitest run src/trpc.test.ts",
+    "test:ci:checkout-cancellation": "pnpm --filter @repo/api exec vitest run src/routers/settings.test.ts src/routers/payments.test.ts src/services/__tests__/membershipEligibility.test.ts src/services/__tests__/stripe.test.ts src/services/__tests__/stripeFulfillment.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts src/services/__tests__/subscriptionPlanButtonState.test.ts",
+    "test:ci:pay-1-frontend": "pnpm --filter web exec vitest run src/components/landing/PricingSection.test.tsx src/components/profile/SubscriptionCard.test.tsx --testNamePattern='^(?!.*(local mobile browser|local browser|actual upgrade preview)).*$'",
+    "test:ci:skill-runtime": "pnpm --filter @repo/api exec vitest run src/services/__tests__/skillRuntime.test.ts src/routers/aiStreamRoute.test.ts",
+    "test:ci:year-calendar": "pnpm --filter @repo/api exec vitest run src/services/__tests__/subscriptionCreditGrants.test.ts",
+    "test:ci:refund-race": "pnpm --filter @repo/api exec vitest run src/services/__tests__/refund1bConsumedAmount.test.ts src/services/__tests__/subscriptionCreditGrants.test.ts",
+    "test:ci:billing-cron": "pnpm --filter @repo/api exec vitest run src/services/__tests__/billingReconciliation.test.ts src/services/__tests__/billingReconciliationPermissions.test.ts && pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts",
+    "test:ci:proxy-hostname": "pnpm --filter web exec vitest run src/proxy-hostname.test.ts",
+    "test:ci:safeguards": "node --test scripts/tests/*.test.mjs",
+    "db:push": "node scripts/db-push-guard.mjs"
   },
   "keywords": [],
   "author": "",
