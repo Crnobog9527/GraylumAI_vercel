@@ -54,22 +54,104 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          package-manager-cache: false
+
+      - name: CI safeguard — check migration ledger
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              migration_base_sha="$(jq -er '.pull_request.base.sha' "$GITHUB_EVENT_PATH")"
+              ;;
+            push)
+              migration_base_sha="$(jq -er '.before' "$GITHUB_EVENT_PATH")"
+              ;;
+            *)
+              echo 'Unsupported workflow event for migration ledger check.' >&2
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$migration_base_sha" | grep -Eq '^[0-9a-f]{40}$' ||
+            printf '%s' "$migration_base_sha" | grep -Eq '^0{40}$' ||
+            ! git cat-file -e "${migration_base_sha}^{commit}" 2>/dev/null; then
+            echo 'Exact migration base commit is unavailable.' >&2
+            exit 1
+          fi
+
+          if git cat-file -e "${migration_base_sha}:scripts/check-migration-ledger.mjs" 2>/dev/null; then
+            trusted_checker="$RUNNER_TEMP/graylum-check-migration-ledger.mjs"
+            git show "${migration_base_sha}:scripts/check-migration-ledger.mjs" > "$trusted_checker"
+            echo 'Using migration ledger checker from the exact base commit.'
+            node "$trusted_checker"
+          else
+            echo 'Bootstrapping the migration ledger checker; base-existing migrations must be unchanged.'
+            checker_index_entry="$(git ls-files --stage -- scripts/check-migration-ledger.mjs)"
+            checker_mode="${checker_index_entry%% *}"
+            if [ -z "$checker_index_entry" ] || [ -L scripts/check-migration-ledger.mjs ] ||
+              [ ! -f scripts/check-migration-ledger.mjs ]; then
+              echo 'Bootstrap migration ledger checker must be a tracked regular file.' >&2
+              exit 1
+            fi
+            case "$checker_mode" in
+              100644|100755) ;;
+              *)
+                echo 'Bootstrap migration ledger checker has an unsupported Git mode.' >&2
+                exit 1
+                ;;
+            esac
+            expected_checker_sha='f7b64010de1ffb58c4910bb74aee431e1d2273249257ba8cb1dcbc8b0d2a1f07'
+            actual_checker_sha="$(sha256sum scripts/check-migration-ledger.mjs | awk '{print $1}')"
+            if [ "$actual_checker_sha" != "$expected_checker_sha" ]; then
+              echo 'Bootstrap migration ledger checker does not match the reviewed content.' >&2
+              exit 1
+            fi
+            git diff --quiet --no-ext-diff --no-textconv --no-renames \
+              --diff-filter=MDTUXB "$migration_base_sha" -- packages/db/migrations
+            node scripts/check-migration-ledger.mjs
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Run API tests
         run: pnpm test:api
+
+      - name: Launch regression — auth bootstrap including OAuth
+        run: pnpm test:ci:auth-bootstrap
+
+      - name: Launch regression — checkout readiness, cancellation, and PAY-1
+        run: pnpm test:ci:checkout-cancellation
+
+      - name: Launch regression — PAY-1 frontend checkout readiness and cancellation
+        run: pnpm test:ci:pay-1-frontend
+
+      - name: Launch regression — Skill runtime active and unbound fail-closed
+        run: pnpm test:ci:skill-runtime
+
+      - name: Launch regression — YEAR-1 calendar grants
+        run: pnpm test:ci:year-calendar
+
+      - name: Launch regression — REFUND-1B counters and race protections
+        run: pnpm test:ci:refund-race
+
+      - name: Launch regression — billing cron authorization and reconciliation
+        run: pnpm test:ci:billing-cron
+
+      - name: Launch regression — proxy hostname behavior
+        run: pnpm test:ci:proxy-hostname
+
+      - name: CI safeguards — migration ledger and db push guard
+        run: pnpm test:ci:safeguards
 
   build:
     name: Build Check
