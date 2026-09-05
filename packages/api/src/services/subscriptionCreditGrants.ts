@@ -1113,6 +1113,7 @@ function isUsableSourceForInvoice(
 async function getResidualSubscriptionPlanChangeLock(input: {
   supabase: SupabaseLikeClient;
   subscriptionId: string;
+  expectedSourceOrderId: string;
   sourceCutoff?: string | null;
 }): Promise<PaymentOrderRow | null> {
   const lockKey = buildSubscriptionPlanChangeLockKey(input.subscriptionId);
@@ -1121,6 +1122,7 @@ async function getResidualSubscriptionPlanChangeLock(input: {
     .select('id, stripe_checkout_session_id, status, payment_status, fulfilled_at, created_at, metadata')
     .eq('stripe_subscription_id', input.subscriptionId)
     .eq('stripe_checkout_session_id', lockKey)
+    .eq('id', input.expectedSourceOrderId)
     .maybeSingle();
 
   if (result.error) {
@@ -2953,18 +2955,21 @@ export async function fulfillMembershipInvoiceWithSubscriptionCreditGrants(
   }
 
   if (existingInvoiceOrder?.fulfilled_at) {
-    const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
-      supabase,
-      subscriptionId: input.subscriptionId,
-      sourceCutoff: getInvoiceSourceCutoff(input),
-    });
-    if (residualPlanChangeLock && (!input.expectedSourceOrderId || residualPlanChangeLock.id === input.expectedSourceOrderId)) {
-      await releaseSubscriptionPlanChangeLock({
+    if (input.expectedSourceOrderId) {
+      const residualPlanChangeLock = await getResidualSubscriptionPlanChangeLock({
         supabase,
-        sourceOrder: residualPlanChangeLock,
-        fulfilledAt: existingInvoiceOrder.fulfilled_at,
-        paymentStatus: existingInvoiceOrder.payment_status ?? input.paymentStatus,
+        subscriptionId: input.subscriptionId,
+        expectedSourceOrderId: input.expectedSourceOrderId,
+        sourceCutoff: getInvoiceSourceCutoff(input),
       });
+      if (residualPlanChangeLock) {
+        await releaseSubscriptionPlanChangeLock({
+          supabase,
+          sourceOrder: residualPlanChangeLock,
+          fulfilledAt: existingInvoiceOrder.fulfilled_at,
+          paymentStatus: existingInvoiceOrder.payment_status ?? input.paymentStatus,
+        });
+      }
     }
 
     return {
