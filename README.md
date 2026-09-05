@@ -8,3 +8,4 @@
 
 Owner 说明目标和期望结果即可；技术范围、命令及验证由 Agent 判断。
 历史稳定化记录可作线索，不是当前任务顺序、授权或完成证明。
+<!-- codex-review-network-smoke-test -->
