@@ -36,21 +36,12 @@ is ready.
 
 ## Launch selection boundary
 
-- Only the Owner may select the next named Launch task.
-- The selected task must be a member of the currently derived ready-candidate set.
-- Readiness narrows eligible Owner choices but never selects or authorizes a task.
-- If the selected task is not ready, return `NO_PRODUCT_TASK_AUTHORIZED` with
-  reason `OWNER_SELECTED_TASK_NOT_READY`.
-- If no task is explicitly selected, return `NO_PRODUCT_TASK_AUTHORIZED`.
-- No Agent may infer task authorization from dependency completion, priority,
-  ordering, a previous task finishing, a historical Gate, or tracker prose.
-- After an eligible Owner selection, current `AGENTS.md` governs risk,
-  implementation mechanics, validation, review, merge, and external boundaries.
-- Product specifications remain product/technical inputs, not execution authority.
-- Multiple or conflicting current task identities, completion evidence, or
-  overlapping writers produce `BLOCKED_CONTEXT_NOT_VERIFIED`.
-- After any selected task completes, stop. Never automatically progress to
-  another node.
+Follow the [Launch discovery protocol](START_HERE.md#discovery-protocol).
+Read-only discovery, comparison, and readiness audits need no task selection.
+Only the Owner selects a new named Launch task from the current ready-candidate
+set; continuing that same task needs no reselection. Readiness and task ordering
+never grant authorization. After completion, do not automatically start another
+node. Current `AGENTS.md` governs implementation and protected effects.
 
 ## Writer and recovery invariants
 

@@ -1,5 +1,9 @@
 # GraylumAI 项目地图（给不写代码的负责人）
 
+本文是架构导航，具体接口和状态需核对当前代码与 live evidence。历史验证
+记录不代表当前候选通过；执行规则见当前 `AGENTS.md`，任务发现见
+[Launch 入口](launch/START_HERE.md)。
+
 ## 1) 这个项目到底是什么
 - 项目类型：`pnpm + turbo` Monorepo。
 - 前端应用：`apps/web`（Next.js 16 + React 19）。
@@ -72,27 +76,28 @@
   - `packages/api/src/routers/admin.ts`
   - `apps/web/src/app/admin/*`
 
-## 7) 负责人必用验证命令
+## 7) Agent 可按任务选择的开发命令
 - API 单测基线：`pnpm --filter @repo/api test:run`
 - 全仓构建：`pnpm build`
 - 本地开发：`pnpm dev`
 
-## 8) 当前已完成稳定化动作（本轮）
+## 8) 历史稳定化记录（不是当前验证结果）
 - `.env.example` 改为安全占位符，移除真实密钥样式值。
 - 修复 `admin.getUserDetails` 消息统计逻辑（按用户对话 ID 统计消息）。
 - 下线旧 `chat.sendMessage` Echo 入口，避免误接旧链路。
 - API 测试从 4 个失败修复为 0 个失败（228/228 通过）。
 
-## 9) 你每次找 agent 前要做的 10 秒动作
-- 先判断任务属于：`聊天主链` / `管理后台` / `计费` / `数据库`。
-- 明确你要改的“页面或接口”与“验收句子”。
-- 按 `docs/AGENT_COMMAND_PLAYBOOK.md` 模板发指令。
+## 9) 如何提出任务
 
-## 10) 当前严格签核结论
-- 全站严格签核总表：`docs/STRICT_SIGNOFF_STATUS.md`
-- 如果你只想知道“现在能不能说除了支付都完了”，先看这份总表，不要只看单独的后台矩阵或安全审计。
-- 这份总表的判定标准比“主链路可用”更严格：只要还有 follow-up、accepted risk、或缺少全站级证明，就不会判成“全部完成”。
-- 上线前发布准备与演练入口：
-  - `docs/RELEASE_PREP_CHECKLIST.md`
-  - `docs/runbooks/PRE_RELEASE_REHEARSAL.md`
-  - `docs/STRIPE_ENABLEMENT_CHECKLIST.md`
+说明期望的用户行为、当前问题和验收结果即可。Agent 自行定位页面、接口、
+文件范围和验证方式，不要求 Owner 选择技术命令或使用固定模板。
+
+## 10) 发布资料
+
+以下材料可用于定位历史证据与技术要求，不能替代当前候选的验证、授权或
+完成判断；当前执行流程以 `AGENTS.md` 为准：
+
+- `docs/STRICT_SIGNOFF_STATUS.md`
+- `docs/RELEASE_PREP_CHECKLIST.md`
+- `docs/runbooks/PRE_RELEASE_REHEARSAL.md`
+- `docs/STRIPE_ENABLEMENT_CHECKLIST.md`

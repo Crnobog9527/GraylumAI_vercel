@@ -34,15 +34,17 @@ process wording has been retired.
 2. Read `plan-core.md` and derive ready candidates from live completion evidence.
 3. Treat the ready-candidate set as discovery data only; readiness never selects
    or authorizes a task by itself.
-4. Require the Owner to explicitly select a named Launch task from the current
-   ready-candidate set before planning or implementation begins.
+4. Read-only discovery, comparison, and readiness audits need no task selection.
+   Before starting a new Launch implementation, require explicit Owner selection
+   of a named task from the current ready-candidate set. Continuing the same
+   selected task does not require reselection.
 5. If the Owner-selected task is not currently ready, return
    `NO_PRODUCT_TASK_AUTHORIZED` with reason `OWNER_SELECTED_TASK_NOT_READY`.
 6. After an eligible Owner selection, derive technical risk, scope, branch/PR,
    and validation under current `AGENTS.md`.
 7. Verify exactly-one-writer before mutation.
-8. If no Launch task is explicitly Owner-selected, return
-   `NO_PRODUCT_TASK_AUTHORIZED`.
+8. If implementation is requested without an explicitly Owner-selected Launch
+   task, return `NO_PRODUCT_TASK_AUTHORIZED`; discovery may still continue.
 9. If task identity, readiness evidence, repository state, or writer occupancy is
    materially ambiguous or conflicting, return `BLOCKED_CONTEXT_NOT_VERIFIED`.
 10. After the selected task completes, stop. Never automatically select or start
