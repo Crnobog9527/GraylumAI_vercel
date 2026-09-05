@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -27,7 +27,17 @@ test('rejects a byte change to an allowlisted historical migration', async () =>
   const fixture = await copiedMigrations();
   try {
     await appendFile(path.join(fixture, '0018_payment_fulfillment_atomicity.sql'), '\n-- test fixture\n');
-    assert.throws(() => runChecker(fixture), (error) => /Modified frozen historical migration: 0018_payment_fulfillment_atomicity\.sql/.test(error.stderr));
+    assert.throws(() => runChecker(fixture), (error) => /Modified frozen migration: 0018_payment_fulfillment_atomicity\.sql/.test(error.stderr));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('rejects a byte change to a non-allowlisted applied migration', async () => {
+  const fixture = await copiedMigrations();
+  try {
+    await appendFile(path.join(fixture, '0047_subscription_fulfillment_service_role_grants.sql'), '\n-- test fixture\n');
+    assert.throws(() => runChecker(fixture), (error) => /Modified frozen migration: 0047_subscription_fulfillment_service_role_grants\.sql/.test(error.stderr));
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
@@ -58,6 +68,18 @@ test('rejects deletion of the committed post-baseline high-water migration', asy
   try {
     await rm(path.join(fixture, '0063_bill_1_reconciliation_select_contract.sql'));
     assert.throws(() => runChecker(fixture), (error) => /Missing post-baseline migration number 0063/.test(error.stderr));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('rejects deletion of the entire committed post-baseline segment', async () => {
+  const fixture = await copiedMigrations();
+  try {
+    for (const file of await readdir(fixture)) {
+      if (/^00(?:4[89]|5\d|6[0-3])_/.test(file)) await rm(path.join(fixture, file));
+    }
+    assert.throws(() => runChecker(fixture), (error) => /Missing post-baseline migration number 0048/.test(error.stderr));
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
