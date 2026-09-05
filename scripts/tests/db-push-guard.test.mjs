@@ -8,12 +8,13 @@ import { parseDatabaseTarget } from '../db-push-guard.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const guard = path.join(repositoryRoot, 'scripts/db-push-guard.mjs');
-const validUrl = 'postgresql://postgres@db.gvcpmcunmfrbxuwimxfa.supabase.co:5432/postgres';
-const validPoolerUrl = 'postgresql://postgres.gvcpmcunmfrbxuwimxfa@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
+const fixtureProjectRef = 'abcdefghijklmnopqrst';
+const validUrl = `postgresql://postgres@db.${fixtureProjectRef}.supabase.co:5432/postgres`;
+const validPoolerUrl = `postgresql://postgres.${fixtureProjectRef}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`;
 
 test('derives the same project ref from supported direct and pooler URLs', () => {
-  assert.equal(parseDatabaseTarget(validUrl), 'gvcpmcunmfrbxuwimxfa');
-  assert.equal(parseDatabaseTarget(validPoolerUrl), 'gvcpmcunmfrbxuwimxfa');
+  assert.equal(parseDatabaseTarget(validUrl), fixtureProjectRef);
+  assert.equal(parseDatabaseTarget(validPoolerUrl), fixtureProjectRef);
 });
 
 async function fixtureRunner() {
@@ -79,7 +80,7 @@ test('blocks a wrong confirmation before downstream invocation', async () => {
 test('allows an exact confirmation to invoke the harmless injected runner', async () => {
   const fixture = await fixtureRunner();
   try {
-    runGuard({ DATABASE_URL: validUrl, NODE_ENV: 'test', DB_PUSH_TEST_RUNNER: fixture.runner, DB_PUSH_CONFIRM: 'gvcpmcunmfrbxuwimxfa' });
+    runGuard({ DATABASE_URL: validUrl, NODE_ENV: 'test', DB_PUSH_TEST_RUNNER: fixture.runner, DB_PUSH_CONFIRM: fixtureProjectRef });
     assert.equal(await wasInvoked(fixture.marker), true);
   } finally {
     await rm(fixture.directory, { recursive: true, force: true });
@@ -91,12 +92,12 @@ test('fails closed for malformed, unsupported, and ambiguous targets before down
   try {
     for (const databaseUrl of [
       'not a url',
-      'mysql://user@db.gvcpmcunmfrbxuwimxfa.supabase.co/database',
+      `mysql://user@db.${fixtureProjectRef}.supabase.co/database`,
       'postgresql://postgres@db.example.test/postgres',
       'postgresql://postgres@aws-0-us-east-1.pooler.supabase.com/postgres',
     ]) {
       assert.throws(
-        () => runGuard({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', DB_PUSH_TEST_RUNNER: fixture.runner, DB_PUSH_CONFIRM: 'gvcpmcunmfrbxuwimxfa' }),
+        () => runGuard({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', DB_PUSH_TEST_RUNNER: fixture.runner, DB_PUSH_CONFIRM: fixtureProjectRef }),
         (error) => /db:push blocked/.test(error.stderr),
       );
       assert.equal(await wasInvoked(fixture.marker), false);
