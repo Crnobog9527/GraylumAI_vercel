@@ -71,6 +71,33 @@ jobs:
       - name: Run API tests
         run: pnpm test:api
 
+      - name: Launch regression — auth bootstrap including OAuth
+        run: pnpm test:ci:auth-bootstrap
+
+      - name: Launch regression — checkout readiness, cancellation, and PAY-1
+        run: pnpm test:ci:checkout-cancellation
+
+      - name: Launch regression — Skill runtime active and unbound fail-closed
+        run: pnpm test:ci:skill-runtime
+
+      - name: Launch regression — YEAR-1 calendar grants
+        run: pnpm test:ci:year-calendar
+
+      - name: Launch regression — REFUND-1B counters and race protections
+        run: pnpm test:ci:refund-race
+
+      - name: Launch regression — billing cron authorization and reconciliation
+        run: pnpm test:ci:billing-cron
+
+      - name: Launch regression — proxy hostname behavior
+        run: pnpm test:ci:proxy-hostname
+
+      - name: CI safeguards — migration ledger and db push guard
+        run: pnpm test:ci:safeguards
+
+      - name: CI safeguard — check migration ledger
+        run: node scripts/check-migration-ledger.mjs
+
   build:
     name: Build Check
     runs-on: ubuntu-latest
