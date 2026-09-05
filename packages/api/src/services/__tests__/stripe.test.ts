@@ -278,3 +278,92 @@ describe('stripe service helpers', () => {
     });
   });
 });
+
+const limitState = vi.hoisted(() => ({ check: vi.fn() }));
+vi.mock('../redisRateLimiter', () => ({ checkRateLimit: limitState.check }));
+
+describe('PAY-1 payment boundaries', () => {
+  beforeEach(() => {
+    process.env.VERCEL = '1';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
+    limitState.check.mockReset().mockResolvedValue({ success: true, limit: 5, remaining: 4 });
+  });
+  afterEach(() => { process.env = { ...ORIGINAL_ENV }; });
+
+  it('uses separate user and trusted IP keys, ignoring spoofed forwarding headers', async () => {
+    const { assertCheckoutRateLimit } = await import('../stripe');
+    const headers = new Headers({ 'x-vercel-forwarded-for': '203.0.113.7', 'x-forwarded-for': '1.2.3.4' });
+    await assertCheckoutRateLimit('user-a', headers);
+    await assertCheckoutRateLimit('user-b', headers);
+    expect(limitState.check.mock.calls).toEqual([
+      ['checkout:user:user-a', 'auth'], ['checkout:ip:203.0.113.7', 'anonymous'],
+      ['checkout:user:user-b', 'auth'], ['checkout:ip:203.0.113.7', 'anonymous'],
+    ]);
+  });
+  it.each([0, 1])('rejects when dimension %s is over limit', async (dimension) => {
+    const { assertCheckoutRateLimit } = await import('../stripe');
+    if (dimension) limitState.check.mockResolvedValueOnce({ success: true, limit: 5 });
+    limitState.check.mockResolvedValueOnce({ success: false, limit: 5, reason: 'rate_limited' });
+    await expect(assertCheckoutRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' })))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+  });
+  it.each([{ success: true, limit: 0 }, { success: false, limit: 0, reason: 'unavailable' }])('fails closed on backend fallback %j', async (result) => {
+    const { assertCheckoutRateLimit } = await import('../stripe');
+    limitState.check.mockResolvedValueOnce(result);
+    await expect(assertCheckoutRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' })))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
+  it.each(['', 'unknown', '1.2.3.4, 5.6.7.8', 'fake-ip'])('rejects missing or malformed trusted IP %s without a shared unknown bucket', async (ip) => {
+    const { assertCheckoutRateLimit } = await import('../stripe');
+    await expect(assertCheckoutRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': ip, 'x-forwarded-for': '1.2.3.4' })))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(limitState.check).not.toHaveBeenCalled();
+  });
+  it('canonicalizes equivalent IPv6 spellings', async () => {
+    const { assertCheckoutRateLimit } = await import('../stripe');
+    for (const ip of ['2001:db8::1', '2001:0db8:0:0:0:0:0:1']) {
+      await assertCheckoutRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': ip }));
+    }
+    expect(limitState.check.mock.calls[1]).toEqual(limitState.check.mock.calls[3]);
+  });
+  it('isolates subscription-change user/IP windows from Checkout', async () => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    await assertSubscriptionChangeRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' }));
+    expect(limitState.check.mock.calls).toEqual([
+      ['subscription-change:user:user-a', 'auth'], ['subscription-change:ip:203.0.113.7', 'anonymous'],
+    ]);
+  });
+  it.each([0, 1])('rejects subscription-change dimension %s', async dimension => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    if (dimension) limitState.check.mockResolvedValueOnce({ success: true, limit: 5 });
+    limitState.check.mockResolvedValueOnce({ success: false, limit: 5, reason: 'rate_limited' });
+    await expect(assertSubscriptionChangeRateLimit('user-a', new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' })))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+  });
+  it.each(['timeout', 'fallback', 'unavailable', 'missing-ip', 'invalid-ip'])('fails closed for upgrade %s', async problem => {
+    const { assertSubscriptionChangeRateLimit } = await import('../stripe');
+    if (problem === 'timeout') limitState.check.mockRejectedValue(new Error('timeout'));
+    if (problem === 'fallback') limitState.check.mockResolvedValue({ success: true, limit: 0 });
+    if (problem === 'unavailable') limitState.check.mockResolvedValue({ success: false, limit: 5, reason: 'unavailable' });
+    const headers = new Headers();
+    if (problem !== 'missing-ip') headers.set('x-vercel-forwarded-for', problem === 'invalid-ip' ? 'unknown' : '203.0.113.7');
+    await expect(assertSubscriptionChangeRateLimit('user-a', headers)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  });
+  it('allows only the exact server-configured Profile return URL', async () => {
+    const { getStripePortalReturnUrl } = await import('../stripe');
+    expect(getStripePortalReturnUrl()).toBe('https://app.example.com/profile?tab=subscription');
+    expect(getStripePortalReturnUrl('https://app.example.com/profile?tab=subscription')).toBe('https://app.example.com/profile?tab=subscription');
+  });
+  it.each([
+    'https://evil.example/profile?tab=subscription', '//evil.example',
+    'javascript:alert(1)', 'https://app.example.com.evil.example/profile?tab=subscription',
+    'https://app.example.com@evil.example/profile?tab=subscription',
+    'https://app.example.com/profile?tab=subscription&next=https://evil.example',
+    'https://app.example.com/profile?tab=subscription#evil',
+    'http://app.example.com/profile?tab=subscription', '/profile?tab=subscription',
+    'https://app.example.com:444/profile?tab=subscription',
+  ])('rejects Portal return URL abuse %s', async (url) => {
+    const { getStripePortalReturnUrl } = await import('../stripe');
+    expect(() => getStripePortalReturnUrl(url)).toThrow('无效的返回地址');
+  });
+});

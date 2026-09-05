@@ -300,7 +300,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
-      checkout_ready: stripeReady && hasConfiguredStripePriceId(pkg.stripe_price_id),
+      checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(pkg.stripe_price_id),
     }));
   }),
 
@@ -364,8 +364,8 @@ export const settingsRouter = router({
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
       checkoutReady: {
-        monthly: stripeReady && hasConfiguredStripePriceId(plan.stripe_monthly_price_id),
-        yearly: stripeReady && hasConfiguredStripePriceId(plan.stripe_yearly_price_id),
+        monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(plan.stripe_monthly_price_id),
+        yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(plan.stripe_yearly_price_id),
       },
     }));
   }),

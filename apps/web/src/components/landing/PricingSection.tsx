@@ -112,7 +112,10 @@ export default function PricingSection({
               Number(plan.credits.yearly ?? 0) + Number(plan.credits.yearlyBonus ?? 0);
             const isHighlighted = plan.highlight || plan.recommended;
             const hasCheckout =
-              Boolean(plan.checkoutReady?.monthly) || Boolean(plan.checkoutReady?.yearly);
+              plan.level !== 'free' && (
+                (Boolean(plan.checkoutReady?.monthly) && Number.isFinite(monthlyPrice) && monthlyPrice > 0)
+                || (Boolean(plan.checkoutReady?.yearly) && Number.isFinite(yearlyPrice) && yearlyPrice > 0)
+              );
             const ctaHref = hasCheckout
               ? buildAuthHref(`/login?action=signup&plan=${encodeURIComponent(plan.name)}`)
               : '/contact';

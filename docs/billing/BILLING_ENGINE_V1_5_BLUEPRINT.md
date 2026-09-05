@@ -51,7 +51,7 @@
 6. 同级同周期不允许重复购买。
 7. active 订阅用户不得通过新 checkout 创建第二个 active subscription。
 8. 订阅升级必须走 Stripe subscription update / pending update / schedule，不得用新 checkout 创建第二份订阅。
-9. `cancel_at_period_end` 但未到期的用户仍按 active 权益处理；可恢复取消或升级，不允许降级立即生效。
+9. `cancel_at_period_end` 但未到期的用户仍按 active 权益处理；必须先明确恢复续费后才可升级，升级操作不得隐式恢复续费；不允许降级立即生效。
 10. `past_due / incomplete / unpaid` 用户必须先处理付款异常，不允许购买/切换套餐以绕过账单问题。
 
 ### 1.4 订单状态规则
@@ -388,15 +388,18 @@ subscription_grant:monthly:{stripe_invoice_id}
 1. 前端调用新的 `changeSubscriptionPlan` API，而不是 `createCheckoutSession`。
 2. 后端读取当前 `user_subscriptions` 与目标 plan。
 3. membership eligibility 判断是否允许升级。
-4. 创建 `subscription_change_requests`。
-5. 调用 Stripe subscription update / pending update / schedule 替换现有 subscription item 的 price。
-6. 如果需要立即收费，必须确保支付成功后才应用本地权益。
-7. Stripe webhook 到达后更新本地 subscription、plan、billing_cycle。
-8. 按新的订阅周期释放积分：
-   - 月付目标：发放目标套餐当期月度积分。
-   - 年付目标：立即释放年付第 1 个月积分，然后后续按月释放。
-9. 写入 `subscription_credit_grants` 与 `credit_transactions`。
-10. `subscription_change_requests.status = applied`。
+4. 受保护预览以同一 subscription、现有 item、目标 Price、`billing_cycle_anchor=now`、`proration_behavior=none` 建模；预览不得发送 `proration_date`。
+5. 更新前必须读取目标 Stripe Price，并要求月付为 `month × 1`、年付为 `year × 1` 的 recurring cadence，Price 金额/币种也必须与本地目录一致；预览发票必须只有完整目标周期的目标 Price line，月付 line 必须精确覆盖 1 个 UTC 日历月，年付 line 必须精确覆盖 12 个 UTC 日历月；分页完整且不得出现任何 proration、旧 Price 负数抵扣、discount/tax 条目（包括零金额条目）或余额调整；`amount_due` 与当前本地目标套餐/周期目录价及 USD 币种必须完全一致，否则 fail closed。
+6. 报价的财务语义字段为 `amountDue`、`currency`、`quotedAt` 与语义 fingerprint；另用服务端认证的 freshness proof 将 `quotedAt` 绑定到该 fingerprint，防止客户端刷新时间绕过 300 秒重新确认。`quotedAt` 不进入财务语义 fingerprint，也不参与按时间计价。确认时重新读取本地/Stripe 状态并再次执行同一全价预览；金额、币种、时间证明或语义状态变化时要求重新确认。
+7. 创建一个持久 plan-change source/lock，以其 id 派生稳定 Stripe idempotency key。
+8. 更新同一 Stripe subscription 的现有 item：目标 Price + `billing_cycle_anchor=now` + `proration_behavior=none` + `payment_behavior=error_if_incomplete`。不得发送 `proration_date`，不得清除到期取消，也不得创建第二个 Checkout/subscription。
+9. 目标套餐/周期收取当前配置的完整价格；旧套餐不退款、不按未使用时间抵扣、不计算差价，也不根据剩余或已用积分改价。新的完整目标 term 从付款成功对应的 Stripe 目标周期开始。
+10. subscription update 本身不授予权益。只有精确绑定持久 source、目标 Price/customer/user，且在履约时再次确认目标 Stripe Price 是精确 `month × 1` / `year × 1` cadence、精确 1/12 个 UTC 日历月的完整目标 service period、全价 `amount_due/amount_paid/subtotal/total`，且无任何折扣、税、credit note 或余额调整的 paid invoice 可以更新本地 subscription、plan、billing_cycle；普通续费发票必须按 invoice line 的 exact Price 选择 source，并排除 plan-change source，防止延迟旧续费误用目标套餐的 lock 或派生 invoice order；普通续费失败也不得消费或释放 plan-change lock。
+11. 已有积分及历史 grant 全部保留，不反转、不扣减：
+    - 月付目标：在现有余额上完整追加 `monthly_credits + monthly_bonus_credits`，恰好一次。
+    - 年付目标：开始新的 12 期计划，仅追加 canonical period 1；period 2–12 继续由 YEAR-1 按月释放。
+12. 写入 `subscription_credit_grants` 与 `credit_transactions`，完成并释放精确 plan-change source；paid invoice 重放不得重复 term、权益或积分。
+13. 明确的付款失败保持原套餐/term/积分并安全释放失败 source；传输不确定时先读取远端，applied 不重试、unknown 保持锁，proven old 且报价过期时才退休旧 source 并要求新预览与重新确认。
 
 ### 4.5 退款流程
 
@@ -492,7 +495,7 @@ SUM(abs(amount)) WHERE ledger_type = 'spend' AND counts_as_spend = true AND crea
 | 当前套餐 | 当前套餐 |
 | 禁止降级 | 当前会员有效，暂不支持降级 |
 | 支付异常 | 请先处理付款异常 |
-| cancel_at_period_end | 当前权益仍有效，可恢复续订或升级 |
+| cancel_at_period_end | 当前权益仍有效；升级前须先通过订阅管理恢复续费 |
 
 ### 5.5 年付文案
 
@@ -681,9 +684,10 @@ SUM(abs(amount)) WHERE ledger_type = 'spend' AND counts_as_spend = true AND crea
 1. active 用户升级不创建第二个 subscription。
 2. Pro -> Gold 可升级。
 3. 月付 -> 年付可升级。
-4. 支付成功后才更新本地权益。
-5. 升级到年付后只释放第 1 个月年付积分。
-6. 失败回滚/不应用本地权益。
+4. 同一 subscription 以目标完整价格、无旧套餐退款/未使用时间抵扣/差价计算的方式开始完整目标 term。
+5. 支付成功后才更新本地权益；已有积分保留，目标月付完整追加一期积分。
+6. 升级到年付后只释放第 1 个月年付积分，后续期间仍可按月释放。
+7. 明确付款失败保持原套餐；不确定结果保留锁并先读取远端。
 
 禁止范围：
 

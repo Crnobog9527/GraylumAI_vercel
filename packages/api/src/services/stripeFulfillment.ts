@@ -14,6 +14,7 @@ import {
 } from './paymentOrderStatus';
 import { getStripeClient } from './stripe';
 import {
+  addUtcCalendarMonthsClamped,
   fulfillMembershipInvoiceWithSubscriptionCreditGrants,
   reconcileSubscriptionRefundCreditGrants,
 } from './subscriptionCreditGrants';
@@ -35,6 +36,8 @@ type SubscriptionRefundOrderRow = {
 };
 type RefundPaymentOrder = {
   id: string;
+  item_type?: string | null;
+  fulfilled_at?: string | null;
   amount_total?: number | string | null;
   metadata?: Record<string, unknown> | null;
 };
@@ -661,6 +664,20 @@ async function listStripeInvoiceLines(invoiceId: string, startingAfter: string) 
   });
 }
 
+function isExpectedRecurringUpgradePrice(price: Stripe.Price, input: {
+  priceId: string;
+  amount: number;
+  currency: string;
+  billingCycle: 'monthly' | 'yearly';
+}) {
+  return price.id === input.priceId
+    && price.type === 'recurring'
+    && price.currency === input.currency
+    && price.unit_amount === input.amount
+    && price.recurring?.interval === (input.billingCycle === 'yearly' ? 'year' : 'month')
+    && price.recurring.interval_count === 1;
+}
+
 async function getInvoiceSubscriptionServicePeriod(
   invoice: Stripe.Invoice,
   subscriptionId: string,
@@ -670,9 +687,13 @@ async function getInvoiceSubscriptionServicePeriod(
       startingAfter: string,
     ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
     paginationLimits?: StripePaginationLimits;
+    requiredPriceId?: string;
+    requiredAmount?: number;
+    requiredCurrency?: string;
+    requiredBillingCycle?: 'monthly' | 'yearly';
   } = {},
 ) {
-  const periods = new Map<string, { start: number; end: number }>();
+  const periods = new Map<string, { start: number; end: number; priceId: string }>();
   const lines = await collectBoundedStripeList({
     initialPage: {
       data: invoice.lines?.data ?? [],
@@ -684,6 +705,22 @@ async function getInvoiceSubscriptionServicePeriod(
     limits: options.paginationLimits,
     resource: 'invoice_lines',
   });
+
+  if (options.requiredPriceId) {
+    const invoiceRecord = invoice as Stripe.Invoice & {
+      subtotal?: number | null; total?: number | null; starting_balance?: number | null;
+      pre_payment_credit_notes_amount?: number | null; post_payment_credit_notes_amount?: number | null;
+      total_discount_amounts?: Array<{ amount?: number | null }> | null;
+      total_taxes?: Array<{ amount?: number | null }> | null;
+    };
+    const adjustedInvoice = [invoiceRecord.starting_balance, invoiceRecord.pre_payment_credit_notes_amount,
+      invoiceRecord.post_payment_credit_notes_amount].some(value => typeof value === 'number' && value !== 0);
+    if (invoiceRecord.subtotal !== options.requiredAmount || invoiceRecord.total !== options.requiredAmount
+      || adjustedInvoice || Boolean(invoiceRecord.total_discount_amounts?.length)
+      || Boolean(invoiceRecord.total_taxes?.length)) {
+      throw new Error('upgrade_invoice_adjustment_mismatch');
+    }
+  }
 
   for (const line of lines) {
     const lineRecord = line as Stripe.InvoiceLineItem & {
@@ -698,16 +735,26 @@ async function getInvoiceSubscriptionServicePeriod(
     const lineSubscriptionId = getExpandableId(details?.subscription);
     const start = line.period?.start;
     const end = line.period?.end;
+    const linePriceId = line.pricing?.price_details?.price;
 
-    if (lineSubscriptionId !== subscriptionId
-      || details?.proration === true
-      || typeof start !== 'number'
-      || typeof end !== 'number'
-      || end <= start) {
+    if (options.requiredPriceId) {
+      const exactPeriod = typeof start === 'number' && typeof end === 'number' && options.requiredBillingCycle
+        && addUtcCalendarMonthsClamped(new Date(start * 1000), options.requiredBillingCycle === 'yearly' ? 12 : 1).getTime() === end * 1000;
+      if (lineSubscriptionId !== subscriptionId || details?.proration !== false
+        || linePriceId !== options.requiredPriceId
+        || line.amount !== options.requiredAmount || line.currency !== options.requiredCurrency
+        || line.subtotal !== options.requiredAmount || line.quantity !== 1 || !exactPeriod
+        || Boolean(line.discount_amounts?.length) || Boolean(line.discounts?.length)
+        || Boolean(line.pretax_credit_amounts?.length) || Boolean(line.taxes?.length)) {
+        throw new Error('upgrade_invoice_full_target_line_mismatch');
+      }
+    } else if (lineSubscriptionId !== subscriptionId || details?.proration === true
+      || typeof linePriceId !== 'string'
+      || typeof start !== 'number' || typeof end !== 'number' || end <= start) {
       continue;
     }
 
-    periods.set(`${start}:${end}`, { start, end });
+    periods.set(`${start}:${end}:${linePriceId}`, { start, end, priceId: linePriceId });
   }
 
   if (periods.size === 0) {
@@ -716,6 +763,10 @@ async function getInvoiceSubscriptionServicePeriod(
 
   if (periods.size > 1) {
     throw new Error('invoice_subscription_service_period_not_unique');
+  }
+
+  if (options.requiredPriceId && lines.length !== 1) {
+    throw new Error('upgrade_invoice_full_target_line_not_unique');
   }
 
   return [...periods.values()][0];
@@ -1009,7 +1060,7 @@ async function findRefundPaymentOrder(
       'order_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('id', facts.orderId)
         .maybeSingle(),
       safeContext,
@@ -1022,7 +1073,7 @@ async function findRefundPaymentOrder(
       'invoice_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('stripe_invoice_id', facts.invoiceId)
         .maybeSingle(),
       safeContext,
@@ -1035,7 +1086,7 @@ async function findRefundPaymentOrder(
       'checkout_session_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('stripe_checkout_session_id', facts.checkoutSessionId)
         .maybeSingle(),
       safeContext,
@@ -1048,7 +1099,7 @@ async function findRefundPaymentOrder(
       'payment_intent_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('metadata->>paymentIntentId', facts.paymentIntentId)
         .maybeSingle(),
       safeContext,
@@ -1061,7 +1112,7 @@ async function findRefundPaymentOrder(
       'charge_id',
       () => supabase
         .from('payment_orders')
-        .select('id, amount_total, metadata')
+        .select('id, item_type, fulfilled_at, amount_total, metadata')
         .eq('metadata->>chargeId', facts.chargeId)
         .maybeSingle(),
       safeContext,
@@ -1645,6 +1696,9 @@ export async function upsertPaymentOrderBySession(
   const orderMetadata = {
     ...asRecord(existing.data?.metadata),
     ...metadata,
+    ...(getExpandableId(session.payment_intent)
+      ? { paymentIntentId: getExpandableId(session.payment_intent) }
+      : {}),
     checkoutStatus: session.status ?? null,
     paymentStatus: session.payment_status ?? null,
     lastPaymentOrderStatus: nextStatus,
@@ -1671,10 +1725,17 @@ export async function upsertPaymentOrderBySession(
   };
 
   if (existing.data?.id) {
-    const result = await supabase
+    const isCreditPackage = session.mode === 'payment' && metadata.itemType === 'credit_package';
+    // The fulfillment RPC commits credits, ledger, metadata and fulfilled_at
+    // together. A Checkout replay must never replace that financial snapshot.
+    if (isCreditPackage && existing.data.fulfilled_at) return;
+    const query = supabase
       .from('payment_orders')
       .update(payload)
       .eq('id', existing.data.id);
+    const result = isCreditPackage
+      ? await query.is('fulfilled_at', null)
+      : await query;
 
     if (result.error) {
       throwFulfillmentError(
@@ -1741,6 +1802,7 @@ async function findInvoiceFailureOrders(
   supabase: SupabaseLikeClient,
   invoice: Stripe.Invoice,
   subscriptionId: string | null,
+  sourcePriceId?: string,
 ) {
   const invoiceId = invoice.id;
   const existingInvoiceOrder = await supabase
@@ -1768,14 +1830,32 @@ async function findInvoiceFailureOrders(
     };
   }
 
+  if (invoice.billing_reason === 'subscription_update') {
+    const details = invoice.parent?.subscription_details;
+    const attemptId = details?.metadata?.upgradeAttemptId;
+    if (!attemptId) return { invoiceOrder: null, subscriptionOrder: null };
+    const exact = await supabase.from('payment_orders').select(FAILED_INVOICE_ORDER_SELECT)
+      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
+    if (exact.error) throw new Error('upgrade_failed_invoice_source_read');
+    const order = exact.data;
+    if (!order || order.stripe_price_id !== details.metadata?.priceId
+      || order.user_id !== details.metadata?.userId || order.stripe_customer_id !== getInvoiceCustomerId(invoice)) {
+      return { invoiceOrder: null, subscriptionOrder: null };
+    }
+    return { invoiceOrder: null, subscriptionOrder: order };
+  }
+
   const sourceCutoff = getFailedInvoiceSourceQueryCutoff(invoice);
   const subscriptionOrderQuery = supabase
     .from('payment_orders')
     .select(FAILED_INVOICE_ORDER_SELECT)
     .eq('stripe_subscription_id', subscriptionId);
-  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof subscriptionOrderQuery.lte === 'function'
-    ? subscriptionOrderQuery.lte('created_at', sourceCutoff)
+  const priceSubscriptionOrderQuery = sourcePriceId
+    ? subscriptionOrderQuery.eq('stripe_price_id', sourcePriceId)
     : subscriptionOrderQuery;
+  const cutoffSubscriptionOrderQuery = sourceCutoff && typeof priceSubscriptionOrderQuery.lte === 'function'
+    ? priceSubscriptionOrderQuery.lte('created_at', sourceCutoff)
+    : priceSubscriptionOrderQuery;
   const filteredSubscriptionOrderQuery = typeof cutoffSubscriptionOrderQuery.neq === 'function'
     ? cutoffSubscriptionOrderQuery.neq('status', 'failed')
     : cutoffSubscriptionOrderQuery;
@@ -1798,6 +1878,17 @@ async function findInvoiceFailureOrders(
         subscriptionId: maskIdentifier(subscriptionId),
       },
     );
+  }
+
+  if (isSubscriptionPlanChangeOrder(subscriptionOrder.data)) {
+    logger.info('billing', 'stripe_invoice_payment_failed_plan_change_lock_preserved', {
+      invoiceId: maskIdentifier(invoiceId),
+      subscriptionId: maskIdentifier(subscriptionId),
+      orderId: maskIdentifier(subscriptionOrder.data.id),
+      sourceOrderCreatedAt: subscriptionOrder.data.created_at ?? null,
+      invoiceCreatedAt: getFailedInvoiceSourceCutoff(invoice),
+    });
+    return { invoiceOrder: null, subscriptionOrder: null };
   }
 
   return {
@@ -1979,13 +2070,34 @@ async function insertFailedInvoiceOrder(
 export async function markMembershipInvoicePaymentFailed(
   supabase: SupabaseLikeClient,
   invoice: Stripe.Invoice,
+  options: {
+    listInvoiceLines?: (
+      invoiceId: string,
+      startingAfter: string,
+    ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    paginationLimits?: StripePaginationLimits;
+  } = {},
 ) {
   const invoiceId = invoice.id;
   const subscriptionId = getInvoiceSubscriptionId(invoice);
+  let sourcePriceId: string | undefined;
+  if (subscriptionId && invoice.billing_reason !== 'subscription_update') {
+    try {
+      sourcePriceId = (await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options)).priceId;
+    } catch (error) {
+      throwFulfillmentError(
+        'invoice_payment_failed_service_period',
+        STRIPE_FULFILLMENT_ERRORS.invoicePaymentFailedLookup,
+        error,
+        { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
+      );
+    }
+  }
   const { invoiceOrder, subscriptionOrder } = await findInvoiceFailureOrders(
     supabase,
     invoice,
     subscriptionId,
+    sourcePriceId,
   );
   const existingOrder = invoiceOrder ?? subscriptionOrder;
 
@@ -2075,6 +2187,7 @@ export async function fulfillCreditPackageOrder(
   supabase: SupabaseLikeClient,
   session: Stripe.Checkout.Session,
 ) {
+  if (session.mode !== 'payment' || session.payment_status !== 'paid') return;
   const metadata = session.metadata ?? {};
   const userId = metadata.userId ?? session.client_reference_id;
   const packageId = metadata.itemId;
@@ -2127,6 +2240,9 @@ export async function reconcileStripeRefund(
   input: RefundReconciliationInput,
 ) {
   const facts = 'charge' in input ? buildChargeRefundFacts(input) : buildRefundFacts(input);
+  // Alipay refunds are asynchronous. Pending/canceled refunds must not mark
+  // an order refunded or consume the existing financial idempotency key.
+  if (!facts.failed && !isSuccessfulRefundStatus(facts.refundStatus)) return null;
   const order = await findRefundPaymentOrder(supabase, facts);
 
   if (!order) {
@@ -2140,7 +2256,28 @@ export async function reconcileStripeRefund(
       checkoutSessionId: maskIdentifier(facts.checkoutSessionId),
       subscriptionId: maskIdentifier(facts.subscriptionId),
     });
+    if (!facts.failed) {
+      throwFulfillmentError(
+        'refund_order_lookup',
+        STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+        new Error('Payment order binding missing; retry webhook'),
+        { refundId: maskIdentifier(facts.refundId), paymentIntentId: maskIdentifier(facts.paymentIntentId) },
+      );
+    }
     return null;
+  }
+
+  // A bound Checkout may still be waiting on atomic credit fulfillment.
+  // Its monotonic fulfilled_at is committed with grantedCredits and the ledger;
+  // defer successful refunds until that snapshot exists, including when a
+  // concurrent fulfillment has not committed yet. Failed refunds only audit.
+  if (!facts.failed && order.item_type === 'credit_package' && !order.fulfilled_at) {
+    throwFulfillmentError(
+      'refund_order_unfulfilled',
+      STRIPE_FULFILLMENT_ERRORS.refundOrderLookup,
+      new Error('Credit fulfillment not committed; retry refund webhook'),
+      { orderId: maskIdentifier(order.id), refundId: maskIdentifier(facts.refundId) },
+    );
   }
 
   const isFullRefund = isFullStripeRefundForOrder(facts, order);
@@ -2515,6 +2652,7 @@ export async function fulfillMembershipInvoice(
       invoiceId: string,
       startingAfter: string,
     ) => Promise<StripeListPage<Stripe.InvoiceLineItem>>;
+    retrievePrice?: (priceId: string) => Promise<Stripe.Price>;
     paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
@@ -2530,14 +2668,68 @@ export async function fulfillMembershipInvoice(
     );
   }
 
+  // Upgrade invoices must bind to the exact durable source, never whichever
+  // attempt happens to be newest when a delayed invoice is delivered.
+  let upgradeSource: { id: string; stripe_price_id: string; amountDue: number; currency: string; billingCycle: 'monthly' | 'yearly' } | undefined;
+  if (invoice.billing_reason === 'subscription_update') {
+    const details = invoice.parent?.subscription_details;
+    const attemptId = details?.metadata?.upgradeAttemptId;
+    if (!attemptId || invoice.status !== 'paid') {
+      throw new Error('upgrade_invoice_paid_source_missing');
+    }
+    const lookup = await supabase.from('payment_orders')
+      .select('id, user_id, item_id, billing_cycle, stripe_price_id, stripe_customer_id, status, created_at, metadata')
+      .eq('id', attemptId).eq('stripe_subscription_id', subscriptionId).maybeSingle();
+    const source = lookup.data;
+    if (lookup.error || !source || source.status === 'failed' || (!isSubscriptionPlanChangeOrder(source) && !asRecord(source.metadata).upgradeAttempt)
+      || source.stripe_price_id !== details.metadata?.priceId
+      || (source.billing_cycle !== 'monthly' && source.billing_cycle !== 'yearly')
+      || source.user_id !== details.metadata?.userId || source.item_id !== details.metadata?.itemId
+      || source.stripe_customer_id !== getExpandableId(invoice.customer)) {
+      throw new Error('upgrade_invoice_source_mismatch');
+    }
+    const attempt = asRecord(asRecord(source.metadata).upgradeAttempt);
+    const quote = asRecord(attempt.quote);
+    if (!Number.isSafeInteger(quote.amountDue) || (quote.amountDue as number) <= 0 || quote.currency !== 'usd'
+      || quote.amountDue !== invoice.amount_due || quote.amountDue !== invoice.amount_paid
+      || quote.currency !== invoice.currency) {
+      throw new Error('upgrade_invoice_quote_mismatch');
+    }
+    const validatedUpgradeSource = { ...source, amountDue: quote.amountDue as number, currency: quote.currency,
+      billingCycle: source.billing_cycle as 'monthly' | 'yearly' } as NonNullable<typeof upgradeSource>;
+    upgradeSource = validatedUpgradeSource;
+    try {
+      const targetPrice = await (options.retrievePrice
+        ?? ((priceId: string) => getStripeClient().prices.retrieve(priceId)))(validatedUpgradeSource.stripe_price_id);
+      if (!isExpectedRecurringUpgradePrice(targetPrice, {
+        priceId: validatedUpgradeSource.stripe_price_id,
+        amount: validatedUpgradeSource.amountDue,
+        currency: validatedUpgradeSource.currency,
+        billingCycle: validatedUpgradeSource.billingCycle,
+      })) {
+        throw new Error('upgrade_price_cadence_mismatch');
+      }
+    } catch (error) {
+      throwFulfillmentError(
+        'upgrade_invoice_price_cadence',
+        STRIPE_FULFILLMENT_ERRORS.fulfillMembershipInvoice,
+        error,
+        { invoiceId: maskIdentifier(invoiceId), subscriptionId: maskIdentifier(subscriptionId) },
+      );
+    }
+  }
+
   // Stripe documents invoice-level period_start/period_end as the usage
   // collection window, not the service period for a subscription price. The
-  // service period is carried by the matching non-proration invoice line. In
+  // service period is carried by the matching non-proration invoice line. Upgrade invoices must contain exactly
+  // one full-price target line; old-price credits or prorations are rejected before entitlement admission. In
   // particular, subscription_create invoices can have a zero-length top-level
   // window while their line has the complete monthly or annual term.
-  let servicePeriod: { start: number; end: number };
+  let servicePeriod: { start: number; end: number; priceId: string };
   try {
-    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, options);
+    servicePeriod = await getInvoiceSubscriptionServicePeriod(invoice, subscriptionId, { ...options,
+      requiredPriceId: upgradeSource?.stripe_price_id, requiredAmount: upgradeSource?.amountDue,
+      requiredCurrency: upgradeSource?.currency, requiredBillingCycle: upgradeSource?.billingCycle });
   } catch (error) {
     throwFulfillmentError(
       'invoice_subscription_service_period',
@@ -2548,6 +2740,9 @@ export async function fulfillMembershipInvoice(
   }
 
   const result = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
+    expectedSourceOrderId: upgradeSource?.id,
+    expectedSourcePriceId: servicePeriod.priceId,
+    excludeSubscriptionPlanChangeSources: !upgradeSource,
     amountTotal: invoice.amount_paid,
     currency: invoice.currency ?? 'usd',
     invoiceId,
@@ -2764,6 +2959,22 @@ export async function fulfillPaidMembershipCheckoutSession(
   };
 }
 
+function isScheduledAtCurrentPeriodEnd(subscription: Stripe.Subscription): boolean {
+  if (subscription.cancel_at_period_end === true) return true;
+
+  // Portal can schedule cancellation using cancel_at without setting the
+  // legacy flag. Only an exact, valid paid-period boundary is equivalent.
+  const cancelAt = subscription.cancel_at;
+  const periodEnd = subscription.items.data[0]?.current_period_end;
+  return typeof cancelAt === 'number'
+    && Number.isSafeInteger(cancelAt)
+    && cancelAt > 0
+    && typeof periodEnd === 'number'
+    && Number.isSafeInteger(periodEnd)
+    && periodEnd > 0
+    && cancelAt === periodEnd;
+}
+
 export async function syncSubscriptionState(
   supabase: SupabaseLikeClient,
   subscription: Stripe.Subscription,
@@ -2772,11 +2983,11 @@ export async function syncSubscriptionState(
   const primaryItem = subscription.items.data[0];
   const currentPeriodStart = asIsoTimestamp(primaryItem?.current_period_start ?? null);
   const currentPeriodEnd = asIsoTimestamp(primaryItem?.current_period_end ?? null);
-  const cancelAtPeriodEnd = subscription.cancel_at_period_end ? 'true' : 'false';
+  const cancelAtPeriodEnd = isScheduledAtCurrentPeriodEnd(subscription) ? 'true' : 'false';
 
   const existingSubscriptionQuery = supabase
     .from('user_subscriptions')
-    .select('id, user_id, membership_plan_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
+    .select('id, user_id, membership_plan_id, stripe_price_id, status, current_period_start, current_period_end, credit_release_terminated_at, created_at')
     .eq('stripe_subscription_id', subscriptionId);
   const orderedExistingSubscriptionQuery = typeof existingSubscriptionQuery.order === 'function'
     ? existingSubscriptionQuery.order('created_at', { ascending: true })
@@ -2811,6 +3022,10 @@ export async function syncSubscriptionState(
       canonicalSubscriptionId: maskIdentifier(existingSubscription?.id),
     });
   }
+
+  const pendingPaidUpgrade = Boolean(subscription.metadata?.upgradeAttemptId
+    && (subscription.metadata?.itemId !== existingSubscription?.membership_plan_id
+      || subscription.metadata?.priceId !== existingSubscription?.stripe_price_id));
 
   const incomingStartMs = currentPeriodStart ? Date.parse(currentPeriodStart) : Number.NaN;
   const incomingEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : Number.NaN;
@@ -2849,8 +3064,10 @@ export async function syncSubscriptionState(
     .update({
       status: subscription.status,
       cancel_at_period_end: cancelAtPeriodEnd,
-      current_period_start: currentPeriodStart,
-      current_period_end: currentPeriodEnd,
+      // A subscription.updated event can beat the paid invoice. Keep the paid
+      // term (and annual release authority) until invoice admission promotes it.
+      current_period_start: pendingPaidUpgrade ? existingSubscription?.current_period_start : currentPeriodStart,
+      current_period_end: pendingPaidUpgrade ? existingSubscription?.current_period_end : currentPeriodEnd,
       updated_at: new Date().toISOString(),
     })
     .eq('stripe_subscription_id', subscriptionId);

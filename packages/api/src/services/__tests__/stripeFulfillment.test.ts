@@ -58,7 +58,10 @@ type RefundWebhookMockHooks = {
   }) => Promise<void> | void;
 };
 
-function withInvoiceSubscriptionServiceLine(invoice: Record<string, any>): Stripe.Invoice {
+function withInvoiceSubscriptionServiceLine(
+  invoice: Record<string, any>,
+  linePriceId = 'price_test_monthly',
+): Stripe.Invoice {
   const subscriptionId = invoice.parent?.subscription_details?.subscription
     ?? invoice.subscription;
   const start = invoice.period_start ?? invoice.created ?? 1_742_646_400;
@@ -73,6 +76,7 @@ function withInvoiceSubscriptionServiceLine(invoice: Record<string, any>): Strip
       data: [{
         id: `il_${invoice.id}`,
         period: { start, end },
+        pricing: { price_details: { price: linePriceId } },
         parent: {
           type: 'subscription_item_details',
           subscription_item_details: { proration: false, subscription: subscriptionId },
@@ -855,11 +859,13 @@ function createRefundWebhookSupabase(
 
 function makeGenericRefundSupabase(options: {
   match: { column: string; value: string };
-  order?: { id: string; amount_total: number | string | null; metadata: Record<string, unknown> | null };
+  order?: { id: string; item_type: string; fulfilled_at: string | null; amount_total: number | string | null; metadata: Record<string, unknown> | null };
   rpcData?: unknown[];
 }) {
   const order = options.order ?? {
     id: '00000000-0000-4000-8000-000000000100',
+    item_type: 'credit_package',
+    fulfilled_at: '2026-09-04T00:00:00.000Z',
     amount_total: 990,
     metadata: { grantedCredits: 100 },
   };
@@ -1450,7 +1456,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_paid_yearly_checkout',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_paid_yearly_checkout',
       status: 'active',
@@ -1619,7 +1625,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_expanded_latest_invoice',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_expanded_latest_invoice',
       status: 'active',
@@ -1725,7 +1731,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_invoice_list_fallback',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_invoice_list_fallback',
       status: 'active',
@@ -2065,7 +2071,7 @@ describe('stripe fulfillment helpers', () => {
           subscription: 'sub_rpc_failure_audit',
         },
       },
-    });
+    }, 'price_pro_yearly');
     const subscription = {
       id: 'sub_rpc_failure_audit',
       status: 'active',
@@ -2197,19 +2203,7 @@ describe('stripe fulfillment helpers', () => {
       },
     );
 
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toEqual(
-      expect.objectContaining({
-        status: 'completed',
-        payment_status: 'paid',
-        metadata: expect.objectContaining({
-          transactionId: 'txn-1',
-          grantedCredits: 100,
-          lastPaymentOrderStatus: 'completed',
-          lastPaymentOrderStatusSource: 'checkout.session.completed',
-        }),
-      }),
-    );
+    expect(updates).toEqual([]);
   });
 
   it('marks expired checkout sessions as terminal without fulfillment', async () => {
@@ -2240,7 +2234,9 @@ describe('stripe fulfillment helpers', () => {
           update(payload: unknown) {
             updates.push(payload);
             return {
-              eq() {
+              eq() { return this; },
+              is(column: string, value: null) {
+                expect([column, value]).toEqual(['fulfilled_at', null]);
                 return Promise.resolve({ error: null });
               },
             };
@@ -2591,7 +2587,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_123',
           },
         },
-      }),
+      }, 'price_monthly'),
     );
 
     expect(updates).toEqual([
@@ -3026,7 +3022,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_atomic',
           },
         },
-      }),
+      }, 'price_yearly'),
     );
 
     expect(tables.subscription_credit_grants).toHaveLength(1);
@@ -5170,7 +5166,7 @@ describe('stripe fulfillment helpers', () => {
     expect(supabase.tables.profiles[0].credits).toBe(94);
   });
 
-  it('marks a pending subscription plan-change order failed and releases its lock when the first invoice payment fails', async () => {
+  it('does not let a timestamp-adjacent generic renewal failure release a pending plan-change lock', async () => {
     const updates: Array<{ table: string; payload: Record<string, unknown>; orderId?: string }> = [];
 
     const supabase = {
@@ -5195,6 +5191,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_failed');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_upgrade');
               return this;
             }
 
@@ -5242,7 +5243,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_failed',
         created: 1781346300,
         status: 'open',
@@ -5254,32 +5255,15 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_failed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_upgrade'),
     );
 
-    expect(updates).toEqual([
-      {
-        table: 'payment_orders',
-        orderId: 'order-pending-subscription',
-        payload: expect.objectContaining({
-          stripe_invoice_id: 'in_test_failed',
-          stripe_checkout_session_id: null,
-          stripe_subscription_id: 'sub_test_failed',
-          amount_total: 2990,
-          currency: 'usd',
-          status: 'failed',
-          payment_status: 'open',
-          metadata: expect.objectContaining({
-            existing: 'kept',
-            source: 'invoice.payment_failed',
-            invoiceId: 'in_test_failed',
-            subscriptionId: 'sub_test_failed',
-            lastPaymentOrderStatus: 'failed',
-            lastPaymentOrderStatusSource: 'invoice.payment_failed',
-          }),
-        }),
-      },
-    ]);
+    expect(updates).toEqual([]);
+    expect(loggerState.info).toHaveBeenCalledWith(
+      'billing',
+      'stripe_invoice_payment_failed_plan_change_lock_preserved',
+      expect.objectContaining({ orderId: 'order-pe...iption' }),
+    );
   });
 
   it('preserves a newer pending plan-change lock during stale failed invoice replay', async () => {
@@ -5308,6 +5292,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_stale_failed');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_upgrade');
               return this;
             }
 
@@ -5363,7 +5352,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_stale_failed',
         created: 1781344800,
         status: 'open',
@@ -5375,7 +5364,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_stale_failed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_upgrade'),
     );
 
     expect(updates).toEqual([]);
@@ -5515,7 +5504,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_stale_failed_completed',
         created: Date.parse('2026-06-13T10:00:00.000Z') / 1000,
         status: 'open',
@@ -5528,7 +5517,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_stale_failed_completed',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_pro_monthly'),
     );
 
     expect(lteFilters).toEqual([['created_at', '2026-06-13T10:00:00.999Z']]);
@@ -5580,6 +5569,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_renewal');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_yearly');
               return this;
             }
 
@@ -5636,7 +5630,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_renewal_failed',
         status: 'open',
         amount_due: 2990,
@@ -5648,7 +5642,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_renewal',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_test_yearly'),
     );
 
     expect(updates).toEqual([]);
@@ -5713,6 +5707,11 @@ describe('stripe fulfillment helpers', () => {
               return this;
             }
 
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_monthly');
+              return this;
+            }
+
             throw new Error(`Unexpected eq(${column}, ${value})`);
           },
           order() {
@@ -5754,7 +5753,7 @@ describe('stripe fulfillment helpers', () => {
 
     await markMembershipInvoicePaymentFailed(
       supabase,
-      {
+      withInvoiceSubscriptionServiceLine({
         id: 'in_test_renewal_missing_plan',
         status: 'open',
         amount_due: 2990,
@@ -5764,7 +5763,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_test_missing_plan',
           },
         },
-      } as Stripe.Invoice,
+      }, 'price_test_monthly'),
     );
 
     expect(updates).toEqual([]);
@@ -5848,6 +5847,7 @@ describe('stripe fulfillment helpers', () => {
       data: [{
         id: 'il_webhook_line_period_page_2',
         period: { start: 1_788_125_971, end: 1_790_804_371 },
+        pricing: { price_details: { price: 'price_webhook_line_period' } },
         parent: {
           type: 'subscription_item_details',
           subscription_item_details: {
@@ -5958,6 +5958,7 @@ describe('stripe fulfillment helpers', () => {
           data: [{
             id: 'il_conflict_page_1',
             period: { start: 1_788_125_971, end: 1_790_804_371 },
+            pricing: { price_details: { price: 'price_conflict' } },
             parent: {
               subscription_item_details: {
                 proration: false,
@@ -5973,6 +5974,7 @@ describe('stripe fulfillment helpers', () => {
           data: [{
             id: 'il_conflict_page_2',
             period: { start: 1_790_804_371, end: 1_793_482_771 },
+            pricing: { price_details: { price: 'price_conflict' } },
             parent: {
               subscription_item_details: {
                 proration: false,
@@ -6220,7 +6222,7 @@ describe('stripe fulfillment helpers', () => {
             subscription: 'sub_webhook_source_partial_review_only',
           },
         },
-      }),
+      }, 'price_webhook_source_partial_review_only'),
     );
 
     expect(supabase.tables.subscription_credit_grants).toHaveLength(0);
@@ -6249,6 +6251,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000300',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           checkoutSessionId: 'cs_test_credit_package_refund',
@@ -6310,6 +6314,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'metadata->>paymentIntentId', value: 'pi_test_credit_package_webhook_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000310',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           itemType: 'credit_package',
@@ -6355,6 +6361,8 @@ describe('stripe fulfillment helpers', () => {
       match: { column: 'stripe_checkout_session_id', value: 'cs_test_checkout_metadata_refund' },
       order: {
         id: '00000000-0000-4000-8000-000000000320',
+        item_type: 'credit_package',
+        fulfilled_at: '2026-09-04T00:00:00.000Z',
         amount_total: 500,
         metadata: {
           itemType: 'credit_package',
@@ -6404,10 +6412,10 @@ describe('stripe fulfillment helpers', () => {
     }));
   });
 
-  it('returns unreconciled for non-invoice refund webhooks that have no generic order match', async () => {
+  it('retries successful non-invoice refund webhooks that have no generic order match', async () => {
     const supabase = createRefundWebhookSupabase();
 
-    const result = await reconcileSubscriptionRefundFromStripeWebhook(
+    const result = reconcileSubscriptionRefundFromStripeWebhook(
       supabase,
       {
         id: 'evt_test_unknown_checkout_refund',
@@ -6430,11 +6438,7 @@ describe('stripe fulfillment helpers', () => {
       } as unknown as Stripe.Event & { type: 'refund.created'; data: { object: Stripe.Refund } },
     );
 
-    expect(result).toMatchObject({
-      reconciled: false,
-      reason: 'non_subscription_order_not_found',
-      orderId: null,
-    });
+    await expect(result).rejects.toMatchObject({ stage: 'refund_order_lookup' });
     expect(loggerState.warn).toHaveBeenCalledWith(
       'billing',
       'stripe_refund_order_not_found',
@@ -6560,7 +6564,7 @@ describe('stripe fulfillment helpers', () => {
         currency: 'usd',
         amount_paid: 990,
         subscription: 'sub_test_legacy_shape',
-      }),
+      }, 'price_legacy'),
     );
 
     expect(updates).toEqual([
@@ -6592,6 +6596,11 @@ describe('stripe fulfillment helpers', () => {
 
             if (column === 'stripe_subscription_id') {
               expect(value).toBe('sub_test_rpc_failure');
+              return this;
+            }
+
+            if (column === 'stripe_price_id') {
+              expect(value).toBe('price_test_monthly');
               return this;
             }
 
@@ -6655,5 +6664,422 @@ describe('stripe fulfillment helpers', () => {
         }),
       }),
     );
+  });
+});
+
+describe('PAY-1 card and Alipay fulfillment compatibility', () => {
+  it.each(['card', 'alipay'])('completed-paid %s replay and later async success invoke fulfillment only once', async (method) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-pay1', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    const rpc = vi.fn(async (name: string, params: Record<string, unknown>) => {
+      expect(name).toBe('atomic_fulfill_credit_package');
+      expect(params).toEqual({ p_checkout_session_id: 'cs_test_pay1', p_payment_status: 'paid' });
+      tables.payment_orders[0].fulfilled_at = '2026-09-04T00:00:00Z';
+      tables.payment_orders[0].status = 'completed';
+      tables.payment_orders[0].metadata.grantedCredits = 100;
+      return { data: [{ fulfilled_at: tables.payment_orders[0].fulfilled_at }], error: null };
+    });
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    const session = {
+      id: 'cs_test_pay1', mode: 'payment', payment_status: 'paid', status: 'complete', amount_total: 1000,
+      payment_method_types: [method], payment_intent: 'pi_test_pay1',
+      metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package', billingCycle: 'one_time' },
+    };
+    for (const type of ['checkout.session.completed', 'checkout.session.completed', 'checkout.session.async_payment_succeeded']) {
+      await handleStripeWebhookEvent(supabase as any, { type, data: { object: session } } as any);
+    }
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(tables.payment_orders[0]).toMatchObject({ status: 'completed', metadata: { grantedCredits: 100, paymentIntentId: 'pi_test_pay1' } });
+  });
+  it.each(['checkout.session.completed', 'checkout.session.async_payment_failed', 'checkout.session.async_payment_succeeded'])('unpaid %s does not fulfill', async (type) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-pay1', stripe_checkout_session_id: 'cs_test_pay1', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    const rpc = vi.fn();
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+      id: 'cs_test_pay1', mode: 'payment', payment_status: 'unpaid', metadata: { userId: 'user-pay1', itemId: 'package-pay1', itemType: 'credit_package' },
+    } } } as any);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(tables.payment_orders[0].fulfilled_at).toBeNull();
+  });
+  it.each(['card', 'alipay'])('matches %s refunds using the stored payment intent, with pending/failure/success and stable replay keys', async (method) => {
+    const { rpc, supabase } = makeGenericRefundSupabase({
+      match: { column: 'metadata->>paymentIntentId', value: 'pi_pay1_refund' },
+      order: { id: 'order-pay1', item_type: 'credit_package', fulfilled_at: '2026-09-04T00:00:00.000Z', amount_total: 1000, metadata: { itemType: 'credit_package', paymentIntentId: 'pi_pay1_refund', grantedCredits: 100 } },
+    });
+    const charge = { id: 'ch_pay1', amount: 1000, amount_refunded: 1000, currency: 'usd', payment_intent: 'pi_pay1_refund', metadata: {}, payment_method_details: { type: method } };
+    const event = (type: string, status: string) => ({ id: `evt_${status}`, type, data: { object: {
+      id: 're_pay1', amount: 1000, currency: 'usd', status, created: 1788470400,
+      charge, payment_intent: 'pi_pay1_refund', metadata: {},
+    } } });
+    await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.updated', 'pending') as any);
+    expect(rpc).not.toHaveBeenCalled();
+    await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.failed', 'failed') as any);
+    expect(rpc).toHaveBeenLastCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({ p_is_failed: true, p_is_full_refund: false }));
+    for (let i = 0; i < 2; i++) await reconcileSubscriptionRefundFromStripeWebhook(supabase, event('refund.updated', 'succeeded') as any);
+    const successCalls = rpc.mock.calls.slice(1);
+    expect(successCalls).toHaveLength(2);
+    for (const call of successCalls) expect(call).toEqual(['atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-pay1', p_is_failed: false, p_is_full_refund: true, p_idempotency_key: 'stripe_refund:re_pay1',
+    })]);
+  });
+  const paidTermStart = 1788532484;
+  const paidTermEnd = 1820068484;
+
+  function makeCancellationFixture() {
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-pay1', status: 'completed' }],
+      profiles: [{ id: 'user-pay1', membership_level: 'pro', credits: 1767 }],
+      credit_transactions: [{ id: 'paid-grant-tx', amount: 1667 }], membership_plans: [],
+      user_subscriptions: [{
+        id: 'mirror-pay1', user_id: 'user-pay1', stripe_subscription_id: 'sub_pay1',
+        status: 'active', billing_cycle: 'yearly', cancel_at_period_end: 'false',
+        current_period_start: new Date(paidTermStart * 1000).toISOString(),
+        current_period_end: new Date(paidTermEnd * 1000).toISOString(),
+        credit_release_terminated_at: null,
+      }],
+      subscription_credit_grants: [
+        { id: 'grant-pay1', status: 'granted', credits_granted: 1667, total_periods: 12 },
+        { id: 'future-grant-pay1', status: 'scheduled', credits_granted: 1667 },
+      ],
+    };
+    const rpc = vi.fn();
+    const from = vi.fn((table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table));
+    return { tables, rpc, supabase: { from, rpc } };
+  }
+
+  const cancellationCases = [
+    { name: 'legacy cancellation', legacy: true, cancelAt: null, expected: 'true' },
+    { name: 'Portal flexible cancellation', legacy: false, cancelAt: paidTermEnd, expected: 'true' },
+    { name: 'normal renewal', legacy: false, cancelAt: null, expected: 'false' },
+    { name: 'one second before period end', legacy: false, cancelAt: paidTermEnd - 1, expected: 'false' },
+    { name: 'one second after period end', legacy: false, cancelAt: paidTermEnd + 1, expected: 'false' },
+    ...[0, -1, paidTermEnd + 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map((cancelAt) => ({
+      name: `invalid cancel_at ${cancelAt}`, legacy: false, cancelAt, expected: 'false',
+    })),
+  ];
+
+  describe.each(['sync', 'webhook'] as const)('Portal cancellation through %s', (entryPoint) => {
+    it.each(cancellationCases)('$name preserves paid rights and annual releases', async ({ legacy, cancelAt, expected }) => {
+      const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+      const { tables, rpc, supabase } = makeCancellationFixture();
+      const before = structuredClone(tables);
+      const subscription = {
+        id: 'sub_pay1', status: 'active', billing_mode: { type: 'flexible' },
+        cancel_at_period_end: legacy, cancel_at: cancelAt,
+        items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] },
+      } as Stripe.Subscription;
+      if (entryPoint === 'sync') {
+        await syncSubscriptionState(supabase, subscription);
+      } else {
+        await handleStripeWebhookEvent(supabase as any, {
+          type: 'customer.subscription.updated', data: { object: subscription },
+        } as Stripe.Event);
+      }
+      expect(tables.user_subscriptions[0]).toMatchObject({
+        ...before.user_subscriptions[0], cancel_at_period_end: expected,
+      });
+      for (const table of ['profiles', 'credit_transactions', 'payment_orders', 'subscription_credit_grants'] as const) {
+        expect(tables[table]).toEqual(before[table]);
+        expect(supabase.from).not.toHaveBeenCalledWith(table);
+      }
+      expect(rpc).not.toHaveBeenCalled();
+    });
+  });
+
+  it('subscription.updated cannot advance paid term before upgrade invoice admission, even for the same tier', async () => {
+    const { tables, supabase } = makeCancellationFixture();
+    tables.user_subscriptions[0].membership_plan_id = 'plan-pro';
+    tables.user_subscriptions[0].stripe_price_id = 'price_pro_monthly';
+    const before = structuredClone(tables);
+    await syncSubscriptionState(supabase, { id: 'sub_pay1', status: 'active', cancel_at_period_end: false, cancel_at: null,
+      metadata: { upgradeAttemptId: 'order-upgrade', itemId: 'plan-pro', priceId: 'price_pro_yearly' },
+      items: { data: [{ current_period_start: paidTermStart + 100, current_period_end: paidTermEnd + 1000 }] },
+    } as unknown as Stripe.Subscription);
+    expect(tables.user_subscriptions[0].current_period_start).toEqual(before.user_subscriptions[0].current_period_start);
+    expect(tables.user_subscriptions[0].current_period_end).toEqual(before.user_subscriptions[0].current_period_end);
+    for (const table of ['profiles', 'credit_transactions', 'subscription_credit_grants'] as const) expect(tables[table]).toEqual(before[table]);
+  });
+
+  it.each([undefined, null, 0])('does not infer period-end cancellation without a valid boundary (%s)', async (periodEnd) => {
+    const { tables, supabase } = makeCancellationFixture();
+    await syncSubscriptionState(supabase, {
+      id: 'sub_pay1', status: 'active', cancel_at_period_end: false, cancel_at: paidTermEnd,
+      items: { data: [{ current_period_start: paidTermStart, current_period_end: periodEnd }] },
+    } as unknown as Stripe.Subscription);
+    expect(tables.user_subscriptions[0].cancel_at_period_end).toBe('false');
+  });
+
+  it.each(['customer.subscription.updated', 'customer.subscription.deleted'])('%s still downgrades an actually canceled subscription', async (type) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const { tables, rpc, supabase } = makeCancellationFixture();
+    const grantsBefore = structuredClone(tables.subscription_credit_grants);
+    await handleStripeWebhookEvent(supabase as any, { type, data: { object: {
+      id: 'sub_pay1', status: 'canceled', cancel_at_period_end: false, cancel_at: paidTermEnd,
+      items: { data: [{ current_period_start: paidTermStart, current_period_end: paidTermEnd }] },
+    } } } as Stripe.Event);
+    expect(tables.user_subscriptions[0]).toMatchObject({ status: 'canceled', cancel_at_period_end: 'true', credit_release_terminated_at: null });
+    expect(tables.profiles[0]).toEqual({ id: 'user-pay1', membership_level: 'free', credits: 1767 });
+    expect(tables.subscription_credit_grants).toEqual(grantsBefore);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe('PAY-1 early refund delivery', () => {
+  it('retries a successful refund arriving before the checkout binding, then reconciles its redelivery', async () => {
+    const match = { column: 'metadata->>paymentIntentId', value: 'not-bound-yet' };
+    const { rpc, supabase } = makeGenericRefundSupabase({
+      match,
+      order: { id: 'order-early-refund', item_type: 'credit_package', fulfilled_at: '2026-09-04T00:00:00.000Z', amount_total: 1000, metadata: { itemType: 'credit_package', grantedCredits: 100 } },
+    });
+    const event = { id: 'evt_early_refund', type: 'refund.updated', data: { object: {
+      id: 're_early', amount: 1000, currency: 'usd', status: 'succeeded', created: 1788470400,
+      payment_intent: 'pi_early', metadata: {},
+      charge: { id: 'ch_early', amount: 1000, payment_intent: 'pi_early', metadata: { itemType: 'credit_package' }, payment_method_details: { type: 'alipay' } },
+    } } } as any;
+    const options = {
+      retrievePaymentIntent: vi.fn().mockResolvedValue({ id: 'pi_early', metadata: { itemType: 'credit_package' } }),
+      listInvoicePayments: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+    };
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(supabase, event, options))
+      .rejects.toMatchObject({ stage: 'refund_order_lookup' });
+    expect(rpc).not.toHaveBeenCalled();
+    // A delayed Checkout delivery establishes the binding. The same Stripe
+    // refund must still be delivered and retain the same financial key.
+    match.value = 'pi_early';
+    await expect(reconcileSubscriptionRefundFromStripeWebhook(supabase, event, options))
+      .resolves.toMatchObject({ reconciled: true });
+    expect(rpc).toHaveBeenCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-early-refund', p_idempotency_key: 'stripe_refund:re_early', p_is_full_refund: true,
+    }));
+  });
+});
+
+describe('PAY-1 refund waits for committed credit fulfillment', () => {
+  it.each(['card', 'alipay'])('defers a bound %s refund after failed fulfillment, then reconciles after checkout retry', async (method) => {
+    const { handleStripeWebhookEvent } = await import('../../../../../apps/web/src/app/api/stripe/webhook/route');
+    const tables: Record<RefundWebhookTableName, RefundWebhookRow[]> = {
+      payment_orders: [{ id: 'order-bound', item_type: 'credit_package', amount_total: 1000, stripe_checkout_session_id: 'cs_bound', fulfilled_at: null, status: 'pending', metadata: {} }],
+      profiles: [], credit_transactions: [], membership_plans: [], user_subscriptions: [], subscription_credit_grants: [],
+    };
+    let failFulfillment = true;
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'atomic_fulfill_credit_package') {
+        if (failFulfillment) return { data: null, error: new Error('transaction rolled back') };
+        // Fixture for the existing RPC's single committed fulfillment snapshot.
+        Object.assign(tables.payment_orders[0], {
+          fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'completed',
+          metadata: { ...tables.payment_orders[0].metadata, grantedCredits: 100, transactionId: 'txn-bound' },
+        });
+        return { data: [{ fulfilled_at: tables.payment_orders[0].fulfilled_at }], error: null };
+      }
+      expect(name).toBe('atomic_reconcile_stripe_refund');
+      expect(tables.payment_orders[0]).toMatchObject({ fulfilled_at: expect.any(String), metadata: { grantedCredits: 100 } });
+      return { data: [{ reconciled: true }], error: null };
+    });
+    const supabase = { from: (table: RefundWebhookTableName) => new RefundWebhookMockQuery(tables, table), rpc };
+    const checkoutEvent = { type: 'checkout.session.completed', data: { object: {
+      id: 'cs_bound', mode: 'payment', payment_status: 'paid', amount_total: 1000,
+      payment_intent: 'pi_bound', payment_method_types: [method],
+      metadata: { userId: 'user-bound', itemId: 'package-bound', itemType: 'credit_package' },
+    } } } as any;
+    const refundInput = { eventType: 'refund.updated', refund: {
+      id: 're_bound', status: 'succeeded', amount: 1000, currency: 'usd', payment_intent: 'pi_bound',
+      metadata: { checkoutSessionId: 'cs_bound' },
+    } } as any;
+    await expect(handleStripeWebhookEvent(supabase, checkoutEvent)).rejects.toMatchObject({ stage: 'fulfill_credit_package_rpc' });
+    expect(tables.payment_orders[0]).toMatchObject({ fulfilled_at: null, metadata: { paymentIntentId: 'pi_bound' } });
+    await expect(reconcileStripeRefund(supabase, refundInput)).rejects.toMatchObject({ stage: 'refund_order_unfulfilled' });
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['atomic_fulfill_credit_package']);
+    failFulfillment = false;
+    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    await expect(reconcileStripeRefund(supabase, refundInput)).resolves.toMatchObject({ reconciled: true });
+    await handleStripeWebhookEvent(supabase, checkoutEvent);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'atomic_fulfill_credit_package', 'atomic_fulfill_credit_package', 'atomic_reconcile_stripe_refund',
+    ]);
+    expect(rpc).toHaveBeenLastCalledWith('atomic_reconcile_stripe_refund', expect.objectContaining({
+      p_order_id: 'order-bound', p_idempotency_key: 'stripe_refund:re_bound', p_is_full_refund: true,
+    }));
+  });
+
+  it('does not let an in-flight checkout upsert erase a concurrently committed credit snapshot', async () => {
+    const supabase = createRefundWebhookSupabase({
+      payment_orders: [{ id: 'order-stale-checkout', stripe_checkout_session_id: 'cs_stale', fulfilled_at: null, status: 'pending', metadata: { paymentIntentId: 'pi_stale' } }],
+    }, {
+      onBeforeUpdate: async ({ table }) => {
+        if (table !== 'payment_orders') return;
+        Object.assign(supabase.tables.payment_orders[0], {
+          fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'refunded', payment_status: 'refunded',
+          metadata: { paymentIntentId: 'pi_stale', grantedCredits: 100, transactionId: 'txn-stale', refundStatus: 'succeeded' },
+        });
+      },
+    });
+    await upsertPaymentOrderBySession(supabase, {
+      id: 'cs_stale', mode: 'payment', payment_status: 'paid', payment_intent: 'pi_stale',
+      metadata: { userId: 'user-stale', itemId: 'package-stale', itemType: 'credit_package' },
+    } as unknown as Stripe.Checkout.Session);
+    expect(supabase.tables.payment_orders[0]).toMatchObject({
+      fulfilled_at: '2026-09-04T00:00:00.000Z', status: 'refunded', payment_status: 'refunded',
+      metadata: { paymentIntentId: 'pi_stale', grantedCredits: 100, transactionId: 'txn-stale', refundStatus: 'succeeded' },
+    });
+  });
+});
+
+
+describe('PAY-1 exact-source paid upgrade invoices', () => {
+  function fixture(billingCycle: 'monthly' | 'yearly') {
+    const targetAmount = billingCycle === 'yearly' ? 29900 : 2990;
+    const source = { id: 'upgrade-source', user_id: 'upgrade-user', item_id: 'upgrade-plan', item_type: 'membership_plan',
+      billing_cycle: billingCycle, stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade',
+      stripe_price_id: 'price_upgrade', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade',
+      status: 'pending', created_at: '2026-09-04T00:00:00.000Z',
+      metadata: { source: 'changeSubscriptionPlan', upgradeAttempt: { quote: { amountDue: targetAmount, currency: 'usd' } } } };
+    const historicalGrant = { id: 'grant-old', user_id: 'upgrade-user', membership_plan_id: 'old-plan', stripe_subscription_id: 'sub_old',
+      stripe_invoice_id: 'in_old', billing_cycle: 'monthly', grant_type: 'monthly_invoice', grant_period_key: 'invoice:in_old',
+      period_start: '2026-08-01T00:00:00.000Z', period_end: '2026-09-01T00:00:00.000Z', period_index: null,
+      total_periods: 1, credits_granted: 1000, consumed_amount: 583, accounting_state: 'trusted', status: 'granted' };
+    const historicalTransaction = { id: 'txn-old', user_id: 'upgrade-user', amount: 1000, type: 'addition',
+      ledger_type: 'grant', reason_code: 'monthly_invoice', source_type: 'stripe_invoice', source_id: 'in_old' };
+    const supabase = createRefundWebhookSupabase({ payment_orders: [source], profiles: [{ id: 'upgrade-user', credits: 417, membership_level: 'pro' }],
+      membership_plans: [{ id: 'upgrade-plan', name: 'Gold', level: 'gold', monthly_credits: 300, monthly_bonus_credits: 0, yearly_credits: 3600 }],
+      subscription_credit_grants: [historicalGrant], credit_transactions: [historicalTransaction] });
+    const start = 1788480000; const end = billingCycle === 'yearly' ? 1820016000 : 1791072000;
+    const retrievePrice = vi.fn().mockResolvedValue({
+      id: 'price_upgrade', type: 'recurring', currency: 'usd', unit_amount: targetAmount,
+      recurring: { interval: billingCycle === 'yearly' ? 'year' : 'month', interval_count: 1 },
+    } as Stripe.Price);
+    const invoice = { id: 'in_upgrade', status: 'paid', billing_reason: 'subscription_update', amount_paid: targetAmount, amount_due: targetAmount,
+      subtotal: targetAmount, total: targetAmount, starting_balance: 0, pre_payment_credit_notes_amount: 0,
+      post_payment_credit_notes_amount: 0, total_discount_amounts: [], total_taxes: [], currency: 'usd',
+      created: start + 1, customer: 'cus_upgrade',
+      parent: { subscription_details: { subscription: 'sub_upgrade', metadata: { upgradeAttemptId: 'upgrade-source', userId: 'upgrade-user', itemId: 'upgrade-plan', priceId: 'price_upgrade' } } },
+      lines: { has_more: false, data: [
+        { id: 'il_target', amount: targetAmount, subtotal: targetAmount, currency: 'usd', quantity: 1,
+          discount_amounts: [], discounts: [], pretax_credit_amounts: [], taxes: [], pricing: { price_details: { price: 'price_upgrade' } },
+          period: { start, end }, parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: false } } },
+      ] } } as unknown as Stripe.Invoice;
+    return { supabase, invoice, source, start, end, targetAmount, historicalGrant, historicalTransaction, retrievePrice };
+  }
+  it.each(['monthly', 'yearly'] as const)('adds the paid full-price %s target grant once and preserves historical credits and replay safety', async billingCycle => {
+    const { supabase, invoice, historicalGrant, historicalTransaction, retrievePrice } = fixture(billingCycle);
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    const before = structuredClone(supabase.tables);
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'gold', credits: 717 });
+    expect(supabase.tables.subscription_credit_grants).toHaveLength(2);
+    expect(supabase.tables.subscription_credit_grants[0]).toEqual(historicalGrant);
+    expect(supabase.tables.credit_transactions[0]).toEqual(historicalTransaction);
+    expect(supabase.tables.subscription_credit_grants[1]).toMatchObject({ credits_granted: 300, billing_cycle: billingCycle,
+      ...(billingCycle === 'yearly' ? { period_index: 1, total_periods: 12 } : {}) });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'upgrade-plan', billing_cycle: billingCycle });
+    expect(supabase.tables.profiles).toEqual(before.profiles);
+    expect(supabase.tables.credit_transactions).toEqual(before.credit_transactions);
+    expect(supabase.tables.subscription_credit_grants).toEqual(before.subscription_credit_grants);
+  });
+  it('keeps yearly upgrade periods 2 through 12 releasable from the new target term', async () => {
+    const { supabase, invoice, start, retrievePrice } = fixture('yearly');
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    const release = await releaseDueAnnualSubscriptionCredits(supabase, {
+      now: new Date((start + (31 * 24 * 60 * 60)) * 1000),
+    });
+    expect(release).toMatchObject({ releasedGrantCount: 1, releasedCredits: 300 });
+    expect(supabase.tables.subscription_credit_grants.map(row => row.period_index)).toEqual([null, 1, 2]);
+    expect(supabase.tables.profiles[0]).toMatchObject({ credits: 1017 });
+  });
+  it.each(['monthly', 'yearly'] as const)('rejects a paid upgrade whose target Price cadence is not exact %s before grants or rights writes', async billingCycle => {
+    const { supabase, invoice, retrievePrice } = fixture(billingCycle);
+    retrievePrice.mockResolvedValue({
+      id: 'price_upgrade', type: 'recurring', currency: 'usd', unit_amount: billingCycle === 'yearly' ? 29900 : 2990,
+      recurring: billingCycle === 'yearly'
+        ? { interval: 'month', interval_count: 12 }
+        : { interval: 'day', interval_count: 28 },
+    } as Stripe.Price);
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toMatchObject({
+      stage: 'upgrade_invoice_price_cadence',
+    });
+    expect(supabase.tables).toEqual(before);
+  });
+  it.each(['wrong-price', 'wrong-customer', 'failed-source', 'missing-source', 'unpaid', 'changed-amount'])('rejects %s before grants or rights writes', async problem => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    if (problem === 'wrong-price') invoice.parent!.subscription_details!.metadata!.priceId = 'price_wrong';
+    if (problem === 'wrong-customer') invoice.customer = 'cus_wrong';
+    if (problem === 'failed-source') supabase.tables.payment_orders[0].status = 'failed';
+    if (problem === 'missing-source') delete invoice.parent!.subscription_details!.metadata!.upgradeAttemptId;
+    if (problem === 'unpaid') invoice.status = 'open';
+    if (problem === 'changed-amount') invoice.amount_due++;
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toBeDefined();
+    expect(supabase.tables).toEqual(before);
+  });
+  it('failed upgrade invoice targets its own source and cannot seed a later paid upgrade or release another attempt', async () => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    supabase.tables.payment_orders.push({ ...structuredClone(supabase.tables.payment_orders[0]), id: 'new-source', created_at: '2026-09-04T00:00:01.500Z' });
+    const failed = { ...invoice, status: 'open' } as Stripe.Invoice;
+    await markMembershipInvoicePaymentFailed(supabase, failed);
+    expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'new-source')?.status).toBe('pending');
+    const before = structuredClone(supabase.tables);
+    await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toBeDefined();
+    expect(supabase.tables).toEqual(before);
+  });
+  it.each(['target-proration', 'old-price-credit', 'partial-lines', 'wrong-line-amount', 'wrong-period', 'unpaid-amount',
+    'discount', 'tax', 'zero-tax', 'customer-balance', 'credit-note'])(
+    'rejects non-full-price paid upgrade invoice evidence: %s', async problem => {
+      const { supabase, invoice, retrievePrice } = fixture('yearly');
+      if (problem === 'target-proration') invoice.lines.data[0].parent!.subscription_item_details!.proration = true;
+      if (problem === 'old-price-credit') invoice.lines.data.unshift({ ...structuredClone(invoice.lines.data[0]), id: 'il_credit',
+        amount: -1000, pricing: { price_details: { price: 'price_old' } },
+        parent: { subscription_item_details: { subscription: 'sub_upgrade', proration: true } } } as any);
+      if (problem === 'partial-lines') invoice.lines.has_more = true;
+      if (problem === 'wrong-line-amount') invoice.lines.data[0].amount--;
+      if (problem === 'wrong-period') invoice.lines.data[0].period!.end = invoice.lines.data[0].period!.start + (30 * 24 * 60 * 60);
+      if (problem === 'unpaid-amount') invoice.amount_paid--;
+      if (problem === 'discount') invoice.lines.data[0].discount_amounts = [{ amount: 1 }] as any;
+      if (problem === 'tax') invoice.total_taxes = [{ amount: 1000 }] as any;
+      if (problem === 'zero-tax') invoice.lines.data[0].taxes = [{ amount: 0 }] as any;
+      if (problem === 'customer-balance') invoice.starting_balance = -1000;
+      if (problem === 'credit-note') invoice.pre_payment_credit_notes_amount = 1000;
+      const before = structuredClone(supabase.tables);
+      await expect(fulfillMembershipInvoice(supabase, invoice, { retrievePrice })).rejects.toBeDefined();
+      expect(supabase.tables).toEqual(before);
+    });
+  it('old upgrade replay does not release a newer residual lock', async () => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    supabase.tables.payment_orders.push({ id: 'new-lock', user_id: 'upgrade-user', item_id: 'another-plan', item_type: 'membership_plan',
+      stripe_subscription_id: 'sub_upgrade', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade', status: 'pending',
+      created_at: '2026-09-04T00:00:00.500Z', metadata: { source: 'changeSubscriptionPlan' } });
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    expect(supabase.tables.payment_orders.find(r => r.id === 'new-lock')).toMatchObject({ status: 'pending', stripe_checkout_session_id: 'change_subscription_plan_lock:sub_upgrade' });
+  });
+  it('binds an older generic renewal to its exact Price instead of pending or derived upgrade sources', async () => {
+    const { supabase, invoice, retrievePrice } = fixture('monthly');
+    supabase.tables.membership_plans.push({ id: 'old-plan', name: 'Pro', level: 'pro', monthly_credits: 1000, monthly_bonus_credits: 0 });
+    supabase.tables.payment_orders.push({ id: 'old-source', user_id: 'upgrade-user', item_id: 'old-plan', item_type: 'membership_plan',
+      billing_cycle: 'monthly', stripe_subscription_id: 'sub_upgrade', stripe_customer_id: 'cus_upgrade', stripe_price_id: 'price_old',
+      stripe_checkout_session_id: 'cs_old', status: 'completed', created_at: '2026-09-03T23:59:59.500Z' });
+    supabase.tables.payment_orders.push({ id: 'completed-upgrade-invoice', user_id: 'upgrade-user', item_id: 'upgrade-plan',
+      item_type: 'membership_plan', billing_cycle: 'monthly', stripe_subscription_id: 'sub_upgrade',
+      stripe_customer_id: 'cus_upgrade', stripe_price_id: 'price_upgrade', stripe_invoice_id: 'in_newer_upgrade',
+      status: 'completed', payment_status: 'paid', fulfilled_at: '2026-09-04T00:00:00.500Z',
+      created_at: '2026-09-04T00:00:00.500Z', metadata: { source: 'invoice.payment_succeeded' } });
+    invoice.billing_reason = 'subscription_cycle'; invoice.amount_due = 990; invoice.amount_paid = 990;
+    invoice.parent!.subscription_details!.metadata = {};
+    invoice.lines.data[0].amount = 990; invoice.lines.data[0].pricing!.price_details!.price = 'price_old';
+    await fulfillMembershipInvoice(supabase, invoice, { retrievePrice });
+    expect(supabase.tables.profiles[0]).toMatchObject({ membership_level: 'pro', credits: 1417 });
+    expect(supabase.tables.user_subscriptions[0]).toMatchObject({ membership_plan_id: 'old-plan', billing_cycle: 'monthly' });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'upgrade-source')).toMatchObject({ status: 'pending' });
+    expect(supabase.tables.payment_orders.find(row => row.id === 'completed-upgrade-invoice')).toMatchObject({
+      item_id: 'upgrade-plan', stripe_price_id: 'price_upgrade', fulfilled_at: '2026-09-04T00:00:00.500Z',
+    });
   });
 });

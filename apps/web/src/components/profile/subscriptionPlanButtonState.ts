@@ -71,12 +71,17 @@ export function getMembershipPlanButtonState(input: {
 
   if (eligibility.action === 'changeSubscriptionPlan') {
     return {
-      disabled: false,
-      label: checkoutReady ? '升级套餐' : '联系我们',
+      disabled: !checkoutReady,
+      label: checkoutReady ? '升级套餐' : '暂不可升级',
       canCreateCheckout: false,
       canChangeSubscriptionPlan: checkoutReady,
-      message: eligibility.safeMessage,
+      message: checkoutReady ? null : '该套餐暂不可升级，请稍后重试。',
     };
+  }
+
+  if (eligibility.reasonCode === 'RENEWAL_RESTORE_REQUIRED') {
+    return { disabled: true, label: '请先恢复续费', canCreateCheckout: false,
+      canChangeSubscriptionPlan: false, message: eligibility.safeMessage };
   }
 
   if (eligibility.action === 'resolvePaymentIssue') {

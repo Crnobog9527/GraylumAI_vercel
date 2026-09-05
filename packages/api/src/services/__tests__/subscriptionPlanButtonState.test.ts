@@ -60,7 +60,7 @@ describe('getMembershipPlanButtonState', () => {
     });
   });
 
-  it('enables subscription change for backend upgrade actions without allowing checkout creation', () => {
+  it('enables only ready legal upgrades without Checkout', () => {
     const result = getMembershipPlanButtonState({
       eligibility: {
         ...baseEligibility,
@@ -82,6 +82,7 @@ describe('getMembershipPlanButtonState', () => {
   });
 
   it.each([
+    ['RENEWAL_RESTORE_REQUIRED', 'none', '请先恢复续费'],
     ['CURRENT_PLAN', 'none', '当前套餐'],
     ['DOWNGRADE_NOT_ALLOWED', 'none', '暂不支持降级'],
     ['PAYMENT_ATTENTION_REQUIRED', 'resolvePaymentIssue', '请先处理付款异常'],

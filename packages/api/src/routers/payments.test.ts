@@ -1,8 +1,12 @@
 import { TRPCError } from '@trpc/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isDeepStrictEqual } from 'node:util';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const stripeState = vi.hoisted(() => ({
   assertStripeCheckoutConfigured: vi.fn(),
+  assertCheckoutRateLimit: vi.fn(),
+  assertSubscriptionChangeRateLimit: vi.fn(),
+  getStripePortalReturnUrl: vi.fn(),
   getOrCreateStripeCustomerId: vi.fn(),
   getStripeAppUrl: vi.fn(),
   getStripeClient: vi.fn(),
@@ -18,6 +22,9 @@ const loggerState = vi.hoisted(() => ({
 
 vi.mock('../services/stripe', () => ({
   assertStripeCheckoutConfigured: stripeState.assertStripeCheckoutConfigured,
+  assertCheckoutRateLimit: stripeState.assertCheckoutRateLimit,
+  assertSubscriptionChangeRateLimit: stripeState.assertSubscriptionChangeRateLimit,
+  getStripePortalReturnUrl: stripeState.getStripePortalReturnUrl,
   buildStripeMetadata: stripeState.buildStripeMetadata,
   calculateDiscountedAmountCents: stripeState.calculateDiscountedAmountCents,
   getOrCreateStripeCustomerId: stripeState.getOrCreateStripeCustomerId,
@@ -220,153 +227,128 @@ function createProtectedCaller(options: {
 }
 
 function createSubscriptionChangeGuardHarness(options: {
-  monthlyPrice?: unknown;
-  yearlyPrice?: unknown;
-  profileResult?: () => Promise<unknown>;
-  planResult?: () => Promise<unknown>;
-  eligibilitySubscriptionResult?: () => Promise<unknown>;
-  eligibilityOrderResult?: () => Promise<unknown>;
+  monthlyPrice?: unknown; yearlyPrice?: unknown;
+  currentLevel?: string; currentCycle?: string; targetLevel?: string;
+  profileResult?: () => Promise<unknown>; planResult?: () => Promise<unknown>;
+  eligibilitySubscriptionResult?: () => Promise<unknown>; eligibilityOrderResult?: () => Promise<unknown>;
 } = {}) {
   const targetPlanId = '123e4567-e89b-42d3-a456-426614174222';
-  const subscriptionRetrieve = vi.fn().mockResolvedValue({
-    id: 'sub_test_active',
-    status: 'active',
-    cancel_at_period_end: false,
-    metadata: { userId: 'user-1' },
-    items: {
-      data: [{ id: 'si_test_current' }],
-    },
+  const targetLevel = options.targetLevel ?? 'gold';
+  const currentPlanId = (options.currentLevel ?? 'pro') === targetLevel ? targetPlanId : '123e4567-e89b-42d3-a456-426614174111';
+  const profile = { id: 'user-1', role: 'user', status: 'active', email: 'user@example.com',
+    nickname: 'User', membership_level: options.currentLevel ?? 'pro' };
+  const targetPriceIds = { monthly: `price_test_${targetLevel}_monthly`, yearly: `price_test_${targetLevel}_yearly` };
+  const plan: any = { id: targetPlanId, name: targetLevel === 'gold' ? 'Gold' : 'Pro', level: targetLevel, is_active: 'true',
+    monthly_price: targetLevel === 'gold' ? 2990 : 990, yearly_price: targetLevel === 'gold' ? 29900 : 9900,
+    stripe_monthly_price_id: 'monthlyPrice' in options ? options.monthlyPrice : targetPriceIds.monthly,
+    stripe_yearly_price_id: 'yearlyPrice' in options ? options.yearlyPrice : targetPriceIds.yearly };
+  const targetPrice = (billingCycle: 'monthly' | 'yearly') => ({
+    id: billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id,
+    active: true,
+    type: 'recurring',
+    currency: 'usd',
+    unit_amount: billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price,
+    recurring: { interval: billingCycle === 'yearly' ? 'year' : 'month', interval_count: 1 },
   });
-  const updatedSubscription = {
-    id: 'sub_test_active',
-    status: 'active',
-    cancel_at_period_end: false,
-    metadata: { userId: 'user-1' },
-    items: {
-      data: [{ id: 'si_test_current' }],
-    },
+  const priceRetrieve = vi.fn().mockImplementation(async (priceId: string) => structuredClone(targetPrice(
+    priceId === plan.stripe_yearly_price_id ? 'yearly' : 'monthly',
+  )));
+  const local: any = { id: 'sub-row-1', membership_plan_id: currentPlanId, stripe_subscription_id: 'sub_test_active',
+    stripe_customer_id: 'cus_test_active', stripe_price_id: 'price_test_old', status: 'active',
+    billing_cycle: options.currentCycle ?? 'monthly', cancel_at_period_end: 'false', metadata: {} };
+  const remote: any = { id: 'sub_test_active', customer: 'cus_test_active', status: 'active',
+    cancel_at_period_end: false, cancel_at: null, collection_method: 'charge_automatically',
+    metadata: { userId: 'user-1' }, items: { has_more: false, data: [{ id: 'si_test_current', quantity: 1,
+      price: { id: 'price_test_old' }, current_period_start: 1700000000, current_period_end: 2000000000 }] } };
+  const subscriptionRetrieve = vi.fn().mockImplementation(async () => structuredClone(remote));
+  const subscriptionUpdate = vi.fn().mockResolvedValue(remote);
+  const invoiceList = vi.fn().mockResolvedValue({ data: [], has_more: false });
+  const fullPricePreview = (billingCycle: 'monthly' | 'yearly' = 'monthly', overrides: Record<string, unknown> = {}) => {
+    const amount = billingCycle === 'yearly' ? plan.yearly_price : plan.monthly_price;
+    const price = billingCycle === 'yearly' ? plan.stripe_yearly_price_id : plan.stripe_monthly_price_id;
+    const start = Date.UTC(2026, 8, 1) / 1000;
+    const end = Date.UTC(billingCycle === 'yearly' ? 2027 : 2026, billingCycle === 'yearly' ? 8 : 9, 1) / 1000;
+    return { amount_due: amount, currency: 'usd', subtotal: amount, total: amount, starting_balance: 0,
+      pre_payment_credit_notes_amount: 0, post_payment_credit_notes_amount: 0,
+      total_discount_amounts: [], total_taxes: [], lines: { has_more: false, data: [{
+        id: 'il_full_target', amount, subtotal: amount, currency: 'usd', quantity: 1,
+        discount_amounts: [], discounts: [], pretax_credit_amounts: [], taxes: [],
+        pricing: { price_details: { price } }, period: { start, end },
+        parent: { subscription_item_details: { subscription: remote.id, subscription_item: 'si_test_current', proration: false } },
+      }] }, ...overrides };
   };
-  const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
-  const orderInserts: unknown[] = [];
-  const userTableReads: string[] = [];
-  let profileReadCount = 0;
+  const invoicePreview = vi.fn().mockImplementation(async (params: any) => fullPricePreview(
+    params.subscription_details.items[0].price === plan.stripe_yearly_price_id ? 'yearly' : 'monthly',
+  ));
+  const invoiceRetrieve = vi.fn().mockResolvedValue({ customer: 'cus_test_active', status: 'paid',
+    parent: { subscription_details: { subscription: remote.id } }, billing_reason: 'subscription_update',
+    lines: { has_more: false, data: [{ pricing: { price_details: { price: targetPriceIds.monthly } } }] } });
+  const orderInserts: any[] = []; const rows: any[] = []; const orderUpdates: any[] = [];
+  const userTableReads: string[] = []; let profileReadCount = 0;
+  let insertError: any = null;
+  stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve: subscriptionRetrieve, update: subscriptionUpdate }, prices: { retrieve: priceRetrieve },
+    invoices: { createPreview: invoicePreview, retrieve: invoiceRetrieve, list: invoiceList } });
+  function ordersBuilder() {
+    const filters: Array<[string, unknown]> = []; let values: any = null;
+    const result = () => {
+      const found = rows.filter(row => filters.every(([key, value]) => key === 'metadata'
+        ? isDeepStrictEqual(row.metadata, JSON.parse(value as string)) : value === null ? row[key] == null : row[key] === value));
+      if (values) { orderUpdates.push(values); found.forEach(row => Object.assign(row, values)); }
+      return { data: structuredClone(found), error: null };
+    };
+    return {
+      select() { return this; }, eq(k: string, v: unknown) { filters.push([k, v]); return this; },
+      is(k: string, v: unknown) { filters.push([k, v]); return this; },
+      order() { return this; }, limit() { return this; },
+      update(v: any) { values = v; return this; },
+      maybeSingle: async () => options.eligibilityOrderResult?.() ?? { ...result(), data: result().data[0] ?? null },
+      then(resolve: any, reject: any) { return Promise.resolve(result()).then(resolve, reject); },
+      insert(payload: any) {
+        const conflict = rows.some(r => r.stripe_checkout_session_id === payload.stripe_checkout_session_id);
+        const error = insertError ?? (conflict ? { code: '23505' } : null);
+        const id = `order-change-${rows.length + 1}`;
+        if (!error) { orderInserts.push(payload); rows.push(structuredClone({ ...payload, id })); }
+        return createSingleQueryBuilder(Promise.resolve({ data: error ? null : { id }, error }));
+      },
+    };
+  }
+  const userSupabase = { from(table: string) {
+    userTableReads.push(table);
+    if (table === 'profiles') { profileReadCount++; return createSingleQueryBuilder(profileReadCount === 1
+      ? Promise.resolve({ data: profile, error: null }) : options.profileResult?.() ?? Promise.resolve({ data: profile, error: null })); }
+    if (table === 'membership_plans') return createSingleQueryBuilder(options.planResult?.() ?? Promise.resolve({ data: plan, error: null }));
+    if (table === 'user_subscriptions') return createListQueryBuilder(options.eligibilitySubscriptionResult?.()
+      ?? Promise.resolve({ data: options.currentLevel === 'free' ? [] : [local], error: null }));
+    if (table === 'payment_orders') return ordersBuilder();
+    throw new Error(`Unexpected user table ${table}`);
+  } };
+  const adminSupabase = { from(table: string) {
+    if (table === 'payment_orders') return ordersBuilder();
+    throw new Error(`Unexpected admin write ${table}`);
+  } };
+  return { caller: createProtectedCaller({ supabase: userSupabase, supabaseAdmin: adminSupabase }),
+    targetPlanId, subscriptionRetrieve, subscriptionUpdate, priceRetrieve, targetPrice, invoicePreview, invoiceRetrieve, invoiceList, remote, local, plan,
+    rows, orderInserts, orderUpdates, userTableReads, adminSupabase, targetPriceIds, fullPricePreview,
+    setInsertError: (e: any) => { insertError = e; } };
+}
 
-  stripeState.getStripeClient.mockReturnValue({
-    subscriptions: {
-      retrieve: subscriptionRetrieve,
-      update: subscriptionUpdate,
-    },
-  });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  const userSupabase = {
-    from(table: string) {
-      userTableReads.push(table);
-
-      if (table === 'profiles') {
-        profileReadCount += 1;
-        const result = profileReadCount === 1
-          ? Promise.resolve({
-            data: {
-              id: 'user-1',
-              role: 'user',
-              status: 'active',
-              email: 'user@example.com',
-              nickname: 'User',
-              membership_level: 'pro',
-            },
-            error: null,
-          })
-          : options.profileResult?.() ?? Promise.resolve({
-            data: {
-              id: 'user-1',
-              email: 'user@example.com',
-              nickname: 'User',
-              membership_level: 'pro',
-            },
-            error: null,
-          });
-
-        return createSingleQueryBuilder(result);
-      }
-
-      if (table === 'membership_plans') {
-        return createSingleQueryBuilder(
-          options.planResult?.() ?? Promise.resolve({
-            data: {
-              id: targetPlanId,
-              name: 'Gold',
-              level: 'gold',
-              is_active: 'true',
-              stripe_monthly_price_id: 'monthlyPrice' in options
-                ? options.monthlyPrice
-                : 'price_test_gold_monthly',
-              stripe_yearly_price_id: 'yearlyPrice' in options
-                ? options.yearlyPrice
-                : 'price_test_gold_yearly',
-            },
-            error: null,
-          }),
-        );
-      }
-
-      if (table === 'user_subscriptions') {
-        return createListQueryBuilder(
-          options.eligibilitySubscriptionResult?.() ?? Promise.resolve({
-            data: [{
-              id: 'sub-row-1',
-              membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-              stripe_subscription_id: 'sub_test_active',
-              stripe_customer_id: 'cus_test_active',
-              status: 'active',
-              billing_cycle: 'monthly',
-              cancel_at_period_end: 'false',
-              metadata: {},
-            }],
-            error: null,
-          }),
-        );
-      }
-
-      if (table === 'payment_orders') {
-        return createMaybeSingleQueryBuilder(
-          options.eligibilityOrderResult?.() ?? Promise.resolve({ data: null, error: null }),
-        );
-      }
-
-      throw new Error(`Unexpected user table ${table}`);
-    },
-  };
-
-  const adminSupabase = {
-    from(table: string) {
-      if (table === 'payment_orders') {
-        return createInsertBuilder(
-          Promise.resolve({ data: { id: 'order-change-1' }, error: null }),
-          orderInserts,
-        );
-      }
-
-      throw new Error(`Unexpected admin table ${table}`);
-    },
-  };
-
-  return {
-    caller: createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    }),
-    targetPlanId,
-    subscriptionRetrieve,
-    subscriptionUpdate,
-    updatedSubscription,
-    orderInserts,
-    userTableReads,
-    adminSupabase,
-  };
+function fakeQuote() { return { amountDue: 2990, currency: 'usd', quotedAt: Math.floor(Date.now() / 1000),
+  fingerprint: 'a'.repeat(64), freshnessProof: 'b'.repeat(64) }; }
+async function getQuote(h: ReturnType<typeof createSubscriptionChangeGuardHarness>, input: { planId: string; billingCycle: 'monthly' | 'yearly' }) {
+  const preview = await h.caller.previewSubscriptionPlanChange(input);
+  if (preview.status !== 'quote') throw new Error('Expected financial quote');
+  const { amountDue, currency, quotedAt, fingerprint, freshnessProof } = preview;
+  return { amountDue, currency, quotedAt, fingerprint, freshnessProof };
 }
 
 describe('paymentsRouter error sanitization', () => {
   beforeEach(() => {
+    process.env.STRIPE_SECRET_KEY = 'local-noncredential-pay1-quote-signing';
+    stripeState.assertCheckoutRateLimit.mockReset();
+    stripeState.assertSubscriptionChangeRateLimit.mockReset();
+    stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
     stripeState.assertStripeCheckoutConfigured.mockReset();
     stripeState.getOrCreateStripeCustomerId.mockReset();
     stripeState.getStripeAppUrl.mockReset();
@@ -1095,48 +1077,13 @@ describe('paymentsRouter error sanitization', () => {
       }),
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'BAD_REQUEST',
-      message: '当前会员订阅仍有效，升级套餐需要通过 changeSubscriptionPlan 处理；该能力将在 PR5 实现，本次不会创建新的 Checkout。',
+      message: '当前会员订阅仍有效，请通过升级套餐调整现有订阅，不会创建新的 Checkout。',
     });
 
     expect(stripeState.getOrCreateStripeCustomerId).not.toHaveBeenCalled();
     expect(sessionCreate).not.toHaveBeenCalled();
     expect(orderInserts).toHaveLength(0);
   });
-
-  it.each([
-    ['monthly', null],
-    ['monthly', ''],
-    ['monthly', ' '],
-    ['yearly', null],
-    ['yearly', ''],
-    ['yearly', ' '],
-  ] as const)(
-    'rejects an unconfigured %s subscription Price before Stripe or order side effects (%j)',
-    async (billingCycle, priceId) => {
-      const harness = createSubscriptionChangeGuardHarness(
-        billingCycle === 'monthly'
-          ? { monthlyPrice: priceId }
-          : { yearlyPrice: priceId },
-      );
-
-      await expect(
-        harness.caller.changeSubscriptionPlan({
-          planId: harness.targetPlanId,
-          billingCycle,
-        }),
-      ).rejects.toMatchObject<Partial<TRPCError>>({
-        code: 'BAD_REQUEST',
-        message: '该会员套餐暂不可升级，请稍后重试',
-      });
-
-      expect(harness.subscriptionRetrieve).not.toHaveBeenCalled();
-      expect(harness.subscriptionUpdate).not.toHaveBeenCalled();
-      expect(harness.orderInserts).toHaveLength(0);
-      expect(syncSubscriptionState).not.toHaveBeenCalled();
-      expect(harness.userTableReads).not.toContain('user_subscriptions');
-      expect(harness.userTableReads).not.toContain('payment_orders');
-    },
-  );
 
   it.each([
     'user_subscriptions',
@@ -1155,6 +1102,7 @@ describe('paymentsRouter error sanitization', () => {
         harness.caller.changeSubscriptionPlan({
           planId: harness.targetPlanId,
           billingCycle: 'yearly',
+          expected: fakeQuote(),
         }),
       ).rejects.toMatchObject<Partial<TRPCError>>({
         code: 'SERVICE_UNAVAILABLE',
@@ -1192,7 +1140,7 @@ describe('paymentsRouter error sanitization', () => {
       'successful not-found',
       () => Promise.resolve({ data: null, error: null }),
       'NOT_FOUND',
-      '用户资料不存在，无法切换订阅套餐',
+      '用户资料不存在，无法升级订阅',
     ],
   ] as const)(
     'distinguishes profile %s before subscription change side effects',
@@ -1203,6 +1151,7 @@ describe('paymentsRouter error sanitization', () => {
         harness.caller.changeSubscriptionPlan({
           planId: harness.targetPlanId,
           billingCycle: 'yearly',
+          expected: fakeQuote(),
         }),
       ).rejects.toMatchObject<Partial<TRPCError>>({
         code: errorCode,
@@ -1244,6 +1193,7 @@ describe('paymentsRouter error sanitization', () => {
         harness.caller.changeSubscriptionPlan({
           planId: harness.targetPlanId,
           billingCycle: 'yearly',
+          expected: fakeQuote(),
         }),
       ).rejects.toMatchObject<Partial<TRPCError>>({
         code: errorCode,
@@ -1257,867 +1207,361 @@ describe('paymentsRouter error sanitization', () => {
     },
   );
 
-  it('trims a configured subscription Price before metadata, order, and Stripe update', async () => {
-    const harness = createSubscriptionChangeGuardHarness({
-      yearlyPrice: ' price_test_gold_yearly ',
-    });
-    stripeState.buildStripeMetadata.mockImplementation((metadata) => metadata);
-
-    await expect(
-      harness.caller.changeSubscriptionPlan({
-        planId: harness.targetPlanId,
-        billingCycle: 'yearly',
-      }),
-    ).resolves.toMatchObject({
-      subscriptionId: 'sub_test_active',
-      planId: harness.targetPlanId,
-      billingCycle: 'yearly',
-      action: 'changeSubscriptionPlan',
-    });
-
-    expect(stripeState.buildStripeMetadata).toHaveBeenCalledWith(expect.objectContaining({
-      priceId: 'price_test_gold_yearly',
-    }));
-    expect(harness.orderInserts).toHaveLength(1);
-    expect(harness.orderInserts[0]).toMatchObject({
-      stripe_price_id: 'price_test_gold_yearly',
-      metadata: expect.objectContaining({
-        priceId: 'price_test_gold_yearly',
-      }),
-    });
-    expect(harness.subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
-    expect(harness.subscriptionUpdate).toHaveBeenCalledWith(
-      'sub_test_active',
-      expect.objectContaining({
-        items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
-        metadata: expect.objectContaining({
-          priceId: 'price_test_gold_yearly',
-        }),
-      }),
-    );
-    expect(syncSubscriptionState).toHaveBeenCalledWith(
-      harness.adminSupabase,
-      harness.updatedSubscription,
-    );
+  it.each([
+    ['pro', 'monthly', 'gold', 'monthly'], ['pro', 'monthly', 'pro', 'yearly'],
+    ['pro', 'monthly', 'gold', 'yearly'], ['pro', 'yearly', 'gold', 'yearly'],
+    ['gold', 'monthly', 'gold', 'yearly'],
+  ] as const)('previews and upgrades %s %s -> %s %s on the existing subscription', async (currentLevel, currentCycle, targetLevel, billingCycle) => {
+    const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
+    const input = { planId: h.targetPlanId, billingCycle };
+    const quote = await h.caller.previewSubscriptionPlanChange(input);
+    const targetAmount = billingCycle === 'yearly' ? h.plan.yearly_price : h.plan.monthly_price;
+    const targetPrice = billingCycle === 'yearly' ? h.plan.stripe_yearly_price_id : h.plan.stripe_monthly_price_id;
+    expect(quote).toMatchObject({ amountDue: targetAmount, currency: 'usd', annualAmount: billingCycle === 'yearly' ? targetAmount : null });
+    expect(quote).not.toHaveProperty('subscriptionId'); expect(quote).not.toHaveProperty('customerId');
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    expect(h.invoicePreview).toHaveBeenCalledWith(expect.objectContaining({ subscription: 'sub_test_active', subscription_details: {
+      items: [{ id: 'si_test_current', price: targetPrice }], billing_cycle_anchor: 'now', proration_behavior: 'none',
+    } }));
+    expect(h.invoicePreview.mock.calls[0][0].subscription_details).not.toHaveProperty('proration_date');
+    if (quote.status !== 'quote') throw new Error('Expected financial quote');
+    const { amountDue, currency, quotedAt, fingerprint, freshnessProof } = quote;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { amountDue, currency, quotedAt, fingerprint, freshnessProof } }))
+      .resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.orderInserts).toHaveLength(1);
+    expect(h.subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
+      items: [{ id: 'si_test_current', price: targetPrice }],
+      billing_cycle_anchor: 'now', proration_behavior: 'none', payment_behavior: 'error_if_incomplete',
+    }), { idempotencyKey: 'subscription-change:order-change-1' });
+    expect(h.priceRetrieve).toHaveBeenCalledTimes(2);
+    expect(h.priceRetrieve).toHaveBeenNthCalledWith(1, targetPrice);
+    expect(h.priceRetrieve).toHaveBeenNthCalledWith(2, targetPrice);
+    expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('proration_date');
+    expect(h.subscriptionUpdate.mock.calls[0][1]).not.toHaveProperty('cancel_at_period_end');
+    expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
   });
 
-  it('changes an eligible active subscription plan without creating checkout or credit grants', async () => {
-    const subscriptionRetrieve = vi.fn().mockResolvedValue({
-      id: 'sub_test_active',
-      status: 'active',
-      cancel_at_period_end: false,
-      metadata: { userId: 'user-1' },
-      items: {
-        data: [
-          {
-            id: 'si_test_current',
-            current_period_start: 1_742_646_400,
-            current_period_end: 1_745_238_400,
-          },
-        ],
-      },
+  it.each([
+    'amount-below-catalog', 'amount-above-catalog', 'currency', 'partial-lines', 'old-price-credit',
+    'target-proration', 'missing-target-price', 'wrong-period', 'discount', 'tax', 'zero-tax', 'zero-total-tax',
+    'customer-balance',
+  ])('rejects non-full-price preview evidence: %s', async problem => {
+    const h = createSubscriptionChangeGuardHarness();
+    const preview: any = h.fullPricePreview('monthly');
+    if (problem === 'amount-below-catalog') preview.amount_due--;
+    if (problem === 'amount-above-catalog') preview.amount_due++;
+    if (problem === 'currency') preview.currency = 'eur';
+    if (problem === 'partial-lines') preview.lines.has_more = true;
+    if (problem === 'old-price-credit') preview.lines.data.push({
+      ...structuredClone(preview.lines.data[0]), id: 'il_old_credit', amount: -100,
+      subtotal: -100, pricing: { price_details: { price: 'price_test_old' } },
+      parent: { subscription_item_details: { subscription: h.remote.id, subscription_item: 'si_test_current', proration: true } },
     });
-    const updatedSubscription = {
-      id: 'sub_test_active',
-      status: 'active',
-      cancel_at_period_end: false,
-      metadata: { userId: 'user-1' },
-      items: {
-        data: [
-          {
-            id: 'si_test_current',
-            current_period_start: 1_742_646_400,
-            current_period_end: 1_745_238_400,
-          },
-        ],
-      },
-    };
-    const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
-    const sessionCreate = vi.fn();
-    const orderInserts: unknown[] = [];
-    const subscriptionUpdates: unknown[] = [];
-    stripeState.buildStripeMetadata.mockReturnValue({
-      itemType: 'membership_plan',
-      itemId: '123e4567-e89b-42d3-a456-426614174222',
-      userId: 'user-1',
-      priceId: 'price_test_gold_yearly',
-      billingCycle: 'yearly',
-    });
-    stripeState.getStripeClient.mockReturnValue({
-      checkout: {
-        sessions: {
-          create: sessionCreate,
-        },
-      },
-      subscriptions: {
-        retrieve: subscriptionRetrieve,
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                role: 'user',
-                status: 'active',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174222',
-                name: 'Gold',
-                level: 'gold',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_gold_monthly',
-                stripe_yearly_price_id: 'price_test_gold_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                stripe_customer_id: 'cus_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-                metadata: {},
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const adminSupabase = {
-      from(table: string) {
-        if (table === 'payment_orders') {
-          return createInsertBuilder(Promise.resolve({ error: null }), orderInserts);
-        }
-
-        if (table === 'user_subscriptions') {
-          return createUpdateBuilder(Promise.resolve({ error: null }), subscriptionUpdates);
-        }
-
-        throw new Error(`Unexpected admin table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174222',
-        billingCycle: 'yearly',
-      }),
-    ).resolves.toMatchObject({
-      subscriptionId: 'sub_test_active',
-      status: 'active',
-      planId: '123e4567-e89b-42d3-a456-426614174222',
-      planLevel: 'gold',
-      billingCycle: 'yearly',
-      action: 'changeSubscriptionPlan',
-    });
-
-    expect(sessionCreate).not.toHaveBeenCalled();
-    expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
-    expect(subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
-    expect(subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.objectContaining({
-      items: [{ id: 'si_test_current', price: 'price_test_gold_yearly' }],
-      proration_behavior: 'always_invoice',
-      cancel_at_period_end: false,
-    }));
-    expect(syncSubscriptionState).toHaveBeenCalledWith(adminSupabase, updatedSubscription);
-    expect(subscriptionUpdates).toHaveLength(0);
-    expect(orderInserts).toHaveLength(1);
-    expect(orderInserts[0]).toMatchObject({
-      user_id: 'user-1',
-      item_type: 'membership_plan',
-      item_id: '123e4567-e89b-42d3-a456-426614174222',
-      billing_cycle: 'yearly',
-      stripe_subscription_id: 'sub_test_active',
-      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_active',
-      stripe_customer_id: 'cus_test_active',
-      stripe_price_id: 'price_test_gold_yearly',
-      amount_total: null,
-      mode: 'subscription',
-      status: 'pending',
-      payment_status: 'active',
-      metadata: expect.objectContaining({
-        source: 'changeSubscriptionPlan',
-        previousMembershipPlanId: '123e4567-e89b-42d3-a456-426614174111',
-        previousBillingCycle: 'monthly',
-      }),
-    });
+    if (problem === 'target-proration') preview.lines.data[0].parent.subscription_item_details.proration = true;
+    if (problem === 'missing-target-price') preview.lines.data[0].pricing.price_details.price = 'price_test_old';
+    if (problem === 'wrong-period') preview.lines.data[0].period.end = preview.lines.data[0].period.start + (31 * 24 * 60 * 60);
+    if (problem === 'discount') preview.lines.data[0].discount_amounts = [{ amount: 1 }];
+    if (problem === 'tax') preview.lines.data[0].taxes = [{ amount: 1 }];
+    if (problem === 'zero-tax') preview.lines.data[0].taxes = [{ amount: 0 }];
+    if (problem === 'zero-total-tax') preview.total_taxes = [{ amount: 0 }];
+    if (problem === 'customer-balance') preview.starting_balance = -1;
+    h.invoicePreview.mockResolvedValue(preview);
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects concurrent plan-change lock conflicts before Stripe subscription update', async () => {
-    const subscriptionRetrieve = vi.fn().mockResolvedValue({
-      id: 'sub_test_active',
-      status: 'active',
-      cancel_at_period_end: false,
-      metadata: { userId: 'user-1' },
-      items: {
-        data: [{ id: 'si_test_current' }],
-      },
+  it.each(['monthly', 'yearly'] as const)('rejects a target Price whose configured cadence is not exact %s before preview or update', async billingCycle => {
+    const h = createSubscriptionChangeGuardHarness();
+    const target = h.targetPrice(billingCycle);
+    h.priceRetrieve.mockResolvedValue({
+      ...target,
+      recurring: billingCycle === 'monthly'
+        ? { interval: 'day', interval_count: 28 }
+        : { interval: 'month', interval_count: 12 },
     });
-    const subscriptionUpdate = vi.fn();
-    const orderInserts: unknown[] = [];
-
-    stripeState.buildStripeMetadata.mockReturnValue({
-      itemType: 'membership_plan',
-      itemId: '123e4567-e89b-42d3-a456-426614174222',
-      userId: 'user-1',
-      priceId: 'price_test_gold_yearly',
-      billingCycle: 'yearly',
-    });
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: subscriptionRetrieve,
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174222',
-                name: 'Gold',
-                level: 'gold',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_gold_monthly',
-                stripe_yearly_price_id: 'price_test_gold_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                stripe_customer_id: 'cus_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const adminSupabase = {
-      from(table: string) {
-        if (table === 'payment_orders') {
-          return createInsertBuilder(
-            Promise.resolve({
-              error: {
-                code: '23505',
-                message: 'duplicate key value violates unique constraint "payment_orders_stripe_checkout_session_id_key"',
-              },
-            }),
-            orderInserts,
-          );
-        }
-
-        throw new Error(`Unexpected admin table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174222',
-        billingCycle: 'yearly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'BAD_REQUEST',
-      message: '该订阅升级正在处理中，请等待付款完成后再试。',
-    });
-
-    expect(orderInserts).toHaveLength(1);
-    expect(orderInserts[0]).toMatchObject({
-      stripe_checkout_session_id: 'change_subscription_plan_lock:sub_test_active',
-    });
-    expect(subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
-    expect(subscriptionUpdate).not.toHaveBeenCalled();
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.invoicePreview).not.toHaveBeenCalled();
+    expect(h.orderInserts).toHaveLength(0);
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects duplicate changeSubscriptionPlan requests before Stripe subscription update', async () => {
-    const subscriptionUpdate = vi.fn();
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: vi.fn(),
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174111',
-                name: 'Pro',
-                level: 'pro',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_pro_monthly',
-                stripe_yearly_price_id: 'price_test_pro_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({ supabase: userSupabase });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174111',
-        billingCycle: 'monthly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'BAD_REQUEST',
-      message: '当前套餐仍有效，无需重复购买。',
-    });
-
-    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  it('keeps quote time outside the semantic fingerprint', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const first = await getQuote(h, input); vi.advanceTimersByTime(1000); const second = await getQuote(h, input);
+    expect(second.quotedAt).toBe(first.quotedAt + 1); expect(second.fingerprint).toBe(first.fingerprint);
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects repeated pending changeSubscriptionPlan requests before Stripe subscription update', async () => {
-    const subscriptionUpdate = vi.fn();
-    const subscriptionRetrieve = vi.fn();
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: subscriptionRetrieve,
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174222',
-                name: 'Gold',
-                level: 'gold',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_gold_monthly',
-                stripe_yearly_price_id: 'price_test_gold_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                stripe_customer_id: 'cus_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'order-change-pending',
-                item_id: '123e4567-e89b-42d3-a456-426614174222',
-                billing_cycle: 'yearly',
-                status: 'pending',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({
-      supabase: userSupabase,
-    });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174222',
-        billingCycle: 'yearly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'BAD_REQUEST',
-      message: '该订阅升级正在处理中，请等待付款完成后再试。',
-    });
-
-    expect(subscriptionRetrieve).not.toHaveBeenCalled();
-    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  it('rejects a refreshed quotedAt without its server-authenticated freshness proof', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const issued = await getQuote(h, input); vi.advanceTimersByTime(1000);
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: { ...issued, quotedAt: issued.quotedAt + 1 } }))
+      .rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
   });
 
-  it('rejects subscription changes before Stripe update when the plan-change source row cannot be saved', async () => {
-    const subscriptionRetrieve = vi.fn().mockResolvedValue({
-      id: 'sub_test_active',
-      status: 'active',
-      cancel_at_period_end: false,
-      metadata: { userId: 'user-1' },
-      items: {
-        data: [
-          {
-            id: 'si_test_current',
-            current_period_start: 1_742_646_400,
-            current_period_end: 1_745_238_400,
-          },
-        ],
-      },
-    });
-    const subscriptionUpdate = vi.fn();
-    const orderInserts: unknown[] = [];
-    stripeState.buildStripeMetadata.mockReturnValue({
-      itemType: 'membership_plan',
-      itemId: '123e4567-e89b-42d3-a456-426614174222',
-      userId: 'user-1',
-      priceId: 'price_test_gold_yearly',
-      billingCycle: 'yearly',
-    });
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: subscriptionRetrieve,
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174222',
-                name: 'Gold',
-                level: 'gold',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_gold_monthly',
-                stripe_yearly_price_id: 'price_test_gold_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                stripe_customer_id: 'cus_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const adminSupabase = {
-      from(table: string) {
-        if (table === 'payment_orders') {
-          return createInsertBuilder(
-            Promise.resolve({ error: { message: 'permission denied for table payment_orders' } }),
-            orderInserts,
-          );
-        }
-
-        throw new Error(`Unexpected admin table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174222',
-        billingCycle: 'yearly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '保存订阅升级记录失败，请稍后重试',
-    });
-
-    expect(subscriptionRetrieve).toHaveBeenCalledWith('sub_test_active');
-    expect(orderInserts).toHaveLength(1);
-    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  it.each([
+    ['gold', 'monthly', 'pro', 'monthly'], ['pro', 'yearly', 'gold', 'monthly'],
+    ['pro', 'monthly', 'pro', 'monthly'], ['free', 'monthly', 'gold', 'monthly'],
+  ] as const)('denies illegal transition %s %s -> %s %s before provider calls', async (currentLevel, currentCycle, targetLevel, billingCycle) => {
+    const h = createSubscriptionChangeGuardHarness({ currentLevel, currentCycle, targetLevel });
+    for (const method of ['previewSubscriptionPlanChange', 'changeSubscriptionPlan'] as const) {
+      await expect(h.caller[method]({ planId: h.targetPlanId, billingCycle, ...(method === 'changeSubscriptionPlan' ? { expected: fakeQuote() } : {}) } as any)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
   });
 
-  it('marks the plan-change source row failed when Stripe rejects the subscription update', async () => {
-    const subscriptionRetrieve = vi.fn().mockResolvedValue({
-      id: 'sub_test_active',
-      status: 'active',
-      cancel_at_period_end: false,
-      metadata: { userId: 'user-1' },
-      items: {
-        data: [
-          {
-            id: 'si_test_current',
-            current_period_start: 1_742_646_400,
-            current_period_end: 1_745_238_400,
-          },
-        ],
-      },
-    });
-    const subscriptionUpdate = vi.fn().mockRejectedValue(new Error('Stripe subscription update failed'));
-    const orderInserts: unknown[] = [];
-    const orderUpdates: unknown[] = [];
-    const subscriptionUpdates: unknown[] = [];
-    stripeState.buildStripeMetadata.mockReturnValue({
-      itemType: 'membership_plan',
-      itemId: '123e4567-e89b-42d3-a456-426614174222',
-      userId: 'user-1',
-      priceId: 'price_test_gold_yearly',
-      billingCycle: 'yearly',
-    });
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: subscriptionRetrieve,
-        update: subscriptionUpdate,
-      },
-    });
-
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'pro',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174222',
-                name: 'Gold',
-                level: 'gold',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_gold_monthly',
-                stripe_yearly_price_id: 'price_test_gold_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174111',
-                stripe_subscription_id: 'sub_test_active',
-                stripe_customer_id: 'cus_test_active',
-                status: 'active',
-                billing_cycle: 'monthly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
-
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
-
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
-
-    const adminSupabase = {
-      from(table: string) {
-        if (table === 'payment_orders') {
-          return {
-            ...createInsertBuilder(
-              Promise.resolve({ data: { id: 'order-change-1' }, error: null }),
-              orderInserts,
-            ),
-            ...createUpdateBuilder(Promise.resolve({ error: null }), orderUpdates),
-          };
-        }
-
-        if (table === 'user_subscriptions') {
-          return createUpdateBuilder(Promise.resolve({ error: null }), subscriptionUpdates);
-        }
-
-        throw new Error(`Unexpected admin table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller({
-      supabase: userSupabase,
-      supabaseAdmin: adminSupabase,
-    });
-
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174222',
-        billingCycle: 'yearly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '切换订阅套餐失败，请稍后重试',
-    });
-
-    expect(orderInserts).toHaveLength(1);
-    expect(subscriptionUpdate).toHaveBeenCalledWith('sub_test_active', expect.any(Object));
-    expect(orderUpdates).toEqual([
-      expect.objectContaining({
-        status: 'failed',
-        payment_status: 'failed',
-      }),
-    ]);
-    expect(syncSubscriptionState).not.toHaveBeenCalled();
-    expect(subscriptionUpdates).toHaveLength(0);
+  it.each(['monthly', 'yearly'] as const)('fails closed for malformed %s catalog configuration', async (billingCycle) => {
+    for (const amount of [0, -1, null, undefined, '2990', 1.5, NaN]) {
+      const h = createSubscriptionChangeGuardHarness(); h.plan[billingCycle + '_price'] = amount;
+      await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle })).rejects.toBeDefined();
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle, expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    }
+    for (const price of [null, '', '   ']) {
+      const h = createSubscriptionChangeGuardHarness(); h.plan['stripe_' + billingCycle + '_price_id'] = price;
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle, expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+    }
   });
 
-  it('rejects downgrade changeSubscriptionPlan requests before Stripe subscription update', async () => {
-    const subscriptionUpdate = vi.fn();
-    stripeState.getStripeClient.mockReturnValue({
-      subscriptions: {
-        retrieve: vi.fn(),
-        update: subscriptionUpdate,
-      },
+  it.each(['customer', 'metadata', 'id', 'cancel_at_period_end', 'cancel_at', 'past_due', 'incomplete', 'unpaid', 'items', 'quantity'])(
+    'rejects remote %s before preview/order/update', async (problem) => {
+      const h = createSubscriptionChangeGuardHarness();
+      if (problem === 'customer') h.remote.customer = 'cus_wrong';
+      else if (problem === 'metadata') h.remote.metadata.userId = 'wrong-user';
+      else if (problem === 'id') h.remote.id = 'sub_wrong';
+      else if (problem === 'cancel_at_period_end') h.remote.cancel_at_period_end = true;
+      else if (problem === 'cancel_at') h.remote.cancel_at = 2000000000;
+      else if (problem === 'items') h.remote.items.data.push(h.remote.items.data[0]);
+      else if (problem === 'quantity') h.remote.items.data[0].quantity = 2;
+      else h.remote.status = problem;
+      await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toBeDefined();
+      await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle: 'monthly', expected: fakeQuote() })).rejects.toBeDefined();
+      expect(h.invoicePreview).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
     });
 
-    const userSupabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                email: 'user@example.com',
-                nickname: 'User',
-                membership_level: 'gold',
-              },
-              error: null,
-            }),
-          );
-        }
+  it('requires restoration for local scheduled cancellation without altering rights', async () => {
+    const h = createSubscriptionChangeGuardHarness(); h.local.cancel_at_period_end = 'true';
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toMatchObject({ message: expect.stringContaining('恢复续费') });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionRetrieve).not.toHaveBeenCalled();
+  });
 
-        if (table === 'membership_plans') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: '123e4567-e89b-42d3-a456-426614174111',
-                name: 'Pro',
-                level: 'pro',
-                is_active: 'true',
-                stripe_monthly_price_id: 'price_test_pro_monthly',
-                stripe_yearly_price_id: 'price_test_pro_yearly',
-              },
-              error: null,
-            }),
-          );
-        }
+  it.each(['TOO_MANY_REQUESTS', 'SERVICE_UNAVAILABLE'] as const)('rate limit %s blocks preview and mutation before Stripe', async code => {
+    const h = createSubscriptionChangeGuardHarness(); stripeState.assertSubscriptionChangeRateLimit.mockRejectedValue(new TRPCError({ code }));
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toMatchObject({ code });
+    await expect(h.caller.changeSubscriptionPlan({ planId: h.targetPlanId, billingCycle: 'monthly', expected: fakeQuote() })).rejects.toMatchObject({ code });
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+  });
 
-        if (table === 'user_subscriptions') {
-          return createListQueryBuilder(
-            Promise.resolve({
-              data: [{
-                id: 'sub-row-1',
-                membership_plan_id: '123e4567-e89b-42d3-a456-426614174222',
-                stripe_subscription_id: 'sub_test_active',
-                status: 'active',
-                billing_cycle: 'yearly',
-                cancel_at_period_end: 'false',
-              }],
-              error: null,
-            }),
-          );
-        }
+  it.each(['amount', 'currency', 'catalog', 'term', 'expired'])('requires reconfirmation on %s drift before any durable write', async field => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    if (field === 'amount') h.invoicePreview.mockResolvedValue(h.fullPricePreview('monthly', { amount_due: 2991 }));
+    if (field === 'currency') h.invoicePreview.mockResolvedValue(h.fullPricePreview('monthly', { currency: 'eur' }));
+    if (field === 'catalog') h.plan.monthly_price++;
+    if (field === 'term') h.remote.items.data[0].current_period_end++;
+    if (field === 'expired') expected.quotedAt -= 301;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
 
-        if (table === 'payment_orders') {
-          return createMaybeSingleQueryBuilder(Promise.resolve({ data: null, error: null }));
-        }
+  it.each(['inactive', 'free', 'missing-profile', 'missing-plan', 'local-payment-attention'])('rejects %s before provider effects', async problem => {
+    const h = createSubscriptionChangeGuardHarness(problem === 'missing-profile' ? { profileResult: async () => ({ data: null, error: null }) }
+      : problem === 'missing-plan' ? { planResult: async () => ({ data: null, error: null }) } : {});
+    if (problem === 'inactive') h.plan.is_active = 'false';
+    if (problem === 'free') h.plan.level = 'free';
+    if (problem === 'local-payment-attention') h.local.status = 'past_due';
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly' })).rejects.toBeDefined();
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled(); expect(h.orderInserts).toHaveLength(0);
+  });
 
-        throw new Error(`Unexpected user table ${table}`);
-      },
-    };
+  it('rejects client-controlled subscription/customer identifiers', async () => {
+    const h = createSubscriptionChangeGuardHarness();
+    await expect(h.caller.previewSubscriptionPlanChange({ planId: h.targetPlanId, billingCycle: 'monthly', customerId: 'cus_other' } as any)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.subscriptionRetrieve).not.toHaveBeenCalled();
+  });
 
-    const caller = createProtectedCaller({ supabase: userSupabase });
+  it.each(['card_declined', 'authentication_required'])('releases only explicitly rejected %s payment without rights or credit writes', async code => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValue({ type: 'StripeCardError', statusCode: 402, code });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.rows[0]).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(syncSubscriptionState).not.toHaveBeenCalled(); expect(fulfillMembershipInvoice).not.toHaveBeenCalled();
+  });
 
-    await expect(
-      caller.changeSubscriptionPlan({
-        planId: '123e4567-e89b-42d3-a456-426614174111',
-        billingCycle: 'monthly',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'BAD_REQUEST',
-      message: '当前会员有效，暂不支持降级。',
+  it('keeps transport-before-apply pending and recovers with the same order and idempotency key', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce({ type: 'StripeConnectionError' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.orderUpdates.filter(u => u.status === 'failed')).toHaveLength(0);
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
+    expect(h.subscriptionUpdate.mock.calls[0]).toEqual(h.subscriptionUpdate.mock.calls[1]);
+  });
+
+  it('recovers applied transport timeout without a second update or direct entitlement sync', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async (_id, params) => {
+      h.remote.items.data[0].price.id = 'price_test_gold_monthly'; h.remote.metadata = params.metadata; h.remote.latest_invoice = 'in_upgrade';
+      throw { type: 'StripeConnectionError' };
     });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).resolves.toMatchObject({ status: 'pending_fulfillment' });
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1); expect(h.orderInserts).toHaveLength(1); expect(syncSubscriptionState).not.toHaveBeenCalled();
+  });
 
-    expect(subscriptionUpdate).not.toHaveBeenCalled();
+  it('retains unprovable outcomes and blocks a different target and aged retry', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async () => { h.subscriptionRetrieve.mockRejectedValue(new Error('read timeout')); throw new Error('timeout'); });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    expect(h.rows[0].status).toBe('pending');
+    await expect(h.caller.changeSubscriptionPlan({ ...input, billingCycle: 'yearly', expected })).rejects.toMatchObject({ message: expect.stringContaining('正在处理中') });
+    h.subscriptionRetrieve.mockResolvedValue(h.remote); h.rows[0].metadata.upgradeAttempt.createdAt -= 24 * 3600000;
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1); expect(h.orderInserts).toHaveLength(1);
+  });
+
+  it.each(['preview', 'confirm'])('retires expired proven-old attempts via %s and requires a separately confirmed fresh attempt', async endpoint => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce(new Error('transport-before-apply'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    vi.advanceTimersByTime(301000);
+    await expect(endpoint === 'preview' ? h.caller.previewSubscriptionPlanChange(input)
+      : h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('报价已过期') });
+    expect(h.rows[0]).toMatchObject({ status: 'failed', stripe_checkout_session_id: null });
+    expect(h.invoiceList).toHaveBeenCalled(); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+    const fresh = await getQuote(h, input);
+    expect(fresh.quotedAt).toBe(expected.quotedAt + 301); expect(fresh.amountDue).toBe(2990);
+    expect(h.orderInserts).toHaveLength(1); // Preview alone does not replace the attempt.
+    await h.caller.changeSubscriptionPlan({ ...input, expected: fresh });
+    expect(h.orderInserts).toHaveLength(2); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(2);
+    expect(h.subscriptionUpdate.mock.calls[1][1]).not.toHaveProperty('proration_date');
+    expect(h.subscriptionUpdate.mock.calls[1][2].idempotencyKey).not.toBe(h.subscriptionUpdate.mock.calls[0][2].idempotencyKey);
+    expect(h.rows.filter(r => r.status === 'pending')).toHaveLength(1);
+  });
+
+  it('allows recovery at the TTL boundary with identical parameters and returns the fresh stored preview', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    vi.advanceTimersByTime(300000);
+    expect(await getQuote(h, input)).toEqual(expected);
+    await h.caller.changeSubscriptionPlan({ ...input, expected });
+    expect(h.subscriptionUpdate.mock.calls[1]).toEqual(h.subscriptionUpdate.mock.calls[0]);
+    expect(h.orderInserts).toHaveLength(1);
+  });
+
+  it.each(['preview', 'confirm'])('returns pending fulfillment for an applied expired attempt via %s without showing a quote', async endpoint => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.subscriptionUpdate.mockImplementationOnce(async (_id, params) => {
+      h.remote.items.data[0].price.id = 'price_test_gold_monthly'; h.remote.metadata = params.metadata;
+      h.remote.latest_invoice = 'in_upgrade'; throw new Error('transport-after-apply');
+    });
+    await h.caller.changeSubscriptionPlan({ ...input, expected }); vi.advanceTimersByTime(86400000);
+    const result = await (endpoint === 'preview' ? h.caller.previewSubscriptionPlanChange(input)
+      : h.caller.changeSubscriptionPlan({ ...input, expected }));
+    expect(result).toEqual({ action: 'changeSubscriptionPlan', status: 'pending_fulfillment' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+    expect(h.orderInserts).toHaveLength(1); expect(syncSubscriptionState).not.toHaveBeenCalled();
+  });
+
+  it.each(['list-error', 'partial-history', 'target-invoice', 'latest-target', 'attempt-metadata', 'partial-lines', 'read-error'])('retains an expired lock when old-price evidence is ambiguous: %s', async evidence => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined(); vi.advanceTimersByTime(3600000);
+    const invoice: any = { id: 'in_target', customer: h.remote.customer, parent: { subscription_details: { subscription: h.remote.id } },
+      lines: { has_more: false, data: [{ pricing: { price_details: { price: 'price_test_gold_monthly' } } }] } };
+    if (evidence === 'list-error') h.invoiceList.mockRejectedValue(new Error('timeout'));
+    if (evidence === 'partial-history') h.invoiceList.mockResolvedValue({ data: [], has_more: true });
+    if (evidence === 'target-invoice') h.invoiceList.mockResolvedValue({ data: [invoice], has_more: false });
+    if (evidence === 'latest-target') { h.remote.latest_invoice = invoice.id; h.invoiceRetrieve.mockResolvedValue(invoice); }
+    if (evidence === 'attempt-metadata') { h.remote.metadata.upgradeAttemptId = h.rows[0].id; }
+    if (evidence === 'partial-lines') { invoice.lines = { has_more: true, data: [] }; h.invoiceList.mockResolvedValue({ data: [invoice], has_more: false }); }
+    if (evidence === 'read-error') h.subscriptionRetrieve.mockRejectedValue(new Error('timeout'));
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.rows[0].stripe_checkout_session_id).not.toBeNull();
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes concurrent stale retirement and replacement, including an in-flight recovery crossing TTL', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined();
+    vi.advanceTimersByTime(299000);
+    let enter!: () => void; let finish!: () => void;
+    const entered = new Promise<void>(r => { enter = r; }); const blocked = new Promise<void>(r => { finish = r; });
+    h.subscriptionUpdate.mockImplementationOnce(async () => { enter(); await blocked; throw new Error('timeout'); });
+    const recovery = h.caller.changeSubscriptionPlan({ ...input, expected }).catch(e => e);
+    await entered; vi.advanceTimersByTime(2000);
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); finish(); await recovery;
+    const expirations = await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected }), h.caller.previewSubscriptionPlanChange(input)]);
+    expect(expirations.every(r => r.status === 'rejected')).toBe(true);
+    expect(h.rows[0].status).toBe('failed');
+    const fresh = await getQuote(h, input);
+    await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected: fresh }), h.caller.changeSubscriptionPlan({ ...input, expected: fresh })]);
+    expect(h.orderInserts).toHaveLength(2); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(3);
+    expect(h.rows.filter(r => r.status === 'pending')).toHaveLength(1);
+  });
+
+  it('does not overwrite a webhook transition that wins during stale retirement', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toBeDefined(); vi.advanceTimersByTime(301000);
+    h.invoiceList.mockImplementationOnce(async () => {
+      h.rows[0].status = 'completed'; h.rows[0].fulfilled_at = '2026-09-05T00:05:01Z';
+      return { data: [], has_more: false };
+    });
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('completed'); expect(h.orderInserts).toHaveLength(1);
+    expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('never ages out a crashed execution holder or sends a quote that expires during re-preview', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-05T00:00:00Z'));
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    h.invoicePreview.mockImplementationOnce(async () => { vi.advanceTimersByTime(301000); return h.fullPricePreview('monthly'); });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(h.orderInserts).toHaveLength(0); expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+    const fresh = await getQuote(h, input); h.subscriptionUpdate.mockRejectedValueOnce(new Error('timeout'));
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected: fresh })).rejects.toBeDefined();
+    h.rows[0].metadata.upgradeExecution = 'crashed-process'; vi.advanceTimersByTime(86400000);
+    await expect(h.caller.previewSubscriptionPlanChange(input)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    expect(h.rows[0].status).toBe('pending'); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves durable lock conflicts and insert failure before update', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input); h.setInsertError({ code: '23505' });
+    await expect(h.caller.changeSubscriptionPlan({ ...input, expected })).rejects.toMatchObject({ message: expect.stringContaining('正在处理中') });
+    expect(h.subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent clicks with one durable row and identical Stripe attempt parameters', async () => {
+    const h = createSubscriptionChangeGuardHarness(); const input = { planId: h.targetPlanId, billingCycle: 'monthly' as const };
+    const expected = await getQuote(h, input);
+    await Promise.allSettled([h.caller.changeSubscriptionPlan({ ...input, expected }), h.caller.changeSubscriptionPlan({ ...input, expected })]);
+    expect(h.orderInserts).toHaveLength(1); expect(h.subscriptionUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('returns a membership eligibility matrix that matches checkout guard actions', async () => {
@@ -3564,6 +3008,9 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
   const planId = '123e4567-e89b-42d3-a456-426614174111';
 
   beforeEach(() => {
+    stripeState.assertCheckoutRateLimit.mockReset();
+    stripeState.assertSubscriptionChangeRateLimit.mockReset();
+    stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
     stripeState.assertStripeCheckoutConfigured.mockReset();
     stripeState.getOrCreateStripeCustomerId.mockReset().mockResolvedValue('cus_test_guard');
     stripeState.getStripeAppUrl.mockReset().mockReturnValue('http://localhost:3000');
@@ -3582,6 +3029,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     profileResults?: Promise<unknown>[];
     itemResult?: Promise<unknown>;
     factsResult?: Promise<unknown>;
+    alipaySubscriptionEnabled?: boolean;
   }) {
     const sessionCreate = vi.fn();
     const orderInserts: unknown[] = [];
@@ -3632,6 +3080,8 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
           return createSingleQueryBuilder(result);
         }
 
+        if (table === 'system_settings') return createSingleQueryBuilder(Promise.resolve({ data: { key: 'alipay_subscription_enabled', value: options.alipaySubscriptionEnabled ?? false }, error: null }));
+
         if (table === 'credit_packages' || table === 'membership_plans') {
           return createSingleQueryBuilder(itemResult);
         }
@@ -3673,6 +3123,36 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
       orderInserts,
     };
   }
+
+  it.each(['credit_package', 'membership_plan'] as const)('rejects limited %s requests before customer/session/order side effects', async (kind) => {
+    const harness = createGuardHarness({ kind });
+    stripeState.assertCheckoutRateLimit.mockRejectedValue(new TRPCError({ code: 'TOO_MANY_REQUESTS' }));
+    const input = kind === 'credit_package' ? { kind, packageId } : { kind, planId, billingCycle: 'monthly' as const };
+    await expect(harness.caller.createCheckoutSession(input)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    expectNoCheckoutWrites(harness);
+  });
+
+  it.each(['credit_package', 'membership_plan'] as const)('creates %s with the correct payment methods when within limit', async (kind) => {
+    const harness = createGuardHarness({ kind });
+    harness.sessionCreate.mockResolvedValue({ id: 'cs_test_pay1', url: 'https://checkout.stripe.com/test', payment_status: 'unpaid' });
+    const input = kind === 'credit_package' ? { kind, packageId } : { kind, planId, billingCycle: 'monthly' as const };
+    await expect(harness.caller.createCheckoutSession(input)).resolves.toMatchObject({ sessionId: 'cs_test_pay1' });
+    expect(harness.sessionCreate).toHaveBeenCalledWith(expect.objectContaining({
+      mode: kind === 'credit_package' ? 'payment' : 'subscription',
+      payment_method_types: kind === 'credit_package' ? ['card', 'alipay'] : ['card'],
+    }));
+    expect(stripeState.assertCheckoutRateLimit).toHaveBeenCalledOnce();
+    expect(stripeState.assertCheckoutRateLimit.mock.invocationCallOrder[0])
+      .toBeLessThan(stripeState.getOrCreateStripeCustomerId.mock.invocationCallOrder[0]);
+    expect(harness.orderInserts).toHaveLength(1);
+  });
+
+  it.each([false, true])('keeps membership card-only with alipay_subscription_enabled=%s', async (enabled) => {
+    const harness = createGuardHarness({ kind: 'membership_plan', alipaySubscriptionEnabled: enabled });
+    harness.sessionCreate.mockResolvedValue({ id: 'cs_flag', url: 'https://checkout.stripe.com/test', payment_status: 'unpaid' });
+    await harness.caller.createCheckoutSession({ kind: 'membership_plan', planId, billingCycle: 'yearly' });
+    expect(harness.sessionCreate).toHaveBeenCalledWith(expect.objectContaining({ mode: 'subscription', payment_method_types: ['card'] }));
+  });
 
   function expectNoCheckoutWrites(harness: {
     sessionCreate: ReturnType<typeof vi.fn>;
@@ -3862,5 +3342,77 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
       message: '会员状态暂不可用，请稍后重试',
     });
     expectNoCheckoutWrites(harness);
+  });
+});
+
+describe('PAY-1 Customer Portal', () => {
+  function portalHarness(options: { noSubscription?: boolean; wrongCustomer?: boolean; immediateCancel?: boolean; upgrades?: boolean; scheduled?: boolean; readError?: boolean } = {}) {
+    const create = vi.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session/test' });
+    const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', cancel_at: options.scheduled ? 2000000000 : null, customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1', metadata: { userId: 'user-1' } });
+    const filters: Array<[string, unknown]> = [];
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') return createSingleQueryBuilder(Promise.resolve({ data: { id: 'user-1', role: 'user', status: 'active', nickname: 'User', email: 'user@example.com' }, error: null }));
+        if (table !== 'user_subscriptions') throw new Error(`unexpected table ${table}`);
+        const builder = {
+          select: () => builder, not: () => builder, order: () => builder,
+          eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
+          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', status: 'active', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
+        };
+        return builder;
+      },
+    };
+    stripeState.getStripeClient.mockReturnValue({ subscriptions: { retrieve }, billingPortal: {
+      sessions: { create }, configurations: { list: vi.fn().mockResolvedValue({ data: [{ id: 'bpc_pay1', active: true, features: {
+        subscription_cancel: { enabled: true, mode: options.immediateCancel ? 'immediately' : 'at_period_end' },
+        subscription_update: { enabled: options.upgrades ?? false },
+      } }] }) },
+    } });
+    return { caller: createProtectedCaller({ supabase }), supabase, create, retrieve, filters };
+  }
+  beforeEach(() => {
+    stripeState.getStripePortalReturnUrl.mockReset().mockReturnValue('https://app.example.com/profile?tab=subscription');
+    stripeState.getStripeClient.mockReset();
+  });
+  it('opens Portal home for explicit renewal restoration on scheduled cancellations', async () => {
+    const h = portalHarness({ scheduled: true });
+    await h.caller.createCustomerPortalSession({});
+    expect(h.create.mock.calls[0][0].flow_data).toBeUndefined();
+    expect(h.create.mock.calls[0][0].customer).toBe('cus_pay1');
+  });
+  it.each([false, true])('reports Portal availability independently of catalog state (missing subscription=%s)', async (noSubscription) => {
+    const h = portalHarness({ noSubscription });
+    await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: !noSubscription });
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('server-resolves the authenticated customer and creates only a period-end cancellation flow', async () => {
+    const h = portalHarness();
+    await expect(h.caller.createCustomerPortalSession({})).resolves.toEqual({ portalUrl: 'https://billing.stripe.com/p/session/test' });
+    expect(h.filters).toContainEqual(['user_id', 'user-1']);
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ customer: 'cus_pay1', configuration: 'bpc_pay1', return_url: 'https://app.example.com/profile?tab=subscription', flow_data: expect.objectContaining({ type: 'subscription_cancel', subscription_cancel: { subscription: 'sub_pay1' } }) }));
+  });
+  it.each([{ noSubscription: true }, { wrongCustomer: true }, { immediateCancel: true }, { upgrades: true }, { readError: true }])('denies an unsafe Portal state %j before session creation', async (options) => {
+    const h = portalHarness(options);
+    await expect(h.caller.createCustomerPortalSession({})).rejects.toBeInstanceOf(TRPCError);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('rejects arbitrary client customer IDs', async () => {
+    const h = portalHarness();
+    await expect(h.caller.createCustomerPortalSession({ customerId: 'cus_victim' } as any)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.retrieve).not.toHaveBeenCalled();
+  });
+  it('rejects return URL abuse before Stripe calls', async () => {
+    const h = portalHarness();
+    stripeState.getStripePortalReturnUrl.mockImplementation(() => { throw new TRPCError({ code: 'BAD_REQUEST' }); });
+    await expect(h.caller.createCustomerPortalSession({ returnUrl: 'https://evil.example' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.retrieve).not.toHaveBeenCalled();
+  });
+  it('requires authentication', async () => {
+    const h = portalHarness();
+    const caller = paymentsRouter.createCaller({ user: null, headers: new Headers(), supabase: h.supabase } as any);
+    await expect(caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(h.create).not.toHaveBeenCalled();
   });
 });

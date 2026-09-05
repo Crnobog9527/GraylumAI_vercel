@@ -566,3 +566,22 @@ describe('public catalog availability', () => {
     });
   });
 });
+
+describe('PAY-1 positive-amount catalog readiness', () => {
+  it('keeps zero-price packages visible without checkout readiness', async () => {
+    const caller = createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...validCreditPackage, price: 0 }], error: null }));
+    expect(await caller.getCreditPackages()).toEqual([expect.objectContaining({ checkout_ready: false })]);
+  });
+  it.each(['monthly', 'yearly'] as const)('disables a zero-price %s cycle independently', async (cycle) => {
+    const caller = createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [{ ...validMembershipPlan, [`${cycle}_price`]: 0 }], error: null }));
+    expect(await caller.getMembershipPlans()).toEqual([expect.objectContaining({ checkoutReady: { monthly: cycle !== 'monthly', yearly: cycle !== 'yearly' } })]);
+  });
+  it.each([-1, null, '', undefined])('preserves unavailable semantics for malformed amounts %j', async (amount) => {
+    const packages = createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...validCreditPackage, price: amount }], error: null }));
+    await expect(packages.getCreditPackages()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    for (const cycle of ['monthly', 'yearly']) {
+      const plans = createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [{ ...validMembershipPlan, [`${cycle}_price`]: amount }], error: null }));
+      await expect(plans.getMembershipPlans()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+    }
+  });
+});
