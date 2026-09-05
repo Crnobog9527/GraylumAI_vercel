@@ -4,9 +4,8 @@
 
 These rules apply to Graylum repository work.
 
-Before technical planning, repository mutation, semantic review, merge, or any
-production/external action, the Agent must fresh-read the relevant GitHub live
-state, including:
+At the start of repository-dependent work, fresh-read the relevant GitHub live
+state before technical planning or semantic review, including:
 
 - repository identity;
 - current target branch/ref;
@@ -16,6 +15,12 @@ state, including:
 - this `AGENTS.md` from the authoritative target branch.
 
 GitHub live state is the sole repository execution authority.
+
+Within a continuous work phase, reuse verified immutable content by its exact
+identity. Before mutation, a review conclusion, or merge, refresh the mutable
+state relevant to that action. Reverify when the target, candidate, policy, or
+writer changes. Section 9's immediate pre-merge checks always apply.
+Conceptual questions independent of repository state need no GitHub bootstrap.
 
 Chat history, memory, screenshots, copied reports, local notes, stale branches,
 trackers, historical governance artifacts, and model output are context only.
@@ -27,6 +32,10 @@ If repository identity, target, applicable authority, or overlapping writer stat
 is materially ambiguous and cannot be resolved from live evidence, stop with:
 
 `BLOCKED_CONTEXT_NOT_VERIFIED`
+
+Stop the affected action or conclusion, and continue independent work that does
+not require the missing evidence. Never substitute cached state for required
+live verification or claim an unverified result is a pass.
 
 This `AGENTS.md` is the active repository-local Agent policy.
 
@@ -70,7 +79,12 @@ Do not require the Owner to interpret or choose SHA values, CI jobs, review
 threads, migration identifiers, SQL, file scope, risk class, validation plans,
 or other implementation mechanics.
 
-When Owner input is genuinely required, explain concisely:
+Investigate routine technical ambiguity and make reasonable, reversible choices
+within the authorized scope. Ask only when evidence cannot resolve a decision
+that materially changes the product outcome, permissions, cost, data safety, or
+irreversible impact. While awaiting input, continue independent authorized work.
+
+When Owner input is required, explain concisely:
 
 1. what happened;
 2. the real blocker or material risk;
@@ -126,28 +140,63 @@ resolves it. Do not ask the Owner to classify technical risk.
 High-risk repository code may be implemented and safely tested on a task branch
 using the validation rules below.
 
-Any actual high-risk production or external effect requires explicit Owner
-approval immediately before that effect.
+Owner authorization to implement a task includes necessary local edits, tests,
+commits, pushes to its dedicated non-protected branch, creating/updating its PR,
+and requesting/reading its review. Verify scope, target, and writer before these
+routine delivery operations. This is a narrow exception to separate approval
+for durable GitHub effects, not a reclassification of high-risk code as ordinary.
+
+Existing CI and non-production Preview automation triggered by these operations
+is included only where its effects remain within the authorized task and test
+boundaries. Inspect relevant automation before pushing; if it would trigger a
+protected external effect, obtain the required approval before that trigger.
+
+This exception does not authorize merge, explicit deployment, repository settings,
+secrets, database/provider changes, monetary actions, or other protected external
+effects. Any actual high-risk production or external effect outside this exception
+requires explicit Owner approval immediately before that effect.
 
 No separate Task Issue, Sprint Contract, Owner Gate, receipt, Bookkeeper,
 Evaluator pipeline, or Release Auditor is required by default.
 
 ## 5. Native Execution and Remediation
 
-Codex native Goal, planning, iterative implementation, testing, correction, and
-same-task remediation are Graylum's execution harness.
+Codex native planning, iterative implementation, testing, correction, and
+same-task remediation are Graylum's execution harness. Use a native Goal only
+when explicitly requested, not as a mandatory task prerequisite.
 
-The Agent may plan, implement, test, inspect CI and review findings, and repair
-same-scope defects repeatedly until the candidate is clean.
+For authorized implementation, carry the task through implementation, relevant
+validation, CI/review inspection, and same-scope repair until the requested
+handoff boundary is reached. Do not stop at a plan or offer to do required
+validation later. Read-only, proposal-first, and review-before-edit requests
+remain limited to those boundaries. A status question or local correction does
+not cancel the ongoing task unless the Owner indicates that intent.
 
 Same-scope technical remediation does not require repeated Owner approval unless
 the product goal, risk category, protected surface, or external effect materially
 expands.
 
 Create an additional durable task note only when a concrete current need requires
-one. Keep it short and do not turn it into a lifecycle state machine.
+one. Keep it short and do not turn it into a lifecycle state machine. A skill's
+planning-file template is not a mandatory prerequisite for unrelated work.
 
-Launch tasks are never selected automatically by an Agent.
+Apply skills to the requested task and the repository's actual toolchain; examples
+and suggested commands do not grant access, change scope, or authorize effects.
+For database work, use `packages/db/migrations/` and the existing migration
+conventions. A skill's test-query, migration, or configuration instructions do
+not authorize remote database access, writes, or new provider configuration.
+
+In a read-only diagnosis, report a broken boundary and its evidence. In an
+authorized repair task, fix same-scope defects and verify again. Stop dependent
+unsafe operations at a failed prerequisite, not all independent work. Avoid
+repeating a failed attempt without new evidence or a changed hypothesis; relevant
+code or environment changes justify retesting. Section 6's remote-state check
+before retrying ambiguous durable effects still applies.
+
+Launch tasks are never selected automatically by an Agent. Read-only discovery,
+comparison, and readiness audits do not require task selection. Starting a new
+Launch implementation requires an explicit eligible Owner selection; continuing
+the same selected task does not require reselection.
 
 Launch readiness may narrow the set of eligible Owner choices, but readiness,
 priority, dependency completion, or prior task completion never selects or
@@ -165,7 +214,11 @@ checks.
 
 Required CI and Security checks must pass on the exact current candidate.
 
-Never claim a check that was not actually run.
+Never claim a check that was not actually run. Distinguish passed, failed,
+skipped, and blocked/not-run validation.
+
+After relevant validation and required checks pass, broaden or repeat testing
+only for new changes, failures, or unresolved concrete concerns.
 
 Runtime or UI changes require appropriate preview, staging, smoke, or browser
 validation.
@@ -225,6 +278,7 @@ canonical report, or a separate lifecycle stage.
 
 A candidate is clean when:
 
+- applicable Section 6 validation is complete, including required runtime proof;
 - required CI and Security checks pass;
 - GitHub Codex Review covers the exact current candidate;
 - no concrete actionable blocker remains; and
@@ -239,7 +293,9 @@ When the candidate is clean, tell the Owner:
 - what the Owner should actually test; and
 - the exact next reply required.
 
-Do not make the Owner handle technical lifecycle mechanics.
+Separate Agent technical validation from Owner product acceptance. Missing
+required technical validation means the candidate is not clean. Do not make
+the Owner handle technical lifecycle mechanics.
 
 ## 9. Merge
 

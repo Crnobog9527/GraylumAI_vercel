@@ -1,15 +1,16 @@
 ---
 name: license-header-adder
-description: Adds the standard corporate license header to new source files.
+description: Add the corporate license header to new first-party source files that support comments, preserving file-format requirements and existing licenses.
 ---
 
 # License Header Adder
 
-This skill ensures that all new source files have the correct copyright header.
+Read `resources/HEADER.txt` relative to this skill directory and preserve its
+license text. Apply it once to new first-party source files that support comments.
+Use the appropriate comment syntax (for example, `/* */` for TypeScript and `#`
+for Python or shell). Preserve required shebang and encoding declarations before
+the header.
 
-## Instructions
-1. **Read the Template**: Read the content of `resources/HEADER.txt`.
-2. **Apply to File**: When creating a new file, prepend this exact content.
-3. **Adapt Syntax**: 
-   - For C-style languages (Java, TS), keep the `/* */` block.
-   - For Python/Shell, convert to `#` comments.
+Do not insert comments into formats that prohibit them, such as JSON. Exclude
+binary, generated, and third-party files. Preserve existing license notices and
+do not bulk-edit existing files unless that work is explicitly requested.
