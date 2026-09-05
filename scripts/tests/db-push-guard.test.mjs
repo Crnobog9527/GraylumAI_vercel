@@ -8,8 +8,8 @@ import { parseDatabaseTarget } from '../db-push-guard.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const guard = path.join(repositoryRoot, 'scripts/db-push-guard.mjs');
-const validUrl = 'postgresql://postgres:secret@db.gvcpmcunmfrbxuwimxfa.supabase.co:5432/postgres';
-const validPoolerUrl = 'postgresql://postgres.gvcpmcunmfrbxuwimxfa:secret@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
+const validUrl = 'postgresql://postgres@db.gvcpmcunmfrbxuwimxfa.supabase.co:5432/postgres';
+const validPoolerUrl = 'postgresql://postgres.gvcpmcunmfrbxuwimxfa@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
 
 test('derives the same project ref from supported direct and pooler URLs', () => {
   assert.equal(parseDatabaseTarget(validUrl), 'gvcpmcunmfrbxuwimxfa');
@@ -91,9 +91,9 @@ test('fails closed for malformed, unsupported, and ambiguous targets before down
   try {
     for (const databaseUrl of [
       'not a url',
-      'mysql://user:secret@db.gvcpmcunmfrbxuwimxfa.supabase.co/database',
-      'postgresql://postgres:secret@db.example.test/postgres',
-      'postgresql://postgres:secret@aws-0-us-east-1.pooler.supabase.com/postgres',
+      'mysql://user@db.gvcpmcunmfrbxuwimxfa.supabase.co/database',
+      'postgresql://postgres@db.example.test/postgres',
+      'postgresql://postgres@aws-0-us-east-1.pooler.supabase.com/postgres',
     ]) {
       assert.throws(
         () => runGuard({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', DB_PUSH_TEST_RUNNER: fixture.runner, DB_PUSH_CONFIRM: 'gvcpmcunmfrbxuwimxfa' }),
