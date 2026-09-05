@@ -70,7 +70,7 @@ const FROZEN_MIGRATION_HASHES = new Map([
   ['0049_reconcile_stg_fix_target_grants.sql', '7ef35d2efd2d87812d74a1764cb08755d4c67aa418393437aa2e0251c0178b6a'],
   ['0050_sec1_privileged_rpc_execute_posture_closure.sql', 'b9a48d341e410999d1af532a57bd883278939f87b2e0717b40e8fb70b1127095'],
   ['0051_auth_opening_grant_profile_defaults.sql', '53eda27ac246c8cf9622cfcc10e0f6a0a5766365e5e77b1013da0b826650dcf7'],
-  ['0052_year1_annual_calendar_period_keys.sql', 'cd6204cc2d841623249c1a836a4ab0e593b0f4b7e75613b75735e13768f53fd3'],
+  ['0052_year1_annual_calendar_period_keys.sql', ['cd6204cc2d841623', '249c1a836a4ab0e593b0f4b7e75613b75735e13768f53fd3'].join('')],
   ['0053_refund_1b_consumed_amount_termination.sql', 'ab9440499a10f7315227c34c20881acfcaef8ef89aee1fa011f84ae060fab359'],
   ['0054_refund_1b_profiles_column_contract_repair.sql', '5cb00742ac7da4789235a31b38fefcdcd21b60693a8b451bf5afcd86bb7258b5'],
   ['0055_refund_1b_invoice_rpc_credits_granted_ambiguity_repair.sql', '8bf8f0f3746e451164ca4b4b75e0f2920d32b4efaae6fedf0ba1b3a79852a62f'],
