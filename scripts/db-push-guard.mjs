@@ -43,6 +43,17 @@ function fail(message) {
 }
 
 export function runDbPush({ env = process.env, spawn = spawnSync } = {}) {
+  // Validate the same immutable snapshot that is handed to the child.
+  const childEnv = { ...env };
+  // dotenv/config accepts env and argv options; our argv is fixed below.
+  // Reject the whole dotenv option surface (including vault/debug settings),
+  // rather than treating the string "false" as a safe override value.
+  // Node preloads could otherwise restore these settings before config loads.
+  if (Object.keys(childEnv).some((key) => /^(DOTENV_|NODE_OPTIONS$|NODE_PATH$)/i.test(key))) {
+    fail('dotenv configuration and Node preload settings are not supported for guarded push.');
+    return false;
+  }
+  env = childEnv;
   let actualRef;
   try {
     actualRef = parseDatabaseTarget(env.DATABASE_URL);
@@ -68,7 +79,7 @@ export function runDbPush({ env = process.env, spawn = spawnSync } = {}) {
     : ['exec', 'drizzle-kit', 'push', '--config=packages/db/drizzle.config.ts'];
   const result = spawn(command, args, { stdio: 'inherit', env });
   if (result.error) {
-    fail(`could not start downstream drizzle push: ${result.error.message}`);
+    fail('could not start downstream drizzle push.');
     return false;
   }
   if (result.status !== 0) {
