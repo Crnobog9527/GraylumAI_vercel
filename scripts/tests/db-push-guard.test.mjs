@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile, chmod, access, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -63,8 +64,15 @@ test('blocks a valid target when confirmation is missing before downstream invoc
 
 test('real dotenv override can replace A with B, but the guard blocks it before downstream execution', async () => {
   const fixture = await fixtureRunner();
-  const targetB = 'postgresql://postgres:fixture-password-b@db.zyxwvutsrqponmlkjihg.supabase.co:5432/postgres';
-  const targetA = validUrl.replace('postgres@', 'postgres:fixture-password-a@');
+  const passwordA = randomUUID();
+  const passwordB = randomUUID();
+  const urlA = new URL(validUrl);
+  const urlB = new URL(validUrl);
+  urlA.password = passwordA;
+  urlB.password = passwordB;
+  urlB.hostname = 'db.zyxwvutsrqponmlkjihg.supabase.co';
+  const targetA = urlA.href;
+  const targetB = urlB.href;
   const dotenvFile = path.join(fixture.directory, '.env');
   const observation = path.join(fixture.directory, 'observed-url');
   try {
@@ -89,7 +97,7 @@ test('real dotenv override can replace A with B, but the guard blocks it before 
       assert.throws(() => runGuard(attack), (error) => {
         assert.notEqual(error.status, 0);
         const output = `${error.stdout}${error.stderr}`;
-        for (const sensitive of [targetA, targetB, 'fixture-password-a', 'fixture-password-b', dotenvFile]) {
+        for (const sensitive of [targetA, targetB, passwordA, passwordB, dotenvFile]) {
           assert.equal(output.includes(sensitive), false);
         }
         return true;
