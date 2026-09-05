@@ -77,6 +77,9 @@ jobs:
       - name: Launch regression — checkout readiness, cancellation, and PAY-1
         run: pnpm test:ci:checkout-cancellation
 
+      - name: Launch regression — PAY-1 frontend checkout readiness and cancellation
+        run: pnpm test:ci:pay-1-frontend
+
       - name: Launch regression — Skill runtime active and unbound fail-closed
         run: pnpm test:ci:skill-runtime
 
