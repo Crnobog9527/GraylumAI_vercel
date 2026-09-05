@@ -102,6 +102,9 @@ export async function checkMigrationLedger(directory) {
     const files = migrationsByNumber.get(match.groups.number) ?? [];
     files.push(entry.name);
     migrationsByNumber.set(match.groups.number, files);
+    if (!FROZEN_MIGRATION_HASHES.has(entry.name)) {
+      errors.push(`Missing frozen migration hash: ${entry.name}`);
+    }
   }
 
   for (const [number, files] of migrationsByNumber) {

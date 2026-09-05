@@ -19,6 +19,12 @@ export function parseDatabaseTarget(databaseUrl) {
     throw new Error('DATABASE_URL must be a supported PostgreSQL URL.');
   }
 
+  for (const parameter of ['host', 'port', 'user', 'password', 'database']) {
+    if (parsed.searchParams.has(parameter)) {
+      throw new Error('DATABASE_URL must not override its target through query parameters.');
+    }
+  }
+
   const hostname = parsed.hostname.toLowerCase();
   const directMatch = DIRECT_DATABASE_HOST.exec(hostname);
   if (directMatch) return directMatch[1];

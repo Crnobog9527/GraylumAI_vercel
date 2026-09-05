@@ -17,6 +17,10 @@ test('derives the same project ref from supported direct and pooler URLs', () =>
   assert.equal(parseDatabaseTarget(validPoolerUrl), fixtureProjectRef);
 });
 
+test('rejects target-overriding connection query parameters', () => {
+  assert.throws(() => parseDatabaseTarget(`${validUrl}?host=db.zyxwvutsrqponmlkjihg.supabase.co`), /must not override/);
+});
+
 async function fixtureRunner() {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'graylum-db-push-'));
   const marker = path.join(directory, 'downstream-invoked');

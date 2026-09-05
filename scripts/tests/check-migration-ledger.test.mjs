@@ -94,3 +94,13 @@ test('rejects malformed migration-like SQL filenames', async () => {
     await rm(fixture, { recursive: true, force: true });
   }
 });
+
+test('rejects a migration missing from the frozen manifest', async () => {
+  const fixture = await copiedMigrations();
+  try {
+    await writeFile(path.join(fixture, '0064_future.sql'), '-- test fixture\n');
+    assert.throws(() => runChecker(fixture), (error) => /Missing frozen migration hash: 0064_future\.sql/.test(error.stderr));
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
