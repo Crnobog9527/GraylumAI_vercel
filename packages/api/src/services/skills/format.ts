@@ -45,7 +45,7 @@ export function parseSkillEntry(source: string, directoryName: string): {
     const { name, description } = fields;
     if (typeof name !== 'string' || !name) issues.push('NAME_REQUIRED');
     else {
-      if ([...name].length > 64 || !/^[\p{Ll}\p{Lo}\p{Nd}]+(?:-[\p{Ll}\p{Lo}\p{Nd}]+)*$/u.test(name)) issues.push('INVALID_NAME');
+      if ([...name].length > 64 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) issues.push('INVALID_NAME');
       if (name !== directoryName) issues.push('DIRECTORY_NAME_MISMATCH');
     }
     if (typeof description !== 'string' || !description.trim() || [...description].length > 1024) issues.push('INVALID_DESCRIPTION');

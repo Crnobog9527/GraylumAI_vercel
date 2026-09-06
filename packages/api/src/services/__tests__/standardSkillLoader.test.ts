@@ -197,6 +197,11 @@ describe('standard validation vs host compatibility diagnostics', () => {
     expect(report.standard.valid).toBe(false); expect(report.standard.issues).toContain(code);
     expect(JSON.stringify(report)).not.toContain('PRIVATE_BODY_SENTINEL'); expect(original).toBe(entry(yaml));
   });
+  it.each(['测试', 'café', '１２', 'café-note'])('rejects a matching non-ASCII directory/name: %s', name => {
+    const report = inspectSkillFormat(entry(`name: ${name}\ndescription: Example`), name);
+    expect(report.standard.valid).toBe(false);
+    expect(report.standard.issues).toContain('INVALID_NAME');
+  });
   it('accepts block scalars, quoted colons, and unknown optional metadata without rewriting', () => {
     expect(inspectSkillFormat(entry('name: demo\ndescription: |-\n  Think: one thing\n  Then another\nx-future: {optional: true}'), 'demo').standard.valid).toBe(true);
   });
