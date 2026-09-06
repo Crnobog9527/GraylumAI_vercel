@@ -3,7 +3,7 @@
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
 CREATE ROLE service_role NOLOGIN BYPASSRLS;
-CREATE ROLE authenticator LOGIN PASSWORD 'disposable-only';
+CREATE ROLE authenticator LOGIN;
 GRANT anon,authenticated,service_role TO authenticator;
 GRANT USAGE ON SCHEMA public TO anon,authenticated,service_role;
 CREATE SCHEMA auth;

@@ -239,7 +239,14 @@ test('rejects nested migration entries instead of ignoring them', async () => {
 
 test('allows a future migration only at the next sequential number', async () => {
   await withFixture(async (fixture) => {
-    await writeFile(path.join(fixture.migrations, '0064_future.sql'), '-- future migration fixture\n');
+    const migrationNumbers = (await readdir(fixture.migrations))
+      .filter((name) => /^\d{4}_.*\.sql$/.test(name))
+      .map((name) => Number(name.slice(0, 4)));
+    const nextNumber = String(Math.max(...migrationNumbers) + 1).padStart(4, '0');
+    await writeFile(
+      path.join(fixture.migrations, `${nextNumber}_future.sql`),
+      '-- future migration fixture\n',
+    );
     assert.match(runChecker(fixture), /Migration ledger check passed/);
   });
 });

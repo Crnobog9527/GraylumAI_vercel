@@ -39,6 +39,8 @@ DB runner 创建独立 PostgreSQL 17、PostgREST 14.13 和 loopback HTTP 网关�
 
 协议测试用官方 SDK 本地服务器，不 Mock MCP client/transport。覆盖 JSON、SSE、关闭、结构化错误、超时/断线、schema/价格/预算拒绝、execute_as 拒绝、重复操作与保存失败。SQL 测试独立证明跨实例预算、单个在途 dispatch、prepared 接管和实际费用异常停用。协议测试中的内存 store 仅用于协议错误注入，不作为数据库原子性证据。
 
+CI 同范围修复：迁移 ledger 的正向测试从 fixture 现有迁移推导下一编号，避免新迁移使旧编号样本失效，未改检查器或工作流。Secret Scan 首次仅命中本地一次性 Docker 的固定假密码 URL；现已移除密码。`.gitleaksignore` 只增加该历史提交/路径/规则/行号的精确 fingerprint，未豁免文件或更改扫描规则；完整 PR 提交范围本地复扫通过。
+
 最终次数、当前 candidate CI / mandatory GitHub Codex Review 和 changed-file manifest 以 PR live 证据为准。没有技术运行证明或审查缺口时不得称 clean。
 
 ## 后续远端验证（NOT_RUN；本批不执行）

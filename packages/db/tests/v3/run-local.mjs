@@ -22,7 +22,7 @@ try {
     apply('packages/db/migrations/0065_v3_research_operations.sql');
   }
   console.log('SQL migrations: applied including repeat application');
-  docker('run','-d','--name',rest,'--network',tag,'-p','127.0.0.1::3000','-e',`PGRST_DB_URI=postgres://authenticator:disposable-only@${db}:5432/v3_disposable`,'-e','PGRST_DB_SCHEMAS=public','-e','PGRST_DB_ANON_ROLE=anon','-e',`PGRST_JWT_SECRET=${secret}`,'public.ecr.aws/supabase/postgrest:v14.13');
+  docker('run','-d','--name',rest,'--network',tag,'-p','127.0.0.1::3000','-e',`PGRST_DB_URI=postgres://authenticator@${db}:5432/v3_disposable`,'-e','PGRST_DB_SCHEMAS=public','-e','PGRST_DB_ANON_ROLE=anon','-e',`PGRST_JWT_SECRET=${secret}`,'public.ecr.aws/supabase/postgrest:v14.13');
   const port=(name,internal)=>docker('port',name,internal).split(':').at(-1);
   const restUrl=`http://127.0.0.1:${port(rest,'3000')}`;
   for(let i=0;i<50;i++){try {if((await fetch(restUrl)).ok)break;}catch{}await new Promise(r=>setTimeout(r,200));}
