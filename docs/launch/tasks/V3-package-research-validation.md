@@ -18,7 +18,7 @@
 
 来源：[固定官方 Skill](https://github.com/chainbase-labs/Agentkey/blob/8e93c67a3362a8ec088896a71e3ef228af868932/skills/agentkey/SKILL.md)、[废弃聚合分发说明](https://github.com/chainbase-labs/Agentkey/pull/84)、[价格说明](https://github.com/chainbase-labs/Agentkey/blob/8e93c67a3362a8ec088896a71e3ef228af868932/skills/agentkey/references/cost-aware.md)。describe 的 `cost.credits_per_call` 才是可能的数值价格；只有 billing_note 或路由相关信息不能解释成零。AgentKey credits 与 Graylum 积分没有换算关系。
 
-公开资料尚未完整定义 discovery/schema/result 的业务 envelope。`ProviderContract` 是显式审核的解码接入点；生产工厂没有猜测的默认 decoder。测试 decoder 明确使用虚构 envelope 与 `Fixture/Search`，不能声称当前真实服务支持这些字段/能力。真实 envelope、平台质量、价格和许可仍需获准后的验证及对应 decoder 复核。
+`ProviderContract` 是显式审核的解码接入点；生产工厂没有猜测的默认 decoder。原始测试 decoder 使用虚构 envelope 与 `Fixture/Search`，不能声称真实服务支持这些字段/能力。后续已观察 Sorsa 契约的独立接线见文末；平台质量、许可与新适配器远端运行仍待单独验证。
 
 直接锁定：`@modelcontextprotocol/client@2.0.0`、测试用 `@modelcontextprotocol/server@2.0.0` / `@modelcontextprotocol/node@2.0.0`、`ajv@8.18.0`、`@types/pg@8.15.6`。SDK v2 stable/Node >=20 经 [官方仓库](https://github.com/modelcontextprotocol/typescript-sdk/blob/5119ee7fd7790e335a3fb60ef36f85334e2a6326/README.md) 与 npm 核实。实际发布包 LICENSE 说明 Apache-2.0 迁移并保留部分历史 MIT 代码；不能只按 package metadata 写成全部 MIT。Ajv/@types/pg 为 MIT。未升级既有依赖版本；保留 pnpm integrity 锁。未复制供应商商业方法。
 
@@ -58,3 +58,17 @@ CI 同范围修复：迁移 ledger 的正向测试从 fixture 现有迁移推导
 新增 SDK→PostgREST→SQL 联合验证费用预留、批准上限、实际费用、succeeded 对象保存与重复恢复；报价 1 / 实际 0.000123 保留对象且不停止计划，恢复不再 execute。超预算/超单次上限/超精度报价在执行前拒绝，实际费用超报价或未知结果仍按原边界停计划。不修改任何迁移、权限政策或依赖。
 
 可读的脱敏原始 SQL/PostgREST、MCP、Web 输出及命令/候选身份/退出状态附在 PR 评论；CI 日志证明当前远端检查。输出只包含测试名、计数、本地连接 ID 和合成费用，不包含正文、manifest、JWT 或凭证。SQL 集成使用 verbose reporter，明确区分原子数据库证明、模拟 getUser、真实本地 SDK 与内存故障注入。
+
+## 已观察 Sorsa 契约：后续适配与本地隔离集成
+
+本次接线基于 Owner 已提供的 AgentKey 0.0.12 / MCP 2025-11-25 运行证据，仅支持 `Sorsa/get_info` 与 `Sorsa/post_user_tweets`。调用方须显式选择 `sorsaContract` 与所需 `sorsaCapabilities`；没有默认启用平台，也没有接线上聊天。证据 ZIP、真实账号/推文全文、账户日志和本机路径不进入仓库；提交的 `sorsaResponses.ts` 只保留已观察形态，身份、文本、日期、计数、URL、cursor 均替换为虚构值。Fixture/Search 仍只是独立故障测试。
+
+`ProviderContext` 将结果解析绑定 canonical 工具与本次请求身份；宿主额外要求 username、数字字符串 user_id 或受限公开 profile URL 恰好一个。该输入约束不会添加到供应商原始 schema，因此不会伪造 schema hash。发现仍与审核白名单求交，并排除显式 disabled/unavailable 项。描述仅接受已观察的 Sorsa 字段、健康状态、数值单价及同名/空 params/无额外字段的 execute_as，再窄归一化；原 adapter 仍校验 schema hash、价格和预算。
+
+结果显式区分 profile/tweet，核对账号身份、稳定字符串 ID、公开状态及关键字段。只投影必要字段；保留 null、缺失列表、空 entities、原帖/嵌套转发与发布时间。无供应商原始来源 URL 时不伪造该字段；observedAt=null，created_at 保留为发布时间，fetchedAt 是宿主接收时间。有 next_cursor 就不标完成；不从第一页推导全部历史。没有已观察的逐笔计费字段，actualCredits 始终 null，仍可成功保存，预留保持保守。
+
+针对本次接线运行 `node packages/db/tests/v3/run-local.mjs --research-only`：现有 runner 在一次性本地 PostgreSQL/PostgREST 上运行 `sorsaResearch.integration.ts`，经官方 SDK JSON/SSE 回放及实际 adapter/store 验证完整保存、跨实例恢复、双实例重复操作、预算/CAS、跨用户/普通角色拒绝、取消、错误结果、断线及真实 SQL 保存故障。它不访问远端数据库、不运行登录或包发布用例，不改 0064/0065；默认 runner 行为保留。这里的 actor/authorize 是测试身份边界，不是 GoTrue 证明；SQL 权限和持久化是真实本地执行。
+
+`pnpm --filter @repo/api exec vitest run src/services/__tests__/sorsaResearch.test.ts src/services/__tests__/agentKeyResearch.test.ts` 验证解析与原协议保护；这些测试被 API 全套执行。现有 Web typecheck 的 research / *Research* include 覆盖新代码、测试及其导入 fixture。另在仓库外私下读取完整运行证据进行解析回归，不读取 Key、不访问真实 AgentKey。
+
+本阶段不再次取数、使用积分、配置 Key、操作远端数据库、调用模型、部署或合并。新适配器的真实供应商运行、后续分页、首发必需平台、许可与完整产品验收仍是 NOT_RUN；本地回放不替代这些结果。

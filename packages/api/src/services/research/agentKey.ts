@@ -14,12 +14,14 @@ export interface ReviewedCapability {
   // Exact key allowlist prevents sending Skill/history/plan bodies.
   parameterKeys:readonly string[]; maxQuoteCredits:number;
 }
+export interface ProviderContext { canonicalName:string; params:Readonly<Record<string,unknown>> }
 export interface ProviderContract {
   // Public AgentKey docs do not publish these full envelopes. A reviewed decoder
   // must be supplied; no production decoder is guessed from synthetic fixtures.
   discovery(value:unknown):{names:string[]};
   description(value:unknown):{name:string;schema:Record<string,unknown>;creditsPerCall:number;executeAs?:unknown};
-  result(value:unknown):Pick<ResearchResult,'objects'|'pagination'> & {actualCredits:number|null};
+  validateInput?(context:ProviderContext):void;
+  result(value:unknown,context:ProviderContext):Pick<ResearchResult,'objects'|'pagination'> & {actualCredits:number|null};
 }
 export interface AdapterOptions {
   store:ResearchStore; capabilities:readonly ReviewedCapability[]; contract:ProviderContract;
@@ -108,6 +110,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
         const cap=options.capabilities.find(c=>c.internalName===op.capability);
         if(!cap||!discovered.has(cap.canonicalName))stop('CAPABILITY_DENIED');
         if(Object.keys(op.params).some(k=>!cap.parameterKeys.includes(k))||Buffer.byteLength(stable(op.params))>4096)stop('PARAMETERS_DENIED');
+        options.contract.validateInput?.({canonicalName:cap.canonicalName,params:op.params});
         return {operationId:op.operationId,identityHash:contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:op.params}),maxQuoteUnits:creditsToUnits(cap.maxQuoteCredits)};
       });
       await options.store.create(planId,creditsToUnits(budgetCredits),approved);
@@ -119,6 +122,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       const cap=options.capabilities.find(c=>c.internalName===input.capability);
       if(!cap||!discovered.has(cap.canonicalName))stop('CAPABILITY_DENIED');
       if(Object.keys(input.params).some(k=>!cap.parameterKeys.includes(k))||Buffer.byteLength(stable(input.params))>4096)stop('PARAMETERS_DENIED');
+      options.contract.validateInput?.({canonicalName:cap.canonicalName,params:input.params});
       // Replayed identities are checked before returning a persisted result.
       const identityHash=contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:input.params});
       const previous=await options.store.get(input.planId,input.operationId);
@@ -146,7 +150,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       let state:'succeeded'|'failed'|'unknown'='unknown';
       try {
         const raw=await call('execute_tool',{name:cap.canonicalName,params:input.params});
-        const parsed=options.contract.result(raw);
+        const parsed=options.contract.result(raw,{canonicalName:cap.canonicalName,params:input.params});
         if(parsed.objects.length>100||parsed.objects.some(x=>!x.id||x.missingFields.length>100))stop('RESULT_LIMIT');
         if(parsed.actualCredits!==null)creditsToUnits(parsed.actualCredits);
         result={source:'agentkey',fixture,canonicalTool:cap.canonicalName,objects:parsed.objects,pagination:parsed.pagination,

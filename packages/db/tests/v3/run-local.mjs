@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createServer } from 'node:http';
 const root=resolve(import.meta.dirname,'../../../..');
+const selected=process.argv.slice(2);
+if(selected.length && (selected.length!==1||selected[0]!=='--research-only'))throw new Error('only --research-only is supported');
+const testFiles=selected.length?['src/services/__tests__/sorsaResearch.integration.ts']:[];
 const tag=`graylum-v3-${randomUUID().slice(0,8)}`, db=`${tag}-db`, rest=`${tag}-rest`;
 const docker=(...args)=>execFileSync('docker',args,{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
 let gateway;
@@ -39,7 +42,7 @@ try {
   // Allowlisted environment only; no inherited .env or real credentials.
   const env={PATH:process.env.PATH,HOME:process.env.HOME,CI:'true',V3_LOCAL_DB:`postgres://postgres@127.0.0.1:${port(db,'5432')}/v3_disposable`,
     V3_LOCAL_REST:apiUrl,V3_LOCAL_SERVICE_JWT:jwt('service_role'),V3_LOCAL_USER_JWT:jwt('authenticated'),V3_LOCAL_JWT_SECRET:secret};
-  const child=spawn('pnpm',['--filter','@repo/api','exec','vitest','run','--config','vitest.integration.config.ts','--reporter','verbose'],{cwd:root,env,stdio:'inherit'});
+  const child=spawn('pnpm',['--filter','@repo/api','exec','vitest','run','--config','vitest.integration.config.ts','--reporter','verbose',...testFiles],{cwd:root,env,stdio:'inherit'});
   const code=await new Promise(r=>child.on('exit',r));if(code!==0)throw new Error(`integration failed: ${code}`);
 } catch(error) {
   for(const name of [rest,db]){try{console.error(docker('logs',name));}catch{}}
