@@ -42,6 +42,14 @@ refund/yearly/cron acceptance and the new V3 cases. It cannot be satisfied by th
 first loader PR. Owner selection and separate external/production authorization
 remain necessary after every slice and after M3.
 
+### 2026-09-07 product amendment: configurable workbench
+
+Owner-approved [generic Skill and configurable workbench requirements](tasks/V3-standard-skills.md#generic-skill-workbench) supplement the historical V3.1-LOAD scope above. This records specification requirements only: no task is selected, started or completed by this amendment. Existing task IDs, dependencies, order and migration slots remain unchanged.
+
+- `V3-ARTIFACTS`: shared project/round/step results, evidence, snapshots, declared-dependency review, fixed workflow/template versions and deterministic report transactions; server isolation across users/projects/Skills/rounds/versions and durable recovery.
+- `V3-WORKBENCH`: one core for configured three-, six- and eight-step workflows, retaining the original social six-step template; shared AI/cost mechanisms, configuration-only onboarding of a further sample after the core is complete, and compatibility with non-workflow document Skills.
+- `V3-M3`: verify every [generic acceptance case](tasks/V3-standard-skills.md#generic-workbench-acceptance), original social behavior, first/subsequent iterations and the entire Master Plan §7 matrix. Generic samples do not replace any other applicable acceptance or prove product completion.
+
 ## Ready-candidate derivation
 
 Resolve completion from live evidence and compute:
