@@ -13,7 +13,7 @@ const apply=(path)=>execFileSync('docker',['exec','-i',db,'psql','-U','postgres'
 try {
   docker('network','create',tag);
   docker('run','-d','--name',db,'--network',tag,'-p','127.0.0.1::5432','-e','POSTGRES_DB=v3_disposable','-e','POSTGRES_HOST_AUTH_METHOD=trust','postgres:17-alpine');
-  for(let i=0;i<50;i++){try{docker('exec',db,'pg_isready','-U','postgres');break;}catch{await new Promise(r=>setTimeout(r,200));}}
+  for(let i=0;i<50;i++){try{docker('exec',db,'pg_isready','-h','127.0.0.1','-U','postgres');break;}catch{await new Promise(r=>setTimeout(r,200));}}
   apply('packages/db/tests/v3/bootstrap.sql');
   apply('packages/db/migrations/0039_normalize_module_policy_shape.sql');
   apply('packages/db/migrations/0062_skill_1a_db_publish_contract.sql');
