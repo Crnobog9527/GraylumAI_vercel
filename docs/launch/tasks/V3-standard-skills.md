@@ -71,3 +71,7 @@ Codex parser 的缺名回退、非法标量修复、超长描述兼容不用于 
 命令：`pnpm test:api`，定点 `pnpm --filter @repo/api exec vitest run src/services/__tests__/standardSkillLoader.test.ts`，以及 `pnpm --filter web lint`、`pnpm --filter web typecheck`、`pnpm build`、`git diff --check`。新测试匹配 API 的 `src/**/*.test.ts`，required Unit Tests 已调用 `pnpm test:api`；新核心显式加入 web tsconfig，现有两项 required TypeScript 检查覆盖它，不更改 workflow。最终执行结果及 exact candidate 以 PR/CI 证据为准，规格不预填 CI PASS。
 
 本批未实现：DB 文件来源/权限修复/原子包发布、工作台与成果落库、AgentKey、模型上下文适配/效果、费用适配、导入 UI。**NOT_RUN**：远端 DB/RLS、真实发布/撤销、模型效果、真实数据质量/价格/条款、费用/支付/退款、M3 产品流程、生产及部署。格式和文件加载 PASS 不能替代其中任何一项。
+
+## 后续批次：V3-PACKAGE-RESEARCH（仓库与隔离验证）
+
+2026-09-06 Owner 在 V3.1-LOAD 合并后选择本节点的仓库实现与隔离测试。上文“本窗口/本批”保留为 V3.1-LOAD 历史范围。新增私有目录 DB 来源、完整发布/撤销/权限、受控研究适配器与隔离运行证据见 [本批说明](V3-package-research-validation.md)。真实平台能力、价格/许可、远端权限/部署与费用验证仍为 NOT_RUN，不能据此把整个节点标完成或解锁后续任务。

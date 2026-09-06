@@ -4,7 +4,7 @@ import { skillsRouter } from './skills';
 
 const ID = '00000000-0000-4000-8000-000000000011';
 const MODULE = '00000000-0000-4000-8000-000000000001';
-const published = { id: ID, skill_key: 'writer', status: 'published', published_content: 'System',
+const published = { id: ID, skill_key: 'writer', status: 'published', content_kind: 'text', published_content: 'System',
   published_version: 1, published_content_hash: createHash('sha256').update('System').digest('hex') };
 const calls: [string, Record<string, unknown> | undefined][] = [
   ['list', undefined], ['get', { id: ID }], ['create', { skillKey: 'writer', draftContent: 'draft' }],
@@ -29,7 +29,7 @@ function setup(role = 'admin', results: unknown[] = [{ id: ID }], privileges = t
       then: (onResolve: (result: unknown) => unknown) => Promise.resolve(resolve()).then(onResolve),
     };
     return q;
-  }), rpc: vi.fn().mockResolvedValue({ data: [{ skill_id: ID }], error: null }) };
+  }), rpc: vi.fn().mockImplementation(async (name: string) => ({ data: name === 'is_text_skill_executable' ? true : [{ skill_id: ID }], error: null })) };
   const authDb = { from: () => {
     const q = { select: () => q, eq: () => q, single: async () => ({ data: {
       id: 'admin-user', role, status: 'active', email: 'admin@example.com', nickname: 'Admin',

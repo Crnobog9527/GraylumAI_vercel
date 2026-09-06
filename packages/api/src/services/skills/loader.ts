@@ -52,13 +52,16 @@ export function sameIdentity(a: PackageIdentity, b: PackageIdentity): boolean {
 }
 /** Integrity binds identity, complete inventory, and the host's reviewed resource plan. */
 export function packageHash(p: Omit<PackageDescriptor, 'packageHash'>): string {
-  return sha256(JSON.stringify({
+  return sha256(packageHashPayload(p));
+}
+export function packageHashPayload(p: Omit<PackageDescriptor, 'packageHash'>): string {
+  return JSON.stringify({
     packageId: p.packageId, revisionId: p.revisionId, directoryName: p.directoryName,
     files: [...p.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
       .map(f => [f.path, f.bytes, f.mediaType, f.sha256, [...f.requires].sort()]),
     tasks: Object.keys(p.tasks).sort().map(key => [key, [...p.tasks[key]].sort()]),
     requiredCapabilities: [...p.requiredCapabilities].sort(),
-  }));
+  });
 }
 export function validateDescriptor(input: unknown): PackageDescriptor {
   const parsed = descriptorSchema.safeParse(input);

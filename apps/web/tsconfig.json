@@ -19,6 +19,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../../packages/api/src/services/skills/**/*.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../../packages/api/src/services/skills/**/*.ts", "../../packages/api/src/services/research/**/*.ts", "../../packages/api/src/services/__tests__/*Package*.ts", "../../packages/api/src/services/__tests__/*Research*.ts", "../../packages/api/src/services/__tests__/packagePublication.test.ts", "../../packages/api/vitest.integration.config.ts", "../../packages/db/schema.ts"],
   "exclude": ["node_modules"]
 }

@@ -526,7 +526,7 @@ const SKILL_A = '00000000-0000-4000-8000-000000000011';
 const MODULE_B = '00000000-0000-4000-8000-000000000002';
 const SKILL_B = '00000000-0000-4000-8000-000000000012';
 function publishedSkill(id = SKILL_A, content = '  Exact published Skill A\n', version = 1) {
-  return { id, skill_key: id === SKILL_A ? 'skill-a' : 'skill-b', status: 'published',
+  return { id, skill_key: id === SKILL_A ? 'skill-a' : 'skill-b', status: 'published', content_kind: 'text',
     published_content: content, published_version: version,
     published_content_hash: createHash('sha256').update(content).digest('hex') };
 }
@@ -535,6 +535,7 @@ function setupSkillRoute(options: { unbound?: boolean; skill?: Record<string, un
   const events: string[] = [];
   const skill = options.skill === undefined ? publishedSkill() : options.skill;
   const other = publishedSkill(SKILL_B, 'Only Skill B');
+  Object.assign(clients.adminClient, { rpc: vi.fn().mockResolvedValue({ data: true, error: null }) });
   const previousFrom = clients.adminClient.from.getMockImplementation()!;
   clients.adminClient.from.mockImplementation(((table: string) => {
     if (table !== 'modules' && table !== 'skills') return previousFrom(table);
@@ -586,6 +587,7 @@ describe('real web route Skill resolution, billing and provider ordering', () =>
     ['missing', { skill: null }],
     ['DB error', { error: true }],
     ['DB exception', { throws: true }],
+    ['directory package', { skill: { ...publishedSkill(), content_kind: 'directory' } }],
     ['null content', { skill: { ...publishedSkill(), published_content: null } }],
     ['empty content', { skill: { ...publishedSkill(), published_content: '  ' } }],
     ['bad hash', { skill: { ...publishedSkill(), published_content_hash: '0'.repeat(64) } }],

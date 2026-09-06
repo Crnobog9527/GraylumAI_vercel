@@ -1,1 +1,3 @@
 a3bd63213d9860f82f3492b513e1f98d34c40242:packages/api/src/routers/payments.test.ts:generic-api-key:336
+# Historical disposable Docker fixture only; the synthetic password was removed.
+19031e869ff50893089a6c1372e4136d60a15f8d:packages/db/tests/v3/run-local.mjs:graylum-database-url:25
