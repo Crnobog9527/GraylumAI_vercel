@@ -32,7 +32,10 @@ async function fixture(n=3,social=false){
 type F=Awaited<ReturnType<typeof fixture>>;
 const scope=(f:F)=>({projectId:f.projectId,roundId:f.roundId});
 const read=(f:F)=>f.store.execute({action:'read',...scope(f)});
-async function fill(f:F){for(const s of f.flow.steps){await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:s.id,expectedVersion:0,body:`Confirmed ${s.title}`,evidenceIds:[]});await f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId:s.id,expectedVersion:1});}}
+async function fill(f:F){for(const s of f.flow.steps){await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:s.id,expectedVersion:0,body:`Confirmed ${s.title}`,evidenceIds:[]});await confirm(f,s.id,1);}}
+async function confirm(f:F,stepId:string,expectedVersion:number){
+ const state=await read(f);return f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId,expectedVersion,expectedReviewVersion:state.steps[stepId].reviewVersion});
+}
 const publish=(f:F,requestId=randomUUID())=>f.store.execute({action:'publish',...scope(f),requestId});
 beforeAll(async()=>{await sql.connect();await sql.query("insert into profiles(id,email,role) values($1,'owner@example.test','admin'),($2,'actor@example.test','user'),($3,'other@example.test','user')",[owner,actor,other]);});
 afterAll(async()=>{await sql.end();});
@@ -49,7 +52,7 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   await f.store.start({...f.start,roundId:f.roundId,requestId:randomUUID(),fromRoundId:v1round});
   await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-1',expectedVersion:1,body:'Second iteration',evidenceIds:[]});
   const draft=await read(f);expect(draft.currentVersion).toBe(1);expect(draft.steps['step-0'].valid).toBe(true);
-  for(let i=1;i<n;i++){expect(draft.steps[`step-${i}`].valid).toBe(false);await f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId:`step-${i}`,expectedVersion:i===1?2:1});}
+  for(let i=1;i<n;i++){expect(draft.steps[`step-${i}`].valid).toBe(false);await confirm(f,`step-${i}`,i===1?2:1);}
   const v2request=randomUUID();expect((await publish(f,v2request)).version).toBe(2);
   f.store=databaseArtifactStore({...f.options,userClient:user()});expect((await publish(f,v2request)).version).toBe(2);
   expect(await f.store.execute({action:'report',projectId:f.projectId,roundId:v1round})).toEqual(report);
@@ -63,6 +66,23 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   const after=await read(f);expect(after.steps['step-0'].valid).toBe(true);expect(after.steps['step-1'].valid).toBe(false);expect(after.steps['step-2'].valid).toBe(false);expect(after.confirmations).toHaveLength(3);
   await expect(f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-1',expectedVersion:1,body:'Conflict must not win',evidenceIds:[]})).rejects.toThrow();
   expect((await read(f)).steps['step-1'].body).toBe('User change');await expect(publish(f)).rejects.toThrow();
+ });
+ it.each(['published','abandoned'])('rejects new candidates on a %s round but recovers an earlier append',async terminal=>{
+  const f=await fixture();await fill(f);
+  const command={action:'candidate' as const,...scope(f),requestId:randomUUID(),stepId:'step-0',body:'Existing candidate',evidenceIds:[]};
+  const first=await f.store.execute(command);
+  if(terminal==='published')await publish(f);else await f.store.execute({action:'abandon',...scope(f),requestId:randomUUID()});
+  await expect(f.store.execute({...command,requestId:randomUUID(),body:'Too late'})).rejects.toThrow();
+  expect(await f.store.execute(command)).toEqual(first);expect((await read(f)).candidates).toHaveLength(1);
+ });
+ it('rejects ASCII and Unicode whitespace-only confirmation without creating formal content',async()=>{
+  const f=await fixture(1);let version=0;
+  for(const body of [' \t\n\r\f', '\u00a0\u2002\u3000\ufeff', '\n\t']){
+   await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:version++,body,evidenceIds:[]});
+   await expect(confirm(f,'step-0',version)).rejects.toThrow();await expect(publish(f)).rejects.toThrow();
+  }
+  await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:version++,body:'\n Meaningful text \t',evidenceIds:[]});
+  await confirm(f,'step-0',version);expect((await publish(f)).version).toBe(1);
  });
  it('preserves v1 while v2 drafts, abandons without overwrite and refuses history mutation',async()=>{
   const f=await fixture();await fill(f);await publish(f);const old=await f.store.execute({action:'report',...scope(f)});
@@ -113,7 +133,7 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   const unused=await f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body:'Not yet adopted',observedAt:null,supersedes:null});
   expect((await read(f)).steps).toEqual(original);
   await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-1',expectedVersion:1,body:'Uses research evidence',evidenceIds:[evidence.evidenceId]});
-  for(const stepId of ['step-1','step-2'])await f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId,expectedVersion:stepId==='step-1'?2:1});
+  for(const stepId of ['step-1','step-2'])await confirm(f,stepId,stepId==='step-1'?2:1);
   await publish(f);const report=await f.store.execute({action:'report',...scope(f)});
   expect(report.report.sources[0]).toMatchObject({cost:result.cost,pagination:result.pagination,license:'unknown'});
   expect((await read(f)).evidence.find((e:{id:string})=>e.id===evidence.evidenceId).payload.result).toEqual(result);
@@ -127,10 +147,43 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   await f.store.execute({action:'restrictEvidence',...scope(f),requestId:randomUUID(),evidenceId:evidence.evidenceId,deleted:false,expiresAt:null});
   expect((await f.store.execute({action:'report',...scope(f)})).available).toBe(false);
  });
+ it.each([false,true])('reconfirmation updates provenance with expired prior evidence=%s; hidden content requires a new draft',async expired=>{
+  const f=await fixture();
+  const evidence=async(body:string)=>f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body,observedAt:null,supersedes:null});
+  const e1=await evidence('Old observation'),e2=await evidence('New observation');
+  await fill(f);await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'Old evidence adopted',evidenceIds:[e1.evidenceId]});
+  for(const s of f.flow.steps)await confirm(f,s.id,s.id==='step-0'?2:1);
+  await publish(f);const v1round=f.roundId;
+  f.roundId=randomUUID();await f.store.start({...f.start,roundId:f.roundId,requestId:randomUUID(),fromRoundId:v1round});
+  await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:2,body:'New evidence adopted',evidenceIds:[e2.evidenceId]});
+  await confirm(f,'step-0',3);
+  if(expired){
+   await f.store.execute({action:'restrictEvidence',...scope(f),requestId:randomUUID(),evidenceId:e1.evidenceId,deleted:true,expiresAt:null});
+   expect((await read(f)).steps['step-1'].body).toBeNull();
+   await expect(confirm(f,'step-1',1)).rejects.toThrow(); // cannot relabel hidden old content by confirming blind
+  }
+  for(const stepId of ['step-1','step-2']){
+   if(expired)await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId,expectedVersion:1,body:'Fresh user draft for new evidence',evidenceIds:[]});
+   await confirm(f,stepId,expired?2:1);
+  }
+  if(!expired)await f.store.execute({action:'restrictEvidence',...scope(f),requestId:randomUUID(),evidenceId:e1.evidenceId,deleted:true,expiresAt:null});
+  const current=await read(f);expect(current.steps['step-1'].provenanceIds).toEqual([e2.evidenceId]);
+  await publish(f);const report=await f.store.execute({action:'report',...scope(f)});
+  expect(report.available).toBe(true);expect(report.report.sources.map((v:{id:string})=>v.id)).toEqual([e2.evidenceId]);
+  for(const section of report.report.sections)expect(section.evidenceIds).toEqual([e2.evidenceId]);
+  expect((await f.store.execute({action:'report',projectId:f.projectId,roundId:v1round})).available).toBe(false);
+ });
+ it('rejects a stale dependency-review token even when the target draft body version is unchanged',async()=>{
+  const f=await fixture();await fill(f);const stale=(await read(f)).steps['step-1'];
+  await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'Upstream changed after the reviewer read',evidenceIds:[]});
+  await confirm(f,'step-0',2);
+  await expect(f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId:'step-1',expectedVersion:1,expectedReviewVersion:stale.reviewVersion})).rejects.toThrow();
+  await confirm(f,'step-1',1);expect((await read(f)).steps['step-1'].valid).toBe(true);
+ });
  it('time-based expiry propagates without mutation and revisions remain distinct from adoption',async()=>{
   const f=await fixture();const e=await f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body:'Synthetic observation',observedAt:null,supersedes:null});
   await fill(f);await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'Observed',evidenceIds:[e.evidenceId]});
-  for(const s of f.flow.steps)await f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId:s.id,expectedVersion:s.id==='step-0'?2:1});
+  for(const s of f.flow.steps)await confirm(f,s.id,s.id==='step-0'?2:1);
   const before=(await read(f)).steps;
   await f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body:'Correction pending adoption',observedAt:null,supersedes:e.evidenceId});
   expect((await read(f)).steps).toEqual(before);
@@ -212,7 +265,7 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
  });
  it('save/confirm competition cannot leave a valid snapshot of the overwritten draft',async()=>{
   const f=await fixture();await fill(f);
-  await race(f,[{action:'save',payload:{stepId:'step-0',expectedVersion:1,body:'Concurrent draft',evidenceIds:[]}},{action:'confirm',payload:{stepId:'step-0',expectedVersion:1}}]);
+  await race(f,[{action:'save',payload:{stepId:'step-0',expectedVersion:1,body:'Concurrent draft',evidenceIds:[]}},{action:'confirm',payload:{stepId:'step-0',expectedVersion:1,expectedReviewVersion:(await read(f)).steps['step-0'].reviewVersion}}]);
   expect((await read(f)).steps['step-0']).toMatchObject({version:2,valid:false,body:'Concurrent draft'});
  });
  it('two concurrent publish requests recover exactly one formal version',async()=>{

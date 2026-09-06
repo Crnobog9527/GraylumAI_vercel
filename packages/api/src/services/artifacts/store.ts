@@ -14,7 +14,7 @@ export const commandSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('report'),...scope.shape}).strict(),
  z.object({action:z.literal('save'),...mutation,stepId:step,expectedVersion:z.number().int().nonnegative(),body:z.string().max(20000),evidenceIds}).strict(),
  z.object({action:z.literal('candidate'),...mutation,stepId:step,body:z.string().max(20000),evidenceIds}).strict(),
- z.object({action:z.literal('confirm'),...mutation,stepId:step,expectedVersion:z.number().int().nonnegative()}).strict(),
+ z.object({action:z.literal('confirm'),...mutation,stepId:step,expectedVersion:z.number().int().nonnegative(),expectedReviewVersion:z.number().int().nonnegative()}).strict(),
  z.object({action:z.literal('publish'),...mutation}).strict(),
  z.object({action:z.literal('abandon'),...mutation}).strict(),
  z.object({action:z.literal('researchEvidence'),...mutation,planId:uuid,operationId:uuid}).strict(),

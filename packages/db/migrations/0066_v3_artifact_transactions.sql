@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS public.artifact_evidence_restrictions (
 );
 CREATE TABLE IF NOT EXISTS public.artifact_confirmations (
  id uuid PRIMARY KEY,round_id uuid NOT NULL REFERENCES public.artifact_rounds(id),step_id text NOT NULL,
- version integer NOT NULL,body text NOT NULL,evidence_ids jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
+ version integer NOT NULL,review_version integer NOT NULL,body text NOT NULL,evidence_ids jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS public.artifact_candidates (
  id uuid PRIMARY KEY,round_id uuid NOT NULL REFERENCES public.artifact_rounds(id),step_id text NOT NULL,
@@ -60,6 +60,11 @@ END $$;
 CREATE OR REPLACE FUNCTION public.artifact_hash(v jsonb) RETURNS text LANGUAGE sql IMMUTABLE STRICT AS $$
  SELECT encode(sha256(convert_to(v::text,'UTF8')),'hex')
 $$;
+-- Count substantive text, including Unicode whitespace accepted by the JSON/text transport.
+CREATE OR REPLACE FUNCTION public.artifact_text_length(body text) RETURNS integer LANGUAGE sql IMMUTABLE STRICT AS $$
+ SELECT char_length(regexp_replace(translate(body,
+ chr(160)||chr(5760)||chr(8192)||chr(8193)||chr(8194)||chr(8195)||chr(8196)||chr(8197)||chr(8198)||chr(8199)||chr(8200)||chr(8201)||chr(8202)||chr(8232)||chr(8233)||chr(8239)||chr(8287)||chr(12288)||chr(65279),''),'[[:space:]]','','g'))
+$$;
 CREATE OR REPLACE FUNCTION public.artifact_evidence_allowed(project uuid,ids jsonb) RETURNS boolean LANGUAGE sql VOLATILE AS $$
  SELECT jsonb_typeof(ids)='array' AND jsonb_array_length(ids)<=64 AND NOT EXISTS(
  SELECT 1 FROM jsonb_array_elements_text(ids) x LEFT JOIN public.artifact_evidence e ON e.id::text=x AND e.project_id=project
@@ -73,13 +78,16 @@ BEGIN
  SELECT changed UNION SELECT s->>'id' FROM affected a,jsonb_array_elements(flow->'steps') s
  WHERE s->'dependsOn' ? a.id) SELECT id FROM affected LOOP
   result:=jsonb_set(result,ARRAY[k,'valid'],'false');
+  result:=jsonb_set(result,ARRAY[k,'reviewVersion'],to_jsonb(coalesce((result->k->>'reviewVersion')::integer,0)+1));
  END LOOP;
  RETURN result;
 END $$;
+-- Reconfirmation uses current direct references. Cached provenance protects existing
+-- draft text on reads but must not contaminate the new confirmation basis.
 CREATE OR REPLACE FUNCTION public.artifact_step_evidence(flow jsonb,steps jsonb,step text) RETURNS jsonb LANGUAGE sql STABLE AS $$
  WITH RECURSIVE ancestors(id) AS (
  SELECT step UNION SELECT d FROM ancestors a,jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d WHERE node->>'id'=a.id)
- SELECT coalesce(jsonb_agg(DISTINCT e ORDER BY e),'[]') FROM ancestors a,jsonb_array_elements(coalesce(steps->a.id->'evidenceIds','[]')||coalesce(steps->a.id->'provenanceIds','[]')) e
+ SELECT coalesce(jsonb_agg(DISTINCT e ORDER BY e),'[]') FROM ancestors a,jsonb_array_elements(coalesce(steps->a.id->'evidenceIds','[]')) e
 $$;
 CREATE OR REPLACE FUNCTION public.artifact_resource_identity(manifest jsonb,roots jsonb) RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
  WITH RECURSIVE paths(path) AS (
@@ -153,7 +161,7 @@ BEGIN
  IF r.id IS NOT NULL THEN
   states:=r.steps;
   FOR k,st IN SELECT * FROM jsonb_each(states) LOOP
-   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,states,k)) THEN states:=artifact_invalidate(r.workflow,states,k); END IF;
+   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,states,k)||coalesce(st->'provenanceIds','[]')) THEN states:=artifact_invalidate(r.workflow,states,k); END IF;
   END LOOP;
   r.steps:=states; -- expiry propagates without a scheduler or modification of historical snapshots.
  END IF;
@@ -171,14 +179,14 @@ BEGIN
   END IF;
   states:='{}';
   FOR k,st IN SELECT * FROM jsonb_each(r.steps) LOOP
-   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,r.steps,k)) THEN st:=st||'{"body":null,"valid":false,"available":false}'; END IF;
+   IF NOT artifact_evidence_allowed(p.id,artifact_step_evidence(r.workflow,r.steps,k)||coalesce(st->'provenanceIds','[]')) THEN st:=st||'{"body":null,"valid":false,"available":false}'; END IF;
    states:=jsonb_set(states,ARRAY[k],st);
   END LOOP;
   SELECT coalesce(jsonb_agg(jsonb_build_object('id',e.id,'kind',e.kind,'supersedes',e.supersedes,'hash',e.content_hash,'createdAt',e.created_at,
    'available',artifact_evidence_allowed(p.id,jsonb_build_array(e.id)),
    'payload',CASE WHEN artifact_evidence_allowed(p.id,jsonb_build_array(e.id)) THEN e.payload ELSE 'null'::jsonb END) ORDER BY e.id),'[]') INTO ids FROM artifact_evidence e WHERE e.project_id=p.id;
   SELECT coalesce(jsonb_agg(jsonb_build_object('id',c.id,'stepId',c.step_id,'body',CASE WHEN artifact_evidence_allowed(p.id,c.evidence_ids) THEN c.body ELSE NULL END,'evidenceIds',c.evidence_ids) ORDER BY c.id),'[]') INTO sections FROM artifact_candidates c WHERE c.round_id=r.id;
-  SELECT coalesce(jsonb_agg(jsonb_build_object('id',c.id,'stepId',c.step_id,'version',c.version,'body',CASE WHEN artifact_evidence_allowed(p.id,c.evidence_ids) THEN c.body ELSE NULL END,'evidenceIds',c.evidence_ids) ORDER BY c.id),'[]') INTO snap FROM artifact_confirmations c WHERE c.round_id=r.id;
+  SELECT coalesce(jsonb_agg(jsonb_build_object('id',c.id,'stepId',c.step_id,'version',c.version,'reviewVersion',c.review_version,'body',CASE WHEN artifact_evidence_allowed(p.id,c.evidence_ids) THEN c.body ELSE NULL END,'evidenceIds',c.evidence_ids) ORDER BY c.id),'[]') INTO snap FROM artifact_confirmations c WHERE c.round_id=r.id;
   -- Explicit public UI projection; never return resources, required-capability plans or manifest.
   SELECT jsonb_build_object('id',r.workflow->>'id','version',r.workflow->'version','steps',jsonb_agg(jsonb_build_object('id',x->>'id','title',x->>'title','dependsOn',x->'dependsOn') ORDER BY n)) INTO flow FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY t(x,n);
   RETURN jsonb_build_object('projectId',p.id,'roundId',r.id,'skillId',p.skill_id,'state',r.state,'currentVersion',p.current_version,
@@ -202,7 +210,7 @@ BEGIN
    SELECT m.manifest INTO old_manifest FROM skill_packages m WHERE m.revision_id=prior.revision_id;
   ELSIF EXISTS(SELECT 1 FROM artifact_rounds WHERE project_id=p.id) THEN RAISE EXCEPTION 'explicit source round required'; END IF;
   FOR s IN SELECT * FROM jsonb_array_elements(flow->'steps') LOOP
-   k:=s->>'id';st:=coalesce(prior.steps->k,jsonb_build_object('body','','version',0,'evidenceIds','[]'::jsonb,'provenanceIds','[]'::jsonb,'confirmationId',NULL,'valid',false));
+   k:=s->>'id';st:=coalesce(prior.steps->k,jsonb_build_object('body','','version',0,'reviewVersion',0,'evidenceIds','[]'::jsonb,'provenanceIds','[]'::jsonb,'confirmationId',NULL,'valid',false));
    IF prior.id IS NOT NULL AND (NOT EXISTS(SELECT 1 FROM jsonb_array_elements(prior.workflow->'steps') x WHERE x=s)
     OR artifact_resource_identity(manifest,s->'resources') IS DISTINCT FROM artifact_resource_identity(old_manifest,s->'resources')) THEN
     changed:=array_append(changed,k);
@@ -213,15 +221,15 @@ BEGIN
   INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,steps)
    VALUES(p_round_id,p.id,(p_payload->>'revisionId')::uuid,p_payload->>'packageHash',flow,artifact_hash(flow),artifact_hash(flow->'report'),states);
   FOR k,st IN SELECT * FROM jsonb_each(states) LOOP
-   IF (st->>'valid')::boolean AND artifact_evidence_allowed(p.id,st->'evidenceIds') THEN
-    ident:=gen_random_uuid();INSERT INTO artifact_confirmations VALUES(ident,p_round_id,k,(st->>'version')::integer,st->>'body',artifact_step_evidence(flow,states,k),now());
+   IF (st->>'valid')::boolean AND artifact_evidence_allowed(p.id,artifact_step_evidence(flow,states,k)) THEN
+    ident:=gen_random_uuid();INSERT INTO artifact_confirmations VALUES(ident,p_round_id,k,(st->>'version')::integer,(st->>'reviewVersion')::integer,st->>'body',artifact_step_evidence(flow,states,k),now());
     states:=jsonb_set(states,ARRAY[k,'confirmationId'],to_jsonb(ident));
    ELSE states:=jsonb_set(states,ARRAY[k,'valid'],'false');states:=jsonb_set(states,ARRAY[k,'confirmationId'],'null'); END IF;
   END LOOP;
   UPDATE artifact_rounds SET steps=states WHERE id=p_round_id;
   response:=jsonb_build_object('roundId',p_round_id);
  ELSE
-  IF p_action NOT IN ('restrictEvidence','abandon','candidate') AND r.state<>'draft' THEN RAISE EXCEPTION 'round closed'; END IF;
+  IF p_action NOT IN ('restrictEvidence','abandon') AND r.state<>'draft' THEN RAISE EXCEPTION 'round closed'; END IF;
   states:=r.steps;k:=p_payload->>'stepId';st:=states->k;
   IF p_action IN ('save','confirm','candidate') THEN
    SELECT x INTO s FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=k;
@@ -245,14 +253,14 @@ BEGIN
     response:=jsonb_build_object('version',st->'version');
    END IF;
   ELSIF p_action='confirm' THEN
-   IF (p_payload->>'expectedVersion')::integer IS DISTINCT FROM (st->>'version')::integer OR char_length(btrim(st->>'body'))<(s->>'minLength')::integer
-    OR NOT artifact_evidence_allowed(p.id,st->'evidenceIds') OR ((s->>'requiresEvidence')::boolean AND jsonb_array_length(st->'evidenceIds')=0) THEN RAISE EXCEPTION 'confirmation conflict'; END IF;
+   IF (p_payload->>'expectedVersion')::integer IS DISTINCT FROM (st->>'version')::integer OR (p_payload->>'expectedReviewVersion')::integer IS DISTINCT FROM (st->>'reviewVersion')::integer OR artifact_text_length(st->>'body')<(s->>'minLength')::integer
+    OR NOT artifact_evidence_allowed(p.id,st->'evidenceIds') OR NOT artifact_evidence_allowed(p.id,coalesce(st->'provenanceIds','[]')) OR ((s->>'requiresEvidence')::boolean AND jsonb_array_length(st->'evidenceIds')=0) THEN RAISE EXCEPTION 'confirmation conflict'; END IF;
    FOR dep IN SELECT jsonb_array_elements_text(s->'dependsOn') LOOP
     IF NOT (states->dep->>'valid')::boolean OR NOT artifact_evidence_allowed(p.id,states->dep->'evidenceIds') THEN RAISE EXCEPTION 'dependency review required'; END IF;
    END LOOP;
    ids:=artifact_step_evidence(r.workflow,states,k);
    IF NOT artifact_evidence_allowed(p.id,ids) THEN RAISE EXCEPTION 'dependency evidence unavailable'; END IF;
-   INSERT INTO artifact_confirmations(id,round_id,step_id,version,body,evidence_ids) VALUES(ident,r.id,k,(st->>'version')::integer,st->>'body',ids);
+   INSERT INTO artifact_confirmations(id,round_id,step_id,version,review_version,body,evidence_ids) VALUES(ident,r.id,k,(st->>'version')::integer,(st->>'reviewVersion')::integer,st->>'body',ids);
    states:=jsonb_set(states,ARRAY[k],st||jsonb_build_object('confirmationId',ident,'valid',true,'provenanceIds',ids));
    UPDATE artifact_rounds SET steps=states WHERE id=r.id;
    response:=jsonb_build_object('confirmationId',ident);
@@ -260,12 +268,12 @@ BEGIN
    FOR s IN SELECT * FROM jsonb_array_elements(r.workflow->'steps') LOOP
     st:=states->(s->>'id');
     IF NOT (st->>'valid')::boolean OR NOT artifact_evidence_allowed(p.id,st->'evidenceIds') THEN RAISE EXCEPTION 'confirmation required'; END IF;
-    IF NOT EXISTS(SELECT 1 FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid AND c.round_id=r.id AND c.step_id=s->>'id' AND c.version=(st->>'version')::integer AND c.body=st->>'body' AND c.evidence_ids=artifact_step_evidence(r.workflow,states,s->>'id')) THEN RAISE EXCEPTION 'snapshot conflict'; END IF;
+    IF NOT EXISTS(SELECT 1 FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid AND c.round_id=r.id AND c.step_id=s->>'id' AND c.version=(st->>'version')::integer AND c.review_version=(st->>'reviewVersion')::integer AND c.body=st->>'body' AND c.evidence_ids=artifact_step_evidence(r.workflow,states,s->>'id')) THEN RAISE EXCEPTION 'snapshot conflict'; END IF;
     all_ids:=all_ids||artifact_step_evidence(r.workflow,states,s->>'id');
    END LOOP;
    SELECT coalesce(jsonb_agg(DISTINCT v ORDER BY v),'[]') INTO all_ids FROM jsonb_array_elements(all_ids) v;
    FOR s IN SELECT * FROM jsonb_array_elements(r.workflow->'report'->'sections') LOOP
-    st:=states->(s->>'stepId');sections:=sections||jsonb_build_array(jsonb_build_object('title',s->>'title','stepId',s->>'stepId','body',st->>'body','confirmationId',st->'confirmationId','evidenceIds',st->'evidenceIds'));
+    st:=states->(s->>'stepId');sections:=sections||jsonb_build_array(jsonb_build_object('title',s->>'title','stepId',s->>'stepId','body',st->>'body','confirmationId',st->'confirmationId','evidenceIds',(SELECT c.evidence_ids FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid)));
    END LOOP;
    SELECT coalesce(jsonb_agg(jsonb_build_object('id',e.id,'kind',e.kind,'hash',e.content_hash,'operationId',e.operation_id,'supersedes',e.supersedes,'fetchedAt',coalesce(e.payload#>'{result,fetchedAt}',to_jsonb(e.created_at)),'observedAt',e.payload->'observedAt','pagination',e.payload#>'{result,pagination}','cost',e.payload#>'{result,cost}','license','unknown',
     'objects',(SELECT coalesce(jsonb_agg(jsonb_build_object('id',o->'id','sourceUrl',o->'sourceUrl','observedAt',o->'observedAt','missingFields',o->'missingFields')),'[]') FROM jsonb_array_elements(coalesce(e.payload#>'{result,objects}','[]')) o)) ORDER BY e.id),'[]') INTO ids FROM artifact_evidence e WHERE all_ids ? e.id::text;
@@ -319,6 +327,6 @@ BEGIN
  INSERT INTO artifact_requests(project_id,request_id,round_id,action,payload,response) VALUES(p.id,p_request_id,p_round_id,p_action,p_payload,response);
  RETURN response;
 END $$;
-REVOKE ALL ON FUNCTION public.artifact_resource_identity(jsonb,jsonb),public.artifact_step_evidence(jsonb,jsonb,text),public.artifact_round_identity(),public.artifact_immutable(),public.artifact_hash(jsonb),public.artifact_evidence_allowed(uuid,jsonb),public.artifact_invalidate(jsonb,jsonb,text),public.artifact_validate_workflow(jsonb,jsonb),public.artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.artifact_text_length(text),public.artifact_resource_identity(jsonb,jsonb),public.artifact_step_evidence(jsonb,jsonb,text),public.artifact_round_identity(),public.artifact_immutable(),public.artifact_hash(jsonb),public.artifact_evidence_allowed(uuid,jsonb),public.artifact_invalidate(jsonb,jsonb,text),public.artifact_validate_workflow(jsonb,jsonb),public.artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) TO service_role;
 COMMIT;
