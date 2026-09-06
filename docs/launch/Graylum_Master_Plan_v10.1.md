@@ -2,6 +2,8 @@
 
 本文保留 v10.1 历史产品决策与任务交付；本批仅同步 Owner 批准的 V3 产品范围及 V3.1 最小加载交付。执行遵循 current staging `AGENTS.md`，本文不授予合并、数据库、配置、收费调用或生产操作权限。旧流程用语仅作历史，不恢复 Gate 或台账。
 
+2026-09-07 产品修订：Owner 批准“通用 Skill 基座＋配置驱动多步骤工作台”，补充 D7、§7 及[V3 详细规格](tasks/V3-standard-skills.md#generic-skill-workbench)。社媒六步保留为首个业务模板；本次仅补规格，功能与新增验收尚待实现/运行，不启动后续任务。以下带日期阶段及其 NOT_RUN 是历史记录，不据此改写当前验证结论或宣布研究/V3/M3完成。
+
 ## 当前仓库事实与本批边界（2026-09-06 核验）
 
 GitHub live 仓库 `Crnobog9527/GraylumAI_vercel`，本批起点 staging 为 `283686d00733d69147c89f8ac5f552e4b380074b`。以下仅证明代码/文档已合并，不等于远端 schema、权限、模型效果、付款验收或 M3 已通过：
@@ -74,7 +76,7 @@ progress_refresh_v10_1:
 | D4 | 退款 | 任何 Owner 批准的订阅退款（partial/full 事件同语义）＝整份订阅立即终止：Stripe 端 Owner 立即取消+退款 → 本地先写 release termination → 只扣当前退款周期尚未使用的订阅积分 → 历史周期不追回 → 开户/签到/管理员/其他订阅/未退款积分包不动 → 年付未来释放全部停止。系统不自算现金金额、无自助退款。 |
 | D5 | 正常取消 | Stripe Customer Portal `cancel_at_period_end=true`；已付周期权益继续；年付剩余月度按周年继续释放到 Stripe period end。正常取消≠退款。 |
 | D6 | 年付释放 | 12 期；第 1 期在首张年付发票支付后立即发放；anchor=原始 Stripe term start；UTC 日历月周年；月末保留原日、超出 clamp 到月末；每期从原始 anchor 计算；**禁止毫秒÷12**。示例：01-31 → 01-31 / 02-28(29) / 03-31 / 04-30。 |
-| D7 | Skill（V3 已批准扩展） | 保留 `skills`、不可变 revision 与模块绑定基础，扩展为**私有标准目录包、完整入口和按需资源真实读取**；六步成果、用户确认快照、策略历史及确定性报告按 [V3 规格](tasks/V3-standard-skills.md) 交付，Skill 外部研究统一走受控服务端数据适配层（首选 AgentKey MCP）。不执行任意脚本、沙箱或无限工具循环。active 模块必须绑定有效 published 且可执行的 Skill；缺失、归档、撤销、无权限或读取失败均拒绝执行，不调用 provider/收费取数、不预扣，不回退 description。**普通聊天**下个请求读取当前发布版本；**工作台**固定该轮方法版本，升级须明确确认；固定旧版不绕过实时模块/Skill/版本/权限检查。历史成果读取与私有方法可执行性分开。 |
+| D7 | Skill（V3 已批准扩展） | 建设**共享 Skill 基座与配置驱动多步骤工作台**，社媒六步是首个模板而非平台固定结构；在已支持能力范围内，仅改变步骤数、业务名称、问题或报告章节应通过方法包与校验后的流程配置接入，不改核心页面、存储结构、保存/确认接口或报告代码；新增能力通过受控可复用模块扩展，不复制系统。服务端与界面共用该轮固定定义，配置不是任意代码。详细边界及[通用验收](tasks/V3-standard-skills.md#generic-skill-workbench)适用于后续既有任务，尚非实现证明。保留 `skills`、不可变 revision 与模块绑定基础，扩展为**私有标准目录包、完整入口和按需资源真实读取**；六步成果、用户确认快照、策略历史及确定性报告按 [V3 规格](tasks/V3-standard-skills.md) 交付，Skill 外部研究统一走受控服务端数据适配层（首选 AgentKey MCP）。不执行任意脚本、沙箱或无限工具循环。active 模块必须绑定有效 published 且可执行的 Skill；缺失、归档、撤销、无权限或读取失败均拒绝执行，不调用 provider/收费取数、不预扣，不回退 description。**普通聊天**下个请求读取当前发布版本；**工作台**固定该轮方法版本，升级须明确确认；固定旧版不绕过实时模块/Skill/版本/权限检查。历史成果读取与私有方法可执行性分开。 |
 | D8 | 首发商品 | Pro/Gold 月付+年付 + ≥1 个正金额积分包；零金额/未配置不得 checkout-ready（#276）；首发恢复 Billing Engine v1.5 仅升级路径（Pro→Gold、月付→年付）；禁止降级/同级同周期重复；到期取消须先恢复续费。 |
 | **D11** | 大陆支付（2026-08-15） | **大陆是核心付费盘。** Owner 实测确认两条已跑通：① **会员订阅**=卡支付（Visa/Master，含大陆发行的双币卡）可成功续费 ✓ —— 大陆会员的**主路径**；② **积分包**=支付宝+卡，一次性收款成功 ✓。<br>**支付宝续费订阅**（Stripe Checkout subscription 模式**不支持** alipay、recurring alipay 仅 private preview，[文档](https://docs.stripe.com/payments/alipay)）降级为**可选增强、且非"置开关即得"**：Owner 可并行向 Stripe 申请 recurring preview，但**审批通过只是前提，续费机制仍需单独实现任务**（保存方式+off-session），非本次范围（详见 PAY-1 第 3 条）。`alipay_subscription_enabled` 上线保持 false；**不批、批了但未实现，均不影响上线**（卡订阅已覆盖会员）。<br>**已删除**：原"一次性会员资格包"保底路径——卡订阅实测可用后不再需要，PAY-1 相应减负、**取消其迁移槽**。<br>**边界说明**（备查，非任务）：仅持银联单币卡且不用支付宝的用户无法购买会员，但可用支付宝购买积分包；无人被完全挡在付费之外。 |
 | **D12** | 人机验证架构（2026-08-15） | **全体统一用 Supabase 原生 hCaptcha**，弃用"应用层地域分流（极验/阿里云）"。**根因**：注册/登录是浏览器用公开 anon key **直连 Supabase**（`login/page.tsx:128/181/222` 实测），不经 Graylum 服务端 → 应用层 CAPTCHA 无法卡住注册端点（第 4 轮 F2）；而 Supabase 原生 CAPTCHA **只支持 hCaptcha/Turnstile**（官方文档），选 hCaptcha（大陆可用的 reCAPTCHA 替代）。覆盖：邮箱注册、密码登录、**未来手机 OTP**（同为客户端直连，原生 hCaptcha 一并覆盖）。**OAuth（Google）不走 hCaptcha**（重定向流不接受 captchaToken），依赖 Google 自身机器人防护——AUTH-1 不得强行给 OAuth 加 captcha 否则会打断。<br>**时序纪律（F7 复活）**：开启 Supabase 原生 CAPTCHA 后，客户端必须传 `captchaToken`，否则登录全断 → 后台开关必须与 AUTH-1 前端接入**同环境配对**开启（见 AUTH-1、§9）。 |
@@ -365,6 +367,7 @@ progress_refresh_v10_1:
 - **退款**：partial 与 full 同语义；当期剩余只扣一次；历史期/开户/签到/管理员/其他订阅/积分包全部保留；重放与 later-full 不二次扣；缺 timestamp→REVIEW_REQUIRED；Stripe 侧仍 active→告警。
 - **Skill**：draft 不进 runtime；完整包发布原子、失败保留旧版本；普通聊天下个请求读取新发布版本，工作台固定方法包且不混用新 reference；模块隔离；**active+unbound、归档、撤销版本、无权限或读取失败均拒绝执行且不扣费**；公开接口及普通角色读不到私有 draft/正文/文件/manifest；完整读取选中方法及必要资源，容量不足明确失败；用户不能越权指定 skill/revision。
 - **V3 工作台/研究**：六步候选、工作稿、确认快照分别保存；前序修改使下游待复核但不删成果；迟到 AI 不覆盖用户编辑；正式版本、证据及报告不可变且属于本用户/项目；v2 草稿不切换当前 v1，全部有效确认后幂等生成确定性报告；AgentKey 必需平台能力、分页、字段、价格/预算、使用与保留条件经真实验证；取数与 AI 分开计量且不重复收费，断线/结果未知可恢复；首次与后续迭代经 Owner 产品验收。各层证据不得互相替代。
+- **通用 Skill/配置工作台**：按[V3 通用验收](tasks/V3-standard-skills.md#generic-workbench-acceptance)，同一核心端到端跑通三步非社媒、原六步社媒、八步非社媒的编辑/保存/确认/依赖复核/历史/报告/恢复；核心完成后新增业务仅改方法包/流程配置，不改核心源码、数据库结构或新增专属业务路由，保留差异和运行证据。确认失效只沿声明依赖传播且保留内容/历史，迟到AI不覆盖工作稿；增删/重排流程版本不破坏旧轮次/确认/报告。跨用户/项目/Skill越权读取、修改、确认、恢复拒绝，同名步骤及轮次/版本不串数据。非法配置、循环/无效依赖、无效资源映射与未支持必需能力在外部调用/扣费前拒绝；无研究需求样本不调用研究，原非工作流文档Skill无需转换流程。该组是 V3-ARTIFACTS / V3-WORKBENCH / V3-M3 的新增验收，保留前项社媒六步和本节全部原有矩阵，不以通用样本替代完整M3。
 - **付费**：积分包/Pro/Gold 月年全部走通；零/负/空无 CTA；success/cancel/expired；订单落库；webhook 重放只履约一次；Portal 取消；PAY-1 合法升级矩阵通过（FULL_TARGET_NO_PRORATION：按目标周期完整价格收费、no proration）；降级、年付→月付、同级同周期重复均拒绝；scheduled cancellation 必须先恢复续费，直接升级拒绝；package discount 正确；**checkout 超频被限流**；**积分包支付宝端到端（test-mode）：发起→回跳→`checkout.session.completed(paid)`→履约一次；重放不二次；（若收到）async_failed 不履约；退款走 `refund.updated` 对支付宝 charge 对账成立**。
 - **Cron/对账**：5 cron 授权通过、unauthorized 拒绝；release 幂等；reconcile success 且 baseline 之后 paid-unfulfilled=0、重复发放=0、termination gap=0；日志无 secret。
 

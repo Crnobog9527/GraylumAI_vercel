@@ -8,6 +8,7 @@ runtime ledger, or completion state.
 - Authoritative current `staging` `AGENTS.md`.
 - [Master Plan v10.1 with approved V3 amendments](Graylum_Master_Plan_v10.1.md).
 - [V3 specification and V3.1 first delivery](tasks/V3-standard-skills.md).
+- [Generic Skill foundation and configurable workbench](tasks/V3-standard-skills.md#generic-skill-workbench): Owner-approved product amendment (2026-09-07), including [future acceptance cases](tasks/V3-standard-skills.md#generic-workbench-acceptance). Requirements are specified; implementation/acceptance remain pending. The social six-step template is retained. This entry does not select or start a task.
 - `docs/launch/plan-core.md`.
 - Stable task specifications under `docs/launch/tasks/`.
 
