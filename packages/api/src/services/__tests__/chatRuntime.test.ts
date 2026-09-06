@@ -5,12 +5,12 @@ import { applyUserPromptTemplate, buildRuntimeSystemPrompt, resolveActiveModuleP
 const content = '  Published system\n';
 function client(module: Record<string, unknown> | null, error: unknown = null) {
   const select = vi.fn();
-  return { select, from: (table: string) => {
+  return { rpc: vi.fn().mockResolvedValue({ data: true, error: null }), select, from: (table: string) => {
     const query = {
       select: (columns: string) => { select(table, columns); return query; },
       eq: () => query,
       single: async () => table === 'modules' ? { data: module, error } : { data: {
-        id: 'skill-a', skill_key: 'a', status: 'published', published_content: content,
+        id: 'skill-a', skill_key: 'a', status: 'published', content_kind: 'text', published_content: content,
         published_version: 1, published_content_hash: createHash('sha256').update(content).digest('hex'),
       }, error: null },
     };

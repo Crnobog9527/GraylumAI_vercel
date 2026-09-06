@@ -30,16 +30,17 @@ export class ModuleSkillUnavailableError extends Error {
 export async function resolvePublishedSkillSnapshot(
   supabase: SupabaseClient,
   module: { id: string; skill_id: unknown },
+  options: { allowInactive?: boolean } = {},
 ): Promise<PublishedSkillSnapshot> {
   try {
     if (typeof module.skill_id !== 'string' || !module.skill_id.trim()) {
       throw new ModuleSkillUnavailableError();
     }
     const { data, error } = await supabase.from('skills')
-      .select('id, skill_key, status, published_content, published_version, published_content_hash')
+      .select('id, skill_key, status, content_kind, published_content, published_version, published_content_hash')
       .eq('id', module.skill_id)
       .single();
-    if (error || !data || data.id !== module.skill_id || data.status !== 'published'
+    if (error || !data || data.id !== module.skill_id || data.status !== 'published' || data.content_kind !== 'text'
       || typeof data.skill_key !== 'string' || !data.skill_key.trim()
       || typeof data.published_content !== 'string' || !data.published_content.trim()
       || !Number.isSafeInteger(data.published_version) || data.published_version < 1
@@ -48,6 +49,10 @@ export async function resolvePublishedSkillSnapshot(
       || createHash('sha256').update(data.published_content, 'utf8').digest('hex') !== data.published_content_hash) {
       throw new ModuleSkillUnavailableError();
     }
+    const revocation = await supabase.rpc('is_text_skill_executable', {
+      p_module_id: module.id, p_skill_id: data.id, p_version: data.published_version, p_require_active: !options.allowInactive,
+    });
+    if (revocation.error || revocation.data !== true) throw new ModuleSkillUnavailableError();
     return Object.freeze({
       skillId: data.id,
       skillKey: data.skill_key,

@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolvePublishedSkillSnapshot, skillSnapshotMetadata } from '../skillRuntime';
 
 const published = (content = '  Exact Skill A\n', version = 1) => ({
-  id: 'skill-a', skill_key: 'skill-a', status: 'published', published_content: content,
+  id: 'skill-a', skill_key: 'skill-a', status: 'published', content_kind: 'text', published_content: content,
   published_version: version, published_content_hash: createHash('sha256').update(content).digest('hex'),
 });
 function fixture(data: unknown, error: unknown = null, throws = false) {
   const eq = vi.fn();
   const select = vi.fn();
-  return { eq, select, from: () => {
+  return { rpc: vi.fn().mockResolvedValue({ data: true, error: null }), eq, select, from: () => {
     const q = { select: (columns: string) => { select(columns); return q; },
       eq: (key: string, value: string) => { eq(key, value); return q; },
       single: async () => { if (throws) throw new Error('private secret'); return { data, error }; } };
@@ -18,7 +18,7 @@ function fixture(data: unknown, error: unknown = null, throws = false) {
 }
 describe('Skill runtime snapshot', () => {
   it.each([
-    ['missing', null], ['draft', { ...published(), status: 'draft' }],
+    ['directory', { ...published(), content_kind: 'directory' }], ['missing', null], ['draft', { ...published(), status: 'draft' }],
     ['archived', { ...published(), status: 'archived' }],
     ['empty', { ...published(), published_content: '  ' }],
     ['null', { ...published(), published_content: null }],
@@ -34,6 +34,10 @@ describe('Skill runtime snapshot', () => {
   it.each([false, true])('normalizes returned/thrown DB errors (%s)', async (throws) => {
     await expect(resolvePublishedSkillSnapshot(fixture(null, { message: 'private secret' }, throws) as any, { id: 'module-a', skill_id: 'skill-a' }))
       .rejects.toMatchObject({ code: 'MODULE_SKILL_UNAVAILABLE', message: expect.not.stringContaining('private secret') });
+  });
+  it('rejects revoked or unreadable live execution state', async () => {
+    const db=fixture(published());db.rpc.mockResolvedValue({data:false,error:null});
+    await expect(resolvePublishedSkillSnapshot(db as any,{id:'module-a',skill_id:'skill-a'})).rejects.toMatchObject({code:'MODULE_SKILL_UNAVAILABLE'});
   });
   it('does not query an unbound Skill', async () => {
     const db = fixture(published());

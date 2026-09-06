@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, integer, timestamp, jsonb, primaryKey, decimal, uniqueIndex, boolean, customType, bigint } from 'drizzle-orm/pg-core';
 
 // --- 核心表 ---
 
@@ -468,6 +468,7 @@ export const aiUsageLogs = pgTable('ai_usage_logs', {
 export const skills = pgTable('skills', {
   id: uuid('id').primaryKey().defaultRandom(),
   skillKey: text('skill_key').notNull(),
+  contentKind: text('content_kind', { enum: ['text', 'directory'] }).default('text').notNull(),
   draftContent: text('draft_content').default('').notNull(),
   publishedContent: text('published_content'),
   status: text('status', { enum: ['draft', 'published', 'archived'] }).default('draft').notNull(),
@@ -549,4 +550,36 @@ export const modules = pgTable('modules', {
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// V3 private state. ACL, immutability and transitions are defined in 0064/0065.
+const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' });
+export const skillPackages = pgTable('skill_packages', {
+  revisionId: uuid('revision_id').primaryKey().references(() => skillRevisions.id),
+  skillId: uuid('skill_id').notNull().references(() => skills.id),
+  requestId: uuid('request_id').notNull().unique(), manifest: jsonb('manifest').notNull(),
+  packageHash: text('package_hash').notNull(), entryHash: text('entry_hash').notNull(),
+  expectedVersion: integer('expected_version').notNull(), actorId: uuid('actor_id').notNull().references(() => profiles.id),
+});
+export const skillPackageFiles = pgTable('skill_package_files', {
+  revisionId: uuid('revision_id').notNull().references(() => skillPackages.revisionId),
+  path: text('path').notNull(), bytes: bytea('bytes').notNull(), byteLength: integer('byte_length').notNull(),
+  mediaType: text('media_type').notNull(), fileHash: text('file_hash').notNull(),
+}, t => [primaryKey({ columns: [t.revisionId, t.path] })]);
+export const skillRevisionRevocations = pgTable('skill_revision_revocations', {
+  revisionId: uuid('revision_id').primaryKey().references(() => skillRevisions.id),
+  revokedBy: uuid('revoked_by').notNull().references(() => profiles.id),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }).defaultNow().notNull(),
+});
+export const researchPlans = pgTable('research_plans', {
+  id: uuid('id').primaryKey(), actorId: uuid('actor_id').notNull().references(() => profiles.id),
+  budgetUnits: bigint('budget_units', { mode: 'number' }).notNull(), maxOperations: integer('max_operations').notNull(),
+  operations: jsonb('operations').notNull(), reservedUnits: bigint('reserved_units', { mode: 'number' }).default(0).notNull(),
+  cancelled: boolean('cancelled').default(false).notNull(), createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+export const researchOperations = pgTable('research_operations', {
+  id: uuid('id').primaryKey(), planId: uuid('plan_id').notNull().references(() => researchPlans.id),
+  identityHash: text('identity_hash').notNull(), quoteUnits: bigint('quote_units', { mode: 'number' }).notNull(),
+  dispatchToken: uuid('dispatch_token').notNull(), state: text('state').notNull(), result: jsonb('result'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

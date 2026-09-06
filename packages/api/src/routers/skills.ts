@@ -7,6 +7,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { adminProcedure, router } from '../trpc';
+import { packagePublicationInput, publishSkillPackage } from '../services/skills/publication';
 import { resolvePublishedSkillSnapshot } from '../services/skillRuntime';
 
 const skillColumns = 'id, skill_key, draft_content, status, published_version, published_content_hash, published_at';
@@ -39,6 +40,15 @@ function assertResult(error: unknown, data: unknown, message: string): asserts d
 }
 
 export const skillsRouter = router({
+  publishPackage: adminProcedure.input(packagePublicationInput).mutation(async ({ ctx, input }) => {
+    try { return await publishSkillPackage(ctx.supabase, ctx.profileId, input); }
+    catch { throw new TRPCError({ code: 'BAD_REQUEST', message: '完整包发布失败，请刷新版本并检查文件与资源计划' }); }
+  }),
+  revokeRevision: adminProcedure.input(z.object({ revisionId: z.string().uuid() }).strict()).mutation(async ({ ctx, input }) => {
+    const { error } = await ctx.supabase.rpc('revoke_skill_revision', { p_revision_id: input.revisionId, p_actor_id: ctx.profileId });
+    if (error) throw new TRPCError({ code: 'BAD_REQUEST', message: '撤销失败' });
+    return { success: true };
+  }),
   list: adminProcedure.input(pagination).query(async ({ ctx, input }) => {
     const offset = input?.offset ?? 0;
     const { data, error, count } = await ctx.supabase.from('skills')
@@ -123,7 +133,7 @@ export const skillsRouter = router({
           .select('id, skill_id').eq('id', input.id).single();
         assertResult(error, module, '模块不存在或读取失败');
         try {
-          await resolvePublishedSkillSnapshot(ctx.supabase, { id: module.id, skill_id: module.skill_id });
+          await resolvePublishedSkillSnapshot(ctx.supabase, { id: module.id, skill_id: module.skill_id }, { allowInactive: true });
         } catch {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'MODULE_SKILL_UNAVAILABLE：请先绑定可用的已发布 Skill' });
         }
