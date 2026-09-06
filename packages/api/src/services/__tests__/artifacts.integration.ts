@@ -168,6 +168,13 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
    expect(result.error).not.toBeNull();expect((await sql.query('select count(*)::int n from artifact_projects where id=$1',[projectId])).rows[0].n).toBe(0);
   }
  });
+ it('validates a dense 32-step acyclic workflow within a bounded SQL statement',async()=>{
+  const pack=makePackage(),flow=makeWorkflow(32);
+  flow.steps.forEach((step,i)=>{step.dependsOn=flow.steps.slice(0,i).map(s=>s.id);step.resources=[`references/step-${i%8}.md`];});
+  await sql.query('set statement_timeout=2000');
+  try{await sql.query('select artifact_validate_workflow($1,$2)',[flow,pack.descriptor]);}
+  finally{await sql.query('set statement_timeout=0');}
+ });
  it('rejects unverified Auth without a private RPC and never modifies ordinary text Skill state',async()=>{
   const f=await fixture(),u=user();vi.mocked(u.auth.getUser).mockResolvedValue({data:{user:{id:actor}},error:null} as never);
   const rpc=vi.spyOn(db,'rpc');rpc.mockClear();

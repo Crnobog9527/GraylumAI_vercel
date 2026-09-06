@@ -121,10 +121,11 @@ BEGIN
   IF (s->>'requiresEvidence')::boolean AND NOT s->'requiredCapabilities' ? 'research.evidence' THEN RAISE EXCEPTION 'unsupported capability'; END IF;
   IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(flow->'report'->'sections') x WHERE x->>'stepId'=s->>'id') THEN RAISE EXCEPTION 'missing report mapping'; END IF;
  END LOOP;
- IF EXISTS(WITH RECURSIVE edges(a,b,path,cycle) AS (
- SELECT node->>'id',d,ARRAY[node->>'id',d],node->>'id'=d FROM jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d
- UNION ALL SELECT e.a,d,e.path||d,d=ANY(e.path) FROM edges e,jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d WHERE node->>'id'=e.b AND NOT e.cycle)
- SELECT 1 FROM edges WHERE cycle) THEN RAISE EXCEPTION 'cyclic workflow'; END IF;
+ -- Distinct reachability pairs bound work to at most 32*32, even for a dense DAG.
+ IF EXISTS(WITH RECURSIVE edges(a,b) AS (
+ SELECT node->>'id',d FROM jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d
+ UNION SELECT e.a,d FROM edges e,jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d WHERE node->>'id'=e.b)
+ SELECT 1 FROM edges WHERE a=b) THEN RAISE EXCEPTION 'cyclic workflow'; END IF;
  FOR v IN SELECT * FROM jsonb_array_elements(flow->'report'->'sections') LOOP
   IF v->>'title' IS NULL OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(flow->'steps') node WHERE node->>'id'=v->>'stepId') THEN RAISE EXCEPTION 'invalid report mapping'; END IF;
  END LOOP;
