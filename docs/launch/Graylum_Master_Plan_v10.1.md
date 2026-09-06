@@ -1,8 +1,27 @@
-# Launch status: `STAGING_REF_CONDITIONAL_ACTIVE`
+# Graylum Launch 产品规格（v10.1 + 已批准 V3.1 扩展）
 
-This file is a verbatim freeze of the Owner-provided v10.1 input. Its frozen plan body below is not reopened or substantively redesigned by this cutover. The wrapper is effective only when this exact cutover content is present on the authoritative current `staging` ref after a separately Owner-authorized, independently audited governance merge. A feature branch, commit, Draft PR, review, check, Issue, or gate does not activate Launch Authority. This file remains a plan and does not itself authorize a product task, STG-FIX, merge, database action, main, production, or external-system mutation.
+本文保留 v10.1 历史产品决策与任务交付；本批仅同步 Owner 批准的 V3 产品范围及 V3.1 最小加载交付。执行遵循 current staging `AGENTS.md`，本文不授予合并、数据库、配置、收费调用或生产操作权限。旧流程用语仅作历史，不恢复 Gate 或台账。
+
+## 当前仓库事实与本批边界（2026-09-06 核验）
+
+GitHub live 仓库 `Crnobog9527/GraylumAI_vercel`，本批起点 staging 为 `283686d00733d69147c89f8ac5f552e4b380074b`。以下仅证明代码/文档已合并，不等于远端 schema、权限、模型效果、付款验收或 M3 已通过：
+
+| 历史交付 | GitHub 合并证据 |
+| --- | --- |
+| SKILL-1A 发布契约 | [#364](https://github.com/Crnobog9527/GraylumAI_vercel/pull/364) |
+| SKILL-1B 管理端及当前正文 runtime | [#366](https://github.com/Crnobog9527/GraylumAI_vercel/pull/366) |
+| BILL-1 对账 | [#365](https://github.com/Crnobog9527/GraylumAI_vercel/pull/365) |
+| PAY-1 付费与升级 | [#367](https://github.com/Crnobog9527/GraylumAI_vercel/pull/367) |
+| CI-1 精选回归与 db:push 防护 | [#372](https://github.com/Crnobog9527/GraylumAI_vercel/pull/372) |
+| M3 付费矩阵文字修正 | [#375](https://github.com/Crnobog9527/GraylumAI_vercel/pull/375) |
+
+Owner 本窗口仅选择 **V3.1 规格同步与标准 Skill 最小真实加载**。第一批交付、后续依赖和验收见 [V3 技术规格](tasks/V3-standard-skills.md) 与 [依赖结构](plan-core.md)。本批不切换聊天运行路径，不代表 V3 完成；不接手旧 M3 支付验收、不启动 REL-1。远端数据库、模型、AgentKey、计费与完整 M3 在本批均为 **NOT_RUN**。
+
+以下 2026-08-14 至 08-16 的代码、环境、进度、日期承诺和“下一任务”快照均为历史，不能作为当前状态；仍有效的产品决策、验收与出口保留，D7 及直接相关 Skill/M3 要求由本批显式扩展。进度须以每次 GitHub live 及获准的运行证据重新核实。
 
 # Graylum 公开付费 MVP — Master Plan v10.1（执行进度刷新版）
+
+> 下列 YAML 为 2026-08-16 历史快照，不是当前执行状态。
 
 ```yaml
 version: v10.1
@@ -55,7 +74,7 @@ progress_refresh_v10_1:
 | D4 | 退款 | 任何 Owner 批准的订阅退款（partial/full 事件同语义）＝整份订阅立即终止：Stripe 端 Owner 立即取消+退款 → 本地先写 release termination → 只扣当前退款周期尚未使用的订阅积分 → 历史周期不追回 → 开户/签到/管理员/其他订阅/未退款积分包不动 → 年付未来释放全部停止。系统不自算现金金额、无自助退款。 |
 | D5 | 正常取消 | Stripe Customer Portal `cancel_at_period_end=true`；已付周期权益继续；年付剩余月度按周年继续释放到 Stripe period end。正常取消≠退款。 |
 | D6 | 年付释放 | 12 期；第 1 期在首张年付发票支付后立即发放；anchor=原始 Stripe term start；UTC 日历月周年；月末保留原日、超出 clamp 到月末；每期从原始 anchor 计算；**禁止毫秒÷12**。示例：01-31 → 01-31 / 02-28(29) / 03-31 / 04-30。 |
-| D7 | Skill | 最小 DB Skill CMS：`skills` + `skill_revisions` + `modules.skill_id`；draft/published/archived；原子发布、自动 revision、版本只增；无 tool loop/沙箱/文件 Skill/历史 diff 回滚 UI。**active 模块必须 bound 且 Skill published**；不可用（draft/archived/缺失/读库失败）→ 不调 provider、不扣积分、结构化告警，禁止回退 description。**active + unbound 一律视为故障**（legacy fallback 仅限 inactive 模块与测试环境）。 |
+| D7 | Skill（V3 已批准扩展） | 保留 `skills`、不可变 revision 与模块绑定基础，扩展为**私有标准目录包、完整入口和按需资源真实读取**；六步成果、用户确认快照、策略历史及确定性报告按 [V3 规格](tasks/V3-standard-skills.md) 交付，Skill 外部研究统一走受控服务端数据适配层（首选 AgentKey MCP）。不执行任意脚本、沙箱或无限工具循环。active 模块必须绑定有效 published 且可执行的 Skill；缺失、归档、撤销、无权限或读取失败均拒绝执行，不调用 provider/收费取数、不预扣，不回退 description。**普通聊天**下个请求读取当前发布版本；**工作台**固定该轮方法版本，升级须明确确认；固定旧版不绕过实时模块/Skill/版本/权限检查。历史成果读取与私有方法可执行性分开。 |
 | D8 | 首发商品 | Pro/Gold 月付+年付 + ≥1 个正金额积分包；零金额/未配置不得 checkout-ready（#276）；首发恢复 Billing Engine v1.5 仅升级路径（Pro→Gold、月付→年付）；禁止降级/同级同周期重复；到期取消须先恢复续费。 |
 | **D11** | 大陆支付（2026-08-15） | **大陆是核心付费盘。** Owner 实测确认两条已跑通：① **会员订阅**=卡支付（Visa/Master，含大陆发行的双币卡）可成功续费 ✓ —— 大陆会员的**主路径**；② **积分包**=支付宝+卡，一次性收款成功 ✓。<br>**支付宝续费订阅**（Stripe Checkout subscription 模式**不支持** alipay、recurring alipay 仅 private preview，[文档](https://docs.stripe.com/payments/alipay)）降级为**可选增强、且非"置开关即得"**：Owner 可并行向 Stripe 申请 recurring preview，但**审批通过只是前提，续费机制仍需单独实现任务**（保存方式+off-session），非本次范围（详见 PAY-1 第 3 条）。`alipay_subscription_enabled` 上线保持 false；**不批、批了但未实现，均不影响上线**（卡订阅已覆盖会员）。<br>**已删除**：原"一次性会员资格包"保底路径——卡订阅实测可用后不再需要，PAY-1 相应减负、**取消其迁移槽**。<br>**边界说明**（备查，非任务）：仅持银联单币卡且不用支付宝的用户无法购买会员，但可用支付宝购买积分包；无人被完全挡在付费之外。 |
 | **D12** | 人机验证架构（2026-08-15） | **全体统一用 Supabase 原生 hCaptcha**，弃用"应用层地域分流（极验/阿里云）"。**根因**：注册/登录是浏览器用公开 anon key **直连 Supabase**（`login/page.tsx:128/181/222` 实测），不经 Graylum 服务端 → 应用层 CAPTCHA 无法卡住注册端点（第 4 轮 F2）；而 Supabase 原生 CAPTCHA **只支持 hCaptcha/Turnstile**（官方文档），选 hCaptcha（大陆可用的 reCAPTCHA 替代）。覆盖：邮箱注册、密码登录、**未来手机 OTP**（同为客户端直连，原生 hCaptcha 一并覆盖）。**OAuth（Google）不走 hCaptcha**（重定向流不接受 captchaToken），依赖 Google 自身机器人防护——AUTH-1 不得强行给 OAuth 加 captcha 否则会打断。<br>**时序纪律（F7 复活）**：开启 Supabase 原生 CAPTCHA 后，客户端必须传 `captchaToken`，否则登录全断 → 后台开关必须与 AUTH-1 前端接入**同环境配对**开启（见 AUTH-1、§9）。 |
@@ -71,7 +90,7 @@ progress_refresh_v10_1:
 
 ---
 
-## 2. 事实地基（已验证；执行时以 live state 复核）
+## 2. 历史事实地基（2026-08-14 快照；不得当作当前缺陷清单）
 
 **代码事实**（origin/staging b148803）：
 - Billing v1.5 主体已存在且已上生产 → **只增量修，禁止重建**。
@@ -125,7 +144,7 @@ progress_refresh_v10_1:
 6. 发现生产数据异常、真实用户受影响、或安全暴露；
 7. fresh-read 的 live state 出现**无法用"本计划已合并任务"解释的**漂移。<br>**判定口径（v7 修正 F1）**：本计划的任务会主动推进 staging SHA、迁移号、分支状态——这些是**预期变化**，不触发停止。触发停止的是**未预期漂移**：出现本计划未列出的第三方提交、迁移号被计划外占用、外部配置（Stripe/Supabase/Vercel）出现非本计划所致的变更、或 live 状态与"截至上一个已合并任务应有的状态"不符。换言之：把 fresh-read 结果与**动态基线**（= 计划快照 + 已合并任务的预期效果）比对，而非与静态文档快照比对。存疑时上报，不擅自推进也不无脑阻塞。
 
-### 前置进度（R0-A ✅ → GOV-1 ✅ → R0-B ✅ → STG-FIX ⏭）
+### 历史前置进度（2026-08-16 快照）
 
 > **顺序依据（v6 修正）**：R0-B 是 staging→main 的 production release，按 AGENTS.md 属高风险，故必须在 GOV-1 合并之后。R0-A（PR 入 staging）与 GOV-1（文档变更）均不在高风险清单，可先于 GOV-1 执行——因此不存在自锁。
 
@@ -238,15 +257,17 @@ progress_refresh_v10_1:
 
 ### Lane-产品（与钱路并行）
 
-**SKILL-1A DB 与发布契约** — SLOT-6
+**SKILL-1A DB 与发布契约** — SLOT-6（历史基础交付已合并 #364；V3 不重判其未实现）
 - 内容：`skills`（skill_key 不可变唯一/draft_content/published_content/status/published_version/hash/审计列）+ `skill_revisions`（UNIQUE(skill_id,version)，不可变）+ `modules.skill_id`（nullable FK，新模块默认 inactive）；RLS+grants（anon/authenticated 无写、普通用户读不到 draft）；service-role-only 原子发布 RPC（锁行→校验非空→version+1→插 revision→published=draft→hash/时间）；版本只增，恢复旧内容=旧 revision 复制为新 draft 再发布。
 - 验收：发布事务/权限/forward-only 测试全绿；普通用户读 draft 被拒。
 - allowed_paths：`packages/db/schema.ts`、`packages/db/migrations/<SLOT-6>.sql`、对应测试。预估 2 天。
 
-**SKILL-1B admin + runtime**（依赖 1A）
+**SKILL-1B admin + runtime**（依赖 1A；历史基础交付已合并 #366）
 - 内容：独立 `skillsRouter`/`skillRuntime`（不塞 admin.ts）；`/admin/skills`：列表/新建/编辑 draft/发布/归档/最小模块创建/绑定/启停/显示 version+hash（不做 preview/diff/回滚 UI/批量迁移/caching）；runtime：bound+published → published_content 进 system prompt、用户输入保持 user message、usage metadata 记 skill id/key/version/hash/module id；**active 模块若 unbound 或 Skill 不可用 → `MODULE_SKILL_UNAVAILABLE`，不调 provider、不预扣**（替换 `chatRuntime.ts:121` 回退）；legacy fallback **仅限 inactive 模块的 admin preview 与测试环境**，生产 active 路径不可达。
 - 验收：draft 不进 runtime / 发布后下次请求即新版本 / 模块 A 不含 Skill B / **active+unbound 必须失败且不扣费** / active+bound 但 Skill archived 必须失败且不扣费 / 普通用户读不到 draft / 用户不能指定 skill。
 - allowed_paths：`packages/api/src/routers/skills.ts`（新建）、`packages/api/src/services/skillRuntime.ts`（新建）、`packages/api/src/services/chatRuntime.ts`、`packages/api/src/root.ts`、`apps/web/src/app/admin/skills/**`（新建）、对应测试。预估 3–4 天。
+
+> 上述 SKILL-1A/1B 保留原交付与验收历史。其普通聊天“下个请求即新版本”不适用于 V3 工作台固定轮次；只禁止用户越权指定 Skill，不禁止宿主校验后的显式模块选择。V3 追加私有完整包、撤销、固定版本、工作台与研究验收，不能只靠旧正文发布判定完成。
 
 **PAY-1 公开付费面 + checkout 限流 + 大陆支付（D11）**
 - 内容（基础）：#276（`settings.ts:276` 金额>0 才 checkout-ready，服务端正数校验保持）；Customer Portal session（server-resolved customer、return URL allowlist）+ Profile 取消入口 + Portal 取消 webhook 状态同步；恢复现有 Billing Engine v1.5 `changeSubscriptionPlan` 仅升级路径（Pro→Gold、月付→年付），禁止降级与同级同周期重复；已安排到期取消须先恢复续费，升级不得自动恢复；现有订阅不得通过 Checkout 创建第二份订阅；升级目标本地周期金额须为正整数且 Price 配置有效，用户/IP 限流 fail closed；Stripe 全价预览→用户明确确认→服务端重新预览防价格或状态漂移；同一 Stripe subscription 使用 `billing_cycle_anchor=now` + `proration_behavior=none` + `payment_behavior=error_if_incomplete` 开始完整目标周期，持久锁派生幂等键，超时先读取远端再恢复，同一尝试不得重复写入；仅已付全价目标发票履约更新权益和积分；**checkout session 创建加每用户/每 IP 限流（复用现有 Upstash）**，防批量试卡。禁止：重建 checkout、自助退款、客户端传 customer id、Stripe live 写入。
@@ -342,9 +363,12 @@ progress_refresh_v10_1:
 - **计数器记账**：Owner 双例精确通过；当期优先封顶；预扣→成功少用恢复→计数逆减；**跨来源少用（→460）**；**超用后退款（→500，非 450）**；顺序型/交错型并发（→500）；provider 失败全恢复；中断部分恢复；reversed 期的恢复与超用均被拦截记录且不补扣；并发不超发；余额=账本累计恒成立；无负余额、无 consumed>granted。
 - **年付**：Jan-31 全链；闰年；月末 clamp；首期即时；12 期总和精确；webhook/cron 同期不重复；正常取消继续释放、period end 停止；退款立即终止。
 - **退款**：partial 与 full 同语义；当期剩余只扣一次；历史期/开户/签到/管理员/其他订阅/积分包全部保留；重放与 later-full 不二次扣；缺 timestamp→REVIEW_REQUIRED；Stripe 侧仍 active→告警。
-- **Skill**：draft 不进 runtime；发布原子；下个请求即新版本；模块隔离；**active+unbound 失败且不扣费**；active+archived Skill 失败且不扣费；普通用户读不到 draft；长历史截断不截 Skill；用户不能指定 skill。
+- **Skill**：draft 不进 runtime；完整包发布原子、失败保留旧版本；普通聊天下个请求读取新发布版本，工作台固定方法包且不混用新 reference；模块隔离；**active+unbound、归档、撤销版本、无权限或读取失败均拒绝执行且不扣费**；公开接口及普通角色读不到私有 draft/正文/文件/manifest；完整读取选中方法及必要资源，容量不足明确失败；用户不能越权指定 skill/revision。
+- **V3 工作台/研究**：六步候选、工作稿、确认快照分别保存；前序修改使下游待复核但不删成果；迟到 AI 不覆盖用户编辑；正式版本、证据及报告不可变且属于本用户/项目；v2 草稿不切换当前 v1，全部有效确认后幂等生成确定性报告；AgentKey 必需平台能力、分页、字段、价格/预算、使用与保留条件经真实验证；取数与 AI 分开计量且不重复收费，断线/结果未知可恢复；首次与后续迭代经 Owner 产品验收。各层证据不得互相替代。
 - **付费**：积分包/Pro/Gold 月年全部走通；零/负/空无 CTA；success/cancel/expired；订单落库；webhook 重放只履约一次；Portal 取消；PAY-1 合法升级矩阵通过（FULL_TARGET_NO_PRORATION：按目标周期完整价格收费、no proration）；降级、年付→月付、同级同周期重复均拒绝；scheduled cancellation 必须先恢复续费，直接升级拒绝；package discount 正确；**checkout 超频被限流**；**积分包支付宝端到端（test-mode）：发起→回跳→`checkout.session.completed(paid)`→履约一次；重放不二次；（若收到）async_failed 不履约；退款走 `refund.updated` 对支付宝 charge 对账成立**。
 - **Cron/对账**：5 cron 授权通过、unauthorized 拒绝；release 幂等；reconcile success 且 baseline 之后 paid-unfulfilled=0、重复发放=0、termination gap=0；日志无 secret。
+
+**完整 M3 出口保留**：在固定 RC 的代码/schema/私有包/能力与配置身份上，完成本节全部适用 Auth、计数器、年付、退款、Skill、V3、付费与 Cron/对账项，无可复现 P0/P1，才可报告 M3 完成。旧任务已合并、本批格式/加载测试通过或规格已同步均不能替代该出口。任何受保护外部验证需另获授权；M3 完成后仍由 Owner 选择后续任务，绝不自动启动 REL-1。
 
 ---
 
@@ -430,7 +454,7 @@ R0-A 历史示例（**已完成，禁止重用为当前授权**）：
 
 > **STG-FIX 注意**：不得照抄 R0-A 示例。STG-FIX 属 database schema / migration 高风险任务，开工时必须以 fresh live `AGENTS.md` 和 canonical Sprint Contract 为准；迁移编号、exact allowed path、required validation、services 与 Owner gate 都要当次解析，本文不预先产生授权。
 
-## 13. 当前唯一下一动作
+## 13. 历史下一动作快照（2026-08-16；当前选择见文首）
 
 ```text
 状态（2026-08-16，fresh GitHub live）：
@@ -628,7 +652,7 @@ Codex 逐一走通四类且结果全部正确：(a) 纯少用 G1000/C0/其他500
 - **审计双方一致判定收敛**：Codex 明确"同意继续散文评审边际收益已明显递减；REFUND-1B 剩余风险主要在事务实现、锁序、元数据写入及并发交错，必须由真实 SQL/RPC 代码 + 四类边界加双事务测试裁决，而非继续扩写方案"。本文件作者（独立核验方）判断一致。
 - **决定**：**v10 为执行定稿，停止散文评审，进入执行。** REFUND-1B 的剩余把握转由代码测试兜底——§4/§7 已备好覆盖"少用/超用/超用溢出/跨来源/顺序并发/交错并发"六类的验收用例，编码时直接落为测试。若后续出现\*新事实\*（外部环境变化、Stripe/Supabase 行为与文档不符、EXT-0 未覆盖项暴露）再定点修订，不再做无差别整篇复审。
 
-**执行路径提醒（已由 v10.1 live 进度刷新）**：R0-A ✅ → GOV-1 ✅ → R0-B ✅ → **STG-FIX（下一计划任务，未授权）** → SEC-1 → AUTH-1 → YEAR-1 → REFUND-1B → BILL-1；产品 lane 在依赖满足后并行 SKILL-1A→1B、PAY-1、CI-1。迁移槽仍按 §5 规则在每个任务开工时 fresh-read / 分配，**本进度刷新不重新写死当前最大迁移号**。`ADMIN_MODEL_API_KEY_SAVE_FAILURE` 走独立 bug lane，不夹带进上述任务。
+**历史执行路径提醒（2026-08-16 快照，已过时）**：R0-A ✅ → GOV-1 ✅ → R0-B ✅ → **STG-FIX（下一计划任务，未授权）** → SEC-1 → AUTH-1 → YEAR-1 → REFUND-1B → BILL-1；产品 lane 在依赖满足后并行 SKILL-1A→1B、PAY-1、CI-1。迁移槽仍按 §5 规则在每个任务开工时 fresh-read / 分配，**本进度刷新不重新写死当前最大迁移号**。`ADMIN_MODEL_API_KEY_SAVE_FAILURE` 走独立 bug lane，不夹带进上述任务。
 
 ---
 
@@ -636,7 +660,7 @@ Codex 逐一走通四类且结果全部正确：(a) 纯少用 G1000/C0/其他500
 
 > 本节**不是第 7 轮架构审计**，也不重开 D1–D12。它只把 v10 的静态执行入口更新为 2026-08-16 fresh GitHub live 状态，并同步 GOV-1 已生效的 canonical 三态门禁。
 
-### 22.1 Fresh live baseline
+### 22.1 历史 live baseline（2026-08-16）
 
 ```yaml
 repository: Crnobog9527/GraylumAI_vercel
@@ -664,7 +688,7 @@ authority_epoch: G2_MINIMAL_POLICY_EPOCH_1
 - **R0-B ✅** — Phase 1 reconciliation 通过；PR #312 merged `staging → main`；PR #313 以 **0 repository file diff** 将 #312 merge history 同步回 `staging`；Issue #311 已 `closed/completed`。
 - 当前 `main` 与 `staging` 的 tree SHA 相同，说明 R0-B closeout 后代码/文件内容已收敛；`staging` 的额外差异仅为 history-sync merge commit。
 
-### 22.3 当前关键路径
+### 22.3 当时关键路径（历史）
 
 ```text
 R0-A ✅
