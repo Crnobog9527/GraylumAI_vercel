@@ -141,6 +141,6 @@ Owner 本次明确选择受限服务端实现与本地隔离验证；不修改�
 
 验证使用已有 `node packages/db/tests/v3/run-local.mjs`（全相关SQL/包/SDK回放）和新增 `--artifacts-only` 选择项，创建一次性PostgreSQL17/PostgREST14.13、实际应用0066并重复应用，结束清理本轮容器。独立编写的合成包/研究结果，无真实NASA响应或商业方法。Auth的getUser在本地套件中明确模拟；后续HTTP、普通角色拒绝、store/RPC、SQL事务和双连接锁等待均实际运行，不能称GoTrue或三/六/八步网页端到端通过。
 
-当前本地完整相关SQL运行76项通过，其中19项为本批成果事务；后续增加密集32步DAG的有界SQL校验用例，受影响套件当前20项；三/六/八步均覆盖v1、v2、依赖复核和新实例恢复。并发测试记录不同backend PID且同时处于Lock等待，覆盖save/save、save/confirm、publish/publish、publish/save；真实触发器故障证明报告/指针/request整体回滚。API全套1456项通过（含13项新增配置测试），既有非工作流Skill加载与研究边界回归包含其中。执行命令、exact候选和脱敏原始输出见本批PR；最终CI/Review以其live状态为准。
+当前本地完整相关SQL运行77项通过，其中20项为本批成果事务，包含密集32步DAG的有界SQL校验与缺失归属参数拒绝；三/六/八步均覆盖v1、v2、依赖复核和新实例恢复。并发测试记录不同backend PID且同时处于Lock等待，覆盖save/save、save/confirm、publish/publish、publish/save；真实触发器故障证明报告/指针/request整体回滚。API全套1456项通过（含13项新增配置测试），既有非工作流Skill加载与研究边界回归包含其中。执行命令、exact候选和脱敏原始输出见本批PR；最终CI/Review以其live状态为准。
 
 本批验证命令还包括 `pnpm --filter web typecheck`、`pnpm --filter web lint`、仅本地非凭证构建变量下的 `pnpm build`、`git diff --check`；新增源码/测试显式加入web TypeScript include，required检查覆盖。未新增依赖、开源应用参考或复制第三方实现。后续WORKBENCH负责动态网页、冲突保留体验、共享AI/原钱路接线、新业务配置端到端及普通文档Skill兼容；M3负责固定候选完整矩阵和Owner产品验收。本PR不声称这些已完成，也不启动后续节点。

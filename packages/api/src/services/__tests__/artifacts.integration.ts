@@ -81,6 +81,9 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   await expect(f.store.execute({action:'read',projectId:f.projectId,roundId:g.roundId})).rejects.toThrow();
   await expect(g.store.execute({action:'read',...scope(f)})).rejects.toThrow();
   await expect(f.store.execute({action:'read',...scope(f),actorId:actor} as never)).rejects.toThrow();
+  for(const missing of ['p_module_id','p_skill_id']){
+   const result=await db.rpc('artifact_transition',{p_actor_id:actor,p_module_id:f.moduleId,p_skill_id:f.pack.id,p_action:'read',p_project_id:f.projectId,p_round_id:f.roundId,[missing]:null});expect(result.error).not.toBeNull();
+  }
   const ordinary=user();expect((await ordinary.from('artifact_rounds').select('*')).error).not.toBeNull();
   expect((await ordinary.rpc('artifact_transition',{p_actor_id:actor,p_module_id:f.moduleId,p_skill_id:f.pack.id,p_action:'read',p_project_id:f.projectId,p_round_id:f.roundId})).error).not.toBeNull();
   await expect(databaseArtifactStore({...f.options,privateClient:null}).execute({action:'read',...scope(f)})).rejects.toThrow();

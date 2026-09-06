@@ -145,7 +145,7 @@ BEGIN
   VALUES(p_project_id,p_actor_id,p_module_id,p_skill_id,p_payload->>'account') ON CONFLICT(id) DO NOTHING;
  END IF;
  SELECT * INTO p FROM artifact_projects WHERE id=p_project_id FOR UPDATE;
- IF NOT FOUND OR p.actor_id<>p_actor_id OR p.module_id<>p_module_id OR p.skill_id<>p_skill_id THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
+ IF NOT FOUND OR p.actor_id IS DISTINCT FROM p_actor_id OR p.module_id IS DISTINCT FROM p_module_id OR p.skill_id IS DISTINCT FROM p_skill_id THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
  IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'actor no longer active' USING ERRCODE='42501'; END IF;
  SELECT * INTO r FROM artifact_rounds WHERE id=p_round_id;
  IF FOUND AND r.project_id<>p.id THEN RAISE EXCEPTION 'round denied' USING ERRCODE='42501'; END IF;
