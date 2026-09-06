@@ -6,7 +6,8 @@ runtime ledger, or completion state.
 ## Entry points
 
 - Authoritative current `staging` `AGENTS.md`.
-- Frozen Master Plan v10.1.
+- [Master Plan v10.1 with approved V3 amendments](Graylum_Master_Plan_v10.1.md).
+- [V3 specification and V3.1 first delivery](tasks/V3-standard-skills.md).
 - `docs/launch/plan-core.md`.
 - Stable task specifications under `docs/launch/tasks/`.
 
@@ -31,7 +32,9 @@ process wording has been retired.
 
 1. Fresh-read repository identity, exact current refs, and authoritative current
    `staging` `AGENTS.md`.
-2. Read `plan-core.md` and derive ready candidates from live completion evidence.
+2. Read `plan-core.md`, including the approved V3 dependencies, and derive ready
+   candidates from live completion evidence. Historical baseline merges alone do
+   not make the extended product ready for release.
 3. Treat the ready-candidate set as discovery data only; readiness never selects
    or authorizes a task by itself.
 4. Read-only discovery, comparison, and readiness audits need no task selection.

@@ -20,7 +20,27 @@ runtime authorization, current-task writer state, or automatic-progression state
 | `SKILL-1B` | `SKILL-1A` | `product` | `none` | 110 | 110 |
 | `PAY-1` | `STG-FIX` | `product` | `none` | 120 | 120 |
 | `CI-1` | `STG-FIX` | `product` | `none` | 130 | 130 |
-| `REL-1` | `BILL-1`, `SKILL-1B`, `PAY-1`, `CI-1` | `shared` | `none` | 140 | 140 |
+| `V3.1-LOAD` | `SKILL-1B` | `product` | `none` | 140 | 140 |
+| `V3-PACKAGE-RESEARCH` | `V3.1-LOAD` | `product` | `unassigned` | 150 | 150 |
+| `V3-ARTIFACTS` | `V3-PACKAGE-RESEARCH` | `product` | `unassigned` | 160 | 160 |
+| `V3-WORKBENCH` | `V3-ARTIFACTS`, `BILL-1`, `PAY-1` | `product` | `none` | 170 | 170 |
+| `V3-M3` | `V3-WORKBENCH`, `CI-1` | `shared` | `none` | 180 | 180 |
+| `REL-1` | `BILL-1`, `SKILL-1B`, `PAY-1`, `CI-1`, `V3-M3` | `shared` | `none` | 190 | 190 |
+
+## Approved V3 delivery requirements
+
+[V3 specification](tasks/V3-standard-skills.md) defines these product slices. Only
+`V3.1-LOAD` (规格同步与标准 Skill 最小真实加载) is selected in this implementation
+window. Later rows express delivery dependencies, not permission or automatic task
+selection. `unassigned` does not reserve a migration number or authorize SQL.
+
+Preserve SKILL-1A/1B, BILL-1, PAY-1 and CI-1 as historical baseline deliveries;
+their merges do not complete V3. Code merges alone do not prove non-production
+runtime, private package permissions, provider behavior, billing or M3 acceptance.
+`V3-M3` requires the **entire** Master Plan §7 exit, including existing payment/auth/
+refund/yearly/cron acceptance and the new V3 cases. It cannot be satisfied by the
+first loader PR. Owner selection and separate external/production authorization
+remain necessary after every slice and after M3.
 
 ## Ready-candidate derivation
 

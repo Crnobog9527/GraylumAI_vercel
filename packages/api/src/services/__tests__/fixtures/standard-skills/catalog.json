@@ -1,0 +1,151 @@
+[
+  {
+    "root": "workshop-notes/v1/workshop-notes",
+    "descriptor": {
+      "packageId": "workshop-notes",
+      "revisionId": "v1",
+      "directoryName": "workshop-notes",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 489,
+          "sha256": "907d2c00c0145bda7a9f0beafc8ab2cd54d55369720009a750ba02bc8475a3f1",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "references/gather.md",
+          "bytes": 109,
+          "sha256": "d5c0c671cb2bb612bbb3f69200b019d03b93a3304069cc0f19c50f90800543ed",
+          "mediaType": "text/markdown",
+          "requires": [
+            "assets/worksheet.md"
+          ]
+        },
+        {
+          "path": "references/outline.md",
+          "bytes": 75,
+          "sha256": "ba30b50b44c7519e71f3e859d4b53def0c15201520acaf4016075fe27d68a9f5",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "assets/worksheet.md",
+          "bytes": 51,
+          "sha256": "a4255916967fe398eb4fc8797aa5b318db095ddad6302681538572994e738dac",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "references/unrelated.md",
+          "bytes": 102,
+          "sha256": "163e2329638671aca01b50380a8b5f46195ba37ccb5a156bb1b6efe4366ec3a3",
+          "mediaType": "text/markdown",
+          "requires": []
+        }
+      ],
+      "tasks": {
+        "gather": [
+          "references/gather.md"
+        ],
+        "outline": [
+          "references/outline.md"
+        ]
+      },
+      "requiredCapabilities": [
+        "documents.read"
+      ],
+      "packageHash": "1c1ef950bf1d7b980662c195ab8aec49ea6d9fe3ffd58cc5424d14ac7e882921"
+    }
+  },
+  {
+    "root": "workshop-notes/v2/workshop-notes",
+    "descriptor": {
+      "packageId": "workshop-notes",
+      "revisionId": "v2",
+      "directoryName": "workshop-notes",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 489,
+          "sha256": "907d2c00c0145bda7a9f0beafc8ab2cd54d55369720009a750ba02bc8475a3f1",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "references/gather.md",
+          "bytes": 109,
+          "sha256": "84e65f6a5f112da3491c16ef7490d85af6bc6c75afad599f6b86751d832b3067",
+          "mediaType": "text/markdown",
+          "requires": [
+            "assets/worksheet.md"
+          ]
+        },
+        {
+          "path": "references/outline.md",
+          "bytes": 75,
+          "sha256": "ba30b50b44c7519e71f3e859d4b53def0c15201520acaf4016075fe27d68a9f5",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "assets/worksheet.md",
+          "bytes": 51,
+          "sha256": "a4255916967fe398eb4fc8797aa5b318db095ddad6302681538572994e738dac",
+          "mediaType": "text/markdown",
+          "requires": []
+        },
+        {
+          "path": "references/unrelated.md",
+          "bytes": 102,
+          "sha256": "163e2329638671aca01b50380a8b5f46195ba37ccb5a156bb1b6efe4366ec3a3",
+          "mediaType": "text/markdown",
+          "requires": []
+        }
+      ],
+      "tasks": {
+        "gather": [
+          "references/gather.md"
+        ],
+        "outline": [
+          "references/outline.md"
+        ]
+      },
+      "requiredCapabilities": [
+        "documents.read"
+      ],
+      "packageHash": "269b3a1f5dd15b54d5e6f85942f5130320c7869f049bc05230ae439998cf4621"
+    }
+  },
+  {
+    "root": "reading-note/v1/reading-note",
+    "descriptor": {
+      "packageId": "reading-note",
+      "revisionId": "v1",
+      "directoryName": "reading-note",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 312,
+          "sha256": "b7f05c10311f4f226edbc8ec219c917b58b938ba09ba4894902552e0f9880299",
+          "mediaType": "text/markdown",
+          "requires": [
+            "references/worksheet.md"
+          ]
+        },
+        {
+          "path": "references/worksheet.md",
+          "bytes": 66,
+          "sha256": "1b9f0f042494932147361d555dfc559ec586ebcfe4943db059170236d7596325",
+          "mediaType": "text/markdown",
+          "requires": []
+        }
+      ],
+      "tasks": {},
+      "requiredCapabilities": [
+        "documents.read"
+      ],
+      "packageHash": "3d8731eea8996ba01bbd1f7e839847fd0bc6dcff9461ccb8e4cf4a4ff8dd358c"
+    }
+  }
+]
