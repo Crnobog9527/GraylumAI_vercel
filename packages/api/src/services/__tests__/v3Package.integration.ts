@@ -9,6 +9,8 @@ import { publishSkillPackage, type PackagePublication } from '../skills/publicat
 import { databaseSkillSource } from '../skills/databaseSource';
 import { resolveActiveModulePrompt } from '../chatRuntime';
 import { databaseResearchStore } from '../research/store';
+import { creditsToUnits, contractHash } from '../research/agentKey';
+import { localMcpFixture, schema } from './fixtures/agentKeyServer';
 
 const url=process.env.V3_LOCAL_REST!;
 if(!url?.startsWith('http://127.0.0.1:')||!process.env.V3_LOCAL_DB?.endsWith('/v3_disposable'))throw new Error('explicit disposable environment required');
@@ -18,7 +20,8 @@ const user=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession
 // Standalone local PostgREST has no GoTrue. Auth boundary uses a synthetic verified identity;
 // every subsequent module / private RPC call uses actual HTTP and database grants.
 const actor=randomUUID(),viewer=randomUUID();
-vi.spyOn(user.auth,'getUser').mockResolvedValue({data:{user:{id:viewer,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null} as never);
+const verifiedUser={id:viewer,email_confirmed_at:'2026-01-01T00:00:00Z'};
+const getUser=vi.spyOn(user.auth,'getUser').mockResolvedValue({data:{user:verifiedUser},error:null} as never);
 const source=(moduleId:string,skillId:string,revisionId?:string)=>databaseSkillSource({userClient:user,privateClient:admin,moduleId,skillId,revisionId});
 async function fixture(index:number,skillId:string=randomUUID(),expectedVersion=0):Promise<PackagePublication>{
  const base=new URL('./fixtures/standard-skills/',import.meta.url);
@@ -54,6 +57,32 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
    await expect(activateSkill(src,found[0].selection,{task:index===0?'gather':undefined,maxContextBytes:2})).rejects.toMatchObject({code:'CAPACITY_EXCEEDED'});
   }
  });
+ it.each([
+  ['confirmed email',{email_confirmed_at:'2026-01-01T00:00:00Z'}],
+  ['Google provider',{app_metadata:{provider:'google'}}],
+  ['Google providers list',{app_metadata:{providers:['email','google']}}],
+  ['identity boolean verified',{identities:[{identity_data:{email_verified:true}}]}],
+  ['identity string verified',{identities:[{identity_data:{email_verified:'true'}}]}],
+ ])('loads private resources through real HTTP under existing auth semantics: %s',async(_name,identity)=>{
+  const p=await fixture(0),m=await seed(p);await publishSkillPackage(admin,actor,p);
+  getUser.mockResolvedValue({data:{user:{id:viewer,...identity}},error:null} as never);
+  try{
+   const src=source(m,p.id),[found]=await discoverSkills(src);
+   const loaded=await activateSkill(src,found.selection,{task:'gather',maxContextBytes:10000});
+   expect(loaded.resourceIdentities().length).toBeGreaterThan(1);
+   expect(loaded.resourceIdentities().every(x=>x.revisionId===p.revisionId)).toBe(true);
+  }finally{getUser.mockResolvedValue({data:{user:verifiedUser},error:null} as never);}
+ });
+ it.each(['unverified','false-string','auth-error','missing-user','missing-private'])('denies private loading before RPC on %s',async mode=>{
+  const p=await fixture(0),m=await seed(p);await publishSkillPackage(admin,actor,p);
+  const identity=mode==='unverified'?{id:viewer}:mode==='false-string'?{id:viewer,identities:[{identity_data:{email_verified:'false'}}]}:verifiedUser;
+  getUser.mockResolvedValue({data:{user:mode==='missing-user'?null:identity},error:mode==='auth-error'?new Error('synthetic auth failure'):null} as never);
+  const rpc=vi.spyOn(admin,'rpc');
+  try{
+   await expect(discoverSkills(databaseSkillSource({userClient:user,privateClient:mode==='missing-private'?null:admin,moduleId:m,skillId:p.id}))).rejects.toThrow();
+   expect(rpc).not.toHaveBeenCalled();
+  }finally{rpc.mockRestore();getUser.mockResolvedValue({data:{user:verifiedUser},error:null} as never);}
+ });
  it('denies ordinary roles private columns/tables/RPC while preserving public metadata',async()=>{
   for(const role of ['anon','authenticated']){
    await sql.query(`set role ${role}`);
@@ -69,6 +98,7 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
   const direct=await user.from('skills').select('published_content');expect(direct.error).not.toBeNull();
   const rpc=await user.rpc('read_skill_package',{p_actor_id:viewer,p_module_id:randomUUID(),p_skill_id:randomUUID()});expect(rpc.error).not.toBeNull();
   const acl=await sql.query("select has_column_privilege('anon','skills','published_content','SELECT') a,has_column_privilege('authenticated','skills','published_content','SELECT') b");expect(acl.rows[0]).toEqual({a:false,b:false});
+  console.log('private privilege proof',JSON.stringify({anonPublishedContent:acl.rows[0].a,authenticatedPublishedContent:acl.rows[0].b,ordinaryHttpReadDenied:direct.error!==null,ordinaryHttpRpcDenied:rpc.error!==null}));
  });
  it('rolls back invalid publication, rejects stale drafts/replays and prevents content mutation',async()=>{
   const p=await fixture(0);await seed(p);await publishSkillPackage(admin,actor,p);await publishSkillPackage(admin,actor,p);
@@ -102,7 +132,7 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
    const pending=rawPublish(b,q).then(()=>false,()=>true);
    let blocked=false;for(let i=0;i<100;i++){const r=await sql.query('select wait_event_type from pg_stat_activity where pid=$1',[ids[1].rows[0].id]);if(r.rows[0]?.wait_event_type==='Lock'){blocked=true;break;}await new Promise(r=>setTimeout(r,20));}expect(blocked).toBe(true);
    await rawPublish(a,p);await a.query('commit');expect(await pending).toBe(true);
-   console.log('concurrent publisher backend IDs',ids.map(r=>r.rows[0].id));
+   console.log('concurrent publisher proof',JSON.stringify({backendIds:ids.map(r=>r.rows[0].id),lockWaitObserved:blocked,stalePublisherRejected:true}));
   }finally{await Promise.all([a.end(),b.end()]);}
  });
  it.each(['archive','revoke','disable','rebind','actor-denied'])('rechecks live admission after discovery: %s',async(mode)=>{
@@ -137,6 +167,69 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
   const published=await caller(actor).publishPackage(p);expect(published.revisionId).toBe(p.revisionId);
   await caller(actor).revokeRevision({revisionId:p.revisionId});
  });
+ it.each([
+  [0.000123,0.000123,123],
+  [0.001001,0.001001,1001],
+  [1.000001,1.000001,1000001],
+  [1,0.000123,1000000],
+ ])('persists exact budget/cap/quote and successful actual cost via SDK + SQL: quote %s actual %s',async(quote,actual,expectedUnits)=>{
+  const f=await localMcpFixture(databaseResearchStore(admin,viewer));
+  try{
+   f.setDescription({creditsPerCall:quote});f.setActualCredits(actual);
+   const a=await f.connect({capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:quote}]});
+   try{
+    await a.discover('test');const i={planId:randomUUID(),operationId:randomUUID(),capability:'search',params:{query:'synthetic query'}};
+    await a.createPlan(i.planId,quote,[i]);const result=await a.execute(i);
+    expect(result.state).toBe('succeeded');expect(result.result?.objects[0].id).toBe('synthetic-1');
+    const saved=(await sql.query(`select p.budget_units::text,p.reserved_units::text,p.operations->0->>'maxQuoteUnits' cap_units,p.cancelled,o.quote_units::text,o.state,o.result,
+      ((o.result#>>'{cost,actual}')::numeric*1000000)::bigint::text actual_units from research_plans p join research_operations o on o.plan_id=p.id where p.id=$1`,[i.planId])).rows[0];
+    expect(saved).toMatchObject({budget_units:String(expectedUnits),reserved_units:String(expectedUnits),cap_units:String(expectedUnits),quote_units:String(expectedUnits),actual_units:String(creditsToUnits(actual)),state:'succeeded',cancelled:false});
+    expect(saved.result.objects[0].id).toBe('synthetic-1');
+    expect((await databaseResearchStore(admin,viewer).get(i.planId,i.operationId))?.result?.objects).toEqual(result.result?.objects);
+    expect((await a.execute(i)).recovered).toBe(true);
+    expect(f.events.filter(x=>['find','describe','execute'].includes(x))).toEqual(['find','describe','execute']);
+    console.log('decimal SQL proof',JSON.stringify({quote,actual,...saved,result:undefined}));
+   }finally{await a.close();}
+  }finally{await f.stop();}
+ });
+ it.each(['budget','cap','quote-precision','budget-precision','cap-precision'])('blocks execute with real SQL store on %s',async mode=>{
+  const store=databaseResearchStore(admin,viewer),f=await localMcpFixture(store);
+  try{
+   const cap=mode==='cap-precision'?0.0001234:1;
+   const a=await f.connect({capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:cap}]});
+   try{
+    await a.discover('test');const i={planId:randomUUID(),operationId:randomUUID(),capability:'search',params:{query:'test'}};
+    if(mode.endsWith('-precision')&&mode!=='quote-precision'){
+     await expect(a.createPlan(i.planId,mode==='budget-precision'?0.0001234:1,[i])).rejects.toThrow('PRICE_UNEXPLAINED');
+     expect((await sql.query('select count(*)::int n from research_plans where id=$1',[i.planId])).rows[0].n).toBe(0);
+    }else{
+     await a.createPlan(i.planId,mode==='budget'?0.999999:2,[i]);
+     f.setDescription({creditsPerCall:mode==='cap'?1.000001:mode==='quote-precision'?0.0001234:1});
+     await expect(a.execute(i)).rejects.toThrow();
+     expect((await sql.query('select reserved_units::text from research_plans where id=$1',[i.planId])).rows[0].reserved_units).toBe('0');
+    }
+    expect((await sql.query('select count(*)::int n from research_operations where plan_id=$1',[i.planId])).rows[0].n).toBe(0);
+    expect(f.events.filter(x=>x==='execute')).toHaveLength(0);
+   }finally{await a.close();}
+  }finally{await f.stop();}
+ });
+ it.each(['actual-excess','actual-precision','timeout'] as const)('preserves execution boundary and freezes real SQL plan on %s',async mode=>{
+  const f=await localMcpFixture(databaseResearchStore(admin,viewer));
+  try{
+   f.setActualCredits(mode==='actual-excess'?1.000001:0.0001234);
+   if(mode==='timeout')f.setBehavior('timeout');
+   const a=await f.connect();
+   try{
+    await a.discover('test');const i={planId:randomUUID(),operationId:randomUUID(),capability:'search',params:{query:'test'}};
+    await a.createPlan(i.planId,2,[i]);const result=await a.execute(i);
+    expect(result.state).toBe(mode==='actual-excess'?'succeeded':'unknown');
+    const saved=(await sql.query('select p.cancelled,p.reserved_units::text,o.state from research_plans p join research_operations o on o.plan_id=p.id where p.id=$1',[i.planId])).rows[0];
+    expect(saved).toEqual({cancelled:true,reserved_units:'1000000',state:result.state});
+    if(mode==='actual-excess')expect(result.result?.objects[0].id).toBe('synthetic-1');
+    expect((await a.execute(i)).recovered).toBe(true);expect(f.events.filter(x=>x==='execute')).toHaveLength(1);
+   }finally{await a.close().catch(()=>{});}
+  }finally{await f.stop();}
+ });
  it('serializes dispatch, resumes prepared safely, and atomically freezes on excess actual cost',async()=>{
   const store=databaseResearchStore(admin,viewer),plan=randomUUID(),ops=[randomUUID(),randomUUID()];
   await store.create(plan,3000000,ops.map(operationId=>({operationId,identityHash:'c'.repeat(64),maxQuoteUnits:1000000})));
@@ -150,7 +243,7 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
  });
  it('atomically reserves cross-instance budgets, de-duplicates and recovers saved results',async()=>{
   const store=databaseResearchStore(admin,viewer);const plan=randomUUID();
-  const ops=[randomUUID(),randomUUID()];await store.create(plan,100,ops.map(operationId=>({operationId,identityHash:'a'.repeat(64),maxQuoteUnits:70})));const r=await Promise.allSettled(ops.map(o=>store.reserve(plan,o,'a'.repeat(64),70)));expect(r.filter(x=>x.status==='fulfilled')).toHaveLength(1);
+  const ops=[randomUUID(),randomUUID()];await store.create(plan,100,ops.map(operationId=>({operationId,identityHash:'a'.repeat(64),maxQuoteUnits:70})));const r=await Promise.allSettled(ops.map(o=>databaseResearchStore(admin,viewer).reserve(plan,o,'a'.repeat(64),70)));expect(r.filter(x=>x.status==='fulfilled')).toHaveLength(1);
   const i=r.findIndex(x=>x.status==='fulfilled');const claim=(r[i] as PromiseFulfilledResult<Awaited<ReturnType<typeof store.reserve>>>).value;
   const reclaim=await store.reserve(plan,ops[i],'a'.repeat(64),70);expect(reclaim.claimed).toBe(true);
   await expect(store.dispatch(plan,ops[i],claim.token!)).rejects.toThrow();claim.token=reclaim.token;
@@ -158,5 +251,8 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
   await store.finish(plan,ops[i],claim.token!,'unknown',null);expect((await databaseResearchStore(admin,viewer).get(plan,ops[i]))?.state).toBe('unknown');
   await expect(databaseResearchStore(admin,actor).get(plan,ops[i])).rejects.toThrow();
   await store.cancel(plan);await expect(store.reserve(plan,randomUUID(),'b'.repeat(64),1)).rejects.toThrow();
+  const saved=(await sql.query('select budget_units::text,reserved_units::text,cancelled from research_plans where id=$1',[plan])).rows[0];
+  expect(saved).toEqual({budget_units:'100',reserved_units:'70',cancelled:true});
+  console.log('cross-instance budget proof',JSON.stringify({successfulReservations:r.filter(x=>x.status==='fulfilled').length,...saved,staleTokenDenied:true,secondDispatchDenied:true}));
  });
 });

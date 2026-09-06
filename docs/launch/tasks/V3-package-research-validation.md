@@ -48,3 +48,13 @@ CI 同范围修复：迁移 ledger 的正向测试从 fixture 现有迁移推导
 1. 在 Owner 指定的非生产项目，对当前 schema/角色继承/依赖 view/RPC/public 出口只读预检；单独批准后应用 0064/0065 并读回。先部署相容 runtime，再发布非机密目录样本；旧 runtime 不能运行新目录包。验证合法文本聊天、缺 Key、模块拒绝、完整包发布/撤销与回滚；真实商业包另行批准。
 2. 确認真实 AgentKey API Key 的服务器配置目标后，单独批准受控 discovery/describe。公开资料不足以预填任何真实报价、调用免费承诺或平台许可。需先获取实际 envelope 和单价/单位/保留条款，审核 decoder/白名单和 bounded plan，再给出具体最多操作数及总 AgentKey credits 预算供 Owner 决定；执行预算目前未获授权。
 3. 不修改支付/退款/订阅计数；真实取数后的费用联通、完整 M3、上线与下一 Launch 节点均未运行、未完成、未授权。
+
+## 独立审计同范围修复
+
+数据库 source 直接复用现有 `isEmailVerified(getUser().data.user)`，不另定认证政策。getUser 仍是服务端认证边界；普通确认邮箱、Google provider/providers 与 identity_data.email_verified 的布尔 true / 字符串 "true" 均经真实本地数据库加载验证。未验证、认证错误、无用户和无 private client 在私有 RPC 前拒绝；禁用用户、模块关闭/解绑、归档和撤销继续实时拒绝。getUser 样本仍是模拟身份，不能视作完整 GoTrue/OAuth 验证。
+
+费用换算以 Number 的规范十进制字符串（与 JSON 数值序列化一致）为输入，用 BigInt 十进制位移与余数检查精确转为百万分之一单位；预算、单次上限、报价与实际费用共用同一函数。非有限、负数、超过 1000 credits、非零超精度余数均拒绝，不使用容差或向下取整。`0.000123`、`0.001001`、`1.000001` 分别为 123、1001、1000001 单位；计算产生的 `0.1 + 0.2` 在规范表示中有超精度尾数，按严格规则拒绝。
+
+新增 SDK→PostgREST→SQL 联合验证费用预留、批准上限、实际费用、succeeded 对象保存与重复恢复；报价 1 / 实际 0.000123 保留对象且不停止计划，恢复不再 execute。超预算/超单次上限/超精度报价在执行前拒绝，实际费用超报价或未知结果仍按原边界停计划。不修改任何迁移、权限政策或依赖。
+
+可读的脱敏原始 SQL/PostgREST、MCP、Web 输出及命令/候选身份/退出状态附在 PR 评论；CI 日志证明当前远端检查。输出只包含测试名、计数、本地连接 ID 和合成费用，不包含正文、manifest、JWT 或凭证。SQL 集成使用 verbose reporter，明确区分原子数据库证明、模拟 getUser、真实本地 SDK 与内存故障注入。

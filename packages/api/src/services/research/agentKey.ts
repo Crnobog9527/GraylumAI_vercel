@@ -108,9 +108,9 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
         const cap=options.capabilities.find(c=>c.internalName===op.capability);
         if(!cap||!discovered.has(cap.canonicalName))stop('CAPABILITY_DENIED');
         if(Object.keys(op.params).some(k=>!cap.parameterKeys.includes(k))||Buffer.byteLength(stable(op.params))>4096)stop('PARAMETERS_DENIED');
-        return {operationId:op.operationId,identityHash:contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:op.params}),maxQuoteUnits:units(cap.maxQuoteCredits)};
+        return {operationId:op.operationId,identityHash:contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:op.params}),maxQuoteUnits:creditsToUnits(cap.maxQuoteCredits)};
       });
-      await options.store.create(planId,units(budgetCredits),approved);
+      await options.store.create(planId,creditsToUnits(budgetCredits),approved);
     },
     async execute(input:{planId:string;operationId:string;capability:string;params:Record<string,unknown>}){
       input=structuredClone(input);
@@ -133,8 +133,8 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       const ajv=new Ajv({strict:true,allErrors:false,validateFormats:false});
       let valid=false;try{valid=ajv.compile(desc.schema)(input.params)===true;}catch{stop('SCHEMA_UNSUPPORTED');}
       if(!valid)stop('INVALID_PARAMETERS');
-      if(!Number.isFinite(cap.maxQuoteCredits)||cap.maxQuoteCredits<0||desc.creditsPerCall>cap.maxQuoteCredits)stop('QUOTE_CHANGED');
-      const quoteUnits=units(desc.creditsPerCall);
+      const quoteUnits=creditsToUnits(desc.creditsPerCall);
+      if(quoteUnits>creditsToUnits(cap.maxQuoteCredits))stop('QUOTE_CHANGED');
       const reservation=await options.store.reserve(input.planId,input.operationId,identityHash,quoteUnits);
       if(!reservation.claimed)return {state:reservation.state,result:reservation.result??null,recovered:true};
       if(!reservation.token)stop('STATE_INVALID');
@@ -148,7 +148,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
         const raw=await call('execute_tool',{name:cap.canonicalName,params:input.params});
         const parsed=options.contract.result(raw);
         if(parsed.objects.length>100||parsed.objects.some(x=>!x.id||x.missingFields.length>100))stop('RESULT_LIMIT');
-        if(parsed.actualCredits!==null)units(parsed.actualCredits);
+        if(parsed.actualCredits!==null)creditsToUnits(parsed.actualCredits);
         result={source:'agentkey',fixture,canonicalTool:cap.canonicalName,objects:parsed.objects,pagination:parsed.pagination,
           fetchedAt:new Date().toISOString(),error:null,cost:{unit:'agentkey-credit',quoted:desc.creditsPerCall,actual:parsed.actualCredits,status:parsed.actualCredits===null?'unknown':'reported'}};
         state='succeeded';
@@ -167,8 +167,20 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
     async close(){try{await transport.terminateSession();}finally{await client.close();}},
   };
 }
-function units(credits:number):number {
-  const value=credits*1000000;
-  if(!Number.isFinite(credits)||credits<0||!Number.isSafeInteger(value)||value>1000000000)stop('PRICE_UNEXPLAINED');
-  return value;
+/** Convert the canonical decimal Number representation (also sent as JSON) to
+ * six-place integer units. No binary multiplication, rounding or tolerance.
+ * Values with a nonzero sub-unit remainder cannot be represented and fail closed. */
+export function creditsToUnits(credits:number):number {
+  if(!Number.isFinite(credits)||credits<0||credits>1000)stop('PRICE_UNEXPLAINED');
+  const [coefficient, exponent='0']=credits.toString().split('e');
+  const [whole, fraction='']=coefficient.split('.');
+  let value=BigInt(whole+fraction);
+  const power=6+Number(exponent)-fraction.length;
+  if(power<0){
+    const divisor=10n**BigInt(-power);
+    if(value%divisor!==0n)stop('PRICE_UNEXPLAINED');
+    value/=divisor;
+  }else value*=10n**BigInt(power);
+  if(value>1000000000n)stop('PRICE_UNEXPLAINED');
+  return Number(value);
 }

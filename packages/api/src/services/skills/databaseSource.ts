@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isEmailVerified } from '../../lib/auth';
 import { fail, identityOf, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
 
 /** Request-local only. The authenticated client verifies identity and public module
@@ -15,7 +16,7 @@ export function databaseSkillSource(options: {
     if (!options.privateClient) fail('UNAVAILABLE');
     const auth = await options.userClient.auth.getUser();
     const user = auth.data.user;
-    if (auth.error || !user || !user.email_confirmed_at) fail('UNAVAILABLE');
+    if (auth.error || !user || !isEmailVerified(user)) fail('UNAVAILABLE');
     const visible = await options.userClient.from('modules').select('id,active').eq('id',options.moduleId).eq('active',true).single();
     if (visible.error || visible.data?.id !== options.moduleId) fail('UNAVAILABLE');
     const { data, error } = await options.privateClient.rpc('read_skill_package', {

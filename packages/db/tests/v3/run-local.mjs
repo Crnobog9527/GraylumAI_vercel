@@ -39,7 +39,7 @@ try {
   // Allowlisted environment only; no inherited .env or real credentials.
   const env={PATH:process.env.PATH,HOME:process.env.HOME,CI:'true',V3_LOCAL_DB:`postgres://postgres@127.0.0.1:${port(db,'5432')}/v3_disposable`,
     V3_LOCAL_REST:apiUrl,V3_LOCAL_SERVICE_JWT:jwt('service_role'),V3_LOCAL_USER_JWT:jwt('authenticated'),V3_LOCAL_JWT_SECRET:secret};
-  const child=spawn('pnpm',['--filter','@repo/api','exec','vitest','run','--config','vitest.integration.config.ts'],{cwd:root,env,stdio:'inherit'});
+  const child=spawn('pnpm',['--filter','@repo/api','exec','vitest','run','--config','vitest.integration.config.ts','--reporter','verbose'],{cwd:root,env,stdio:'inherit'});
   const code=await new Promise(r=>child.on('exit',r));if(code!==0)throw new Error(`integration failed: ${code}`);
 } catch(error) {
   for(const name of [rest,db]){try{console.error(docker('logs',name));}catch{}}

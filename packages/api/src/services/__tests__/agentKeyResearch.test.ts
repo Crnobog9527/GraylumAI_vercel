@@ -1,19 +1,10 @@
-import { describe,it,expect,vi } from 'vitest';
-import { createServer } from 'node:http';
+import { describe,it,expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { McpServer } from '@modelcontextprotocol/server';
-import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
-import { z } from 'zod';
-import { connectLocalAgentKey, contractHash, type ProviderContract } from '../research/agentKey';
+import { connectLocalAgentKey, creditsToUnits } from '../research/agentKey';
+import { localMcpFixture } from './fixtures/agentKeyServer';
 import type { ResearchStore,OperationRecord } from '../research/store';
 
-const schema={type:'object',properties:{query:{type:'string',maxLength:100}},required:['query'],additionalProperties:false};
-// All envelopes below are synthetic. Official docs do not specify these full shapes.
-const contract:ProviderContract={
- discovery:v=>z.object({names:z.array(z.string())}).parse(v),
- description:v=>z.object({name:z.string(),schema:z.record(z.string(),z.unknown()),creditsPerCall:z.number(),executeAs:z.unknown().optional()}).parse(v),
- result:v=>z.object({objects:z.array(z.object({id:z.string(),fields:z.record(z.string(),z.unknown()),missingFields:z.array(z.string()),observedAt:z.string().nullable()})),pagination:z.object({complete:z.boolean(),nextCursor:z.string().nullable()}),actualCredits:z.number().nullable()}).parse(v),
-};
+const fixture=(mode:'json'|'sse'='json')=>localMcpFixture(testStore(),mode);
 function testStore():ResearchStore {
  const records=new Map<string,OperationRecord>();let available=0,cancelled=false;
  return {
@@ -22,30 +13,6 @@ function testStore():ResearchStore {
   async dispatch(_p,o){const r=records.get(o)!;if(cancelled||r.state!=='prepared')return false;r.state='dispatched';return true;},
   async finish(_p,o,_t,state,result){records.set(o,{...records.get(o)!,state,result});},async cancel(){cancelled=true;},
  };
-}
-async function fixture(mode:'json'|'sse'='json'){
- const events:string[]=[];let description:Record<string,unknown>={name:'Fixture/Search',schema,creditsPerCall:1};
- let behavior:'success'|'error'|'timeout'|'disconnect'|'oversize'='success';
- const mcp=new McpServer({name:'synthetic-agentkey',version:'test'});
- mcp.registerTool('find_tools',{inputSchema:z.object({q:z.string()})},async()=>{events.push('find');return {content:[{type:'text',text:JSON.stringify({names:['Fixture/Search','Unreviewed/Write']})}]};});
- mcp.registerTool('describe_tool',{inputSchema:z.object({name:z.string()})},async()=>{events.push('describe');return {content:[],structuredContent:description};});
- mcp.registerTool('execute_tool',{inputSchema:z.object({name:z.string(),params:z.record(z.string(),z.unknown())})},async()=>{
-  events.push('execute');
-  if(behavior==='timeout')await new Promise(r=>setTimeout(r,500));
-  if(behavior==='disconnect'){for(const socket of sockets)socket.destroy();await new Promise(r=>setTimeout(r,200));}
-  if(behavior==='error')return {isError:true,content:[{type:'text',text:'synthetic error'}]};
-  return {content:[],structuredContent:{objects:[{id:'synthetic-1',fields:{title:behavior==='oversize'?'x'.repeat(100001):'Test only'},missingFields:['views'],observedAt:null}],pagination:{complete:true,nextCursor:null},actualCredits:null}};
- });
- const transport=new NodeStreamableHTTPServerTransport({sessionIdGenerator:()=>randomUUID(),enableJsonResponse:mode==='json'});
- await mcp.connect(transport);
- const sockets=new Set<import('node:net').Socket>();
- const server=createServer((req,res)=>{events.push(req.method==='DELETE'?'close':`http:${req.method}`);void transport.handleRequest(req,res);});
- server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
- await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as import('node:net').AddressInfo;
- const authorize=vi.fn(async()=>{}),store=testStore();
- const connect=(overrides={})=>connectLocalAgentKey({store,authorize,contract,capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:1}],timeoutMs:200,maxResponseBytes:100000,maxCalls:30,maxPages:2,...overrides},new URL(`http://127.0.0.1:${address.port}/mcp`));
- return {events,connect,store,authorize,setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
-  async stop(){await mcp.close();for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
 }
 const input=()=>({planId:randomUUID(),operationId:randomUUID(),capability:'search',params:{query:'synthetic query'}});
 describe('actual official SDK MCP transport; synthetic supplier fixtures',()=>{
@@ -76,5 +43,14 @@ describe('actual official SDK MCP transport; synthetic supplier fixtures',()=>{
  });
  it('retains dispatched state when saving fails and never reexecutes',async()=>{
   const f=await fixture();try{const original=f.store.finish;f.store.finish=async()=>{throw new Error('save unavailable');};const a=await f.connect();await a.discover('test');const i=input();await a.createPlan(i.planId,2,[i]);await expect(a.execute(i)).rejects.toThrow('save unavailable');f.store.finish=original;expect((await a.execute(i)).state).toBe('dispatched');expect(f.events.filter(x=>x==='execute')).toHaveLength(1);await a.close();}finally{await f.stop();}
+ });
+});
+
+describe('exact decimal AgentKey credit units',()=>{
+ it.each([[0,0],[0.000001,1],[0.000123,123],[0.001001,1001],[1.000001,1000001],[1000,1000000000]])('converts %s to %s units',(credits,expected)=>{
+  expect(creditsToUnits(credits)).toBe(expected);
+ });
+ it.each([0.0000001,0.0001234,1.0000001,0.1+0.2,-0.000001,NaN,Infinity,-Infinity,1000.000001,Number.MIN_VALUE])('rejects unrepresentable or out-of-range %s',credits=>{
+  expect(()=>creditsToUnits(credits)).toThrow('PRICE_UNEXPLAINED');
  });
 });
