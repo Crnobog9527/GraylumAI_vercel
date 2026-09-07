@@ -64,6 +64,7 @@ export const snapshotSchema = z.object({
       stepId: z.string(),
       body: z.string().nullable(),
       evidenceIds: z.array(uuid),
+      directEvidenceIds: z.array(uuid).max(64).nullable(),
     }),
   ),
   confirmations: z.array(

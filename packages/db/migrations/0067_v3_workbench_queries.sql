@@ -59,6 +59,12 @@ BEGIN
   RETURN jsonb_build_object('moduleId',p.module_id,'skillId',p.skill_id,'account',p.account,'revisionId',r.revision_id,'workflow',r.workflow);
  ELSIF p_action='read' THEN
   snapshot:=artifact_transition(p_actor_id,p.module_id,p.skill_id,'read',p.id,r.id);
+  -- Direct candidate inputs are retained in immutable request records. The
+  -- candidate's evidenceIds remain the complete inherited provenance.
+  snapshot:=snapshot||jsonb_build_object('candidates',(SELECT coalesce(jsonb_agg(c||jsonb_build_object('directEvidenceIds',
+   (SELECT q.payload->'evidenceIds' FROM artifact_requests q WHERE q.project_id=p.id AND q.round_id=r.id
+    AND q.action='candidate' AND q.response->>'candidateId'=c->>'id' LIMIT 1))),'[]')
+   FROM jsonb_array_elements(snapshot->'candidates') c));
   RETURN snapshot||jsonb_build_object('workflow',jsonb_build_object('id',r.workflow->>'id','version',r.workflow->'version','kind',r.workflow->>'kind',
    'report',r.workflow->'report','steps',(SELECT jsonb_agg(jsonb_build_object('id',x->>'id','title',x->>'title','dependsOn',x->'dependsOn',
     'minLength',x->'minLength','maxLength',x->'maxLength','requiresEvidence',x->'requiresEvidence') ORDER BY n)
@@ -81,6 +87,32 @@ BEGIN
  END IF;
  RETURN artifact_transition(p_actor_id,p_module_id,p_skill_id,'publish',p_project_id,p_round_id,p_request_id,payload);
 END $$;
+-- Adopt a known candidate through the existing save transaction. Keep direct
+-- input capacity separate from the full provenance and guard dependency drift.
+CREATE OR REPLACE FUNCTION public.artifact_save_candidate(p_actor_id uuid,p_module_id uuid,p_skill_id uuid,
+ p_project_id uuid,p_round_id uuid,p_request_id uuid,p_step_id text,p_candidate_id uuid,p_expected_version integer,p_body text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE snapshot jsonb; candidate public.artifact_candidates%ROWTYPE; direct_ids jsonb; effective_ids jsonb; flow jsonb; payload jsonb;
+BEGIN
+ PERFORM 1 FROM artifact_projects WHERE id=p_project_id FOR UPDATE;
+ snapshot:=artifact_transition(p_actor_id,p_module_id,p_skill_id,'read',p_project_id,p_round_id);
+ SELECT * INTO candidate FROM artifact_candidates WHERE id=p_candidate_id AND round_id=p_round_id AND step_id=p_step_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
+ SELECT q.payload->'evidenceIds' INTO direct_ids FROM artifact_requests q WHERE q.project_id=p_project_id AND q.round_id=p_round_id
+  AND q.action='candidate' AND q.response->>'candidateId'=p_candidate_id::text;
+ IF direct_ids IS NULL OR jsonb_array_length(direct_ids)>64 THEN RAISE EXCEPTION 'candidate inputs unavailable'; END IF;
+ payload:=jsonb_build_object('stepId',p_step_id,'candidateId',p_candidate_id,'expectedVersion',p_expected_version,'body',p_body,'evidenceIds',direct_ids);
+ IF NOT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN
+  SELECT workflow INTO flow FROM artifact_rounds WHERE id=p_round_id;
+  effective_ids:=artifact_step_evidence(flow,jsonb_set(snapshot->'steps',ARRAY[p_step_id,'evidenceIds'],direct_ids),p_step_id);
+  IF NOT (candidate.evidence_ids <@ effective_ids) OR NOT artifact_evidence_allowed(p_project_id,candidate.evidence_ids) THEN
+   RAISE EXCEPTION 'candidate provenance changed';
+  END IF;
+ END IF;
+ RETURN artifact_transition(p_actor_id,p_module_id,p_skill_id,'save',p_project_id,p_round_id,p_request_id,payload);
+END $$;
+REVOKE ALL ON FUNCTION public.artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) TO service_role;
 REVOKE ALL ON FUNCTION public.artifact_publish_current(uuid,uuid,uuid,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.artifact_publish_current(uuid,uuid,uuid,uuid,uuid,uuid,jsonb) TO service_role;
 REVOKE ALL ON FUNCTION public.artifact_workflow_immutable() FROM PUBLIC,anon,authenticated,service_role;

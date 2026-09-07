@@ -16,6 +16,9 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@repo/api/src/root";
 type Catalog = inferRouterOutputs<AppRouter>["workbench"]["catalog"];
 type Draft = {
+  scope: string;
+  editId: string;
+  candidateId?: string;
   body: string;
   evidenceIds: string[];
   baseVersion: number;
@@ -80,9 +83,13 @@ export default function WorkbenchPage() {
       Object.fromEntries(
         Object.entries(s.steps).map(([key, v]) => [
           key,
-          preserve && old[key]?.dirty
+          preserve &&
+          old[key]?.dirty &&
+          old[key].scope === `${s.projectId}/${s.roundId}`
             ? old[key]
             : {
+                scope: `${s.projectId}/${s.roundId}`,
+                editId: id(),
                 body: v.body ?? "",
                 evidenceIds: v.evidenceIds,
                 baseVersion: v.version,
@@ -162,19 +169,46 @@ export default function WorkbenchPage() {
     for (const [stepId, d] of Object.entries(entries))
       if (d.dirty) {
         await api.execute.mutate({
-          action: "save",
+          ...(d.candidateId
+            ? { action: "saveCandidate" as const, candidateId: d.candidateId }
+            : { action: "save" as const, evidenceIds: d.evidenceIds }),
           projectId: s.projectId,
           roundId: s.roundId,
           requestId: requests[stepId],
           stepId,
           expectedVersion: d.baseVersion,
           body: d.body,
-          evidenceIds: d.evidenceIds,
         });
-        setDrafts((old) => ({
-          ...old,
-          [stepId]: { ...d, baseVersion: d.baseVersion + 1, dirty: false },
-        }));
+        setDrafts((old) => {
+          const current = old[stepId];
+          // A replay acknowledges the submitted edit, never a later local edit
+          // or another project/round which happens to use the same step ID.
+          if (!current || current.scope !== d.scope) return old;
+          if (current.editId === d.editId)
+            return {
+              ...old,
+              [stepId]: {
+                ...current,
+                baseVersion: d.baseVersion + 1,
+                candidateId: undefined,
+                dirty: false,
+              },
+            };
+          return {
+            ...old,
+            [stepId]: {
+              ...current,
+              candidateId:
+                current.candidateId === d.candidateId
+                  ? undefined
+                  : current.candidateId,
+              baseVersion:
+                current.baseVersion === d.baseVersion
+                  ? d.baseVersion + 1
+                  : current.baseVersion,
+            },
+          };
+        });
       }
   }
   function save(publish = false) {
@@ -216,7 +250,11 @@ export default function WorkbenchPage() {
         });
       }
       await refresh();
-      setNotice(publish ? "正式版已发布。" : "编辑已保存。");
+      setNotice(
+        publish
+          ? "正式版已发布。"
+          : "本次提交已保存；后续未保存输入会继续保留。",
+      );
     }, true);
   }
   const availableAccounts = (c: Catalog[number]) =>
@@ -487,6 +525,7 @@ export default function WorkbenchPage() {
                           [selected]: {
                             ...draft,
                             body: e.target.value,
+                            editId: id(),
                             dirty: true,
                           },
                         })
@@ -511,6 +550,7 @@ export default function WorkbenchPage() {
                               [selected]: {
                                 ...draft,
                                 baseVersion: server.version,
+                                editId: id(),
                               },
                             })
                           }
@@ -545,6 +585,8 @@ export default function WorkbenchPage() {
                           setDrafts({
                             ...drafts,
                             [selected]: {
+                              scope: `${snapshot.projectId}/${snapshot.roundId}`,
+                              editId: id(),
                               body: server.body ?? "",
                               evidenceIds: server.evidenceIds,
                               baseVersion: server.version,
@@ -583,14 +625,20 @@ export default function WorkbenchPage() {
                             </pre>
                             {c.body !== null && (
                               <Button
-                                disabled={busy || snapshot.state !== "draft"}
+                                disabled={
+                                  busy ||
+                                  snapshot.state !== "draft" ||
+                                  c.directEvidenceIds === null
+                                }
                                 onClick={() =>
                                   setDrafts({
                                     ...drafts,
                                     [selected]: {
                                       ...draft,
                                       body: c.body!,
-                                      evidenceIds: c.evidenceIds,
+                                      evidenceIds: c.directEvidenceIds!,
+                                      candidateId: c.id,
+                                      editId: id(),
                                       dirty: true,
                                     },
                                   })
@@ -609,6 +657,11 @@ export default function WorkbenchPage() {
                   <p className={`mb-4 ${label}`}>
                     补充来源后，在步骤中选择采用并保存。仅补充不会使确认失效。
                   </p>
+                  {draft?.candidateId && (
+                    <p className="mb-3 text-sm text-amber-200">
+                      候选的直接来源将由服务器核对，依赖来源完整保留。保存采用后可调整直接来源。
+                    </p>
+                  )}
                   {snapshot.evidence.map((e) => (
                     <div
                       key={e.id}
@@ -620,9 +673,11 @@ export default function WorkbenchPage() {
                           aria-label={`采用来源 ${e.id}`}
                           disabled={
                             busy ||
-                            !e.available ||
+                            (!e.available &&
+                              !draft?.evidenceIds.includes(e.id)) ||
                             snapshot.state !== "draft" ||
                             !draft ||
+                            !!draft.candidateId ||
                             (draft.evidenceIds.length >= 64 &&
                               !draft.evidenceIds.includes(e.id))
                           }
@@ -635,6 +690,7 @@ export default function WorkbenchPage() {
                                 evidenceIds: x.target.checked
                                   ? [...draft.evidenceIds, e.id]
                                   : draft.evidenceIds.filter((v) => v !== e.id),
+                                editId: id(),
                                 dirty: true,
                               },
                             })

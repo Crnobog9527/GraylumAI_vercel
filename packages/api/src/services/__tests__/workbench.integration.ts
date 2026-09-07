@@ -234,6 +234,23 @@ beforeAll(async () => {
   }
 }, 120000);
 afterAll(async () => {
+  if (process.env.V3_WORKBENCH_PHASE !== "restore") {
+    const state = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
+    const service = workbenchService(await authenticated(), db);
+    state.expectedSnapshots = [];
+    for (const p of await service.projects()) {
+      const rounds = await service.rounds(p.projectId);
+      const current =
+        rounds.find((r) => r.state === "draft") ??
+        rounds
+          .filter((r) => r.state === "published")
+          .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+      state.expectedSnapshots.push(
+        await service.read(p.projectId, current.roundId),
+      );
+    }
+    writeFileSync(output + "/restore.json", JSON.stringify(state));
+  }
   writeFileSync(output + "/network.txt", outputs.join("\n"));
   await browser?.close();
   await sql.end();
@@ -365,9 +382,32 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE !== "restore")(
         .getByText("synthetic:local-account · 正式 v3", { exact: true })
         .count(),
     ).toBe(1);
+    const saved = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
+    for (const f of fixtures) {
+      const expected = saved.expectedSnapshots.find(
+        (s: { skillId: string }) => s.skillId === f.pack.id,
+      );
+      await page
+        .getByRole("button", { name: new RegExp(`^${f.label}`) })
+        .first()
+        .click();
+      await quiet(page);
+      for (const [n, step] of expected.workflow.steps.entries()) {
+        await page
+          .getByRole("button", {
+            name: new RegExp(`^${n + 1}\\. ${step.title}`),
+          })
+          .click();
+        expect(
+          await page
+            .getByRole("textbox", { name: `${step.title} 工作稿` })
+            .inputValue(),
+        ).toBe(expected.steps[step.id].body ?? "");
+      }
+    }
     await context.close();
     console.log(
-      "new process + new browser + real password login restores all configured projects PASS",
+      "new process + new browser + real password login restores all configured projects and exact saved bodies PASS",
     );
   },
   120000,
@@ -880,4 +920,447 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     );
   },
   60000,
+);
+
+async function repairProject() {
+  const credentials = await newUser();
+  const user = await authenticated(credentials),
+    service = workbenchService(user, db);
+  const f = fixtures.find((x) => x.flow.steps.length === 4)!;
+  const { page, context } = await pageFor(credentials);
+  await quiet(page);
+  await page
+    .getByRole("button", { name: `创建 ${f.label}`, exact: true })
+    .click();
+  await quiet(page);
+  const project = (await service.projects())[0];
+  const round = (await service.rounds(project.projectId))[0];
+  return {
+    credentials,
+    user,
+    service,
+    f,
+    page,
+    context,
+    projectId: project.projectId,
+    roundId: round.roundId,
+  };
+}
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "retains later input when recovering committed saves and partial multi-step saves",
+  async () => {
+    const r = await repairProject();
+    const choose = async (n: number) => {
+      await r.page
+        .getByRole("button", {
+          name: new RegExp(`^${n + 1}\\. ${r.f.flow.steps[n].title}`),
+        })
+        .click();
+      return r.page.getByRole("textbox", {
+        name: `${r.f.flow.steps[n].title} 工作稿`,
+      });
+    };
+    const save = async () => {
+      await r.page
+        .getByRole("button", { name: "保存全部编辑", exact: true })
+        .click();
+      await quiet(r.page);
+    };
+    for (const count of [1, 2]) {
+      const before = await r.service.read(r.projectId, r.roundId);
+      for (let n = 0; n < count; n++)
+        await (await choose(n)).fill(`submitted-A-${count}-${n}`);
+      await r.page.route("**/api/trpc/workbench.execute*", async (route) => {
+        const response = await route.fetch();
+        const body = route.request().postData() ?? "";
+        if (body.includes('"save"') && body.includes(`"step-${count - 1}"`))
+          await route.abort("failed");
+        else await route.fulfill({ response });
+      });
+      await save();
+      expect(await r.page.locator("main [role=alert]").count()).toBe(1);
+      const committed = await r.service.read(r.projectId, r.roundId);
+      for (let n = 0; n < count; n++) {
+        expect(committed.steps[`step-${n}`].body).toBe(
+          `submitted-A-${count}-${n}`,
+        );
+        expect(committed.steps[`step-${n}`].version).toBe(
+          before.steps[`step-${n}`].version + 1,
+        );
+        await (await choose(n)).fill(`later-B-${count}-${n}`);
+      }
+      await r.page.unroute("**/api/trpc/workbench.execute*");
+      await r.page
+        .getByRole("button", { name: "重试同一请求", exact: true })
+        .click();
+      await quiet(r.page);
+      for (let n = 0; n < count; n++) {
+        expect(await (await choose(n)).inputValue()).toBe(
+          `later-B-${count}-${n}`,
+        );
+        expect(
+          await r.page
+            .getByRole("button", {
+              name: new RegExp(
+                `^${n + 1}\\. ${r.f.flow.steps[n].title}.*未保存`,
+              ),
+            })
+            .count(),
+        ).toBe(1);
+      }
+      const replayed = await r.service.read(r.projectId, r.roundId);
+      for (let n = 0; n < count; n++)
+        expect(replayed.steps[`step-${n}`]).toEqual(
+          committed.steps[`step-${n}`],
+        );
+      await save();
+      const saved = await r.service.read(r.projectId, r.roundId);
+      for (let n = 0; n < count; n++) {
+        expect(saved.steps[`step-${n}`].body).toBe(`later-B-${count}-${n}`);
+        expect(saved.steps[`step-${n}`].version).toBe(
+          committed.steps[`step-${n}`].version + 1,
+        );
+      }
+    }
+    await r.context.close();
+    console.log(
+      "WB-386-01 real browser: committed response loss + later input + original request replay + partial multi-step retention PASS",
+    );
+  },
+  120000,
+);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "removes adopted deleted and expired evidence in the browser while old reports remain restricted",
+  async () => {
+    for (const restriction of ["deleted", "expired"]) {
+      const r = await repairProject();
+      const evidence = await r.service.execute({
+        action: "userEvidence",
+        projectId: r.projectId,
+        roundId: r.roundId,
+        requestId: randomUUID(),
+        body: `original-${restriction}`,
+        observedAt: null,
+        supersedes: null,
+      });
+      expect(evidence.accepted).toBe(true);
+      const e = (await r.service.read(r.projectId, r.roundId)).evidence[0];
+      await r.page.getByRole("button", { name: "重新加载服务端状态" }).click();
+      await quiet(r.page);
+      await r.page.getByLabel(`采用来源 ${e.id}`, { exact: true }).check();
+      await fillConfirm(r.page, r.f, "original-restricted");
+      await r.page
+        .getByRole("button", { name: "发布正式版", exact: true })
+        .click();
+      await quiet(r.page);
+      const published = r.roundId;
+      await r.page
+        .getByRole("button", { name: "沿用此方法开启新轮次", exact: true })
+        .click();
+      await quiet(r.page);
+      r.roundId = (await r.service.rounds(r.projectId)).find(
+        (x) => x.state === "draft",
+      )!.roundId;
+      await r.page
+        .getByRole("button", {
+          name: new RegExp(`^1\\. ${r.f.flow.steps[0].title}`),
+        })
+        .click();
+      if (restriction === "deleted") {
+        await r.page
+          .getByRole("button", { name: "限制此来源访问", exact: true })
+          .click();
+        await quiet(r.page);
+      } else {
+        await r.service.execute({
+          action: "restrictEvidence",
+          projectId: r.projectId,
+          roundId: r.roundId,
+          requestId: randomUUID(),
+          evidenceId: e.id,
+          deleted: false,
+          expiresAt: new Date(Date.now() + 600).toISOString(),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        await r.page
+          .getByRole("button", { name: "重新加载服务端状态" })
+          .click();
+        await quiet(r.page);
+      }
+      const checkbox = r.page.getByLabel(`采用来源 ${e.id}`, { exact: true });
+      expect(await checkbox.isChecked()).toBe(true);
+      expect(await checkbox.isEnabled()).toBe(true);
+      await checkbox.uncheck();
+      expect(await checkbox.isDisabled()).toBe(true);
+      // Rewrites every affected body and explicitly reconfirms dependency order.
+      await fillConfirm(r.page, r.f, `replacement-${restriction}`);
+      const repaired = await r.service.read(r.projectId, r.roundId);
+      expect(repaired.steps["step-0"].evidenceIds).toEqual([]);
+      expect(Object.values(repaired.steps).every((s) => s.valid)).toBe(true);
+      expect(
+        (await r.service.read(r.projectId, published)).steps["step-0"].body,
+      ).toBeNull();
+      await expect(r.service.export(r.projectId, published)).rejects.toThrow(
+        "ARTIFACT_EVIDENCE_UNAVAILABLE",
+      );
+      await r.page
+        .getByRole("button", { name: "正式 v1", exact: true })
+        .click();
+      await quiet(r.page);
+      await r.page
+        .getByRole("button", {
+          name: new RegExp(`^1\\. ${r.f.flow.steps[0].title}`),
+        })
+        .click();
+      expect(
+        await r.page
+          .getByRole("textbox", { name: `${r.f.flow.steps[0].title} 工作稿` })
+          .inputValue(),
+      ).toBe("");
+      await r.page
+        .getByRole("button", { name: "重新校验并导出 Markdown", exact: true })
+        .click();
+      await quiet(r.page);
+      expect(await r.page.locator("main [role=alert]").count()).toBe(1);
+      await r.context.close();
+    }
+    console.log(
+      "WB-386-02 real browser: deleted/expired adopted source removal + rewrite/reconfirm + historic redaction/re-export denial PASS",
+    );
+  },
+  180000,
+);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "adopts 64 direct plus 64 inherited candidate sources through the browser without widening direct input",
+  async () => {
+    const r = await repairProject();
+    const trusted = databaseArtifactStore({
+      userClient: r.user,
+      privateClient: db,
+      moduleId: r.f.moduleId,
+      skillId: r.f.pack.id,
+      registrations: {},
+    });
+    const ids: string[] = [];
+    for (let i = 0; i < 128; i++) {
+      const result = (await trusted.execute({
+        action: "userEvidence",
+        projectId: r.projectId,
+        roundId: r.roundId,
+        requestId: randomUUID(),
+        body: `fictional-source-${i}`,
+        observedAt: null,
+        supersedes: null,
+      })) as { evidenceId: string };
+      ids.push(result.evidenceId);
+    }
+    expect(new Set(ids).size).toBe(128);
+    const scope = { projectId: r.projectId, roundId: r.roundId };
+    await trusted.execute({
+      action: "save",
+      ...scope,
+      requestId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: 0,
+      body: "upstream 64 sources",
+      evidenceIds: ids.slice(0, 64),
+    });
+    for (const invalid of [ids.slice(0, 65), [ids[0], ids[0]], [randomUUID()]])
+      await expect(
+        trusted.execute({
+          action: "candidate",
+          ...scope,
+          requestId: randomUUID(),
+          stepId: "step-1",
+          body: "invalid",
+          evidenceIds: invalid,
+        }),
+      ).rejects.toThrow();
+    const foreign = await repairProject();
+    const foreignTrusted = databaseArtifactStore({
+      userClient: foreign.user,
+      privateClient: db,
+      moduleId: foreign.f.moduleId,
+      skillId: foreign.f.pack.id,
+      registrations: {},
+    });
+    const other = (await foreignTrusted.execute({
+      action: "userEvidence",
+      projectId: foreign.projectId,
+      roundId: foreign.roundId,
+      requestId: randomUUID(),
+      body: "foreign",
+      observedAt: null,
+      supersedes: null,
+    })) as { evidenceId: string };
+    await expect(
+      trusted.execute({
+        action: "candidate",
+        ...scope,
+        requestId: randomUUID(),
+        stepId: "step-1",
+        body: "cross-project",
+        evidenceIds: [other.evidenceId],
+      }),
+    ).rejects.toThrow();
+    await foreign.context.close();
+    const created = (await trusted.execute({
+      action: "candidate",
+      ...scope,
+      requestId: randomUUID(),
+      stepId: "step-1",
+      body: "candidate with 128 complete sources",
+      evidenceIds: ids.slice(64),
+    })) as { candidateId: string };
+    const adoption = {
+      action: "saveCandidate" as const,
+      ...scope,
+      requestId: randomUUID(),
+      stepId: "step-1",
+      expectedVersion: 0,
+      body: "candidate with 128 complete sources",
+      candidateId: created.candidateId,
+    };
+    await expect(foreign.service.execute(adoption)).rejects.toThrow(
+      "ARTIFACT_DENIED",
+    );
+    expect(
+      (
+        await r.user.rpc("artifact_save_candidate", {
+          p_actor_id: r.credentials.id,
+          p_module_id: r.f.moduleId,
+          p_skill_id: r.f.pack.id,
+          p_project_id: r.projectId,
+          p_round_id: r.roundId,
+          p_request_id: randomUUID(),
+          p_step_id: "step-1",
+          p_candidate_id: created.candidateId,
+          p_expected_version: 0,
+          p_body: "denied",
+        })
+      ).error,
+    ).not.toBeNull();
+    await trusted.execute({
+      action: "save",
+      ...scope,
+      requestId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: 1,
+      body: "changed dependency",
+      evidenceIds: [],
+    });
+    await expect(r.service.execute(adoption)).rejects.toThrow(
+      "ARTIFACT_REVIEW_REQUIRED",
+    );
+    expect(
+      (await r.service.read(r.projectId, r.roundId)).steps["step-1"].version,
+    ).toBe(0);
+    await trusted.execute({
+      action: "save",
+      ...scope,
+      requestId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: 2,
+      body: "upstream 64 sources",
+      evidenceIds: ids.slice(0, 64),
+    });
+    const snapshot = await r.service.read(r.projectId, r.roundId),
+      candidate = snapshot.candidates.find(
+        (x) => x.id === created.candidateId,
+      )!;
+    expect(candidate.evidenceIds).toHaveLength(128);
+    expect(candidate.directEvidenceIds).toEqual(ids.slice(64));
+    await r.page.getByRole("button", { name: "重新加载服务端状态" }).click();
+    await quiet(r.page);
+    await r.page
+      .getByRole("button", { name: "确认当前工作稿", exact: true })
+      .click();
+    await quiet(r.page);
+    await r.page
+      .getByRole("button", {
+        name: new RegExp(`^2\\. ${r.f.flow.steps[1].title}`),
+      })
+      .click();
+    await r.page.getByText("此步骤确认历史与候选", { exact: true }).click();
+    await r.page
+      .getByRole("button", { name: "采用到本地工作稿", exact: true })
+      .click();
+    await r.page.route("**/api/trpc/workbench.execute*", async (route) => {
+      const response = await route.fetch();
+      if (route.request().postData()?.includes("saveCandidate"))
+        await route.abort("failed");
+      else await route.fulfill({ response });
+    });
+    await r.page
+      .getByRole("button", { name: "保存全部编辑", exact: true })
+      .click();
+    await quiet(r.page);
+    expect(await r.page.locator("main [role=alert]").count()).toBe(1);
+    await r.page.unroute("**/api/trpc/workbench.execute*");
+    await r.page
+      .getByRole("button", { name: "重试同一请求", exact: true })
+      .click();
+    await quiet(r.page);
+    expect(await r.page.locator("main [role=alert]").count()).toBe(0);
+    const adopted = await r.service.read(r.projectId, r.roundId);
+    expect(adopted.steps["step-1"].version).toBe(1);
+    expect(adopted.steps["step-1"].evidenceIds).toEqual(ids.slice(64));
+    expect(adopted.steps["step-1"].provenanceIds).toHaveLength(128);
+    await r.page
+      .getByRole("button", { name: "确认当前工作稿", exact: true })
+      .click();
+    await quiet(r.page);
+    for (const n of [2, 3]) {
+      await r.page
+        .getByRole("button", {
+          name: new RegExp(`^${n + 1}\\. ${r.f.flow.steps[n].title}`),
+        })
+        .click();
+      await r.page
+        .getByRole("textbox", { name: `${r.f.flow.steps[n].title} 工作稿` })
+        .fill(`independent output ${n}`);
+      await r.page
+        .getByRole("button", { name: "保存全部编辑", exact: true })
+        .click();
+      await quiet(r.page);
+      await r.page
+        .getByRole("button", { name: "确认当前工作稿", exact: true })
+        .click();
+      await quiet(r.page);
+    }
+    await r.page
+      .getByRole("button", { name: "发布正式版", exact: true })
+      .click();
+    await quiet(r.page);
+    expect(await r.page.locator("main [role=alert]").count()).toBe(0);
+    const report = await r.service.report(r.projectId, r.roundId);
+    expect(report.report!.sources).toHaveLength(128);
+    expect(new Set(report.report!.sources.map((x) => x.id))).toEqual(
+      new Set(ids),
+    );
+    await r.page
+      .getByRole("button", { name: "查看正式报告", exact: true })
+      .click();
+    await quiet(r.page);
+    expect(
+      await r.page
+        .getByText(`${r.f.flow.report.title} · v1`, { exact: true })
+        .count(),
+    ).toBe(1);
+    const download = r.page.waitForEvent("download");
+    await r.page
+      .getByRole("button", { name: "重新校验并导出 Markdown", exact: true })
+      .click();
+    await (await download).saveAs(output + "/candidate-128.md");
+    const markdown = readFileSync(output + "/candidate-128.md", "utf8");
+    for (const evidenceId of ids) expect(markdown).toContain(evidenceId);
+    await r.context.close();
+    console.log(
+      "WB-386-03 real browser: 64 direct + 64 inherited candidate adoption/save/confirm/report/export retains 128 unique sources; invalid/duplicate/foreign rejected PASS",
+    );
+  },
+  180000,
 );

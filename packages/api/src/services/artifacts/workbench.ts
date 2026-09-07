@@ -15,6 +15,10 @@ import {
 const uuid = z.string().uuid();
 export const webCommandSchema = z.discriminatedUnion("action", [
   commandSchema.options[2],
+  commandSchema.options[2].omit({ evidenceIds: true }).extend({
+    action: z.literal("saveCandidate"),
+    candidateId: uuid,
+  }),
   commandSchema.options[4],
   commandSchema.options[5].extend({
     expectedSteps: z
@@ -176,22 +180,20 @@ export function workbenchService(
           selected: { revisionId: entry.revisionId, workflow: entry.workflow },
         },
       });
-      return z
-        .object({ roundId: uuid })
-        .parse(
-          await s.start({
-            projectId: v.projectId,
-            roundId: v.roundId,
-            requestId: v.requestId,
-            registration: "selected",
-            account,
-            fromRoundId: v.fromRoundId,
-          }),
-        );
+      return z.object({ roundId: uuid }).parse(
+        await s.start({
+          projectId: v.projectId,
+          roundId: v.roundId,
+          requestId: v.requestId,
+          registration: "selected",
+          account,
+          fromRoundId: v.fromRoundId,
+        }),
+      );
     },
     async execute(input: z.infer<typeof webCommandSchema>) {
       const v = webCommandSchema.parse(input);
-      if (v.action === "publish") {
+      if (v.action === "publish" || v.action === "saveCandidate") {
         const fixed = await resolve(v.projectId, v.roundId),
           id = await actor();
         const visible = await userClient
@@ -203,23 +205,37 @@ export function workbenchService(
         if (visible.error || visible.data?.id !== fixed.moduleId)
           throw new Error("ARTIFACT_DENIED");
         const result = await privateClient!
-          .rpc("artifact_publish_current", {
-            p_actor_id: id,
-            p_module_id: fixed.moduleId,
-            p_skill_id: fixed.skillId,
-            p_project_id: v.projectId,
-            p_round_id: v.roundId,
-            p_request_id: v.requestId,
-            p_expected_steps: v.expectedSteps,
-          })
+          .rpc(
+            v.action === "publish"
+              ? "artifact_publish_current"
+              : "artifact_save_candidate",
+            {
+              p_actor_id: id,
+              p_module_id: fixed.moduleId,
+              p_skill_id: fixed.skillId,
+              p_project_id: v.projectId,
+              p_round_id: v.roundId,
+              p_request_id: v.requestId,
+              ...(v.action === "publish"
+                ? { p_expected_steps: v.expectedSteps }
+                : {
+                    p_step_id: v.stepId,
+                    p_candidate_id: v.candidateId,
+                    p_expected_version: v.expectedVersion,
+                    p_body: v.body,
+                  }),
+            },
+          )
           .abortSignal(AbortSignal.timeout(10000));
         if (result.error)
           throw new Error(
             result.error.code === "42501"
               ? "ARTIFACT_DENIED"
-              : result.error.code === "P0001"
-                ? "ARTIFACT_REVIEW_REQUIRED"
-                : "ARTIFACT_UNAVAILABLE",
+              : result.error.message === "save conflict"
+                ? "ARTIFACT_VERSION_CONFLICT"
+                : result.error.code === "P0001"
+                  ? "ARTIFACT_REVIEW_REQUIRED"
+                  : "ARTIFACT_UNAVAILABLE",
           );
       } else await (await store(v.projectId, v.roundId)).execute(v);
       return { accepted: true };

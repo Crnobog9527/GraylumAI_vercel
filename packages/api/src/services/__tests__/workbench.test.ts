@@ -43,6 +43,27 @@ describe("workbench browser boundary", () => {
       }).success,
     ).toBe(false);
   });
+  it("allows adoption of an existing candidate without browser-controlled provenance", () => {
+    const value = {
+      ...scope,
+      action: "saveCandidate",
+      candidateId: randomUUID(),
+      stepId: "step-0",
+      expectedVersion: 0,
+      body: "edited candidate",
+    };
+    expect(webCommandSchema.safeParse(value).success).toBe(true);
+    for (const field of [
+      "evidenceIds",
+      "actorId",
+      "workflow",
+      "moduleId",
+      "revisionId",
+    ])
+      expect(
+        webCommandSchema.safeParse({ ...value, [field]: [] }).success,
+      ).toBe(false);
+  });
   it("projects display constraints without exposing resource plans", () => {
     const result = publicWorkflowSchema.parse(makeWorkflow(6, true));
     expect(result.steps).toHaveLength(6);
