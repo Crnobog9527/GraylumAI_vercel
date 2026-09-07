@@ -41,16 +41,16 @@ export default function WorkbenchPage() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(true);
   const [sourceDrafts, setSourceDrafts] = useState<
-    Record<string, { body: string; supersedes: string }>
+    Record<string, { editId: string; body: string; supersedes: string }>
   >({});
   const sourceScope = snapshot ? `${snapshot.projectId}/${snapshot.roundId}` : "";
   const evidence = sourceDrafts[sourceScope]?.body ?? "";
   const supersedes = sourceDrafts[sourceScope]?.supersedes ?? "";
   const setEvidence = (body: string) => setSourceDrafts((old) => ({
-    ...old, [sourceScope]: { body, supersedes: old[sourceScope]?.supersedes ?? "" },
+    ...old, [sourceScope]: { editId: id(), body, supersedes: old[sourceScope]?.supersedes ?? "" },
   }));
   const setSupersedes = (value: string) => setSourceDrafts((old) => ({
-    ...old, [sourceScope]: { body: old[sourceScope]?.body ?? "", supersedes: value },
+    ...old, [sourceScope]: { editId: id(), body: old[sourceScope]?.body ?? "", supersedes: value },
   }));
   const [upgrade, setUpgrade] = useState(""),
     [account, setAccount] = useState<Record<string, string>>({});
@@ -61,6 +61,9 @@ export default function WorkbenchPage() {
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
   const dirty = Object.values(drafts).some((d) => d.dirty);
+  // Source forms survive project/round navigation, so protect every retained
+  // scope from a full page unload, including a currently hidden source draft.
+  const unsaved = dirty || Object.values(sourceDrafts).some((d) => d.body !== "" || d.supersedes !== "");
   const currentProject = projects.find(
     (p) => p.projectId === snapshot?.projectId,
   );
@@ -163,11 +166,11 @@ export default function WorkbenchPage() {
     return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
-    if (!dirty) return;
+    if (!unsaved) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [unsaved]);
   async function refresh() {
     const s = snapshotRef.current;
     await Promise.all([discover(), s ? load(s.projectId, s.roundId, true) : Promise.resolve()]);
@@ -188,6 +191,29 @@ export default function WorkbenchPage() {
     void run(async () => {
       await api.execute.mutate(command);
       await refreshCurrent(command.action === "abandon");
+    }, true);
+  }
+  function saveSource() {
+    if (!snapshot || !sourceDrafts[sourceScope]) return;
+    const scope = sourceScope, submitted = sourceDrafts[scope];
+    const command = {
+      action: "userEvidence" as const,
+      projectId: snapshot.projectId,
+      roundId: snapshot.roundId,
+      requestId: id(),
+      body: submitted.body,
+      observedAt: null,
+      supersedes: submitted.supersedes || null,
+    };
+    void run(async () => {
+      await api.execute.mutate(command);
+      setSourceDrafts((old) => {
+        if (old[scope]?.editId !== submitted.editId) return old;
+        const next = { ...old };
+        delete next[scope];
+        return next;
+      });
+      await refreshCurrent();
     }, true);
   }
   async function saveEntries(
@@ -812,17 +838,7 @@ export default function WorkbenchPage() {
                     disabled={
                       busy || !evidence.trim() || snapshot.state !== "draft"
                     }
-                    onClick={() =>
-                      execute({
-                        action: "userEvidence",
-                        projectId: snapshot.projectId,
-                        roundId: snapshot.roundId,
-                        requestId: id(),
-                        body: evidence,
-                        observedAt: null,
-                        supersedes: supersedes || null,
-                      })
-                    }
+                    onClick={saveSource}
                   >
                     保存来源补充
                   </Button>

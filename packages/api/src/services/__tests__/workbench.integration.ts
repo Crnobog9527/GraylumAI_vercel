@@ -1578,11 +1578,41 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     const source = r.page.getByRole("textbox", { name: "用户来源补充" });
     const revision = r.page.getByLabel("修订来源", { exact: true });
     const saveSource = r.page.getByRole("button", { name: "保存来源补充", exact: true });
+    const unloadProtected = () => r.page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    await expect.poll(unloadProtected).toBe(false);
     await source.fill("saved-source-A");
+    await expect.poll(unloadProtected).toBe(true);
+    const dialog = r.page.waitForEvent("dialog");
+    const reload = r.page.reload().catch(() => null);
+    const warning = await dialog;
+    expect(warning.type()).toBe("beforeunload");
+    await warning.dismiss();
+    await reload;
+    expect(await source.inputValue()).toBe("saved-source-A");
+    await r.page.route("**/api/trpc/workbench.execute**", async (route) => {
+      await route.fetch(); // Commit A, then lose only its response.
+      await route.abort("failed");
+    });
     await saveSource.click();
     await quiet(r.page);
+    await r.page.unroute("**/api/trpc/workbench.execute**");
+    expect(await source.inputValue()).toBe("saved-source-A");
+    await expect.poll(unloadProtected).toBe(true);
+    await source.fill("later-unsaved-source");
+    await r.page.getByRole("button", { name: "重试同一请求", exact: true }).click();
+    await quiet(r.page);
+    expect(await source.inputValue()).toBe("later-unsaved-source");
+    await expect.poll(unloadProtected).toBe(true);
+    expect((await r.service.read(r.projectId, r.roundId)).evidence).toHaveLength(1);
+    await source.fill("");
+    await expect.poll(unloadProtected).toBe(false);
     const idA = (await r.service.read(r.projectId, r.roundId)).evidence[0].id;
     await revision.selectOption(idA);
+    await expect.poll(unloadProtected).toBe(true);
     await source.fill("unsaved-source-A");
     const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
     await r.page.getByRole("button", { name: `创建 ${other.label}`, exact: true }).click();
@@ -1590,9 +1620,13 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     expect(await source.inputValue()).toBe("");
     expect(await revision.inputValue()).toBe("");
     expect(await saveSource.isDisabled()).toBe(true);
+    await expect.poll(unloadProtected).toBe(true); // Hidden A still needs protection.
     await source.fill("saved-source-B");
     await saveSource.click();
     await quiet(r.page);
+    expect(await source.inputValue()).toBe("");
+    expect(await revision.inputValue()).toBe("");
+    await expect.poll(unloadProtected).toBe(true); // B is saved, A remains unsaved.
     const projectB = (await r.service.projects()).find((p) => p.skillId === other.pack.id)!;
     const roundB = (await r.service.rounds(projectB.projectId))[0];
     const stateB = await r.service.read(projectB.projectId, roundB.roundId);
@@ -1604,6 +1638,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     expect(await source.inputValue()).toBe("unsaved-source-A");
     expect(await revision.inputValue()).toBe(idA);
     expect((await r.service.read(r.projectId, r.roundId)).evidence).toHaveLength(1);
+    await source.fill("");
+    await revision.selectOption("");
+    await expect.poll(unloadProtected).toBe(false);
     await r.page.getByRole("button", { name: "放弃当前草稿", exact: true }).click();
     await quiet(r.page);
     await r.page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
@@ -1612,7 +1649,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     expect(await revision.inputValue()).toBe("");
     expect(await saveSource.isDisabled()).toBe(true);
     await r.context.close();
-    console.log("real source draft isolation: projectA text/revision retained only in A; projectB/new round start empty and cannot submit A; SQL confirms no cross-project source write PASS");
+    console.log("real source draft isolation/unload: native reload warning preserves source-only input; response-loss retry preserves later input; saved form clears, hidden unsaved scopes remain protected; project/round isolation and SQL contents PASS");
   },
   90000,
 );
