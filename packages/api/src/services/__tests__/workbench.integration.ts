@@ -112,8 +112,13 @@ async function fixture(config: {
     ]);
   return { pack, moduleId, flow, registration, label: config.label };
 }
-async function pageFor(c = credentials) {
+async function pageFor(c = credentials, requests?: string[]) {
   const context = await browser.newContext();
+  context.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/trpc") || path.startsWith("/api/ai/stream"))
+      requests?.push(path);
+  });
   await context.route("**/*", (route) => {
     const u = new URL(route.request().url());
     if (
@@ -1532,4 +1537,82 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     );
   },
   150000,
+);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "completes an eight-step workflow within the existing API request budget",
+  async () => {
+    const credentials = await newUser();
+    const f = fixtures.find((f) => f.flow.steps.length === 8)!;
+    const requests: string[] = [];
+    const { page, context } = await pageFor(credentials, requests);
+    await quiet(page);
+    await page.getByRole("button", { name: `创建 ${f.label}`, exact: true }).click();
+    await quiet(page);
+    await fillConfirm(page, f, "request-budget");
+    await page.getByRole("button", { name: "发布正式版", exact: true }).click();
+    await quiet(page);
+    await page.getByRole("button", { name: "查看正式报告", exact: true }).click();
+    await quiet(page);
+    expect(await page.getByText(`${f.flow.report.title} · v1`, { exact: true }).count()).toBe(1);
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "重新校验并导出 Markdown", exact: true }).click();
+    await download;
+    await quiet(page);
+    expect(await page.locator("main [role=alert]").count()).toBe(0);
+    // Count actual proxy-limited HTTP requests including login, creation,
+    // individual saves/confirms, publication/report/export. The ENTIRE chain
+    // fits below60, so every60-second subset does too. This does not claim a
+    // remote Upstash execution; the production limiter and its threshold stay unchanged.
+    expect(requests.length).toBeLessThanOrEqual(50);
+    console.log(`real8-step workflow limited HTTP request count=${requests.length}; existing proxy threshold60/minute unchanged PASS`);
+    await context.close();
+  },
+  120000,
+);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "keeps source text and revision selection scoped to each project and round",
+  async () => {
+    const r = await repairProject();
+    const source = r.page.getByRole("textbox", { name: "用户来源补充" });
+    const revision = r.page.getByLabel("修订来源", { exact: true });
+    const saveSource = r.page.getByRole("button", { name: "保存来源补充", exact: true });
+    await source.fill("saved-source-A");
+    await saveSource.click();
+    await quiet(r.page);
+    const idA = (await r.service.read(r.projectId, r.roundId)).evidence[0].id;
+    await revision.selectOption(idA);
+    await source.fill("unsaved-source-A");
+    const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
+    await r.page.getByRole("button", { name: `创建 ${other.label}`, exact: true }).click();
+    await quiet(r.page);
+    expect(await source.inputValue()).toBe("");
+    expect(await revision.inputValue()).toBe("");
+    expect(await saveSource.isDisabled()).toBe(true);
+    await source.fill("saved-source-B");
+    await saveSource.click();
+    await quiet(r.page);
+    const projectB = (await r.service.projects()).find((p) => p.skillId === other.pack.id)!;
+    const roundB = (await r.service.rounds(projectB.projectId))[0];
+    const stateB = await r.service.read(projectB.projectId, roundB.roundId);
+    expect(stateB.evidence).toHaveLength(1);
+    expect(JSON.stringify(stateB.evidence)).toContain("saved-source-B");
+    expect(JSON.stringify(stateB.evidence)).not.toContain("source-A");
+    await r.page.getByRole("button", { name: new RegExp(`^${r.f.label}`) }).click();
+    await quiet(r.page);
+    expect(await source.inputValue()).toBe("unsaved-source-A");
+    expect(await revision.inputValue()).toBe(idA);
+    expect((await r.service.read(r.projectId, r.roundId)).evidence).toHaveLength(1);
+    await r.page.getByRole("button", { name: "放弃当前草稿", exact: true }).click();
+    await quiet(r.page);
+    await r.page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
+    await quiet(r.page);
+    expect(await source.inputValue()).toBe("");
+    expect(await revision.inputValue()).toBe("");
+    expect(await saveSource.isDisabled()).toBe(true);
+    await r.context.close();
+    console.log("real source draft isolation: projectA text/revision retained only in A; projectB/new round start empty and cannot submit A; SQL confirms no cross-project source write PASS");
+  },
+  90000,
 );

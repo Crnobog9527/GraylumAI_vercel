@@ -39,9 +39,19 @@ export default function WorkbenchPage() {
     [comparison, setComparison] = useState<ArtifactSnapshot | null>(null);
   const [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
-    [busy, setBusy] = useState(true),
-    [evidence, setEvidence] = useState(""),
-    [supersedes, setSupersedes] = useState("");
+    [busy, setBusy] = useState(true);
+  const [sourceDrafts, setSourceDrafts] = useState<
+    Record<string, { body: string; supersedes: string }>
+  >({});
+  const sourceScope = snapshot ? `${snapshot.projectId}/${snapshot.roundId}` : "";
+  const evidence = sourceDrafts[sourceScope]?.body ?? "";
+  const supersedes = sourceDrafts[sourceScope]?.supersedes ?? "";
+  const setEvidence = (body: string) => setSourceDrafts((old) => ({
+    ...old, [sourceScope]: { body, supersedes: old[sourceScope]?.supersedes ?? "" },
+  }));
+  const setSupersedes = (value: string) => setSourceDrafts((old) => ({
+    ...old, [sourceScope]: { body: old[sourceScope]?.body ?? "", supersedes: value },
+  }));
   const [upgrade, setUpgrade] = useState(""),
     [account, setAccount] = useState<Record<string, string>>({});
   const pending = useRef<null | (() => Promise<void>)>(null),
@@ -75,6 +85,9 @@ export default function WorkbenchPage() {
       history.at(-1)?.roundId;
     if (!current) return;
     const s = await api.read.query({ projectId, roundId: current });
+    applySnapshot(s, preserve);
+  }
+  function applySnapshot(s: ArtifactSnapshot, preserve = true) {
     setSnapshot(s);
     setReport(null);
     setComparison(null);
@@ -135,6 +148,7 @@ export default function WorkbenchPage() {
       if (previous !== undefined && current !== previous) {
         setSnapshot(null);
         setDrafts({});
+        setSourceDrafts({});
         setProjects([]);
         setRounds([]);
         setReport(null);
@@ -155,14 +169,25 @@ export default function WorkbenchPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   async function refresh() {
-    await discover();
     const s = snapshotRef.current;
-    if (s) await load(s.projectId, s.roundId, true);
+    await Promise.all([discover(), s ? load(s.projectId, s.roundId, true) : Promise.resolve()]);
+  }
+  async function refreshCurrent(history = false) {
+    const s = snapshotRef.current;
+    if (!s) return;
+    const [current, updatedRounds, updatedProjects] = await Promise.all([
+      api.read.query({ projectId: s.projectId, roundId: s.roundId }),
+      history ? api.rounds.query({ projectId: s.projectId }) : undefined,
+      history ? api.projects.query() : undefined,
+    ]);
+    applySnapshot(current);
+    if (updatedRounds) setRounds(updatedRounds);
+    if (updatedProjects) setProjects(updatedProjects);
   }
   function execute(command: Parameters<typeof api.execute.mutate>[0]) {
     void run(async () => {
       await api.execute.mutate(command);
-      await refresh();
+      await refreshCurrent(command.action === "abandon");
     }, true);
   }
   async function saveEntries(
@@ -237,7 +262,8 @@ export default function WorkbenchPage() {
           projectId: s.projectId,
           roundId: s.roundId,
         });
-        await refresh();
+        applySnapshot(recovered);
+        if (recovered.state === "published") await refreshCurrent(true);
         setNotice(
           recovered.state === "published"
             ? "已读取现有正式版。后续未保存输入仍保留，可复制到新轮次继续处理。"
@@ -259,7 +285,7 @@ export default function WorkbenchPage() {
               latest.steps[k].reviewVersion !== s.steps[k].reviewVersion,
           )
         ) {
-          await refresh();
+          applySnapshot(latest);
           setNotice("编辑已保存。请复核并确认所有待确认步骤，再发布正式版。");
           return;
         }
@@ -276,7 +302,8 @@ export default function WorkbenchPage() {
           ),
         });
       }
-      await refresh();
+      if (publish) await refreshCurrent(true);
+      else applySnapshot(latest);
       setNotice(
         publish
           ? "正式版已发布。"
@@ -312,8 +339,7 @@ export default function WorkbenchPage() {
     };
     void run(async () => {
       const created = await api.start.mutate(input);
-      await discover();
-      await load(projectId, created.roundId);
+      await Promise.all([discover(), load(projectId, created.roundId)]);
       setUpgrade("");
     }, true);
   }
