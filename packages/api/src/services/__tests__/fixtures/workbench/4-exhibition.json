@@ -1,0 +1,98 @@
+{
+  "id": "fictional-exhibition",
+  "label": "虚构展览策划",
+  "methodText": "Fictional local-only exhibition planning method. Define exhibition intent, connect exhibit narratives, plan circulation and resources, then confirm an opening checklist. No provider or business data.",
+  "workflow": {
+    "id": "fictional-exhibition",
+    "version": 1,
+    "kind": "document",
+    "steps": [
+      {
+        "id": "step-0",
+        "title": "展览意图",
+        "dependsOn": [],
+        "resources": [
+          "references/step-0.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-1",
+        "title": "展品叙事",
+        "dependsOn": [
+          "step-0"
+        ],
+        "resources": [
+          "references/step-1.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-2",
+        "title": "动线与资源",
+        "dependsOn": [
+          "step-0"
+        ],
+        "resources": [
+          "references/step-2.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-3",
+        "title": "开幕检查",
+        "dependsOn": [
+          "step-1",
+          "step-2"
+        ],
+        "resources": [
+          "references/step-3.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      }
+    ],
+    "report": {
+      "id": "exhibition-plan",
+      "version": 1,
+      "title": "虚构展览策划报告",
+      "sections": [
+        {
+          "title": "展览意图",
+          "stepId": "step-0"
+        },
+        {
+          "title": "展品叙事",
+          "stepId": "step-1"
+        },
+        {
+          "title": "动线与资源",
+          "stepId": "step-2"
+        },
+        {
+          "title": "开幕检查",
+          "stepId": "step-3"
+        }
+      ]
+    }
+  }
+}
