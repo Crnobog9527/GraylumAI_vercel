@@ -2,7 +2,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
-import { workbenchGeneration, generationQuoteInput, generationInput, generationScope } from "../services/artifacts/generation";
+import { workbenchGeneration, generationQuoteInput, generationInput, generationScope, generationRecoveryInput } from "../services/artifacts/generation";
 import {
   workbenchService,
   startSchema,
@@ -78,7 +78,8 @@ export const workbenchRouter = router({
   generate: procedure.input(generationInput).mutation(({ ctx, input }) => ctx.generation.generate(input)),
   generations: procedure.input(generationScope).query(({ ctx, input }) => ctx.generation.list(input)),
   cancelGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.cancel(input)),
-  recoverGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.recover(input)),
+  abandonGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.abandon(input)),
+  recoverGeneration: procedure.input(generationRecoveryInput).mutation(({ ctx, input }) => ctx.generation.recover(input)),
   catalog: procedure.query(({ ctx }) => ctx.workbench.catalog()),
   projects: procedure.query(({ ctx }) => ctx.workbench.projects()),
   rounds: procedure

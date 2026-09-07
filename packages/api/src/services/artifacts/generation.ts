@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Tiktoken } from 'js-tiktoken/lite';
 import o200k from 'js-tiktoken/ranks/o200k_base';
@@ -22,7 +23,39 @@ export const generationQuoteInput = generationScope.extend({
 export const generationInput = generationQuoteInput.extend({
   requestId: uuid, quoteHash: z.string().regex(/^[a-f0-9]{64}$/), budgetCredits: z.number().int().min(1).max(1000000),
 }).strict();
-export const generationStatus = generationStatusSchema;
+const answerSchema = z.object({ body: z.string().min(1).max(20000), inputTokens: z.number().int().min(0).max(2000000), outputTokens: z.number().int().min(0).max(2000000) }).strict();
+export const generationStatus = generationStatusSchema.extend({ recoveryReceipt: z.string().max(200000).optional() });
+const receiptSchema = answerSchema.extend({ credits: z.number().int().min(0).max(1000000), costUsd: z.number().finite().nonnegative() });
+export const generationRecoveryInput = generationScope.extend({ requestId: uuid, recoveryReceipt: z.string().min(1).max(200000).optional() }).strict();
+// A response may outlive the process during a DB outage. The browser holds only
+// authenticated ciphertext; its key remains in the existing private dispatch row.
+export function sealGenerationReceipt(result: unknown, token: string, binding: string) {
+  const iv = randomBytes(12), key = createHash('sha256').update(token).digest();
+  const cipher = createCipheriv('aes-256-gcm', key, iv); cipher.setAAD(Buffer.from(binding));
+  const body = Buffer.concat([cipher.update(JSON.stringify(receiptSchema.parse(result)), 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
+}
+export function openGenerationReceipt(sealed: string, token: string, binding: string) {
+  const bytes = Buffer.from(sealed, 'base64url');
+  const decipher = createDecipheriv('aes-256-gcm', createHash('sha256').update(token).digest(), bytes.subarray(0, 12));
+  decipher.setAAD(Buffer.from(binding)); decipher.setAuthTag(bytes.subarray(12, 28));
+  return receiptSchema.parse(JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString('utf8')));
+}
+// Deterministic echo detection, including whitespace/punctuation obfuscation.
+// This is not a promise to detect semantic paraphrases of arbitrary methods.
+export function echoesPrivateMethod(answer: string, privateContext: string): boolean {
+  const normalize = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const output = normalize(answer), sections = JSON.parse(privateContext).resources as Array<{path: string; content: string}>;
+  const windows = new Set<string>();
+  for (let i = 0; i + 16 <= output.length; i++) windows.add(output.slice(i, i + 16));
+  return sections.some(({ path, content }) => {
+    if (output.includes(normalize(path))) return true;
+    for (const word of content.match(/[\p{L}\p{N}_-]{12,}/gu) ?? []) if (output.includes(normalize(word))) return true;
+    const source = normalize(content);
+    for (let i = 0; i + 16 <= source.length; i++) if (windows.has(source.slice(i, i + 16))) return true;
+    return false;
+  });
+}
 const modelSchema = z.object({
   id: uuid, model_id: z.enum(['openai/gpt-4o-2024-08-06', 'openai/gpt-4o-mini-2024-07-18']),
   is_active: z.literal('true'), max_tokens: z.number().int().min(1).max(16384),
@@ -32,7 +65,6 @@ const modelSchema = z.object({
 });
 type Model = z.infer<typeof modelSchema>;
 export type ModelRequest = { model: Model; messages: Array<{ role: 'system' | 'user'; content: string }>; maxTokens: number };
-const answerSchema = z.object({ body: z.string().min(1).max(20000), inputTokens: z.number().int().min(0).max(2000000), outputTokens: z.number().int().min(0).max(2000000) }).strict();
 export type GenerationTransport = (request: ModelRequest) => Promise<z.infer<typeof answerSchema>>;
 // A fixed endpoint, explicit server credential, bounded reply and no redirects,
 // tools, plugins, fallback models or agent loop. No environment-key fallback.
@@ -124,7 +156,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       revisionId: snapshot.revisionId, packageHash: snapshot.packageHash, workflowHash: snapshot.workflowHash, templateHash: snapshot.templateHash,
       resources: loaded.resourceIdentities(), contextHash: sha256(JSON.stringify(messages)) };
     const quoteHash = sha256(JSON.stringify(quote));
-    return { quote, quoteHash, model, messages, source, descriptor, step, id };
+    return { quote, quoteHash, model, messages, source, descriptor, step, id, loaded };
   }
   return {
     async quote(input: z.infer<typeof generationQuoteInput>) {
@@ -136,9 +168,19 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     async cancel(input: z.infer<typeof generationScope> & { requestId: string }) {
       return generationStatus.parse(await rpc(generationScope.parse({ projectId: input.projectId, roundId: input.roundId }), 'cancel', uuid.parse(input.requestId)));
     },
-    async recover(input: z.infer<typeof generationScope> & { requestId: string }) {
-      const scope = generationScope.parse({ projectId: input.projectId, roundId: input.roundId });
-      return generationStatus.parse(await rpc(scope, 'settle', uuid.parse(input.requestId)));
+    async abandon(input: z.infer<typeof generationScope> & { requestId: string }) {
+      return z.object({ abandoned: z.boolean() }).parse(await rpc(input, 'abandon', uuid.parse(input.requestId)));
+    },
+    async recover(input: z.infer<typeof generationRecoveryInput>): Promise<z.infer<typeof generationStatus>> {
+      const v = generationRecoveryInput.parse(input), id = await actor();
+      if (v.recoveryReceipt) {
+        const saved = await rpc(v, 'recovery_key', v.requestId);
+        if (saved.status.state === 'succeeded') return generationStatus.parse(saved.status);
+        const result = openGenerationReceipt(v.recoveryReceipt, uuid.parse(saved.token), JSON.stringify([id, v.projectId, v.roundId, v.requestId]));
+        // Every retry reads the durable state above before replaying the same receipt.
+        if (saved.status.state !== 'responded') await rpc(v, 'receipt', v.requestId, { token: saved.token, result });
+      }
+      return generationStatus.parse(await rpc(v, 'settle', v.requestId));
     },
     async generate(input: z.infer<typeof generationInput>) {
       const v = generationInput.parse(input);
@@ -151,7 +193,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       const ready = await prepare(generationQuoteInput.parse({ projectId: v.projectId, roundId: v.roundId, stepId: v.stepId, instruction: v.instruction, expectedSteps: v.expectedSteps }));
       if (v.quoteHash !== ready.quoteHash || v.budgetCredits < ready.quote.reservedCredits) throw new Error('GENERATION_QUOTE_CHANGED');
       if (!existing) await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, ready.quote.reservedCredits);
-      const reserved = z.object({ token: uuid }).passthrough().parse(await rpc(v, 'prepare', v.requestId, { input: v, quote: ready.quote }));
+      const reserved = generationStatus.extend({ token: uuid }).parse(await rpc(v, 'prepare', v.requestId, { input: v, quote: ready.quote }));
       // No provider effect until dispatch ownership is durably confirmed. A lost
       // dispatch acknowledgement is uncertain and must never be resent.
       try {
@@ -166,18 +208,28 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         throw e;
       }
       if (dispatch?.dispatch !== true) throw new Error('GENERATION_CONFLICT');
+      let known: z.infer<typeof receiptSchema> | undefined;
       try {
         const answer = answerSchema.parse(await transport({ model: ready.model, messages: ready.messages, maxTokens: ready.quote.maxTokens }));
         if (answer.outputTokens > ready.quote.maxTokens || !answer.body.trim() || [...answer.body].length > ready.step.maxLength) throw new Error('GENERATION_OUTCOME_UNKNOWN');
         const filtered = filterAIOutput(answer.body);
-        if (filtered.blocked || !filtered.content.trim()) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+        if (filtered.blocked || !filtered.content.trim() || echoesPrivateMethod(answer.body, ready.loaded.forModel()) || echoesPrivateMethod(filtered.content, ready.loaded.forModel())) throw new Error('GENERATION_OUTCOME_UNKNOWN');
         const cost = calculateTokenCostWithPricing({ ...answer, cacheReadTokens: 0, cacheCreationTokens: 0 }, ready.quote.pricing, {}, ready.quote.settings);
         // Never charge above the user-approved reservation. Persist actual
         // calculated model cost separately for accounting/reconciliation.
-        const result = { ...answer, body: filtered.content, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd };
-        await rpc(v, 'receipt', v.requestId, { token: reserved.token, result });
+        known = receiptSchema.parse({ ...answer, body: filtered.content, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd });
+        await rpc(v, 'receipt', v.requestId, { token: reserved.token, result: known });
         return generationStatus.parse(await rpc(v, 'settle', v.requestId));
       } catch {
+        if (known) {
+          const recoveryReceipt = sealGenerationReceipt(known, reserved.token, JSON.stringify([ready.id, v.projectId, v.roundId, v.requestId]));
+          // Read back an ambiguous durable write before retrying. If DB recovery
+          // still fails, return the sealed receipt instead of discarding the answer.
+          try { return await this.recover({ projectId: v.projectId, roundId: v.roundId, requestId: v.requestId, recoveryReceipt }); }
+          catch { /* May still be dispatched or DB unavailable; retain ciphertext. */ }
+          const status = await rpc(v, 'get', v.requestId, { input: v }).then(generationStatus.parse).catch(() => ({ ...reserved, state: 'dispatched' as const }));
+          return generationStatus.parse({ ...status, recoveryReceipt });
+        }
         const status = generationStatus.parse(await rpc(v, 'unknown', v.requestId, { token: reserved.token }));
         if (status.state === 'responded') return generationStatus.parse(await rpc(v, 'settle', v.requestId));
         return status;

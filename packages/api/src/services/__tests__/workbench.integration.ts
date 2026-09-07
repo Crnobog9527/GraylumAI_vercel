@@ -1957,7 +1957,7 @@ aiTest('AI: unknown provider outcome holds the reservation and prevents blind re
 aiTest('AI: saved receipt survives failed billing commit and recovers atomically without another model call', async () => {
   const t = await generationFixture(), v = await t.request();
   await sql.query("create function local_fail_ai_settle() returns trigger language plpgsql as $$ begin if NEW.operation_type='settle' then raise exception 'local injected settle failure'; end if; return NEW; end $$; create trigger local_fail_ai_settle before insert on billing_history for each row execute function local_fail_ai_settle()");
-  try { await expect(t.ai.generate(v)).rejects.toThrow(); }
+  try { expect((await t.ai.generate(v)).recoveryReceipt).toBeTruthy(); }
   finally { await sql.query('drop trigger local_fail_ai_settle on billing_history; drop function local_fail_ai_settle()'); }
   expect((await t.ai.list(t.scope))[0].state).toBe('responded');
   expect((await t.service.read(v.projectId, v.roundId)).candidates).toHaveLength(0);
@@ -2074,3 +2074,68 @@ aiTest('AI: adopted source restriction and fixed revision revocation reject exec
   expect(Number((await sql.query('select count(*) from billing_history')).rows[0].count)).toBe(before);
   expect(t.calls()).toBe(0);
 }, 30000);
+
+aiTest('AI: private method echo is never persisted as a candidate or receipt', async () => {
+  const t = await generationFixture();
+  const ai = t.workbenchGeneration(t.user, db, async () => ({ body: 'M E T H O D _ C A N A R Y', inputTokens: 800, outputTokens: 30 }));
+  const v = await t.request(ai), result = await ai.generate(v);
+  expect(result.state).toBe('unknown'); expect(result.recoveryReceipt).toBeUndefined();
+  expect((await t.service.read(v.projectId, v.roundId)).candidates).toHaveLength(0);
+  expect((await sql.query('select result from artifact_generations where request_id=$1',[v.requestId])).rows[0].result).toBeNull();
+}, 30000);
+aiTest('AI: receipt write outage returns encrypted recovery across service recreation, denies tampering and settles once', async () => {
+  const t = await generationFixture(); let calls = 0;
+  const fault = new Proxy(db, { get(target, key) {
+    if (key === 'rpc') return (name: string, args: Record<string, unknown>) => args.p_action === 'receipt'
+      ? { abortSignal: async () => ({ data: null, error: { code: 'P0001' } }) } : target.rpc(name, args);
+    const value = Reflect.get(target,key); return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const ai = t.workbenchGeneration(t.user, fault, async () => { calls++; return { body: 'Known synthetic result retained across DB failure.', inputTokens: 800, outputTokens: 30 }; });
+  const v = await t.request(ai), result = await ai.generate(v);
+  expect(result.recoveryReceipt).toBeTruthy(); expect(result.state).toBe('dispatched');
+  expect(result.recoveryReceipt).not.toContain('Known synthetic');
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(0);
+  const restarted = t.workbenchGeneration(t.user, db, async () => { throw new Error('must not resend'); });
+  const recovery = { ...t.scope, requestId: v.requestId, recoveryReceipt: result.recoveryReceipt! };
+  const bytes=Buffer.from(recovery.recoveryReceipt,'base64url'); bytes[35]^=1;
+  await expect(restarted.recover({...recovery,recoveryReceipt:bytes.toString('base64url')})).rejects.toThrow();
+  const done = await restarted.recover(recovery); expect(done.state).toBe('succeeded');
+  expect(await restarted.recover(recovery)).toEqual(done); expect(calls).toBe(1);
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(1);
+  expect((await sql.query("select count(*)::int as n from billing_history b join artifact_generations g on b.metadata->>'preDeductId'=g.pre_deduct_id::text where b.operation_type='settle' and g.request_id=$1",[v.requestId])).rows[0].n).toBe(1);
+}, 30000);
+aiTest('AI: abandoning a rejected quote tombstones delayed original delivery and permits a fresh quote', async () => {
+  const t = await generationFixture(), v = await t.request();
+  await t.service.execute({ ...t.scope, action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Changed after quote',evidenceIds:[] });
+  await expect(t.ai.generate(v)).rejects.toThrow();
+  expect(await t.ai.abandon({...t.scope,requestId:v.requestId})).toEqual({abandoned:true});
+  const fresh=await t.request();
+  await expect(t.ai.generate({...fresh,requestId:v.requestId})).rejects.toThrow();
+  expect((await t.ai.generate(fresh)).state).toBe('succeeded');
+  expect(await t.ai.abandon({...t.scope,requestId:fresh.requestId})).toEqual({abandoned:false});
+  expect(t.calls()).toBe(1);
+}, 30000);
+aiTest('AI: browser rejected quote can requote, and sealed response survives reload during receipt outage', async () => {
+  const t = await generationFixture(), {page,context}=await pageFor();
+  await page.getByRole('button',{name:new RegExp(`^${t.f.label}`)}).click(); await quiet(page);
+  const quote=page.getByRole('button',{name:'查看生成费用',exact:true});
+  await quote.click(); await page.getByRole('button',{name:/^生成候选（最多/}).waitFor();
+  await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);
+  await page.getByRole('button',{name:/^生成候选（最多/}).click();
+  await expect.poll(()=>quote.isEnabled(),{timeout:10000}).toBe(true);
+  expect((await t.ai.list(t.scope))).toHaveLength(0);
+  await quote.click(); await page.getByRole('button',{name:/^生成候选（最多/}).waitFor();
+  await sql.query("create function local_fail_ai_receipt() returns trigger language plpgsql as $$ begin if NEW.state='responded' then raise exception 'local receipt unavailable'; end if; return NEW; end $$; create trigger local_fail_ai_receipt before update on artifact_generations for each row execute function local_fail_ai_receipt()");
+  try {
+    await page.getByRole('button',{name:/^生成候选（最多/}).click();
+    await expect.poll(async()=> (await page.getByRole('region',{name:'AI 候选生成'}).innerText()).includes('已收到结果，待恢复保存'),{timeout:30000}).toBe(true);
+    await page.reload(); await quiet(page);
+    await page.getByRole('button',{name:new RegExp(`^${t.f.label}`)}).click(); await quiet(page);
+    expect(await page.getByRole('region',{name:'AI 候选生成'}).innerText()).toContain('已收到结果，待恢复保存');
+  } finally { await sql.query('drop trigger local_fail_ai_receipt on artifact_generations; drop function local_fail_ai_receipt()'); }
+  await page.getByRole('button',{name:'恢复已保存结果',exact:true}).click();
+  await expect.poll(async()=> (await page.getByRole('region',{name:'AI 候选生成'}).innerText()).includes('候选已保存'),{timeout:10000}).toBe(true);
+  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates).toHaveLength(1);
+  expect((await t.ai.list(t.scope))).toHaveLength(1);
+  await context.close();
+},90000);

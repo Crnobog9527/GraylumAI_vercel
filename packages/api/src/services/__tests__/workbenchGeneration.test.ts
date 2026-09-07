@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { countWorkbenchTokens, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
+import { countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
 import { activateSkill, identityOf, packageHash, type SkillSource } from '../skills/loader';
 import { makePackage } from './fixtures/artifacts';
 const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1', token_counting_supported: 'true', tokenizer_family: 'o200k_base' };
@@ -60,4 +60,20 @@ it('workflow resource selection loads entry and transitive closure without chang
   read.mockClear();
   await expect(activateSkill(source, identityOf(p.descriptor), { resources: ['references/step-0.md'], maxContextBytes: 1 })).rejects.toThrow('CAPACITY_EXCEEDED');
   expect(read).not.toHaveBeenCalled();
+});
+
+it('blocks private resource echoes including punctuation-obfuscated identifiers without blocking unrelated output', () => {
+  const context = JSON.stringify({ resources: [{ path: 'references/private-method.md', content: 'METHOD_CANARY. 严格保护内部流程的第二阶段操作细节。' }] });
+  for (const body of ['METHOD_CANARY', 'M E T H O D _ C A N A R Y', '严格保护内部流程的第二阶段操作细节', 'references/private-method.md']) expect(echoesPrivateMethod(body, context)).toBe(true);
+  expect(echoesPrivateMethod('A useful fictional project candidate.', context)).toBe(false);
+});
+it('authenticates encrypted receipt contents and user/project/request binding, independently of process memory', () => {
+  const result = { body: 'Known model result', inputTokens: 20, outputTokens: 10, credits: 1, costUsd: 0.001 };
+  const sealed = sealGenerationReceipt(result, model.id, 'owner/project/round/request');
+  expect(sealed).not.toContain(result.body);
+  expect(openGenerationReceipt(sealed, model.id, 'owner/project/round/request')).toEqual(result);
+  expect(() => openGenerationReceipt(sealed, model.id, 'other-owner/project/round/request')).toThrow();
+  expect(() => openGenerationReceipt(sealed, 'different-secret', 'owner/project/round/request')).toThrow();
+  const bytes = Buffer.from(sealed, 'base64url'); bytes[35] ^= 1;
+  expect(() => openGenerationReceipt(bytes.toString('base64url'), model.id, 'owner/project/round/request')).toThrow();
 });

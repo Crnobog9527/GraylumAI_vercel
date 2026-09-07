@@ -18,6 +18,8 @@ export function GenerationPanel({ snapshot, stepId, disabled, refresh }: {
   const [instruction, setInstruction] = useState(''), [error, setError] = useState('');
   const [records, setRecords] = useState<Status[]>(snapshot.generations ?? []), [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState<{ quoteHash: string; reservedCredits: number } | null>(null);
+  const [receipts, setReceipts] = useState<Record<string, string>>({});
+  const storageKey = `workbench-receipts:${snapshot.projectId}:${snapshot.roundId}`;
   const pending = useRef<Parameters<typeof api.generate.mutate>[0] | null>(null);
   const live = useRef(true), lock = useRef(false);
   const scope = { projectId: snapshot.projectId, roundId: snapshot.roundId };
@@ -26,11 +28,38 @@ export function GenerationPanel({ snapshot, stepId, disabled, refresh }: {
   useEffect(() => { setQuote(null); }, [instruction, basis]);
   useEffect(() => {
     live.current = true;
+    try { const stored = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}');
+      if (stored && typeof stored === 'object') setReceipts(Object.fromEntries(Object.entries(stored).filter(([key, value]) => /^[a-f0-9-]{36}$/.test(key) && typeof value === 'string' && value.length <= 200000)) as Record<string,string>);
+    } catch { /* Storage unavailable: current page still retains the receipt. */ }
     return () => { live.current = false; };
     // A new keyed component is mounted for each project/round/step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (snapshot.generations) setRecords(snapshot.generations); }, [snapshot.generations]);
+  function remember(requestId: string, receipt?: string) {
+    setReceipts(old => {
+      const next = { ...old }; if (receipt) next[requestId] = receipt; else delete next[requestId];
+      try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Keep in memory if browser storage is full. */ }
+      return next;
+    });
+  }
+  async function sendPending() {
+    const input = pending.current!;
+    try {
+      const result = await api.generate.mutate(input);
+      remember(result.requestId, result.recoveryReceipt);
+      pending.current = null;
+      if (live.current) { setQuote(null); setRecords(old => [...old.filter(r => r.requestId !== result.requestId), result]); }
+      await reload();
+    } catch (e) {
+      // A server transaction tombstones an absent request before allowing a new
+      // quote. Delayed delivery can no longer charge this abandoned identity.
+      if (pending.current && (await api.abandonGeneration.mutate({ ...scope, requestId: input.requestId }).catch(() => ({ abandoned: false }))).abandoned) {
+        pending.current = null; if (live.current) setQuote(null);
+      }
+      throw e;
+    }
+  }
   async function run(action: () => Promise<void>) {
     if (lock.current) return; lock.current = true; setBusy(true); setError('');
     try { await action(); }
@@ -62,25 +91,19 @@ export function GenerationPanel({ snapshot, stepId, disabled, refresh }: {
         // Retain the exact request after uncertain HTTP delivery. Refresh reads
         // server records; it never creates a replacement request automatically.
         pending.current ??= { ...scope, stepId, instruction, expectedSteps, requestId: crypto.randomUUID(), quoteHash: quote.quoteHash, budgetCredits: quote.reservedCredits };
-        const result = await api.generate.mutate(pending.current);
-        pending.current = null;
-        if (live.current) { setQuote(null); setRecords(old => [...old.filter(r => r.requestId !== result.requestId), result]); }
-        await reload();
+        await sendPending();
       })}>生成候选（最多 {quote.reservedCredits} 积分）</Button>}
       {pending.current && <Button variant="outline" disabled={busy} onClick={() => void run(async () => {
-        const result = await api.generate.mutate(pending.current!);
-        pending.current = null;
-        if (live.current) { setQuote(null); setRecords(old => [...old.filter(r => r.requestId !== result.requestId), result]); }
-        await reload();
+        await sendPending();
       })}>重试同一生成请求</Button>}
       <Button variant="outline" disabled={busy} onClick={() => void run(reload)}>刷新生成记录</Button>
     </div>
     {disabled && <p className="text-sm text-zinc-400">请先保存编辑，再生成候选。</p>}
     {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
     <ul className="space-y-2 text-sm">{records.filter(r => r.stepId === stepId).map(r => <li key={r.requestId}>
-      {states[r.state]} · 预留 {r.reservedCredits} 积分{r.chargedCredits !== null ? ` · 已结算 ${r.chargedCredits} 积分` : ''}
+      {receipts[r.requestId] ? '已收到结果，待恢复保存' : states[r.state]} · 预留 {r.reservedCredits} 积分{r.chargedCredits !== null ? ` · 已结算 ${r.chargedCredits} 积分` : ''}
       {r.state === 'prepared' && <Button variant="outline" disabled={busy} className="ml-2" onClick={() => void run(async () => { await api.cancelGeneration.mutate({ ...scope, requestId: r.requestId }); await reload(); })}>取消未发送请求</Button>}
-      {r.state === 'responded' && <Button variant="outline" disabled={busy} className="ml-2" onClick={() => void run(async () => { await api.recoverGeneration.mutate({ ...scope, requestId: r.requestId }); await reload(); })}>恢复已保存结果</Button>}
+      {(r.state === 'responded' || receipts[r.requestId]) && <Button variant="outline" disabled={busy} className="ml-2" onClick={() => void run(async () => { await api.recoverGeneration.mutate({ ...scope, requestId: r.requestId, recoveryReceipt: receipts[r.requestId] }); remember(r.requestId); await reload(); })}>恢复已保存结果</Button>}
     </li>)}</ul>
   </section>;
 }

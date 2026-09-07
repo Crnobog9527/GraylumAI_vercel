@@ -44,6 +44,17 @@ BEGIN
  END IF;
  SELECT * INTO o FROM artifact_generations WHERE project_id=p.id AND request_id=p_request_id;
  IF o.id IS NOT NULL AND o.round_id<>r.id THEN RAISE EXCEPTION 'generation conflict'; END IF;
+ IF p_action='abandon' THEN
+  -- Serialize a no-reservation tombstone against delayed original requests.
+  IF o.id IS NOT NULL THEN RETURN '{"abandoned":false}'; END IF;
+  INSERT INTO artifact_requests(project_id,request_id,round_id,action,payload,response)
+   VALUES(p.id,p_request_id,r.id,'generation_abandoned','{}','{}') ON CONFLICT DO NOTHING;
+  RETURN '{"abandoned":true}';
+ END IF;
+ IF p_action='recovery_key' THEN
+  IF o.id IS NULL OR o.state NOT IN ('dispatched','unknown','responded','succeeded') THEN RAISE EXCEPTION 'generation unavailable'; END IF;
+  RETURN jsonb_build_object('token',o.dispatch_token,'status',artifact_generation_public(o));
+ END IF;
  IF p_action='get' THEN
   IF o.id IS NULL THEN RETURN 'null'; END IF;
   IF o.input IS DISTINCT FROM p_payload->'input' THEN RAISE EXCEPTION 'generation conflict'; END IF;
@@ -105,6 +116,7 @@ BEGIN
   WHERE m.id=p.module_id AND a.is_active='true' AND a.id::text=coalesce(o.quote,p_payload->'quote')->>'modelId')
  THEN RAISE EXCEPTION 'generation model unavailable'; END IF;
  IF p_action='prepare' THEN
+  IF EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p.id AND request_id=p_request_id) THEN RAISE EXCEPTION 'generation abandoned'; END IF;
   IF o.id IS NOT NULL THEN
    IF o.input IS DISTINCT FROM p_payload->'input' THEN RAISE EXCEPTION 'generation conflict'; END IF;
    IF o.state<>'prepared' THEN RETURN artifact_generation_public(o); END IF;
