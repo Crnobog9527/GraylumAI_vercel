@@ -2205,3 +2205,28 @@ aiTest('AI: candidate, original settlement, spend ledger and canonical usage rec
   await sql.query("insert into token_stats(conversation_id,user_id,model_used,input_tokens,output_tokens,total_cost_usd,total_credits) values($1,$2,'legacy-fixture',0,0,0,0)",[conversation,actor]);
   await expect(sql.query("insert into token_stats(user_id,model_used,input_tokens,output_tokens,total_cost_usd,total_credits) values($1,'unscoped',0,0,0,0)",[actor])).rejects.toThrow();
 },30000);
+
+aiTest('AI: prepared retry rechecks consumption limits without requiring a second reservation balance',async()=>{
+  const t=await generationFixture(),v=await t.request();
+  const stopped=new Proxy(db,{get(target,key){
+    if(key==='rpc') return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'
+      ? {abortSignal:async()=>{const saved=await target.rpc(name,args);if(saved.error)throw saved.error;throw new Error('local stopped after reserve');}}
+      : target.rpc(name,args);
+    const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+  }});
+  await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not send');}).generate(v)).rejects.toThrow('local stopped after reserve');
+  expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
+  const marker=randomUUID();
+  await sql.query("insert into billing_history(id,user_id,operation_type,amount,metadata) values($1,$2,'settle',-10000,'{}')",[marker,actor]);
+  try { await expect(t.ai.generate(v)).rejects.toThrow('每小时消费已达上限'); expect(t.calls()).toBe(0);expect((await t.ai.list(t.scope))[0].state).toBe('prepared'); }
+  finally {await sql.query('delete from billing_history where id=$1',[marker]);}
+  await sql.query('update profiles set credits=0 where id=$1',[actor]);
+  expect((await t.ai.generate(v)).state).toBe('succeeded');expect(t.calls()).toBe(1);
+  expect((await sql.query("select count(*)::int as n from billing_history b join artifact_generations g on b.id=g.pre_deduct_id where g.request_id=$1",[v.requestId])).rows[0].n).toBe(1);
+},30000);
+aiTest('AI: ordinary domain phrase shared with a private method still produces a candidate',async()=>{
+  const t=await generationFixture(3,'Use competitive analysis and entrepreneurship to reason about fictional markets.');
+  const ai=t.workbenchGeneration(t.user,db,async()=>({body:'Competitive analysis helps entrepreneurship.',inputTokens:800,outputTokens:30}));
+  const v=await t.request(ai);expect((await ai.generate(v)).state).toBe('succeeded');
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(1);
+},30000);

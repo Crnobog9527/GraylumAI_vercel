@@ -65,8 +65,9 @@ it('workflow resource selection loads entry and transitive closure without chang
 });
 
 it('blocks private resource echoes including punctuation-obfuscated identifiers without blocking unrelated output', () => {
-  const context = JSON.stringify({ resources: [{ path: 'references/private-method.md', content: 'METHOD_CANARY. 严格保护内部流程的第二阶段操作细节。' }] });
-  for (const body of ['METHOD_CANARY', 'M E T H O D _ C A N A R Y', '严格保护内部流程的第二阶段操作细节', 'references/private-method.md']) expect(echoesPrivateMethod(body, context)).toBe(true);
+  const excerpt = '严格保护内部流程的第二阶段操作细节与第三阶段内部评估条件然后按照专属操作顺序完成内部评分并核对限制条件不得复制给最终用户或外部访问者因为此处包含完整的私有执行步骤';
+  const context = JSON.stringify({ resources: [{ path: 'references/private-method.md', content: `METHOD_CANARY. ${excerpt}。` }] });
+  for (const body of ['METHOD_CANARY', 'M E T H O D _ C A N A R Y', excerpt, 'references/private-method.md']) expect(echoesPrivateMethod(body, context)).toBe(true);
   expect(echoesPrivateMethod('A useful fictional project candidate.', context)).toBe(false);
 });
 it('authenticates encrypted receipt contents and user/project/request binding, independently of process memory', () => {
@@ -105,4 +106,10 @@ it('rate limits invalid direct generation before private reads and tokenization'
   expect(limit).toHaveBeenCalledTimes(3); expect(from).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
   expect(rpc).toHaveBeenCalledTimes(3);
   for(const [,payload] of rpc.mock.calls as unknown as Array<[string,{p_action:string}]>) expect(payload.p_action).toBe('get');
+});
+
+it('allows generic domain phrases without allowing substantial private excerpts',()=>{
+  const context=JSON.stringify({resources:[{path:'SKILL.md',content:'Use competitive-analysis and entrepreneurship to reason about fictional markets.'}]});
+  expect(echoesPrivateMethod('Competitive analysis helps entrepreneurship.',context)).toBe(false);
+  expect(echoesPrivateMethod('Use competitive analysis and entrepreneurship to reason about fictional markets.',context)).toBe(true);
 });

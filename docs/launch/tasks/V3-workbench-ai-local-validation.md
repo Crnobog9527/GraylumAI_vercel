@@ -72,3 +72,10 @@ GitHub Codex 对首个候选提出三项问题，本轮同范围修复：
 - 路径模糊匹配要求规范化后至少 12 字符；短路径仍检查字面回显，不再将 `-.md` 等合法文件名压缩为普通 `md` 子串误拦回答。私有正文及混淆标识测试仍通过。
 - 262 项相关单测、TypeScript、20 项隔离 AI/浏览器场景通过（16 项显式筛选）。首次集成运行 19 passed / 1 failed：刷新后恢复断言读取了 React effect 完成前的文字；改成等待实际恢复状态后最终运行全部通过。没有修改恢复产品行为或放宽断言内容。
 - 原始日志：/tmp/graylum-pr387-round4-all-unit.log、/tmp/graylum-pr387-round4-types.log、/tmp/graylum-pr387-round4-local.log（失败保留）、/tmp/graylum-pr387-round4-final-local.log（最终通过）。应用日志 canary 检查通过；真实模型/外部启用继续 NOT_RUN。新候选审查结果需重新取得。
+
+## 恢复消费熔断与通用词组修复
+
+- prepared 请求在重新准备后、发送前重新执行用户状态与既有消费熔断；余额预检只要求零新增预留，避免同一积分要求两遍。已经收到结果的幂等恢复不重新调用模型。安全 FORBIDDEN 提示可通过路由传达，未知诊断仍脱敏。
+- 任意 16 字符片段不再作为泄露证据：正文匹配要求 64 个连续规范化字符，短标识匹配限于至少 12 个有效字符的大写下划线结构标识；路径仍保留上轮字面/长规范化检查。普通 competitive analysis、competitive-analysis、entrepreneurship 不会误拦，完整较长私有正文和 METHOD_CANARY 混淆回显仍拒绝。这是确定性原样泄露检查，不保证短普通词组、任意编码或语义改写的外传检测；外部启用前真实模型对抗验证仍必要。
+- 264 项相关单测通过，新增真实隔离场景证明预留后触及小时消费上限时不发送、限制解除后余额为零仍能使用原预留完成一次生成，以及普通行业词组生成成功。22 项 AI/浏览器场景通过，16 项原工作台显式筛选跳过。首次新增消费 fixture 使用了不存在的 balance_before 字段而失败，修正 fixture 后通过；没有更改既有账务表。
+- 日志保留：/tmp/graylum-pr387-round5-final-unit.log、/tmp/graylum-pr387-round5-local.log（fixture 失败）、/tmp/graylum-pr387-round5-final-local.log（22 通过）。新提交另运行同一 22 项集成及 TypeScript，证据交付时记录实际状态。未运行真实 provider 或外部启用。

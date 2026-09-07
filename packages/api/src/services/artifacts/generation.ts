@@ -46,17 +46,19 @@ export function openGenerationReceipt(sealed: string, token: string, binding: st
 export function echoesPrivateMethod(answer: string, privateContext: string): boolean {
   const normalize = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   const output = normalize(answer), sections = JSON.parse(privateContext).resources as Array<{path: string; content: string}>;
+  // Short domain phrases and ordinary words are not private method excerpts.
+  // Require a substantial normalized excerpt, or a structured long identifier.
   const windows = new Set<string>();
-  for (let i = 0; i + 16 <= output.length; i++) windows.add(output.slice(i, i + 16));
+  for (let i = 0; i + 64 <= output.length; i++) windows.add(output.slice(i, i + 64));
   return sections.some(({ path, content }) => {
     const pathIdentifier = normalize(path);
     if (answer.normalize('NFKC').toLowerCase().includes(path.normalize('NFKC').toLowerCase()) || (pathIdentifier.length >= 12 && output.includes(pathIdentifier))) return true;
     for (const word of content.match(/[\p{L}\p{N}_-]{12,}/gu) ?? []) {
       const identifier = normalize(word);
-      if (identifier.length >= 12 && output.includes(identifier)) return true;
+      if (identifier.length >= 12 && /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(word) && output.includes(identifier)) return true;
     }
     const source = normalize(content);
-    for (let i = 0; i + 16 <= source.length; i++) if (windows.has(source.slice(i, i + 16))) return true;
+    for (let i = 0; i + 64 <= source.length; i++) if (windows.has(source.slice(i, i + 64))) return true;
     return false;
   });
 }
@@ -202,7 +204,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       await checkRateLimitAsync(await actor(), 'ai');
       const ready = await prepare(generationQuoteInput.parse({ projectId: v.projectId, roundId: v.roundId, stepId: v.stepId, instruction: v.instruction, expectedSteps: v.expectedSteps }));
       if (v.quoteHash !== ready.quoteHash || v.budgetCredits < ready.quote.reservedCredits) throw new Error('GENERATION_QUOTE_CHANGED');
-      if (!existing) await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, ready.quote.reservedCredits, { skipRateLimit: true });
+      await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, existing ? 0 : ready.quote.reservedCredits, { skipRateLimit: true });
       const reserved = generationStatus.extend({ token: uuid }).parse(await rpc(v, 'prepare', v.requestId, { input: v, quote: ready.quote }));
       // No provider effect until dispatch ownership is durably confirmed. A lost
       // dispatch acknowledgement is uncertain and must never be resent.
