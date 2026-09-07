@@ -1411,7 +1411,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
           .getByRole("button", { name: "重试同一请求", exact: true })
           .count(),
       ).toBe(0);
-      // A draft has no formal report: these fresh authenticated calls really fail.
+      // A missing report is a successful null response. Temporarily disable this
+      // isolated test identity so the subsequent real HTTP read/export is denied.
+      await sql.query("update profiles set status='disabled' where id=$1", [
+        r.credentials.id,
+      ]);
       await r.page
         .getByRole("button", {
           name:
@@ -1428,6 +1432,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
           .getByRole("button", { name: "重试同一请求", exact: true })
           .count(),
       ).toBe(0);
+      await sql.query("update profiles set status='active' where id=$1", [
+        r.credentials.id,
+      ]);
       const state = await r.service.read(r.projectId, r.roundId);
       expect(state.steps["step-0"].version).toBe(0);
       expect(state.steps["step-0"].body).toBe("");
