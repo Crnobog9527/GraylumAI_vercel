@@ -1673,13 +1673,16 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 
     // Concurrent revocation holds the mapping row. A new transaction must wait
     // for that decision and deny after delete commits, not use a stale check.
+    const concurrentAccount = "synthetic:concurrent-revocation";
+    const concurrentBinding = [credentials.id, f.moduleId, f.pack.id, concurrentAccount];
+    await sql.query("insert into artifact_accounts values($1,$2,$3,$4)", concurrentBinding);
     const revoker = new pg.Client({ connectionString: process.env.V3_LOCAL_DB });
     await revoker.connect();
     try {
       await revoker.query("begin");
-      await revoker.query("delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3 and account=$4", binding);
+      await revoker.query("delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3 and account=$4", concurrentBinding);
       const projectId = randomUUID();
-      const attempt = direct.start({ projectId, roundId: randomUUID(), requestId: randomUUID(), registration: "fixed", account })
+      const attempt = direct.start({ projectId, roundId: randomUUID(), requestId: randomUUID(), registration: "fixed", account: concurrentAccount })
         .then(() => "unexpected success", (e: Error) => e.message);
       await expect.poll(async () => Number((await sql.query("select count(*) as n from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%artifact_transition%'" )).rows[0].n), { timeout: 5000 }).toBeGreaterThan(0);
       await revoker.query("commit");
