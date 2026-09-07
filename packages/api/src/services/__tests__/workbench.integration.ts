@@ -132,11 +132,18 @@ async function pageFor(c = credentials) {
       expect(text).not.toContain("references/step-");
     }
   });
+  // Wait for the login page's client query before filling controlled fields.
+  // The initial server HTML can be visible before hydration attaches handlers.
+  const loginReady = page.waitForResponse((response) =>
+    response.url().includes("/api/trpc/settings.getSystemSettings") && response.ok(),
+  );
   await page.goto(app + "/login?redirect=/workbench");
+  await loginReady;
   await page.getByPlaceholder("name@example.com").fill(c.email);
   await page.getByPlaceholder("输入你的密码").fill(c.password);
   await page.getByRole("button", { name: "登录", exact: true }).last().click();
-  await page.waitForURL("**/workbench", { timeout: 90000 });
+  // A suffix glob also matches /login?redirect=/workbench before login succeeds.
+  await page.waitForURL((url) => url.pathname === "/workbench", { timeout: 90000 });
   await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
   await page.getByRole("button", { name: "重新加载服务端状态" }).waitFor();
   return { page, context };
