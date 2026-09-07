@@ -1622,7 +1622,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   async () => {
     const credentials = await newUser();
     const user = await authenticated(credentials), service = workbenchService(user, db);
-    const f = fixtures.find((f) => f.flow.kind === "social")!;
+    const f = await fixture({ id: "account-binding-local", label: "账号解绑验证", methodText: "Fictional isolated account authorization method.", workflow: makeWorkflow(6, true) });
     const account = "synthetic:revocation-test";
     const binding = [credentials.id, f.moduleId, f.pack.id, account];
     await sql.query("insert into artifact_accounts values($1,$2,$3,$4)", binding);
@@ -1690,7 +1690,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
       await revoker.end();
     }
     await context.close();
-    await sql.query("delete from artifact_workflows where id='account-upgrade-local'");
+    await sql.query("delete from artifact_workflows where id in ('account-upgrade-local','account-binding-local')");
     console.log("real social account guard: same-method/upgrade/direct RPC denied after unbind; history retained; exact denied retry succeeds after rebind; concurrent delete blocks and rolls back new project/round PASS");
   },
   150000,
