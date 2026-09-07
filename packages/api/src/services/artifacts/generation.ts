@@ -50,7 +50,10 @@ export function echoesPrivateMethod(answer: string, privateContext: string): boo
   for (let i = 0; i + 16 <= output.length; i++) windows.add(output.slice(i, i + 16));
   return sections.some(({ path, content }) => {
     if (output.includes(normalize(path))) return true;
-    for (const word of content.match(/[\p{L}\p{N}_-]{12,}/gu) ?? []) if (output.includes(normalize(word))) return true;
+    for (const word of content.match(/[\p{L}\p{N}_-]{12,}/gu) ?? []) {
+      const identifier = normalize(word);
+      if (identifier.length >= 12 && output.includes(identifier)) return true;
+    }
     const source = normalize(content);
     for (let i = 0; i + 16 <= source.length; i++) if (windows.has(source.slice(i, i + 16))) return true;
     return false;
@@ -135,6 +138,9 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     visit(v.stepId);
     if ([...ancestors].some(k => snapshot.steps[k].available === false || (k !== v.stepId && !snapshot.steps[k].valid))) throw new Error('GENERATION_INPUT_UNAVAILABLE');
     const evidenceIds = new Set([...ancestors].flatMap(k => snapshot.steps[k].evidenceIds));
+    // Cached provenance belongs to text we are about to send, even after an
+    // upstream step changes. Require explicit rewrite/save before reusing that text.
+    if ([...ancestors].some(k => snapshot.steps[k].provenanceIds.some(id => !evidenceIds.has(id)))) throw new Error('GENERATION_INPUT_UNAVAILABLE');
     const evidence = snapshot.evidence.filter(e => evidenceIds.has(e.id));
     if (evidence.length !== evidenceIds.size || evidence.some(e => !e.available) || (step.requiresEvidence && !evidence.length)) throw new Error('GENERATION_INPUT_UNAVAILABLE');
     const source = databaseSkillSource({ userClient, privateClient, ...binding });

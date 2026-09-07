@@ -42,7 +42,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
       GENERATION_CAPACITY: { code: "BAD_REQUEST", message: "完整方法和项目内容超过当前模型容量，未扣费。" },
       GENERATION_QUOTE_CHANGED: { code: "CONFLICT", message: "内容或价格已变化，请重新获取费用。" },
       GENERATION_CONFLICT: { code: "CONFLICT", message: "生成状态或输入已变化，请刷新生成记录。不会自动重复调用模型。" },
-      GENERATION_INPUT_UNAVAILABLE: { code: "BAD_REQUEST", message: "请先确认依赖步骤，并检查采用的来源是否可用。" },
+      GENERATION_INPUT_UNAVAILABLE: { code: "BAD_REQUEST", message: "工作稿的来源或依赖已变化，请检查来源、重新保存工作稿并确认依赖后再生成。" },
       GENERATION_BUDGET: { code: "BAD_REQUEST", message: "生成费用超出允许范围，未扣费。" },
       ARTIFACT_VERSION_CONFLICT: {
         code: "CONFLICT",

@@ -16,6 +16,26 @@ CREATE TABLE IF NOT EXISTS public.artifact_generations (
  CHECK(octet_length(input::text)<=32768 AND octet_length(quote::text)<=16384),
  CHECK(result IS NULL OR octet_length(result::text)<=131072)
 );
+-- Workbench uses the existing usage statistics and daily reconciliation without
+-- inventing chat conversations. Existing chat rows remain conversation-bound.
+ALTER TABLE public.token_stats ADD COLUMN IF NOT EXISTS artifact_generation_id uuid REFERENCES public.artifact_generations(id);
+ALTER TABLE public.token_stats ALTER COLUMN conversation_id DROP NOT NULL;
+ALTER TABLE public.ai_usage_logs ADD COLUMN IF NOT EXISTS artifact_generation_id uuid REFERENCES public.artifact_generations(id);
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.token_stats'::regclass AND conname='token_stats_execution_scope') THEN
+  ALTER TABLE public.token_stats ADD CONSTRAINT token_stats_execution_scope CHECK
+   ((conversation_id IS NOT NULL AND artifact_generation_id IS NULL) OR (conversation_id IS NULL AND artifact_generation_id IS NOT NULL));
+ END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS token_stats_artifact_generation ON public.token_stats(artifact_generation_id) WHERE artifact_generation_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_logs_artifact_generation ON public.ai_usage_logs(artifact_generation_id) WHERE artifact_generation_id IS NOT NULL;
+CREATE OR REPLACE FUNCTION public.artifact_generation_inputs_current(flow jsonb,steps jsonb,step text) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE ancestors(id) AS (
+ SELECT step UNION SELECT d FROM ancestors a,jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d WHERE node->>'id'=a.id)
+ SELECT NOT EXISTS(SELECT 1 FROM ancestors a WHERE NOT (coalesce(steps->a.id->'provenanceIds','[]') <@ artifact_step_evidence(flow,steps,step)))
+$$;
+REVOKE ALL ON FUNCTION public.artifact_generation_inputs_current(jsonb,jsonb,text) FROM PUBLIC,anon,authenticated,service_role;
 ALTER TABLE public.artifact_generations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.artifact_generations FROM PUBLIC,anon,authenticated,service_role;
 CREATE INDEX IF NOT EXISTS artifact_generations_round ON public.artifact_generations(round_id,created_at);
@@ -32,7 +52,7 @@ CREATE OR REPLACE FUNCTION public.artifact_generation(p_actor_id uuid,p_project_
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE p public.artifact_projects%ROWTYPE; r public.artifact_rounds%ROWTYPE;
  o public.artifact_generations%ROWTYPE; spec jsonb; actual jsonb; evidence jsonb;
- token uuid:=gen_random_uuid(); pre uuid; candidate uuid; receipt jsonb; charge integer;
+ token uuid:=gen_random_uuid(); pre uuid; candidate uuid; receipt jsonb; charge integer; spend uuid;
 BEGIN
  SELECT * INTO p FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id FOR UPDATE;
  IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false')
@@ -91,6 +111,18 @@ BEGIN
      'generationId',o.id,'pricing',jsonb_build_object('modelId',o.quote->'modelId','providerModel',o.quote->'providerModel',
       'rates',o.quote->'pricing','settings',o.quote->'settings'),'calculatedModelCostUsd',o.result->'costUsd'),
     jsonb_build_object('generationId',o.id,'candidateId',candidate));
+   IF charge>0 THEN
+    INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,counts_as_spend,source_type,source_id,idempotency_key,metadata)
+     VALUES(p_actor_id,-charge,'deduction','Workbench AI generation','spend','ai_task_spend',true,'ai_task',o.id::text,
+      'workbench_generation:'||o.id::text,jsonb_build_object('generationId',o.id)) RETURNING id INTO spend;
+    UPDATE billing_history SET transaction_id=spend WHERE user_id=p_actor_id AND operation_type='settle' AND metadata->>'preDeductId'=o.pre_deduct_id::text;
+   END IF;
+   INSERT INTO token_stats(artifact_generation_id,user_id,model_used,input_tokens,output_tokens,
+    cached_tokens,cache_creation_tokens,web_search_count,total_cost_usd,total_credits,metadata)
+    VALUES(o.id,p_actor_id,o.quote->>'providerModel',(o.result->>'inputTokens')::integer,(o.result->>'outputTokens')::integer,
+     0,0,0,(o.result->>'costUsd')::numeric,charge,jsonb_build_object('generationId',o.id,'pricing',o.quote->'pricing'));
+   INSERT INTO ai_usage_logs(artifact_generation_id,user_id,request_id,model_id,status,metadata)
+    VALUES(o.id,p_actor_id,o.request_id::text,o.quote->>'providerModel','success',jsonb_build_object('generationId',o.id));
    UPDATE artifact_generations SET state='succeeded',candidate_id=candidate,charged_credits=charge WHERE id=o.id RETURNING * INTO o;
   ELSIF p_action IN ('refund','cancel') THEN
    IF o.state='refunded' THEN RETURN artifact_generation_public(o); END IF;
@@ -129,6 +161,7 @@ BEGIN
   IF actual IS DISTINCT FROM p_payload#>'{input,expectedSteps}' THEN RAISE EXCEPTION 'generation input changed'; END IF;
   IF EXISTS(SELECT 1 FROM artifact_generations WHERE project_id=p.id AND state IN ('prepared','dispatched','unknown','responded')) THEN RAISE EXCEPTION 'generation pending'; END IF;
   IF (SELECT count(*) FROM artifact_candidates WHERE round_id=r.id)+(SELECT count(*) FROM artifact_generations WHERE round_id=r.id AND candidate_id IS NULL)>=256 THEN RAISE EXCEPTION 'generation capacity'; END IF;
+  IF NOT artifact_generation_inputs_current(r.workflow,r.steps,spec->>'id') THEN RAISE EXCEPTION 'generation provenance changed'; END IF;
   evidence:=artifact_step_evidence(r.workflow,r.steps,spec->>'id');
   IF NOT artifact_evidence_allowed(p.id,evidence) THEN RAISE EXCEPTION 'generation evidence unavailable'; END IF;
   IF (spec->>'requiresEvidence')::boolean AND jsonb_array_length(evidence)=0 THEN RAISE EXCEPTION 'generation evidence required'; END IF;
@@ -142,7 +175,7 @@ BEGIN
  ELSIF p_action='dispatch' THEN
   SELECT jsonb_object_agg(key,jsonb_build_object('version',value->'version','reviewVersion',value->'reviewVersion')) INTO actual FROM jsonb_each(r.steps);
   IF o.id IS NULL OR o.state<>'prepared' OR o.dispatch_token IS DISTINCT FROM (p_payload->>'token')::uuid THEN RETURN '{"dispatch":false}'; END IF;
-  IF actual IS DISTINCT FROM o.basis OR NOT artifact_evidence_allowed(p.id,o.evidence_ids) THEN RAISE EXCEPTION 'generation input changed'; END IF;
+  IF actual IS DISTINCT FROM o.basis OR NOT artifact_generation_inputs_current(r.workflow,r.steps,o.step_id) OR NOT artifact_evidence_allowed(p.id,o.evidence_ids) THEN RAISE EXCEPTION 'generation input changed'; END IF;
   UPDATE artifact_generations SET state='dispatched' WHERE id=o.id;
   RETURN '{"dispatch":true}';
  END IF;

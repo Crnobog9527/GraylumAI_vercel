@@ -77,3 +77,10 @@ it('authenticates encrypted receipt contents and user/project/request binding, i
   const bytes = Buffer.from(sealed, 'base64url'); bytes[35] ^= 1;
   expect(() => openGenerationReceipt(bytes.toString('base64url'), model.id, 'owner/project/round/request')).toThrow();
 });
+
+it('does not mistake long markdown delimiters for private identifiers', () => {
+  for (const delimiter of ['--------------------', '____________________', '-_-_-_-_-_-_-_-_-_-_']) {
+    const context=JSON.stringify({resources:[{path:'SKILL.md',content:`# Private method\n${delimiter}\nA harmless local example.`}]});
+    expect(echoesPrivateMethod('Unrelated candidate output',context)).toBe(false);
+  }
+});

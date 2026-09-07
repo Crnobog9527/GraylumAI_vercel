@@ -1875,10 +1875,10 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 // AI transport is explicitly injected here. SQL, Auth, Skill reads, pricing and
 // the existing credit RPCs are real local services; no provider request is made.
 const localModel = randomUUID();
-async function generationFixture(n = 3) {
+async function generationFixture(n = 3, methodText = 'Synthetic generation method.') {
   const { workbenchGeneration } = await import('../artifacts/generation');
   const flow = makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
-  const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText: 'Synthetic generation method.', workflow: flow });
+  const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText, workflow: flow });
   await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Local fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localModel]);
   await sql.query('update modules set model_id=$1 where id=$2', [localModel, f.moduleId]);
   await sql.query("insert into system_settings(key,value) values('v3_workbench_ai','true') on conflict(key) do update set value='true'");
@@ -2153,4 +2153,54 @@ aiTest('AI: duplicated provider model names use the selected UUID pricing and re
     expect(q.modelId).toBe(duplicate); expect(q.pricing.inputPer1M).toBe(9); expect(q.pricing.outputPer1M).toBe(12);
     expect(t.calls()).toBe(1);
   } finally { await sql.query('update modules set model_id=$1 where id=$2',[localModel,t.f.moduleId]); await sql.query('delete from ai_models where id=$1',[duplicate]); }
+},30000);
+
+aiTest('AI: valid markdown delimiters produce exactly one candidate and settlement on replay', async () => {
+  const t=await generationFixture(3,'\n--------------------\n____________________\nNormal fictional method.');
+  const v=await t.request(), done=await t.ai.generate(v);
+  expect(done.state).toBe('succeeded'); expect(await t.ai.generate(v)).toEqual(done); expect(t.calls()).toBe(1);
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(1);
+  expect((await sql.query("select count(*)::int as n from billing_history b join artifact_generations g on b.metadata->>'preDeductId'=g.pre_deduct_id::text where b.operation_type='settle' and g.request_id=$1",[v.requestId])).rows[0].n).toBe(1);
+},30000);
+aiTest('AI: stale saved-text provenance cannot disappear through generation after dependency rewrite', async () => {
+  const t=await generationFixture();
+  const save=async(stepId:string,body:string,evidenceIds:string[])=>{const s=await t.service.read(t.scope.projectId,t.scope.roundId);await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId,expectedVersion:s.steps[stepId].version,body,evidenceIds});};
+  const confirm=async(stepId:string)=>{const s=await t.service.read(t.scope.projectId,t.scope.roundId);await t.service.execute({...t.scope,action:'confirm',requestId:randomUUID(),stepId,expectedVersion:s.steps[stepId].version,expectedReviewVersion:s.steps[stepId].reviewVersion});};
+  await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'Historical fictional source A',observedAt:new Date().toISOString(),supersedes:null});
+  const source=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0];
+  await save('step-0','Draft grounded in source A',[source.id]);await confirm('step-0');
+  await save('step-1','Old working text derived from source A',[]);
+  const previous=await t.request(t.ai,'step-1');
+  await save('step-0','Rewritten upstream without source A',[]);await confirm('step-0');
+  const changed=await t.service.read(t.scope.projectId,t.scope.roundId);
+  expect(changed.steps['step-1'].provenanceIds).toContain(source.id);
+  await expect(t.request(t.ai,'step-1')).rejects.toThrow('GENERATION_INPUT_UNAVAILABLE');
+  const expectedSteps=Object.fromEntries(Object.entries(changed.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]));
+  const bypass=await db.rpc('artifact_generation',{p_actor_id:actor,p_project_id:t.scope.projectId,p_round_id:t.scope.roundId,p_action:'prepare',p_request_id:randomUUID(),p_payload:{input:{...previous,expectedSteps},quote:{modelId:localModel,reservedCredits:previous.budgetCredits}}});
+  expect(bypass.error).not.toBeNull();expect(t.calls()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);
+  await save('step-1','Explicit new working draft after reviewing changed sources',[]);
+  expect((await t.ai.generate(await t.request(t.ai,'step-1'))).state).toBe('succeeded');expect(t.calls()).toBe(1);
+},30000);
+aiTest('AI: candidate, original settlement, spend ledger and canonical usage records roll back and reconcile together', async () => {
+  const t=await generationFixture(),v=await t.request();
+  await sql.query("create function local_fail_usage() returns trigger language plpgsql as $$ begin raise exception 'local usage storage unavailable'; end $$; create trigger local_fail_usage before insert on token_stats for each row execute function local_fail_usage()");
+  try { expect((await t.ai.generate(v)).state).toBe('responded'); }
+  finally {await sql.query('drop trigger local_fail_usage on token_stats; drop function local_fail_usage()');}
+  const g=(await sql.query('select id,pre_deduct_id from artifact_generations where request_id=$1',[v.requestId])).rows[0];
+  expect((await sql.query("select count(*)::int as n from billing_history where operation_type='settle' and metadata->>'preDeductId'=$1",[g.pre_deduct_id])).rows[0].n).toBe(0);
+  expect((await sql.query('select count(*)::int as n from credit_transactions where source_id=$1',[g.id])).rows[0].n).toBe(0);
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(0);
+  const done=await t.ai.recover({...t.scope,requestId:v.requestId});expect(done.state).toBe('succeeded');
+  expect(await t.ai.recover({...t.scope,requestId:v.requestId})).toEqual(done);expect(t.calls()).toBe(1);
+  for(const table of ['token_stats','ai_usage_logs']) expect((await sql.query(`select count(*)::int as n from ${table} where artifact_generation_id=$1`,[g.id])).rows[0].n).toBe(1);
+  expect((await sql.query('select amount,counts_as_spend from credit_transactions where source_id=$1',[g.id])).rows).toEqual([{amount:-done.chargedCredits!,counts_as_spend:true}]);
+  const {runDailyBillingReconciliation}=await import('../billingReconciliation');
+  const tomorrow=new Date();tomorrow.setUTCDate(tomorrow.getUTCDate()+1);
+  const reconciled=await runDailyBillingReconciliation(db,tomorrow,new Date('2000-01-01T00:00:00Z'));
+  expect(reconciled.mismatches).toEqual([]);expect(reconciled.success).toBe(true);
+  expect(reconciled.summary.settledCredits).toBe(reconciled.summary.tokenStatsCredits);
+  // Existing conversation-bound writes remain valid; unscoped stats do not.
+  const conversation=randomUUID();await sql.query('insert into conversations(id) values($1)',[conversation]);
+  await sql.query("insert into token_stats(conversation_id,user_id,model_used,input_tokens,output_tokens,total_cost_usd,total_credits) values($1,$2,'legacy-fixture',0,0,0,0)",[conversation,actor]);
+  await expect(sql.query("insert into token_stats(user_id,model_used,input_tokens,output_tokens,total_cost_usd,total_credits) values($1,'unscoped',0,0,0,0)",[actor])).rejects.toThrow();
 },30000);
