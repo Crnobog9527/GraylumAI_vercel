@@ -1680,13 +1680,14 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
       const baseline = await r.service.read(targetProject, targetRound);
       const initialProjects = (await r.service.projects()).length;
       let failCatalog = true, holdRead = true, lateUrl = "", catalogRejected = false;
-      let release!: () => void, readReady!: () => void;
+      let release!: () => void, readReady!: () => void, readFailed!: (error: unknown) => void;
       const blocked = new Promise<void>((resolve) => { release = resolve; });
-      const ready = new Promise<void>((resolve) => { readReady = resolve; });
+      const ready = new Promise<void>((resolve, reject) => { readReady = resolve; readFailed = reject; });
       const invalidId = `parallel-failure-${scenario}`;
       const invalid = structuredClone(r.f.flow);
       invalid.steps[0].dependsOn = [r.f.flow.steps.at(-1)!.id];
       await r.page.route("**/api/trpc/**", async (route) => {
+        try {
         const calls = new URL(route.request().url()).pathname.split("/api/trpc/")[1].split(",");
         if (failCatalog && calls.includes("workbench.catalog")) {
           failCatalog = false;
@@ -1698,7 +1699,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
             const response = await route.fetch();
             const body = await response.json();
             const entries = Array.isArray(body) ? body : [body];
-            expect(entries[calls.indexOf("workbench.catalog")].error.json.data.code).toBe("SERVICE_UNAVAILABLE");
+            expect(entries[calls.indexOf("workbench.catalog")].error.data.code).toBe("SERVICE_UNAVAILABLE");
             for (const call of ["workbench.projects", "workbench.rounds"]) {
               const index = calls.indexOf(call);
               if (index >= 0) expect(entries[index].result).toBeDefined();
@@ -1717,6 +1718,10 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
           await blocked;
           await route.fulfill({ response });
         } else await route.continue();
+        } catch (error) {
+          readFailed(error);
+          await route.abort().catch(() => undefined);
+        }
       });
       try {
         if (scenario === "start")
