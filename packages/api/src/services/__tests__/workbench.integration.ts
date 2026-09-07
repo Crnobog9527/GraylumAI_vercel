@@ -655,11 +655,16 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
       if (committed) {
         expect(await input.getAttribute("readonly")).not.toBeNull();
         const report = await r.service.report(r.projectId, r.roundId);
-        expect(report.report).not.toBeNull();
+        expect(report.available).toBe(true);
+        expect(report.version).toBe(1);
+        expect(report.report).toBeDefined();
         expect(JSON.stringify(report)).not.toContain("later-unsaved-B");
       } else {
         expect(await input.isEditable()).toBe(true);
-        expect((await r.service.report(r.projectId, r.roundId)).report).toBeNull();
+        expect(await r.service.report(r.projectId, r.roundId)).toEqual({
+          available: false,
+          reason: "NOT_PUBLISHED",
+        });
         await r.page.getByRole("button", { name: "保存全部编辑", exact: true }).click();
         await quiet(r.page);
         const saved = await r.service.read(r.projectId, r.roundId);
