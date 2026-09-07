@@ -275,6 +275,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   async () => {
     for (const scenario of ["project", "round", "start"] as const) {
       const r = await repairProject();
+      const creation = scenario === "start" ? await fixture({ id: "parallel-created-local", label: "独立创建恢复", methodText: "Fictional isolated creation recovery method.", workflow: makeWorkflow(3) }) : null;
       const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
       let targetProject = r.projectId, targetRound = r.roundId, targetFlow = r.f.flow;
       if (scenario === "round") {
@@ -342,7 +343,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
       });
       try {
         if (scenario === "start")
-          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
+          await r.page.getByRole("button", { name: `创建 ${creation!.label}`, exact: true }).click();
         else await r.page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
         await ready;
         await quiet(r.page);
@@ -386,16 +387,18 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
         expect(await r.page.locator("main [role=alert]").count()).toBe(0);
         expect((await r.service.projects()).length).toBe(initialProjects + (scenario === "start" ? 1 : 0));
         if (scenario === "start") {
-          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
+          await r.page.getByRole("button", { name: new RegExp(`^${creation!.label}`) }).click();
           await quiet(r.page);
           expect(await r.page.locator("main [role=alert]").count()).toBe(0);
-          expect((await r.service.projects()).length).toBe(initialProjects + 2);
+          expect((await r.service.projects()).length).toBe(initialProjects + 1);
+          expect(await r.page.getByRole("button", { name: `创建 ${creation!.label}`, exact: true }).count()).toBe(0);
         }
       } finally {
         release();
         await r.page.unroute("**/api/trpc/**");
         await sql.query("delete from artifact_workflows where id=$1", [invalidId]);
         await r.context.close();
+        if (creation) await sql.query("delete from artifact_workflows where id=$1", [creation.registration]);
       }
     }
     console.log("WB-386-05 real catalog-only business failure + delayed real read: project/round/start late responses cannot replace current scope, rounds or unsaved body; only explicit save changes SQL; normal refresh/start recover PASS");
