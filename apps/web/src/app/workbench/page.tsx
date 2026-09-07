@@ -24,6 +24,7 @@ type Draft = {
   baseVersion: number;
   dirty: boolean;
 };
+type Action = (() => Promise<void>) & { changesScope?: boolean };
 const panel = "rounded-xl border border-white/10 bg-white/[0.03] p-5";
 const label = "text-sm text-zinc-400";
 const id = () => crypto.randomUUID();
@@ -54,7 +55,7 @@ export default function WorkbenchPage() {
   }));
   const [upgrade, setUpgrade] = useState(""),
     [account, setAccount] = useState<Record<string, string>>({});
-  const pending = useRef<null | (() => Promise<void>)>(null),
+  const pending = useRef<Action | null>(null),
     locked = useRef(false);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -126,8 +127,9 @@ export default function WorkbenchPage() {
       ),
     );
   }
-  async function run(action: () => Promise<void>, retryable = false) {
+  async function run(action: Action, retryable = false) {
     if (locked.current) return;
+    if (action.changesScope && Object.values(draftsRef.current).some((d) => d.dirty)) return;
     locked.current = true;
     setBusy(true);
     setError("");
@@ -379,7 +381,7 @@ export default function WorkbenchPage() {
           }
         : {}),
     };
-    void run(async () => {
+    const action = Object.assign(async () => {
       const created = await api.start.mutate(input);
       const [discovery, project] = await Promise.all([
         discover(), readProject(projectId, created.roundId),
@@ -387,7 +389,8 @@ export default function WorkbenchPage() {
       applyDiscovery(discovery);
       applyProject(project);
       setUpgrade("");
-    }, true);
+    }, { changesScope: true });
+    void run(action, true);
   }
   const step = snapshot?.workflow.steps.find((x) => x.id === selected),
     draft = drafts[selected],
@@ -434,7 +437,7 @@ export default function WorkbenchPage() {
             {pending.current && (
               <Button
                 variant="outline"
-                disabled={busy}
+                disabled={busy || Boolean(dirty && pending.current.changesScope)}
                 onClick={() => {
                   const retry = pending.current;
                   if (retry) void run(retry, true);
@@ -442,6 +445,9 @@ export default function WorkbenchPage() {
               >
                 重试同一请求
               </Button>
+            )}
+            {dirty && pending.current?.changesScope && (
+              <p className="mt-2 text-sm">当前项目有新的未保存编辑，暂不能重试切换项目。请先保存或放弃这些编辑。</p>
             )}
           </div>
         )}

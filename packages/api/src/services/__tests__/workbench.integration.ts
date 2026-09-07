@@ -1731,6 +1731,17 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
         await quiet(r.page);
         expect(catalogRejected).toBe(true);
         expect(await r.page.locator("main [role=alert]").innerText()).toContain("工作台服务未配置或暂时不可用");
+        if (scenario === "start") {
+          const oldInput = r.page.getByRole("textbox", { name: `${r.f.flow.steps[0].title} 工作稿` });
+          await oldInput.fill("LATER-OLD-PROJECT-INPUT");
+          const retry = r.page.getByRole("button", { name: "重试同一请求", exact: true });
+          expect(await retry.isDisabled()).toBe(true);
+          await retry.evaluate((button: HTMLButtonElement) => button.click());
+          expect(await oldInput.inputValue()).toBe("LATER-OLD-PROJECT-INPUT");
+          expect((await r.service.read(r.projectId, r.roundId)).steps["step-0"].body).toBeNull();
+          expect((await r.service.projects()).length).toBe(initialProjects + 1);
+          await r.page.getByRole("button", { name: "放弃此步骤本地编辑", exact: true }).click();
+        }
         if (scenario === "round")
           await r.page.getByRole("button", { name: "轮次 2 · 草稿", exact: true }).click();
         else await r.page.getByRole("button", { name: new RegExp(`^${other.label}`) }).click();
