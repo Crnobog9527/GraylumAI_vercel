@@ -1367,3 +1367,79 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   },
   180000,
 );
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "never resurrects a discarded write after unrelated read or export failure",
+  async () => {
+    const r = await repairProject();
+    const input = r.page.getByRole("textbox", {
+      name: `${r.f.flow.steps[0].title} 工作稿`,
+    });
+    for (const cancellation of ["discard", "reload"]) {
+      await input.fill(`uncommitted-and-cancelled-${cancellation}`);
+      // Unlike WB01, no request reaches Next or SQL. Replaying this stale callback
+      // later would create a write which the user explicitly stopped pursuing.
+      await r.page.route("**/api/trpc/workbench.execute*", (route) =>
+        route.abort("failed"),
+      );
+      await r.page
+        .getByRole("button", { name: "保存全部编辑", exact: true })
+        .click();
+      await quiet(r.page);
+      await r.page.unroute("**/api/trpc/workbench.execute*");
+      expect(
+        await r.page
+          .getByRole("button", { name: "重试同一请求", exact: true })
+          .count(),
+      ).toBe(1);
+      if (cancellation === "discard") {
+        await r.page
+          .getByRole("button", { name: "放弃此步骤本地编辑", exact: true })
+          .click();
+        expect(await input.inputValue()).toBe("");
+      } else {
+        await r.page
+          .getByRole("button", { name: "重新加载服务端状态", exact: true })
+          .click();
+        await quiet(r.page);
+        expect(await input.inputValue()).toBe(
+          `uncommitted-and-cancelled-${cancellation}`,
+        );
+      }
+      expect(
+        await r.page
+          .getByRole("button", { name: "重试同一请求", exact: true })
+          .count(),
+      ).toBe(0);
+      // A draft has no formal report: these fresh authenticated calls really fail.
+      await r.page
+        .getByRole("button", {
+          name:
+            cancellation === "discard"
+              ? "查看正式报告"
+              : "重新校验并导出 Markdown",
+          exact: true,
+        })
+        .click();
+      await quiet(r.page);
+      expect(await r.page.locator("main [role=alert]").count()).toBe(1);
+      expect(
+        await r.page
+          .getByRole("button", { name: "重试同一请求", exact: true })
+          .count(),
+      ).toBe(0);
+      const state = await r.service.read(r.projectId, r.roundId);
+      expect(state.steps["step-0"].version).toBe(0);
+      expect(state.steps["step-0"].body).toBe("");
+      if (cancellation === "reload")
+        await r.page
+          .getByRole("button", { name: "放弃此步骤本地编辑", exact: true })
+          .click();
+    }
+    await r.context.close();
+    console.log(
+      "GitHub P2 real browser: pre-commit failure + explicit discard/non-retryable reload + unrelated report/export failure never exposes or executes stale write PASS",
+    );
+  },
+  90000,
+);

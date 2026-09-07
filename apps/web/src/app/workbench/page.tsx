@@ -105,7 +105,9 @@ export default function WorkbenchPage() {
     setBusy(true);
     setError("");
     setNotice("");
-    if (retryable) pending.current = action;
+    // A new action owns the current error/recovery UI. Read-only actions must
+    // not resurrect a failed write from a discarded edit or previous scope.
+    pending.current = retryable ? action : null;
     try {
       await action();
       if (pending.current === action) pending.current = null;
@@ -336,7 +338,10 @@ export default function WorkbenchPage() {
               <Button
                 variant="outline"
                 disabled={busy}
-                onClick={() => void run(pending.current!, true)}
+                onClick={() => {
+                  const retry = pending.current;
+                  if (retry) void run(retry, true);
+                }}
               >
                 重试同一请求
               </Button>
@@ -544,7 +549,9 @@ export default function WorkbenchPage() {
                         </pre>
                         <Button
                           variant="outline"
-                          onClick={() =>
+                          onClick={() => {
+                            pending.current = null;
+                            setError("");
                             setDrafts({
                               ...drafts,
                               [selected]: {
@@ -552,8 +559,8 @@ export default function WorkbenchPage() {
                                 baseVersion: server.version,
                                 editId: id(),
                               },
-                            })
-                          }
+                            });
+                          }}
                         >
                           已比较，保留我的输入作为下一版
                         </Button>
@@ -581,7 +588,9 @@ export default function WorkbenchPage() {
                       <Button
                         variant="outline"
                         disabled={busy || !draft.dirty}
-                        onClick={() =>
+                        onClick={() => {
+                          pending.current = null;
+                          setError("");
                           setDrafts({
                             ...drafts,
                             [selected]: {
@@ -592,8 +601,8 @@ export default function WorkbenchPage() {
                               baseVersion: server.version,
                               dirty: false,
                             },
-                          })
-                        }
+                          });
+                        }}
                       >
                         放弃此步骤本地编辑
                       </Button>
