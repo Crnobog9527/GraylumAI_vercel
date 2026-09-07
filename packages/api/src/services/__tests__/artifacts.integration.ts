@@ -17,12 +17,13 @@ function user(id=actor){
  // Synthetic Auth boundary only; all following HTTP/SQL/grants/transactions are real.
  vi.spyOn(client.auth,'getUser').mockResolvedValue({data:{user:{id,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null} as never);return client;
 }
-async function fixture(n=3,social=false){
+async function fixture(n=3,social=false,independent=false){
  const pack=makePackage(),moduleId=randomUUID();
  await sql.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,`synthetic-${pack.id}`,owner]);
  await sql.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,'Synthetic',pack.id]);
  await publishSkillPackage(db,owner,pack);
  const flow=makeWorkflow(n,social),projectId=randomUUID(),roundId=randomUUID(),requestId=randomUUID();
+ if(independent)for(const step of flow.steps)step.dependsOn=[];
  const options={userClient:user(),privateClient:db,moduleId,skillId:pack.id,registrations:{original:{revisionId:pack.revisionId,workflow:flow}}};
  const store=databaseArtifactStore(options);
  const start={projectId,roundId,requestId,registration:'original',account:social?'test:public-account':null};
@@ -37,9 +38,61 @@ async function confirm(f:F,stepId:string,expectedVersion:number){
  const state=await read(f);return f.store.execute({action:'confirm',...scope(f),requestId:randomUUID(),stepId,expectedVersion,expectedReviewVersion:state.steps[stepId].reviewVersion});
 }
 const publish=(f:F,requestId=randomUUID())=>f.store.execute({action:'publish',...scope(f),requestId});
+async function addEvidence(f:F,count:number){
+ const ids:string[]=[];
+ for(let i=0;i<count;i++)ids.push((await f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body:`Synthetic evidence ${i}`,observedAt:null,supersedes:null})).evidenceId);
+ return ids;
+}
 beforeAll(async()=>{await sql.connect();await sql.query("insert into profiles(id,email,role) values($1,'owner@example.test','admin'),($2,'actor@example.test','user'),($3,'other@example.test','user')",[owner,actor,other]);});
 afterAll(async()=>{await sql.end();});
 describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
+ it.each([33,64])('reads and confirms %i direct references without counting cached provenance twice',async count=>{
+  const f=await fixture(1),ids=await addEvidence(f,count);
+  await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'All references are valid',evidenceIds:ids});
+  expect((await read(f)).steps['step-0'].body).toBe('All references are valid');
+  await confirm(f,'step-0',1);expect((await read(f)).steps['step-0'].valid).toBe(true);
+  await publish(f);expect((await f.store.execute({action:'report',...scope(f)})).available).toBe(true);
+ });
+ it.each([{counts:[22,22,22],independent:true},{counts:[64,64],independent:false}])('publishes and restores a report with project-wide evidence $counts',async({counts,independent})=>{
+  const f=await fixture(counts.length,false,independent),ids=await addEvidence(f,counts.reduce((a,b)=>a+b,0));let offset=0;
+  if(ids.length===128){
+   await expect(f.store.execute({action:'userEvidence',...scope(f),requestId:randomUUID(),body:'Beyond project capacity',observedAt:null,supersedes:null})).rejects.toThrow();
+   expect((await sql.query('select count(*)::int n from artifact_evidence where project_id=$1',[f.projectId])).rows[0].n).toBe(128);
+  }
+  for(const [i,count] of counts.entries()){
+   const stepId=`step-${i}`,direct=ids.slice(offset,offset+count);offset+=count;
+   await f.store.execute({action:'candidate',...scope(f),requestId:randomUUID(),stepId,body:'Candidate only',evidenceIds:direct});
+   await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId,expectedVersion:0,body:`Confirmed ${stepId}`,evidenceIds:direct});
+   await confirm(f,stepId,1);
+  }
+  const requestId=randomUUID(),published=await publish(f,requestId),report=await f.store.execute({action:'report',...scope(f)});
+  expect(report.available).toBe(true);expect(report.report.sources.map((e:{id:string})=>e.id).sort()).toEqual([...ids].sort());
+  if(!independent)expect(report.report.sections.at(-1).evidenceIds).toHaveLength(128);
+  f.store=databaseArtifactStore({...f.options,userClient:user()});
+  expect(await publish(f,requestId)).toEqual(published);expect(await f.store.execute({action:'report',...scope(f)})).toEqual(report);
+  expect((await sql.query('select count(*)::int n from artifact_versions where project_id=$1',[f.projectId])).rows[0].n).toBe(1);
+  await f.store.execute({action:'restrictEvidence',...scope(f),requestId:randomUUID(),evidenceId:ids.at(-1)!,deleted:independent,expiresAt:independent?null:'2000-01-01T00:00:00Z'});
+  expect(await f.store.execute({action:'report',...scope(f)})).toMatchObject({available:false,reason:'EVIDENCE_UNAVAILABLE'});
+  expect((await read(f)).steps[`step-${counts.length-1}`].body).toBeNull();
+  console.log('artifact evidence capacity',JSON.stringify({directCounts:counts,uniqueReportEvidence:ids.length,restored:true,versions:1,restrictedReportDenied:true}));
+ });
+ it('keeps direct input bounds and evidence ownership fail-closed at both host and SQL entry',async()=>{
+  const f=await fixture(1),ids=await addEvidence(f,65),g=await fixture(1),foreign=await addEvidence(g,1);
+  const before=(await sql.query('select count(*)::int n from artifact_requests where project_id=$1',[f.projectId])).rows[0].n;
+  for(const action of ['save','candidate'] as const){
+   for(const references of [ids,[ids[0],ids[0]],foreign]){
+    const payload={stepId:'step-0',body:'Rejected input',evidenceIds:references,...(action==='save'?{expectedVersion:0}:{})};
+    const common={...scope(f),requestId:randomUUID(),stepId:'step-0',body:'Rejected input',evidenceIds:references};
+    const command=action==='save'?{...common,action,expectedVersion:0}:{...common,action};
+    await expect(f.store.execute(command)).rejects.toThrow();
+    const raw=await db.rpc('artifact_transition',{p_actor_id:actor,p_module_id:f.moduleId,p_skill_id:f.pack.id,p_action:action,p_project_id:f.projectId,p_round_id:f.roundId,p_request_id:randomUUID(),p_payload:payload});
+    expect(raw.error).not.toBeNull();
+   }
+  }
+  for(const malformed of [null,{},[null],['not-a-uuid']])expect((await sql.query('select artifact_evidence_allowed($1,$2::jsonb) allowed',[f.projectId,JSON.stringify(malformed)])).rows[0].allowed).toBe(false);
+  expect((await read(f)).steps['step-0'].version).toBe(0);expect((await read(f)).candidates).toHaveLength(0);
+  expect((await sql.query('select count(*)::int n from artifact_requests where project_id=$1',[f.projectId])).rows[0].n).toBe(before);
+ });
  it.each([3,6,8])('%i steps share save/confirmation/publication/report and cross-instance recovery',async n=>{
   const f=await fixture(n,n===6);await fill(f);const req=randomUUID(),first=await publish(f,req);
   f.store=databaseArtifactStore({...f.options,userClient:user()});expect(await publish(f,req)).toEqual(first);

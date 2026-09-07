@@ -66,10 +66,15 @@ CREATE OR REPLACE FUNCTION public.artifact_text_length(body text) RETURNS intege
  chr(160)||chr(5760)||chr(8192)||chr(8193)||chr(8194)||chr(8195)||chr(8196)||chr(8197)||chr(8198)||chr(8199)||chr(8200)||chr(8201)||chr(8202)||chr(8232)||chr(8233)||chr(8239)||chr(8287)||chr(12288)||chr(65279),''),'[[:space:]]','','g'))
 $$;
 CREATE OR REPLACE FUNCTION public.artifact_evidence_allowed(project uuid,ids jsonb) RETURNS boolean LANGUAGE sql VOLATILE AS $$
- SELECT jsonb_typeof(ids)='array' AND jsonb_array_length(ids)<=64 AND NOT EXISTS(
- SELECT 1 FROM jsonb_array_elements_text(ids) x LEFT JOIN public.artifact_evidence e ON e.id::text=x AND e.project_id=project
- LEFT JOIN public.artifact_evidence_restrictions r ON r.evidence_id=e.id
- WHERE e.id IS NULL OR r.deleted OR r.expires_at<=clock_timestamp())
+ -- Lifecycle checks operate on a set within the project capacity. The same ID
+ -- may occur in both current references and cached provenance; input limits are separate.
+ SELECT CASE WHEN jsonb_typeof(ids) IS DISTINCT FROM 'array' THEN false ELSE (
+  WITH refs AS (SELECT DISTINCT value AS id FROM jsonb_array_elements_text(ids))
+  SELECT (SELECT count(*) FROM refs)<=128 AND NOT EXISTS(
+   SELECT 1 FROM refs x LEFT JOIN public.artifact_evidence e ON e.id::text=x.id AND e.project_id=project
+   LEFT JOIN public.artifact_evidence_restrictions r ON r.evidence_id=e.id
+   WHERE e.id IS NULL OR r.deleted OR r.expires_at<=clock_timestamp())
+ ) END
 $$;
 CREATE OR REPLACE FUNCTION public.artifact_invalidate(flow jsonb,steps jsonb,changed text) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE k text; result jsonb:=steps;
@@ -238,6 +243,8 @@ BEGIN
   IF p_action IN ('save','candidate') THEN
    body:=p_payload->>'body';ids:=p_payload->'evidenceIds';
    IF body IS NULL OR ids IS NULL OR char_length(body)>(s->>'maxLength')::integer OR NOT artifact_evidence_allowed(p.id,ids) THEN RAISE EXCEPTION 'invalid content or evidence'; END IF;
+   -- Match the host's direct-input contract; inherited/report evidence can span the project.
+   IF jsonb_array_length(ids)>64 OR jsonb_array_length(ids)<>(SELECT count(DISTINCT v) FROM jsonb_array_elements(ids) v) THEN RAISE EXCEPTION 'invalid direct evidence'; END IF;
    IF p_action='candidate' THEN
     IF (SELECT count(*) FROM artifact_candidates WHERE round_id=r.id)>=256 THEN RAISE EXCEPTION 'candidate capacity'; END IF;
     ids:=artifact_step_evidence(r.workflow,jsonb_set(states,ARRAY[k,'evidenceIds'],ids),k);
@@ -272,6 +279,7 @@ BEGIN
     all_ids:=all_ids||artifact_step_evidence(r.workflow,states,s->>'id');
    END LOOP;
    SELECT coalesce(jsonb_agg(DISTINCT v ORDER BY v),'[]') INTO all_ids FROM jsonb_array_elements(all_ids) v;
+   IF NOT artifact_evidence_allowed(p.id,all_ids) THEN RAISE EXCEPTION 'report evidence unavailable'; END IF;
    FOR s IN SELECT * FROM jsonb_array_elements(r.workflow->'report'->'sections') LOOP
     st:=states->(s->>'stepId');sections:=sections||jsonb_build_array(jsonb_build_object('title',s->>'title','stepId',s->>'stepId','body',st->>'body','confirmationId',st->'confirmationId','evidenceIds',(SELECT c.evidence_ids FROM artifact_confirmations c WHERE c.id=(st->>'confirmationId')::uuid)));
    END LOOP;
