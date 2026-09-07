@@ -252,9 +252,12 @@ afterAll(async () => {
     writeFileSync(output + "/restore.json", JSON.stringify(state));
   }
   writeFileSync(output + "/network.txt", outputs.join("\n"));
+  console.log("isolated cleanup: closing browser");
   await browser?.close();
+  console.log("isolated cleanup: closing SQL connection");
   await sql.end();
-});
+  console.log("isolated cleanup complete");
+}, 60000);
 it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   "runs every configured workflow through browser login → Next HTTP → PostgREST → SQL",
   async () => {
