@@ -40,6 +40,7 @@ import {
 const navItems = [
   { href: '/', label: '首页', icon: Home },
   { href: '/chat', label: '对话', icon: MessageSquare },
+  { href: '/workbench', label: '工作台', icon: Grid3X3 },
   { href: '/marketplace', label: '功能广场', icon: Grid3X3 },
   { href: '/profile', label: '个人中心', icon: User },
 ];

@@ -1,3 +1,4 @@
+import { workbenchRouter } from './routers/workbench';
 import { router } from './trpc';
 import { chatRouter } from './routers/chat';
 import { userRouter } from './routers/user';
@@ -36,6 +37,7 @@ export const appRouter = router({
   costs: costsRouter,
   payments: paymentsRouter,
   skills: skillsRouter,
+  workbench: workbenchRouter,
 });
 
 /**

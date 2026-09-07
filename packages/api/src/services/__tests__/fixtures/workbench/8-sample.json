@@ -1,0 +1,177 @@
+{
+  "id": "sample-8",
+  "label": "虚构样本 8 步",
+  "methodText": "Fictional local-only method with 8 stages. No provider or business data.",
+  "workflow": {
+    "id": "sample-8",
+    "version": 1,
+    "kind": "document",
+    "steps": [
+      {
+        "id": "step-0",
+        "title": "Synthetic step 1",
+        "dependsOn": [],
+        "resources": [
+          "references/step-0.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-1",
+        "title": "Synthetic step 2",
+        "dependsOn": [
+          "step-0"
+        ],
+        "resources": [
+          "references/step-1.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-2",
+        "title": "Synthetic step 3",
+        "dependsOn": [
+          "step-1"
+        ],
+        "resources": [
+          "references/step-2.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-3",
+        "title": "Synthetic step 4",
+        "dependsOn": [
+          "step-2"
+        ],
+        "resources": [
+          "references/step-3.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-4",
+        "title": "Synthetic step 5",
+        "dependsOn": [
+          "step-3"
+        ],
+        "resources": [
+          "references/step-4.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-5",
+        "title": "Synthetic step 6",
+        "dependsOn": [
+          "step-4"
+        ],
+        "resources": [
+          "references/step-5.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-6",
+        "title": "Synthetic step 7",
+        "dependsOn": [
+          "step-5"
+        ],
+        "resources": [
+          "references/step-6.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-7",
+        "title": "Synthetic step 8",
+        "dependsOn": [
+          "step-6"
+        ],
+        "resources": [
+          "references/step-7.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      }
+    ],
+    "report": {
+      "id": "confirmed-report",
+      "version": 1,
+      "title": "虚构样本 8 步报告",
+      "sections": [
+        {
+          "title": "Synthetic step 1",
+          "stepId": "step-0"
+        },
+        {
+          "title": "Synthetic step 2",
+          "stepId": "step-1"
+        },
+        {
+          "title": "Synthetic step 3",
+          "stepId": "step-2"
+        },
+        {
+          "title": "Synthetic step 4",
+          "stepId": "step-3"
+        },
+        {
+          "title": "Synthetic step 5",
+          "stepId": "step-4"
+        },
+        {
+          "title": "Synthetic step 6",
+          "stepId": "step-5"
+        },
+        {
+          "title": "Synthetic step 7",
+          "stepId": "step-6"
+        },
+        {
+          "title": "Synthetic step 8",
+          "stepId": "step-7"
+        }
+      ]
+    }
+  }
+}

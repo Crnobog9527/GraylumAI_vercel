@@ -1,0 +1,77 @@
+{
+  "id": "sample-3",
+  "label": "虚构样本 3 步",
+  "methodText": "Fictional local-only method with 3 stages. No provider or business data.",
+  "workflow": {
+    "id": "sample-3",
+    "version": 1,
+    "kind": "document",
+    "steps": [
+      {
+        "id": "step-0",
+        "title": "Synthetic step 1",
+        "dependsOn": [],
+        "resources": [
+          "references/step-0.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-1",
+        "title": "Synthetic step 2",
+        "dependsOn": [
+          "step-0"
+        ],
+        "resources": [
+          "references/step-1.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-2",
+        "title": "Synthetic step 3",
+        "dependsOn": [
+          "step-1"
+        ],
+        "resources": [
+          "references/step-2.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      }
+    ],
+    "report": {
+      "id": "confirmed-report",
+      "version": 1,
+      "title": "虚构样本 3 步报告",
+      "sections": [
+        {
+          "title": "Synthetic step 1",
+          "stepId": "step-0"
+        },
+        {
+          "title": "Synthetic step 2",
+          "stepId": "step-1"
+        },
+        {
+          "title": "Synthetic step 3",
+          "stepId": "step-2"
+        }
+      ]
+    }
+  }
+}
