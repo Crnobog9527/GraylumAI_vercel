@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
+import * as security from '../../middleware/securityChecks';
+import { TRPCError } from '@trpc/server';
+import { workbenchGeneration, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
 import { activateSkill, identityOf, packageHash, type SkillSource } from '../skills/loader';
 import { makePackage } from './fixtures/artifacts';
 const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1', token_counting_supported: 'true', tokenizer_family: 'o200k_base' };
 const request: ModelRequest = { model, messages: [{ role: 'system', content: 'synthetic method' }, { role: 'user', content: 'fictional content' }], maxTokens: 100 };
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('workbench model boundary', () => {
   it('sends one bounded text-only request to the fixed endpoint with no tool loop or redirects', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Synthetic result' } }], usage: { prompt_tokens: 100, completion_tokens: 10 } })));
@@ -83,4 +85,24 @@ it('does not mistake long markdown delimiters for private identifiers', () => {
     const context=JSON.stringify({resources:[{path:'SKILL.md',content:`# Private method\n${delimiter}\nA harmless local example.`}]});
     expect(echoesPrivateMethod('Unrelated candidate output',context)).toBe(false);
   }
+});
+
+it('does not normalize punctuation-heavy resource paths into common short words', () => {
+  for (const path of ['-.md', '__.md', 'a-.md']) {
+    const context=JSON.stringify({resources:[{path,content:'Some private wording.'}]});
+    expect(echoesPrivateMethod('An AMD processor helps this fictional project.',context)).toBe(false);
+    expect(echoesPrivateMethod(`Private file: ${path}`,context)).toBe(true);
+  }
+});
+it('rate limits invalid direct generation before private reads and tokenization', async () => {
+  const limit=vi.spyOn(security,'checkRateLimitAsync').mockRejectedValue(new TRPCError({code:'TOO_MANY_REQUESTS'}));
+  const from=vi.fn(), rpc=vi.fn(()=>({abortSignal:async()=>({data:null,error:null})})), transport=vi.fn();
+  const auth={getUser:async()=>({data:{user:{id:model.id,email_confirmed_at:'2026-01-01'}},error:null})};
+  const service=workbenchGeneration({auth} as never,{from,rpc} as never,transport);
+  for(let n=1;n<=3;n++) {
+    await expect(service.generate({projectId:model.id,roundId:model.id,requestId:`00000000-0000-4000-8000-00000000000${n}`,stepId:'step-0',instruction:'',expectedSteps:{'step-0':{version:0,reviewVersion:0}},quoteHash:'a'.repeat(64),budgetCredits:100})).rejects.toMatchObject({code:'TOO_MANY_REQUESTS'});
+  }
+  expect(limit).toHaveBeenCalledTimes(3); expect(from).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+  expect(rpc).toHaveBeenCalledTimes(3);
+  for(const [,payload] of rpc.mock.calls as unknown as Array<[string,{p_action:string}]>) expect(payload.p_action).toBe('get');
 });

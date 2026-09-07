@@ -2131,7 +2131,8 @@ aiTest('AI: browser rejected quote can requote, and sealed response survives rel
     await expect.poll(async()=> (await page.getByRole('region',{name:'AI 候选生成'}).innerText()).includes('已收到结果，待恢复保存'),{timeout:30000}).toBe(true);
     await page.reload(); await quiet(page);
     await page.getByRole('button',{name:new RegExp(`^${t.f.label}`)}).click(); await quiet(page);
-    expect(await page.getByRole('region',{name:'AI 候选生成'}).innerText()).toContain('已收到结果，待恢复保存');
+    // The restored receipt is loaded by a React effect after project selection.
+    await expect.poll(async()=> (await page.getByRole('region',{name:'AI 候选生成'}).innerText()).includes('已收到结果，待恢复保存'),{timeout:10000}).toBe(true);
   } finally { await sql.query('drop trigger local_fail_ai_receipt on artifact_generations; drop function local_fail_ai_receipt()'); }
   await page.getByRole('button',{name:'恢复已保存结果',exact:true}).click();
   await expect.poll(async()=> (await page.getByRole('region',{name:'AI 候选生成'}).innerText()).includes('候选已保存'),{timeout:10000}).toBe(true);

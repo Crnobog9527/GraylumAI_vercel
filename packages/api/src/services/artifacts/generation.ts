@@ -49,7 +49,8 @@ export function echoesPrivateMethod(answer: string, privateContext: string): boo
   const windows = new Set<string>();
   for (let i = 0; i + 16 <= output.length; i++) windows.add(output.slice(i, i + 16));
   return sections.some(({ path, content }) => {
-    if (output.includes(normalize(path))) return true;
+    const pathIdentifier = normalize(path);
+    if (answer.normalize('NFKC').toLowerCase().includes(path.normalize('NFKC').toLowerCase()) || (pathIdentifier.length >= 12 && output.includes(pathIdentifier))) return true;
     for (const word of content.match(/[\p{L}\p{N}_-]{12,}/gu) ?? []) {
       const identifier = normalize(word);
       if (identifier.length >= 12 && output.includes(identifier)) return true;
@@ -196,9 +197,12 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         if (status.state === 'responded') return generationStatus.parse(await rpc(v, 'settle', v.requestId));
         if (status.state !== 'prepared') return status;
       }
+      // Replays of durable results stay recoverable; every expensive preparation,
+      // including invalid quotes and prepared retries, consumes one rate slot.
+      await checkRateLimitAsync(await actor(), 'ai');
       const ready = await prepare(generationQuoteInput.parse({ projectId: v.projectId, roundId: v.roundId, stepId: v.stepId, instruction: v.instruction, expectedSteps: v.expectedSteps }));
       if (v.quoteHash !== ready.quoteHash || v.budgetCredits < ready.quote.reservedCredits) throw new Error('GENERATION_QUOTE_CHANGED');
-      if (!existing) await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, ready.quote.reservedCredits);
+      if (!existing) await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, ready.quote.reservedCredits, { skipRateLimit: true });
       const reserved = generationStatus.extend({ token: uuid }).parse(await rpc(v, 'prepare', v.requestId, { input: v, quote: ready.quote }));
       // No provider effect until dispatch ownership is durably confirmed. A lost
       // dispatch acknowledgement is uncertain and must never be resent.
