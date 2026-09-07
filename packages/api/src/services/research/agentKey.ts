@@ -130,7 +130,8 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       if(previous && previous.identityHash!==identityHash)stop('OPERATION_CONFLICT');
       if(previous && previous.state!=='prepared'){
         // get alone is deliberately not an identity authorization mechanism.
-        return {state:previous.state,result:previous.result??null,recovered:true,identityHash};
+        return {state:previous.state,result:previous.result??null,recovered:true,identityHash,
+          ...(previous.resultAccess==='restricted'?{resultAccess:previous.resultAccess,cost:previous.cost??null}:{})};
       }
       const desc=options.contract.description(await call('describe_tool',{name:cap.canonicalName}));
       if(desc.name!==cap.canonicalName||desc.executeAs!==undefined||contractHash(desc.schema)!==cap.schemaHash)stop('SCHEMA_CHANGED');
@@ -140,7 +141,8 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       const quoteUnits=creditsToUnits(desc.creditsPerCall);
       if(quoteUnits>creditsToUnits(cap.maxQuoteCredits))stop('QUOTE_CHANGED');
       const reservation=await options.store.reserve(input.planId,input.operationId,identityHash,quoteUnits);
-      if(!reservation.claimed)return {state:reservation.state,result:reservation.result??null,recovered:true};
+      if(!reservation.claimed)return {state:reservation.state,result:reservation.result??null,recovered:true,
+        ...(reservation.resultAccess==='restricted'?{resultAccess:reservation.resultAccess,cost:reservation.cost??null}:{})};
       if(!reservation.token)stop('STATE_INVALID');
       // No call may follow failed admission/reservation/cancellation.
       await options.authorize();

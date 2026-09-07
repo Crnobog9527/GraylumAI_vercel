@@ -5,8 +5,8 @@ import { resolve } from 'node:path';
 import { createServer } from 'node:http';
 const root=resolve(import.meta.dirname,'../../../..');
 const selected=process.argv.slice(2);
-if(selected.length && (selected.length!==1||selected[0]!=='--research-only'))throw new Error('only --research-only is supported');
-const testFiles=selected.length?['src/services/__tests__/sorsaResearch.integration.ts']:[];
+if(selected.length && (selected.length!==1||!['--research-only','--artifacts-only'].includes(selected[0])))throw new Error('only --research-only or --artifacts-only is supported');
+const testFiles=selected.length?[selected[0]==='--artifacts-only'?'src/services/__tests__/artifacts.integration.ts':'src/services/__tests__/sorsaResearch.integration.ts']:[];
 const tag=`graylum-v3-${randomUUID().slice(0,8)}`, db=`${tag}-db`, rest=`${tag}-rest`;
 const docker=(...args)=>execFileSync('docker',args,{encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
 let gateway;
@@ -23,6 +23,7 @@ try {
   for(let i=0;i<2;i++) {
     apply('packages/db/migrations/0064_v3_private_skill_packages.sql');
     apply('packages/db/migrations/0065_v3_research_operations.sql');
+    apply('packages/db/migrations/0066_v3_artifact_transactions.sql');
   }
   console.log('SQL migrations: applied including repeat application');
   docker('run','-d','--name',rest,'--network',tag,'-p','127.0.0.1::3000','-e',`PGRST_DB_URI=postgres://authenticator@${db}:5432/v3_disposable`,'-e','PGRST_DB_SCHEMAS=public','-e','PGRST_DB_ANON_ROLE=anon','-e',`PGRST_JWT_SECRET=${secret}`,'public.ecr.aws/supabase/postgrest:v14.13');
