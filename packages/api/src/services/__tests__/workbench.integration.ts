@@ -271,6 +271,139 @@ afterAll(async () => {
   console.log("isolated cleanup complete");
 }, 60000);
 it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "ignores late parallel refresh and creation reads after a real catalog failure",
+  async () => {
+    for (const scenario of ["project", "round", "start"] as const) {
+      const r = await repairProject();
+      const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
+      let targetProject = r.projectId, targetRound = r.roundId, targetFlow = r.f.flow;
+      if (scenario === "round") {
+        await r.page.getByRole("button", { name: "放弃当前草稿", exact: true }).click();
+        await quiet(r.page);
+        await r.page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
+        await quiet(r.page);
+        targetRound = (await r.service.rounds(r.projectId)).find((x) => x.state === "draft")!.roundId;
+        await r.page.getByRole("button", { name: "轮次 1 · 已放弃", exact: true }).click();
+      } else {
+        await r.page.getByRole("button", { name: `创建 ${other.label}`, exact: true }).click();
+        await quiet(r.page);
+        targetProject = (await r.service.projects()).find((p) => p.skillId === other.pack.id)!.projectId;
+        targetRound = (await r.service.rounds(targetProject))[0].roundId;
+        targetFlow = other.flow;
+        await r.page.getByRole("button", { name: new RegExp(`^${r.f.label}`) }).click();
+      }
+      await quiet(r.page);
+      const baseline = await r.service.read(targetProject, targetRound);
+      const original = await r.service.read(r.projectId, r.roundId);
+      const initialProjects = (await r.service.projects()).length;
+      let failCatalog = true, holdRead = true, lateUrl = "", catalogRejected = false;
+      let release!: () => void, readReady!: () => void, readFailed!: (error: unknown) => void;
+      const blocked = new Promise<void>((resolve) => { release = resolve; });
+      const ready = new Promise<void>((resolve, reject) => { readReady = resolve; readFailed = reject; });
+      const invalidId = `parallel-failure-${scenario}`;
+      const invalid = structuredClone(r.f.flow);
+      invalid.steps[0].dependsOn = [r.f.flow.steps.at(-1)!.id];
+      await r.page.route("**/api/trpc/**", async (route) => {
+        try {
+        const calls = new URL(route.request().url()).pathname.split("/api/trpc/")[1].split(",");
+        if (failCatalog && calls.includes("workbench.catalog")) {
+          failCatalog = false;
+          // Only catalog fails in the real Next/SQL batch. Projects/rounds
+          // succeed, allowing the separate real read to remain in flight.
+          await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
+            [invalidId, r.f.moduleId, r.f.pack.id, r.f.pack.revisionId, invalid, "invalid isolated catalog",]);
+          try {
+            const response = await route.fetch();
+            const body = await response.json();
+            const entries = Array.isArray(body) ? body : [body];
+            expect(entries[calls.indexOf("workbench.catalog")].error.data.code).toBe("SERVICE_UNAVAILABLE");
+            for (const call of ["workbench.projects", "workbench.rounds"]) {
+              const index = calls.indexOf(call);
+              if (index >= 0) expect(entries[index].result).toBeDefined();
+            }
+            catalogRejected = true;
+            await route.fulfill({ response });
+          } finally {
+            await sql.query("delete from artifact_workflows where id=$1", [invalidId]);
+          }
+        } else if (holdRead && calls.includes("workbench.read")) {
+          holdRead = false;
+          const response = await route.fetch();
+          expect(response.ok()).toBe(true);
+          lateUrl = route.request().url();
+          readReady();
+          await blocked;
+          await route.fulfill({ response });
+        } else await route.continue();
+        } catch (error) {
+          readFailed(error);
+          await route.abort().catch(() => undefined);
+        }
+      });
+      try {
+        if (scenario === "start")
+          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
+        else await r.page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
+        await ready;
+        await quiet(r.page);
+        expect(catalogRejected).toBe(true);
+        expect(await r.page.locator("main [role=alert]").innerText()).toContain("工作台服务未配置或暂时不可用");
+        if (scenario === "start") {
+          const oldInput = r.page.getByRole("textbox", { name: `${r.f.flow.steps[0].title} 工作稿` });
+          await oldInput.fill("LATER-OLD-PROJECT-INPUT");
+          const retry = r.page.getByRole("button", { name: "重试同一请求", exact: true });
+          expect(await retry.isDisabled()).toBe(true);
+          await retry.evaluate((button: HTMLButtonElement) => button.click());
+          expect(await oldInput.inputValue()).toBe("LATER-OLD-PROJECT-INPUT");
+          expect(await r.service.read(r.projectId, r.roundId)).toEqual(original);
+          expect((await r.service.projects()).length).toBe(initialProjects + 1);
+          await r.page.getByRole("button", { name: "放弃此步骤本地编辑", exact: true }).click();
+        }
+        if (scenario === "round")
+          await r.page.getByRole("button", { name: "轮次 2 · 草稿", exact: true }).click();
+        else await r.page.getByRole("button", { name: new RegExp(`^${other.label}`) }).click();
+        await quiet(r.page);
+        const input = r.page.getByRole("textbox", { name: `${targetFlow.steps[0].title} 工作稿` });
+        const marker = `UNSAVED-${scenario}-AFTER-FAILURE`;
+        await input.fill(marker);
+        const roundButtons = r.page.getByRole("button", { name: /^(轮次 \d+ ·|正式 v\d+)/ });
+        const shownRounds = await roundButtons.allTextContents();
+        const late = r.page.waitForResponse((response) => response.url() === lateUrl);
+        release();
+        await (await late).finished();
+        await r.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        expect(await input.inputValue()).toBe(marker);
+        expect(await roundButtons.allTextContents()).toEqual(shownRounds);
+        expect(await r.page.getByText("有未保存编辑。发布会先保存，随后检查全部确认。", { exact: true }).count()).toBe(1);
+        expect(await r.service.read(targetProject, targetRound)).toEqual(baseline);
+        await r.page.getByRole("button", { name: "保存全部编辑", exact: true }).click();
+        await quiet(r.page);
+        expect((await r.service.read(targetProject, targetRound)).steps["step-0"].body).toBe(marker);
+        expect(await r.service.read(r.projectId, r.roundId)).toEqual(original);
+        await r.page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
+        await quiet(r.page);
+        expect(await input.inputValue()).toBe(marker);
+        expect(await r.page.locator("main [role=alert]").count()).toBe(0);
+        expect((await r.service.projects()).length).toBe(initialProjects + (scenario === "start" ? 1 : 0));
+        if (scenario === "start") {
+          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
+          await quiet(r.page);
+          expect(await r.page.locator("main [role=alert]").count()).toBe(0);
+          expect((await r.service.projects()).length).toBe(initialProjects + 2);
+        }
+      } finally {
+        release();
+        await r.page.unroute("**/api/trpc/**");
+        await sql.query("delete from artifact_workflows where id=$1", [invalidId]);
+        await r.context.close();
+      }
+    }
+    console.log("WB-386-05 real catalog-only business failure + delayed real read: project/round/start late responses cannot replace current scope, rounds or unsaved body; only explicit save changes SQL; normal refresh/start recover PASS");
+  },
+  180000,
+);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   "runs every configured workflow through browser login → Next HTTP → PostgREST → SQL",
   async () => {
     if (process.env.V3_WORKBENCH_PHASE === "restore") return;
@@ -1652,138 +1785,6 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     console.log("real source draft isolation/unload: native reload warning preserves source-only input; response-loss retry preserves later input; saved form clears, hidden unsaved scopes remain protected; project/round isolation and SQL contents PASS");
   },
   90000,
-);
-
-it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
-  "ignores late parallel refresh and creation reads after a real catalog failure",
-  async () => {
-    for (const scenario of ["project", "round", "start"] as const) {
-      const r = await repairProject();
-      const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
-      let targetProject = r.projectId, targetRound = r.roundId, targetFlow = r.f.flow;
-      if (scenario === "round") {
-        await r.page.getByRole("button", { name: "放弃当前草稿", exact: true }).click();
-        await quiet(r.page);
-        await r.page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
-        await quiet(r.page);
-        targetRound = (await r.service.rounds(r.projectId)).find((x) => x.state === "draft")!.roundId;
-        await r.page.getByRole("button", { name: "轮次 1 · 已放弃", exact: true }).click();
-      } else {
-        await r.page.getByRole("button", { name: `创建 ${other.label}`, exact: true }).click();
-        await quiet(r.page);
-        targetProject = (await r.service.projects()).find((p) => p.skillId === other.pack.id)!.projectId;
-        targetRound = (await r.service.rounds(targetProject))[0].roundId;
-        targetFlow = other.flow;
-        await r.page.getByRole("button", { name: new RegExp(`^${r.f.label}`) }).click();
-      }
-      await quiet(r.page);
-      const baseline = await r.service.read(targetProject, targetRound);
-      const initialProjects = (await r.service.projects()).length;
-      let failCatalog = true, holdRead = true, lateUrl = "", catalogRejected = false;
-      let release!: () => void, readReady!: () => void, readFailed!: (error: unknown) => void;
-      const blocked = new Promise<void>((resolve) => { release = resolve; });
-      const ready = new Promise<void>((resolve, reject) => { readReady = resolve; readFailed = reject; });
-      const invalidId = `parallel-failure-${scenario}`;
-      const invalid = structuredClone(r.f.flow);
-      invalid.steps[0].dependsOn = [r.f.flow.steps.at(-1)!.id];
-      await r.page.route("**/api/trpc/**", async (route) => {
-        try {
-        const calls = new URL(route.request().url()).pathname.split("/api/trpc/")[1].split(",");
-        if (failCatalog && calls.includes("workbench.catalog")) {
-          failCatalog = false;
-          // Only catalog fails in the real Next/SQL batch. Projects/rounds
-          // succeed, allowing the separate real read to remain in flight.
-          await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
-            [invalidId, r.f.moduleId, r.f.pack.id, r.f.pack.revisionId, invalid, "invalid isolated catalog",]);
-          try {
-            const response = await route.fetch();
-            const body = await response.json();
-            const entries = Array.isArray(body) ? body : [body];
-            expect(entries[calls.indexOf("workbench.catalog")].error.data.code).toBe("SERVICE_UNAVAILABLE");
-            for (const call of ["workbench.projects", "workbench.rounds"]) {
-              const index = calls.indexOf(call);
-              if (index >= 0) expect(entries[index].result).toBeDefined();
-            }
-            catalogRejected = true;
-            await route.fulfill({ response });
-          } finally {
-            await sql.query("delete from artifact_workflows where id=$1", [invalidId]);
-          }
-        } else if (holdRead && calls.includes("workbench.read")) {
-          holdRead = false;
-          const response = await route.fetch();
-          expect(response.ok()).toBe(true);
-          lateUrl = route.request().url();
-          readReady();
-          await blocked;
-          await route.fulfill({ response });
-        } else await route.continue();
-        } catch (error) {
-          readFailed(error);
-          await route.abort().catch(() => undefined);
-        }
-      });
-      try {
-        if (scenario === "start")
-          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
-        else await r.page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
-        await ready;
-        await quiet(r.page);
-        expect(catalogRejected).toBe(true);
-        expect(await r.page.locator("main [role=alert]").innerText()).toContain("工作台服务未配置或暂时不可用");
-        if (scenario === "start") {
-          const oldInput = r.page.getByRole("textbox", { name: `${r.f.flow.steps[0].title} 工作稿` });
-          await oldInput.fill("LATER-OLD-PROJECT-INPUT");
-          const retry = r.page.getByRole("button", { name: "重试同一请求", exact: true });
-          expect(await retry.isDisabled()).toBe(true);
-          await retry.evaluate((button: HTMLButtonElement) => button.click());
-          expect(await oldInput.inputValue()).toBe("LATER-OLD-PROJECT-INPUT");
-          expect((await r.service.read(r.projectId, r.roundId)).steps["step-0"].body).toBeNull();
-          expect((await r.service.projects()).length).toBe(initialProjects + 1);
-          await r.page.getByRole("button", { name: "放弃此步骤本地编辑", exact: true }).click();
-        }
-        if (scenario === "round")
-          await r.page.getByRole("button", { name: "轮次 2 · 草稿", exact: true }).click();
-        else await r.page.getByRole("button", { name: new RegExp(`^${other.label}`) }).click();
-        await quiet(r.page);
-        const input = r.page.getByRole("textbox", { name: `${targetFlow.steps[0].title} 工作稿` });
-        const marker = `UNSAVED-${scenario}-AFTER-FAILURE`;
-        await input.fill(marker);
-        const roundButtons = r.page.getByRole("button", { name: /^(轮次 \d+ ·|正式 v\d+)/ });
-        const shownRounds = await roundButtons.allTextContents();
-        const late = r.page.waitForResponse((response) => response.url() === lateUrl);
-        release();
-        await (await late).finished();
-        await r.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-        expect(await input.inputValue()).toBe(marker);
-        expect(await roundButtons.allTextContents()).toEqual(shownRounds);
-        expect(await r.page.getByText("有未保存编辑。发布会先保存，随后检查全部确认。", { exact: true }).count()).toBe(1);
-        expect(await r.service.read(targetProject, targetRound)).toEqual(baseline);
-        await r.page.getByRole("button", { name: "保存全部编辑", exact: true }).click();
-        await quiet(r.page);
-        expect((await r.service.read(targetProject, targetRound)).steps["step-0"].body).toBe(marker);
-        expect((await r.service.read(r.projectId, r.roundId)).steps["step-0"].body).toBeNull();
-        await r.page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
-        await quiet(r.page);
-        expect(await input.inputValue()).toBe(marker);
-        expect(await r.page.locator("main [role=alert]").count()).toBe(0);
-        expect((await r.service.projects()).length).toBe(initialProjects + (scenario === "start" ? 1 : 0));
-        if (scenario === "start") {
-          await r.page.getByRole("button", { name: `创建 ${r.f.label}`, exact: true }).click();
-          await quiet(r.page);
-          expect(await r.page.locator("main [role=alert]").count()).toBe(0);
-          expect((await r.service.projects()).length).toBe(initialProjects + 2);
-        }
-      } finally {
-        release();
-        await r.page.unroute("**/api/trpc/**");
-        await sql.query("delete from artifact_workflows where id=$1", [invalidId]);
-        await r.context.close();
-      }
-    }
-    console.log("WB-386-05 real catalog-only business failure + delayed real read: project/round/start late responses cannot replace current scope, rounds or unsaved body; only explicit save changes SQL; normal refresh/start recover PASS");
-  },
-  180000,
 );
 
 it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
