@@ -134,11 +134,11 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     const state = await privateClient!.rpc('artifact_query', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'read' });
     if (state.error) throw new Error('ARTIFACT_DENIED');
     const snapshot = snapshotSchema.parse(state.data), step = binding.workflow.steps.find(s => s.id === v.stepId);
-    const expected = Object.fromEntries(Object.entries(snapshot.steps).map(([k, s]) => [k, { version: s.version, reviewVersion: s.reviewVersion }]));
-    if (!step || snapshot.state !== 'draft' || Object.keys(expected).length !== Object.keys(v.expectedSteps).length || Object.entries(expected).some(([k, s]) => s.version !== v.expectedSteps[k]?.version || s.reviewVersion !== v.expectedSteps[k]?.reviewVersion)) throw new Error('GENERATION_CONFLICT');
+    if (!step || snapshot.state !== 'draft') throw new Error('GENERATION_CONFLICT');
     const ancestors = new Set<string>();
     const visit = (key: string) => { if (ancestors.has(key)) return; ancestors.add(key); binding.workflow.steps.find(s => s.id === key)!.dependsOn.forEach(visit); };
     visit(v.stepId);
+    if ([...ancestors].some(k => snapshot.steps[k].version !== v.expectedSteps[k]?.version || snapshot.steps[k].reviewVersion !== v.expectedSteps[k]?.reviewVersion)) throw new Error('GENERATION_CONFLICT');
     if ([...ancestors].some(k => snapshot.steps[k].available === false || (k !== v.stepId && !snapshot.steps[k].valid))) throw new Error('GENERATION_INPUT_UNAVAILABLE');
     const evidenceIds = new Set([...ancestors].flatMap(k => snapshot.steps[k].evidenceIds));
     // Cached provenance belongs to text we are about to send, even after an
@@ -163,7 +163,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     if (!Number.isSafeInteger(reservedCredits) || reservedCredits < upper || reservedCredits > 1000000) throw new Error('GENERATION_BUDGET');
     const quote = { reservedCredits, inputTokens, maxTokens, modelId: model.id, providerModel: model.model_id, pricing, settings,
       revisionId: snapshot.revisionId, packageHash: snapshot.packageHash, workflowHash: snapshot.workflowHash, templateHash: snapshot.templateHash,
-      resources: loaded.resourceIdentities(), contextHash: sha256(JSON.stringify(messages)) };
+      resourcesHash: sha256(JSON.stringify(loaded.resourceIdentities())), contextHash: sha256(JSON.stringify(messages)) };
     const quoteHash = sha256(JSON.stringify(quote));
     return { quote, quoteHash, model, messages, source, descriptor, step, id, loaded };
   }

@@ -29,6 +29,13 @@ DO $$ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS token_stats_artifact_generation ON public.token_stats(artifact_generation_id) WHERE artifact_generation_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_logs_artifact_generation ON public.ai_usage_logs(artifact_generation_id) WHERE artifact_generation_id IS NOT NULL;
+CREATE OR REPLACE FUNCTION public.artifact_generation_basis(flow jsonb,steps jsonb,step text) RETURNS jsonb
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE ancestors(id) AS (
+ SELECT step UNION SELECT d FROM ancestors a,jsonb_array_elements(flow->'steps') node,jsonb_array_elements_text(node->'dependsOn') d WHERE node->>'id'=a.id)
+ SELECT jsonb_object_agg(a.id,jsonb_build_object('version',steps->a.id->'version','reviewVersion',steps->a.id->'reviewVersion')) FROM ancestors a
+$$;
+REVOKE ALL ON FUNCTION public.artifact_generation_basis(jsonb,jsonb,text) FROM PUBLIC,anon,authenticated,service_role;
 CREATE OR REPLACE FUNCTION public.artifact_generation_inputs_current(flow jsonb,steps jsonb,step text) RETURNS boolean
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
  WITH RECURSIVE ancestors(id) AS (
@@ -157,8 +164,8 @@ BEGIN
   END IF;
   SELECT s INTO spec FROM jsonb_array_elements(r.workflow->'steps') s WHERE s->>'id'=p_payload#>>'{input,stepId}';
   IF spec IS NULL THEN RAISE EXCEPTION 'invalid generation step'; END IF;
-  SELECT jsonb_object_agg(key,jsonb_build_object('version',value->'version','reviewVersion',value->'reviewVersion')) INTO actual FROM jsonb_each(r.steps);
-  IF actual IS DISTINCT FROM p_payload#>'{input,expectedSteps}' THEN RAISE EXCEPTION 'generation input changed'; END IF;
+  actual:=artifact_generation_basis(r.workflow,r.steps,spec->>'id');
+  IF actual IS DISTINCT FROM (SELECT jsonb_object_agg(key,value) FROM jsonb_each(p_payload#>'{input,expectedSteps}') WHERE actual ? key) THEN RAISE EXCEPTION 'generation input changed'; END IF;
   IF EXISTS(SELECT 1 FROM artifact_generations WHERE project_id=p.id AND state IN ('prepared','dispatched','unknown','responded')) THEN RAISE EXCEPTION 'generation pending'; END IF;
   IF (SELECT count(*) FROM artifact_candidates WHERE round_id=r.id)+(SELECT count(*) FROM artifact_generations WHERE round_id=r.id AND candidate_id IS NULL)>=256 THEN RAISE EXCEPTION 'generation capacity'; END IF;
   IF NOT artifact_generation_inputs_current(r.workflow,r.steps,spec->>'id') THEN RAISE EXCEPTION 'generation provenance changed'; END IF;
@@ -173,8 +180,8 @@ BEGIN
    VALUES(p.id,r.id,p_request_id,spec->>'id',p_payload->'input',actual,evidence,coalesce(r.steps->(spec->>'id')->'evidenceIds','[]'),p_payload->'quote',pre,token,'prepared') RETURNING * INTO o;
   RETURN artifact_generation_public(o)||jsonb_build_object('token',token);
  ELSIF p_action='dispatch' THEN
-  SELECT jsonb_object_agg(key,jsonb_build_object('version',value->'version','reviewVersion',value->'reviewVersion')) INTO actual FROM jsonb_each(r.steps);
   IF o.id IS NULL OR o.state<>'prepared' OR o.dispatch_token IS DISTINCT FROM (p_payload->>'token')::uuid THEN RETURN '{"dispatch":false}'; END IF;
+  actual:=artifact_generation_basis(r.workflow,r.steps,o.step_id);
   IF actual IS DISTINCT FROM o.basis OR NOT artifact_generation_inputs_current(r.workflow,r.steps,o.step_id) OR NOT artifact_evidence_allowed(p.id,o.evidence_ids) THEN RAISE EXCEPTION 'generation input changed'; END IF;
   UPDATE artifact_generations SET state='dispatched' WHERE id=o.id;
   RETURN '{"dispatch":true}';
@@ -198,9 +205,10 @@ BEGIN
  IF direct_ids IS NULL OR jsonb_array_length(direct_ids)>64 THEN RAISE EXCEPTION 'candidate inputs unavailable'; END IF;
  payload:=jsonb_build_object('stepId',p_step_id,'candidateId',p_candidate_id,'expectedVersion',p_expected_version,'body',p_body,'evidenceIds',direct_ids);
  IF NOT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN
-  -- AI candidates bind the actual generating input versions, not only source IDs.
+  SELECT workflow INTO flow FROM artifact_rounds WHERE id=p_round_id;
+  -- Only contributing step/ancestor versions invalidate an AI candidate.
   IF EXISTS(SELECT 1 FROM artifact_generations g WHERE g.candidate_id=p_candidate_id
-    AND g.basis IS DISTINCT FROM (SELECT jsonb_object_agg(key,jsonb_build_object('version',value->'version','reviewVersion',value->'reviewVersion')) FROM jsonb_each(snapshot->'steps')))
+    AND g.basis IS DISTINCT FROM artifact_generation_basis(flow,snapshot->'steps',p_step_id))
   THEN RAISE EXCEPTION 'candidate input changed'; END IF;
   SELECT workflow INTO flow FROM artifact_rounds WHERE id=p_round_id;
   effective_ids:=artifact_step_evidence(flow,jsonb_set(snapshot->'steps',ARRAY[p_step_id,'evidenceIds'],direct_ids),p_step_id);

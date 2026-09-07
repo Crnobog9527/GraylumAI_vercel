@@ -79,3 +79,11 @@ GitHub Codex 对首个候选提出三项问题，本轮同范围修复：
 - 任意 16 字符片段不再作为泄露证据：正文匹配要求 64 个连续规范化字符，短标识匹配限于至少 12 个有效字符的大写下划线结构标识；路径仍保留上轮字面/长规范化检查。普通 competitive analysis、competitive-analysis、entrepreneurship 不会误拦，完整较长私有正文和 METHOD_CANARY 混淆回显仍拒绝。这是确定性原样泄露检查，不保证短普通词组、任意编码或语义改写的外传检测；外部启用前真实模型对抗验证仍必要。
 - 264 项相关单测通过，新增真实隔离场景证明预留后触及小时消费上限时不发送、限制解除后余额为零仍能使用原预留完成一次生成，以及普通行业词组生成成功。22 项 AI/浏览器场景通过，16 项原工作台显式筛选跳过。首次新增消费 fixture 使用了不存在的 balance_before 字段而失败，修正 fixture 后通过；没有更改既有账务表。
 - 日志保留：/tmp/graylum-pr387-round5-final-unit.log、/tmp/graylum-pr387-round5-local.log（fixture 失败）、/tmp/graylum-pr387-round5-final-local.log（22 通过）。新提交另运行同一 22 项集成及 TypeScript，证据交付时记录实际状态。未运行真实 provider 或外部启用。
+
+## 独立步骤、输入错误与大资源配置修复
+
+- 生成版本基础只包含当前步骤及传递依赖，服务准备、SQL 预留/发送和候选采用使用相同范围。无关分支的保存不再使候选失效；真正参与生成的祖先编辑仍拒绝旧候选。
+- 既有安全 BAD_REQUEST 错误保留业务提示，提示修正输入；未知内部错误继续脱敏。
+- 私有资源仍完整加载并参与上下文/报价身份，持久化报价改存资源身份清单的 SHA-256 摘要，避免合法 64 文件长路径配置超出 16 KiB 报价列约束。实际隔离测试发布并加载 64 个文件，生成及结算成功，逐一检查完整路径进入模型替身输入，报价存储小于限制。
+- 265 项相关单测、TypeScript 和 24 项真实隔离 AI/浏览器场景通过（16 项显式筛选）。新独立分支场景证明无关编辑前后报价/候选有效，并验证参与生成的祖先变化后采用拒绝。日志 /tmp/graylum-pr387-round6-unit.log、/tmp/graylum-pr387-round6-types.log、/tmp/graylum-pr387-round6-local.log。
+- 另对935a515运行了仅增加测试的步骤切换探针，22项通过，未复现卸载后凭据丢失；探针补丁及原始日志保留在 /tmp/graylum-pr387-audit/PR387-935a515-step-switch-probe.patch 和 /tmp/graylum-pr387-unmount-before.log，未据此修改产品实现。新提交继续使用准确提交后的运行证据。

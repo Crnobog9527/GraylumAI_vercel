@@ -78,9 +78,10 @@ async function fixture(config: {
   id: string;
   label: string;
   methodText: string;
+  package?: ReturnType<typeof makePackage>;
   workflow: ReturnType<typeof makeWorkflow>;
 }) {
-  const pack = makePackage(),
+  const pack = config.package ?? makePackage(),
     moduleId = randomUUID(),
     registration = config.id,
     flow = config.workflow;
@@ -1875,10 +1876,10 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 // AI transport is explicitly injected here. SQL, Auth, Skill reads, pricing and
 // the existing credit RPCs are real local services; no provider request is made.
 const localModel = randomUUID();
-async function generationFixture(n = 3, methodText = 'Synthetic generation method.') {
+async function generationFixture(n = 3, methodText = 'Synthetic generation method.', options: {workflow?: ReturnType<typeof makeWorkflow>; package?: ReturnType<typeof makePackage>} = {}) {
   const { workbenchGeneration } = await import('../artifacts/generation');
-  const flow = makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
-  const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText, workflow: flow });
+  const flow = options.workflow ?? makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
+  const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText, workflow: flow, package: options.package });
   await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Local fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localModel]);
   await sql.query('update modules set model_id=$1 where id=$2', [localModel, f.moduleId]);
   await sql.query("insert into system_settings(key,value) values('v3_workbench_ai','true') on conflict(key) do update set value='true'");
@@ -2229,4 +2230,37 @@ aiTest('AI: ordinary domain phrase shared with a private method still produces a
   const ai=t.workbenchGeneration(t.user,db,async()=>({body:'Competitive analysis helps entrepreneurship.',inputTokens:800,outputTokens:30}));
   const v=await t.request(ai);expect((await ai.generate(v)).state).toBe('succeeded');
   expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(1);
+},30000);
+
+aiTest('AI: independent edits preserve candidates while contributing ancestor edits invalidate them',async()=>{
+  const flow=makeWorkflow(3);flow.steps[2].dependsOn=[];
+  const t=await generationFixture(3,'Branching fictional method.',{workflow:flow});
+  const save=async(stepId:string,body:string)=>{const s=await t.service.read(t.scope.projectId,t.scope.roundId);await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId,expectedVersion:s.steps[stepId].version,body,evidenceIds:[]});};
+  await save('step-0','Confirmed ancestor');
+  const s=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({...t.scope,action:'confirm',requestId:randomUUID(),stepId:'step-0',expectedVersion:s.steps['step-0'].version,expectedReviewVersion:s.steps['step-0'].reviewVersion});
+  const v=await t.request(t.ai,'step-1');await save('step-2','Unrelated before dispatch');
+  const done=await t.ai.generate(v);expect(done.state).toBe('succeeded');
+  await save('step-2','Unrelated after generation');
+  await t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-1',candidateId:done.candidateId!,expectedVersion:0,body:'Adopted unaffected candidate'});
+  const basis=(await sql.query('select basis from artifact_generations where request_id=$1',[v.requestId])).rows[0].basis;
+  expect(Object.keys(basis).sort()).toEqual(['step-0','step-1']);
+  const newer=await t.ai.generate(await t.request(t.ai,'step-1'));
+  await save('step-0','Changed contributing ancestor');
+  await expect(t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-1',candidateId:newer.candidateId!,expectedVersion:1,body:'Must not adopt stale candidate'})).rejects.toThrow();
+},30000);
+aiTest('AI: 64 long-path resources remain complete while quote identity fits durable storage',async()=>{
+  const pack=makePackage();pack.files=pack.files.slice(0,1);pack.descriptor.files=pack.descriptor.files.slice(0,1);
+  for(let i=0;i<63;i++) {
+    const path=`references/${'x'.repeat(195)}-${i}.md`,body=`Private fictional resource ${i}.`;
+    pack.files.push({path,base64:Buffer.from(body).toString('base64')});
+    pack.descriptor.files.push({path,bytes:Buffer.byteLength(body),sha256:sha256(body),mediaType:'text/markdown',requires:[]});
+  }
+  pack.descriptor.packageHash=packageHash(pack.descriptor);
+  const flow=makeWorkflow(1);flow.steps[0].resources=pack.files.slice(1).map(f=>f.path);
+  const t=await generationFixture(1,'',{workflow:flow,package:pack}),v=await t.request();
+  expect((await t.ai.generate(v)).state).toBe('succeeded');
+  for(const file of pack.files)expect(t.captured[0]).toContain(file.path);
+  const stored=(await sql.query('select quote,octet_length(quote::text) as bytes from artifact_generations where request_id=$1',[v.requestId])).rows[0];
+  expect(stored.bytes).toBeLessThan(16384);expect(stored.quote.resourcesHash).toMatch(/^[a-f0-9]{64}$/);expect(stored.quote.resources).toBeUndefined();
 },30000);

@@ -15,7 +15,7 @@ function caller() {
 }
 const input={projectId:id,roundId:id,stepId:'step-0',instruction:'',expectedSteps:{'step-0':{version:0,reviewVersion:0}}};
 describe('workbench preflight error transport',()=>{
-  it.each(['TOO_MANY_REQUESTS','PRECONDITION_FAILED','FORBIDDEN'] as const)('preserves %s and its safe business message',async code=>{
+  it.each(['TOO_MANY_REQUESTS','PRECONDITION_FAILED','FORBIDDEN','BAD_REQUEST'] as const)('preserves %s and its safe business message',async code=>{
     mocked.quote.mockRejectedValueOnce(new TRPCError({code,message:'Safe actionable preflight message'}));
     await expect(caller().generationQuote(input)).rejects.toMatchObject({code,message:'Safe actionable preflight message'});
   });
