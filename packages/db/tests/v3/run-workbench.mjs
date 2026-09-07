@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
+import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHmac, createHash } from "node:crypto";
 import {
@@ -14,6 +15,9 @@ import { resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length === 1 && args[0] !== '--ai-only')) throw new Error('only --ai-only is supported');
+const aiOnly = args[0] === '--ai-only';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const files = execFileSync("git", ["ls-files", "-z"], {
   cwd: source,
@@ -154,6 +158,9 @@ try {
   ])
     apply(`packages/db/migrations/${p}`);
   apply("packages/db/migrations/0067_v3_workbench_queries.sql");
+  installWorkbenchBilling(sql, root);
+  apply("packages/db/migrations/0068_v3_workbench_generation.sql");
+  apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -227,7 +234,22 @@ try {
     }
     if (!ok) throw new Error("local service not ready");
   }
+  let modelCalls = 0;
   gateway = createServer(async (req, res) => {
+    if (req.url === '/__workbench_model_fixture') {
+      const chunks = []; let bytes = 0;
+      for await (const chunk of req) { bytes += chunk.length; if (bytes > 2097152) { res.writeHead(413).end(); return; } chunks.push(chunk); }
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      if (req.method !== 'POST' || body.tools?.length || body.plugins?.length || body.stream !== false) { res.writeHead(400).end(); return; }
+      modelCalls++;
+      await new Promise(r => setTimeout(r, 1500));
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        choices: [{ finish_reason: 'stop', message: { content: 'Synthetic local HTTP candidate' } }],
+        usage: { prompt_tokens: 800, completion_tokens: 30 },
+      })); return;
+    }
+    if (req.url === '/__workbench_model_calls') { res.writeHead(200).end(JSON.stringify({ calls: modelCalls })); return; }
+
     const prefix = req.url?.startsWith("/rest/v1/")
       ? "/rest/v1"
       : req.url?.startsWith("/auth/v1/")
@@ -274,6 +296,14 @@ try {
   });
   await new Promise((r) => gateway.listen(0, "127.0.0.1", r));
   const apiUrl = `http://127.0.0.1:${gateway.address().port}`;
+  // Only the disposable, credential-free source COPY receives this transport
+  // substitution. Shipped code has no environment-controlled mock/provider URL.
+  const generationPath = resolve(root, 'packages/api/src/services/artifacts/generation.ts');
+  const productionSource = readFileSync(generationPath, 'utf8');
+  const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
+  if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
+  writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
+  console.log('Model transport: synthetic loopback HTTP substituted in disposable copy only');
   const service = jwt("service_role"),
     anon = jwt("anon");
   const listener = createServer();
@@ -344,15 +374,18 @@ try {
         "src/services/__tests__/workbench.integration.ts",
         "--reporter",
         "verbose",
+        ...(aiOnly ? ["--testNamePattern", "^AI:"] : []),
       ],
       { cwd: root, env, stdio: "inherit" },
     );
   await childExit(runTests());
+  if (!aiOnly) {
   process.kill(-app.pid, "SIGTERM");
   await new Promise((r) => app.on("exit", r));
   env.V3_WORKBENCH_PHASE = "restore";
   startApp();
   await childExit(runTests());
+  }
   if (appLog.join("").includes("METHOD_CANARY"))
     throw new Error("private method leaked in application logs");
   writeFileSync(

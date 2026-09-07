@@ -3,7 +3,7 @@ import { beforeAll, afterAll, it, expect } from "vitest";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { publishSkillPackage } from "../skills/publication";
 import { makePackage, makeWorkflow } from "./fixtures/artifacts";
@@ -247,7 +247,7 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => {
   if (process.env.V3_WORKBENCH_PHASE !== "restore") {
-    const state = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
+    const state = existsSync(output + "/restore.json") ? JSON.parse(readFileSync(output + "/restore.json", "utf8")) : { credentials, fixtures, actor, owner };
     const service = workbenchService(await authenticated(), db);
     state.expectedSnapshots = [];
     for (const p of await service.projects()) {
@@ -1871,3 +1871,206 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   },
   150000,
 );
+
+// AI transport is explicitly injected here. SQL, Auth, Skill reads, pricing and
+// the existing credit RPCs are real local services; no provider request is made.
+const localModel = randomUUID();
+async function generationFixture(n = 3) {
+  const { workbenchGeneration } = await import('../artifacts/generation');
+  const flow = makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
+  const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText: 'Synthetic generation method.', workflow: flow });
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Local fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localModel]);
+  await sql.query('update modules set model_id=$1 where id=$2', [localModel, f.moduleId]);
+  await sql.query("insert into system_settings(key,value) values('v3_workbench_ai','true') on conflict(key) do update set value='true'");
+  await sql.query('update profiles set credits=100000 where id=$1', [actor]);
+  const user = await authenticated(), service = workbenchService(user, db);
+  const scope = { projectId: randomUUID(), roundId: randomUUID() };
+  const account = n === 6 ? `synthetic:${randomUUID()}` : undefined;
+  if (account) await sql.query('insert into artifact_accounts values($1,$2,$3,$4)', [actor, f.moduleId, f.pack.id, account]);
+  await service.start({ ...scope, requestId: randomUUID(), registration: f.registration, account });
+  let calls = 0;
+  const captured: string[] = [];
+  const ai = workbenchGeneration(user, db, async req => { calls++; captured.push(JSON.stringify(req.messages)); return { body: 'Synthetic AI candidate text.', inputTokens: 800, outputTokens: 30 }; });
+  async function input(client = ai, stepId = 'step-0') {
+    const s = await service.read(scope.projectId, scope.roundId);
+    const v = { ...scope, stepId, instruction: 'Generate a fictional strategy.', expectedSteps: Object.fromEntries(Object.entries(s.steps).map(([k, x]) => [k, { version: x.version, reviewVersion: x.reviewVersion }])) };
+    const quote = await client.quote(v);
+    return { ...v, ...quote, budgetCredits: quote.reservedCredits, requestId: randomUUID() };
+  }
+  // Public input deliberately contains no actor, model, price, resource or key.
+  async function request(client = ai, stepId = 'step-0') {
+    const { reservedCredits: _reserved, ...v } = await input(client, stepId); return v;
+  }
+  return { f, user, service, scope, ai, request, captured, calls: () => calls, workbenchGeneration };
+}
+const aiTest = it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore');
+aiTest('AI: exact request replay associates one real credit settlement and one private-method candidate', async () => {
+  const t = await generationFixture(), v = await t.request();
+  const before = await t.service.read(v.projectId, v.roundId);
+  const result = await t.ai.generate(v);
+  expect(result.state).toBe('succeeded');
+  expect(await t.ai.generate(v)).toEqual(result);
+  expect(t.calls()).toBe(1);
+  expect(t.captured[0]).toContain('METHOD_CANARY');
+  expect(t.captured[0]).toContain('references/step-0.md');
+  expect(t.captured[0]).not.toContain('references/step-1.md');
+  const after = await t.service.read(v.projectId, v.roundId);
+  expect(after.steps).toEqual(before.steps);
+  expect(after.candidates).toHaveLength(1);
+  expect(JSON.stringify(result)).not.toContain('METHOD_CANARY');
+  const rows = (await sql.query("select operation_type,amount from billing_history where user_id=$1 order by created_at", [actor])).rows;
+  expect(rows.filter(r => r.operation_type === 'pre_deduct')).toHaveLength(1);
+  expect(rows.filter(r => r.operation_type === 'settle')).toHaveLength(1);
+  const billingMetadata = JSON.stringify((await sql.query('select metadata from billing_history where user_id=$1', [actor])).rows);
+  expect(billingMetadata).not.toContain('references/step-');
+  expect(billingMetadata).not.toContain('METHOD_CANARY');
+  expect((await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(100000 - result.chargedCredits!);
+  await expect(t.ai.generate({ ...v, instruction: 'changed' })).rejects.toThrow('GENERATION_CONFLICT');
+  console.log('AI local real SQL billing + injected model: single deduction/settlement, private closure, idempotent replay PASS');
+}, 30000);
+aiTest('AI: concurrent duplicate does not dispatch twice; late output preserves edits and cannot adopt stale basis', async () => {
+  const t = await generationFixture(); let release!: () => void, arrived!: () => void; let calls = 0;
+  const started = new Promise<void>(r => { arrived = r; }), wait = new Promise<void>(r => { release = r; });
+  const ai = t.workbenchGeneration(t.user, db, async () => { calls++; arrived(); await wait; return { body: 'Late synthetic candidate', inputTokens: 700, outputTokens: 20 }; });
+  const v = await t.request(ai), running = ai.generate(v);
+  await started;
+  expect((await ai.generate(v)).state).toBe('dispatched');
+  await t.service.execute({ ...t.scope, action: 'save', requestId: randomUUID(), stepId: 'step-0', expectedVersion: 0, body: 'User edited while AI was running.', evidenceIds: [] });
+  release(); const result = await running;
+  expect(calls).toBe(1); expect(result.state).toBe('succeeded');
+  const snapshot = await t.service.read(v.projectId, v.roundId);
+  expect(snapshot.steps['step-0'].body).toBe('User edited while AI was running.');
+  expect(snapshot.candidates[0].body).toBe('Late synthetic candidate');
+  await expect(t.service.execute({ ...t.scope, action: 'saveCandidate', requestId: randomUUID(), stepId: 'step-0', candidateId: result.candidateId!, expectedVersion: 1, body: 'Late synthetic candidate' })).rejects.toThrow();
+}, 30000);
+aiTest('AI: unknown provider outcome holds the reservation and prevents blind resend or replacement', async () => {
+  const t = await generationFixture(); let calls = 0;
+  const ai = t.workbenchGeneration(t.user, db, async () => { calls++; throw new Error('synthetic provider timeout'); });
+  const v = await t.request(ai), result = await ai.generate(v);
+  expect(result.state).toBe('unknown'); expect(result.chargedCredits).toBeNull();
+  expect((await ai.generate(v)).state).toBe('unknown');
+  await expect(ai.generate({ ...v, requestId: randomUUID() })).rejects.toThrow();
+  expect(calls).toBe(1);
+  await expect(ai.cancel({ ...t.scope, requestId: v.requestId })).rejects.toThrow();
+  expect((await t.service.read(v.projectId, v.roundId)).candidates).toHaveLength(0);
+}, 30000);
+aiTest('AI: saved receipt survives failed billing commit and recovers atomically without another model call', async () => {
+  const t = await generationFixture(), v = await t.request();
+  await sql.query("create function local_fail_ai_settle() returns trigger language plpgsql as $$ begin if NEW.operation_type='settle' then raise exception 'local injected settle failure'; end if; return NEW; end $$; create trigger local_fail_ai_settle before insert on billing_history for each row execute function local_fail_ai_settle()");
+  try { await expect(t.ai.generate(v)).rejects.toThrow(); }
+  finally { await sql.query('drop trigger local_fail_ai_settle on billing_history; drop function local_fail_ai_settle()'); }
+  expect((await t.ai.list(t.scope))[0].state).toBe('responded');
+  expect((await t.service.read(v.projectId, v.roundId)).candidates).toHaveLength(0);
+  const done = await t.ai.recover({ ...t.scope, requestId: v.requestId });
+  expect(done.state).toBe('succeeded');
+  expect(await t.ai.recover({ ...t.scope, requestId: v.requestId })).toEqual(done);
+  expect(t.calls()).toBe(1);
+  expect((await t.service.read(v.projectId, v.roundId)).candidates).toHaveLength(1);
+}, 30000);
+aiTest('AI: disabled, model capacity, insufficient credits, unavailable dependencies and forged actor all fail before model effects', async () => {
+  const t = await generationFixture(), v = await t.request();
+  const count = async () => Number((await sql.query('select count(*) from billing_history')).rows[0].count);
+  const before = await count();
+  await sql.query("update system_settings set value='false' where key='v3_workbench_ai'");
+  await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_DISABLED');
+  await sql.query("update system_settings set value='true' where key='v3_workbench_ai'");
+  await sql.query('update ai_models set input_limit=100 where id=$1', [localModel]);
+  await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_CAPACITY');
+  await sql.query('update ai_models set input_limit=128000 where id=$1', [localModel]);
+  await sql.query('update profiles set credits=0 where id=$1', [actor]);
+  await expect(t.ai.generate(v)).rejects.toThrow();
+  await sql.query('update profiles set credits=100000 where id=$1', [actor]);
+  await expect(t.request(t.ai, 'step-1')).rejects.toThrow('GENERATION_INPUT_UNAVAILABLE');
+  const stranger = await newUser(), foreign = t.workbenchGeneration(await authenticated(stranger), db, async () => { throw new Error('must not call'); });
+  await expect(foreign.list(t.scope)).rejects.toThrow('ARTIFACT_DENIED');
+  await sql.query('update modules set active=false where id=$1', [t.f.moduleId]);
+  await expect(t.ai.generate(v)).rejects.toThrow();
+  await sql.query('update modules set active=true where id=$1', [t.f.moduleId]);
+  expect(await count()).toBe(before); expect(t.calls()).toBe(0);
+  const denied = await t.user.rpc('artifact_generation', { p_actor_id: actor, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'list' });
+  expect(denied.error).not.toBeNull();
+  const deniedTable = await t.user.from('artifact_generations').select('*');
+  expect(deniedTable.error).not.toBeNull();
+}, 30000);
+aiTest.each([3, 6, 8])('AI: same host generates for a %i-step configuration without a research call', async n => {
+  const t = await generationFixture(n), v = await t.request();
+  expect((await t.ai.generate(v)).state).toBe('succeeded');
+  expect(t.calls()).toBe(1);
+  expect(t.captured[0]).not.toContain('agentkey');
+}, 30000);
+aiTest('AI: prepared cancellation restores actual credits once, and dispatch failure refunds only an unsent reservation', async () => {
+  const t = await generationFixture(), v = await t.request();
+  const reserve = await db.rpc('artifact_generation', { p_actor_id: actor, p_project_id: v.projectId, p_round_id: v.roundId, p_request_id: v.requestId, p_action: 'prepare', p_payload: { input: v, quote: { modelId: localModel, reservedCredits: v.budgetCredits } } });
+  expect(reserve.error).toBeNull();
+  expect((await t.ai.cancel({ ...t.scope, requestId: v.requestId })).state).toBe('refunded');
+  expect((await t.ai.cancel({ ...t.scope, requestId: v.requestId })).state).toBe('refunded');
+  expect((await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(100000);
+  const fault = new Proxy(db, { get(target, key) {
+    if (key === 'rpc') return (name: string, args: Record<string, unknown>) => args.p_action === 'dispatch'
+      ? { abortSignal: async () => ({ data: null, error: { code: 'P0001', message: 'synthetic before dispatch failure' } }) }
+      : target.rpc(name, args);
+    const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const ai = t.workbenchGeneration(t.user, fault, async () => { throw new Error('must not dispatch'); });
+  await expect(ai.generate({ ...v, requestId: randomUUID() })).rejects.toThrow();
+  expect((await ai.list(t.scope)).every(r => r.state === 'refunded')).toBe(true);
+  expect((await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(100000);
+}, 30000);
+aiTest('AI: browser quote → real local HTTP generation → candidate → adopt/save, with late edit and reload protection', async () => {
+  const t = await generationFixture();
+  const { page, context } = await pageFor();
+  await page.getByRole('button', { name: new RegExp(`^${t.f.label}`) }).click(); await quiet(page);
+  const panel = page.getByRole('region', { name: 'AI 候选生成' });
+  await page.getByRole('button', { name: '查看生成费用', exact: true }).click();
+  const generate = page.getByRole('button', { name: /^生成候选（最多/ }); await generate.waitFor();
+  const dispatched = page.waitForRequest(req => req.url().includes('/api/trpc/workbench.generate'));
+  await generate.click(); await dispatched;
+  const editor = page.getByRole('textbox', { name: 'Synthetic step 1 工作稿' });
+  await editor.fill('User typing during delayed synthetic model response.');
+  await expect.poll(async () => (await panel.innerText()).includes('候选已保存'), { timeout: 30000 }).toBe(true);
+  expect(await editor.inputValue()).toBe('User typing during delayed synthetic model response.');
+  expect((await t.service.read(t.scope.projectId, t.scope.roundId)).steps['step-0'].body).toBe('');
+  await page.getByText('此步骤确认历史与候选', { exact: true }).click();
+  await page.getByRole('button', { name: '采用到本地工作稿', exact: true }).click();
+  expect(await editor.inputValue()).toBe('Synthetic local HTTP candidate');
+  await page.getByRole('button', { name: '保存全部编辑', exact: true }).click(); await quiet(page);
+  expect((await t.service.read(t.scope.projectId, t.scope.roundId)).steps['step-0'].body).toBe('Synthetic local HTTP candidate');
+  await page.reload(); await quiet(page);
+  await page.getByRole('button', { name: new RegExp(`^${t.f.label}`) }).click(); await quiet(page);
+  expect(await page.getByRole('region', { name: 'AI 候选生成' }).innerText()).toContain('候选已保存');
+  const count = await (await fetch(url + '/__workbench_model_calls')).json(); expect(count.calls).toBe(1);
+  await page.screenshot({ path: output + '/ai-candidate-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: output + '/ai-candidate-mobile.png', fullPage: true });
+  await expect.poll(async () => await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), { timeout: 3000 }).toBe(true);
+  await context.close();
+}, 90000);
+aiTest('AI: existing monthly grant consumption follows the original pre-deduct and settlement rules', async () => {
+  const t = await generationFixture(), v = await t.request();
+  const grant = randomUUID(), subscription = `sub_${randomUUID()}`, plan = randomUUID(), invoice = `in_${randomUUID()}`;
+  const start = new Date(Date.now() - 86400000).toISOString(), end = new Date(Date.now() + 86400000).toISOString();
+  await sql.query("insert into user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,current_period_end) values($1,$2,$3,'monthly',$4,$5)", [actor, subscription, plan, start, end]);
+  await sql.query("insert into subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted) values($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,100000)", [grant, actor, subscription, plan, `invoice:${invoice}`, start, end, invoice]);
+  try {
+    const result = await t.ai.generate(v); expect(result.state).toBe('succeeded');
+    expect((await sql.query('select consumed_amount from subscription_credit_grants where id=$1', [grant])).rows[0].consumed_amount).toBe(result.chargedCredits);
+    expect((await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(100000 - result.chargedCredits!);
+  } finally {
+    await sql.query('delete from subscription_credit_grants where id=$1', [grant]);
+    await sql.query('delete from user_subscriptions where stripe_subscription_id=$1', [subscription]);
+  }
+}, 30000);
+aiTest('AI: adopted source restriction and fixed revision revocation reject execution before charging', async () => {
+  const t = await generationFixture();
+  await t.service.execute({ ...t.scope, action: 'userEvidence', requestId: randomUUID(), body: 'Fictional observed source', observedAt: new Date().toISOString(), supersedes: null });
+  const source = (await t.service.read(t.scope.projectId, t.scope.roundId)).evidence[0];
+  await t.service.execute({ ...t.scope, action: 'save', requestId: randomUUID(), stepId: 'step-0', expectedVersion: 0, body: 'Draft using fictional evidence.', evidenceIds: [source.id] });
+  const v = await t.request();
+  const before = Number((await sql.query('select count(*) from billing_history')).rows[0].count);
+  await t.service.execute({ ...t.scope, action: 'restrictEvidence', requestId: randomUUID(), evidenceId: source.id, deleted: true, expiresAt: null });
+  await expect(t.ai.generate(v)).rejects.toThrow();
+  const revoked = await db.rpc('revoke_skill_revision', { p_revision_id: t.f.pack.revisionId, p_actor_id: owner }); expect(revoked.error).toBeNull();
+  await expect(t.ai.generate(v)).rejects.toThrow();
+  expect(Number((await sql.query('select count(*) from billing_history')).rows[0].count)).toBe(before);
+  expect(t.calls()).toBe(0);
+}, 30000);
