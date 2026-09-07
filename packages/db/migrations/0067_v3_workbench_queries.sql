@@ -15,6 +15,26 @@ CREATE TABLE IF NOT EXISTS public.artifact_accounts (
 ALTER TABLE public.artifact_workflows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.artifact_accounts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.artifact_workflows,public.artifact_accounts FROM PUBLIC,anon,authenticated,service_role;
+-- Authorize every new social round at the actual insert, including same-method
+-- and upgraded rounds through the existing transaction RPC. Key-share prevents
+-- concurrent account revocation from racing this check; historical reads and
+-- exact replays of already-created rounds do not insert and remain available.
+CREATE OR REPLACE FUNCTION public.artifact_round_account_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE p public.artifact_projects%ROWTYPE;
+BEGIN
+ IF NEW.workflow->>'kind'='social' THEN
+  SELECT * INTO p FROM artifact_projects WHERE id=NEW.project_id;
+  PERFORM 1 FROM artifact_accounts WHERE actor_id=p.actor_id AND module_id=p.module_id
+   AND skill_id=p.skill_id AND account=p.account FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'artifact account denied' USING ERRCODE='42501'; END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.artifact_round_account_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS artifact_round_account_guard ON public.artifact_rounds;
+CREATE TRIGGER artifact_round_account_guard BEFORE INSERT ON public.artifact_rounds
+FOR EACH ROW EXECUTE FUNCTION public.artifact_round_account_guard();
 CREATE OR REPLACE FUNCTION public.artifact_workflow_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF (to_jsonb(OLD)-'enabled') IS DISTINCT FROM (to_jsonb(NEW)-'enabled') THEN RAISE EXCEPTION 'registration immutable'; END IF;

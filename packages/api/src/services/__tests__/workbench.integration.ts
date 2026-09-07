@@ -1616,3 +1616,82 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   },
   90000,
 );
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "revokes new social rounds atomically while retaining historical access",
+  async () => {
+    const credentials = await newUser();
+    const user = await authenticated(credentials), service = workbenchService(user, db);
+    const f = fixtures.find((f) => f.flow.kind === "social")!;
+    const account = "synthetic:revocation-test";
+    const binding = [credentials.id, f.moduleId, f.pack.id, account];
+    await sql.query("insert into artifact_accounts values($1,$2,$3,$4)", binding);
+    const { page, context } = await pageFor(credentials);
+    await quiet(page);
+    await page.getByRole("button", { name: `创建 ${f.label}`, exact: true }).click();
+    await quiet(page);
+    await fillConfirm(page, f, "authorized-account");
+    await page.getByRole("button", { name: "发布正式版", exact: true }).click();
+    await quiet(page);
+    const project = (await service.projects())[0];
+    const original = (await service.rounds(project.projectId))[0];
+    const history = await service.read(project.projectId, original.roundId);
+    const flow = structuredClone(f.flow);
+    flow.version = 2;
+    flow.report.version = 2;
+    await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)",
+      ["account-upgrade-local", f.moduleId, f.pack.id, f.pack.revisionId, flow, "账号权限升级测试"]);
+    await sql.query("delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3 and account=$4", binding);
+    await page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
+    await quiet(page);
+    expect(await page.locator("main [role=alert]").innerText()).toContain("ARTIFACT_DENIED");
+    expect((await service.rounds(project.projectId)).length).toBe(1);
+    expect(await service.read(project.projectId, original.roundId)).toEqual(history);
+    expect((await service.report(project.projectId, original.roundId)).available).toBe(true);
+    await page.getByRole("button", { name: "重新加载服务端状态", exact: true }).click();
+    await quiet(page);
+    await page.getByLabel("升级方法", { exact: true }).selectOption("account-upgrade-local");
+    await page.getByRole("button", { name: "确认以上方法变化并新建轮次", exact: true }).click();
+    await quiet(page);
+    expect(await page.locator("main [role=alert]").innerText()).toContain("ARTIFACT_DENIED");
+    expect((await service.rounds(project.projectId)).length).toBe(1);
+    const direct = databaseArtifactStore({ userClient: user, privateClient: db,
+      moduleId: f.moduleId, skillId: f.pack.id,
+      registrations: { fixed: { revisionId: f.pack.revisionId, workflow: f.flow } } });
+    await expect(direct.start({ projectId: project.projectId, roundId: randomUUID(), requestId: randomUUID(), registration: "fixed", account, fromRoundId: original.roundId })).rejects.toThrow("ARTIFACT_DENIED");
+    // Rebinding permits the exact denied upgrade request; the failed transaction
+    // left no round/request receipt which could masquerade as a successful start.
+    await sql.query("insert into artifact_accounts values($1,$2,$3,$4)", binding);
+    await page.getByRole("button", { name: "重试同一请求", exact: true }).click();
+    await quiet(page);
+    expect(await page.locator("main [role=alert]").count()).toBe(0);
+    const rounds = await service.rounds(project.projectId);
+    expect(rounds.length).toBe(2);
+    const created = rounds.find((r) => r.state === "draft")!;
+    expect((await service.read(project.projectId, created.roundId)).workflow.version).toBe(2);
+    expect(await service.read(project.projectId, original.roundId)).toEqual(history);
+
+    // Concurrent revocation holds the mapping row. A new transaction must wait
+    // for that decision and deny after delete commits, not use a stale check.
+    const revoker = new pg.Client({ connectionString: process.env.V3_LOCAL_DB });
+    await revoker.connect();
+    try {
+      await revoker.query("begin");
+      await revoker.query("delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3 and account=$4", binding);
+      const projectId = randomUUID();
+      const attempt = direct.start({ projectId, roundId: randomUUID(), requestId: randomUUID(), registration: "fixed", account })
+        .then(() => "unexpected success", (e: Error) => e.message);
+      await expect.poll(async () => Number((await sql.query("select count(*) as n from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%artifact_transition%'" )).rows[0].n), { timeout: 5000 }).toBeGreaterThan(0);
+      await revoker.query("commit");
+      expect(await attempt).toBe("ARTIFACT_DENIED");
+      expect((await sql.query("select id from artifact_projects where id=$1", [projectId])).rowCount).toBe(0);
+    } finally {
+      await revoker.query("rollback");
+      await revoker.end();
+    }
+    await context.close();
+    await sql.query("delete from artifact_workflows where id='account-upgrade-local'");
+    console.log("real social account guard: same-method/upgrade/direct RPC denied after unbind; history retained; exact denied retry succeeds after rebind; concurrent delete blocks and rolls back new project/round PASS");
+  },
+  150000,
+);

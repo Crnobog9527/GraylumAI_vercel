@@ -166,6 +166,9 @@ export function workbenchService(
       )
         throw new Error("ARTIFACT_DENIED");
       const account = prior ? prior.account : (v.account ?? null);
+      // Initial catalog preflight only. The SQL round-insert guard atomically
+      // checks live account authorization for every new social round, including
+      // prior/upgrade paths and callers of the underlying transaction store.
       if (
         !prior &&
         entry.workflow.kind === "social" &&
