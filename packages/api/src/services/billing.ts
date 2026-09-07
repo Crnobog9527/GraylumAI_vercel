@@ -365,17 +365,19 @@ function withTopLevelPricingMetadata(
 export async function getModelPricing(
   supabase: SupabaseClient,
   modelId: string,
-  options: { requireModelPricing?: boolean } = {},
+  options: { requireModelPricing?: boolean; modelRecordId?: string } = {},
 ): Promise<ModelPricingInfo> {
   const requireModelPricing = options.requireModelPricing ?? true;
   // Production billing must read the latest admin/model pricing on every request.
   // Stale process-local caches can undercharge after SQL data corrections or admin edits.
-  const { data: model, error } = await supabase
+  let modelQuery = supabase
     .from('ai_models')
     .select('input_token_cost, output_token_cost, web_search_cost')
     .eq('model_id', modelId)
-    .eq('is_active', 'true')
-    .single();
+    .eq('is_active', 'true');
+  // Provider model names are not unique; hosts with a selected record bind its UUID.
+  if (options.modelRecordId) modelQuery = modelQuery.eq('id', options.modelRecordId);
+  const { data: model, error } = await modelQuery.single();
 
   if (error || !model) {
     logger.warn('billing', 'billing_pricing_fallback_model_missing', {

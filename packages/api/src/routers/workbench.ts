@@ -24,6 +24,8 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
     },
   });
   if (!result.ok) {
+    // These existing preflight errors already carry safe, actionable messages.
+    if (result.error.code === 'TOO_MANY_REQUESTS' || result.error.code === 'PRECONDITION_FAILED') throw result.error;
     const message =
       result.error.cause instanceof Error
         ? result.error.cause.message

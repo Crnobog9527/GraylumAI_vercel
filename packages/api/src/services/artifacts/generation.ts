@@ -147,7 +147,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     const messages: ModelRequest['messages'] = [{ role: 'system', content: `${systemInstruction}\n${loaded.forModel()}` }, { role: 'user', content: context }];
     const inputTokens = countWorkbenchTokens(messages), maxTokens = Math.min(model.max_tokens, 4096);
     if (inputTokens + maxTokens > model.input_limit) throw new Error('GENERATION_CAPACITY');
-    const settings = await getBillingRuntimeSettings(privateClient!), pricing = await getModelPricing(privateClient!, model.model_id, { requireModelPricing: true });
+    const settings = await getBillingRuntimeSettings(privateClient!), pricing = await getModelPricing(privateClient!, model.model_id, { requireModelPricing: true, modelRecordId: model.id });
     if (Object.values(pricing).some(x => !Number.isFinite(x) || x < 0)) throw new Error('GENERATION_DISABLED');
     const upper = calculateTokenCostWithPricing({ inputTokens, outputTokens: maxTokens, cacheReadTokens: 0, cacheCreationTokens: 0 }, pricing, {}, settings).credits;
     const reservedCredits = estimatePreDeductCredits(upper, settings);

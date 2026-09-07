@@ -2139,3 +2139,18 @@ aiTest('AI: browser rejected quote can requote, and sealed response survives rel
   expect((await t.ai.list(t.scope))).toHaveLength(1);
   await context.close();
 },90000);
+
+aiTest('AI: duplicated provider model names use the selected UUID pricing and reject changed price before dispatch', async () => {
+  const t=await generationFixture(), duplicate=randomUUID();
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Other selected row','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',9000000,12000000)",[duplicate]);
+  try {
+    const v=await t.request(); expect(v.budgetCredits).toBeGreaterThan(0);
+    await sql.query('update modules set model_id=$1 where id=$2',[duplicate,t.f.moduleId]);
+    await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_QUOTE_CHANGED'); expect(t.calls()).toBe(0);
+    const replacement=await t.request(); expect(replacement.budgetCredits).toBeGreaterThan(v.budgetCredits);
+    const result=await t.ai.generate(replacement); expect(result.state).toBe('succeeded');
+    const q=(await sql.query('select quote from artifact_generations where request_id=$1',[replacement.requestId])).rows[0].quote;
+    expect(q.modelId).toBe(duplicate); expect(q.pricing.inputPer1M).toBe(9); expect(q.pricing.outputPer1M).toBe(12);
+    expect(t.calls()).toBe(1);
+  } finally { await sql.query('update modules set model_id=$1 where id=$2',[localModel,t.f.moduleId]); await sql.query('delete from ai_models where id=$1',[duplicate]); }
+},30000);
