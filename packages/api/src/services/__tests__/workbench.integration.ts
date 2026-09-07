@@ -1644,7 +1644,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     await sql.query("delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3 and account=$4", binding);
     await page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
     await quiet(page);
-    expect(await page.locator("main [role=alert]").innerText()).toContain("ARTIFACT_DENIED");
+    expect(await page.locator("main [role=alert]").innerText()).toContain("无权访问或项目不可用。");
     expect((await service.rounds(project.projectId)).length).toBe(1);
     expect(await service.read(project.projectId, original.roundId)).toEqual(history);
     expect((await service.report(project.projectId, original.roundId)).available).toBe(true);
@@ -1653,7 +1653,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
     await page.getByLabel("升级方法", { exact: true }).selectOption("account-upgrade-local");
     await page.getByRole("button", { name: "确认以上方法变化并新建轮次", exact: true }).click();
     await quiet(page);
-    expect(await page.locator("main [role=alert]").innerText()).toContain("ARTIFACT_DENIED");
+    expect(await page.locator("main [role=alert]").innerText()).toContain("无权访问或项目不可用。");
     expect((await service.rounds(project.projectId)).length).toBe(1);
     const direct = databaseArtifactStore({ userClient: user, privateClient: db,
       moduleId: f.moduleId, skillId: f.pack.id,
