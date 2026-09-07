@@ -1,0 +1,137 @@
+{
+  "id": "sample-6",
+  "label": "虚构样本 6 步",
+  "methodText": "Fictional local-only method with 6 stages. No provider or business data.",
+  "workflow": {
+    "id": "sample-6",
+    "version": 1,
+    "kind": "social",
+    "steps": [
+      {
+        "id": "step-0",
+        "title": "需求确认",
+        "dependsOn": [],
+        "resources": [
+          "references/step-0.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-1",
+        "title": "对标分析",
+        "dependsOn": [
+          "step-0"
+        ],
+        "resources": [
+          "references/step-1.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-2",
+        "title": "定位",
+        "dependsOn": [
+          "step-1"
+        ],
+        "resources": [
+          "references/step-2.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-3",
+        "title": "内容规划",
+        "dependsOn": [
+          "step-2"
+        ],
+        "resources": [
+          "references/step-3.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-4",
+        "title": "运营",
+        "dependsOn": [
+          "step-3"
+        ],
+        "resources": [
+          "references/step-4.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      },
+      {
+        "id": "step-5",
+        "title": "变现",
+        "dependsOn": [
+          "step-4"
+        ],
+        "resources": [
+          "references/step-5.md"
+        ],
+        "minLength": 1,
+        "maxLength": 20000,
+        "requiresEvidence": false,
+        "requiredCapabilities": [
+          "documents.read"
+        ]
+      }
+    ],
+    "report": {
+      "id": "confirmed-report",
+      "version": 1,
+      "title": "虚构样本 6 步报告",
+      "sections": [
+        {
+          "title": "需求确认",
+          "stepId": "step-0"
+        },
+        {
+          "title": "对标分析",
+          "stepId": "step-1"
+        },
+        {
+          "title": "定位",
+          "stepId": "step-2"
+        },
+        {
+          "title": "内容规划",
+          "stepId": "step-3"
+        },
+        {
+          "title": "运营",
+          "stepId": "step-4"
+        },
+        {
+          "title": "变现",
+          "stepId": "step-5"
+        }
+      ]
+    }
+  }
+}

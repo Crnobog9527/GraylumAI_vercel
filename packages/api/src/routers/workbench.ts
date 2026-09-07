@@ -1,0 +1,94 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import { protectedProcedure, router } from "../trpc";
+import {
+  workbenchService,
+  startSchema,
+  webCommandSchema,
+} from "../services/artifacts/workbench";
+const scope = z
+  .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
+  .strict();
+// All routes (including downloads) run through the existing HTTP maintenance and Auth gates.
+const procedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const result = await next({
+    ctx: {
+      ...ctx,
+      workbench: workbenchService(
+        ctx.userScopedSupabase,
+        ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null,
+      ),
+    },
+  });
+  if (!result.ok) {
+    const message =
+      result.error.cause instanceof Error
+        ? result.error.cause.message
+        : result.error.message;
+    const messages: Record<
+      string,
+      {
+        code: "CONFLICT" | "FORBIDDEN" | "SERVICE_UNAVAILABLE" | "BAD_REQUEST";
+        message: string;
+      }
+    > = {
+      ARTIFACT_VERSION_CONFLICT: {
+        code: "CONFLICT",
+        message: "保存版本已变化；本地输入已保留，请加载服务端版本并比较。",
+      },
+      ARTIFACT_REVIEW_REQUIRED: {
+        code: "CONFLICT",
+        message: "确认状态或依赖已变化，请重新加载并复核。",
+      },
+      ARTIFACT_CONFLICT_OR_DENIED: {
+        code: "CONFLICT",
+        message: "操作未完成，请重新加载项目状态。",
+      },
+      ARTIFACT_DENIED: { code: "FORBIDDEN", message: "无权访问或项目不可用。" },
+      ARTIFACT_EVIDENCE_UNAVAILABLE: {
+        code: "FORBIDDEN",
+        message: "来源已受限，报告不可导出。",
+      },
+      ARTIFACT_INVALID_WORKFLOW: {
+        code: "BAD_REQUEST",
+        message: "方法配置不可用。",
+      },
+    };
+    throw new TRPCError(
+      messages[message] ?? {
+        code: "SERVICE_UNAVAILABLE",
+        message: "工作台服务未配置或暂时不可用，请稍后重试。",
+      },
+    );
+  }
+  return result;
+});
+export const workbenchRouter = router({
+  catalog: procedure.query(({ ctx }) => ctx.workbench.catalog()),
+  projects: procedure.query(({ ctx }) => ctx.workbench.projects()),
+  rounds: procedure
+    .input(z.object({ projectId: z.string().uuid() }).strict())
+    .query(({ ctx, input }) => ctx.workbench.rounds(input.projectId)),
+  read: procedure
+    .input(scope)
+    .query(({ ctx, input }) =>
+      ctx.workbench.read(input.projectId, input.roundId),
+    ),
+  report: procedure
+    .input(scope)
+    .query(({ ctx, input }) =>
+      ctx.workbench.report(input.projectId, input.roundId),
+    ),
+  export: procedure
+    .input(scope)
+    .mutation(({ ctx, input }) =>
+      ctx.workbench.export(input.projectId, input.roundId),
+    ),
+  start: procedure
+    .input(startSchema)
+    .mutation(({ ctx, input }) => ctx.workbench.start(input)),
+  execute: procedure
+    .input(webCommandSchema)
+    .mutation(({ ctx, input }) => ctx.workbench.execute(input)),
+});
