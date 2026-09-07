@@ -72,13 +72,14 @@ export default function WorkbenchPage() {
       api.catalog.query(),
       api.projects.query(),
     ]);
-    setCatalog(c);
-    setProjects(p);
-    return p;
+    return { catalog: c, projects: p };
   }
-  async function load(projectId: string, roundId?: string, preserve = false) {
+  function applyDiscovery(result: Awaited<ReturnType<typeof discover>>) {
+    setCatalog(result.catalog);
+    setProjects(result.projects);
+  }
+  async function readProject(projectId: string, roundId?: string) {
     const history = await api.rounds.query({ projectId });
-    setRounds(history);
     const current =
       roundId ??
       history.find((r) => r.state === "draft")?.roundId ??
@@ -86,9 +87,17 @@ export default function WorkbenchPage() {
         .filter((r) => r.state === "published")
         .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0]?.roundId ??
       history.at(-1)?.roundId;
-    if (!current) return;
+    if (!current) return null;
     const s = await api.read.query({ projectId, roundId: current });
-    applySnapshot(s, preserve);
+    return { history, snapshot: s };
+  }
+  function applyProject(result: Awaited<ReturnType<typeof readProject>>, preserve = false) {
+    if (!result) return;
+    setRounds(result.history);
+    applySnapshot(result.snapshot, preserve);
+  }
+  async function load(projectId: string, roundId?: string) {
+    applyProject(await readProject(projectId, roundId));
   }
   function applySnapshot(s: ArtifactSnapshot, preserve = true) {
     setSnapshot(s);
@@ -138,8 +147,9 @@ export default function WorkbenchPage() {
   }
   useEffect(() => {
     void run(async () => {
-      const p = await discover();
-      if (p.length) await load(p[0].projectId);
+      const result = await discover();
+      applyDiscovery(result);
+      if (result.projects.length) await load(result.projects[0].projectId);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -173,7 +183,13 @@ export default function WorkbenchPage() {
   }, [unsaved]);
   async function refresh() {
     const s = snapshotRef.current;
-    await Promise.all([discover(), s ? load(s.projectId, s.roundId, true) : Promise.resolve()]);
+    // Parallel branches only fetch. A failed batch leaves no pending branch
+    // which can later commit stale page state after run() releases the UI.
+    const [discovery, project] = await Promise.all([
+      discover(), s ? readProject(s.projectId, s.roundId) : null,
+    ]);
+    applyDiscovery(discovery);
+    applyProject(project, true);
   }
   async function refreshCurrent(history = false) {
     const s = snapshotRef.current;
@@ -365,7 +381,11 @@ export default function WorkbenchPage() {
     };
     void run(async () => {
       const created = await api.start.mutate(input);
-      await Promise.all([discover(), load(projectId, created.roundId)]);
+      const [discovery, project] = await Promise.all([
+        discover(), readProject(projectId, created.roundId),
+      ]);
+      applyDiscovery(discovery);
+      applyProject(project);
       setUpgrade("");
     }, true);
   }
