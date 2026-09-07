@@ -337,4 +337,84 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.artifact_text_length(text),public.artifact_resource_identity(jsonb,jsonb),public.artifact_step_evidence(jsonb,jsonb,text),public.artifact_round_identity(),public.artifact_immutable(),public.artifact_hash(jsonb),public.artifact_evidence_allowed(uuid,jsonb),public.artifact_invalidate(jsonb,jsonb,text),public.artifact_validate_workflow(jsonb,jsonb),public.artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) TO service_role;
+-- Replace the repository-owned 0065 RPC in this new migration, leaving the
+-- applied migration unchanged. Preserve its plan/budget/dispatch transactions;
+-- only terminal result delivery gains linked artifact lifecycle enforcement.
+CREATE OR REPLACE FUNCTION public.research_transition(p_action text,p_plan_id uuid,p_actor_id uuid,p_operation_id uuid DEFAULT NULL,p_payload jsonb DEFAULT '{}')
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE p public.research_plans%ROWTYPE; o public.research_operations%ROWTYPE; token uuid:=gen_random_uuid(); linked_id uuid; linked_project uuid;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'research denied' USING ERRCODE='42501'; END IF;
+ IF p_action='create' THEN
+   INSERT INTO public.research_plans(id,actor_id,budget_units,max_operations,operations)
+   VALUES(p_plan_id,p_actor_id,(p_payload->>'budgetUnits')::bigint,(p_payload->>'maxOperations')::integer,p_payload->'operations') ON CONFLICT DO NOTHING;
+ END IF;
+ SELECT * INTO p FROM public.research_plans WHERE id=p_plan_id FOR UPDATE;
+ IF NOT FOUND OR p.actor_id<>p_actor_id THEN RAISE EXCEPTION 'research denied' USING ERRCODE='42501'; END IF;
+ IF p_action='create' THEN
+   IF p.operations IS DISTINCT FROM p_payload->'operations' OR p.budget_units<>(p_payload->>'budgetUnits')::bigint OR p.max_operations<>(p_payload->>'maxOperations')::integer THEN RAISE EXCEPTION 'plan conflict'; END IF;
+   RETURN '{"created":true}';
+ END IF;
+ SELECT * INTO o FROM public.research_operations WHERE id=p_operation_id;
+ IF FOUND AND o.plan_id<>p_plan_id THEN RAISE EXCEPTION 'operation conflict'; END IF;
+ IF p_action IN ('reserve','get') AND o.id IS NOT NULL THEN
+   IF p_action='reserve' AND (o.identity_hash IS DISTINCT FROM p_payload->>'identityHash' OR o.quote_units IS DISTINCT FROM (p_payload->>'quoteUnits')::bigint) THEN RAISE EXCEPTION 'operation conflict'; END IF;
+   IF p_action='reserve' AND o.state='prepared' AND NOT p.cancelled THEN
+     UPDATE public.research_operations SET dispatch_token=token WHERE id=o.id;
+     RETURN jsonb_build_object('claimed',true,'token',token,'state','prepared');
+   END IF;
+   -- The original plan lock still owns research state/budget transitions. Read
+   -- linked restrictions under the same project lock used by restrictEvidence.
+   -- Artifact transitions do not acquire the research plan lock, avoiding reverse lock order.
+   SELECT id,project_id INTO linked_id,linked_project FROM artifact_evidence WHERE operation_id=o.id;
+   IF linked_id IS NOT NULL THEN
+     PERFORM 1 FROM artifact_projects WHERE id=linked_project FOR SHARE;
+     IF NOT artifact_evidence_allowed(linked_project,jsonb_build_array(linked_id)) THEN
+       RETURN jsonb_build_object('claimed',false,'identityHash',o.identity_hash,'state',o.state,
+         'result',NULL,'resultAccess','restricted',
+         'cost',jsonb_build_object('unit','agentkey-credit','quoted',o.quote_units::numeric/1000000,
+           'actual',CASE WHEN jsonb_typeof(o.result#>'{cost,actual}')='number' THEN o.result#>'{cost,actual}' ELSE 'null'::jsonb END,
+           'status',CASE WHEN jsonb_typeof(o.result#>'{cost,actual}')='number' THEN 'reported' ELSE 'unknown' END));
+     END IF;
+   END IF;
+   RETURN jsonb_build_object('claimed',false,'identityHash',o.identity_hash,'state',o.state,'result',o.result);
+ END IF;
+ IF p_action='get' THEN
+   IF p.cancelled THEN RAISE EXCEPTION 'plan cancelled'; END IF;
+   RETURN 'null'::jsonb;
+ END IF;
+ IF p_action='cancel' THEN
+   UPDATE public.research_plans SET cancelled=true WHERE id=p.id;
+   UPDATE public.research_operations SET state='cancelled' WHERE plan_id=p.id AND state='prepared';
+   RETURN '{"cancelled":true}';
+ END IF;
+ IF p_action='reserve' THEN
+   IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p.operations) x WHERE x->>'operationId'=p_operation_id::text
+     AND x->>'identityHash'=p_payload->>'identityHash' AND (x->>'maxQuoteUnits')::bigint >= (p_payload->>'quoteUnits')::bigint) THEN RAISE EXCEPTION 'unconfirmed operation'; END IF;
+   IF p.cancelled OR (SELECT count(*) FROM public.research_operations WHERE plan_id=p.id)>=p.max_operations
+      OR (p_payload->>'quoteUnits')::bigint<0 OR p.reserved_units+(p_payload->>'quoteUnits')::bigint>p.budget_units THEN RAISE EXCEPTION 'budget or plan unavailable'; END IF;
+   INSERT INTO public.research_operations(id,plan_id,identity_hash,quote_units,dispatch_token,state)
+     VALUES(p_operation_id,p.id,p_payload->>'identityHash',(p_payload->>'quoteUnits')::bigint,token,'prepared');
+   UPDATE public.research_plans SET reserved_units=reserved_units+(p_payload->>'quoteUnits')::bigint WHERE id=p.id;
+   RETURN jsonb_build_object('claimed',true,'token',token,'state','prepared');
+ END IF;
+ IF o.id IS NULL OR o.dispatch_token IS DISTINCT FROM (p_payload->>'token')::uuid THEN RAISE EXCEPTION 'operation unavailable'; END IF;
+ IF p_action='dispatch' THEN
+   IF p.cancelled OR o.state<>'prepared' OR EXISTS(SELECT 1 FROM public.research_operations WHERE plan_id=p.id AND state IN ('dispatched','unknown')) THEN RETURN '{"dispatch":false}'; END IF;
+   UPDATE public.research_operations SET state='dispatched' WHERE id=o.id;
+   RETURN '{"dispatch":true}';
+ END IF;
+ IF p_action='finish' THEN
+   IF o.state<>'dispatched' OR p_payload->>'state' NOT IN ('succeeded','failed','unknown') THEN RAISE EXCEPTION 'invalid finish'; END IF;
+   UPDATE public.research_operations SET state=p_payload->>'state',result=p_payload->'result' WHERE id=o.id;
+   IF p_payload->>'state'='unknown' OR (p_payload#>>'{result,cost,actual}')::numeric*1000000 > o.quote_units THEN
+     UPDATE public.research_plans SET cancelled=true WHERE id=p.id;
+   END IF;
+   RETURN '{"saved":true}';
+ END IF;
+ RAISE EXCEPTION 'unknown transition';
+END $$;
+REVOKE ALL ON FUNCTION public.research_transition(text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_transition(text,uuid,uuid,uuid,jsonb) TO service_role;
+
 COMMIT;

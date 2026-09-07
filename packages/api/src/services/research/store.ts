@@ -1,6 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 export type OperationState = 'prepared'|'dispatched'|'succeeded'|'failed'|'unknown'|'cancelled';
-export interface OperationRecord { identityHash?: string; claimed?: boolean; token?: string; state: OperationState; result?: ResearchResult | null }
+export interface OperationRecord {
+  identityHash?: string; claimed?: boolean; token?: string; state: OperationState; result?: ResearchResult | null;
+  /** Terminal execution can remain successful after its evidence body becomes unreadable. */
+  resultAccess?: 'restricted'; cost?: ResearchResult['cost'];
+}
 export interface ResearchResult {
   source: 'agentkey'; fixture: boolean; canonicalTool: string;
   objects: { id: string; sourceUrl?: string; fields: Record<string,unknown>; missingFields: string[]; observedAt: string|null }[];

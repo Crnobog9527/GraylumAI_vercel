@@ -7,6 +7,7 @@ import {databaseArtifactStore} from '../artifacts/store';
 import {publishSkillPackage} from '../skills/publication';
 import {databaseResearchStore,type ResearchResult} from '../research/store';
 import {makePackage,makeWorkflow} from './fixtures/artifacts';
+import {sorsaReplay} from './fixtures/sorsaServer';
 const url=process.env.V3_LOCAL_REST!;
 if(!url?.startsWith('http://127.0.0.1:')||!process.env.V3_LOCAL_DB?.endsWith('/v3_disposable'))throw new Error('disposable local environment required');
 const sql=new pg.Client({connectionString:process.env.V3_LOCAL_DB});
@@ -46,7 +47,7 @@ async function addEvidence(f:F,count:number){
 beforeAll(async()=>{await sql.connect();await sql.query("insert into profiles(id,email,role) values($1,'owner@example.test','admin'),($2,'actor@example.test','user'),($3,'other@example.test','user')",[owner,actor,other]);});
 afterAll(async()=>{await sql.end();});
 describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
- it.each([33,64])('reads and confirms %i direct references without counting cached provenance twice',async count=>{
+ it.each([32,33,64])('reads and confirms %i direct references without counting cached provenance twice',async count=>{
   const f=await fixture(1),ids=await addEvidence(f,count);
   await f.store.execute({action:'save',...scope(f),requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'All references are valid',evidenceIds:ids});
   expect((await read(f)).steps['step-0'].body).toBe('All references are valid');
@@ -174,6 +175,44 @@ describe('V3-ARTIFACTS actual host → PostgREST → isolated SQL',()=>{
   expect((await read(f)).state).toBe('published');
   await sql.query("update profiles set status='disabled' where id=$1",[actor]);
   try{await expect(read(f)).rejects.toThrow();}finally{await sql.query("update profiles set status='active' where id=$1",[actor]);}
+ });
+ it.each(['deleted','expired'])('hides %s linked research results through fresh stores and actual adapter recovery without executing again',async mode=>{
+  const f=await fixture(),research=databaseResearchStore(db,actor),server=await sorsaReplay(research),adapter=await server.connect();
+  const planId=randomUUID(),inputs=Array.from({length:3},()=>({planId,operationId:randomUUID(),capability:'sorsa.profile',params:{username:'sample_lab'}}));
+  const expected:ResearchResult[]=[];
+  try{
+   await adapter.discover('Synthetic lifecycle test');await adapter.createPlan(planId,3,inputs);
+   for(const input of inputs)expected.push((await adapter.execute(input)).result!);
+  }finally{await adapter.close();await server.stop();}
+  expect(server.events.filter(e=>e.startsWith('execute:'))).toHaveLength(3);
+  const attach=(operationId:string)=>f.store.execute({action:'researchEvidence',...scope(f),requestId:randomUUID(),planId,operationId});
+  const e1=await attach(inputs[0].operationId),e2=await attach(inputs[1].operationId);
+  const original=await research.get(planId,inputs[0].operationId);
+  await f.store.execute({action:'restrictEvidence',...scope(f),requestId:randomUUID(),evidenceId:e1.evidenceId,deleted:mode==='deleted',expiresAt:mode==='expired'?new Date(Date.now()+2000).toISOString():null});
+  if(mode==='expired'){
+   expect((await databaseResearchStore(db,actor).get(planId,inputs[0].operationId))?.result).toEqual(expected[0]);
+   await sql.query('select pg_sleep(2.1)'); // let the declared local deadline expire without rewriting it
+  }
+  const fresh=databaseResearchStore(db,actor);
+  const restricted={state:'succeeded',claimed:false,identityHash:original!.identityHash,result:null,resultAccess:'restricted',cost:expected[0].cost};
+  expect(await fresh.get(planId,inputs[0].operationId)).toMatchObject(restricted);
+  expect(await fresh.reserve(planId,inputs[0].operationId,original!.identityHash!,1000000)).toMatchObject(restricted);
+  for(const i of [1,2])expect((await fresh.get(planId,inputs[i].operationId))?.result).toEqual(expected[i]);
+  await expect(databaseResearchStore(db,other).get(planId,inputs[0].operationId)).rejects.toThrow();
+  await expect(databaseResearchStore(db,other).reserve(planId,inputs[0].operationId,original!.identityHash!,1000000)).rejects.toThrow();
+  const otherProject=await fixture();await expect(otherProject.store.execute({action:'researchEvidence',...scope(otherProject),requestId:randomUUID(),planId,operationId:inputs[0].operationId})).rejects.toThrow();
+  expect((await attach(inputs[0].operationId)).evidenceId).toBe(e1.evidenceId);
+  const evidence=(await read(f)).evidence;expect(evidence.find((e:{id:string})=>e.id===e1.evidenceId).payload).toBeNull();expect(evidence.find((e:{id:string})=>e.id===e2.evidenceId).payload.result).toEqual(expected[1]);
+  const replay=await sorsaReplay(databaseResearchStore(db,actor)),recovered=await replay.connect();
+  try{
+   await recovered.discover('Synthetic recovery');
+   expect(await recovered.execute(inputs[0])).toMatchObject({state:'succeeded',result:null,recovered:true,resultAccess:'restricted',cost:expected[0].cost});
+   for(const i of [1,2])expect((await recovered.execute(inputs[i])).result).toEqual(expected[i]);
+   expect(replay.events.filter(e=>e.startsWith('execute:')||e==='describe')).toHaveLength(0);
+  }finally{await recovered.close();await replay.stop();}
+  expect((await sql.query('select reserved_units::text,cancelled from research_plans where id=$1',[planId])).rows[0]).toEqual({reserved_units:'3000000',cancelled:false});
+  expect((await sql.query("select count(*)::int n from research_operations where plan_id=$1 and state='succeeded' and result is not null",[planId])).rows[0].n).toBe(3);
+  console.log('restricted research recovery',JSON.stringify({mode,state:'succeeded',result:null,actualCredits:null,reservedUnits:3000000,localReplayExecutions:3,recoveryExecutions:0,recoveryDescriptions:0,unrestrictedAndUnlinkedRestored:true}));
  });
  it('attaches actual research-store results by owner, preserves unknown cost and enforces evidence restrictions on history',async()=>{
   const f=await fixture(),planId=randomUUID(),operationId=randomUUID(),research=databaseResearchStore(db,actor);
