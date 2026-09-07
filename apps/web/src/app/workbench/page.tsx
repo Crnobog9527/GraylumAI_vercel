@@ -48,6 +48,8 @@ export default function WorkbenchPage() {
     locked = useRef(false);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
   const dirty = Object.values(drafts).some((d) => d.dirty);
   const currentProject = projects.find(
     (p) => p.projectId === snapshot?.projectId,
@@ -220,6 +222,29 @@ export default function WorkbenchPage() {
       requests = Object.fromEntries(Object.keys(entries).map((k) => [k, id()])),
       publishId = id();
     void run(async () => {
+      if (
+        publish &&
+        Object.entries(entries).some(
+          ([key, value]) =>
+            draftsRef.current[key]?.scope !== value.scope ||
+            draftsRef.current[key]?.editId !== value.editId,
+        )
+      ) {
+        // An old publish must not create a report after later local edits.
+        // Read an already committed result; never change its request/payload or
+        // resend an uncommitted publication which no longer matches the editor.
+        const recovered = await api.read.query({
+          projectId: s.projectId,
+          roundId: s.roundId,
+        });
+        await refresh();
+        setNotice(
+          recovered.state === "published"
+            ? "已读取现有正式版。后续未保存输入仍保留，可复制到新轮次继续处理。"
+            : "检测到后续编辑，本次未重发发布。请先保存并复核确认，再发布正式版。",
+        );
+        return;
+      }
       await saveEntries(s, entries, requests);
       const latest = await api.read.query({
         projectId: s.projectId,

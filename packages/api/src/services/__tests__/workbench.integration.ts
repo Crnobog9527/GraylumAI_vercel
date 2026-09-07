@@ -614,6 +614,65 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   },
   150000,
 );
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
+  "rechecks later edits before retrying an uncommitted publication and reads committed results",
+  async () => {
+    for (const committed of [false, true]) {
+      const r = await repairProject();
+      await fillConfirm(r.page, r.f, "publish-A");
+      const step = r.f.flow.steps.at(-1)!;
+      const input = r.page.getByRole("textbox", { name: `${step.title} 工作稿` });
+      const before = await r.service.read(r.projectId, r.roundId);
+      const requests: string[] = [];
+      await r.page.route("**/api/trpc/workbench.execute*", async (route) => {
+        requests.push(route.request().postData() ?? "");
+        if (committed) expect((await route.fetch()).ok()).toBe(true);
+        await route.abort("failed");
+      });
+      await r.page.getByRole("button", { name: "发布正式版", exact: true }).click();
+      await quiet(r.page);
+      expect(requests.length).toBe(1);
+      expect(requests[0]).toContain('"publish"');
+      expect(await r.page.getByRole("button", { name: "重试同一请求", exact: true }).count()).toBe(1);
+      await input.fill("later-unsaved-B");
+      await r.page.unroute("**/api/trpc/workbench.execute*");
+      // Any retry write is a failure: changed editor state permits only a read
+      // of an existing result, never a fresh publication with stale input.
+      await r.page.route("**/api/trpc/workbench.execute*", async (route) => {
+        requests.push(route.request().postData() ?? "");
+        await route.continue();
+      });
+      await r.page.getByRole("button", { name: "重试同一请求", exact: true }).click();
+      await quiet(r.page);
+      expect(requests.length).toBe(1);
+      expect(await input.inputValue()).toBe("later-unsaved-B");
+      expect(await r.page.getByRole("button", { name: "重试同一请求", exact: true }).count()).toBe(0);
+      const after = await r.service.read(r.projectId, r.roundId);
+      expect(after.steps).toEqual(before.steps);
+      expect(after.state).toBe(committed ? "published" : "draft");
+      expect((await r.service.projects())[0].currentVersion).toBe(committed ? 1 : 0);
+      if (committed) {
+        expect(await input.getAttribute("readonly")).not.toBeNull();
+        const report = await r.service.report(r.projectId, r.roundId);
+        expect(report.report).not.toBeNull();
+        expect(JSON.stringify(report)).not.toContain("later-unsaved-B");
+      } else {
+        expect(await input.isEditable()).toBe(true);
+        expect((await r.service.report(r.projectId, r.roundId)).report).toBeNull();
+        await r.page.getByRole("button", { name: "保存全部编辑", exact: true }).click();
+        await quiet(r.page);
+        const saved = await r.service.read(r.projectId, r.roundId);
+        expect(saved.steps[step.id].body).toBe("later-unsaved-B");
+        expect(saved.steps[step.id].valid).toBe(false);
+        expect(saved.state).toBe("draft");
+      }
+      await r.context.close();
+    }
+    console.log("WB-386-04 real browser: pre-commit publish retry with later B performs no write; committed response loss reads existing v1 without duplicate publication; B preserved and never auto-confirmed PASS");
+  },
+  150000,
+);
 it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   "separates historical read from revoked method execution and rechecks export restrictions",
   async () => {
@@ -1371,11 +1430,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
   "never resurrects a discarded write after unrelated read or export failure",
   async () => {
-    const r = await repairProject();
-    const input = r.page.getByRole("textbox", {
-      name: `${r.f.flow.steps[0].title} 工作稿`,
-    });
-    for (const cancellation of ["discard", "reload"]) {
+    for (const cancellation of ["discard", "reload", "project", "round"]) {
+      const r = await repairProject();
+      const input = r.page.getByRole("textbox", {
+        name: `${r.f.flow.steps[0].title} 工作稿`,
+      });
       await input.fill(`uncommitted-and-cancelled-${cancellation}`);
       // Unlike WB01, no request reaches Next or SQL. Replaying this stale callback
       // later would create a write which the user explicitly stopped pursuing.
@@ -1392,7 +1451,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
           .getByRole("button", { name: "重试同一请求", exact: true })
           .count(),
       ).toBe(1);
-      if (cancellation === "discard") {
+      if (cancellation !== "reload") {
         await r.page
           .getByRole("button", { name: "放弃此步骤本地编辑", exact: true })
           .click();
@@ -1411,6 +1470,18 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
           .getByRole("button", { name: "重试同一请求", exact: true })
           .count(),
       ).toBe(0);
+      if (cancellation === "project") {
+        const other = fixtures.find((f) => f.flow.kind === "document" && f.moduleId !== r.f.moduleId)!;
+        await r.page.getByRole("button", { name: `创建 ${other.label}`, exact: true }).click();
+        await quiet(r.page);
+        expect((await r.service.projects()).length).toBe(2);
+      } else if (cancellation === "round") {
+        await r.page.getByRole("button", { name: "放弃当前草稿", exact: true }).click();
+        await quiet(r.page);
+        await r.page.getByRole("button", { name: "沿用此方法开启新轮次", exact: true }).click();
+        await quiet(r.page);
+        expect((await r.service.rounds(r.projectId)).length).toBe(2);
+      }
       // A missing report is a successful null response. Temporarily disable this
       // isolated test identity so the subsequent real HTTP read/export is denied.
       await sql.query("update profiles set status='disabled' where id=$1", [
@@ -1442,11 +1513,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
         await r.page
           .getByRole("button", { name: "放弃此步骤本地编辑", exact: true })
           .click();
+      await r.context.close();
     }
-    await r.context.close();
     console.log(
-      "GitHub P2 real browser: pre-commit failure + explicit discard/non-retryable reload + unrelated report/export failure never exposes or executes stale write PASS",
+      "GitHub P2 real browser: pre-commit failure + discard/reload/project/round switch + unrelated report/export failure never exposes or executes stale write PASS",
     );
   },
-  90000,
+  150000,
 );
