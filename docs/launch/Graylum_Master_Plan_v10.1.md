@@ -88,7 +88,7 @@ progress_refresh_v10_1:
 | D8 | 首发商品 | Pro/Gold 月付+年付 + ≥1 个正金额积分包；零金额/未配置不得 checkout-ready（#276）；首发恢复 Billing Engine v1.5 仅升级路径（Pro→Gold、月付→年付）；禁止降级/同级同周期重复；到期取消须先恢复续费。 |
 | **D11** | 大陆支付（2026-08-15） | **大陆是核心付费盘。** Owner 实测确认两条已跑通：① **会员订阅**=卡支付（Visa/Master，含大陆发行的双币卡）可成功续费 ✓ —— 大陆会员的**主路径**；② **积分包**=支付宝+卡，一次性收款成功 ✓。<br>**支付宝续费订阅**（Stripe Checkout subscription 模式**不支持** alipay、recurring alipay 仅 private preview，[文档](https://docs.stripe.com/payments/alipay)）降级为**可选增强、且非"置开关即得"**：Owner 可并行向 Stripe 申请 recurring preview，但**审批通过只是前提，续费机制仍需单独实现任务**（保存方式+off-session），非本次范围（详见 PAY-1 第 3 条）。`alipay_subscription_enabled` 上线保持 false；**不批、批了但未实现，均不影响上线**（卡订阅已覆盖会员）。<br>**已删除**：原"一次性会员资格包"保底路径——卡订阅实测可用后不再需要，PAY-1 相应减负、**取消其迁移槽**。<br>**边界说明**（备查，非任务）：仅持银联单币卡且不用支付宝的用户无法购买会员，但可用支付宝购买积分包；无人被完全挡在付费之外。 |
 | **D12** | 人机验证架构（2026-08-15） | **全体统一用 Supabase 原生 hCaptcha**，弃用"应用层地域分流（极验/阿里云）"。**根因**：注册/登录是浏览器用公开 anon key **直连 Supabase**（`login/page.tsx:128/181/222` 实测），不经 Graylum 服务端 → 应用层 CAPTCHA 无法卡住注册端点（第 4 轮 F2）；而 Supabase 原生 CAPTCHA **只支持 hCaptcha/Turnstile**（官方文档），选 hCaptcha（大陆可用的 reCAPTCHA 替代）。覆盖：邮箱注册、密码登录、**未来手机 OTP**（同为客户端直连，原生 hCaptcha 一并覆盖）。**OAuth（Google）不走 hCaptcha**（重定向流不接受 captchaToken），依赖 Google 自身机器人防护——AUTH-1 不得强行给 OAuth 加 captcha 否则会打断。<br>**时序纪律（F7 复活）**：开启 Supabase 原生 CAPTCHA 后，客户端必须传 `captchaToken`，否则登录全断 → 后台开关必须与 AUTH-1 前端接入**同环境配对**开启（见 AUTH-1、§9）。 |
-| D9 | 生产 8 个旧模块 | **全部停用。** 它们是生产库 `modules` 表的 8 条真实数据行（2026-01-20 创建、带历史 usage_count、全部无 system_prompt/prompt_content），非硬编码。停用=生产库数据操作（§9 gate 内执行），复验须按 id 逐行确认，见 §4-C）。上线所需 active 模块由 SKILL-1B 新建并在生产库创建绑定（§9）。 |
+| D9 | 生产 8 个旧模块 | **全部停用。** 它们是生产库 `modules` 表的 8 条真实数据行（2026-01-20 创建、带历史 usage_count、全部无 system_prompt/prompt_content），非硬编码。停用=生产库数据操作（§9 gate 内执行，复验须按 id 逐行确认，见 §4-C）。上线所需 active 模块由 SKILL-1B 新建并在生产库创建绑定（§9）。 |
 
 ---
 
@@ -176,7 +176,7 @@ progress_refresh_v10_1:
 - Release：PR **#312**（`staging → main`）已 merged；当前 `main = ecf4c6a347038f9352477a98d4171a8ef00c85de`。
 - History convergence：PR **#313**（`main → staging`）已 merged，仅同步 #312 merge history；当前 `staging = c39311bca4ab44769d5cd2cf3d0e3f8046fb0938`。
 - Tree convergence：当前 main / staging 的 repository tree 均为 `f1a6bb44d456666984e7295328843283413afeaa`；PR #313 不引入 repository file 内容变化。
-- Closeout：Issue #311 已于 2026-08-16 关闭，state reason=`completed`。因此旧的“R0-B 前不得进入功能/迁移”的冻结已解除；后续仍须另行授权。
+- Closeout：Issue #311 已于 2026-08-16 关闭，state reason=`completed`。因此旧的“R0-B 合并前禁止”已完成其门禁使命，不再阻塞后续**另行授权**的任务。
 - `ADMIN_MODEL_API_KEY_SAVE_FAILURE` **未在 R0-B 中调查或修复**，继续保持 `SEPARATE_BUG_TASK`，不得借后续 STG-FIX / SEC-1 / AUTH-1 顺手扩大范围。
 
 **STG-FIX staging 基线补齐 — ⏭ 下一计划任务（尚未授权执行）** — 独占 **SLOT-1**
@@ -229,7 +229,7 @@ progress_refresh_v10_1:
   ```bash
   grep -rn "\.auth\.signUp\|\.auth\.signInWithPassword\|\.auth\.signInWithOtp\|\.auth\.resend\|\.auth\.resetPasswordForEmail\|\.auth\.verifyOtp" apps/web/src --include="*.tsx" --include="*.ts" | grep -v "\.test\."
   ```
-  **审计时（b148803）该 grep 的完整结果 = 5 处、3 文件**（以开工 fresh-read 为准，可能已变）：`login/page.tsx:128 signUp`、`login/page.tsx:181 signUp`、`verify-email/page.tsx:112 resend`、**`SecuritySettingsCard.tsx:67 resend`**、**`SecuritySettingsCard.tsx:117 signInWithPassword（改密码前重认证）`**。captcha 传参封装为公共函数、所有入口复用（也为手机 OTP 预留，§19）。
+  **审计时（b148803）该 grep 的完整结果 = 5 处、3 文件**（以开工 fresh-read 为准，可能已变）：`login/page.tsx:128 signInWithPassword`、`login/page.tsx:181 signUp`、`verify-email/page.tsx:112 resend`、**`SecuritySettingsCard.tsx:67 resend`**、**`SecuritySettingsCard.tsx:117 signInWithPassword（改密码前重认证）`**。captcha 传参封装为公共函数、所有入口复用（也为手机 OTP 预留，§19）。
 - 验收：测试/清单覆盖——邮箱未验证：无 profile 无发放；邮箱已验证：恰好一次 100；**Google OAuth 注册：恰好一次 100 且不重复、且不因 captcha 缺失被拒**；重放不重复；service-role 缺失 fail-closed；**在启用 CAPTCHA 的 staging 上：⑥-a grep 列出的\*每一个\*入口（含 `SecuritySettingsCard` 的 resend 与改密码 reauth）各在缺失/无效 token 时被拒、带有效 token 时通过**——PR 须附该 grep 的当次输出并逐条对应到已接入的代码；`pnpm test:api` ✅。
 - allowed_paths：`packages/api/src/trpc.ts`、`packages/api/src/lib/auth.ts`、`packages/db/schema.ts`、`packages/db/migrations/<SLOT-3>.sql`、`apps/web/src/app/login/**`、`apps/web/src/app/verify-email/**`、`apps/web/src/components/profile/SecuritySettingsCard.tsx`、以及 ⑥-a grep 在开工时新surface 的任何调用点文件、相关测试。预估 **3–4 天**（单 provider）。
 - **Owner 前置**：注册一个 hCaptcha 站点，拿 sitekey（公开，前端用）与 secret（填入 Supabase Auth → CAPTCHA 设置，不交给编码代理）；**但 Supabase 的 CAPTCHA 强制开关先别开**——等 AUTH-1 前端接入部署到该环境后再开（staging 随 AUTH-1 部署、生产随 §9 新 runtime 生效）。
@@ -331,7 +331,7 @@ progress_refresh_v10_1:
    - 另需确认操作对象是生产：`select current_database(), (select count(*) from profiles);` 应与 EXT-0 记录一致（5 profiles）。
 7. **生产 Skill 与模块创建**（§9 必经步骤，见下）。
 
-**COM-1 商业内容**：正式商品名/USD/credits/周期定稿且 DB=Stripe Price 一致；terms/privacy/acceptable-use/退款政策文本审定；自动续费披露、cancel-at-period-end、原则不退款+Owner 审核例外、refund 后当期扣回+未来停发、其他来源不动；support 邮箱实测收件；payment stuck/cancel/refund/chargeback/账号数据请求 SOP；seller identity。编码代理只落地 Owner 批准文本。
+**COM-1 商业内容**：正式商品名/USD/credits/周期定稿且 DB=Stripe Price 一致；terms/privacy/acceptable-use/退款政策文本审定；自动续费披露、cancel-at-period-end、原则不退款+Owner 审核例外、refund 后当期扣回+未来停发、其他来源不动；support 邮箱实测可收件；payment stuck/cancel/refund/chargeback/账号数据请求 SOP；seller identity。编码代理只落地 Owner 批准文本。
 
 **Skill 内容**：最迟 M3 开始前 Owner 批准 ≥1 份真实非占位 Skill。建议 Day 1 起草。
 
@@ -629,7 +629,7 @@ OWNER 当前动作：
 ## 20. v8 → v9 变更记录（对应第 5 轮交叉审计 5 条，全部经独立核验成立）
 
 **事实错误（2）**
-1. `[承接#3][P0][不彻底] REFUND-1B 超用边界错误`（Codex）—— **确认成立并纠正 v8 第二次修 F3 的边界**。v8 把 `actual>reserved` 的追加封顶写成 `amountToPeriod`，但该金额预扣时已用满，导致超用被错误推给其他来源。**代码级复算**：当期 grant=1000/consumed=0/其他=500，预扣100→实耗150（超用50）→退款；正确应超用吃当期剩余额度（consumed=150、扣850、余额500），v8 规则误得450。**修正**：REFUND-1B 第 4 条改为"超用吃绑定周期\*当前剩余额度\* `credits_granted−consumed`，非 amountToPeriod 封顶"；新增"超用后退款→500"验收用例。**（少用/restore 方向的 amountToPeriod 上限仍正确，未动。）**
+1. `[承接#3][P0][不彻底] REFUND-1B 超用边界错误`（Codex）—— **确认成立并纠正 v8 第二次修 F3 的边界**。v8 把 `actual>reserved` 的追加封顶写成 `amountToPeriod`，但该金额预扣时已用满，导致超用被错误推给其他来源。**代码级复算**：当期 grant=1000/consumed=0/其他=500，预扣100→实耗150（超用50）→退款；正确应超用吃当期剩余额度（consumed=150、扣850、余500），v8 规则误得450。**修正**：REFUND-1B 第 4 条改为"超用吃绑定周期\*当前剩余额度\* `credits_granted−consumed`，非 amountToPeriod 封顶"；新增"超用后退款→500"验收用例。**（少用/restore 方向的 amountToPeriod 上限仍正确，未动。）**
 2. `[承接#5][P1][改错] 支付宝被误当作异步支付方式`（Codex）—— **确认成立，Stripe 文档实证**：Alipay 是 **customer-initiated（即时确认）**，正常流程在 `checkout.session.completed(paid)` 完成履约（与卡同一现有履约点），`async_payment_succeeded` **非必经**。v8 把 async 写成必需验收会让正常支付宝支付假失败。**修正**：PAY-1 履约挂 `completed`、async 仅防御性幂等处理；退款走 `refund.updated/failed`（支付宝退款异步，文档实证，现有 webhook 已覆盖）；§7/G8/§9-13 全部改。**连带**：Stripe 文档明确 "Alipay Not supported in Checkout subscription mode" → F1 钉死（见下）。
 
 **遗漏（1）**
