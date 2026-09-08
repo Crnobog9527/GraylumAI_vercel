@@ -471,6 +471,13 @@ export function SkillConversation({
     if (alive.current) setDelivery(value);
   }
   async function deliver(value: Parameters<typeof api.generate.mutate>[0]) {
+    const known = state.current.snapshot?.generations?.find(g => g.requestId === value.requestId);
+    if (Object.values(state.current.drafts).some(d => d.dirty) && (!known || known.state === "prepared")) {
+      // This call could still dispatch. Release only the callback queue so the
+      // edits can save; preserve the original delivery and receipt identities.
+      pendingWrite.current = null;
+      throw new Error("请等待成果自动保存后再恢复发送。");
+    }
     rememberDelivery(value);
     let status;
     try {

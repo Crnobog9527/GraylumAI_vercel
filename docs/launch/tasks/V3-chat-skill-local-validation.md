@@ -155,3 +155,8 @@ GitHub P1 3956133617 已修复：发送按钮、send 函数入口、可恢复 ru
 `graylum-dirty-send-final-validation.log`：2 PASS / 84 SKIP，真实本地浏览器/HTTP/SQL验证：前序编辑后切后序在自动保存前不发 quote/generate；保存后前序失去确认。另一个场景将quote响应挂起，此期间编辑成果，释放后零generate且旧意图abandon；编辑保存后显式再次发送成功。私有canary检查通过。Web typecheck PASS。该专项不代表真实模型或完整V3验收。
 
 恢复队列补充修复：恢复尚未开始的发送回调遇到 dirty 成果时，仅清除该 pendingWrite 队列占用，保留 delivery、pendingSave 及未知回执身份，避免自动保存被自身永久阻塞。`graylum-send-queue-validation.log` 3 PASS / 84 SKIP，覆盖前述两场景及发送请求网络失败→编辑→恢复拒绝但自动保存继续→显式新发送成功；cleanup/canary、Web typecheck 均通过。
+
+
+显式 delivery 恢复补充（GitHub P1 3956302764）：deliver 的共同入口在任一步骤 dirty 且请求未知或 prepared 时拒绝可能产生新 dispatch 的调用，只释放 pendingWrite 以允许自动保存。已知非 prepared 状态仍按原身份恢复；不新增队列或绑定机制。
+
+`graylum-prepared-recovery-validation-3.log`：1 PASS / 87 SKIP，真实本地 Auth/浏览器/HTTP/PostgREST/SQL 创建 prepared 预留后编辑成果，点击恢复不增加 generate HTTP 请求、无模型 transport，成果自动保存且原 prepared 身份保留。该用例不声称旧 basis 保存后还能重新生成；应走既有取消/新发送流程。前两次测试分别因请求解包和等待时限失败，不能计为通过。另三个 dirty-send 场景在首轮通过，Web typecheck PASS，cleanup/canary PASS；供应商无新增调用。

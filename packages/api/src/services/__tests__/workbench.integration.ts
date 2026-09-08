@@ -3063,3 +3063,26 @@ aiTest('CHAT: dirty edit after failed send recovery releases autosave queue',asy
  await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>t.generationState==='succeeded'),{timeout:30000}).toBe(true);
  await context.close();
 },90000);
+
+aiTest('CHAT: prepared delivery recovery waits for all dirty results to autosave',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const stopped=new Proxy(db,{get(target,key){if(key==='rpc')return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'?{abortSignal:async()=>{const result=await target.rpc(name,args);if(result.error)throw result.error;throw new Error('local stopped after reserve');}}:target.rpc(name,args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ let generates=0;
+ await page.route('**/api/trpc/workbench.generate*',async route=>{
+  generates++;const data=route.request().postDataJSON(),v=data.json??data['0']?.json??data['0']??data;
+  await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not dispatch');}).generate(v)).rejects.toThrow('local stopped after reserve');
+  await route.abort('failed');
+ });
+ await page.getByLabel('给当前步骤发消息').fill('Discuss latest saved decisions');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByRole('button',{name:'恢复原发送状态',exact:true}).waitFor();
+ await expect.poll(async()=>page.getByRole('button',{name:'恢复原发送状态',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
+ await page.getByLabel('当前步骤工作稿').fill('New decision must save before prepared delivery');
+ await page.getByRole('button',{name:'恢复原发送状态',exact:true}).click();
+ expect(generates).toBe(1);expect(t.calls()).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('New decision must save before prepared delivery');
+ expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
+ await context.close();
+},90000);
