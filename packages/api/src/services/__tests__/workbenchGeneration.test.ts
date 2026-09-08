@@ -27,6 +27,15 @@ describe('workbench model boundary', () => {
     expect(JSON.parse(String(options.body))).toMatchObject({model:'qwen/qwen3.8-flash',reasoning:{enabled:false},provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
     expect(options.redirect).toBe('error');
   });
+  it('sends Luna with low reasoning and fixed bounded text-only transport',async()=>{
+    const fetch=vi.fn(async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'Luna result'}}],usage:{prompt_tokens:100,completion_tokens:10}})));vi.stubGlobal('fetch',fetch);
+    await openRouterGeneration({...request,model:{...model,model_id:'openai/gpt-5.6-luna'}});
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url,options]=fetch.mock.calls[0] as unknown as [string,RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(options.redirect).toBe('error');
+    expect(JSON.parse(String(options.body))).toMatchObject({model:'openai/gpt-5.6-luna',reasoning:{effort:'low'},max_tokens:100,provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
+  });
   it.each(['https://attacker.invalid', 'http://127.0.0.1:1234', 'https://openrouter.ai@attacker.invalid'])('rejects unreviewed endpoint %s before fetch', async endpoint => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     await expect(openRouterGeneration({ ...request, model: { ...model, api_endpoint: endpoint as never } })).rejects.toThrow();

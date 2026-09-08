@@ -275,7 +275,7 @@ BEGIN
   IF EXISTS(SELECT 1 FROM jsonb_array_elements(turns) x WHERE x->>'available'='false') THEN RAISE EXCEPTION 'context restricted' USING ERRCODE='42501'; END IF;
   -- The current assistant response never becomes its own input on prepared retry.
   SELECT jsonb_agg(CASE WHEN x->>'requestId'=t.request_id::text THEN (x-'generationState'-'abandoned'-'summaryState'-'summaryRequestId'-'summaryCandidateId'-'summaryBasis'-'summaryDismissed')||'{"answer":null,"candidateId":null}' ELSE x-'generationState'-'abandoned'-'summaryState'-'summaryRequestId'-'summaryCandidateId'-'summaryBasis'-'summaryDismissed' END ORDER BY ord) INTO turns FROM jsonb_array_elements(turns) WITH ORDINALITY q(x,ord);
-  RETURN jsonb_build_object('turns',turns,'evidenceIds',t.evidence_ids,'body',t.body,'binding',artifact_chat_binding(c));
+  RETURN jsonb_build_object('turns',turns,'evidenceIds',t.evidence_ids,'body',t.body,'binding',artifact_chat_binding(c),'replyModel',(SELECT jsonb_build_object('modelId',g.quote->'modelId','providerModel',g.quote->'providerModel') FROM artifact_generations g WHERE g.project_id=p.id AND g.round_id=r.id AND g.request_id=t.request_id AND g.state='succeeded' AND g.input->>'purpose'='reply'));
  END IF;
  RAISE EXCEPTION 'invalid chat action';
 END $$;
@@ -300,7 +300,7 @@ BEGIN
      AND parent.evidence_ids <@ NEW.evidence_ids) THEN RAISE EXCEPTION 'summary parent denied' USING ERRCODE='42501'; END IF;
  ELSE RAISE EXCEPTION 'role denied' USING ERRCODE='42501'; END IF;
  IF TG_OP='INSERT' OR (NEW.state='dispatched' AND OLD.state='prepared') THEN
-  IF NEW.input->>'purpose'='summary' AND NOT EXISTS(SELECT 1 FROM artifact_generations parent WHERE parent.project_id=NEW.project_id AND parent.round_id=NEW.round_id AND parent.request_id=t.request_id AND artifact_evidence_allowed(NEW.project_id,parent.evidence_ids)) THEN RAISE EXCEPTION 'summary source denied' USING ERRCODE='42501'; END IF;
+  IF NEW.input->>'purpose'='summary' AND NOT EXISTS(SELECT 1 FROM artifact_generations parent WHERE parent.project_id=NEW.project_id AND parent.round_id=NEW.round_id AND parent.request_id=t.request_id AND parent.quote->>'modelId' <> NEW.quote->>'modelId' AND lower(trim(parent.quote->>'providerModel')) <> lower(trim(NEW.quote->>'providerModel')) AND artifact_evidence_allowed(NEW.project_id,parent.evidence_ids)) THEN RAISE EXCEPTION 'summary source denied' USING ERRCODE='42501'; END IF;
   IF NOT (t.evidence_ids <@ NEW.evidence_ids) OR NOT artifact_evidence_allowed(NEW.project_id,t.evidence_ids) THEN RAISE EXCEPTION 'chat evidence denied' USING ERRCODE='42501'; END IF;
   SELECT coalesce(jsonb_agg(DISTINCT e),'[]') INTO NEW.evidence_ids FROM jsonb_array_elements(NEW.evidence_ids||t.evidence_ids) e;
  END IF;
@@ -343,7 +343,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE w public.artifact_workflows%ROWTYPE; result jsonb:='[]'; descriptor jsonb;
 BEGIN
  IF p_module_id IS NULL OR NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'artifact denied' USING ERRCODE='42501'; END IF;
-  IF (SELECT count(*) FROM artifact_workflows WHERE enabled)>100 THEN RAISE EXCEPTION 'registry capacity'; END IF;
+  IF (SELECT count(*) FROM artifact_workflows WHERE enabled AND module_id=p_module_id)>100 THEN RAISE EXCEPTION 'registry capacity'; END IF;
   FOR w IN SELECT * FROM artifact_workflows WHERE enabled AND module_id=p_module_id ORDER BY id LIMIT 100 LOOP
    BEGIN
     descriptor:=read_skill_package(p_actor_id,w.module_id,w.skill_id,w.revision_id,NULL,NULL);

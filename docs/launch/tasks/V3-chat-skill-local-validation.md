@@ -132,3 +132,14 @@ project/round，并继续使用原有来源和权限校验。浏览器存储不�
 Local Qwen `qwen/qwen3.8-flash` testing found that an older conversation reply could displace a directly edited topic despite the saved body being present in the general step context. Chat generation now names `currentStepResult` explicitly and instructs the model to use the latest saved result before older replies, applying the current requested changes. This does not confirm the step. Four configured-workflow SQL/HTTP tests verify the saved body/version reaches the generation transport; web TypeScript passed.
 
 Real browser retesting retained community-family audience, online sharing, pet-action photography, October 12, Tencent Meeting and 60 minutes, then changed only the requested budget from 1200 to 1100. Model results saved automatically. This is observed text-model behavior, not a guarantee for arbitrary Skills or every model output. An earlier separate provider operation remained unknown after timeout and was not retried; its conservative budget reservation remains held. The temporary credential and budget control stay outside the repository and apply only to the local test.
+
+
+## Luna 与审查修复（2026-09-08）
+
+Owner 指定整理模型 `openai/gpt-5.6-luna`；公开 OpenRouter models/endpoints 元数据已只读核验。新增精确模型 ID 适配，推理 low，固定端点、无工具/旁路/自动回退；以完整配置输入容量保守预留并按供应商实际 usage 核对，不声称使用其精确 tokenizer。本地测试配置已改为 Luna，凭证仍在仓库外，未增加真实调用，原 1 USD 总预算不变。
+
+独立审计发现的父回复模型漂移已修复：整理同时与当前对话配置及父回复不可变 quote 的模型 UUID/provider ID 比较。内部 context 只返回两个模型身份字段；不开放生成记录表读取。数据库 INSERT/dispatch 也拒绝同模型，已 dispatch 的已知回执恢复保持可用。第一次专项因直接读取受保护表而 4 FAIL，改用既有受权限检查的内部接口后 4 PASS；失败不计入通过。
+
+GitHub 审查的两项同时修复：scoped catalog 的 100 项上限只计算目标模块，原全局 catalog 上限保留；对话回复使用独立 20000 文本上限及 token 上限，summary/legacy 仍受成果步骤长度限制。
+
+最新本地专项 `graylum-luna-review-regression.log`：5 PASS / 78 SKIP，覆盖 OpenAI/Qwen/Luna 三种双阶段组合、长于成果上限的正常对话、父模型 UUID/alias 漂移在服务和直接 SQL 准入时拒绝、来源撤回后已发出整理的结算恢复、超过 100 个无关注册时当前模块入口。迁移重复应用和日志 canary 检查通过。相关模型/transport 单测 40 PASS，Web typecheck 通过。真实双模型成功仍未验证；旧候选审查与 CI 不替代下一候选复审。

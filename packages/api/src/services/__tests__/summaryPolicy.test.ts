@@ -39,12 +39,22 @@ describe('admin summary model eligibility', () => {
 describe('Qwen input reservation',()=>{
  const row={id:summary,model_id:'qwen/qwen3.8-flash' as const,is_active:'true' as const,max_tokens:2048,input_limit:128000,api_key:'SYNTHETIC',api_endpoint:'https://openrouter.ai/api/v1' as const,token_counting_supported:'true' as const,tokenizer_family:'openai' as const};
  it('admits the real model name with admin provider-usage metadata and reserves its full input capacity',async()=>{
-  const {workbenchModelSchema,qwenInputReservation}=await import('../artifacts/modelPolicy');
+  const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
   expect(workbenchModelSchema.safeParse(row).success).toBe(true);
-  expect(qwenInputReservation(row,[{content:'中文 🐈 <|endoftext|>'}],2048)).toBe(125952);
+  expect(providerInputReservation(row,[{content:'中文 🐈 <|endoftext|>'}],2048)).toBe(125952);
  });
  it('rejects a prompt beyond the byte envelope without truncation or paid dispatch',async()=>{
-  const {qwenInputReservation}=await import('../artifacts/modelPolicy');
-  expect(()=>qwenInputReservation(row,[{content:'猫'.repeat(50000)}],2048)).toThrow('GENERATION_CAPACITY');
+  const {providerInputReservation}=await import('../artifacts/modelPolicy');
+  expect(()=>providerInputReservation(row,[{content:'猫'.repeat(50000)}],2048)).toThrow('GENERATION_CAPACITY');
+ });
+});
+
+// Luna uses provider usage with conservative admission, never a guessed tokenizer.
+describe('Luna summary model admission',()=>{
+ it('accepts the exact Owner-selected API ID and reserves full configured capacity',async()=>{
+  const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
+  const model=workbenchModelSchema.parse({id:summary,model_id:'openai/gpt-5.6-luna',is_active:'true',max_tokens:2048,input_limit:32768,api_key:'SYNTHETIC',api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'openai'});
+  expect(providerInputReservation(model,[{content:'整理已讨论的预算、受众和形式'}],2048)).toBe(30720);
+  expect(()=>providerInputReservation(model,[{content:'猫'.repeat(11000)}],2048)).toThrow('GENERATION_CAPACITY');
  });
 });

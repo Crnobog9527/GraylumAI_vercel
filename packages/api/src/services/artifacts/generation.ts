@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { workbenchModelSchema as modelSchema, qwenInputReservation } from "./modelPolicy";
+import { workbenchModelSchema as modelSchema, providerInputReservation } from "./modelPolicy";
 import { z } from 'zod';
 import { summaryPolicy, assertSeparateSummaryModel } from './summaryPolicy';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
@@ -76,7 +76,7 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45000),
     headers: { Authorization: `Bearer ${model.api_key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, plugins: [], tools: [], tool_choice: 'none', ...(model.model_id === 'qwen/qwen3.8-flash' ? {reasoning:{enabled:false}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
+    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, plugins: [], tools: [], tool_choice: 'none', ...(model.model_id === 'qwen/qwen3.8-flash' ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
   });
   // No automatic refund after dispatch: even an HTTP/parse error may follow a
   // billed provider execution. Reconciliation never blindly resends the request.
@@ -175,6 +175,12 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       if (view.error || !turn || (turn.generationMode === 'dual' ? !v.purpose : !!v.purpose)) throw new Error('ARTIFACT_DENIED');
       if (v.purpose === 'summary') {
         if (turn.generationState !== 'succeeded' || !turn.available || typeof turn.answer !== 'string') throw new Error('SUMMARY_REPLY_UNAVAILABLE');
+        // Current module configuration can change after the reply. Compare the
+        // immutable parent quote too, before admitting any summary reservation.
+        const parentIdentity = z.object({modelId:uuid,providerModel:z.string().min(1)}).safeParse(chat.data.replyModel);
+        if(!parentIdentity.success) throw new Error('SUMMARY_REPLY_UNAVAILABLE');
+        if(parentIdentity.data.modelId === model.id) throw new Error('SUMMARY_MODEL_MUST_DIFFER');
+        assertSeparateSummaryModel(parentIdentity.data.providerModel,model.model_id);
         currentReply = turn.answer;
       }
     }
@@ -183,7 +189,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     checkInputSecurity(context);
     const messages: ModelRequest['messages'] = [{ role: 'system', content: `${v.purpose === 'reply' ? dialogueSystemInstruction : v.conversationId ? chatSystemInstruction : systemInstruction}\n${loaded.forModel()}` }, { role: 'user', content: context }];
     const maxTokens = Math.min(model.max_tokens, summaryLimit ?? 4096);
-    const inputTokens = qwenInputReservation(model,messages,maxTokens) ?? countWorkbenchTokens(messages);
+    const inputTokens = providerInputReservation(model,messages,maxTokens) ?? countWorkbenchTokens(messages);
     if (inputTokens + maxTokens > model.input_limit) throw new Error('GENERATION_CAPACITY');
     const settings = await getBillingRuntimeSettings(privateClient!), pricing = await getModelPricing(privateClient!, model.model_id, { requireModelPricing: true, modelRecordId: model.id });
     if (Object.values(pricing).some(x => !Number.isFinite(x) || x < 0)) throw new Error('GENERATION_DISABLED');
@@ -258,7 +264,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       try {
         const answer = answerSchema.parse(await transport({ model: ready.model, messages: ready.messages, maxTokens: ready.quote.maxTokens }));
         if(answer.inputTokens>ready.quote.inputTokens){exceededUsage={inputTokens:answer.inputTokens,outputTokens:answer.outputTokens};throw new Error('GENERATION_USAGE_EXCEEDED');}
-        if (answer.outputTokens > ready.quote.maxTokens || !answer.body.trim() || [...answer.body].length > ready.step.maxLength) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+        if (answer.outputTokens > ready.quote.maxTokens || !answer.body.trim() || [...answer.body].length > (v.purpose === 'reply' ? 20000 : ready.step.maxLength)) throw new Error('GENERATION_OUTCOME_UNKNOWN');
         const filtered = filterAIOutput(answer.body);
         if (filtered.blocked || !filtered.content.trim() || echoesPrivateMethod(answer.body, ready.loaded.forModel()) || echoesPrivateMethod(filtered.content, ready.loaded.forModel())) throw new Error('GENERATION_OUTCOME_UNKNOWN');
         const cost = calculateTokenCostWithPricing({ ...answer, cacheReadTokens: 0, cacheCreationTokens: 0 }, ready.quote.pricing, {}, ready.quote.settings);

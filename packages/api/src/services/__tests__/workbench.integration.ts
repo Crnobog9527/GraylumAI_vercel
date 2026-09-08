@@ -2737,21 +2737,23 @@ aiTest.each(['candidate','saved'])('CHAT: revoked inherited sources hide %s loca
  await context.close();
 },120000);
 
-aiTest.each(['openai','qwen'])('CHAT: dual model stages persist separate usage and only summary becomes a result with %s',async(provider)=>{
+aiTest.each(['openai','qwen','luna'])('CHAT: dual model stages persist separate usage and only summary becomes a result with %s',async(provider)=>{
  const {skillChatService}=await import('../artifacts/chat');
- const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const flow=makeWorkflow(3);flow.steps[0].maxLength=100;
+ const dialogue='Let us refine the event together. '.repeat(5);
+ const t=await generationFixture(3,'Synthetic generation method.',{workflow:flow}),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
  const primaryId=provider==='qwen'?randomUUID():localModel;
  if(provider==='qwen'){
   await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost,tokenizer_family) values($1,'qwen/qwen3.8-flash','Qwen fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,470000,'openai')",[primaryId]);
   await sql.query('update modules set model_id=$1 where id=$2',[primaryId,t.f.moduleId]);
  }
  const summaryId=randomUUID();
- await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-2024-08-06','Separate summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryId]);
+ await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,$2,'Separate summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',200000,1200000)",[summaryId,provider==='luna'?'openai/gpt-5.6-luna':'openai/gpt-4o-2024-08-06']);
  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(summaryId)]);
  const seen:string[]=[];
  const ai=t.workbenchGeneration(t.user,db,async request=>{
   seen.push(request.model.id);
-  return {body:request.model.id===summaryId?'Combined result: family audience, budget 1200.':'Let us refine the event together.',inputTokens:800,outputTokens:30};
+  return {body:request.model.id===summaryId?'Combined result: family audience, budget 1200.':dialogue,inputTokens:800,outputTokens:30};
  });
  const turnId=randomUUID(),body='Plan a family event';
  await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
@@ -2763,16 +2765,37 @@ aiTest.each(['openai','qwen'])('CHAT: dual model stages persist separate usage a
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
  const summaryBinding=await chat.summary({conversationId:binding.conversationId,requestId:turnId});
  expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(summaryBinding);
- const summaryInput={...input,purpose:'summary' as const},summaryQuote=await ai.quote(summaryInput);
+ const summaryInput={...input,purpose:'summary' as const};
+ // Configuration changes cannot make the parent's actual model the organizer.
+ await sql.query('update modules set model_id=$1 where id=$2',[summaryId,t.f.moduleId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(primaryId)]);
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_MUST_DIFFER');
+ const aliasId=randomUUID();
+ await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint) select $1,model_id,'Parent alias fixture','LOCAL_SYNTHETIC_KEY',api_endpoint from ai_models where id=$2",[aliasId,primaryId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(aliasId)]);
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_MUST_DIFFER');
+ expect(seen).toEqual([primaryId]);
+ await sql.query('update modules set model_id=$1 where id=$2',[primaryId,t.f.moduleId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(summaryId)]);
+ const summaryQuote=await ai.quote(summaryInput);
  const request={...summaryInput,requestId:summaryBinding.requestId,quoteHash:summaryQuote.quoteHash,budgetCredits:summaryQuote.reservedCredits};
  const result=await ai.generate(request);expect(result.state).toBe('succeeded');
  expect((await ai.generate(request)).candidateId).toBe(result.candidateId);
  expect((await ai.generate(replyRequest)).candidateId).toBe(reply.candidateId);
  expect(seen).toEqual([primaryId,summaryId]);
+ // Exercise the SQL admission trigger directly as well as service preflight.
+ // A different row UUID cannot admit a quote using the immutable parent model.
+ for(const sameRecord of [true,false]){
+  await expect(sql.query(`insert into artifact_generations select (jsonb_populate_record(null::artifact_generations,
+   to_jsonb(g)||jsonb_build_object('id',$3::uuid,'state','prepared','candidate_id',null,'result',null,
+    'quote',g.quote||jsonb_build_object('modelId',$4::text,'providerModel',(select quote->>'providerModel' from artifact_generations where project_id=$1 and request_id=$5))))) .*
+   from artifact_generations g where g.project_id=$1 and g.request_id=$2`,
+   [t.scope.projectId,summaryBinding.requestId,randomUUID(),sameRecord?primaryId:aliasId,turnId])).rejects.toMatchObject({code:'42501',message:'summary source denied'});
+ }
  if(provider==='qwen'){const quoteRow=await sql.query('select quote from artifact_generations where project_id=$1 and request_id=$2',[t.scope.projectId,turnId]);expect(quoteRow.rows[0].quote.providerModel).toBe('qwen/qwen3.8-flash');expect(quoteRow.rows[0].quote.inputTokens).toBe(128000-4096);}
  await t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Combined result: family audience, budget 1200.',candidateId:result.candidateId!});
  const view=await chat.read({conversationId:binding.conversationId});
- expect(view.turns).toHaveLength(1);expect(view.turns[0]).toMatchObject({answer:'Let us refine the event together.',summaryState:'succeeded',summaryCandidateId:result.candidateId,generationMode:'dual'});
+ expect(view.turns).toHaveLength(1);expect(view.turns[0]).toMatchObject({answer:dialogue,summaryState:'succeeded',summaryCandidateId:result.candidateId,generationMode:'dual'});
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(false);
  const logs=await sql.query("select metadata->>'role' role from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1) order by metadata->>'role'",[t.scope.projectId]);
  expect(logs.rows.map(x=>x.role)).toEqual(['reply','summary']);
@@ -2940,6 +2963,8 @@ aiTest('CHAT: selected module catalog avoids unrelated registrations while retai
  const t=await generationFixture(),other=await generationFixture();
  const broken='unrelated-'+randomUUID();
  await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) select $1,module_id,skill_id,revision_id,jsonb_set(workflow,'{steps}','[]'),'Unrelated invalid fixture',true from artifact_workflows where module_id=$2 limit 1",[broken,other.f.moduleId]);
+ const bulk='catalog-bulk-'+randomUUID();
+ await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) select $1||'-'||n,module_id,skill_id,revision_id,workflow,'Unrelated capacity fixture',true from (select * from artifact_workflows where module_id=$2 limit 1) w cross join generate_series(1,101) n",[bulk,other.f.moduleId]);
  try{
   await expect(t.service.catalog()).rejects.toThrow();
   const scoped=await t.service.catalog(t.f.moduleId);expect(scoped.length).toBeGreaterThan(0);expect(scoped.every(x=>x.moduleId===t.f.moduleId)).toBe(true);
@@ -2958,5 +2983,5 @@ aiTest('CHAT: selected module catalog avoids unrelated registrations while retai
   }finally{await denied.end();}
   const stopped=await newUser();await sql.query("update profiles set status='disabled' where id=$1",[stopped.id]);
   await expect(sql.query('select artifact_module_catalog($1,$2)',[stopped.id,t.f.moduleId])).rejects.toThrow('artifact denied');
- }finally{await sql.query('delete from artifact_workflows where id=$1',[broken]);}
+ }finally{await sql.query('delete from artifact_workflows where id=$1 or id like $2',[broken,bulk+'-%']);}
 },60000);
