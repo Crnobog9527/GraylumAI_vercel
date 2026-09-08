@@ -2520,8 +2520,9 @@ aiTest('CHAT: module rebinding enters the current Skill while preserving the for
  expect(await chat.mode(old.f.moduleId)).toEqual({guided:true});
  await expect(chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_INVALID_WORKFLOW');
  await sql.query('update artifact_workflows set enabled=true where id=$1',[old.f.registration]);
- const newer=await generationFixture();await sql.query('update modules set skill_id=$1 where id=$2',[newer.f.pack.id,old.f.moduleId]);
+ const newer={f:await fixture({id:'new-binding-'+randomUUID(),label:'Rebound Skill fixture',methodText:'Synthetic rebound method',workflow:makeWorkflow(3)})};await sql.query('update modules set skill_id=$1 where id=$2',[newer.f.pack.id,old.f.moduleId]);
  await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',['rebind-'+randomUUID(),old.f.moduleId,newer.f.pack.id,newer.f.pack.revisionId,newer.f.flow,'Rebound current Skill']);
+ expect((await old.service.projects()).filter(p=>p.skillId===newer.f.pack.id)).toHaveLength(0);
  const current=await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()});
  expect(current.skillId).toBe(newer.f.pack.id);expect(current.projectId).not.toBe(previous.projectId);
  expect((await chat.read({conversationId:previous.conversationId})).binding.skillId).toBe(old.f.pack.id);
