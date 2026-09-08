@@ -167,3 +167,13 @@ GitHub P1 3956133617 已修复：发送按钮、send 函数入口、可恢复 ru
 GitHub P2 3956471172：Skill 导出改为每批最多并行 4 次原权限检查读取，保留原顺序和受限内容投影。`graylum-export-concurrency-test-2.log` 4 PASS，覆盖并发上限、顺序、来源受限隐藏及原统计场景。首轮新测试的查询替身遗漏 eq 方法而失败，不计为通过。
 
 GitHub P2 3956471186：侧栏用明确的 deleted 原因通知当前对话被删除，普通/Skill 对话均清理旧路由，不再套用新建对话的输入拦截；普通对话同时停止原流。`graylum-delete-navigation-validation-2.log` 1 PASS / 88 SKIP，在真实本地 Auth/浏览器/HTTP/PostgREST/SQL 覆盖普通与 Skill 对话有未发送输入时确认删除、旧路由清除、新输入框可用和软删除完成。首轮因测试环境未安装原 soft_delete_conversation 失败；现从 0050 原样加载函数及所需字段，未重写删除逻辑。cleanup/canary、Web typecheck PASS；未调用真实供应商。
+
+### Guided conversation retention compatibility (review 3956670671)
+
+The previous b6a5a4b review found the new conversation foreign key would abort the existing purge job. Migrations 0069/0070 now cascade only the chat binding, turns and summary identities with the conversation. History updates and direct child deletion remain denied. The conversation delete guard locks its project and skips deletion while a prepared/dispatched/unknown/responded generation remains; unrelated expired records continue through the existing service-only purge. Formal project reports, generation records, usage and canonical spending retain their existing lifetime. This does not claim erasure of the independent project or accounting records.
+
+`/tmp/graylum-chat-retention-validation-2.log`: 1 PASS / 89 SKIP. Real disposable Auth/SQL/PostgREST tests include an actual guided reply generation with synthetic transport, completed formal report, immutable-child denial, ordinary plus guided expired purge, token/spend preservation, pending-generation deferral, cancellation then purge, repeat purge and authenticated-role denial. Migration repeat application and cleanup/private canary PASS. Minimal unused ticket/prompt/announcement tables are test scaffolding; the purge function is executed from the actual migration. The first retention run passed before strengthening the guided generation and accounting assertions.
+
+No deployment, production cleanup or paid provider call occurred. The full current candidate requires renewed CI, GitHub review and independent GPT-6/high audit. Owner has chosen to keep Luna; real dual-model acceptance remains for separately approved Vercel staging validation after the local regional refusal.
+
+Web typecheck: `/tmp/graylum-chat-retention-types.log`, process exit 0.

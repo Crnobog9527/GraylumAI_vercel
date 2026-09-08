@@ -3104,3 +3104,54 @@ aiTest('CHAT: deleting the active ordinary or guided conversation clears its rou
  }
  await context.close();
 },90000);
+
+aiTest('CHAT: retention purges chat hierarchy while retaining accounting and deferring unresolved generations',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),summaryId=randomUUID();
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body:'Completed discussion'});
+ await sql.query('insert into artifact_chat_summaries(turn_id,request_id,attempt) values($1,$2,1)',[turnId,summaryId]);
+ await expect(sql.query('delete from artifact_chat_turns where request_id=$1',[turnId])).rejects.toThrow('immutable');
+ await expect(sql.query('delete from artifact_chat_summaries where request_id=$1',[summaryId])).rejects.toThrow('immutable');
+ const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const input={...t.scope,conversationId:binding.conversationId,turnId,purpose:'reply' as const,stepId:'step-0',instruction:'Completed discussion',expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([id,s])=>[id,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const quote=await t.ai.quote(input);
+ expect((await t.ai.generate({...input,requestId:turnId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits})).state).toBe('succeeded');
+ for(const step of t.f.flow.steps){
+  let s=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({action:'save',...t.scope,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,body:'Confirmed retained result '+step.id,evidenceIds:[]});
+  s=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({action:'confirm',...t.scope,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,expectedReviewVersion:s.steps[step.id].reviewVersion});
+ }
+ const ready=await t.service.read(t.scope.projectId,t.scope.roundId);
+ await t.service.execute({action:'publish',...t.scope,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(ready.steps).map(([id,s])=>[id,{version:s.version,reviewVersion:s.reviewVersion}]))});
+ const report=await t.service.report(t.scope.projectId,t.scope.roundId);
+ const retained=(await sql.query('select id,state,candidate_id,pre_deduct_id from artifact_generations where project_id=$1',[t.scope.projectId])).rows;
+ const accounting=(await sql.query('select id,total_credits,artifact_generation_id from token_stats where artifact_generation_id=any($1::uuid[])',[retained.map(g=>g.id)])).rows;
+ expect(accounting).toHaveLength(1);
+ const spend=(await sql.query('select id,amount from credit_transactions where source_id=any($1::text[])',[retained.map(g=>g.id)])).rows;
+ expect(spend).toHaveLength(1);
+ const pending=await generationFixture(),pendingChat=await skillChatService(pending.user,db).enter({...pending.scope,requestId:randomUUID()}),v=await pending.request();
+ expect((await db.rpc('artifact_generation',{p_actor_id:actor,p_project_id:v.projectId,p_round_id:v.roundId,p_request_id:v.requestId,p_action:'prepare',p_payload:{input:v,quote:{modelId:localModel,reservedCredits:v.budgetCredits}}})).error).toBeNull();
+ const ordinary=randomUUID();await sql.query("insert into conversations(id,user_id,title,is_deleted,deleted_at) values($1,$2,'Expired ordinary','true',now()-interval '40 days')",[ordinary,actor]);
+ await sql.query("update conversations set is_deleted='true',deleted_at=now()-interval '40 days' where id=any($1::uuid[])",[[binding.conversationId,pendingChat.conversationId]]);
+ // Minimal unused category scaffolding; the purge function itself is the actual migration.
+ for(const table of ['tickets','ticket_replies','prompts','announcements'])await sql.query(`create table if not exists ${table}(id uuid primary key default gen_random_uuid(),is_deleted boolean default false,deleted_at timestamptz)`);
+ const denied=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession:false}});
+ expect((await denied.rpc('purge_deleted_records',{p_days_old:30})).error).not.toBeNull();
+ const purge=await db.rpc('purge_deleted_records',{p_days_old:30});expect(purge.error).toBeNull();
+ expect(purge.data.find((r:{table_name:string})=>r.table_name==='conversations').deleted_count).toBe(2);
+ expect((await sql.query('select id from conversations where id=any($1::uuid[])',[[binding.conversationId,ordinary]])).rows).toHaveLength(0);
+ expect((await sql.query('select request_id from artifact_chat_turns where request_id=$1',[turnId])).rows).toHaveLength(0);
+ expect((await sql.query('select request_id from artifact_chat_summaries where request_id=$1',[summaryId])).rows).toHaveLength(0);
+ expect((await sql.query('select id,state,candidate_id,pre_deduct_id from artifact_generations where project_id=$1',[t.scope.projectId])).rows).toEqual(retained);
+ expect((await sql.query('select id,total_credits,artifact_generation_id from token_stats where artifact_generation_id=any($1::uuid[])',[retained.map(g=>g.id)])).rows).toEqual(accounting);
+ expect((await sql.query('select id,amount from credit_transactions where source_id=any($1::text[])',[retained.map(g=>g.id)])).rows).toEqual(spend);
+ expect(await t.service.report(t.scope.projectId,t.scope.roundId)).toEqual(report);
+ expect((await sql.query('select id from conversations where id=$1',[pendingChat.conversationId])).rows).toHaveLength(1);
+ expect((await pending.ai.list(pending.scope))[0].state).toBe('prepared');
+ await pending.ai.cancel({...pending.scope,requestId:v.requestId});
+ const again=await db.rpc('purge_deleted_records',{p_days_old:30});expect(again.error).toBeNull();
+ expect((await sql.query('select id from conversations where id=$1',[pendingChat.conversationId])).rows).toHaveLength(0);
+ expect((await db.rpc('purge_deleted_records',{p_days_old:30})).error).toBeNull();
+},60000);

@@ -4,15 +4,17 @@ BEGIN;
 ALTER TABLE public.artifact_chat_turns ADD COLUMN IF NOT EXISTS generation_mode text NOT NULL DEFAULT 'legacy' CHECK(generation_mode IN ('legacy','dual'));
 ALTER TABLE public.artifact_chat_turns ALTER COLUMN generation_mode SET DEFAULT 'dual';
 CREATE TABLE IF NOT EXISTS public.artifact_chat_summaries (
- turn_id uuid NOT NULL REFERENCES public.artifact_chat_turns(request_id),
+ turn_id uuid NOT NULL REFERENCES public.artifact_chat_turns(request_id) ON DELETE CASCADE,
  request_id uuid PRIMARY KEY CHECK(request_id<>turn_id),
  attempt integer NOT NULL CHECK(attempt BETWEEN 1 AND 8),
  UNIQUE(turn_id,attempt)
 );
 ALTER TABLE public.artifact_chat_summaries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.artifact_chat_summaries FROM PUBLIC,anon,authenticated,service_role;
+ALTER TABLE public.artifact_chat_summaries DROP CONSTRAINT IF EXISTS artifact_chat_summaries_turn_id_fkey;
+ALTER TABLE public.artifact_chat_summaries ADD CONSTRAINT artifact_chat_summaries_turn_id_fkey FOREIGN KEY(turn_id) REFERENCES public.artifact_chat_turns(request_id) ON DELETE CASCADE;
 DROP TRIGGER IF EXISTS artifact_immutable ON public.artifact_chat_summaries;
-CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON public.artifact_chat_summaries FOR EACH ROW EXECUTE FUNCTION public.artifact_immutable();
+CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON public.artifact_chat_summaries FOR EACH ROW EXECUTE FUNCTION public.artifact_chat_history_immutable();
 CREATE OR REPLACE FUNCTION public.artifact_generation(p_actor_id uuid,p_project_id uuid,p_round_id uuid,
  p_action text,p_request_id uuid DEFAULT NULL,p_payload jsonb DEFAULT '{}') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -359,4 +361,29 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.artifact_module_catalog(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.artifact_module_catalog(uuid,uuid) TO service_role;
+-- Preserve the existing service-only retention job and its record categories.
+-- Conversation deletion cascades chat/turn/summary transport records. The chat
+-- delete guard defers unresolved generations; other expired records still purge.
+CREATE OR REPLACE FUNCTION public.purge_deleted_records(p_days_old integer DEFAULT 30)
+RETURNS TABLE(table_name text,deleted_count bigint)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE cutoff timestamptz; removed bigint;
+BEGIN
+ IF p_days_old IS NULL OR p_days_old<1 THEN RAISE EXCEPTION 'invalid retention period'; END IF;
+ cutoff:=now()-make_interval(days=>p_days_old);
+ DELETE FROM messages WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'messages'::text,removed;
+ DELETE FROM conversations WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'conversations'::text,removed;
+ DELETE FROM ticket_replies WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'ticket_replies'::text,removed;
+ DELETE FROM tickets WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'tickets'::text,removed;
+ DELETE FROM prompts WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'prompts'::text,removed;
+ DELETE FROM announcements WHERE is_deleted='true' AND deleted_at<cutoff;
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'announcements'::text,removed;
+END $$;
+REVOKE ALL ON FUNCTION public.purge_deleted_records(integer) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.purge_deleted_records(integer) TO service_role;
 COMMIT;

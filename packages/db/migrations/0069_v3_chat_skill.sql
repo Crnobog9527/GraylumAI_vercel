@@ -4,14 +4,14 @@ BEGIN;
 ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS skill_mode boolean NOT NULL DEFAULT false;
 ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS module_id uuid REFERENCES public.modules(id);
 CREATE TABLE IF NOT EXISTS public.artifact_chats (
- conversation_id uuid PRIMARY KEY REFERENCES public.conversations(id),
+ conversation_id uuid PRIMARY KEY REFERENCES public.conversations(id) ON DELETE CASCADE,
  project_id uuid NOT NULL REFERENCES public.artifact_projects(id),
  round_id uuid NOT NULL UNIQUE REFERENCES public.artifact_rounds(id),
  step_id text NOT NULL
 );
 CREATE TABLE IF NOT EXISTS public.artifact_chat_turns (
  request_id uuid PRIMARY KEY,
- conversation_id uuid NOT NULL REFERENCES public.artifact_chats(conversation_id),
+ conversation_id uuid NOT NULL REFERENCES public.artifact_chats(conversation_id) ON DELETE CASCADE,
  step_id text NOT NULL, body text NOT NULL CHECK(char_length(body) BETWEEN 1 AND 2000),
  evidence_ids jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
@@ -19,8 +19,42 @@ ALTER TABLE public.artifact_chat_turns ADD COLUMN IF NOT EXISTS context_turn_ids
 ALTER TABLE public.artifact_chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.artifact_chat_turns ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.artifact_chats,public.artifact_chat_turns FROM PUBLIC,anon,authenticated,service_role;
+-- Chat transport history is deleted with its conversation; independent project
+-- results and canonical generation/billing records retain their existing lifetime.
+ALTER TABLE public.artifact_chats DROP CONSTRAINT IF EXISTS artifact_chats_conversation_id_fkey;
+ALTER TABLE public.artifact_chats ADD CONSTRAINT artifact_chats_conversation_id_fkey FOREIGN KEY(conversation_id) REFERENCES public.conversations(id) ON DELETE CASCADE;
+ALTER TABLE public.artifact_chat_turns DROP CONSTRAINT IF EXISTS artifact_chat_turns_conversation_id_fkey;
+ALTER TABLE public.artifact_chat_turns ADD CONSTRAINT artifact_chat_turns_conversation_id_fkey FOREIGN KEY(conversation_id) REFERENCES public.artifact_chats(conversation_id) ON DELETE CASCADE;
+CREATE OR REPLACE FUNCTION public.artifact_chat_history_immutable() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF TG_OP='DELETE' THEN
+  IF TG_TABLE_NAME='artifact_chat_turns' THEN
+   IF NOT EXISTS(SELECT 1 FROM conversations WHERE id=OLD.conversation_id) THEN RETURN OLD; END IF;
+  ELSIF TG_TABLE_NAME='artifact_chat_summaries' THEN
+   IF NOT EXISTS(SELECT 1 FROM artifact_chat_turns WHERE request_id=OLD.turn_id) THEN RETURN OLD; END IF;
+  END IF;
+ END IF;
+ RAISE EXCEPTION 'artifact history immutable';
+END $$;
+CREATE OR REPLACE FUNCTION public.artifact_chat_delete_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE c public.artifact_chats%ROWTYPE;
+BEGIN
+ SELECT * INTO c FROM artifact_chats WHERE conversation_id=OLD.id;
+ IF c.conversation_id IS NOT NULL THEN
+  -- Serialize against generation admission/settlement and preserve unresolved
+  -- request context. Returning NULL skips this row, not the rest of a purge.
+  PERFORM 1 FROM artifact_projects WHERE id=c.project_id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM artifact_generations WHERE project_id=c.project_id AND round_id=c.round_id AND state IN ('prepared','dispatched','unknown','responded')) THEN RETURN NULL; END IF;
+ END IF;
+ RETURN OLD;
+END $$;
+DROP TRIGGER IF EXISTS artifact_chat_delete ON public.conversations;
+CREATE TRIGGER artifact_chat_delete BEFORE DELETE ON public.conversations FOR EACH ROW EXECUTE FUNCTION public.artifact_chat_delete_guard();
+REVOKE ALL ON FUNCTION public.artifact_chat_history_immutable(),public.artifact_chat_delete_guard() FROM PUBLIC,anon,authenticated,service_role;
 DROP TRIGGER IF EXISTS artifact_immutable ON public.artifact_chat_turns;
-CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON public.artifact_chat_turns FOR EACH ROW EXECUTE FUNCTION public.artifact_immutable();
+CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON public.artifact_chat_turns FOR EACH ROW EXECUTE FUNCTION public.artifact_chat_history_immutable();
 CREATE OR REPLACE FUNCTION public.artifact_chat_conversation_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
