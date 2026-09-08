@@ -170,6 +170,8 @@ try {
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
+  apply("packages/db/migrations/0071_v3_research_billing.sql");
+  apply("packages/db/migrations/0071_v3_research_billing.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -333,6 +335,12 @@ try {
   const networkGuard=resolve(root,'local-loopback-only.cjs');
   writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
   console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
+  const searchPath=resolve(root,'packages/api/src/services/research/workbenchSearch.ts');
+  let searchSource=readFileSync(searchPath,'utf8');
+  const searchMarker="options=>connectAgentKey(options,process.env.AGENTKEY_API_KEY??'')";
+  if(searchSource.split(searchMarker).length!==2)throw new Error('research fixture boundary changed');
+  searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();return connectLocalAgentKey(options,new URL(row.data.value));}");
+  writeFileSync(searchPath,searchSource);
   const service = jwt("service_role"),
     anon = jwt("anon");
   const listener = createServer();

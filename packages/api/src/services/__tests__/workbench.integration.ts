@@ -2386,6 +2386,21 @@ aiTest('AI: research host dispatches only explicit query and recovers without re
   await expect(host.search({...input,actorId:actor} as never)).rejects.toThrow();
   const other=await generationFixture();
   await expect(host.search({...input,...other.scope})).rejects.toThrow();expect(connections).toBe(1);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  const interrupted={...input,requestId:randomUUID()};
+  await sql.query("create function research_host_reject_spend() returns trigger language plpgsql as $$begin raise exception 'test settlement unavailable'; end$$; create trigger research_host_spend before insert on credit_transactions for each row execute function research_host_reject_spend()");
+  try {await expect(host.search(interrupted)).rejects.toThrow();}
+  finally {await sql.query('drop trigger research_host_spend on credit_transactions; drop function research_host_reject_spend()');}
+  expect((await sql.query('select state,charged_credits from research_operations where id=$1',[interrupted.requestId])).rows[0]).toEqual({state:'succeeded',charged_credits:null});
+  await sql.query('update modules set active=false where id=$1',[t.f.moduleId]);
+  try {
+   expect((await host.search(interrupted)).state).toBe('succeeded');
+   expect((await host.search(interrupted)).state).toBe('succeeded');
+   await expect(host.search({...input,requestId:randomUUID()})).rejects.toThrow();
+   expect(connections).toBe(2);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);
+   expect((await sql.query('select count(*)::int n from credit_transactions where source_id=$1',[interrupted.requestId])).rows[0].n).toBe(1);
+  } finally {await sql.query('update modules set active=true where id=$1',[t.f.moduleId]);}
+
  } finally {await fixture.stop();}
 },60000);
 // Chat linkage uses the same real local Auth/PostgREST/credit transaction fixture.
@@ -3324,6 +3339,20 @@ aiTest('CHAT: search restores a lost response, adopts references once and cancel
   await panel.getByLabel('网页搜索关键词').fill('Unsent query');await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
   await panel.getByRole('button',{name:'取消未发送查询',exact:true}).click();await expect.poll(()=>panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
   expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  await panel.getByLabel('网页搜索关键词').fill(query);
+  await page.route('**/api/trpc/workbench.search*',async route=>{await route.fetch();await route.abort('failed');});
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  await page.unroute('**/api/trpc/workbench.search*');
+  await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});
+  await page.reload();await page.getByText('参考资料（可选）',{exact:true}).click();
+  expect(await panel.getByRole('button',{name:'恢复本次查询',exact:true}).isEnabled()).toBe(true);
+  await panel.getByRole('button',{name:'恢复本次查询',exact:true}).click();
+  await panel.getByText('Reference from the local MCP fixture.',{exact:true}).waitFor();
+  expect(await panel.getByLabel('网页搜索关键词').isEnabled()).toBe(false);
+  expect(await panel.getByRole('button',{name:'新搜索',exact:true}).count()).toBe(0);
+  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).evidence).toHaveLength(1);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);
  } finally {await context.close();await fixture.stop();}
 },120000);
 

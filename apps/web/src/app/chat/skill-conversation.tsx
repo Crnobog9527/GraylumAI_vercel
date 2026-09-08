@@ -940,7 +940,7 @@ export function SkillConversation({
             <details className="mt-5">
               <summary>参考资料（可选）</summary>
               <p className="my-2 text-sm text-[var(--text-tertiary)]">已关联的资料会随成果保留。你也可以选择已有资料或补充信息。</p>
-              <SearchReferences key={`${snapshot.projectId}:${snapshot.roundId}:${step}`} projectId={snapshot.projectId} roundId={snapshot.roundId} stepId={step} disabled={busy || snapshot.state !== "draft" || !!pendingWrite.current || !!pendingSave.current} run={run} reload={reload} />
+              <SearchReferences key={`${snapshot.projectId}:${snapshot.roundId}:${step}`} projectId={snapshot.projectId} roundId={snapshot.roundId} stepId={step} readOnly={snapshot.state !== "draft"} disabled={busy || !!pendingWrite.current || !!pendingSave.current} run={run} reload={reload} />
               {snapshot.evidence.map((e) => (
                 <div key={e.id} className="mt-3 space-y-2 break-words text-sm">
                   <label className="flex items-center gap-2">

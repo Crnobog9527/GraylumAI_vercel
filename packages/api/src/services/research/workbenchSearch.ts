@@ -34,11 +34,16 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
   if(auth.error||!auth.data.user||!isEmailVerified(auth.data.user))throw new Error('ARTIFACT_DENIED');
   return auth.data.user.id;
  }
- async function admission(input:Input,id:string){
+ async function resolve(input:Input,id:string){
   if(await actor()!==id)throw new Error('ARTIFACT_DENIED');
   const fixed=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'resolve'});
   if(fixed.error)throw new Error('ARTIFACT_DENIED');
   const binding=z.object({moduleId:uuid,skillId:uuid,revisionId:uuid,workflow:workflowSchema}).parse(fixed.data);
+  if(!binding.workflow.steps.some(step=>step.id===input.stepId))throw new Error('RESEARCH_SCOPE_UNAVAILABLE');
+  return binding;
+ }
+ async function admission(input:Input,id:string){
+  const binding=await resolve(input,id);
   const read=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'read'});
   if(read.error)throw new Error('ARTIFACT_DENIED');
   const snapshot=snapshotSchema.parse(read.data),step=binding.workflow.steps.find(s=>s.id===input.stepId);
@@ -60,7 +65,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
   },
   async search(raw:Input){
    const input=workbenchSearchInput.parse(raw),id=await actor();
-   await checkRateLimitAsync(id,'ai');await admission(input,id);
+   await checkRateLimitAsync(id,'ai');await resolve(input,id);
    const store=databaseBilledResearchStore(privateClient!,id);
    const params=parameters(input.query);
    const scope={projectId:input.projectId,roundId:input.roundId,stepId:input.stepId};
@@ -72,6 +77,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    if(previous&&previous.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
    // Recovery needs neither a provider connection nor a second search charge.
    if(previous&&previous.state!=='prepared')return publicResult(input.requestId,previous);
+   await admission(input,id);
    const settings=await privateClient!.from('system_settings').select('key,value').in('key',['v3_web_search','search_surcharge_credits']);
    if(settings.error||settings.data?.find(s=>s.key==='v3_web_search')?.value!==true)throw new Error('RESEARCH_DISABLED');
    const price=settings.data.find(s=>s.key==='search_surcharge_credits')?.value;
