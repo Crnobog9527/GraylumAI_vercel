@@ -3155,3 +3155,23 @@ aiTest('CHAT: retention purges chat hierarchy while retaining accounting and def
  expect((await sql.query('select id from conversations where id=$1',[pendingChat.conversationId])).rows).toHaveLength(0);
  expect((await db.rpc('purge_deleted_records',{p_days_old:30})).error).toBeNull();
 },60000);
+
+aiTest('CHAT: retention skips a busy project without blocking concurrent conversation restoration',async()=>{
+ const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const ordinary=randomUUID();await sql.query("insert into conversations(id,user_id,title,is_deleted,deleted_at) values($1,$2,'Expired ordinary concurrent','true',now()-interval '40 days')",[ordinary,actor]);
+ await sql.query("update conversations set is_deleted='true',deleted_at=now()-interval '40 days' where id=$1",[binding.conversationId]);
+ for(const table of ['tickets','ticket_replies','prompts','announcements'])await sql.query(`create table if not exists ${table}(id uuid primary key default gen_random_uuid(),is_deleted boolean default false,deleted_at timestamptz)`);
+ const holder=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await holder.connect();
+ try {
+  await holder.query('begin');await holder.query('select id from artifact_projects where id=$1 for update',[t.scope.projectId]);
+  const purge=await db.rpc('purge_deleted_records',{p_days_old:30}).abortSignal(AbortSignal.timeout(3000));
+  expect(purge.error).toBeNull();
+  expect((await sql.query('select id from conversations where id=$1',[ordinary])).rows).toHaveLength(0);
+  expect((await sql.query('select id from conversations where id=$1',[binding.conversationId])).rows).toHaveLength(1);
+  const restored=await holder.query("select artifact_chat($1,'attach',NULL,$2::jsonb) result",[actor,JSON.stringify({...t.scope,requestId:randomUUID()})]);
+  expect(restored.rows[0].result.conversationId).toBe(binding.conversationId);
+  await holder.query('commit');
+  expect((await skillChatService(t.user,db).read({conversationId:binding.conversationId})).binding.conversationId).toBe(binding.conversationId);
+ } finally {await holder.query('rollback');await holder.end();}
+},30000);

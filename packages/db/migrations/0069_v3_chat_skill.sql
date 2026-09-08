@@ -43,9 +43,11 @@ DECLARE c public.artifact_chats%ROWTYPE;
 BEGIN
  SELECT * INTO c FROM artifact_chats WHERE conversation_id=OLD.id;
  IF c.conversation_id IS NOT NULL THEN
-  -- Serialize against generation admission/settlement and preserve unresolved
+  -- Skip a busy project: attach already locks project before conversation.
+  -- Waiting here would reverse that order. Preserve unresolved
   -- request context. Returning NULL skips this row, not the rest of a purge.
-  PERFORM 1 FROM artifact_projects WHERE id=c.project_id FOR UPDATE;
+  PERFORM 1 FROM artifact_projects WHERE id=c.project_id FOR UPDATE SKIP LOCKED;
+  IF NOT FOUND THEN RETURN NULL; END IF;
   IF EXISTS(SELECT 1 FROM artifact_generations WHERE project_id=c.project_id AND round_id=c.round_id AND state IN ('prepared','dispatched','unknown','responded')) THEN RETURN NULL; END IF;
  END IF;
  RETURN OLD;

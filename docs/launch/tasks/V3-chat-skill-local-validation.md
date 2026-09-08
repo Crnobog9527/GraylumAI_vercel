@@ -177,3 +177,7 @@ The previous b6a5a4b review found the new conversation foreign key would abort t
 No deployment, production cleanup or paid provider call occurred. The full current candidate requires renewed CI, GitHub review and independent GPT-6/high audit. Owner has chosen to keep Luna; real dual-model acceptance remains for separately approved Vercel staging validation after the local regional refusal.
 
 Web typecheck: `/tmp/graylum-chat-retention-types.log`, process exit 0.
+
+Independent audit follow-up: the delete trigger's blocking project lock could invert the existing attach lock order. It now uses `FOR UPDATE SKIP LOCKED` and returns NULL immediately when the project is busy, retaining the pending-generation check after a successful lock. No queue or new retention table is added.
+
+`/tmp/graylum-chat-retention-validation-3.log`: 2 PASS / 89 SKIP, cleanup/canary and repeat migration PASS. In addition to retention/accounting coverage, a second SQL connection holds the project lock while purge must finish within three seconds, delete an ordinary expired conversation, and retain the busy guided conversation. The lock holder then executes the real attach operation and commits successfully. The former blocking implementation would wait for the held lock and exceed this timeout; that old implementation was not rerun. No remote cleanup or provider call.
