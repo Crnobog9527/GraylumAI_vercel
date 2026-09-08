@@ -2311,12 +2311,13 @@ aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, hist
  await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
  const {page,context}=await pageFor(credentials,requests);
  await page.goto(app+'/');await page.getByRole('button',{name:'开始分析',exact:true}).click();
- await page.waitForURL(u=>u.pathname==='/chat'&&u.searchParams.get('mode')==='skill');
- const choice=page.locator('section').filter({has:page.getByRole('heading',{name:t.f.label,exact:true})});
- await choice.getByRole('button',{name:'使用此 Skill',exact:true}).click();
+ await page.waitForURL(u=>u.pathname==='/marketplace');
+ expect(await page.getByRole('link',{name:'Skill 引导',exact:true}).count()).toBe(0);
+ await page.getByRole('heading',{name:t.f.label,exact:true}).first().click();
+ await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
  await page.getByLabel('给当前步骤发消息').waitFor();
  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
- async function send(body:string){await page.getByLabel('给当前步骤发消息').fill(body);await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await page.getByRole('button',{name:/^发送（最多/}).click();await poll(async()=>await page.getByLabel('给当前步骤发消息').inputValue()).toBe('');}
+ async function send(body:string){await page.getByLabel('给当前步骤发消息').fill(body);await page.getByRole('button',{name:'发送',exact:true}).click();await poll(async()=>await page.getByLabel('给当前步骤发消息').inputValue()).toBe('');}
  await send('BROWSER_FIRST_REQUIREMENT');await send('BROWSER_SECOND_REVISION');
  await poll(async()=>await page.locator('[data-message-role="assistant"]').count()).toBe(2);
  await page.getByRole('button',{name:'采用为工作稿',exact:true}).last().click();
@@ -2397,21 +2398,23 @@ aiTest('CHAT: late response preserves later input and draft; rejected quotes and
  const t=await generationFixture(),{page,context}=await pageFor();
  await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
  const composer=page.getByLabel('给当前步骤发消息'),draft=page.getByLabel('当前步骤工作稿');
- await composer.fill('ORIGINAL_SENT_MESSAGE');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();
+ await composer.fill('ORIGINAL_SENT_MESSAGE');
  let arrived!:()=>void,release!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r);
  await page.route('**/api/trpc/workbench.generate*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
- await page.getByRole('button',{name:/^发送（最多/}).click();await seen;
+ await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
  await composer.fill('LATER_UNSENT_MESSAGE');await draft.fill('LATER_LOCAL_DRAFT');release();
  await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(1);
  expect(await composer.inputValue()).toBe('LATER_UNSENT_MESSAGE');expect(await draft.inputValue()).toBe('LATER_LOCAL_DRAFT');
  await page.getByRole('button',{name:'新建对话',exact:true}).click();expect(new URL(page.url()).searchParams.get('conversation')).toBeTruthy();
  await composer.fill('');await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).click();await page.unroute('**/api/trpc/workbench.generate*');
- await composer.fill('REQUOTE_MESSAGE');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await page.getByRole('button',{name:/^发送（最多/}).waitFor();
- await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);await page.getByRole('button',{name:/^发送（最多/}).click();
- await poll(async()=>page.getByRole('button',{name:'查看本次费用',exact:true}).isEnabled()).toBe(true);
- await page.getByRole('button',{name:'查看本次费用',exact:true}).click();
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{
+  const response=await route.fetch();await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);await route.fulfill({response});
+ });
+ await composer.fill('REQUOTE_MESSAGE');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled()).toBe(true);
+ await page.unroute('**/api/trpc/workbench.generationQuote*');
  await sql.query("create function local_chat_receipt_fault() returns trigger language plpgsql as $$ begin if NEW.state='responded' then raise exception 'local receipt unavailable'; end if; return NEW; end $$; create trigger local_chat_receipt_fault before update on artifact_generations for each row execute function local_chat_receipt_fault()");
- try {await page.getByRole('button',{name:/^发送（最多/}).click();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();await page.reload();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();}
+ try {await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();await page.reload();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();}
  finally {await sql.query('drop trigger local_chat_receipt_fault on artifact_generations; drop function local_chat_receipt_fault()');}
  await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
  await page.reload();await page.getByRole('button',{name:'恢复已知结果',exact:true}).waitFor();
@@ -2480,10 +2483,10 @@ aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old 
  const t=await generationFixture(),{page,context}=await pageFor();await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
  let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
  await page.route('**/api/trpc/workbench.generationQuote*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
- await page.getByLabel('给当前步骤发消息').fill('QUOTED_A');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await seen;
+ await page.getByLabel('给当前步骤发消息').fill('QUOTED_A');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
  await page.getByLabel('给当前步骤发消息').fill('CURRENT_B');release();
- await expect.poll(async()=>await page.getByRole('button',{name:'查看本次费用',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
- expect(await page.getByRole('button',{name:/^发送（最多/}).count()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('CURRENT_B');await context.close();
+ await expect.poll(async()=>await page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByRole('button',{name:/积分/}).count()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('CURRENT_B');await context.close();
 },90000);
 
 aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{

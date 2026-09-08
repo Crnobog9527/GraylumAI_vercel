@@ -68,7 +68,8 @@ export function ChatEntry() {
         {mode.error.message} <a href="/chat">打开自由对话</a>
       </EntryNotice>
     );
-  if (guided || mode.data?.guided)
+  if (guided && !moduleId) return <MarketplaceRedirect />;
+  if (mode.data?.guided)
     return (
       <SkillPicker
         key={moduleId ?? "catalog"}
@@ -83,6 +84,11 @@ export function ChatEntry() {
       navigate={navigate}
     />
   );
+}
+function MarketplaceRedirect() {
+  const router = useRouter();
+  useEffect(() => { router.replace("/marketplace"); }, [router]);
+  return <EntryNotice>正在打开功能广场…</EntryNotice>;
 }
 function EntryNotice({ children }: { children: React.ReactNode }) {
   return (
@@ -170,9 +176,9 @@ function SkillPicker({
           onSelectConversation={navigate}
         />
         <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-xl font-semibold">选择 Skill 开始分析</h1>
+          <h1 className="text-xl font-semibold">选择用于本次分析的账号</h1>
           <p className="my-3 text-[var(--text-tertiary)]">
-            从对话补充需求，在步骤栏保存和确认成果。
+            选择后将直接进入对话。
           </p>
           {(error || catalog.error) && (
             <p role="alert">

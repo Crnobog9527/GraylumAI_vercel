@@ -58,8 +58,8 @@ export default function SixStepsGuide({ onStartAnalysis }: SixStepsGuideProps) {
     if (onStartAnalysis) {
       onStartAnalysis();
     } else {
-      // Default: navigate to chat
-      router.push('/chat?mode=skill');
+      // Share the existing module selection entry.
+      router.push('/marketplace');
     }
   };
 

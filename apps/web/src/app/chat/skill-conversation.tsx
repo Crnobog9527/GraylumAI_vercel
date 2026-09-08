@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { ReferenceContent } from "./reference-content";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import type { ArtifactSnapshot } from "@repo/api/src/services/artifacts/public";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -36,10 +37,6 @@ export function SkillConversation({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [showSteps, setShowSteps] = useState(true);
-  const [quote, setQuote] = useState<{
-    input: Parameters<typeof api.generate.mutate>[0];
-    body: string;
-  } | null>(null);
   const [delivery, setDelivery] = useState<
     Parameters<typeof api.generate.mutate>[0] | null
   >(null);
@@ -80,7 +77,7 @@ export function SkillConversation({
   async function finishNavigation(next: string) {
     if (!alive.current) return;
     if (state.current.dirty) {
-      setError("目标轮次已准备好。请先处理当前未保存内容，再从轮次列表打开。");
+      setError("新方案已准备好。请先处理当前未保存内容，再从历史版本打开。");
       await reload();
       return;
     }
@@ -274,7 +271,7 @@ export function SkillConversation({
       await reload();
     }, true);
   }
-  async function obtainQuote() {
+  async function send() {
     if (!scope || !snapshot || !input.trim()) return;
     const body = input.trim(),
       selected = step,
@@ -312,20 +309,18 @@ export function SkillConversation({
         expectedSteps,
       };
       const q = await api.generationQuote.mutate(value);
-      if (
-        alive.current &&
-        inputRevision.current === inputEpoch &&
-        state.current.chat?.binding.stepId === selected
-      )
-        setQuote({
-          body,
-          input: {
-            ...value,
-            requestId,
-            quoteHash: q.quoteHash,
-            budgetCredits: q.reservedCredits,
-          },
-        });
+      if (!alive.current || inputRevision.current !== inputEpoch ||
+          state.current.chat?.binding.stepId !== selected) {
+        // Editing while admission is pending cancels this intent before dispatch.
+        // Tombstone it so it cannot later enter history/context as a sent message.
+        await api.abandonGeneration.mutate({ ...scope, requestId });
+        await reload();
+        return;
+      }
+      // The Send click authorizes this message. Pricing stays server-controlled;
+      // no amount is shown or accepted as a separate user interaction.
+      await deliver({ ...value, requestId, quoteHash: q.quoteHash,
+        budgetCredits: q.reservedCredits });
       await reload();
     }, true);
   }
@@ -352,7 +347,6 @@ export function SkillConversation({
       if (result.abandoned) {
         rememberDelivery(null);
         pendingWrite.current = null;
-        if (alive.current) setQuote(null);
       }
       await reload().catch(() => undefined);
       throw error;
@@ -362,7 +356,6 @@ export function SkillConversation({
     else if (status.state === "succeeded" || status.state === "refunded")
       remember(status.requestId);
     if (alive.current) {
-      setQuote(null);
       setInputs((old) => ({
         ...old,
         [value.stepId]:
@@ -373,12 +366,6 @@ export function SkillConversation({
     }
     await reload();
     rememberDelivery(null);
-  }
-  async function send() {
-    if (quote && quote.body === input.trim() && quote.input.stepId === step) {
-      const sending = quote.input;
-      await run(() => deliver(sending), true);
-    }
   }
   const unresolved = snapshot?.generations?.some((g) =>
     ["prepared", "dispatched", "responded", "unknown"].includes(g.state),
@@ -451,7 +438,7 @@ export function SkillConversation({
                       {t.abandoned
                         ? " · 未发送，未扣费"
                         : t.generationState === "unsent"
-                          ? " · 待确认发送"
+                          ? " · 尚未发送"
                           : ""}
                     </p>
                     <p className="whitespace-pre-wrap break-words">
@@ -517,7 +504,6 @@ export function SkillConversation({
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
-                setQuote(null);
               }}
               placeholder="补充需求，或告诉 AI 需要怎样修改…"
             />
@@ -531,9 +517,9 @@ export function SkillConversation({
                   !!draft?.dirty ||
                   snapshot?.state !== "draft"
                 }
-                onClick={() => void obtainQuote()}
+                onClick={() => void send()}
               >
-                查看本次费用
+                {busy ? "正在发送…" : "发送"}
               </Button>
               {delivery && (
                 <Button
@@ -542,14 +528,6 @@ export function SkillConversation({
                   onClick={() => void run(() => deliver(delivery), true)}
                 >
                   恢复原发送状态
-                </Button>
-              )}
-              {quote && !delivery && (
-                <Button
-                  disabled={busy || !!unresolved}
-                  onClick={() => void send()}
-                >
-                  发送（最多 {quote.input.budgetCredits} 积分）
                 </Button>
               )}
               <Button
@@ -644,7 +622,6 @@ export function SkillConversation({
                         conversationId,
                         stepId: s.id,
                       });
-                      setQuote(null);
                       await reload();
                     })
                   }
@@ -821,9 +798,11 @@ export function SkillConversation({
               </details>
             )}
             <details className="mt-5">
-              <summary>来源与确认历史</summary>
+              <summary>参考资料（可选）</summary>
+              <p className="my-2 text-sm text-[var(--text-tertiary)]">已关联的资料会随成果保留。你也可以选择已有资料或补充信息。</p>
               {snapshot.evidence.map((e) => (
-                <label key={e.id} className="mt-2 block break-words text-sm">
+                <div key={e.id} className="mt-3 space-y-2 break-words text-sm">
+                  <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     disabled={
@@ -847,8 +826,10 @@ export function SkillConversation({
                       }))
                     }
                   />
-                  {e.available ? JSON.stringify(e.payload) : "来源已受限"}
-                </label>
+                  关联到本步骤
+                  </label>
+                  {e.available ? <ReferenceContent payload={e.payload} /> : "来源已受限"}
+                </div>
               ))}
               <textarea
                 aria-label="补充来源"
@@ -879,6 +860,9 @@ export function SkillConversation({
               >
                 保存来源补充
               </Button>
+            </details>
+            <details className="mt-5">
+              <summary>本步骤的确认记录</summary>
               {snapshot.confirmations
                 .filter((c) => c.stepId === step)
                 .map((c) => (
@@ -891,9 +875,9 @@ export function SkillConversation({
                 ))}
             </details>
             <details className="mt-5">
-              <summary>轮次与历史</summary>
+              <summary>历史版本</summary>
               <p className="my-2 text-sm">
-                每轮固定使用创建时的方法。历史内容不会被新一轮覆盖。
+                查看之前的方案，或重新做一版；原有成果会保留。
               </p>
               {rounds.map((r, i) => (
                 <Button
@@ -913,7 +897,7 @@ export function SkillConversation({
                     }, true);
                   }}
                 >
-                  轮次 {i + 1} ·{" "}
+                  方案 {i + 1} ·{" "}
                   {r.version
                     ? `正式 v${r.version}`
                     : r.state === "draft"
@@ -946,7 +930,7 @@ export function SkillConversation({
                   }, true);
                 }}
               >
-                沿用本轮方法开始新一轮
+                重新做一版
               </Button>
             </details>
             <details className="mt-5">
