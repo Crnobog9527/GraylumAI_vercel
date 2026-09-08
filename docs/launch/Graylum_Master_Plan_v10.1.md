@@ -88,7 +88,7 @@ progress_refresh_v10_1:
 | D8 | 首发商品 | Pro/Gold 月付+年付 + ≥1 个正金额积分包；零金额/未配置不得 checkout-ready（#276）；首发恢复 Billing Engine v1.5 仅升级路径（Pro→Gold、月付→年付）；禁止降级/同级同周期重复；到期取消须先恢复续费。 |
 | **D11** | 大陆支付（2026-08-15） | **大陆是核心付费盘。** Owner 实测确认两条已跑通：① **会员订阅**=卡支付（Visa/Master，含大陆发行的双币卡）可成功续费 ✓ —— 大陆会员的**主路径**；② **积分包**=支付宝+卡，一次性收款成功 ✓。<br>**支付宝续费订阅**（Stripe Checkout subscription 模式**不支持** alipay、recurring alipay 仅 private preview，[文档](https://docs.stripe.com/payments/alipay)）降级为**可选增强、且非"置开关即得"**：Owner 可并行向 Stripe 申请 recurring preview，但**审批通过只是前提，续费机制仍需单独实现任务**（保存方式+off-session），非本次范围（详见 PAY-1 第 3 条）。`alipay_subscription_enabled` 上线保持 false；**不批、批了但未实现，均不影响上线**（卡订阅已覆盖会员）。<br>**已删除**：原"一次性会员资格包"保底路径——卡订阅实测可用后不再需要，PAY-1 相应减负、**取消其迁移槽**。<br>**边界说明**（备查，非任务）：仅持银联单币卡且不用支付宝的用户无法购买会员，但可用支付宝购买积分包；无人被完全挡在付费之外。 |
 | **D12** | 人机验证架构（2026-08-15） | **全体统一用 Supabase 原生 hCaptcha**，弃用"应用层地域分流（极验/阿里云）"。**根因**：注册/登录是浏览器用公开 anon key **直连 Supabase**（`login/page.tsx:128/181/222` 实测），不经 Graylum 服务端 → 应用层 CAPTCHA 无法卡住注册端点（第 4 轮 F2）；而 Supabase 原生 CAPTCHA **只支持 hCaptcha/Turnstile**（官方文档），选 hCaptcha（大陆可用的 reCAPTCHA 替代）。覆盖：邮箱注册、密码登录、**未来手机 OTP**（同为客户端直连，原生 hCaptcha 一并覆盖）。**OAuth（Google）不走 hCaptcha**（重定向流不接受 captchaToken），依赖 Google 自身机器人防护——AUTH-1 不得强行给 OAuth 加 captcha 否则会打断。<br>**时序纪律（F7 复活）**：开启 Supabase 原生 CAPTCHA 后，客户端必须传 `captchaToken`，否则登录全断 → 后台开关必须与 AUTH-1 前端接入**同环境配对**开启（见 AUTH-1、§9）。 |
-| D9 | 生产 8 个旧模块 | **全部停用。** 它们是生产库 `modules` 表的 8 条真实数据行（2026-01-20 创建、带历史 usage_count、全部无 system_prompt/prompt_content），非硬编码。停用=生产库数据操作（§9 gate 内执行，复验须按 id 逐行确认，见 §4-C）。上线所需 active 模块由 SKILL-1B 新建并在生产库创建绑定（§9）。 |
+| D9 | 生产 8 个旧模块 | **全部停用。** 它们是生产库 `modules` 表的 8 条真实数据行（2026-01-20 创建、带历史 usage_count、全部无 system_prompt/prompt_content），非硬编码。停用=生产库数据操作（§9 gate 内执行），复验须按 id 逐行确认，见 §4-C）。上线所需 active 模块由 SKILL-1B 新建并在生产库创建绑定（§9）。 |
 
 ---
 
@@ -176,7 +176,7 @@ progress_refresh_v10_1:
 - Release：PR **#312**（`staging → main`）已 merged；当前 `main = ecf4c6a347038f9352477a98d4171a8ef00c85de`。
 - History convergence：PR **#313**（`main → staging`）已 merged，仅同步 #312 merge history；当前 `staging = c39311bca4ab44769d5cd2cf3d0e3f8046fb0938`。
 - Tree convergence：当前 main / staging 的 repository tree 均为 `f1a6bb44d456666984e7295328843283413afeaa`；PR #313 不引入 repository file 内容变化。
-- Closeout：Issue #311 已于 2026-08-16 关闭，state reason=`completed`。因此旧的“R0-B 合并前禁止”已完成其门禁使命，不再阻塞后续**另行授权**的任务。
+- Closeout：Issue #311 已于 2026-08-16 关闭，state reason=`completed`。因此旧的“R0-B 前不得进入功能/迁移”的冻结已解除；后续仍须另行授权。
 - `ADMIN_MODEL_API_KEY_SAVE_FAILURE` **未在 R0-B 中调查或修复**，继续保持 `SEPARATE_BUG_TASK`，不得借后续 STG-FIX / SEC-1 / AUTH-1 顺手扩大范围。
 
 **STG-FIX staging 基线补齐 — ⏭ 下一计划任务（尚未授权执行）** — 独占 **SLOT-1**
@@ -229,7 +229,7 @@ progress_refresh_v10_1:
   ```bash
   grep -rn "\.auth\.signUp\|\.auth\.signInWithPassword\|\.auth\.signInWithOtp\|\.auth\.resend\|\.auth\.resetPasswordForEmail\|\.auth\.verifyOtp" apps/web/src --include="*.tsx" --include="*.ts" | grep -v "\.test\."
   ```
-  **审计时（b148803）该 grep 的完整结果 = 5 处、3 文件**（以开工 fresh-read 为准，可能已变）：`login/page.tsx:128 signInWithPassword`、`login/page.tsx:181 signUp`、`verify-email/page.tsx:112 resend`、**`SecuritySettingsCard.tsx:67 resend`**、**`SecuritySettingsCard.tsx:117 signInWithPassword（改密码前重认证）`**。captcha 传参封装为公共函数、所有入口复用（也为手机 OTP 预留，§19）。
+  **审计时（b148803）该 grep 的完整结果 = 5 处、3 文件**（以开工 fresh-read 为准，可能已变）：`login/page.tsx:128 signUp`、`login/page.tsx:181 signUp`、`verify-email/page.tsx:112 resend`、**`SecuritySettingsCard.tsx:67 resend`**、**`SecuritySettingsCard.tsx:117 signInWithPassword（改密码前重认证）`**。captcha 传参封装为公共函数、所有入口复用（也为手机 OTP 预留，§19）。
 - 验收：测试/清单覆盖——邮箱未验证：无 profile 无发放；邮箱已验证：恰好一次 100；**Google OAuth 注册：恰好一次 100 且不重复、且不因 captcha 缺失被拒**；重放不重复；service-role 缺失 fail-closed；**在启用 CAPTCHA 的 staging 上：⑥-a grep 列出的\*每一个\*入口（含 `SecuritySettingsCard` 的 resend 与改密码 reauth）各在缺失/无效 token 时被拒、带有效 token 时通过**——PR 须附该 grep 的当次输出并逐条对应到已接入的代码；`pnpm test:api` ✅。
 - allowed_paths：`packages/api/src/trpc.ts`、`packages/api/src/lib/auth.ts`、`packages/db/schema.ts`、`packages/db/migrations/<SLOT-3>.sql`、`apps/web/src/app/login/**`、`apps/web/src/app/verify-email/**`、`apps/web/src/components/profile/SecuritySettingsCard.tsx`、以及 ⑥-a grep 在开工时新surface 的任何调用点文件、相关测试。预估 **3–4 天**（单 provider）。
 - **Owner 前置**：注册一个 hCaptcha 站点，拿 sitekey（公开，前端用）与 secret（填入 Supabase Auth → CAPTCHA 设置，不交给编码代理）；**但 Supabase 的 CAPTCHA 强制开关先别开**——等 AUTH-1 前端接入部署到该环境后再开（staging 随 AUTH-1 部署、生产随 §9 新 runtime 生效）。
@@ -309,7 +309,7 @@ progress_refresh_v10_1:
 2. Supabase Auth：开启强制邮箱确认、注册限流。**CAPTCHA（D12，v8 改定）**：注册一个 **hCaptcha** 站点，把 secret 填入 Supabase Auth → CAPTCHA 设置、sitekey 交前端——**但强制开关先别开**，等 AUTH-1 前端接入部署到该环境后再开（否则登录全断，见 §9）。极验/阿里云不再需要（应用层方案已废，见 D12）。**泄露密码保护移至 B-2**（付费功能，随 Supabase 升级一并开）。**⚠️ 尽早用火山引擎（大陆不翻墙）环境实测 hCaptcha 挑战能加载并通过**——这是 D12 方案的唯一假设，且已升为 **G7 硬门**（§8 G7⑥，未过则 DO_NOT_OPEN）。越早测越好：万一大陆加载不了，早发现可及时改用 Cloudflare Turnstile 重测，别拖到上线前。
 3. ✅ Stripe 后台：Radar、3DS、Customer Portal 只留"取消+发票"、收据信息——已完成。
 4. **税务显式决定**：启用 Stripe Tax（仅已登记辖区）或暂不收税并记录理由——二选一，开门前必须落字。
-5. ✅ **Resend 注册 + 域名验证**（graylum.com 已 Verified、DKIM/SPF 通过）；建议补一条 **DMARC**（`_dmarc` TXT `v=DMARC1; p=none;`）改善对 QQ/163 送达。
+5. ✅ **Resend 注册 + 域名验证**（graylum.com 已 Verified、DKIM/SPF 通过、Tokyo 区）。建议补一条 **DMARC**（`_dmarc` TXT `v=DMARC1; p=none;`）改善对 QQ/163 送达。
 6. ✅ **Supabase 自定义 SMTP 已配**（Resend，Sender `no-reply@graylum.com`，Host `smtp.resend.com:465`）。**真实投递实测推迟到 M3**（Owner 决定）——届时用真实邮箱走注册/找回密码确认收到邮件，作为 G7 证据。当前不阻塞。
 7. **邮件模板美化** → 记入 COM-1（Supabase 6 个 Auth 模板 + 中英文），上线前做，不阻塞。
 8. **【可选增强，非阻塞】向 Stripe 申请支付宝 recurring preview**：卡订阅实测已可续费，故支付宝续费仅"锦上添花"。想申请就并行提交；**但注意审批通过≠即可用**——续费机制需单独实现任务（PAY-1 不含），上线 `alipay_subscription_enabled` 保持 false。不批/未实现均不影响上线。
@@ -331,7 +331,7 @@ progress_refresh_v10_1:
    - 另需确认操作对象是生产：`select current_database(), (select count(*) from profiles);` 应与 EXT-0 记录一致（5 profiles）。
 7. **生产 Skill 与模块创建**（§9 必经步骤，见下）。
 
-**COM-1 商业内容**：正式商品名/USD/credits/周期定稿且 DB=Stripe Price 一致；terms/privacy/acceptable-use/退款政策文本审定；自动续费披露、cancel-at-period-end、原则不退款+Owner 审核例外、refund 后当期扣回+未来停发、其他来源不动；support 邮箱实测可收件；payment stuck/cancel/refund/chargeback/账号数据请求 SOP；seller identity。编码代理只落地 Owner 批准文本。
+**COM-1 商业内容**：正式商品名/USD/credits/周期定稿且 DB=Stripe Price 一致；terms/privacy/acceptable-use/退款政策文本审定；自动续费披露、cancel-at-period-end、原则不退款+Owner 审核例外、refund 后当期扣回+未来停发、其他来源不动；support 邮箱实测收件；payment stuck/cancel/refund/chargeback/账号数据请求 SOP；seller identity。编码代理只落地 Owner 批准文本。
 
 **Skill 内容**：最迟 M3 开始前 Owner 批准 ≥1 份真实非占位 Skill。建议 Day 1 起草。
 
@@ -504,7 +504,7 @@ OWNER 当前动作：
 
 **事实错误（4）**：① 治理冲突 → 新增 D10 + GOV-1 任务，§3 重定义两道 PASS。② 迁移顺序矛盾 → §9 改为唯一 12 步序列，SEC-1 迁移**包含在**统一迁移步骤内、不单独重复执行；env 核对位置在 §6/§9 统一为第 2 步。③ R0 边界 → 禁令从"R0-A 合并前"改为"R0-B 合并前"，R0-B 补任务卡。④ "0027–0034 从未应用到生产"表述错误 → §2 更正为"已应用，推定被改签名重置"，并标注**根因待 SEC-1 验证**。
 
-**遗漏（9）**：⑤ 生产 Skill/模块创建 → §9 第 6 步 + G4 改为查生产库。⑥ REFUND-1B 超用竞态 → 任务卡第 3 条 + 验收例 + §7 矩阵（已用 `0023:98,105` 验证现有行为确实无差别扣减）。⑦ 两次 promotion 无任务卡 → 新增 R0-B、REL-1 任务卡（六项证据）。⑧ staging 缺失对象 → 新增 STG-FIX 任务（独占 SLOT-2）。⑨ CAPTCHA 无人认领 → 并入 AUTH-1（前端接入）+ C-A 组（后台开关）。⑩ ENV-1 → §9 第 2 步给出完整环境变量清单与"缺一即停"规则。⑪ Gate 0 → 恢复为 G0。⑫ db:push 无机器防护 → 并入 CI-1。⑬ OAuth 无验收 → §1 明写两条注册路径，AUTH-1 加 OAuth 保障与测试。
+**遗漏（9）**：⑤ 生产 Skill/模块创建 → §9 第 6 步 + G4 改为查生产库。⑥ REFUND-1B 超用竞态 → 任务卡第 3 条 + 验收例 + §7 矩阵（已用 `0023:98,105` 验证现有行为确实无差别扣减）。⑦ 两次 promotion 无任务卡 → 新增 R0-B、REL-1 任务卡（六项证据）。⑧ staging 缺失对象 → 新增 STG-FIX 任务（独占 SLOT-2）。⑨ CAPTCHA 无人认领 → 并入 AUTH-1（前端接入）+ C-A 组（后台开关）。⑩ ENV-1 → §9 第 2 步给出完整环境变量清单与"缺一即停"规则。⑪ Gate 0 → 恢复为 G0。⑫ db:push 无机器防护 → 并入 CI-1（迁移账本一致性检查 + 禁 CI 执行）。⑬ OAuth 无验收 → §1 明写两条注册路径，AUTH-1 加 OAuth 保障与测试。
 
 **风险（10）**：⑭ D9 复验太弱 → 改为按 id 逐行 + 确认所连数据库。⑮ active+unbound 可回退 → D7 明确"active+unbound 即故障"，SKILL-1B 验收与 G4 增加该项。⑯ G8 对账窗口错位 → canary 后手动触发覆盖当日窗口的对账。⑰ SEC-1 验收不足 → 改为白名单式空集查询，覆盖 anon 与 authenticated 全集，`purge_deleted_records`/`cleanup_*`/`atomic_*` 禁入白名单。⑱ SMTP 验收可蒙混 → G7 要求证明自定义 SMTP（设置页 + Resend 投递记录）。⑲ G7 cron 只要记录 → 改为要求 success 状态。⑳ webhook secret 轮换 → §10 改为三步绑定（生成→更新 Vercel→重新部署验证）。㉑ `launch_baseline_at` 缺失 → BILL-1 恢复 baseline 分层，G2 相应改写。㉒ checkout 限流 → 并入 PAY-1。㉓ provider 余额告警 → 并入 G7。
 
@@ -518,14 +518,14 @@ OWNER 当前动作：
 
 **事实错误（4）**
 1. `[承接#1][P0] D10 自锁` —— **确认成立**。R0-B 是 staging→main 的 production release，按 AGENTS.md §High-Risk Gate 属高风险，而 v5 把它排在 GOV-1 之前，与 D10"GOV-1 合并前不得启动高风险任务"直接冲突。**修正**：执行顺序改为 **R0-A → GOV-1 → R0-B → STG-FIX**；D10 显式列出两项豁免（R0-A 入 staging 的依赖 backmerge、GOV-1 自身的文档变更均不在高风险清单），并声明 R0-B/REL-1 必须后置。§6、§13 同步。
-2. `[承接#2][P0] 槽位与执行顺序反向` —— **确认成立**。STG-FIX 在 M0 执行却分到 SLOT-2、SEC-1 在 M1 执行却分到 SLOT-1，与"合并顺序不得变更"互斥。**修正**：**SLOT-1=STG-FIX、SLOT-2=SEC-1**，其余不变；新增不变量"执行/合并顺序 = 槽位号升序"。
+2. `[承接#2][P1] 槽位与执行顺序反向` —— **确认成立**。STG-FIX 在 M0 执行却分到 SLOT-2、SEC-1 在 M1 执行却分到 SLOT-1，与"合并顺序不得变更"互斥。**修正**：**SLOT-1=STG-FIX、SLOT-2=SEC-1**，其余不变；新增不变量"执行/合并顺序 = 槽位号升序"。
 3. `[承接#12][P0] CI 迁移编号检查必然失败` —— **确认成立**（实测：`0018_payment_fulfillment_atomicity.sql` 与 `0018_rls_text_flags_and_job_runs.sql` 并存，且已应用不得编辑；0001–0047 无缺号）。**修正**：CI-1 明确 historical allowlist 豁免这组 0018，仅对编号 >0047 的新迁移强制无重复；连续性只校验新增段。并加验收"现状仓库必须通过、新增重复必须失败"。
 4. `[新][P1] 任务卡缺 allowed_paths 与停止条件` —— **确认成立**（实测 14 张卡中 9 张无 `allowed_paths`）。**修正**：为 R0-A、R0-B、YEAR-1、BILL-1、SKILL-1A、SKILL-1B、PAY-1、CI-1、REL-1 全部补齐 `allowed_paths`；§4 新增"全局禁止动作 + 7 条全局停止条件"，构成 GOV-1 所定义的 sprint contract 组成部分，无需逐卡重复。
 
 **遗漏（0）**：本轮无新增遗漏。
 
 **风险（6）**
-5. `[承接#7+#10][P0] runtime 先于 schema 上线` —— **确认成立**（`vercel.json` main 自动部署；实测 `maintenance_mode` 只覆盖 tRPC/upload/ai-stream，**不阻断 cron 与 webhook**）。**修正**：§9 重排为 16 步，**REL-1 合并降为第 8 步**，位于 maintenance→env→快照→迁移→SEC-1 复验→baseline 之后；新增"env 变更后必须手动 redeploy 并确认生效"；新增部署后冒烟步；显式写出本窗口风险边界（生产 active 订阅=0、站点未公开、Stripe 自动重试）与"未来有真实用户时必须先补 cron/webhook release-freeze"的前提声明。
+5. `[承接#7+#10][P0] runtime 先于 schema 上线` —— **确认成立**（`vercel.json` main 自动部署；实测 `maintenance_mode` 只覆盖 tRPC/upload/ai-stream，**不阻断 cron 与 Stripe webhook**）。**修正**：§9 重排为 16 步，**REL-1 合并降为第 8 步**，位于 maintenance→env→快照→迁移→SEC-1 复验→baseline 之后；新增"env 变更后必须手动 redeploy 并确认生效"；新增部署后冒烟步；显式写出本窗口风险边界（生产 active 订阅=0、站点未公开、Stripe 自动重试）与"未来有真实用户时必须先补 cron/webhook release-freeze"的前提声明。
 6. `[承接#6][P0] 超用竞态验收不覆盖真并发` —— **确认成立**（v5 的"若已 reversed 则不补扣"是读后判断，存在 TOCTOU）。**修正**：REFUND-1B 新增第 3b 条**并发屏障**——退款 clawback 与 AI finalize/abort 统一锁序（先 `SELECT … FOR UPDATE` 锁 grant 行，再锁 profile 行），状态与计数的读写全部在锁内；验收拆为**顺序型 + 交错型**两个用例，交错型必须真实制造双事务交错，不接受顺序调用模拟。
 7. `[承接#17][P1] 白名单按函数名排除` —— **确认成立**。**修正**：SEC-1 验收查询改为按 `p.oid::regprocedure` 完整签名排除，白名单须逐条写完整签名；并明确 `atomic_*`/`cleanup_*`/`purge_deleted_records` 的**任何 overload** 均不得入白名单。
 8. `[承接#21][P1] baseline 未设置/未冻结` —— **确认成立**。**修正**：§9 新增第 7 步（设置 → 读回确认 → 冻结并记入 rollout packet，时点定在迁移之后、canary 之前）；BILL-1 验收新增"baseline 为空或不可解析时对账 fail-closed 返回 BLOCKED"；G2 增列该项。
@@ -573,7 +573,7 @@ OWNER 当前动作：
 
 **R0-A 进度留痕**：本段记录的是 2026-08-15 当时状态（PR #309 已完成待合并）。**2026-08-16 live 状态已前进：PR #309 merged；其后 GOV-1 / R0-B 也均完成，详见 §13 与 §22。**
 
-**D11 大陆支付（含 08-15 简化）**：大陆确认为核心付费盘。Owner 实测两条已跑通——**卡支付（大陆双币 Visa/Master）可续费会员** + **支付宝可付积分包**。故：会员=卡（含大陆双币卡），积分包=支付宝+卡。支付宝续费订阅（Checkout 原生不支持）降为可选增强、开关默认关、不 gating。**原"会员资格包"保底路径已删除**（卡订阅实测可用后不需要）→ PAY-1 回落到 3–3.5 天、取消 SLOT-7、无迁移。→ 已并入 §0 D11、PAY-1 任务卡、§5、C-A 第 8 项。
+**D11 大陆支付（含 08-15 简化）**：大陆确认为核心付费盘。Owner 实测两条已跑通——**卡支付（大陆双币 Visa/Master）可续费会员** + **支付宝可付积分包**。故：会员=卡（含大陆双币卡），积分包=支付宝+卡。支付宝续费订阅（Checkout 原生不支持）降为可选增强、开关默认关、不 gating。**原"会员资格包"保底路径已删除**（卡订阅实测可用后不再需要）→ PAY-1 回落到 3–3.5 天、取消 SLOT-7、无迁移。→ 已并入 §0 D11、PAY-1 任务卡、§5、C-A 第 8 项。
 
 **CAPTCHA 改地域分流** ~~（v7 决策）~~ → **⚠️ 已被 v8 D12 推翻，见 §18 F2**：第 4 轮审计证实注册是浏览器直连 Supabase，应用层地域分流挡不住；改回 **Supabase 原生 hCaptcha 全体统一**，AUTH-1 回落 3–4 天，F7 时序纪律随之复活。本行保留仅作演进留痕，实际以 D12 / AUTH-1 / §9 第 8b 步为准。
 
