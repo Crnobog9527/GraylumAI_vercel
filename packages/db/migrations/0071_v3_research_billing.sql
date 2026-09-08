@@ -69,6 +69,8 @@ GRANT EXECUTE ON FUNCTION public.research_billing_summary(timestamptz,timestampt
 CREATE OR REPLACE FUNCTION public.research_cancel(p_actor_id uuid,p_plan_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
+ IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'research denied' USING ERRCODE='42501'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM research_plans WHERE id=p_plan_id) THEN RETURN true; END IF;
  PERFORM research_transition('cancel',p_plan_id,p_actor_id,NULL,'{}');
  PERFORM research_user_charge(p_actor_id,p_plan_id,NULL,'refund');
  RETURN NOT EXISTS(SELECT 1 FROM research_operations WHERE plan_id=p_plan_id AND state<>'cancelled');

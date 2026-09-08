@@ -56,11 +56,12 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
  return {
   async cancel(raw:Input){
    const input=workbenchSearchInput.parse(raw),id=await actor();
-   const fixed=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'resolve'});
-   if(fixed.error)throw new Error('ARTIFACT_DENIED');
+   await resolve(input,id);
    const store=databaseBilledResearchStore(privateClient!,id);
    const identityHash=researchIdentity(tavilyCapabilities[0],parameters(input.query),{projectId:input.projectId,roundId:input.roundId,stepId:input.stepId});
-   await store.create(input.requestId,1100000,[{operationId:input.requestId,identityHash,maxQuoteUnits:1100000}]);
+   const lookup=await privateClient!.rpc('research_lookup',{p_actor_id:id,p_plan_id:input.requestId,p_operation_id:input.requestId});
+   if(lookup.error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
+   if(lookup.data&&lookup.data.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
    return {cancelled:(await store.cancel(input.requestId))===true};
   },
   async search(raw:Input){

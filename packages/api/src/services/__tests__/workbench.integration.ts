@@ -3347,15 +3347,25 @@ aiTest('CHAT: search restores a lost response, adopts references once and cancel
   await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).check();
   await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:15000}).toEqual([snapshot.evidence[0].id]);
   expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
-  await panel.getByRole('button',{name:'新搜索',exact:true}).click();await sql.query("update system_settings set value='false' where key='v3_web_search'");
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();
+  // A terminal paid result must remain clearable even if evidence adoption fails.
+  await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+  await panel.getByLabel('网页搜索关键词').fill(query);
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();
+  expect(await panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
+  expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith('graylum-search:')))).toEqual([]);
+  await page.unroute('**/api/trpc/workbench.execute*');
+  await sql.query("update system_settings set value='false' where key='v3_web_search'");
   await panel.getByLabel('网页搜索关键词').fill('Unsent query');await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
   await panel.getByRole('button',{name:'取消未发送查询',exact:true}).click();await expect.poll(()=>panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
-  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-10);
   await sql.query("update system_settings set value='true' where key='v3_web_search'");
   fixture.setBehavior('error');await panel.getByLabel('网页搜索关键词').fill(query);
   await panel.getByRole('button',{name:'搜索网页',exact:true}).click();
   await panel.getByText('本次搜索失败，预扣积分已退回。你可以发起新搜索。',{exact:true}).waitFor();
-  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-10);
   await panel.getByRole('button',{name:'新搜索',exact:true}).click();fixture.setBehavior('success');
   await panel.getByLabel('网页搜索关键词').fill(query);
   await page.route('**/api/trpc/workbench.search*',async route=>{await route.fetch();await route.abort('failed');});
@@ -3369,12 +3379,19 @@ aiTest('CHAT: search restores a lost response, adopts references once and cancel
   expect(await panel.getByLabel('网页搜索关键词').isEnabled()).toBe(false);
   expect(await panel.getByRole('button',{name:'新搜索',exact:true}).count()).toBe(0);
   expect((await t.service.read(t.scope.projectId,t.scope.roundId)).evidence).toHaveLength(1);
-  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(3);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(4);
  } finally {await context.close();await fixture.stop();}
 },120000);
 
 aiTest('AI: research cancellation reports unsent and dispatched outcomes under the plan lock',async()=>{
  const {databaseBilledResearchStore}=await import('../research/store');const store=databaseBilledResearchStore(db,actor);
+ const t=await generationFixture(),{workbenchSearch}=await import('../research/workbenchSearch');
+ const host=workbenchSearch(t.user,db),ids=Array.from({length:12},()=>randomUUID());
+ for(const requestId of ids)expect(await host.cancel({...t.scope,stepId:'step-0',query:'Missing query',requestId})).toEqual({cancelled:true});
+ expect((await sql.query('select id from research_plans where id=any($1::uuid[])',[ids])).rows).toHaveLength(0);
+ await expect(host.cancel({...t.scope,stepId:'missing-step',query:'Missing query',requestId:randomUUID()})).rejects.toThrow('RESEARCH_SCOPE_UNAVAILABLE');
+ const foreign=await newUser();
+ await expect(workbenchSearch(await authenticated(foreign),db).cancel({...t.scope,stepId:'step-0',query:'Missing query',requestId:randomUUID()})).rejects.toThrow();
  await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
  for(const state of ['empty','prepared','dispatched']){
   await sql.query('update profiles set credits=100 where id=$1',[actor]);
