@@ -46,7 +46,7 @@ import {
 
 interface ChatSidebarProps {
   onSelectConversation: (id: string) => void;
-  onNewChat: () => void;
+  onNewChat: (reason?: 'deleted') => void;
   activeConversationId?: string;
 }
 
@@ -215,7 +215,18 @@ function ConversationItem({
   );
 }
 
-export function ChatSidebar({
+export function ChatSidebar(props: ChatSidebarProps) {
+  const [open,setOpen]=useState(false);
+  return <div className="w-12 shrink-0 md:w-64">
+    <Button variant="ghost" className="mt-2 w-12 px-1 md:hidden" aria-label="打开聊天历史" aria-expanded={open} onClick={()=>setOpen(true)}>历史</Button>
+    <div className={`${open?'fixed inset-y-16 left-0 z-40 block shadow-xl':'hidden'} h-full bg-[var(--bg-secondary)] md:static md:block md:shadow-none`}>
+      <Button variant="ghost" className="md:hidden" onClick={()=>setOpen(false)}>收起聊天历史</Button>
+      <HistoryPanel {...props} onSelectConversation={id=>{props.onSelectConversation(id);setOpen(false);}} onNewChat={reason=>{props.onNewChat(reason);setOpen(false);}}/>
+    </div>
+  </div>;
+}
+
+function HistoryPanel({
   onSelectConversation,
   onNewChat,
   activeConversationId
@@ -246,9 +257,9 @@ export function ChatSidebar({
         });
       }
 
-      if (activeConversationId === selectedConvId) {
+      if (activeConversationId === conversationId) {
         setActiveConversation(null);
-        onNewChat();
+        onNewChat('deleted');
       }
       setDeleteDialogOpen(false);
       setSelectedConvId(null);
@@ -286,9 +297,9 @@ export function ChatSidebar({
         });
       }
 
-      if (activeConversationId && selectedConvIds.includes(activeConversationId)) {
+      if (activeConversationId && conversationIds.includes(activeConversationId)) {
         setActiveConversation(null);
-        onNewChat();
+        onNewChat('deleted');
       }
       setBatchDeleteDialogOpen(false);
       setSelectedConvIds([]);
@@ -386,7 +397,7 @@ export function ChatSidebar({
       <div className="p-4">
         <Button
           data-testid="conversation-new-chat"
-          onClick={onNewChat}
+          onClick={() => onNewChat()}
           className="w-full gap-2 h-11 rounded-xl font-medium transition-all duration-200 hover:opacity-90"
           style={{
             background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',

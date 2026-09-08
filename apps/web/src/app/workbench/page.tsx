@@ -426,6 +426,7 @@ export default function WorkbenchPage() {
             重新加载服务端状态
           </Button>
         </div>
+        {snapshot && <Button className="mb-5" disabled={busy || unsaved} onClick={() => { const selected=snapshot; const requestId=crypto.randomUUID(); void run(async()=>{ const binding=await api.chatEnter.mutate({projectId:selected.projectId,roundId:selected.roundId,requestId});window.location.assign(`/chat?conversation=${binding.conversationId}`); }); }}>在聊天中继续此轮次</Button>}
         {error && (
           <div
             role="alert"

@@ -1,6 +1,8 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it } from 'vitest';
-import { buildConversationStats, getConversationsWithStats } from './chat';
+import { describe, expect, it, vi } from 'vitest';
+const guidedRead=vi.hoisted(()=>vi.fn());
+vi.mock('../services/artifacts/chat',()=>({skillChatService:()=>({read:guidedRead,stats:async()=>[]})}));
+import { buildConversationStats, getConversationsWithStats, loadConversationExportData } from './chat';
 
 describe('buildConversationStats', () => {
   it('aggregates message counts and credits in bulk without per-conversation queries', () => {
@@ -114,4 +116,19 @@ describe('getConversationsWithStats', () => {
       message: '获取对话统计失败，请稍后重试',
     });
   });
+});
+
+it('loads guided exports with bounded concurrency and preserves order and restricted content',async()=>{
+ let active=0,maximum=0;
+ guidedRead.mockImplementation(async({conversationId}:{conversationId:string})=>{
+  active++;maximum=Math.max(maximum,active);await new Promise(r=>setTimeout(r,10));active--;
+  return {turns:[{available:conversationId!=='c5',body:'Question '+conversationId,answer:'Answer '+conversationId,createdAt:'2026-01-01'}]};
+ });
+ const messages={select:()=>messages,in:()=>messages,eq:()=>messages,order:async()=>({data:[],error:null})};
+ const ctx={supabase:{from:()=>messages},hasSupabaseAdminPrivileges:false} as unknown as Parameters<typeof loadConversationExportData>[0];
+ const rows=Array.from({length:9},(_,i)=>({id:'c'+i,title:'Title '+i,created_at:'2026-01-01',skill_mode:true}));
+ const result=await loadConversationExportData(ctx,rows);
+ expect(maximum).toBe(4);expect(result.map(r=>r.id)).toEqual(rows.map(r=>r.id));
+ expect(result[0].messages).toHaveLength(2);expect(JSON.stringify(result[5])).not.toContain('Question c5');
+ expect(result[5].messages[0].content).toBe('来源已受限，内容不可导出');
 });

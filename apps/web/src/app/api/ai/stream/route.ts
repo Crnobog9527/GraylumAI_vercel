@@ -35,6 +35,7 @@ import {
   resolveActiveModulePrompt,
   skillSnapshotMetadata,
 } from '@repo/api/src/services/chatRuntime';
+import { skillChatService } from '@repo/api/src/services/artifacts/chat';
 import { countTokens, estimateOutputTokens } from '@repo/api/src/services/tokenCounter';
 import {
   getConfiguredProviderApiKey,
@@ -193,18 +194,20 @@ async function getOrCreateConversation(
   supabase: any,
   userId: string,
   conversationId?: string,
-  title?: string
+  title?: string,
+  moduleId?: string
 ): Promise<{ id: string; isNew: boolean }> {
   if (conversationId) {
     const { data: existing } = await supabase
       .from('conversations')
-      .select('id')
+      .select('*')
       .eq('id', conversationId)
       .eq('user_id', userId)
       .eq('is_deleted', 'false')
       .single();
 
     if (existing) {
+      if (existing.skill_mode === true) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
       return { id: existing.id, isNew: false };
     }
   }
@@ -214,6 +217,7 @@ async function getOrCreateConversation(
     .insert({
       user_id: userId,
       title: title ?? '新对话',
+      module_id: moduleId ?? null,
     })
     .select('id')
     .single();
@@ -349,7 +353,7 @@ export async function POST(request: NextRequest) {
     const stageTimings: Record<string, number> = {};
     const body: StreamRequest = await request.json();
     const { conversationId, modelId } = body;
-    const moduleId = normalizeModuleId(body.moduleId);
+    let moduleId = normalizeModuleId(body.moduleId);
     const message = typeof body.message === 'string' ? body.message : '';
     const requestId = normalizeRequestId(body.requestId) ?? crypto.randomUUID();
 
@@ -494,10 +498,17 @@ export async function POST(request: NextRequest) {
     }
     recordStageTiming(stageTimings, 'balance_lookup', balanceStartedAt);
 
+    if (conversationId) {
+      const {data:bound,error:bindingError}=await supabaseAuth.from('conversations').select('*').eq('id',conversationId).eq('user_id',userId).eq('is_deleted','false').single();
+      if(bindingError||!bound||bound.skill_mode||(moduleId&&moduleId!==bound.module_id)) return new Response(JSON.stringify({error:'对话不可用或模式不匹配，请从聊天记录重新打开。'}),{status:403,headers:{'Content-Type':'application/json'}});
+      moduleId=bound.module_id??undefined;
+    }
     const modulePromptStartedAt = Date.now();
     let activePrompt: Awaited<ReturnType<typeof resolveActiveModulePrompt>> | null = null;
     if (moduleId) {
       try {
+        const mode=await skillChatService(supabaseAuth,supabaseAdmin).mode(moduleId);
+        if(mode.guided)return new Response(JSON.stringify({error:'请使用该 Skill 的步骤对话入口。'}),{status:409,headers:{'Content-Type':'application/json'}});
         activePrompt = await resolveActiveModulePrompt(supabaseAdmin, {
           moduleId,
           platform: 'web',
@@ -524,7 +535,8 @@ export async function POST(request: NextRequest) {
       supabaseAuth,
       userId,
       conversationId,
-      message.substring(0, 50)
+      message.substring(0, 50),
+      moduleId
     );
     recordStageTiming(stageTimings, 'conversation_lookup_or_create', conversationStartedAt);
 

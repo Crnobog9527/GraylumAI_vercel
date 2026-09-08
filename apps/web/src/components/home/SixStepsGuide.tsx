@@ -12,8 +12,8 @@ import { PlayCircle, Target, Search, Compass, FileText, Settings, TrendingUp } f
 const steps = [
   {
     num: '01',
-    title: '账号定位分析',
-    desc: '分析目标受众，确定账号定位和差异化策略',
+    title: '需求确认',
+    desc: '补充目标与现状，明确本次分析需求',
     icon: Target
   },
   {
@@ -58,8 +58,8 @@ export default function SixStepsGuide({ onStartAnalysis }: SixStepsGuideProps) {
     if (onStartAnalysis) {
       onStartAnalysis();
     } else {
-      // Default: navigate to chat
-      router.push('/chat');
+      // Share the existing module selection entry.
+      router.push('/marketplace');
     }
   };
 

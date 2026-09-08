@@ -248,7 +248,8 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => {
   if (process.env.V3_WORKBENCH_PHASE !== "restore") {
-    const state = existsSync(output + "/restore.json") ? JSON.parse(readFileSync(output + "/restore.json", "utf8")) : { credentials, fixtures, actor, owner };
+    const prior = existsSync(output + "/restore.json") ? JSON.parse(readFileSync(output + "/restore.json", "utf8")) : null;
+    const state = prior?.actor === actor ? prior : { credentials, fixtures, actor, owner };
     const service = workbenchService(await authenticated(), db);
     state.expectedSnapshots = [];
     for (const p of await service.projects()) {
@@ -257,7 +258,7 @@ afterAll(async () => {
         rounds.find((r) => r.state === "draft") ??
         rounds
           .filter((r) => r.state === "published")
-          .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+          .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0] ?? rounds[0];
       state.expectedSnapshots.push(
         await service.read(p.projectId, current.roundId),
       );
@@ -1876,12 +1877,15 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 // AI transport is explicitly injected here. SQL, Auth, Skill reads, pricing and
 // the existing credit RPCs are real local services; no provider request is made.
 const localModel = randomUUID();
+const localSummaryModel = randomUUID();
 async function generationFixture(n = 3, methodText = 'Synthetic generation method.', options: {workflow?: ReturnType<typeof makeWorkflow>; package?: ReturnType<typeof makePackage>} = {}) {
   const { workbenchGeneration } = await import('../artifacts/generation');
   const flow = options.workflow ?? makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
   const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText, workflow: flow, package: options.package });
   await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Local fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localModel]);
   await sql.query('update modules set model_id=$1 where id=$2', [localModel, f.moduleId]);
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-2024-08-06','Summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localSummaryModel]);
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localSummaryModel)]);
   await sql.query("insert into system_settings(key,value) values('v3_workbench_ai','true') on conflict(key) do update set value='true'");
   await sql.query('update profiles set credits=100000 where id=$1', [actor]);
   const user = await authenticated(), service = workbenchService(user, db);
@@ -2384,3 +2388,909 @@ aiTest('AI: research host dispatches only explicit query and recovers without re
   await expect(host.search({...input,...other.scope})).rejects.toThrow();expect(connections).toBe(1);
  } finally {await fixture.stop();}
 },60000);
+// Chat linkage uses the same real local Auth/PostgREST/credit transaction fixture.
+aiTest('CHAT: durable multi-turn linkage, dependency-limited history, single settlement and denied identities',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const flow=makeWorkflow(3);flow.steps[1].dependsOn=['step-0'];flow.steps[2].dependsOn=[];
+ const t=await generationFixture(3,'Synthetic chat method.',{workflow:flow});
+ const chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ expect(await chat.enter({...t.scope,requestId:randomUUID()})).toEqual(binding);
+ expect(await chat.mode(t.f.moduleId)).toEqual({guided:true});
+ async function send(stepId:string,body:string){
+  const requestId=randomUUID();const submitted=await db.rpc('artifact_chat',{p_actor_id:actor,p_action:'submit',p_conversation_id:binding.conversationId,p_payload:{requestId,stepId,body}});expect(submitted.error).toBeNull();await chat.submit({conversationId:binding.conversationId,stepId,body,requestId});
+  const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+  const input={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId,instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+  const q=await t.ai.quote(input),request={...input,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
+  const result=await t.ai.generate(request);expect(result.state).toBe('succeeded');expect((await t.ai.generate(request)).candidateId).toBe(result.candidateId);
+  return {requestId,result};
+ }
+ const first=await send('step-0','FIRST_CHAT_REQUIREMENT');
+ await send('step-0','SECOND_CHAT_REVISION');
+ expect(t.captured.at(-1)).toContain('FIRST_CHAT_REQUIREMENT');expect(t.captured.at(-1)).toContain('SECOND_CHAT_REVISION');
+ expect(t.captured.at(-1)).toContain('Synthetic AI candidate text.');
+ await send('step-2','UNRELATED_BRANCH_DISCUSSION');
+ expect(t.captured.at(-1)).not.toContain('FIRST_CHAT_REQUIREMENT');
+ const summaryBinding=await chat.summary({conversationId:binding.conversationId,requestId:first.requestId});
+ const summarySnapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const summaryInput={...t.scope,conversationId:binding.conversationId,turnId:first.requestId,purpose:'summary' as const,stepId:'step-0',instruction:'FIRST_CHAT_REQUIREMENT',expectedSteps:Object.fromEntries(Object.entries(summarySnapshot.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};
+ const summaryQuote=await t.ai.quote(summaryInput),summaryResult=await t.ai.generate({...summaryInput,requestId:summaryBinding.requestId,quoteHash:summaryQuote.quoteHash,budgetCredits:summaryQuote.reservedCredits});
+ await t.service.execute({...t.scope,requestId:randomUUID(),action:'saveCandidate',stepId:'step-0',expectedVersion:0,body:'Confirmed basis',candidateId:summaryResult.candidateId!});
+ const saved=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];
+ await t.service.execute({...t.scope,requestId:randomUUID(),action:'confirm',stepId:'step-0',expectedVersion:saved.version,expectedReviewVersion:saved.reviewVersion});
+ await send('step-1','DEPENDENT_DISCUSSION');
+ expect(t.captured.at(-1)).toContain('FIRST_CHAT_REQUIREMENT');expect(t.captured.at(-1)).not.toContain('UNRELATED_BRANCH_DISCUSSION');
+ const restored=await skillChatService(await authenticated(),db).read({conversationId:binding.conversationId});
+ expect(restored.binding.stepId).toBe('step-1');expect(restored.turns).toHaveLength(4);expect(t.calls()).toBe(5);expect((await chat.stats()).find(s=>s.conversationId===binding.conversationId)?.messageCount).toBe(8);
+ const row=(await sql.query('select count(*)::int as n from messages where conversation_id=$1',[binding.conversationId])).rows[0];expect(row.n).toBe(0);
+ const usage=(await sql.query('select count(*)::int as n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0];expect(usage.n).toBe(5);
+ const foreign=await newUser();await expect(skillChatService(await authenticated(foreign),db).read({conversationId:binding.conversationId})).rejects.toThrow('ARTIFACT_DENIED');
+ expect((await t.user.from('artifact_chat_turns').select('*')).error).toBeTruthy();
+ await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns.length).toBeGreaterThan(0);
+ await expect(chat.submit({conversationId:binding.conversationId,requestId:randomUUID(),stepId:'step-0',body:'denied new execution'})).rejects.toThrow();
+ console.log('CHAT real SQL/Auth: durable scoped history, explicit artifact adoption, exact replay and denied user/revoked Skill PASS');
+},60000);
+
+aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, history restore and narrow layout',async()=>{
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),requests:string[]=[];
+ await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
+ const {page,context}=await pageFor(credentials,requests);
+ await page.goto(app+'/');await page.getByRole('button',{name:'开始分析',exact:true}).click();
+ await page.waitForURL(u=>u.pathname==='/marketplace');
+ expect(await page.getByRole('link',{name:'Skill 引导',exact:true}).count()).toBe(0);
+ await page.getByRole('heading',{name:t.f.label,exact:true}).first().click();
+ await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();
+ await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ async function send(body:string){await page.getByLabel('给当前步骤发消息').fill(body);await page.getByRole('button',{name:'发送',exact:true}).click();await poll(async()=>await page.getByLabel('给当前步骤发消息').inputValue()).toBe('');}
+ await send('BROWSER_FIRST_REQUIREMENT');await send('BROWSER_SECOND_REVISION');
+ await poll(async()=>await page.locator('[data-message-role="assistant"]').count()).toBe(2);
+ await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('Synthetic local HTTP candidate');
+ expect(await page.getByRole('button',{name:'保存工作稿',exact:true}).count()).toBe(0);
+ await poll(async()=>await page.getByRole('button',{name:'确认并进入下一步',exact:true}).isEnabled()).toBe(true);
+ await page.getByRole('button',{name:'确认并进入下一步',exact:true}).click();
+ await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(true);
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await poll(async()=>await page.locator('[data-message-role="user"]').count()).toBe(0);
+ await page.getByRole('button',{name:'新建对话',exact:true}).click();
+ await poll(async()=>await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ await page.getByText(t.f.label,{exact:true}).last().click();
+ await page.waitForURL(u=>u.searchParams.get('conversation')===conversationId);await page.reload();
+ await poll(async()=>await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).getAttribute('aria-current')).toBe('step');
+ await page.setViewportSize({width:390,height:844});await page.reload();await page.getByLabel('给当前步骤发消息').waitFor();
+ expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ await page.getByRole('button',{name:'步骤与成果',exact:true}).click();await page.getByRole('button',{name:'收起',exact:true}).click();
+ const width=await page.getByLabel('给当前步骤发消息').boundingBox();expect(width!.width).toBeGreaterThan(260);
+ expect(requests.filter(p=>p.startsWith('/api/ai/stream'))).toHaveLength(0);
+ await page.screenshot({path:output+'/chat-narrow.png'});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.getByLabel('Skill 步骤与成果').waitFor();await page.screenshot({path:output+'/chat-desktop.png'});
+ await context.close();console.log('CHAT real homepage/browser/HTTP: two turns, explicit adoption/confirmation, history refresh, no ordinary generation and narrow drawer PASS');
+},150000);
+
+aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and generation',async(n)=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(n),chat=skillChatService(t.user,db);
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Manual topic: pet action photography',evidenceIds:[]});
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Synthetic configured conversation';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
+ const v={...await t.request(),conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,requestId,instruction:body};
+ const q=await t.ai.quote({projectId:v.projectId,roundId:v.roundId,stepId:v.stepId,conversationId:v.conversationId,turnId:v.turnId,purpose:'reply' as const,instruction:body,expectedSteps:v.expectedSteps});
+ expect((await t.ai.generate({...v,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sent=JSON.parse(t.captured.at(-1)!);
+ expect(JSON.parse(sent[1].content).currentStepResult).toEqual({body:'Manual topic: pet action photography',version:1});
+ expect((await chat.read({conversationId:binding.conversationId})).turns).toHaveLength(1);
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).workflow.steps).toHaveLength(n);
+},30000);
+aiTest('CHAT: source revocation hides historic turns and rejects reuse before new credit effects',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db);
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'SENSITIVE_CONTEXT_CANARY',observedAt:null,supersedes:null});
+ const evidence=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0];
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Source-backed draft',evidenceIds:[evidence.id]});
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='SENSITIVE_CONTEXT_CANARY follow up';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
+ const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId),value={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await t.ai.quote(value);await t.ai.generate({...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});
+ const before=(await sql.query('select count(*)::int n from billing_history')).rows[0].n;
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId:evidence.id,deleted:true,expiresAt:null});
+ const read=await chat.read({conversationId:binding.conversationId});expect(JSON.stringify(read)).not.toContain('SENSITIVE_CONTEXT_CANARY');expect(read.turns[0]).toMatchObject({available:false,body:null,answer:null});
+ await expect(chat.submit({conversationId:binding.conversationId,requestId:randomUUID(),stepId:'step-0',body:'Continue'})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from billing_history')).rows[0].n).toBe(before);
+ const plain=await t.user.from('messages').insert({conversation_id:binding.conversationId,role:'user',content:'Must not use ordinary messages'});expect(plain.error?.code).toBe('42501');
+},30000);
+
+aiTest('CHAT: module Use selects guided mode; free and ordinary document history survive unrelated catalog failure',async()=>{
+ await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),requests:string[]=[];const {page,context}=await pageFor(credentials,requests);
+ await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();await page.getByLabel('Skill 步骤与成果').waitFor();
+ const bound=new URL(page.url()).searchParams.get('conversation');expect(bound).toBeTruthy();
+ const skillId=randomUUID(),moduleId=randomUUID();
+ await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Private document method')",[skillId,skillId]);
+ await sql.query("insert into modules(id,title,skill_id,active) values($1,'Ordinary document',$2,true)",[moduleId,skillId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ const conversationId=randomUUID();expect((await t.user.from('conversations').insert({id:conversationId,user_id:actor,title:'Saved document conversation',module_id:moduleId})).error).toBeNull();
+ expect((await t.user.from('messages').insert({conversation_id:conversationId,role:'user',content:'Ordinary saved message'})).error).toBeNull();
+ const invalidId='chat-invalid-'+randomUUID(),invalid=structuredClone(t.f.flow);invalid.steps[0].dependsOn=[invalid.steps.at(-1)!.id];
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[invalidId,t.f.moduleId,t.f.pack.id,t.f.pack.revisionId,invalid,'Invalid local catalog']);
+ try {
+  requests.length=0;await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();
+  await poll(async()=>page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+  await page.goto(app+'/marketplace?module='+moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+  await page.waitForURL(u=>u.pathname==='/chat'&&u.searchParams.get('module')===moduleId);
+  await page.getByTestId('chat-input').waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+  await page.getByText('Saved document conversation',{exact:true}).click();await page.getByText('Ordinary saved message',{exact:true}).waitFor();await page.reload();await page.getByText('Ordinary saved message',{exact:true}).waitFor();
+  expect(requests.some(p=>p.includes('workbench.catalog'))).toBe(false);expect(requests.some(p=>p.startsWith('/api/ai/stream'))).toBe(false);
+ } finally {await sql.query('delete from artifact_workflows where id=$1',[invalidId]);await context.close();}
+},150000);
+
+aiTest('CHAT: late response preserves later input and draft; rejected quotes and sealed receipts recover without another dispatch',async()=>{
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),{page,context}=await pageFor();
+ await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
+ const composer=page.getByLabel('给当前步骤发消息'),draft=page.getByLabel('当前步骤工作稿');
+ await composer.fill('ORIGINAL_SENT_MESSAGE');
+ let arrived!:()=>void,release!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r);
+ await page.route('**/api/trpc/workbench.generate*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await composer.fill('LATER_UNSENT_MESSAGE');await draft.fill('LATER_LOCAL_DRAFT');release();
+ await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(1);
+ expect(await composer.inputValue()).toBe('LATER_UNSENT_MESSAGE');expect(await draft.inputValue()).toBe('LATER_LOCAL_DRAFT');
+
+ await composer.fill('');await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('LATER_LOCAL_DRAFT');await page.unroute('**/api/trpc/workbench.generate*');
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{
+  const response=await route.fetch();await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);await route.fulfill({response});
+ });
+ await composer.fill('REQUOTE_MESSAGE');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled()).toBe(true);
+ await page.unroute('**/api/trpc/workbench.generationQuote*');
+ await sql.query("create function local_chat_receipt_fault() returns trigger language plpgsql as $$ begin if NEW.state='responded' then raise exception 'local receipt unavailable'; end if; return NEW; end $$; create trigger local_chat_receipt_fault before update on artifact_generations for each row execute function local_chat_receipt_fault()");
+ try {await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();await page.reload();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();}
+ finally {await sql.query('drop trigger local_chat_receipt_fault on artifact_generations; drop function local_chat_receipt_fault()');}
+ await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
+ await page.reload();await page.getByRole('button',{name:'恢复已知结果',exact:true}).waitFor();
+ await page.getByRole('button',{name:'恢复已知结果',exact:true}).click();await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(2);
+ expect((await t.ai.list(t.scope))).toHaveLength(2);expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates).toHaveLength(2);
+ expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='generation_abandoned'",[t.scope.projectId])).rows[0].n).toBe(1);
+ await context.close();console.log('CHAT late UI input/draft, no dirty navigation, quote tombstone and encrypted reload recovery PASS');
+},150000);
+
+aiTest('CHAT: prepared replay keeps its original context and reservation while rechecking consumption',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Resume original contextual turn';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const value={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))},q=await t.ai.quote(value),v={...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
+ const stopped=new Proxy(db,{get(target,key){if(key==='rpc')return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'?{abortSignal:async()=>{const result=await target.rpc(name,args);if(result.error)throw result.error;throw new Error('local stopped after reserve');}}:target.rpc(name,args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not dispatch');}).generate(v)).rejects.toThrow('local stopped after reserve');
+ expect((await t.ai.quote(value)).quoteHash).toBe(q.quoteHash);
+ const marker=randomUUID();await sql.query("insert into billing_history(id,user_id,operation_type,amount,metadata) values($1,$2,'settle',-10000,'{}')",[marker,actor]);
+ try{await expect(t.ai.generate(v)).rejects.toThrow('每小时消费已达上限');expect(t.calls()).toBe(0);}finally{await sql.query('delete from billing_history where id=$1',[marker]);}
+ await sql.query('update profiles set credits=0 where id=$1',[actor]);expect((await t.ai.generate(v)).state).toBe('succeeded');expect(t.calls()).toBe(1);
+},30000);
+
+aiTest('CHAT: legacy workbench entry preserves old candidate and fixed-round conversation across relogin',async()=>{
+ const t=await generationFixture();await t.ai.generate(await t.request());
+ const before=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const {page,context}=await pageFor();
+ await page.getByRole('button',{name:new RegExp(t.f.label)}).first().click();await quiet(page);
+ await page.getByRole('button',{name:'在聊天中继续此轮次',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();const target=page.url();
+ const conversationId=new URL(target).searchParams.get('conversation')!;
+ const {skillChatService}=await import('../artifacts/chat');
+ const restored=await skillChatService(t.user,db).read({conversationId});
+ expect(restored.binding.roundId).toBe(t.scope.roundId);
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates.map(c=>c.id)).toEqual(before.candidates.map(c=>c.id));
+ await page.getByText('此步骤的历史回复（只读）',{exact:true}).click();
+ expect(await page.getByRole('button',{name:'采用历史候选',exact:true}).count()).toBe(0);
+ await context.close();
+ const again=await pageFor();await again.page.goto(target);await again.page.getByLabel('给当前步骤发消息').waitFor();
+ expect(new URL(again.page.url()).searchParams.get('conversation')).toBe(conversationId);await again.context.close();
+},90000);
+
+aiTest('CHAT: a late preceding result cannot enter a submitted turn without its sources',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'SOURCE_E_RESTRICTABLE',observedAt:null,supersedes:null});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'A draft using E',evidenceIds:[evidenceId]});
+ const a=randomUUID(),b=randomUUID();
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ await chat.submit({conversationId:binding.conversationId,requestId:a,stepId:'step-0',body:'A earlier turn'});
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
+ const slow=t.workbenchGeneration(t.user,db,async()=>{arrived();await hold;return {body:'LATE_A_ANSWER_WITH_SOURCE_E',inputTokens:800,outputTokens:30};});
+ const av=await value(a,'A earlier turn'),aq=await slow.quote(av),running=slow.generate({...av,requestId:a,quoteHash:aq.quoteHash,budgetCredits:aq.reservedCredits});
+ await seen;
+ try {
+  snap=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'Rewritten independent draft',evidenceIds:[]});
+  await chat.submit({conversationId:binding.conversationId,requestId:b,stepId:'step-0',body:'B submitted before A result'});
+ } finally {release();await running;}
+ const bv=await value(b,'B submitted before A result'),bq=await t.ai.quote(bv);await t.ai.generate({...bv,requestId:b,quoteHash:bq.quoteHash,budgetCredits:bq.reservedCredits});
+ expect(t.captured.at(-1)).not.toContain('LATE_A_ANSWER_WITH_SOURCE_E');expect(t.captured.at(-1)).not.toContain('A earlier turn');
+ const fixed=(await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[b])).rows[0];expect(fixed.context_turn_ids).toEqual([]);expect(fixed.evidence_ids).toEqual([]);
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const history=await chat.read({conversationId:binding.conversationId});expect(history.turns.find(x=>x.requestId===a)?.answer).toBeNull();expect(history.turns.find(x=>x.requestId===b)?.available).toBe(true);
+},45000);
+
+aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old message',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor();await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByLabel('给当前步骤发消息').fill('QUOTED_A');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await page.getByLabel('给当前步骤发消息').fill('CURRENT_B');release();
+ await expect.poll(async()=>await page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByRole('button',{name:/积分/}).count()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('CURRENT_B');await context.close();
+},90000);
+
+aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{
+ const t=await generationFixture();
+ await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
+ const skillId=randomUUID(),moduleId=randomUUID();
+ await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'METHOD_CANARY_DOCUMENT_STREAM Private document instruction')",[skillId,skillId]);
+ await sql.query("insert into modules(id,title,skill_id,model_id,active) values($1,'Document streaming fixture',$2,$3,true)",[moduleId,skillId,localModel]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ const requests:string[]=[],{page,context}=await pageFor(credentials,requests);
+ for(const module of [null,moduleId]) {
+  if(module){await page.goto(app+'/marketplace?module='+module);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();}
+  else {await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();}
+  await page.getByTestId('chat-input').fill(module?'DOCUMENT_SEND':'FREE_SEND');
+  const sent=page.waitForResponse(response=>response.url().includes('/api/ai/stream'));
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  const response=await sent,responseText=await response.text();expect(response.status(),responseText).toBe(200);expect(responseText).not.toContain('METHOD_CANARY');
+  await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor({timeout:45000});
+  await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'),{timeout:30000});
+  const conversationId=new URL(page.url()).searchParams.get('conversation');
+  const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
+  expect(row).toMatchObject({module_id:module,skill_mode:false});
+  await page.reload();await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ }
+ expect(requests.filter(path=>path.startsWith('/api/ai/stream'))).toHaveLength(2);
+ expect((await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[t.scope.projectId])).rows[0].n).toBe(0);
+ await context.close();
+},150000);
+
+aiTest('CHAT: module rebinding enters the current Skill while preserving the former Skill history',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const old=await generationFixture(),chat=skillChatService(old.user,db);
+ const previous=await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()});
+ await sql.query('update artifact_workflows set enabled=false where id=$1',[old.f.registration]);
+ expect(await chat.mode(old.f.moduleId)).toEqual({guided:true});
+ await expect(chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_INVALID_WORKFLOW');
+ await sql.query('update artifact_workflows set enabled=true where id=$1',[old.f.registration]);
+ const newer={f:await fixture({id:'new-binding-'+randomUUID(),label:'Rebound Skill fixture',methodText:'Synthetic rebound method',workflow:makeWorkflow(3)})};await sql.query('update modules set skill_id=$1 where id=$2',[newer.f.pack.id,old.f.moduleId]);
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',['rebind-'+randomUUID(),old.f.moduleId,newer.f.pack.id,newer.f.pack.revisionId,newer.f.flow,'Rebound current Skill']);
+ expect((await old.service.projects()).filter(p=>p.skillId===newer.f.pack.id)).toHaveLength(0);
+ const current=await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()});
+ expect(current.skillId).toBe(newer.f.pack.id);expect(current.projectId).not.toBe(previous.projectId);
+ expect((await chat.read({conversationId:previous.conversationId})).binding.skillId).toBe(old.f.pack.id);
+ await expect(chat.submit({conversationId:previous.conversationId,requestId:randomUUID(),stepId:'step-0',body:'Old Skill new execution must fail'})).rejects.toThrow();
+ expect((await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()})).projectId).toBe(current.projectId);
+ const documentId=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Rebound ordinary document')",[documentId,documentId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:documentId,p_published_by:owner})).error).toBeNull();
+ await sql.query('update modules set skill_id=$1 where id=$2',[documentId,old.f.moduleId]);
+ expect(await chat.mode(old.f.moduleId)).toEqual({guided:false});
+},30000);
+
+
+aiTest('CHAT: social rebind preserves the single-account project and explicitly refuses a replacement',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const old=await generationFixture(6),chat=skillChatService(old.user,db);
+ const account=(await old.service.projects()).find(p=>p.projectId===old.scope.projectId)!.account!;
+ const previous=await chat.enter({moduleId:old.f.moduleId,account,requestId:randomUUID()});
+ const newer=await fixture({id:'social-rebind-'+randomUUID(),label:'New social method',methodText:'Synthetic new social method',workflow:makeWorkflow(6,true)});
+ await sql.query('update modules set skill_id=$1 where id=$2',[newer.pack.id,old.f.moduleId]);
+ const registration='social-rebound-'+randomUUID();
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[registration,old.f.moduleId,newer.pack.id,newer.pack.revisionId,newer.flow,'New social method']);
+ await sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,old.f.moduleId,newer.pack.id,account]);
+ await expect(chat.enter({moduleId:old.f.moduleId,account,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_ACCOUNT_CONFLICT');
+ // Direct start simulates another creator winning after the preflight read.
+ await expect(old.service.start({projectId:randomUUID(),roundId:randomUUID(),requestId:randomUUID(),registration,account})).rejects.toThrow('ARTIFACT_ACCOUNT_CONFLICT');
+ expect((await sql.query('select count(*)::int n from artifact_projects where actor_id=$1 and account=$2',[actor,account])).rows[0].n).toBe(1);
+ expect((await chat.read({conversationId:previous.conversationId})).binding.skillId).toBe(old.f.pack.id);
+ await expect(chat.submit({conversationId:previous.conversationId,requestId:randomUUID(),stepId:'step-0',body:'No execution under former binding'})).rejects.toThrow();
+ const {page,context}=await pageFor();await page.goto(app+'/marketplace?module='+old.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+ await page.getByRole('button',{name:'使用 · '+account,exact:true}).click();
+ await page.getByText('此账号已有另一功能的项目，暂不能在新功能中开始。请从已有项目查看历史，原成果不会被修改。',{exact:true}).waitFor();
+ expect(await page.getByRole('link',{name:'找回已有项目与正式报告',exact:true}).getAttribute('href')).toBe('/workbench');await context.close();
+},90000);
+
+aiTest('CHAT: ordinary init persists the URL without remounting; abort and error retain free/document identity',async()=>{
+ const t=await generationFixture(),requests:string[]=[];
+ await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
+ const skillId=randomUUID(),moduleId=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Synthetic ordinary interrupted method')",[skillId,skillId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ await sql.query("insert into modules(id,title,skill_id,model_id,active) values($1,'Interrupted document',$2,$3,true)",[moduleId,skillId,localModel]);
+ const {page,context}=await pageFor(credentials,requests);
+ for(const mode of ['ORDINARY_ABORT','ORDINARY_ERROR']){
+  await page.goto(mode==='ORDINARY_ABORT'?app+'/chat':app+'/chat?module='+moduleId);
+  await page.getByTestId('chat-input').fill(mode);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+  await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+  // Provider output is buffered for server-side checks, so stop while init is
+  // visible and the provider is still pending rather than waiting for final text.
+  await page.getByRole('button',{name:'停止',exact:true}).waitFor();
+  expect(await page.getByTestId('chat-input').isDisabled()).toBe(true);
+  if(mode==='ORDINARY_ABORT')await page.getByRole('button',{name:'停止',exact:true}).click();
+  await expect.poll(async()=>await page.getByTestId('chat-input').isEnabled(),{timeout:30000}).toBe(true);
+  if(mode==='ORDINARY_ABORT') {
+ // Header navigation bypasses the sidebar's navigate callback; it must still reset scope.
+ await page.getByRole('link',{name:'对话',exact:true}).click();await page.waitForURL(u=>u.pathname==='/chat'&&!u.search);
+ expect(await page.getByTestId('chat-message').count()).toBe(0);
+ await page.getByTestId('chat-input').fill('AFTER_HEADER_NEW_CHAT');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const freshId=new URL(page.url()).searchParams.get('conversation')!;
+ const fresh=(await t.user.from('conversations').select('module_id').eq('id',freshId).single()).data;expect(fresh?.module_id).toBeNull();
+ await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();
+  expect(freshId).not.toBe(conversationId);
+  await page.goto(app+'/chat?conversation='+conversationId);
+  }
+  if(mode==='ORDINARY_ERROR') {
+   await page.getByText('AI 响应生成失败，请稍后重试',{exact:true}).waitFor();
+   expect((await sql.query("select status from ai_usage_logs where conversation_id=$1",[conversationId])).rows).toEqual([{status:'failed'}]);
+   expect((await sql.query('select id from messages where conversation_id=$1',[conversationId])).rows).toHaveLength(0);
+  }
+  // Ordinary failure preserves conversation identity and failure usage, not unsaved input.
+  await page.reload();await page.getByRole('heading',{name:mode,exact:true}).waitFor();
+  expect(new URL(page.url()).searchParams.get('conversation')).toBe(conversationId);
+  const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
+  expect(row).toMatchObject({module_id:mode==='ORDINARY_ERROR'?moduleId:null,skill_mode:false});
+ }
+ expect(requests.filter(p=>p.startsWith('/api/ai/stream'))).toHaveLength(3);
+ await context.close();
+},150000);
+
+
+aiTest('CHAT: removing prior evidence permits new context and safe same-text retry after a stale quote',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'REMOVED_SOURCE_CANARY',observedAt:null,supersedes:null});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'Draft using original evidence',evidenceIds:[evidenceId]});
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ async function generate(requestId:string,body:string){await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const v=await value(requestId,body),q=await t.ai.quote(v);return t.ai.generate({...v,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});}
+ const a=randomUUID();expect((await generate(a,'OLD_TURN_WITH_REMOVED_SOURCE')).state).toBe('succeeded');
+ const staleId=randomUUID(),retryBody='Continue with the independent rewritten draft';
+ await chat.submit({conversationId:binding.conversationId,requestId:staleId,stepId:'step-0',body:retryBody});
+ const staleValue=await value(staleId,retryBody),staleQuote=await t.ai.quote(staleValue);
+ const {page,context}=await pageFor();await page.goto(app+'/chat?conversation='+binding.conversationId);
+ await page.getByText('参考资料（可选）',{exact:true}).click();await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).uncheck();
+ await page.getByLabel('当前步骤工作稿').fill('Independent rewritten draft');
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:30000}).toEqual([]);
+ const b=randomUUID();expect((await generate(b,'NEW_INDEPENDENT_TURN')).state).toBe('succeeded');
+ expect(t.captured.at(-1)).not.toContain('OLD_TURN_WITH_REMOVED_SOURCE');expect(t.captured.at(-1)).not.toContain('REMOVED_SOURCE_CANARY');
+ const fixed=(await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[b])).rows[0];expect(fixed).toEqual({context_turn_ids:[],evidence_ids:[]});
+ expect((await chat.read({conversationId:binding.conversationId})).turns.find(x=>x.requestId===a)?.available).toBe(true);
+ await page.getByRole('button',{name:'刷新状态',exact:true}).click();await page.getByLabel('给当前步骤发消息').fill(retryBody);await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect.poll(async()=>(await chat.read({conversationId:binding.conversationId})).turns.find(x=>x.requestId===staleId)?.abandoned,{timeout:30000}).toBe(true);
+ await expect(t.ai.generate({...staleValue,requestId:staleId,quoteHash:staleQuote.quoteHash,budgetCredits:staleQuote.reservedCredits})).rejects.toThrow();expect(t.calls()).toBe(2);
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByRole('button',{name:'恢复原操作',exact:true}).count()).toBe(0);
+ await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByLabel('当前步骤讨论').getByText('Synthetic local HTTP candidate',{exact:true}).waitFor();
+ const turns=(await chat.read({conversationId:binding.conversationId})).turns,newTurn=turns.find(x=>x.body===retryBody&&x.requestId!==staleId)!;expect(newTurn.generationState).toBe('succeeded');
+ expect((await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[newTurn.requestId])).rows[0]).toEqual({context_turn_ids:[b],evidence_ids:[]});
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const history=await chat.read({conversationId:binding.conversationId});expect(history.turns.find(x=>x.requestId===a)?.available).toBe(false);expect(history.turns.find(x=>x.requestId===b)?.available).toBe(true);expect(history.turns.find(x=>x.requestId===newTurn.requestId)?.available).toBe(true);
+ await context.close();
+},90000);
+
+aiTest('CHAT: autosave acknowledges a candidate while preserving edits made during its save', async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let arrived!:()=>void,release!:()=>void,finished!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r),handled=new Promise<void>(r=>finished=r);
+ await page.route('**/api/trpc/workbench.execute*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});finished();});
+ await page.getByLabel('给当前步骤发消息').fill('First complete result');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await page.getByLabel('当前步骤工作稿').fill('User refinement during candidate save');release();await handled;await page.unroute('**/api/trpc/workbench.execute*');
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('User refinement during candidate save');
+ const step=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];expect(step.version).toBe(2);expect(step.valid).toBe(false);
+ await context.close();
+},90000);
+
+aiTest.each(['retry','reload'])('CHAT: autosave replays frozen save after lost acknowledgement via %s before newer edits',async(recovery)=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let arrived!:()=>void,release!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r);
+ await page.route('**/api/trpc/workbench.execute*',async route=>{await route.fetch();arrived();await hold;await route.abort('failed');});
+ await page.getByLabel('当前步骤工作稿').fill('Saved A with missing acknowledgement');await seen;
+ await page.getByLabel('当前步骤工作稿').fill('Newer B must survive');release();
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();await page.unroute('**/api/trpc/workbench.execute*');
+ expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).isDisabled()).toBe(true);
+ if(recovery==='reload') await page.reload(); else await page.getByRole('button',{name:'重试保存',exact:true}).click();
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Newer B must survive');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(2);
+ await context.close();
+},90000);
+
+aiTest('CHAT: immediate browser back restores the unsaved draft and composer for the same authenticated conversation',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/marketplace');await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const url=page.url();await page.getByLabel('当前步骤工作稿').fill('Recover after immediate browser back');
+ await page.getByLabel('给当前步骤发消息').fill('Unsent discussion survives');
+ await page.goBack();await page.goto(url);
+ await expect.poll(async()=>page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe('Recover after immediate browser back');
+ expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('Unsent discussion survives');
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Recover after immediate browser back');
+ await context.close();
+},90000);
+
+aiTest('CHAT: a definite external save conflict releases the frozen attempt and permits explicit rebase',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.getByLabel('当前步骤工作稿').waitFor();
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'External version one',evidenceIds:[]});
+ await page.getByLabel('当前步骤工作稿').fill('Local revision after external change');
+ await page.getByText('保存版本已变化；本地输入已保留，请加载服务端版本并比较。',{exact:true}).waitFor();
+ await expect.poll(async()=>page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ await page.getByRole('button',{name:'保留本地内容，采用最新保存版本',exact:true}).click();
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Local revision after external change');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(2);
+ await context.close();
+},90000);
+
+aiTest.each(['candidate','saved'])('CHAT: revoked inherited sources hide %s local drafts and frozen saves after browser restoration',async(kind)=>{
+ const t=await generationFixture();
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'Inherited source E',observedAt:null,supersedes:null});
+ const evidenceId=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'Basis from E',evidenceIds:[evidenceId]});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);
+ await t.service.execute({...t.scope,action:'confirm',stepId:'step-0',requestId:randomUUID(),expectedVersion:snap.steps['step-0'].version,expectedReviewVersion:snap.steps['step-0'].reviewVersion});
+ if(kind==='saved')await t.service.execute({...t.scope,action:'save',stepId:'step-1',requestId:randomUUID(),expectedVersion:0,body:'Persisted descendant from E',evidenceIds:[]});
+ const {page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));const chatUrl=page.url();
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await expect.poll(async()=>page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).getAttribute('aria-current'),{timeout:30000}).toBe('step');
+ await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+ if(kind==='candidate'){
+  await page.getByLabel('给当前步骤发消息').fill('Draft a descendant result');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ }
+ await page.getByLabel('当前步骤工作稿').fill('REVOKED_LOCAL_DRAFT_CANARY');
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.waitForURL(u=>!u.searchParams.has('conversation'));
+ await page.unroute('**/api/trpc/workbench.execute*');
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:1,body:'Independent rewritten ancestor',evidenceIds:[]});
+ if(kind==='saved')await t.service.execute({...t.scope,action:'save',stepId:'step-1',requestId:randomUUID(),expectedVersion:1,body:'Independent rewritten descendant',evidenceIds:[]});
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const replayed:string[]=[];page.on('request',request=>{if(request.url().includes('workbench.execute'))replayed.push(request.postData()??'');});
+ await page.goto(chatUrl);await expect.poll(async()=>page.getByLabel('当前步骤工作稿').isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByLabel('当前步骤工作稿').inputValue()).not.toContain('REVOKED_LOCAL_DRAFT_CANARY');
+ await page.waitForTimeout(1000);
+ expect(replayed).toHaveLength(0);
+ expect(await page.getByRole('button',{name:'恢复此版本到成果',exact:true}).count()).toBe(0);
+ await context.close();
+},120000);
+
+aiTest.each(['openai','qwen','luna'])('CHAT: dual model stages persist separate usage and only summary becomes a result with %s',async(provider)=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const flow=makeWorkflow(3);flow.steps[0].maxLength=100;
+ const dialogue='Let us refine the event together. '.repeat(5);
+ const t=await generationFixture(3,'Synthetic generation method.',{workflow:flow}),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const primaryId=provider==='qwen'?randomUUID():localModel;
+ if(provider==='qwen'){
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost,tokenizer_family) values($1,'qwen/qwen3.8-flash','Qwen fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,470000,'openai')",[primaryId]);
+  await sql.query('update modules set model_id=$1 where id=$2',[primaryId,t.f.moduleId]);
+ }
+ const summaryId=randomUUID();
+ await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,$2,'Separate summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',200000,1200000)",[summaryId,provider==='luna'?'openai/gpt-5.6-luna':'openai/gpt-4o-2024-08-06']);
+ await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(summaryId)]);
+ const seen:string[]=[];
+ const ai=t.workbenchGeneration(t.user,db,async request=>{
+  seen.push(request.model.id);
+  return {body:request.model.id===summaryId?'Combined result: family audience, budget 1200.':dialogue,inputTokens:800,outputTokens:30};
+ });
+ const turnId=randomUUID(),body='Plan a family event';
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const expectedSteps=Object.fromEntries(Object.entries((await t.service.read(t.scope.projectId,t.scope.roundId)).steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]));
+ const input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,expectedSteps,purpose:'reply' as const};
+ const quote=await ai.quote(input),replyRequest={...input,requestId:turnId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits};
+ const reply=await ai.generate(replyRequest);expect(reply.state).toBe('succeeded');
+ await expect(t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Must not save dialogue',candidateId:reply.candidateId!})).rejects.toThrow();
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+ const summaryBinding=await chat.summary({conversationId:binding.conversationId,requestId:turnId});
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(summaryBinding);
+ const summaryInput={...input,purpose:'summary' as const};
+ // Configuration changes cannot make the parent's actual model the organizer.
+ await sql.query('update modules set model_id=$1 where id=$2',[summaryId,t.f.moduleId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(primaryId)]);
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_MUST_DIFFER');
+ const aliasId=randomUUID();
+ await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint) select $1,model_id,'Parent alias fixture','LOCAL_SYNTHETIC_KEY',api_endpoint from ai_models where id=$2",[aliasId,primaryId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(aliasId)]);
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_MUST_DIFFER');
+ expect(seen).toEqual([primaryId]);
+ await sql.query('update modules set model_id=$1 where id=$2',[primaryId,t.f.moduleId]);
+ await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(summaryId)]);
+ const summaryQuote=await ai.quote(summaryInput);
+ const request={...summaryInput,requestId:summaryBinding.requestId,quoteHash:summaryQuote.quoteHash,budgetCredits:summaryQuote.reservedCredits};
+ const result=await ai.generate(request);expect(result.state).toBe('succeeded');
+ expect((await ai.generate(request)).candidateId).toBe(result.candidateId);
+ expect((await ai.generate(replyRequest)).candidateId).toBe(reply.candidateId);
+ expect(seen).toEqual([primaryId,summaryId]);
+ // Exercise the SQL admission trigger directly as well as service preflight.
+ // A different row UUID cannot admit a quote using the immutable parent model.
+ for(const sameRecord of [true,false]){
+  await expect(sql.query(`insert into artifact_generations select (jsonb_populate_record(null::artifact_generations,
+   to_jsonb(g)||jsonb_build_object('id',$3::uuid,'state','prepared','candidate_id',null,'result',null,
+    'quote',g.quote||jsonb_build_object('modelId',$4::text,'providerModel',(select quote->>'providerModel' from artifact_generations where project_id=$1 and request_id=$5))))) .*
+   from artifact_generations g where g.project_id=$1 and g.request_id=$2`,
+   [t.scope.projectId,summaryBinding.requestId,randomUUID(),sameRecord?primaryId:aliasId,turnId])).rejects.toMatchObject({code:'42501',message:'summary source denied'});
+ }
+ if(provider==='qwen'){const quoteRow=await sql.query('select quote from artifact_generations where project_id=$1 and request_id=$2',[t.scope.projectId,turnId]);expect(quoteRow.rows[0].quote.providerModel).toBe('qwen/qwen3.8-flash');expect(quoteRow.rows[0].quote.inputTokens).toBe(128000-4096);}
+ await t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Combined result: family audience, budget 1200.',candidateId:result.candidateId!});
+ const view=await chat.read({conversationId:binding.conversationId});
+ expect(view.turns).toHaveLength(1);expect(view.turns[0]).toMatchObject({answer:dialogue,summaryState:'succeeded',summaryCandidateId:result.candidateId,generationMode:'dual'});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(false);
+ const logs=await sql.query("select metadata->>'role' role from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1) order by metadata->>'role'",[t.scope.projectId]);
+ expect(logs.rows.map(x=>x.role)).toEqual(['reply','summary']);
+ await sql.query("delete from system_settings where key='v3_summary_model_id'");
+},60000);
+
+aiTest('CHAT: missing summary configuration and unknown summary never replay the paid reply',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Previously saved result',evidenceIds:[]});
+ const seen:string[]=[];const ai=t.workbenchGeneration(t.user,db,async req=>{seen.push(req.model.id);if(req.model.id===localSummaryModel)throw new Error('Synthetic lost provider result');return {body:'Dialogue answer survives',inputTokens:800,outputTokens:30};});
+ const turnId=randomUUID(),body='Change budget';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);const reply=await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});expect(reply.state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),summaryInput={...input,purpose:'summary' as const};
+ await sql.query("delete from system_settings where key='v3_summary_model_id'");
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_NOT_CONFIGURED');expect(seen).toEqual([localModel]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0].answer).toBe('Dialogue answer survives');
+ await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1)",[JSON.stringify(localSummaryModel)]);
+ const sq=await ai.quote(summaryInput),request={...summaryInput,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ await expect(ai.generate({...request,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_DENIED');
+ expect((await ai.generate(request)).state).toBe('unknown');expect((await ai.generate(request)).state).toBe('unknown');
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(sb);
+ expect(seen).toEqual([localModel,localSummaryModel]);
+ const restored=await skillChatService(await authenticated(),db).read({conversationId:binding.conversationId});
+ expect(restored.turns[0]).toMatchObject({answer:'Dialogue answer survives',summaryState:'unknown',summaryCandidateId:null});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('Previously saved result');
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(1);
+},60000);
+
+aiTest('CHAT: summary dispatched before source revocation settles once but remains unreadable',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'Restricted test reference',observedAt:null,supersedes:null});
+ const evidenceId=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Source-backed saved basis',evidenceIds:[evidenceId]});
+ let calls=0;const ai=t.workbenchGeneration(t.user,db,async req=>{
+  calls++;
+  if(req.model.id===localSummaryModel)await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+  return {body:'Known response with restricted source',inputTokens:800,outputTokens:30};
+ });
+ const turnId=randomUUID(),body='Discuss the reference';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si={...input,purpose:'summary' as const},sq=await ai.quote(si),request={...si,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ const done=await ai.generate(request);expect(done.state).toBe('succeeded');
+ expect((await ai.generate(request)).state).toBe('succeeded');expect(calls).toBe(2);
+ const view=await t.service.read(t.scope.projectId,t.scope.roundId);expect(view.candidates.find(c=>c.id===done.candidateId)?.body).toBeNull();
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0]).toMatchObject({answer:null,available:false,summaryState:'succeeded'});
+ await expect(t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'Forbidden result',candidateId:done.candidateId!})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(2);
+},60000);
+
+aiTest('CHAT: a summary rejected before dispatch can restart without replaying the reply',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),body='Refine activity';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ async function input(purpose:'reply'|'summary') {const snap=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};}
+ const ri=await input('reply'),rq=await t.ai.quote(ri);expect((await t.ai.generate({...ri,requestId:turnId,quoteHash:rq.quoteHash,budgetCredits:rq.reservedCredits})).state).toBe('succeeded');
+ const old=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si=await input('summary'),sq=await t.ai.quote(si),oldRequest={...si,requestId:old.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Edited after summary quote',evidenceIds:[]});
+ await expect(t.ai.generate(oldRequest)).rejects.toThrow('GENERATION_CONFLICT');
+ expect((await t.ai.abandon({...t.scope,requestId:old.requestId})).abandoned).toBe(true);
+ const next=await chat.summary({conversationId:binding.conversationId,requestId:turnId});expect(next.requestId).not.toBe(old.requestId);
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(next);
+ await expect(t.ai.generate(oldRequest)).rejects.toThrow();
+ const ni=await input('summary'),nq=await t.ai.quote(ni);expect((await t.ai.generate({...ni,requestId:next.requestId,quoteHash:nq.quoteHash,budgetCredits:nq.reservedCredits})).state).toBe('succeeded');
+ expect(t.calls()).toBe(2);
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(2);
+},60000);
+
+aiTest.each(['recover','dismiss','closed','remote-dirty','remote-frozen','remote-unknown','save-race','save-receipt'])('CHAT: server-only summary recovery respects %s state',async(mode)=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),body='A fictional event request';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ let calls=0;const ai=t.workbenchGeneration(t.user,db,async req=>{calls++;if(mode==='closed'&&req.model.id===localSummaryModel)await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});return {body:req.model.id===localSummaryModel?'Saved summary from a different browser session':'A dialogue response',inputTokens:800,outputTokens:30};});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si={...input,purpose:'summary' as const},sq=await ai.quote(si);expect((await ai.generate({...si,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits})).state).toBe('succeeded');
+ if(mode==='save-race'||mode==='save-receipt') {
+  const candidateId=(await chat.read({conversationId:binding.conversationId})).turns[0].summaryCandidateId!;
+  const save={...t.scope,action:'saveCandidate' as const,requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Saved summary from a different browser session',candidateId};
+  if(mode==='save-receipt') {
+   await t.service.execute(save);await chat.dismissSummary({conversationId:binding.conversationId,candidateId});
+   expect(await t.service.execute(save)).toEqual({accepted:true});
+   expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(1);
+  } else {
+   const blocker=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await blocker.connect();
+   try {
+    await blocker.query('begin');await blocker.query('select id from artifact_projects where id=$1 for update',[t.scope.projectId]);
+    const pending=t.service.execute(save).then(()=> 'unexpected success',(e:Error)=>e.message);
+    await expect.poll(async()=>Number((await sql.query("select count(*) n from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%artifact_save_candidate%'" )).rows[0].n),{timeout:5000}).toBeGreaterThan(0);
+    await blocker.query("insert into artifact_requests(project_id,request_id,round_id,action,payload,response) values($1,$2,$3,'summary_dismissed',$4,'{\"dismissed\":true}')",[t.scope.projectId,randomUUID(),t.scope.roundId,JSON.stringify({candidateId})]);
+    await blocker.query('commit');expect(await pending).toBe('ARTIFACT_CANDIDATE_INVALIDATED');
+    expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+   } finally {await blocker.query('rollback');await blocker.end();}
+  }
+  expect(calls).toBe(2);return;
+ }
+ const {page,context}=await pageFor(credentials,[]),writes:string[]=[];
+ if(mode==='dismiss'||mode==='remote-dirty')await page.addInitScript(()=>{const real=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>real(handler,timeout===450?30000:timeout,...args)) as typeof window.setTimeout;});
+ if(mode==='remote-frozen'||mode==='remote-unknown')await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+ page.on('request',request=>{if(request.url().includes('workbench.execute')||request.url().includes('workbench.generate'))writes.push(request.url());});
+ await page.goto(app+'/chat?conversation='+binding.conversationId);await page.getByLabel('当前步骤工作稿').waitFor();
+ if(mode==='recover'){
+  await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Saved summary from a different browser session');
+  expect(writes.filter(x=>x.includes('workbench.generate'))).toHaveLength(0);
+ } else if(mode==='remote-dirty'||mode==='remote-frozen'||mode==='remote-unknown') {
+  if(mode==='remote-frozen'||mode==='remote-unknown')await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+  else await expect.poll(()=>page.getByLabel('当前步骤工作稿').inputValue()).toBe('Saved summary from a different browser session');
+  const candidateId=(await chat.read({conversationId:binding.conversationId})).turns[0].summaryCandidateId!;
+  if(mode==='remote-unknown')await page.getByLabel('当前步骤工作稿').fill('Newer B survives second unknown acknowledgement');
+  await chat.dismissSummary({conversationId:binding.conversationId,candidateId});
+  if(mode==='remote-unknown'){
+   await page.reload();await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+   expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('Newer B survives second unknown acknowledgement');
+   await page.unroute('**/api/trpc/workbench.execute*');
+  }
+  if(mode==='remote-frozen')await page.unroute('**/api/trpc/workbench.execute*');
+  await page.reload();
+  await expect.poll(async()=>await page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe('');
+  await expect.poll(()=>page.getByRole('button',{name:'重试保存',exact:true}).count()).toBe(0);
+  await page.waitForTimeout(1000);
+  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+  expect(writes.filter(x=>x.includes('workbench.generate'))).toHaveLength(0);
+ } else if(mode==='dismiss') {
+  await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).click();
+  await expect.poll(async()=>(await chat.read({conversationId:binding.conversationId})).turns[0].summaryDismissed,{timeout:30000}).toBe(true);
+  await page.reload();await page.getByLabel('当前步骤工作稿').waitFor();
+  expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('');
+  expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).count()).toBe(0);
+  expect(writes).toHaveLength(0);
+ } else {
+  expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).count()).toBe(0);
+  expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('');expect(writes).toHaveLength(0);
+ }
+ expect(calls).toBe(2);await context.close();
+},120000);
+
+
+aiTest.each([false,true])('CHAT: closed manual save resolves original acknowledgement committed=%s',async(committed)=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.route('**/api/trpc/workbench.execute*',async route=>{if(committed)await route.fetch();await route.abort('failed');});
+ await page.getByLabel('当前步骤工作稿').fill('Manual A with unknown acknowledgement');
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});
+ await page.unroute('**/api/trpc/workbench.execute*');await page.reload();
+ await expect.poll(async()=>page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe(committed?'Manual A with unknown acknowledgement':'');
+ await expect.poll(()=>page.getByRole('button',{name:'重试保存',exact:true}).count()).toBe(0);
+ const final=await t.service.read(t.scope.projectId,t.scope.roundId);expect(final.steps['step-0'].version).toBe(committed?1:0);
+ expect(t.calls()).toBe(0);await context.close();
+},90000);
+
+aiTest('CHAT: provider input usage beyond reservation preserves reconciliation evidence without a candidate or retry',async()=>{
+ const t=await generationFixture();let calls=0;
+ const ai=t.workbenchGeneration(t.user,db,async()=>{calls++;return {body:'Do not publish an over-budget result',inputTokens:2000000,outputTokens:20};});
+ const request=await t.request(ai),result=await ai.generate(request);
+ expect(result.state).toBe('unknown');expect(result.candidateId).toBeNull();
+ expect((await ai.generate(request)).state).toBe('unknown');expect(calls).toBe(1);
+ const evidence=await sql.query("select payload from artifact_requests where project_id=$1 and action='generation_usage_exceeded'",[t.scope.projectId]);
+ expect(evidence.rows).toHaveLength(1);expect(evidence.rows[0].payload.inputTokens).toBe(2000000);
+ expect(JSON.stringify(evidence.rows)).not.toContain('Do not publish');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates).toHaveLength(0);
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(0);
+},60000);
+
+aiTest('CHAT: selected module catalog avoids unrelated registrations while retaining authorization',async()=>{
+ const t=await generationFixture(),other=await generationFixture();
+ const broken='unrelated-'+randomUUID();
+ await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) select $1,module_id,skill_id,revision_id,jsonb_set(workflow,'{steps}','[]'),'Unrelated invalid fixture',true from artifact_workflows where module_id=$2 limit 1",[broken,other.f.moduleId]);
+ const bulk='catalog-bulk-'+randomUUID();
+ await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) select $1||'-'||n,module_id,skill_id,revision_id,workflow,'Unrelated capacity fixture',true from (select * from artifact_workflows where module_id=$2 limit 1) w cross join generate_series(1,101) n",[bulk,other.f.moduleId]);
+ try{
+  await expect(t.service.catalog()).rejects.toThrow();
+  const scoped=await t.service.catalog(t.f.moduleId);expect(scoped.length).toBeGreaterThan(0);expect(scoped.every(x=>x.moduleId===t.f.moduleId)).toBe(true);
+  const {skillChatService}=await import('../artifacts/chat');
+  expect((await skillChatService(t.user,db).enter({moduleId:t.f.moduleId,requestId:randomUUID()})).projectId).toBe(t.scope.projectId);
+  await expect(t.service.catalog(other.f.moduleId)).rejects.toThrow();
+  const fresh=await fixture({id:'scoped-'+randomUUID(),label:'Fresh scoped module',methodText:'Fictional scoped entry method.',workflow:makeWorkflow(3)});
+  const entry={moduleId:fresh.moduleId,requestId:randomUUID()},chat=skillChatService(t.user,db);
+  const created=await chat.enter(entry);expect(created.projectId).toBe(entry.requestId);
+  expect(await chat.enter(entry)).toEqual(created);
+  expect((await t.service.projects()).filter(p=>p.moduleId===fresh.moduleId)).toHaveLength(1);
+  const denied=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await denied.connect();
+  try{
+   await denied.query('set role authenticated');
+   await expect(denied.query('select artifact_module_catalog($1,$2)',[actor,t.f.moduleId])).rejects.toThrow('permission denied');
+  }finally{await denied.end();}
+  const stopped=await newUser();await sql.query("update profiles set status='disabled' where id=$1",[stopped.id]);
+  await expect(sql.query('select artifact_module_catalog($1,$2)',[stopped.id,t.f.moduleId])).rejects.toThrow('artifact denied');
+ }finally{await sql.query('delete from artifact_workflows where id=$1 or id like $2',[broken,bulk+'-%']);}
+},60000);
+
+aiTest('CHAT: oversized summary preserves the reply and never replays or settles a result',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const flow=makeWorkflow(3);flow.steps[0].maxLength=100;
+ const t=await generationFixture(3,'Synthetic bounded summary method.',{workflow:flow}),chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),turnId=randomUUID(),body='Discuss a fictional family event';
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),seen:string[]=[];
+ const ai=t.workbenchGeneration(t.user,db,async req=>{seen.push(req.model.id);return {body:req.model.id===localModel?'Readable dialogue':'x'.repeat(101),inputTokens:800,outputTokens:30};});
+ const input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),summary={...input,purpose:'summary' as const},sq=await ai.quote(summary);
+ const request={...summary,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ expect((await ai.generate(request)).state).toBe('unknown');expect((await ai.generate(request)).state).toBe('unknown');
+ expect(seen).toEqual([localModel,localSummaryModel]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0]).toMatchObject({answer:'Readable dialogue',summaryState:'unknown',summaryCandidateId:null});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe(snap.steps['step-0'].body);
+ expect((await sql.query("select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)",[t.scope.projectId])).rows[0].n).toBe(1);
+},60000);
+
+aiTest('CHAT: dirty ancestor blocks descendant send until autosave and fresh confirmation',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture();
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'Old confirmed ancestor',evidenceIds:[]});
+ const saved=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];
+ await t.service.execute({...t.scope,action:'confirm',stepId:'step-0',requestId:randomUUID(),expectedVersion:saved.version,expectedReviewVersion:saved.reviewVersion});
+ const chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const {page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?5000:timeout,...args)) as typeof window.setTimeout;});
+ let quotes=0,dispatches=0;page.on('request',r=>{if(r.url().includes('workbench.generationQuote'))quotes++;if(r.url().includes('workbench.generate'))dispatches++;});
+ await page.goto(app+'/chat?conversation='+binding.conversationId);
+ await page.getByLabel('当前步骤工作稿').fill('New ancestor must be saved before any reply');
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await page.getByLabel('给当前步骤发消息').fill('Discuss the dependent step');
+ expect(await page.getByRole('button',{name:'发送',exact:true}).isDisabled()).toBe(true);
+ expect(quotes).toBe(0);expect(dispatches).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('New ancestor must be saved before any reply');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(false);
+ expect(dispatches).toBe(0);
+ await context.close();
+},90000);
+
+aiTest('CHAT: editing a result while quote is pending abandons before model dispatch',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);let dispatches=0;
+ page.on('request',r=>{if(r.url().includes('workbench.generate'))dispatches++;});
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByLabel('给当前步骤发消息').fill('Discuss without replacing manual decisions');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await page.getByLabel('当前步骤工作稿').fill('Manual decision changed during quotation');release();
+ const {skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db);const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>t.abandoned),{timeout:30000}).toBe(true);
+ expect(dispatches).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Manual decision changed during quotation');
+ await page.unroute('**/api/trpc/workbench.generationQuote*');
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>!t.abandoned&&t.generationState==='succeeded'),{timeout:30000}).toBe(true);
+ expect(dispatches).toBeGreaterThan(0);await context.close();
+},90000);
+
+aiTest('CHAT: dirty edit after failed send recovery releases autosave queue',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let submits=0;await page.route('**/api/trpc/workbench.chatSubmit*',async route=>{submits++;await route.abort('failed');});
+ await page.getByLabel('给当前步骤发消息').fill('Discuss latest manual facts');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByRole('button',{name:'恢复原操作',exact:true}).waitFor();
+ await page.getByLabel('当前步骤工作稿').fill('Manual edit after failed send must autosave');
+ await page.getByRole('button',{name:'恢复原操作',exact:true}).click();expect(submits).toBe(1);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('Manual edit after failed send must autosave');
+ await page.unroute('**/api/trpc/workbench.chatSubmit*');
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:20000}).toBe(true);
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ const {skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db),conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>t.generationState==='succeeded'),{timeout:30000}).toBe(true);
+ await context.close();
+},90000);
+
+aiTest('CHAT: prepared delivery recovery waits for all dirty results to autosave',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const stopped=new Proxy(db,{get(target,key){if(key==='rpc')return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'?{abortSignal:async()=>{const result=await target.rpc(name,args);if(result.error)throw result.error;throw new Error('local stopped after reserve');}}:target.rpc(name,args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ let generates=0;
+ await page.route('**/api/trpc/workbench.generate*',async route=>{
+  generates++;const data=route.request().postDataJSON(),v=data.json??data['0']?.json??data['0']??data;
+  await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not dispatch');}).generate(v)).rejects.toThrow('local stopped after reserve');
+  await route.abort('failed');
+ });
+ await page.getByLabel('给当前步骤发消息').fill('Discuss latest saved decisions');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByRole('button',{name:'恢复原发送状态',exact:true}).waitFor();
+ await expect.poll(async()=>page.getByRole('button',{name:'恢复原发送状态',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
+ await page.getByLabel('当前步骤工作稿').fill('New decision must save before prepared delivery');
+ await page.getByRole('button',{name:'恢复原发送状态',exact:true}).click();
+ expect(generates).toBe(1);expect(t.calls()).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('New decision must save before prepared delivery');
+ expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
+ await context.close();
+},90000);
+
+aiTest('CHAT: deleting the active ordinary or guided conversation clears its route despite unsent text',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ for(const guided of [false,true]){
+  const title='Delete active '+randomUUID();let conversationId:string;
+  if(guided){const {skillChatService}=await import('../artifacts/chat');conversationId=(await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()})).conversationId;await sql.query('update conversations set title=$1 where id=$2',[title,conversationId]);}
+  else {conversationId=randomUUID();await sql.query('insert into conversations(id,user_id,title) values($1,$2,$3)',[conversationId,actor,title]);}
+  await page.goto(app+'/chat?conversation='+conversationId);
+  await (guided?page.getByLabel('给当前步骤发消息'):page.getByTestId('chat-input')).fill('Unsent text before explicit deletion');
+  await page.getByText(title,{exact:true}).locator('../..').getByTestId('conversation-actions-trigger').click();
+  await page.getByRole('menuitem',{name:'删除',exact:true}).click();
+  await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+  await page.waitForURL(u=>u.pathname==='/chat'&&!u.searchParams.has('conversation'));
+  await expect.poll(async()=>page.getByTestId('chat-input').isVisible(),{timeout:30000}).toBe(true);
+  await expect.poll(async()=>(await sql.query("select count(*)::int n from conversations where id=$1 and is_deleted='false'",[conversationId])).rows[0].n,{timeout:30000}).toBe(0);
+ }
+ await context.close();
+},90000);
+
+aiTest('CHAT: retention purges chat hierarchy while retaining accounting and deferring unresolved generations',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),summaryId=randomUUID();
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body:'Completed discussion'});
+ await sql.query('insert into artifact_chat_summaries(turn_id,request_id,attempt) values($1,$2,1)',[turnId,summaryId]);
+ await expect(sql.query('delete from artifact_chat_turns where request_id=$1',[turnId])).rejects.toThrow('immutable');
+ await expect(sql.query('delete from artifact_chat_summaries where request_id=$1',[summaryId])).rejects.toThrow('immutable');
+ const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const input={...t.scope,conversationId:binding.conversationId,turnId,purpose:'reply' as const,stepId:'step-0',instruction:'Completed discussion',expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([id,s])=>[id,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const quote=await t.ai.quote(input);
+ expect((await t.ai.generate({...input,requestId:turnId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits})).state).toBe('succeeded');
+ for(const step of t.f.flow.steps){
+  let s=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({action:'save',...t.scope,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,body:'Confirmed retained result '+step.id,evidenceIds:[]});
+  s=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({action:'confirm',...t.scope,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,expectedReviewVersion:s.steps[step.id].reviewVersion});
+ }
+ const ready=await t.service.read(t.scope.projectId,t.scope.roundId);
+ await t.service.execute({action:'publish',...t.scope,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(ready.steps).map(([id,s])=>[id,{version:s.version,reviewVersion:s.reviewVersion}]))});
+ const report=await t.service.report(t.scope.projectId,t.scope.roundId);
+ const retained=(await sql.query('select id,state,candidate_id,pre_deduct_id from artifact_generations where project_id=$1',[t.scope.projectId])).rows;
+ const accounting=(await sql.query('select id,total_credits,artifact_generation_id from token_stats where artifact_generation_id=any($1::uuid[])',[retained.map(g=>g.id)])).rows;
+ expect(accounting).toHaveLength(1);
+ const spend=(await sql.query('select id,amount from credit_transactions where source_id=any($1::text[])',[retained.map(g=>g.id)])).rows;
+ expect(spend).toHaveLength(1);
+ const pending=await generationFixture(),pendingChat=await skillChatService(pending.user,db).enter({...pending.scope,requestId:randomUUID()}),v=await pending.request();
+ expect((await db.rpc('artifact_generation',{p_actor_id:actor,p_project_id:v.projectId,p_round_id:v.roundId,p_request_id:v.requestId,p_action:'prepare',p_payload:{input:v,quote:{modelId:localModel,reservedCredits:v.budgetCredits}}})).error).toBeNull();
+ const ordinary=randomUUID();await sql.query("insert into conversations(id,user_id,title,is_deleted,deleted_at) values($1,$2,'Expired ordinary','true',now()-interval '40 days')",[ordinary,actor]);
+ await sql.query("update conversations set is_deleted='true',deleted_at=now()-interval '40 days' where id=any($1::uuid[])",[[binding.conversationId,pendingChat.conversationId]]);
+ // Minimal unused category scaffolding; the purge function itself is the actual migration.
+ for(const table of ['tickets','ticket_replies','prompts','announcements'])await sql.query(`create table if not exists ${table}(id uuid primary key default gen_random_uuid(),is_deleted boolean default false,deleted_at timestamptz)`);
+ const denied=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession:false}});
+ expect((await denied.rpc('purge_deleted_records',{p_days_old:30})).error).not.toBeNull();
+ const purge=await db.rpc('purge_deleted_records',{p_days_old:30});expect(purge.error).toBeNull();
+ expect(purge.data.find((r:{table_name:string})=>r.table_name==='conversations').deleted_count).toBe(2);
+ expect((await sql.query('select id from conversations where id=any($1::uuid[])',[[binding.conversationId,ordinary]])).rows).toHaveLength(0);
+ expect((await sql.query('select request_id from artifact_chat_turns where request_id=$1',[turnId])).rows).toHaveLength(0);
+ expect((await sql.query('select request_id from artifact_chat_summaries where request_id=$1',[summaryId])).rows).toHaveLength(0);
+ expect((await sql.query('select id,state,candidate_id,pre_deduct_id from artifact_generations where project_id=$1',[t.scope.projectId])).rows).toEqual(retained);
+ expect((await sql.query('select id,total_credits,artifact_generation_id from token_stats where artifact_generation_id=any($1::uuid[])',[retained.map(g=>g.id)])).rows).toEqual(accounting);
+ expect((await sql.query('select id,amount from credit_transactions where source_id=any($1::text[])',[retained.map(g=>g.id)])).rows).toEqual(spend);
+ expect(await t.service.report(t.scope.projectId,t.scope.roundId)).toEqual(report);
+ expect((await sql.query('select id from conversations where id=$1',[pendingChat.conversationId])).rows).toHaveLength(1);
+ expect((await pending.ai.list(pending.scope))[0].state).toBe('prepared');
+ await pending.ai.cancel({...pending.scope,requestId:v.requestId});
+ const again=await db.rpc('purge_deleted_records',{p_days_old:30});expect(again.error).toBeNull();
+ expect((await sql.query('select id from conversations where id=$1',[pendingChat.conversationId])).rows).toHaveLength(0);
+ expect((await db.rpc('purge_deleted_records',{p_days_old:30})).error).toBeNull();
+},60000);
+
+aiTest('CHAT: retention skips a busy project without blocking concurrent conversation restoration',async()=>{
+ const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const ordinary=randomUUID();await sql.query("insert into conversations(id,user_id,title,is_deleted,deleted_at) values($1,$2,'Expired ordinary concurrent','true',now()-interval '40 days')",[ordinary,actor]);
+ await sql.query("update conversations set is_deleted='true',deleted_at=now()-interval '40 days' where id=$1",[binding.conversationId]);
+ for(const table of ['tickets','ticket_replies','prompts','announcements'])await sql.query(`create table if not exists ${table}(id uuid primary key default gen_random_uuid(),is_deleted boolean default false,deleted_at timestamptz)`);
+ const holder=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await holder.connect();
+ try {
+  await holder.query('begin');await holder.query('select id from artifact_projects where id=$1 for update',[t.scope.projectId]);
+  const purge=await db.rpc('purge_deleted_records',{p_days_old:30}).abortSignal(AbortSignal.timeout(3000));
+  expect(purge.error).toBeNull();
+  expect((await sql.query('select id from conversations where id=$1',[ordinary])).rows).toHaveLength(0);
+  expect((await sql.query('select id from conversations where id=$1',[binding.conversationId])).rows).toHaveLength(1);
+  const restored=await holder.query("select artifact_chat($1,'attach',NULL,$2::jsonb) result",[actor,JSON.stringify({...t.scope,requestId:randomUUID()})]);
+  expect(restored.rows[0].result.conversationId).toBe(binding.conversationId);
+  await holder.query('commit');
+  expect((await skillChatService(t.user,db).read({conversationId:binding.conversationId})).binding.conversationId).toBe(binding.conversationId);
+ } finally {await holder.query('rollback');await holder.end();}
+},30000);
