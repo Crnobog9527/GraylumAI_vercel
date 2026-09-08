@@ -15,15 +15,15 @@ const contract:ProviderContract={
  result:v=>z.object({objects:z.array(z.object({id:z.string(),fields:z.record(z.string(),z.unknown()),missingFields:z.array(z.string()),observedAt:z.string().nullable()})),pagination:z.object({complete:z.boolean(),nextCursor:z.string().nullable()}),actualCredits:z.number().nullable()}).parse(v),
 };
 export async function localMcpFixture(store:ResearchStore,mode:'json'|'sse'='json',wire?:{discovery:Record<string,unknown>;description:Record<string,unknown>;result:Record<string,unknown>}){
- const events:string[]=[];let description:Record<string,unknown>={name:'Fixture/Search',schema,creditsPerCall:1};
+ const events:string[]=[];const executedParams:Record<string,unknown>[]=[];let description:Record<string,unknown>={name:'Fixture/Search',schema,creditsPerCall:1};
  if(wire)description=wire.description;
  let actualCredits:number|null=null;
  let behavior:'success'|'error'|'timeout'|'disconnect'|'oversize'='success';
  const mcp=new McpServer({name:'synthetic-agentkey',version:'test'});
  mcp.registerTool('find_tools',{inputSchema:z.object({q:z.string()})},async()=>{events.push('find');return {content:[{type:'text',text:JSON.stringify(wire?.discovery??{names:['Fixture/Search','Unreviewed/Write']})}]};});
  mcp.registerTool('describe_tool',{inputSchema:z.object({name:z.string()})},async()=>{events.push('describe');return {content:[],structuredContent:description};});
- mcp.registerTool('execute_tool',{inputSchema:z.object({name:z.string(),params:z.record(z.string(),z.unknown())})},async()=>{
-  events.push('execute');
+ mcp.registerTool('execute_tool',{inputSchema:z.object({name:z.string(),params:z.record(z.string(),z.unknown())})},async(args)=>{
+  events.push('execute');executedParams.push(structuredClone(args.params));
   if(behavior==='timeout')await new Promise(r=>setTimeout(r,500));
   if(behavior==='disconnect'){for(const socket of sockets)socket.destroy();await new Promise(r=>setTimeout(r,200));}
   if(behavior==='error')return {isError:true,content:[{type:'text',text:'synthetic error'}]};
@@ -38,6 +38,6 @@ export async function localMcpFixture(store:ResearchStore,mode:'json'|'sse'='jso
  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as import('node:net').AddressInfo;
  const authorize=vi.fn(async()=>{});
  const connect=(overrides:Partial<AdapterOptions>={})=>connectLocalAgentKey({store,authorize,contract,capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:1}],timeoutMs:200,maxResponseBytes:100000,maxCalls:30,maxPages:2,...overrides},new URL(`http://127.0.0.1:${address.port}/mcp`));
- return {events,connect,store,authorize,setActualCredits:(value:number|null)=>{actualCredits=value;},setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
+ return {events,executedParams,connect,store,authorize,setActualCredits:(value:number|null)=>{actualCredits=value;},setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
   async stop(){await mcp.close();for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
 }

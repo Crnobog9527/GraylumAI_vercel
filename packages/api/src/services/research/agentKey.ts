@@ -23,7 +23,12 @@ export interface ProviderContract {
   validateInput?(context:ProviderContext):void;
   result(value:unknown,context:ProviderContext):Pick<ResearchResult,'objects'|'pagination'> & {actualCredits:number|null};
 }
+export type ResearchScope = {projectId:string;roundId:string;stepId:string};
+export function researchIdentity(cap:ReviewedCapability,params:Record<string,unknown>,scope?:ResearchScope){
+ return contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params,...(scope?{scope}:{})});
+}
 export interface AdapterOptions {
+  scope?:ResearchScope;
   store:ResearchStore; capabilities:readonly ReviewedCapability[]; contract:ProviderContract;
   authorize:()=>Promise<void>; timeoutMs:number; maxResponseBytes:number; maxCalls:number; maxPages:number;
 }
@@ -61,7 +66,7 @@ export async function connectLocalAgentKey(options:AdapterOptions,endpoint:URL){
   return connect(options,endpoint.href,undefined,true);
 }
 async function connect(options:AdapterOptions,url:string,key:string|undefined,fixture:boolean){
-  options={...options,capabilities:structuredClone(options.capabilities)};
+  options={...options,capabilities:structuredClone(options.capabilities),...(options.scope?{scope:structuredClone(options.scope)}:{})};
   if(typeof window!=='undefined')stop('SERVER_ONLY');
   if(!Number.isInteger(options.timeoutMs)||options.timeoutMs<20||options.timeoutMs>30000
     ||!Number.isInteger(options.maxResponseBytes)||options.maxResponseBytes<256||options.maxResponseBytes>1048576
@@ -111,7 +116,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
         if(!cap||!discovered.has(cap.canonicalName))stop('CAPABILITY_DENIED');
         if(Object.keys(op.params).some(k=>!cap.parameterKeys.includes(k))||Buffer.byteLength(stable(op.params))>4096)stop('PARAMETERS_DENIED');
         options.contract.validateInput?.({canonicalName:cap.canonicalName,params:op.params});
-        return {operationId:op.operationId,identityHash:contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:op.params}),maxQuoteUnits:creditsToUnits(cap.maxQuoteCredits)};
+        return {operationId:op.operationId,identityHash:researchIdentity(cap,op.params,options.scope),maxQuoteUnits:creditsToUnits(cap.maxQuoteCredits)};
       });
       await options.store.create(planId,creditsToUnits(budgetCredits),approved);
     },
@@ -124,7 +129,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
       if(Object.keys(input.params).some(k=>!cap.parameterKeys.includes(k))||Buffer.byteLength(stable(input.params))>4096)stop('PARAMETERS_DENIED');
       options.contract.validateInput?.({canonicalName:cap.canonicalName,params:input.params});
       // Replayed identities are checked before returning a persisted result.
-      const identityHash=contractHash({capability:cap.canonicalName,schemaHash:cap.schemaHash,params:input.params});
+      const identityHash=researchIdentity(cap,input.params,options.scope);
       const previous=await options.store.get(input.planId,input.operationId);
       // reserve compares identity even for terminal records; fresh quote is not needed to recover.
       if(previous && previous.identityHash!==identityHash)stop('OPERATION_CONFLICT');

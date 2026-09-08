@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { workbenchSearch, workbenchSearchInput } from "../services/research/workbenchSearch";
 import { protectedProcedure, router } from "../trpc";
 import { workbenchGeneration, generationQuoteInput, generationInput, generationScope, generationRecoveryInput } from "../services/artifacts/generation";
 import {
@@ -37,6 +38,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         message: string;
       }
     > = {
+      RESEARCH_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "网页搜索尚未启用，仍可补充自己的参考资料。" },
+      RESEARCH_BILLING_UNAVAILABLE: { code: "SERVICE_UNAVAILABLE", message: "搜索结算暂不可用，请保留本次记录后重试。" },
+      RESEARCH_SCOPE_UNAVAILABLE: { code: "CONFLICT", message: "当前步骤状态已变化，请刷新后再搜索。" },
       GENERATION_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "AI 生成尚未启用，仍可编辑和保存内容。" },
       GENERATION_UNSUPPORTED_MODEL: { code: "SERVICE_UNAVAILABLE", message: "当前模型尚未通过工作台容量与计费配置校验。" },
       GENERATION_CAPACITY: { code: "BAD_REQUEST", message: "完整方法和项目内容超过当前模型容量，未扣费。" },
@@ -76,6 +80,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   return result;
 });
 export const workbenchRouter = router({
+  search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
   generationQuote: procedure.input(generationQuoteInput).mutation(({ ctx, input }) => ctx.generation.quote(input)),
   generate: procedure.input(generationInput).mutation(({ ctx, input }) => ctx.generation.generate(input)),
   generations: procedure.input(generationScope).query(({ ctx, input }) => ctx.generation.list(input)),

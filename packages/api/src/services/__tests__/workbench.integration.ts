@@ -2358,3 +2358,29 @@ aiTest('AI: research adoption waits for canonical settlement and preserves evide
  await expect(service.execute({...command,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
  expect((await sql.query('select count(*)::int n from credit_transactions where source_id=$1',[operationId])).rows[0].n).toBe(1);
 },30000);
+
+aiTest('AI: research host dispatches only explicit query and recovers without reconnecting',async()=>{
+ const t=await generationFixture(),{workbenchSearch}=await import('../research/workbenchSearch');
+ const {localMcpFixture}=await import('./fixtures/agentKeyServer'),{databaseBilledResearchStore}=await import('../research/store'),{tavilySchema}=await import('../research/tavilySchema');
+ const name='Tavily/post_search',query='Fictional public exhibition planning';
+ const wire={discovery:{tools:[{name}]},description:{name,category:'Search',provider:'Tavily',params:tavilySchema,cost:{credits_per_call:1.1},health:{healthy:true},execute_as:{name,params:{query:'<The search query to execute with Tavily.>'}}},result:{category:'search',provider:'Tavily',took_ms:10,data:{query,answer:null,follow_up_questions:null,images:[],response_time:0.01,results:[{id:'fixture-web-1',title:'Fictional guide',url:'https://example.test/guide',content:'Public fictional reference.',score:0.8,raw_content:null}],usage:{credits:1}}}};
+ const fixture=await localMcpFixture(databaseBilledResearchStore(db,actor),'json',wire);let connections=0;
+ const host=workbenchSearch(t.user,db,options=>{connections++;return fixture.connect(options);});
+ const input={...t.scope,requestId:randomUUID(),stepId:'step-0',query};
+ try {
+  await sql.query("insert into system_settings(key,value) values('v3_web_search','false'),('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+  await expect(host.search(input)).rejects.toThrow('RESEARCH_DISABLED');expect(connections).toBe(0);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+  const result=await host.search(input);expect(result.state).toBe('succeeded');expect(result.result?.objects[0].fields.content).toBe('Public fictional reference.');
+  expect(JSON.stringify(result)).not.toContain('quoted');expect(JSON.stringify(result)).not.toContain('agentkey-credit');
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+  await sql.query("update system_settings set value='false' where key='v3_web_search'");
+  expect(await host.search(input)).toEqual(result);expect(connections).toBe(1);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  expect(fixture.executedParams).toEqual([{query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'}]);
+  await expect(host.search({...input,query:'Changed query'})).rejects.toThrow();expect(connections).toBe(1);
+  await expect(host.search({...input,actorId:actor} as never)).rejects.toThrow();
+  const other=await generationFixture();
+  await expect(host.search({...input,...other.scope})).rejects.toThrow();expect(connections).toBe(1);
+ } finally {await fixture.stop();}
+},60000);
