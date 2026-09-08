@@ -37,3 +37,21 @@ export function databaseResearchStore(db:SupabaseClient, actorId:string):Researc
     async cancel(p){await call('cancel',p,null);},
   };
 }
+
+/** Product search uses the original credit RPCs. Persist provider results before
+ * settling: a failed settlement is recoverable without another provider call. */
+export function databaseBilledResearchStore(db:SupabaseClient,actorId:string):ResearchStore {
+  const base=databaseResearchStore(db,actorId);
+  const charge=async(planId:string,operationId:string|null,action:string)=>{
+    const {error}=await db.rpc('research_user_charge',{p_actor_id:actorId,p_plan_id:planId,p_operation_id:operationId,p_action:action});
+    if(error)throw new Error('RESEARCH_BILLING_UNAVAILABLE');
+  };
+  return {
+    create:base.create,
+    async get(p,o){const r=await base.get(p,o);if(r?.state==='succeeded')await charge(p,o,'settle');return r;},
+    async reserve(p,o,identity,quote){const r=await base.reserve(p,o,identity,quote);if(r.claimed)await charge(p,o,'reserve');else if(r.state==='succeeded')await charge(p,o,'settle');return r;},
+    async dispatch(p,o,token){await charge(p,o,'admit');return base.dispatch(p,o,token);},
+    async finish(p,o,token,state,result){await base.finish(p,o,token,state,result);if(state==='succeeded')await charge(p,o,'settle');},
+    async cancel(p){await base.cancel(p);await charge(p,null,'refund');},
+  };
+}

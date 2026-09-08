@@ -43,6 +43,12 @@ describe("workbench browser boundary", () => {
       }).success,
     ).toBe(false);
   });
+  it("accepts only stored research identity for adoption, never a supplied result or price", () => {
+    const value = { ...scope, action: "researchEvidence", planId: randomUUID(), operationId: randomUUID() };
+    expect(webCommandSchema.safeParse(value).success).toBe(true);
+    for (const field of ["actorId", "result", "body", "price", "chargedCredits"])
+      expect(webCommandSchema.safeParse({ ...value, [field]: "injected" }).success).toBe(false);
+  });
   it("allows adoption of an existing candidate without browser-controlled provenance", () => {
     const value = {
       ...scope,

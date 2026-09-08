@@ -20,3 +20,22 @@
 [Tavily Terms §§3.2–3.5](https://www.tavily.com/terms) expressly address application integration and outside end users; this is not evidence of a blanket ban on product integration. [Tavily Privacy §2.1 and §3](https://www.tavily.com/privacy) permits query processing, possible sharing with search-index providers, and retention for stated purposes; no fixed zero-retention promise was established. Therefore product search should send only its explicit query, not silently append the full conversation, private Skill text or documents. Keep existing source links, unknown publication dates and evidence restriction behavior. Source-specific reuse rights remain unknown; do not label all returned content as freely redistributable.
 
 This read-only review adds no paid request, acceptance of new terms, external configuration, user price, or retention-policy change. Product entry, original user-credit billing integration, and complete product validation remain unfinished.
+
+
+## Local billing integration in progress
+
+The unactivated search implementation links existing research operations to the canonical pre-deduct/settle/refund RPCs; no new balance or workflow state table is introduced. The local price of 5 credits is synthetic test configuration only, not an approved user price. Missing/zero price denies new paid admission. Provider results persist before user settlement, and the billed store resumes settlement on read rather than fetching again.
+
+`/tmp/graylum-research-billing-validation-2.log`: 3 PASS / 40 SKIP, real disposable SQL and PostgREST, including repeat migration, concurrent reservation/settlement, forced settlement rollback with the result retained, cancellation after store recreation, no automatic refund of dispatched work, and rejection of an unconfigured price. No provider calls occurred.
+
+Still required before enabling or claiming delivery: daily reconciliation must count research settlements independently of model token stats; product admission/entry and result adoption must use the billed store; finish/recovery and full evidence/UI paths need integrated validation and independent review. Current code is work in progress, not merge-ready.
+
+### Settlement reconciliation and reference admission follow-up
+
+Daily reconciliation now adds the service-only research aggregate to canonical settlement totals without inventing model token usage. Migration 0071 must precede deploying this reconciliation code; the deployment must not interpret a missing aggregate RPC as a zero balance. The aggregate validates its date window and is denied to ordinary users.
+
+The existing workbench command admits stored research identity only, resolves the user's project first, and requires billed-store success before adding reference material. Failed settlement leaves no adopted evidence; retry settles once without another provider request. Existing source restrictions and project binding remain authoritative.
+
+Validation: `/tmp/graylum-research-adoption-unit.log` 102 PASS; `/tmp/graylum-research-adoption-validation.log` 4 PASS / 40 SKIP with real disposable Auth/SQL/PostgREST, aggregate window and access checks, settlement failure/recovery, adoption, cross-user denial and restricted-source denial; cleanup/canary PASS. `/tmp/graylum-research-adoption-types.log` web typecheck exit 0. The preceding snapshot also passed 42 workbench tests plus one process-restart restoration test (`/tmp/graylum-research-billing-validation-3.log`); that earlier full run does not cover the later admission change. No external calls or settings changes occurred.
+
+Still outstanding: bounded product search admission/entry and results UI, full browser integration, remote CI and independent review. No search price or external activation has been approved.

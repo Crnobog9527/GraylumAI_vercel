@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { databaseArtifactStore, commandSchema } from "./store";
 import { workflowSchema } from "./workflow";
+import { databaseBilledResearchStore } from "../research/store";
 import {
   publicWorkflowSchema,
   projectSchema,
@@ -34,6 +35,7 @@ export const webCommandSchema = z.discriminatedUnion("action", [
       .refine((v) => Object.keys(v).length > 0 && Object.keys(v).length <= 32),
   }),
   commandSchema.options[6],
+  commandSchema.options[7],
   commandSchema.options[8],
   commandSchema.options[9],
 ]);
@@ -240,7 +242,16 @@ export function workbenchService(
                   ? "ARTIFACT_REVIEW_REQUIRED"
                   : "ARTIFACT_UNAVAILABLE",
           );
-      } else await (await store(v.projectId, v.roundId)).execute(v);
+      } else {
+        const target = await store(v.projectId, v.roundId);
+        if (v.action === "researchEvidence") {
+          const result = await databaseBilledResearchStore(privateClient!, await actor())
+            .get(v.planId, v.operationId);
+          if (result?.state !== "succeeded" || !result.result || result.resultAccess === "restricted")
+            throw new Error("ARTIFACT_EVIDENCE_UNAVAILABLE");
+        }
+        await target.execute(v);
+      }
       return { accepted: true };
     },
     async report(projectId: string, roundId: string) {
