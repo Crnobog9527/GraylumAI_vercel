@@ -153,3 +153,5 @@ GitHub 审查的两项同时修复：scoped catalog 的 100 项上限只计算�
 GitHub P1 3956133617 已修复：发送按钮、send 函数入口、可恢复 run 回调均检查所有步骤的 dirty 成果；报价返回后再检查，发生编辑则按原未预留请求执行 abandon，不能携带旧已确认前序内容生成收费回复。已发出/unknown 请求仍保留原身份恢复。
 
 `graylum-dirty-send-final-validation.log`：2 PASS / 84 SKIP，真实本地浏览器/HTTP/SQL验证：前序编辑后切后序在自动保存前不发 quote/generate；保存后前序失去确认。另一个场景将quote响应挂起，此期间编辑成果，释放后零generate且旧意图abandon；编辑保存后显式再次发送成功。私有canary检查通过。Web typecheck PASS。该专项不代表真实模型或完整V3验收。
+
+恢复队列补充修复：恢复尚未开始的发送回调遇到 dirty 成果时，仅清除该 pendingWrite 队列占用，保留 delivery、pendingSave 及未知回执身份，避免自动保存被自身永久阻塞。`graylum-send-queue-validation.log` 3 PASS / 84 SKIP，覆盖前述两场景及发送请求网络失败→编辑→恢复拒绝但自动保存继续→显式新发送成功；cleanup/canary、Web typecheck 均通过。

@@ -3045,3 +3045,21 @@ aiTest('CHAT: editing a result while quote is pending abandons before model disp
  await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>!t.abandoned&&t.generationState==='succeeded'),{timeout:30000}).toBe(true);
  expect(dispatches).toBeGreaterThan(0);await context.close();
 },90000);
+
+aiTest('CHAT: dirty edit after failed send recovery releases autosave queue',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let submits=0;await page.route('**/api/trpc/workbench.chatSubmit*',async route=>{submits++;await route.abort('failed');});
+ await page.getByLabel('给当前步骤发消息').fill('Discuss latest manual facts');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.getByRole('button',{name:'恢复原操作',exact:true}).waitFor();
+ await page.getByLabel('当前步骤工作稿').fill('Manual edit after failed send must autosave');
+ await page.getByRole('button',{name:'恢复原操作',exact:true}).click();expect(submits).toBe(1);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('Manual edit after failed send must autosave');
+ await page.unroute('**/api/trpc/workbench.chatSubmit*');
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:20000}).toBe(true);
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ const {skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db),conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>t.generationState==='succeeded'),{timeout:30000}).toBe(true);
+ await context.close();
+},90000);

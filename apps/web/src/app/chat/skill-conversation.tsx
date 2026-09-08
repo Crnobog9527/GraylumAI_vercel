@@ -405,7 +405,12 @@ export function SkillConversation({
       .at(-1);
     const requestId = prior?.requestId ?? id();
     await run(async () => {
-      if (Object.values(state.current.drafts).some(d => d.dirty)) throw new Error("请等待成果自动保存后再发送。");
+      if (Object.values(state.current.drafts).some(d => d.dirty)) {
+        // This send callback has not started any new request. Release only its
+        // queue ownership so autosave can run; delivery/save identities survive.
+        pendingWrite.current = null;
+        throw new Error("请等待成果自动保存后再发送。");
+      }
       await api.chatSubmit.mutate({
         conversationId,
         requestId,
