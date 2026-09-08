@@ -62,6 +62,10 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    const lookup=await privateClient!.rpc('research_lookup',{p_actor_id:id,p_plan_id:input.requestId,p_operation_id:input.requestId});
    if(lookup.error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
    if(lookup.data&&lookup.data.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
+   if(!lookup.data)await checkRateLimitAsync(id,'ai');
+   // The bounded intent is also a cancellation barrier for a delayed search.
+   // Create verifies the entire approved identity even before reservation.
+   await store.create(input.requestId,1100000,[{operationId:input.requestId,identityHash,maxQuoteUnits:1100000}]);
    return {cancelled:(await store.cancel(input.requestId))===true};
   },
   async search(raw:Input){

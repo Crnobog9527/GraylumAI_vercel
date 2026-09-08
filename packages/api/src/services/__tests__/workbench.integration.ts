@@ -3386,12 +3386,42 @@ aiTest('CHAT: search restores a lost response, adopts references once and cancel
 aiTest('AI: research cancellation reports unsent and dispatched outcomes under the plan lock',async()=>{
  const {databaseBilledResearchStore}=await import('../research/store');const store=databaseBilledResearchStore(db,actor);
  const t=await generationFixture(),{workbenchSearch}=await import('../research/workbenchSearch');
- const host=workbenchSearch(t.user,db),ids=Array.from({length:12},()=>randomUUID());
- for(const requestId of ids)expect(await host.cancel({...t.scope,stepId:'step-0',query:'Missing query',requestId})).toEqual({cancelled:true});
- expect((await sql.query('select id from research_plans where id=any($1::uuid[])',[ids])).rows).toHaveLength(0);
- await expect(host.cancel({...t.scope,stepId:'missing-step',query:'Missing query',requestId:randomUUID()})).rejects.toThrow('RESEARCH_SCOPE_UNAVAILABLE');
- const foreign=await newUser();
- await expect(workbenchSearch(await authenticated(foreign),db).cancel({...t.scope,stepId:'step-0',query:'Missing query',requestId:randomUUID()})).rejects.toThrow();
+ const host=workbenchSearch(t.user,db),request={...t.scope,stepId:'step-0',query:'Delayed query',requestId:randomUUID()};
+ const {getRateLimiter}=await import('../rateLimiter');
+ let reached!:()=>void,resume!:()=>void;
+ const paused=new Promise<void>(r=>{reached=r}),released=new Promise<void>(r=>{resume=r});
+ const delayedDb=new Proxy(db,{get(target,key){
+  if(key==='rpc')return async(name:string,args:Record<string,unknown>)=>{
+   if(name==='research_transition'&&args.p_action==='create'){reached();await released;}
+   return target.rpc(name,args);
+  };
+  return Reflect.get(target,key);
+ }});
+ let connections=0;
+ const delayed=workbenchSearch(t.user,delayedDb,async()=>{connections++;throw new Error('must not connect');});
+ const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ const pending=delayed.search(request).then(()=>null,error=>error);
+ await paused;
+ try {
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  // Simulate losing that successful cancellation response and retrying it.
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  await expect(host.cancel({...request,query:'Different scope'})).rejects.toThrow('RESEARCH_IDENTITY_CONFLICT');
+  await expect(host.cancel({...request,stepId:'step-1'})).rejects.toThrow('RESEARCH_IDENTITY_CONFLICT');
+  await expect(host.cancel({...request,stepId:'missing-step'})).rejects.toThrow('RESEARCH_SCOPE_UNAVAILABLE');
+  const foreign=await newUser();
+  await expect(workbenchSearch(await authenticated(foreign),db).cancel(request)).rejects.toThrow();
+  for(let i=0;i<61;i++)getRateLimiter().check(actor,'ai');
+  // Existing cancellation recovery remains available after exhausting new-intent limits.
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  const blocked=randomUUID();
+  await expect(host.cancel({...request,requestId:blocked})).rejects.toThrow('请求过于频繁');
+  expect((await sql.query('select id from research_plans where id=$1',[blocked])).rows).toHaveLength(0);
+ } finally {resume();getRateLimiter().close();}
+ expect(await pending).toBeInstanceOf(Error);
+ expect(connections).toBe(0);
+ expect((await sql.query('select id from research_operations where plan_id=$1',[request.requestId])).rows).toHaveLength(0);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before);
  await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
  for(const state of ['empty','prepared','dispatched']){
   await sql.query('update profiles set credits=100 where id=$1',[actor]);
