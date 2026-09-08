@@ -2,6 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { GenerationPanel } from "./generation-panel";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase";
@@ -460,7 +461,7 @@ export default function WorkbenchPage() {
           </p>
         )}
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="space-y-5">
+          <aside className="min-w-0 space-y-5 break-words">
             <section className={panel}>
               <h2 className="mb-4 font-medium">我的项目</h2>
               {projects.length === 0 && !busy && (
@@ -520,6 +521,7 @@ export default function WorkbenchPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      className="h-auto max-w-full whitespace-normal break-all py-2"
                       disabled={
                         busy ||
                         dirty ||
@@ -710,6 +712,12 @@ export default function WorkbenchPage() {
                         放弃此步骤本地编辑
                       </Button>
                     </div>
+                    <GenerationPanel key={`${snapshot.projectId}/${snapshot.roundId}/${selected}`} snapshot={snapshot} stepId={selected} disabled={busy || dirty}
+                      refresh={async (projectId, roundId) => {
+                        const observed = snapshotRef.current;
+                        const next = await api.read.query({ projectId, roundId });
+                        if (!locked.current && observed === snapshotRef.current && observed?.projectId === projectId && observed?.roundId === roundId) applySnapshot(next, true);
+                      }} />
                     <details className="mt-5">
                       <summary>此步骤确认历史与候选</summary>
                       {snapshot.confirmations

@@ -312,7 +312,9 @@ export const conversationContextSnapshots = pgTable('conversation_context_snapsh
  */
 export const tokenStats = pgTable('token_stats', {
   id: uuid('id').primaryKey().defaultRandom(),
-  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
+  // The SQL migration enforces exactly one chat or workbench execution scope.
+  artifactGenerationId: uuid('artifact_generation_id'),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
   modelUsed: text('model_used').notNull(), // 实际使用的模型 ID (如 claude-sonnet-4-20250514)
@@ -447,6 +449,7 @@ export const aiUsageLogs = pgTable('ai_usage_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  artifactGenerationId: uuid('artifact_generation_id'),
   requestId: text('request_id'), // Claude API 返回的请求 ID
   modelId: text('model_id').notNull(), // 请求的模型 ID
   status: text('status', { enum: ['success', 'failed', 'timeout', 'rate_limited', 'moderation_blocked'] }).notNull(),

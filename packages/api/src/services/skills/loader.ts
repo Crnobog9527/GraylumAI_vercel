@@ -141,7 +141,7 @@ export class LoadedSkill {
   [inspect.custom]() { return this.toJSON(); }
 }
 /** Host selects a reviewed task plan; no name guessing, markdown execution, or model tool loop. */
-export async function activateSkill(source: SkillSource, selection: PackageIdentity, options: { task?: string; maxContextBytes: number }): Promise<LoadedSkill> {
+export async function activateSkill(source: SkillSource, selection: PackageIdentity, options: { task?: string; resources?: readonly string[]; maxContextBytes: number }): Promise<LoadedSkill> {
   const selected = identitySchema.safeParse(selection);
   if (!selected.success) fail('INVALID_IDENTITY');
   if (!Number.isSafeInteger(options.maxContextBytes) || options.maxContextBytes < 1 || options.maxContextBytes > 2 * 1024 * 1024) fail('CAPACITY_EXCEEDED');
@@ -149,7 +149,13 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   if (!p) fail('UNAVAILABLE');
   await enabled(source, p);
   let roots: string[] = [];
-  if (Object.keys(p.tasks).length) {
+  // Only the trusted workflow host supplies resources, from the immutable,
+  // validated round. This does not change package identity or legacy task selection.
+  if (options.resources !== undefined) {
+    if (options.task !== undefined || options.resources.length < 1 || options.resources.length > 64) fail('INVALID_IDENTITY');
+    roots = [...options.resources];
+    roots.forEach(assertPath);
+  } else if (Object.keys(p.tasks).length) {
     if (!options.task || !Object.hasOwn(p.tasks, options.task)) fail('INVALID_IDENTITY');
     roots = p.tasks[options.task];
   } else if (options.task !== undefined) fail('INVALID_IDENTITY');

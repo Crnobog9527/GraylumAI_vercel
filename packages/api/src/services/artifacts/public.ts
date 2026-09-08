@@ -23,7 +23,13 @@ export const publicWorkflowSchema = z.object({
   }),
 });
 export type PublicWorkflow = z.infer<typeof publicWorkflowSchema>;
+export const generationStatusSchema = z.object({
+  requestId: uuid, stepId: z.string(), state: z.enum(['prepared', 'dispatched', 'responded', 'succeeded', 'refunded', 'unknown']),
+  reservedCredits: z.number().int().nonnegative(), chargedCredits: z.number().int().nonnegative().nullable(),
+  candidateId: uuid.nullable(), createdAt: z.string(),
+});
 export const snapshotSchema = z.object({
+  generations: generationStatusSchema.array().optional(),
   projectId: uuid,
   roundId: uuid,
   skillId: uuid,
