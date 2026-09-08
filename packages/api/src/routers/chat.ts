@@ -158,7 +158,7 @@ async function assertExportPermission(ctx: ProtectedContext) {
   };
 }
 
-async function loadConversationExportData(
+export async function loadConversationExportData(
   ctx: ProtectedContext,
   conversations: ExportConversationRecord[]
 ) {
@@ -193,12 +193,16 @@ async function loadConversationExportData(
     messagesByConversationId.set(message.conversation_id, existingMessages);
   }
 
-  for (const conversation of conversations.filter(c=>c.skill_mode)) {
-    const chat=await skillChatService(ctx.supabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).read({conversationId:conversation.id});
+  const guided=conversations.filter(c=>c.skill_mode);
+  const reader=skillChatService(ctx.supabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null);
+  for (let offset=0;offset<guided.length;offset+=4) {
+   await Promise.all(guided.slice(offset,offset+4).map(async conversation=>{
+    const chat=await reader.read({conversationId:conversation.id});
     messagesByConversationId.set(conversation.id,chat.turns.flatMap(turn=>turn.available?[
       {role:'user',content:turn.body??'',created_at:turn.createdAt},
       ...(turn.answer?[{role:'assistant',content:turn.answer,created_at:turn.createdAt}]:[]),
     ]:[{role:'user',content:'来源已受限，内容不可导出',created_at:turn.createdAt}]));
+   }));
   }
   return conversations.map((conversation) => ({
     id: conversation.id,

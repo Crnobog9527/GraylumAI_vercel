@@ -3086,3 +3086,21 @@ aiTest('CHAT: prepared delivery recovery waits for all dirty results to autosave
  expect((await t.ai.list(t.scope))[0].state).toBe('prepared');
  await context.close();
 },90000);
+
+aiTest('CHAT: deleting the active ordinary or guided conversation clears its route despite unsent text',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ for(const guided of [false,true]){
+  const title='Delete active '+randomUUID();let conversationId:string;
+  if(guided){const {skillChatService}=await import('../artifacts/chat');conversationId=(await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()})).conversationId;await sql.query('update conversations set title=$1 where id=$2',[title,conversationId]);}
+  else {conversationId=randomUUID();await sql.query('insert into conversations(id,user_id,title) values($1,$2,$3)',[conversationId,actor,title]);}
+  await page.goto(app+'/chat?conversation='+conversationId);
+  await (guided?page.getByLabel('给当前步骤发消息'):page.getByTestId('chat-input')).fill('Unsent text before explicit deletion');
+  await page.getByText(title,{exact:true}).locator('../..').getByTestId('conversation-actions-trigger').click();
+  await page.getByRole('menuitem',{name:'删除',exact:true}).click();
+  await page.getByRole('alertdialog').getByRole('button',{name:'删除',exact:true}).click();
+  await page.waitForURL(u=>u.pathname==='/chat'&&!u.searchParams.has('conversation'));
+  await expect.poll(async()=>page.getByTestId('chat-input').isVisible(),{timeout:30000}).toBe(true);
+  await expect.poll(async()=>(await sql.query("select count(*)::int n from conversations where id=$1 and is_deleted='false'",[conversationId])).rows[0].n,{timeout:30000}).toBe(0);
+ }
+ await context.close();
+},90000);

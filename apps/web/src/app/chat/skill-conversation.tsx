@@ -557,7 +557,7 @@ export function SkillConversation({
         <ChatSidebar
           activeConversationId={conversationId}
           onSelectConversation={go}
-          onNewChat={() => go()}
+          onNewChat={reason => reason === 'deleted' ? navigate() : go()}
         />
         <main className="flex min-w-0 flex-1 flex-col" aria-label="Skill 对话">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-primary)] p-4">

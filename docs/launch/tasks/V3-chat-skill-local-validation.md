@@ -160,3 +160,10 @@ GitHub P1 3956133617 已修复：发送按钮、send 函数入口、可恢复 ru
 显式 delivery 恢复补充（GitHub P1 3956302764）：deliver 的共同入口在任一步骤 dirty 且请求未知或 prepared 时拒绝可能产生新 dispatch 的调用，只释放 pendingWrite 以允许自动保存。已知非 prepared 状态仍按原身份恢复；不新增队列或绑定机制。
 
 `graylum-prepared-recovery-validation-3.log`：1 PASS / 87 SKIP，真实本地 Auth/浏览器/HTTP/PostgREST/SQL 创建 prepared 预留后编辑成果，点击恢复不增加 generate HTTP 请求、无模型 transport，成果自动保存且原 prepared 身份保留。该用例不声称旧 basis 保存后还能重新生成；应走既有取消/新发送流程。前两次测试分别因请求解包和等待时限失败，不能计为通过。另三个 dirty-send 场景在首轮通过，Web typecheck PASS，cleanup/canary PASS；供应商无新增调用。
+
+
+## 导出与删除导航修复（2026-09-08）
+
+GitHub P2 3956471172：Skill 导出改为每批最多并行 4 次原权限检查读取，保留原顺序和受限内容投影。`graylum-export-concurrency-test-2.log` 4 PASS，覆盖并发上限、顺序、来源受限隐藏及原统计场景。首轮新测试的查询替身遗漏 eq 方法而失败，不计为通过。
+
+GitHub P2 3956471186：侧栏用明确的 deleted 原因通知当前对话被删除，普通/Skill 对话均清理旧路由，不再套用新建对话的输入拦截；普通对话同时停止原流。`graylum-delete-navigation-validation-2.log` 1 PASS / 88 SKIP，在真实本地 Auth/浏览器/HTTP/PostgREST/SQL 覆盖普通与 Skill 对话有未发送输入时确认删除、旧路由清除、新输入框可用和软删除完成。首轮因测试环境未安装原 soft_delete_conversation 失败；现从 0050 原样加载函数及所需字段，未重写删除逻辑。cleanup/canary、Web typecheck PASS；未调用真实供应商。

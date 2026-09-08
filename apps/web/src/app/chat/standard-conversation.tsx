@@ -419,7 +419,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
         {/* 左侧边栏 - 对话列表 */}
         <ChatSidebar
           onSelectConversation={id => { if (isProcessing || inputMessage) {setNavigationNotice('请先完成发送或清空输入，再切换对话。');return;} navigate(id); }}
-          onNewChat={() => { if (isProcessing || inputMessage) {setNavigationNotice('请先完成发送或清空输入，再新建对话。');return;} handleNewChat(); navigate(); }}
+          onNewChat={reason => { if (reason === 'deleted') { abortStreaming(); handleNewChat(); navigate(); return; } if (isProcessing || inputMessage) {setNavigationNotice('请先完成发送或清空输入，再新建对话。');return;} handleNewChat(); navigate(); }}
           activeConversationId={activeConversationId ?? undefined}
         />
 

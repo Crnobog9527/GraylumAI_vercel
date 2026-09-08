@@ -32,6 +32,12 @@ REVOKE ALL ON credit_transactions FROM PUBLIC,anon,authenticated; GRANT SELECT O
     if(start<0||end<=start)throw new Error('missing canonical chat policy'); sql(rls.slice(start,end));
   }
   sql('ALTER TABLE conversations ENABLE ROW LEVEL SECURITY; ALTER TABLE messages ENABLE ROW LEVEL SECURITY; GRANT SELECT,INSERT,UPDATE,DELETE ON conversations,messages TO authenticated,service_role;');
+  sql('ALTER TABLE messages ADD COLUMN deleted_at timestamptz');
+  const deletion = readFileSync(resolve(root,'packages/db/migrations/0050_sec1_privileged_rpc_execute_posture_closure.sql'),'utf8');
+  const deletionStart=deletion.indexOf('CREATE OR REPLACE FUNCTION public.soft_delete_conversation('),deletionEnd=deletion.indexOf('$$;',deletionStart)+3;
+  if(deletionStart<0||deletionEnd<=deletionStart)throw new Error('missing canonical conversation deletion');
+  sql(deletion.slice(deletionStart,deletionEnd));
+  sql('REVOKE ALL ON FUNCTION public.soft_delete_conversation(uuid,uuid) FROM PUBLIC,anon; GRANT EXECUTE ON FUNCTION public.soft_delete_conversation(uuid,uuid) TO authenticated');
   const tables = readFileSync(resolve(root, 'packages/db/migrations/0001_ai_billing_tables.sql'), 'utf8');
   for (const table of ['token_stats', 'ai_usage_logs']) {
     const start = tables.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
