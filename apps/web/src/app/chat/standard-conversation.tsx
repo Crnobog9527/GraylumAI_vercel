@@ -44,11 +44,10 @@ function estimateTokens(text: string) {
   return Math.ceil(chineseChars / 1.5 + otherChars / 4);
 }
 
-export function StandardConversation({ moduleId, initialConversationId, navigate }: {moduleId?:string;initialConversationId?:string;navigate:(id?:string)=>void}) {
+export function StandardConversation({ moduleId, initialConversationId, navigate, onCreated }: {moduleId?:string;initialConversationId?:string;navigate:(id?:string)=>void;onCreated:(id:string)=>void}) {
   const [activeConversationId, setActiveConversation] = useState<string|null>(initialConversationId??null);
   const { refreshConversationList } = useChatStore();
   const [inputMessage, setInputMessage] = useState('');
-  const createdConversationRef=useRef<string|null>(null);
   const [navigationNotice,setNavigationNotice]=useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
@@ -155,12 +154,11 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
       utils.chat.getConversations.invalidate();
       utils.chat.getConversationTokenStats.invalidate();
       refreshConversationList();
-      if(createdConversationRef.current){const id=createdConversationRef.current;createdConversationRef.current=null;navigate(id);}
     },
     onConversationCreated: (newConversationId) => {
       // 新对话创建后同步到 store，使侧边栏正确高亮
-      createdConversationRef.current=newConversationId;
       setActiveConversation(newConversationId);
+      onCreated(newConversationId);
     },
     onError: () => {
       logClientDevError('Streaming error');

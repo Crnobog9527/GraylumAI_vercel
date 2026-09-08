@@ -12,6 +12,7 @@ import { StandardConversation } from "./standard-conversation";
 export function ChatEntry() {
   const params = useSearchParams(),
     router = useRouter();
+  const [ownedOrdinary, setOwnedOrdinary] = useState<{ id: string; moduleId?: string; key: string } | null>(null);
   const [identityChanged, setIdentityChanged] = useState(false);
   useEffect(() => {
     let previous: string | null | undefined;
@@ -30,8 +31,21 @@ export function ChatEntry() {
   const conversationId = params.get("conversation") ?? undefined,
     moduleId = params.get("module") ?? undefined;
   const guided = params.get("mode") === "skill";
-  const navigate = (id?: string) =>
+  const entrySignature = JSON.stringify([conversationId, moduleId, guided]);
+  const [entryLocation, setEntryLocation] = useState({ signature: entrySignature, sequence: 0 });
+  // Header links and browser navigation do not call navigate(). Give a fresh
+  // entry a new component identity while init -> conversation keeps its key.
+  if (entryLocation.signature !== entrySignature)
+    setEntryLocation({ signature: entrySignature, sequence: entryLocation.sequence + (conversationId ? 0 : 1) });
+  const entryKey = `ordinary-${entryLocation.sequence}-${moduleId ?? "free"}`;
+  const navigate = (id?: string) => {
+    setOwnedOrdinary(null);
     router.push(id ? `/chat?conversation=${encodeURIComponent(id)}` : "/chat");
+  };
+  const persistOrdinary = (id: string) => {
+    setOwnedOrdinary({ id, moduleId, key: entryKey });
+    router.replace(`/chat?conversation=${encodeURIComponent(id)}`);
+  };
   const history = trpc.chat.getConversations.useQuery(undefined, {
     enabled: !!conversationId,
   });
@@ -41,6 +55,12 @@ export function ChatEntry() {
   );
   const conversation = history.data?.data.find((c) => c.id === conversationId);
   if (identityChanged) return <EntryNotice>正在切换账号…</EntryNotice>;
+  // An init event must update the URL immediately without replacing the active
+  // stream component. Only this server-created, in-memory identity gets this path;
+  // URL/history entries still use the authenticated history lookup below.
+  if (ownedOrdinary && conversationId === ownedOrdinary.id)
+    return <StandardConversation key={ownedOrdinary.key} moduleId={ownedOrdinary.moduleId}
+      initialConversationId={ownedOrdinary.id} navigate={navigate} onCreated={persistOrdinary} />;
   if (conversationId) {
     if (history.isPending) return <EntryNotice>正在恢复对话…</EntryNotice>;
     if (history.error || !conversation)
@@ -56,6 +76,7 @@ export function ChatEntry() {
         key={conversationId}
         initialConversationId={conversationId}
         moduleId={conversation.module_id ?? undefined}
+        onCreated={persistOrdinary}
         navigate={navigate}
       />
     );
@@ -79,8 +100,9 @@ export function ChatEntry() {
     );
   return (
     <StandardConversation
-      key={moduleId ?? "free"}
+      key={entryKey}
       moduleId={moduleId}
+      onCreated={persistOrdinary}
       navigate={navigate}
     />
   );
@@ -176,13 +198,13 @@ function SkillPicker({
           onSelectConversation={navigate}
         />
         <main className="flex-1 overflow-y-auto p-6">
-          <h1 className="text-xl font-semibold">选择用于本次分析的账号</h1>
+          <h1 className="text-xl font-semibold">{busy ? "正在打开功能对话…" : "开始使用功能"}</h1>
           <p className="my-3 text-[var(--text-tertiary)]">
             选择后将直接进入对话。
           </p>
           {(error || catalog.error) && (
             <p role="alert">
-              {error || catalog.error?.message}。可重试或打开自由对话。
+              {error || catalog.error?.message}
             </p>
           )}
           {catalog.isPending && <p>正在读取可用方法…</p>}

@@ -114,7 +114,13 @@ export function skillChatService(
         ? entries.find((e) => e.id === v.registration)
         : entries.sort((a, b) => b.workflow.version - a.workflow.version)[0];
       if (!entry) throw new Error("ARTIFACT_INVALID_WORKFLOW");
-      const projects = (await workbench.projects()).filter(
+      const existingProjects = await workbench.projects();
+      // Social accounts keep one immutable project identity. A changed module
+      // binding cannot silently duplicate it or rewrite historical Skill scope.
+      if (entry.workflow.kind === "social" && v.account && existingProjects.some(p =>
+        p.account === v.account && (p.skillId !== entry.skillId || p.moduleId !== v.moduleId)))
+        throw new Error("ARTIFACT_ACCOUNT_CONFLICT");
+      const projects = existingProjects.filter(
         (p) =>
           p.moduleId === v.moduleId &&
           p.skillId === entry.skillId &&

@@ -2536,3 +2536,63 @@ aiTest('CHAT: module rebinding enters the current Skill while preserving the for
  await sql.query('update modules set skill_id=$1 where id=$2',[documentId,old.f.moduleId]);
  expect(await chat.mode(old.f.moduleId)).toEqual({guided:false});
 },30000);
+
+
+aiTest('CHAT: social rebind preserves the single-account project and explicitly refuses a replacement',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const old=await generationFixture(6),chat=skillChatService(old.user,db);
+ const account=(await old.service.projects()).find(p=>p.projectId===old.scope.projectId)!.account!;
+ const previous=await chat.enter({moduleId:old.f.moduleId,account,requestId:randomUUID()});
+ const newer=await fixture({id:'social-rebind-'+randomUUID(),label:'New social method',methodText:'Synthetic new social method',workflow:makeWorkflow(6,true)});
+ await sql.query('update modules set skill_id=$1 where id=$2',[newer.pack.id,old.f.moduleId]);
+ const registration='social-rebound-'+randomUUID();
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[registration,old.f.moduleId,newer.pack.id,newer.pack.revisionId,newer.flow,'New social method']);
+ await sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,old.f.moduleId,newer.pack.id,account]);
+ await expect(chat.enter({moduleId:old.f.moduleId,account,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_ACCOUNT_CONFLICT');
+ // Direct start simulates another creator winning after the preflight read.
+ await expect(old.service.start({projectId:randomUUID(),roundId:randomUUID(),requestId:randomUUID(),registration,account})).rejects.toThrow('ARTIFACT_ACCOUNT_CONFLICT');
+ expect((await sql.query('select count(*)::int n from artifact_projects where actor_id=$1 and account=$2',[actor,account])).rows[0].n).toBe(1);
+ expect((await chat.read({conversationId:previous.conversationId})).binding.skillId).toBe(old.f.pack.id);
+ await expect(chat.submit({conversationId:previous.conversationId,requestId:randomUUID(),stepId:'step-0',body:'No execution under former binding'})).rejects.toThrow();
+ const {page,context}=await pageFor();await page.goto(app+'/marketplace?module='+old.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+ await page.getByRole('button',{name:'使用 · '+account,exact:true}).click();
+ await page.getByText('此账号已有另一功能的项目，暂不能在新功能中开始。请从已有项目查看历史，原成果不会被修改。',{exact:true}).waitFor();
+ expect(await page.getByRole('link',{name:'找回已有项目与正式报告',exact:true}).getAttribute('href')).toBe('/workbench');await context.close();
+},90000);
+
+aiTest('CHAT: ordinary init persists the URL without remounting; abort and error retain free/document history',async()=>{
+ const t=await generationFixture(),requests:string[]=[];
+ await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
+ const skillId=randomUUID(),moduleId=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Synthetic ordinary interrupted method')",[skillId,skillId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ await sql.query("insert into modules(id,title,skill_id,model_id,active) values($1,'Interrupted document',$2,$3,true)",[moduleId,skillId,localModel]);
+ const {page,context}=await pageFor(credentials,requests);
+ for(const mode of ['ORDINARY_ABORT','ORDINARY_ERROR']){
+  await page.goto(mode==='ORDINARY_ABORT'?app+'/chat':app+'/chat?module='+moduleId);
+  await page.getByTestId('chat-input').fill(mode);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+  // Provider output is buffered for server-side checks, so stop while init is
+  // visible and the provider is still pending rather than waiting for final text.
+  await page.getByRole('button',{name:'停止',exact:true}).waitFor();
+  if(mode==='ORDINARY_ABORT')await page.getByRole('button',{name:'停止',exact:true}).click();
+  await expect.poll(async()=>await page.getByTestId('chat-input').isEnabled(),{timeout:30000}).toBe(true);
+  if(mode==='ORDINARY_ABORT') {
+ // Header navigation bypasses the sidebar's navigate callback; it must still reset scope.
+ await page.getByRole('link',{name:'对话',exact:true}).click();await page.waitForURL(u=>u.pathname==='/chat'&&!u.search);
+ expect(await page.getByText('ORDINARY_ABORT',{exact:true}).count()).toBe(0);
+ await page.getByTestId('chat-input').fill('AFTER_HEADER_NEW_CHAT');await page.getByRole('button',{name:'发送',exact:true}).click();
+ await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const freshId=new URL(page.url()).searchParams.get('conversation')!;
+ const fresh=(await t.user.from('conversations').select('module_id').eq('id',freshId).single()).data;expect(fresh?.module_id).toBeNull();
+ await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();
+  expect(freshId).not.toBe(conversationId);
+  await page.goto(app+'/chat?conversation='+conversationId);
+  }
+  await page.reload();await page.getByText(mode,{exact:true}).waitFor();
+  expect(new URL(page.url()).searchParams.get('conversation')).toBe(conversationId);
+  const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
+  expect(row).toMatchObject({module_id:mode==='ORDINARY_ERROR'?moduleId:null,skill_mode:false});
+ }
+ expect(requests.filter(p=>p.startsWith('/api/ai/stream'))).toHaveLength(3);
+ await context.close();
+},150000);

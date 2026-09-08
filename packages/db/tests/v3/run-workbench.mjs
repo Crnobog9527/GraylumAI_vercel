@@ -252,9 +252,17 @@ try {
       })); return;
     }
     if(req.url==='/__chat_model_fixture') {
-      for await(const chunk of req){};
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const requestText=Buffer.concat(chunks).toString();
       res.writeHead(200,{'Content-Type':'text/event-stream'});
-      res.end('data: '+JSON.stringify({choices:[{delta:{content:'Synthetic local free/document reply'},finish_reason:null}],usage:{prompt_tokens:800,completion_tokens:30}})+'\n\ndata: [DONE]\n\n');return;
+      res.write('data: '+JSON.stringify({choices:[{delta:{content:'Synthetic local free/document reply'},finish_reason:null}],usage:{prompt_tokens:800,completion_tokens:30}})+'\n\n');
+      if(requestText.includes('ORDINARY_ABORT')||requestText.includes('ORDINARY_ERROR')) {
+        await new Promise(r=>setTimeout(r,1500));
+        res.write('data: '+JSON.stringify({choices:[{delta:{content:' SECOND_DELTA_AFTER_INIT'},finish_reason:null}]})+'\n\n');
+        await new Promise(r=>setTimeout(r,3500));
+        if(requestText.includes('ORDINARY_ERROR')) {res.destroy();return;}
+      }
+      res.end('data: [DONE]\n\n');return;
     }
     if (req.url === '/__workbench_model_calls') { res.writeHead(200).end(JSON.stringify({ calls: modelCalls })); return; }
 

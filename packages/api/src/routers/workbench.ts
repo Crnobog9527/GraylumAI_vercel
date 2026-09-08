@@ -46,6 +46,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
       GENERATION_CONFLICT: { code: "CONFLICT", message: "生成状态或输入已变化，请刷新生成记录。不会自动重复调用模型。" },
       GENERATION_INPUT_UNAVAILABLE: { code: "BAD_REQUEST", message: "工作稿的来源或依赖已变化，请检查来源、重新保存工作稿并确认依赖后再生成。" },
       GENERATION_BUDGET: { code: "BAD_REQUEST", message: "生成费用超出允许范围，未扣费。" },
+      ARTIFACT_ACCOUNT_CONFLICT: {
+        code: "CONFLICT", message: "此账号已有另一功能的项目，暂不能在新功能中开始。请从已有项目查看历史，原成果不会被修改。",
+      },
       ARTIFACT_VERSION_CONFLICT: {
         code: "CONFLICT",
         message: "保存版本已变化；本地输入已保留，请加载服务端版本并比较。",
