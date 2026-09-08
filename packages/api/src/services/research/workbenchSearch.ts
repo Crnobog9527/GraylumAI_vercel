@@ -19,6 +19,7 @@ export const workbenchSearchInput=z.object({
 }).strict();
 type Input=z.infer<typeof workbenchSearchInput>;
 type Connection=Awaited<ReturnType<typeof connectAgentKey>>;
+const parameters=(query:string)=>({query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'});
 const publicResult=(requestId:string,value:OperationRecord)=>({requestId,state:value.state,
  result:value.result?{objects:value.result.objects,fetchedAt:value.result.fetchedAt,pagination:value.result.pagination,fixture:value.result.fixture}:null,
  restricted:value.resultAccess==='restricted',
@@ -48,11 +49,20 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
   await activateSkill(source,identityOf(descriptor),{resources:step.resources,maxContextBytes:2097152});
  }
  return {
+  async cancel(raw:Input){
+   const input=workbenchSearchInput.parse(raw),id=await actor();
+   const fixed=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'resolve'});
+   if(fixed.error)throw new Error('ARTIFACT_DENIED');
+   const store=databaseBilledResearchStore(privateClient!,id);
+   const identityHash=researchIdentity(tavilyCapabilities[0],parameters(input.query),{projectId:input.projectId,roundId:input.roundId,stepId:input.stepId});
+   await store.create(input.requestId,1100000,[{operationId:input.requestId,identityHash,maxQuoteUnits:1100000}]);
+   return {cancelled:(await store.cancel(input.requestId))===true};
+  },
   async search(raw:Input){
    const input=workbenchSearchInput.parse(raw),id=await actor();
    await checkRateLimitAsync(id,'ai');await admission(input,id);
    const store=databaseBilledResearchStore(privateClient!,id);
-   const params={query:input.query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'};
+   const params=parameters(input.query);
    const scope={projectId:input.projectId,roundId:input.roundId,stepId:input.stepId};
    const identityHash=researchIdentity(tavilyCapabilities[0],params,scope);
    // Register the server-built intent before lookup; create is idempotent and

@@ -3294,3 +3294,49 @@ aiTest('CHAT: retention skips a busy project without blocking concurrent convers
   expect((await skillChatService(t.user,db).read({conversationId:binding.conversationId})).binding.conversationId).toBe(binding.conversationId);
  } finally {await holder.query('rollback');await holder.end();}
 },30000);
+
+aiTest('CHAT: search restores a lost response, adopts references once and cancels only unsent work',async()=>{
+ const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const {localMcpFixture}=await import('./fixtures/agentKeyServer'),{databaseBilledResearchStore}=await import('../research/store'),{tavilySchema}=await import('../research/tavilySchema');
+ const name='Tavily/post_search',query='Fictional public guide';
+ const wire={discovery:{tools:[{name}]},description:{name,category:'Search',provider:'Tavily',params:tavilySchema,cost:{credits_per_call:1.1},health:{healthy:true},execute_as:{name,params:{query:'<The search query to execute with Tavily.>'}}},result:{category:'search',provider:'Tavily',took_ms:10,data:{query,answer:null,follow_up_questions:null,images:[],response_time:0.01,results:[{id:'browser-reference',title:'Browser search guide',url:'https://example.test/browser-guide',content:'Reference from the local MCP fixture.',score:0.8,raw_content:null}],usage:{credits:1}}}};
+ const fixture=await localMcpFixture(databaseBilledResearchStore(db,actor),'json',wire);
+ const {page,context}=await pageFor(credentials,[]);
+ try {
+  await sql.query("insert into system_settings(key,value) values('v3_web_search','true'),('search_surcharge_credits','5'),('local_research_endpoint',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(fixture.endpoint)]);
+  const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+  await page.goto(app+'/chat?conversation='+binding.conversationId);await page.getByText('参考资料（可选）',{exact:true}).click();
+  const panel=page.getByRole('region',{name:'网页搜索'});await panel.getByLabel('网页搜索关键词').fill(query);
+  await page.route('**/api/trpc/workbench.search*',async route=>{await route.fetch();await route.abort('failed');});
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await page.unroute('**/api/trpc/workbench.search*');await page.reload();await page.getByText('参考资料（可选）',{exact:true}).click();
+  expect(await panel.getByLabel('网页搜索关键词').inputValue()).toBe(query);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await panel.getByRole('button',{name:'恢复本次查询',exact:true}).click();await panel.getByText('已加入参考资料，可勾选关联到本步骤。',{exact:true}).waitFor();
+  await page.getByText('Reference from the local MCP fixture.',{exact:true}).waitFor();await page.getByText('发布时间未提供',{exact:true}).waitFor();
+  expect(await page.getByRole('link',{name:'查看原始来源',exact:true}).getAttribute('href')).toBe('https://example.test/browser-guide');
+  const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);expect(snapshot.evidence).toHaveLength(1);
+  await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).check();
+  await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:15000}).toEqual([snapshot.evidence[0].id]);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();await sql.query("update system_settings set value='false' where key='v3_web_search'");
+  await panel.getByLabel('网页搜索关键词').fill('Unsent query');await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  await panel.getByRole('button',{name:'取消未发送查询',exact:true}).click();await expect.poll(()=>panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+ } finally {await context.close();await fixture.stop();}
+},120000);
+
+aiTest('AI: research cancellation reports unsent and dispatched outcomes under the plan lock',async()=>{
+ const {databaseBilledResearchStore}=await import('../research/store');const store=databaseBilledResearchStore(db,actor);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ for(const state of ['empty','prepared','dispatched']){
+  await sql.query('update profiles set credits=100 where id=$1',[actor]);
+  const planId=randomUUID(),operationId=randomUUID();await store.create(planId,1100000,[{operationId,identityHash:'f'.repeat(64),maxQuoteUnits:1100000}]);
+  if(state!=='empty'){const r=await store.reserve(planId,operationId,'f'.repeat(64),1100000);if(state==='dispatched')await store.dispatch(planId,operationId,r.token!);}
+  expect(await store.cancel(planId)).toBe(state!=='dispatched');expect(await store.cancel(planId)).toBe(state!=='dispatched');
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(state==='dispatched'?95:100);
+  const denied=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession:false}});
+  expect((await denied.rpc('research_cancel',{p_actor_id:actor,p_plan_id:planId})).error).not.toBeNull();
+ }
+},30000);

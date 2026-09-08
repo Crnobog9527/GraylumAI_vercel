@@ -18,7 +18,7 @@ export interface ResearchStore {
   reserve(planId:string,operationId:string,identityHash:string,quoteUnits:number):Promise<OperationRecord>;
   dispatch(planId:string,operationId:string,token:string):Promise<boolean>;
   finish(planId:string,operationId:string,token:string,state:OperationState,result:ResearchResult|null):Promise<void>;
-  cancel(planId:string):Promise<void>;
+  cancel(planId:string):Promise<void|boolean>;
 }
 /** Construct only with the authenticated host actor after business admission.
  * RPC rechecks live actor status and plan ownership; never takes client owner claims. */
@@ -52,6 +52,6 @@ export function databaseBilledResearchStore(db:SupabaseClient,actorId:string):Re
     async reserve(p,o,identity,quote){const r=await base.reserve(p,o,identity,quote);if(r.claimed)await charge(p,o,'reserve');else if(r.state==='succeeded')await charge(p,o,'settle');return r;},
     async dispatch(p,o,token){await charge(p,o,'admit');return base.dispatch(p,o,token);},
     async finish(p,o,token,state,result){await base.finish(p,o,token,state,result);if(state==='succeeded')await charge(p,o,'settle');},
-    async cancel(p){await base.cancel(p);await charge(p,null,'refund');},
+    async cancel(p){const {data,error}=await db.rpc('research_cancel',{p_actor_id:actorId,p_plan_id:p});if(error)throw new Error('RESEARCH_BILLING_UNAVAILABLE');return data===true;},
   };
 }

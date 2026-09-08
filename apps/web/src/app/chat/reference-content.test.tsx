@@ -25,3 +25,9 @@ it('displays user-provided notes without internal metadata or supplier costs', (
   expect(html).not.toContain('999');
   expect(html).not.toContain('license');
 });
+
+
+it('shows Tavily content and unknown publication date without exposing provider billing',()=>{
+ const html=renderToStaticMarkup(<ReferenceContent payload={{projection:'research-result',result:{fixture:true,objects:[{fields:{kind:'web-search',title:'Public guide',content:'Useful search excerpt'},sourceUrl:'https://example.test/guide',missingFields:['publishedAt']}],cost:{quoted:1.1}}}}/>);
+ expect(html).toContain('Useful search excerpt');expect(html).toContain('发布时间未提供');expect(html).not.toContain('1.1');
+});

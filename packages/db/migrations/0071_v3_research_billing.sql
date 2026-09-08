@@ -64,4 +64,15 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.research_billing_summary(timestamptz,timestamptz) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.research_billing_summary(timestamptz,timestamptz) TO service_role;
+-- Report cancellation under the same plan lock, including an intent with no
+-- operation yet. A dispatched operation can never be reported as unsent.
+CREATE OR REPLACE FUNCTION public.research_cancel(p_actor_id uuid,p_plan_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM research_transition('cancel',p_plan_id,p_actor_id,NULL,'{}');
+ PERFORM research_user_charge(p_actor_id,p_plan_id,NULL,'refund');
+ RETURN NOT EXISTS(SELECT 1 FROM research_operations WHERE plan_id=p_plan_id AND state<>'cancelled');
+END $$;
+REVOKE ALL ON FUNCTION public.research_cancel(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_cancel(uuid,uuid) TO service_role;
 COMMIT;

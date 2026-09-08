@@ -38,6 +38,6 @@ export async function localMcpFixture(store:ResearchStore,mode:'json'|'sse'='jso
  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as import('node:net').AddressInfo;
  const authorize=vi.fn(async()=>{});
  const connect=(overrides:Partial<AdapterOptions>={})=>connectLocalAgentKey({store,authorize,contract,capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:1}],timeoutMs:200,maxResponseBytes:100000,maxCalls:30,maxPages:2,...overrides},new URL(`http://127.0.0.1:${address.port}/mcp`));
- return {events,executedParams,connect,store,authorize,setActualCredits:(value:number|null)=>{actualCredits=value;},setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
+ return {endpoint:`http://127.0.0.1:${address.port}/mcp`,events,executedParams,connect,store,authorize,setActualCredits:(value:number|null)=>{actualCredits=value;},setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
   async stop(){await mcp.close();for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
 }
