@@ -16,9 +16,14 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if (args.length > 1 || (args.length === 1 && args[0] !== '--ai-only')) throw new Error('only --ai-only is supported');
-const aiOnly = args[0] === '--ai-only';
+if(args.some(arg=>!['--ai-only','--chat-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.includes('--ai-only')&&args.includes('--chat-only'))throw new Error('use --ai-only or --chat-only, optionally --serve');
+const serve=args.includes('--serve'),aiOnly=args.includes('--ai-only')||args.includes('--chat-only');
+const testPattern=args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
+const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
+mkdirSync(evidenceRoot, { recursive:true });
+const evidenceDirectory = mkdtempSync(resolve(evidenceRoot, "graylum-workbench-evidence-"));
+console.log("LOCAL_EVIDENCE_DIRECTORY " + evidenceDirectory);
 const files = execFileSync("git", ["ls-files", "-z"], {
   cwd: source,
   encoding: "utf8",
@@ -161,6 +166,10 @@ try {
   installWorkbenchBilling(sql, root);
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
+  apply("packages/db/migrations/0069_v3_chat_skill.sql");
+  apply("packages/db/migrations/0069_v3_chat_skill.sql");
+  apply("packages/db/migrations/0070_v3_separate_summary.sql");
+  apply("packages/db/migrations/0070_v3_separate_summary.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -248,6 +257,19 @@ try {
         usage: { prompt_tokens: 800, completion_tokens: 30 },
       })); return;
     }
+    if(req.url==='/__chat_model_fixture') {
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const requestText=Buffer.concat(chunks).toString();
+      res.writeHead(200,{'Content-Type':'text/event-stream'});
+      res.write('data: '+JSON.stringify({choices:[{delta:{content:'Synthetic local free/document reply'},finish_reason:null}],usage:{prompt_tokens:800,completion_tokens:30}})+'\n\n');
+      if(requestText.includes('ORDINARY_ABORT')||requestText.includes('ORDINARY_ERROR')) {
+        await new Promise(r=>setTimeout(r,1500));
+        res.write('data: '+JSON.stringify({choices:[{delta:{content:' SECOND_DELTA_AFTER_INIT'},finish_reason:null}]})+'\n\n');
+        await new Promise(r=>setTimeout(r,3500));
+        if(requestText.includes('ORDINARY_ERROR')) {res.destroy();return;}
+      }
+      res.end('data: [DONE]\n\n');return;
+    }
     if (req.url === '/__workbench_model_calls') { res.writeHead(200).end(JSON.stringify({ calls: modelCalls })); return; }
 
     const prefix = req.url?.startsWith("/rest/v1/")
@@ -303,7 +325,14 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
-  console.log('Model transport: synthetic loopback HTTP substituted in disposable copy only');
+  const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
+  if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
+  writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));
+  // Every fetch from the disposable Next process is constrained to loopback,
+  // including optional routing helpers. No configured provider can be contacted.
+  const networkGuard=resolve(root,'local-loopback-only.cjs');
+  writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
+  console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
   const service = jwt("service_role"),
     anon = jwt("anon");
   const listener = createServer();
@@ -313,6 +342,7 @@ try {
   const env = {
     ...cleanEnv,
     NODE_ENV: "development",
+    NODE_OPTIONS:`--require=${networkGuard}`,
     NEXT_PUBLIC_SUPABASE_URL: apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
@@ -325,7 +355,7 @@ try {
     NEXT_PUBLIC_SITE_URL: `http://127.0.0.1:${appPort}`,
     V3_LOCAL_APP: `http://127.0.0.1:${appPort}`,
     V3_WORKBENCH_OUTPUT:
-      process.env.V3_WORKBENCH_OUTPUT || "/tmp/graylum-workbench-browser",
+      evidenceDirectory,
   };
   mkdirSync(env.V3_WORKBENCH_OUTPUT, { recursive: true });
 
@@ -374,7 +404,7 @@ try {
         "src/services/__tests__/workbench.integration.ts",
         "--reporter",
         "verbose",
-        ...(aiOnly ? ["--testNamePattern", "^AI:"] : []),
+        ...(aiOnly ? ["--testNamePattern", testPattern] : []),
       ],
       { cwd: root, env, stdio: "inherit" },
     );
@@ -396,6 +426,15 @@ try {
       .replaceAll(anon, "[LOCAL_ANON]"),
   );
   console.log("Private canary absent from application logs PASS");
+  if(serve){
+    const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8'));
+    const demoIds=saved.fixtures.map(f=>f.moduleId);
+    if(![saved.actor,...demoIds].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid local acceptance identity');
+    sql(`UPDATE modules SET model_id=(SELECT id FROM ai_models WHERE api_key='LOCAL_SYNTHETIC_KEY' LIMIT 1) WHERE id IN (${demoIds.map(value=>`'${value}'`).join(',')}); UPDATE profiles SET credits=100000 WHERE id='${saved.actor}';`);
+    writeFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'acceptance.json'),JSON.stringify({url:env.V3_LOCAL_APP,credentials:saved.credentials,samples:saved.fixtures.map(f=>({label:f.label,moduleId:f.moduleId})),mode:'Synthetic local transport only; no production or provider access'},null,2),{mode:0o600});
+    console.log('LOCAL_ACCEPTANCE_READY '+env.V3_LOCAL_APP);
+    await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);app.once('exit',resolve);});
+  }
 } catch (error) {
   // Diagnostics are local-only and redact all temporary JWT material.
   try {
@@ -439,7 +478,7 @@ try {
   } catch {}
   rmSync(
     resolve(
-      process.env.V3_WORKBENCH_OUTPUT || "/tmp/graylum-workbench-browser",
+      evidenceDirectory,
       "restore.json",
     ),
     { force: true },

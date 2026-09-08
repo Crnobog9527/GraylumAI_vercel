@@ -163,3 +163,8 @@ export function reportMarkdown(value: ArtifactReport): string {
     ].join("\n\n") + "\n"
   );
 }
+
+export const saveVersionConflictMessage = "保存版本已变化；本地输入已保留，请加载服务端版本并比较。";
+export const candidateInvalidatedMessage = "成果依据已变化，本次保存未提交。请重新生成，或放弃本地修改。";
+
+export const saveRoundClosedMessage = "本轮已结束，本次保存未提交。已载入保存的成果。";

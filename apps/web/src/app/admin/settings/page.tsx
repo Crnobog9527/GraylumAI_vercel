@@ -55,6 +55,8 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   enable_smart_routing: { value: 'true', type: 'boolean', label: '启用智能路由', description: '根据用户问题自动分类任务类型并推荐最合适的AI模型' },
   smart_routing_min_confidence: { value: '0.72', type: 'number', label: '智能路由最小置信度', description: '轻任务命中该阈值后才允许走辅助模型' },
   primary_model_id: { value: '', type: 'string', label: '主力模型 ID', description: '复杂推理、写作、代码等任务的默认主力模型记录 ID' },
+  v3_summary_model_id: { value: '', type: 'string', label: '步骤成果整理模型', description: '独立于用户对话模型；仅负责整理成果。未配置或不可用时保留原成果，不改用主力模型。' },
+  v3_summary_max_tokens: { value: '2048', type: 'number', label: '整理输出上限（tokens）', description: '128–4096；约束整理模型的单次输出。过小可能无法生成完整成果。' },
   assistant_model_id: { value: '', type: 'string', label: '辅助模型 ID', description: '轻任务、压缩、搜索摘要等任务的默认辅助模型记录 ID' },
   enable_smart_search_decision: { value: 'true', type: 'boolean', label: '启用智能搜索判断', description: '根据请求自动决策是否联网，并优先调用 provider 原生联网能力' },
   search_decision_min_confidence: { value: '0.75', type: 'number', label: '联网决策最小置信度', description: '低于该阈值时即使命中实时性信号也不自动联网' },
@@ -89,7 +91,7 @@ const settingGroups = {
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
   experience: ['chat_show_model_selector', 'chat_prompt_text', 'chat_welcome_message', 'chat_billing_hint', 'home_show_onboarding', 'home_show_featured_modules'],
-  features: ['enable_smart_routing', 'smart_routing_min_confidence', 'primary_model_id', 'assistant_model_id', 'enable_smart_search_decision', 'search_decision_min_confidence', 'search_surcharge_credits', 'enable_prompt_cache', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats'],
+  features: ['enable_smart_routing', 'smart_routing_min_confidence', 'primary_model_id', 'assistant_model_id', 'v3_summary_model_id', 'v3_summary_max_tokens', 'enable_smart_search_decision', 'search_decision_min_confidence', 'search_surcharge_credits', 'enable_prompt_cache', 'enable_free_tier', 'free_tier_messages', 'max_messages_per_conversation', 'max_input_characters', 'enable_long_text_warning', 'long_text_warning_threshold', 'show_token_usage_stats'],
 };
 
 interface SettingData {
@@ -137,6 +139,7 @@ export default function AdminSettingsPage() {
     isLoading: cleanupStatsLoading,
     refetch: refetchCleanupStats,
   } = trpc.admin.getCleanupStats.useQuery();
+  const summaryModels = trpc.settings.getSummaryModels.useQuery();
   const savedSettings = dashboard?.systemSettings;
   const membershipPlans = dashboard?.membershipPlans;
 
@@ -242,6 +245,19 @@ export default function AdminSettingsPage() {
   };
 
   const renderSettingInput = (key: string, data: SettingData) => {
+    if (key === 'v3_summary_model_id') {
+      return <div className="w-full md:max-w-md">
+        <select aria-label="步骤成果整理模型" data-testid="admin-setting-v3_summary_model_id"
+          value={data.value} disabled={summaryModels.isLoading || !!summaryModels.error}
+          onChange={event => handleSettingChange(key, event.target.value)}
+          className="w-full rounded-md border p-2 bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
+          <option value="">未配置（不使用主力模型代替）</option>
+          {data.value && !summaryModels.data?.some(model => model.id === data.value) && <option value={data.value}>当前配置模型不可用</option>}
+          {summaryModels.data?.map(model => <option key={model.id} value={model.id} disabled={!model.available}>{model.name} · {model.model_id}{model.available ? "" : "（尚未适配或配置不完整）"}</option>)}
+        </select>
+        {summaryModels.error && <p role="alert">无法读取模型列表，请刷新后重试。</p>}
+      </div>;
+    }
     if (data.type === 'boolean') {
       return (
         <Switch

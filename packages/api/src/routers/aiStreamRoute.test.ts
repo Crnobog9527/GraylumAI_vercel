@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 
 const routeMocks = vi.hoisted(() => ({
+  skillMode: vi.fn(),
   createClient: vi.fn(() => {
     throw new Error('Supabase client should not be created before the auth gate');
   }),
@@ -50,6 +51,8 @@ const routeMocks = vi.hoisted(() => ({
   contextLoad: vi.fn(),
   contextBuildMessages: vi.fn(),
 }));
+
+vi.mock('@repo/api/src/services/artifacts/chat',()=>({skillChatService:()=>({mode:routeMocks.skillMode})}));
 
 vi.mock('next/server', () => ({
   NextRequest: class NextRequest {},
@@ -160,6 +163,7 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routeMocks.skillMode.mockResolvedValue({guided:false});
   fetchSpy = vi.spyOn(globalThis, 'fetch');
 });
 
@@ -651,4 +655,17 @@ describe('real web route Skill resolution, billing and provider ordering', () =>
     expect(JSON.parse(fetchSpy.mock.calls[1][1]!.body as string).messages[0].content).toBe('Published v2');
     expect(events.filter((event) => event.startsWith('skills:'))).toHaveLength(2);
   });
+});
+
+describe('guided Skill uses one generation path',()=>{
+ it('rejects guided modules before ordinary reservation and model dispatch',async()=>{
+  setupSkillRoute();routeMocks.skillMode.mockResolvedValue({guided:true});
+  const response=await POST(makeAuthenticatedStreamRequest({moduleId:VALID_MODULE_ID}) as any);
+  expect(response.status).toBe(409);expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();expect(fetchSpy).not.toHaveBeenCalled();
+ });
+ it('free chat does not consult workflow discovery',async()=>{
+  setupSkillRoute();routeMocks.skillMode.mockRejectedValue(new Error('workflow unavailable'));
+  const response=await POST(makeAuthenticatedStreamRequest({message:'Free chat'}) as any);
+  await response.text();expect(routeMocks.skillMode).not.toHaveBeenCalled();expect(response.status).toBe(200);
+ });
 });

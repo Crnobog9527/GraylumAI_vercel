@@ -1,3 +1,4 @@
+import { summaryModelOption } from "../services/artifacts/modelPolicy";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -65,6 +66,12 @@ const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
 }).superRefine((setting, ctx) => {
+  if (setting.key === 'v3_summary_model_id' && setting.value !== '' && !z.string().uuid().safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '请选择有效的步骤成果整理模型' });
+  }
+  if (setting.key === 'v3_summary_max_tokens' && !z.coerce.number().int().min(128).max(4096).safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '整理输出上限须为128至4096的整数' });
+  }
   if (setting.key !== LAUNCH_BASELINE_SETTING_KEY) return;
   if (parseLaunchBaselineAt(setting.value).status === 'BLOCKED') {
     ctx.addIssue({
@@ -114,6 +121,15 @@ export function getPublicReadClient(ctx: {
 }
 
 export const settingsRouter = router({
+  getSummaryModels: adminProcedure.query(async ({ctx}) => {
+    const {data,error}=await ctx.supabase.from('ai_models')
+      .select('id,name,model_id,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family')
+      .eq('is_active','true').order('name');
+    if(error)throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
+    // Credentials participate only in server eligibility checks and never leave this projection.
+    return (data??[]).map(summaryModelOption);
+  }),
+
   /**
    * 获取首页公告 (公开接口)
    * 返回 announcement_type = 'homepage' 的活跃公告列表

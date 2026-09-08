@@ -30,7 +30,8 @@
     "./src/services/contextManager": "./src/services/contextManager.ts",
     "./src/services/contextSnapshots": "./src/services/contextSnapshots.ts",
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts",
-    "./src/services/artifacts/public": "./src/services/artifacts/public.ts"
+    "./src/services/artifacts/public": "./src/services/artifacts/public.ts",
+    "./src/services/artifacts/chat": "./src/services/artifacts/chat.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

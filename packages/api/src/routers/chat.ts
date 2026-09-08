@@ -2,6 +2,7 @@ import { createTRPCContext, router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
+import { skillChatService } from '../services/artifacts/chat';
 import { logger } from '../lib/logger';
 
 type ExportFormat = 'json' | 'markdown' | 'txt';
@@ -13,6 +14,7 @@ type ProtectedContext = BaseContext & {
 };
 
 interface ExportConversationRecord {
+  skill_mode?: boolean;
   id: string;
   title: string | null;
   created_at: string;
@@ -72,7 +74,7 @@ export function buildConversationStats<T extends ConversationStatsSource>(
 }
 
 export async function getConversationsWithStats(
-  ctx: Pick<ProtectedContext, 'supabase' | 'profileId'>,
+  ctx: Pick<ProtectedContext, 'supabase' | 'profileId'> & Partial<Pick<ProtectedContext,'hasSupabaseAdminPrivileges'|'supabaseAdmin'>>,
 ) {
   const { data: conversations, error } = await ctx.supabase
     .from('conversations')
@@ -123,14 +125,12 @@ export async function getConversationsWithStats(
     });
   }
 
-  return {
-    data: buildConversationStats(
-      conversations,
-      (messageRows ?? []) as ConversationMessageCountRow[],
-      (creditRows ?? []) as ConversationCreditsRow[],
-    ),
-    error: null,
-  };
+  const stats=buildConversationStats(conversations,(messageRows??[]) as ConversationMessageCountRow[],(creditRows??[]) as ConversationCreditsRow[]);
+  if(conversations.some(c=>c.skill_mode)) {
+    const guided=await skillChatService(ctx.supabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin??null:null).stats();
+    for(const row of stats){const item=guided.find(s=>s.conversationId===row.id);if(item){row.message_count=item.messageCount;row.credits_used=item.creditsUsed;}}
+  }
+  return {data:stats,error:null};
 }
 
 async function assertExportPermission(ctx: ProtectedContext) {
@@ -158,7 +158,7 @@ async function assertExportPermission(ctx: ProtectedContext) {
   };
 }
 
-async function loadConversationExportData(
+export async function loadConversationExportData(
   ctx: ProtectedContext,
   conversations: ExportConversationRecord[]
 ) {
@@ -193,6 +193,17 @@ async function loadConversationExportData(
     messagesByConversationId.set(message.conversation_id, existingMessages);
   }
 
+  const guided=conversations.filter(c=>c.skill_mode);
+  const reader=skillChatService(ctx.supabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null);
+  for (let offset=0;offset<guided.length;offset+=4) {
+   await Promise.all(guided.slice(offset,offset+4).map(async conversation=>{
+    const chat=await reader.read({conversationId:conversation.id});
+    messagesByConversationId.set(conversation.id,chat.turns.flatMap(turn=>turn.available?[
+      {role:'user',content:turn.body??'',created_at:turn.createdAt},
+      ...(turn.answer?[{role:'assistant',content:turn.answer,created_at:turn.createdAt}]:[]),
+    ]:[{role:'user',content:'来源已受限，内容不可导出',created_at:turn.createdAt}]));
+   }));
+  }
   return conversations.map((conversation) => ({
     id: conversation.id,
     title: conversation.title,
@@ -498,7 +509,7 @@ export const chatRouter = router({
       // 验证用户拥有该对话
       const { data: conversation } = await ctx.supabase
         .from('conversations')
-        .select('id, title, created_at')
+        .select('id, title, created_at, skill_mode')
         .eq('id', input.conversationId)
         .eq('user_id', ctx.profileId)
         .eq('is_deleted', 'false')
@@ -525,7 +536,7 @@ export const chatRouter = router({
 
       const { data: conversations, error } = await ctx.supabase
         .from('conversations')
-        .select('id, title, created_at')
+        .select('id, title, created_at, skill_mode')
         .in('id', input.conversationIds)
         .eq('user_id', ctx.profileId)
         .eq('is_deleted', 'false')
@@ -563,7 +574,7 @@ export const chatRouter = router({
       // 获取所有对话
       const { data: conversations } = await ctx.supabase
         .from('conversations')
-        .select('id, title, created_at')
+        .select('id, title, created_at, skill_mode')
         .eq('user_id', ctx.profileId)
         .eq('is_deleted', 'false')
         .order('created_at', { ascending: false });

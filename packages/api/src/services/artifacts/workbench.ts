@@ -93,10 +93,17 @@ export function workbenchService(
       );
     return data;
   }
-  const catalog = async () => {
+  const catalog = async (moduleId?:string) => {
+    let raw:unknown;
+    if(moduleId){
+      const actorId=await actor();
+      const result=await privateClient!.rpc('artifact_module_catalog',{p_actor_id:actorId,p_module_id:uuid.parse(moduleId)}).abortSignal(AbortSignal.timeout(10000));
+      if(result.error)throw new Error(result.error.code==='42501'?'ARTIFACT_DENIED':'ARTIFACT_UNAVAILABLE');
+      raw=result.data;
+    } else raw=await query('catalog');
     const registrations = registrationSchema
       .array()
-      .parse(await query("catalog"));
+      .parse(raw);
     if (!registrations.length) return registrations;
     const visible = await userClient
       .from("modules")
@@ -123,8 +130,8 @@ export function workbenchService(
     });
   }
   return {
-    async catalog() {
-      return (await catalog()).map((r) => ({
+    async catalog(moduleId?:string) {
+      return (await catalog(moduleId)).map((r) => ({
         id: r.id,
         label: r.label,
         moduleId: r.moduleId,
@@ -148,7 +155,7 @@ export function workbenchService(
         await query("read", uuid.parse(projectId), uuid.parse(roundId)),
       );
     },
-    async start(input: z.infer<typeof startSchema>) {
+    async start(input: z.infer<typeof startSchema>, moduleId?:string) {
       const v = startSchema.parse(input);
       const prior = v.fromRoundId
         ? await resolve(v.projectId, v.fromRoundId)
@@ -158,7 +165,7 @@ export function workbenchService(
       const entry =
         prior && !v.upgrade
           ? prior
-          : (await catalog()).find((r) => r.id === v.registration);
+          : (await catalog(moduleId)).find((r) => r.id === v.registration);
       if (!entry) throw new Error("ARTIFACT_UNAVAILABLE");
       if (
         prior &&
@@ -236,6 +243,8 @@ export function workbenchService(
               ? "ARTIFACT_DENIED"
               : result.error.message === "save conflict"
                 ? "ARTIFACT_VERSION_CONFLICT"
+                : v.action === "saveCandidate" && ["candidate input changed", "candidate provenance changed", "summary dismissed"].includes(result.error.message)
+                  ? "ARTIFACT_CANDIDATE_INVALIDATED"
                 : result.error.code === "P0001"
                   ? "ARTIFACT_REVIEW_REQUIRED"
                   : "ARTIFACT_UNAVAILABLE",

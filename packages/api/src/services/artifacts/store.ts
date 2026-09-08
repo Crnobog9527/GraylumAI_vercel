@@ -38,7 +38,9 @@ export function databaseArtifactStore(options:{userClient:SupabaseClient;private
  async function call(actorId:string,action:string,projectId:string,roundId:string,requestId:string|null,payload:Record<string,unknown>){
   const {data,error}=await privateClient!.rpc('artifact_transition',{p_actor_id:actorId,p_module_id:moduleId,p_skill_id:skillId,p_action:action,p_project_id:projectId,p_round_id:roundId,p_request_id:requestId,p_payload:payload}).abortSignal(AbortSignal.timeout(10000));
   if(error){
+   if(action==='start' && error.code==='23505' && error.message.includes('artifact_social_account'))throw new Error('ARTIFACT_ACCOUNT_CONFLICT');
    if(error.code==='42501')throw new Error('ARTIFACT_DENIED');
+   if(action==='save' && error.message==='round closed')throw new Error('ARTIFACT_SAVE_ROUND_CLOSED');
    if(error.message==='save conflict')throw new Error('ARTIFACT_VERSION_CONFLICT');
    if(['confirmation conflict','dependency review required','confirmation required','snapshot conflict'].includes(error.message))throw new Error('ARTIFACT_REVIEW_REQUIRED');
    throw new Error(['P0001','23505','23514','40001'].includes(error.code)?'ARTIFACT_CONFLICT_OR_DENIED':'ARTIFACT_UNAVAILABLE');
