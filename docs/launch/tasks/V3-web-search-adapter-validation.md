@@ -9,3 +9,5 @@
 本地验证：16 项 contract 单测 PASS；仓库外私有既有返回的离线解码 1 PASS，合计 17 PASS。Web typecheck PASS。离线核验没有新增供应商调用；没有使用或打印凭证。证据日志 `/tmp/graylum-tavily-observed-validation.log` 与 `/tmp/graylum-tavily-typecheck.log` 留在本机。
 
 尚未完成：产品内检索入口、研究权限与成果引用接线、Graylum 取数费用策略、供应商许可/保留条款及完整链路验收；不将 decoder PASS 等同搜索功能交付或实际可上线。后续复用已有受控研究服务、预算和恢复，不自动扩展付费授权。
+
+补充 MCP 协议回归：通过官方 SDK 对本地 JSON/SSE 服务运行已审核 Tavily contract，验证单次执行、同请求恢复不再次执行、不同参数复用身份拒绝、报价上涨在执行前拒绝。与原 AgentKey 测试合计 51 PASS；Web typecheck PASS。该协议测试使用内存预算 store 和合成正文，不替代后续真实 SQL/用户积分事务及产品入口验证。

@@ -37,3 +37,34 @@ describe('reviewed Tavily basic search contract',()=>{
   const empty=response();empty.data.results=[];expect(tavilyContract.result(empty,context)).toEqual({objects:[],pagination:{complete:true,nextCursor:null},actualCredits:null});
  });
 });
+
+import {randomUUID} from 'node:crypto';
+import {localMcpFixture} from './fixtures/agentKeyServer';
+import type {ResearchStore,OperationRecord} from '../research/store';
+function memoryStore():ResearchStore {
+ const records=new Map<string,OperationRecord>();let budget=0;
+ return {async create(_p,b){budget=b;},async get(_p,o){return records.get(o)??null;},async reserve(_p,o,identityHash,quote){if(quote>budget)throw new Error('BUDGET');budget-=quote;const value:OperationRecord={identityHash,state:'prepared',claimed:true,token:randomUUID()};records.set(o,value);return value;},async dispatch(_p,o){const row=records.get(o)!;if(row.state!=='prepared')return false;row.state='dispatched';return true;},async finish(_p,o,_t,state,result){records.set(o,{...records.get(o)!,state,result});},async cancel(){budget=0;}};
+}
+describe('Tavily contract through local official MCP transport',()=>{
+ it.each(['json','sse'] as const)('executes once and recovers without losing cost-unit boundaries via %s',async mode=>{
+  const f=await localMcpFixture(memoryStore(),mode,{discovery:{tools:[{name:TAVILY_SEARCH}]},description:description(),result:response()});
+  const a=await f.connect({contract:tavilyContract,capabilities:tavilyCapabilities,timeoutMs:1000});
+  try{
+   expect(await a.discover(params.query)).toEqual(['tavily.webSearch']);
+   const request={planId:randomUUID(),operationId:randomUUID(),capability:'tavily.webSearch',params};
+   await a.createPlan(request.planId,1.1,[request]);
+   const result=await a.execute(request);expect(result.state).toBe('succeeded');expect(result.result?.fixture).toBe(true);
+   expect(result.result?.cost).toEqual({unit:'agentkey-credit',quoted:1.1,actual:null,status:'unknown'});
+   expect((await a.execute(request)).recovered).toBe(true);expect(f.events.filter(x=>x==='execute')).toHaveLength(1);
+   await expect(a.execute({...request,params:{...params,query:'Different'}})).rejects.toThrow('OPERATION_CONFLICT');
+  }finally{await a.close();await f.stop();}
+ });
+ it('rejects a changed AgentKey quote before sending the paid tool request',async()=>{
+  const f=await localMcpFixture(memoryStore(),'json',{discovery:{tools:[{name:TAVILY_SEARCH}]},description:{...description(),cost:{credits_per_call:2}},result:response()});
+  const a=await f.connect({contract:tavilyContract,capabilities:tavilyCapabilities,timeoutMs:1000});
+  try{
+   await a.discover(params.query);const request={planId:randomUUID(),operationId:randomUUID(),capability:'tavily.webSearch',params};await a.createPlan(request.planId,1.1,[request]);
+   await expect(a.execute(request)).rejects.toThrow();expect(f.events).not.toContain('execute');
+  }finally{await a.close();await f.stop();}
+ });
+});
