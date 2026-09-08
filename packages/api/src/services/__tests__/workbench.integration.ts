@@ -2574,12 +2574,13 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
   // Provider output is buffered for server-side checks, so stop while init is
   // visible and the provider is still pending rather than waiting for final text.
   await page.getByRole('button',{name:'停止',exact:true}).waitFor();
+  expect(await page.getByTestId('chat-input').isDisabled()).toBe(true);
   if(mode==='ORDINARY_ABORT')await page.getByRole('button',{name:'停止',exact:true}).click();
   await expect.poll(async()=>await page.getByTestId('chat-input').isEnabled(),{timeout:30000}).toBe(true);
   if(mode==='ORDINARY_ABORT') {
  // Header navigation bypasses the sidebar's navigate callback; it must still reset scope.
  await page.getByRole('link',{name:'对话',exact:true}).click();await page.waitForURL(u=>u.pathname==='/chat'&&!u.search);
- expect(await page.getByText('ORDINARY_ABORT',{exact:true}).count()).toBe(0);
+ expect(await page.getByTestId('chat-message').count()).toBe(0);
  await page.getByTestId('chat-input').fill('AFTER_HEADER_NEW_CHAT');await page.getByRole('button',{name:'发送',exact:true}).click();
  await page.waitForURL(u=>!!u.searchParams.get('conversation'));
  const freshId=new URL(page.url()).searchParams.get('conversation')!;
@@ -2588,7 +2589,7 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
   expect(freshId).not.toBe(conversationId);
   await page.goto(app+'/chat?conversation='+conversationId);
   }
-  await page.reload();await page.getByText(mode,{exact:true}).waitFor();
+  await page.reload();await page.getByTestId('chat-message-content').filter({hasText:mode}).waitFor();
   expect(new URL(page.url()).searchParams.get('conversation')).toBe(conversationId);
   const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
   expect(row).toMatchObject({module_id:mode==='ORDINARY_ERROR'?moduleId:null,skill_mode:false});
