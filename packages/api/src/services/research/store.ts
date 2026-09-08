@@ -48,10 +48,10 @@ export function databaseBilledResearchStore(db:SupabaseClient,actorId:string):Re
   };
   return {
     create:base.create,
-    async get(p,o){const r=await base.get(p,o);if(r?.state==='succeeded')await charge(p,o,'settle');return r;},
+    async get(p,o){const r=await base.get(p,o);if(r?.state==='succeeded')await charge(p,o,'settle');else if(r?.state==='failed')await charge(p,o,'refund');return r;},
     async reserve(p,o,identity,quote){const r=await base.reserve(p,o,identity,quote);if(r.claimed)await charge(p,o,'reserve');else if(r.state==='succeeded')await charge(p,o,'settle');return r;},
     async dispatch(p,o,token){await charge(p,o,'admit');return base.dispatch(p,o,token);},
-    async finish(p,o,token,state,result){await base.finish(p,o,token,state,result);if(state==='succeeded')await charge(p,o,'settle');},
+    async finish(p,o,token,state,result){await base.finish(p,o,token,state,result);if(state==='succeeded')await charge(p,o,'settle');else if(state==='failed')await charge(p,o,'refund');},
     async cancel(p){const {data,error}=await db.rpc('research_cancel',{p_actor_id:actorId,p_plan_id:p});if(error)throw new Error('RESEARCH_BILLING_UNAVAILABLE');return data===true;},
   };
 }

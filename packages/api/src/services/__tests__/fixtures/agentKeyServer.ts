@@ -19,6 +19,9 @@ export async function localMcpFixture(store:ResearchStore,mode:'json'|'sse'='jso
  if(wire)description=wire.description;
  let actualCredits:number|null=null;
  let behavior:'success'|'error'|'timeout'|'disconnect'|'oversize'='success';
+ const sessions=new Map<string,NodeStreamableHTTPServerTransport>();
+ const servers:McpServer[]=[];
+ async function createSession(){
  const mcp=new McpServer({name:'synthetic-agentkey',version:'test'});
  mcp.registerTool('find_tools',{inputSchema:z.object({q:z.string()})},async()=>{events.push('find');return {content:[{type:'text',text:JSON.stringify(wire?.discovery??{names:['Fixture/Search','Unreviewed/Write']})}]};});
  mcp.registerTool('describe_tool',{inputSchema:z.object({name:z.string()})},async()=>{events.push('describe');return {content:[],structuredContent:description};});
@@ -31,13 +34,19 @@ export async function localMcpFixture(store:ResearchStore,mode:'json'|'sse'='jso
   return {content:[],structuredContent:{objects:[{id:'synthetic-1',fields:{title:behavior==='oversize'?'x'.repeat(100001):'Test only'},missingFields:['views'],observedAt:null}],pagination:{complete:true,nextCursor:null},actualCredits}};
  });
  const transport=new NodeStreamableHTTPServerTransport({sessionIdGenerator:()=>randomUUID(),enableJsonResponse:mode==='json'});
- await mcp.connect(transport);
+ await mcp.connect(transport);servers.push(mcp);return transport;
+ }
  const sockets=new Set<import('node:net').Socket>();
- const server=createServer((req,res)=>{events.push(req.method==='DELETE'?'close':`http:${req.method}`);void transport.handleRequest(req,res);});
+ const server=createServer(async(req,res)=>{events.push(req.method==='DELETE'?'close':`http:${req.method}`);
+  const id=req.headers['mcp-session-id'];
+  const transport=typeof id==='string'?sessions.get(id):req.method==='POST'?await createSession():undefined;
+  if(!transport){res.writeHead(400);res.end();return;}
+  await transport.handleRequest(req,res);if(transport.sessionId)sessions.set(transport.sessionId,transport);
+ });
  server.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const address=server.address() as import('node:net').AddressInfo;
  const authorize=vi.fn(async()=>{});
  const connect=(overrides:Partial<AdapterOptions>={})=>connectLocalAgentKey({store,authorize,contract,capabilities:[{internalName:'search',canonicalName:'Fixture/Search',schemaHash:contractHash(schema),parameterKeys:['query'],maxQuoteCredits:1}],timeoutMs:200,maxResponseBytes:100000,maxCalls:30,maxPages:2,...overrides},new URL(`http://127.0.0.1:${address.port}/mcp`));
  return {endpoint:`http://127.0.0.1:${address.port}/mcp`,events,executedParams,connect,store,authorize,setActualCredits:(value:number|null)=>{actualCredits=value;},setDescription:(v:Record<string,unknown>)=>{description={...description,...v};},setBehavior:(v:typeof behavior)=>{behavior=v;},
-  async stop(){await mcp.close();for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
+  async stop(){await Promise.all(servers.map(mcp=>mcp.close()));for(const s of sockets)s.destroy();await new Promise<void>(r=>server.close(()=>r()));}};
 }

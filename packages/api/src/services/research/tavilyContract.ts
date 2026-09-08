@@ -32,3 +32,5 @@ export const tavilyContract:ProviderContract={
   return {objects:v.data.results.map(r=>({id:r.id,sourceUrl:r.url,observedAt:null,missingFields:['publishedAt'],fields:{kind:'web-search',title:r.title,content:r.content,score:r.score,query:p.query,coverage:'ranked-results-not-exhaustive',providerUsage:{unit:'tavily-credit',credits:v.data.usage.credits}}})),pagination:{complete:true,nextCursor:null},actualCredits:null};
  },
 };
+
+export const tavilyParameters=(query:string)=>({query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'});

@@ -9,7 +9,7 @@ import { workflowSchema } from '../artifacts/workflow';
 import { snapshotSchema } from '../artifacts/public';
 import { connectAgentKey, researchIdentity, type AdapterOptions } from './agentKey';
 import { databaseBilledResearchStore, type OperationRecord } from './store';
-import { tavilyCapabilities, tavilyContract } from './tavilyContract';
+import { tavilyCapabilities, tavilyContract, tavilyParameters as parameters } from './tavilyContract';
 
 const uuid=z.string().uuid();
 export const workbenchSearchInput=z.object({
@@ -19,7 +19,7 @@ export const workbenchSearchInput=z.object({
 }).strict();
 type Input=z.infer<typeof workbenchSearchInput>;
 type Connection=Awaited<ReturnType<typeof connectAgentKey>>;
-const parameters=(query:string)=>({query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'});
+
 const publicResult=(requestId:string,value:OperationRecord)=>({requestId,state:value.state,
  result:value.result?{objects:value.result.objects,fetchedAt:value.result.fetchedAt,pagination:value.result.pagination,fixture:value.result.fixture}:null,
  restricted:value.resultAccess==='restricted',
@@ -65,17 +65,26 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
   },
   async search(raw:Input){
    const input=workbenchSearchInput.parse(raw),id=await actor();
-   await checkRateLimitAsync(id,'ai');await resolve(input,id);
+   await resolve(input,id);
    const store=databaseBilledResearchStore(privateClient!,id);
    const params=parameters(input.query);
    const scope={projectId:input.projectId,roundId:input.roundId,stepId:input.stepId};
    const identityHash=researchIdentity(tavilyCapabilities[0],params,scope);
-   // Register the server-built intent before lookup; create is idempotent and
-   // cannot reserve credits or dispatch a provider call.
+   // Lookup never creates an intent. Only an exact existing terminal request
+   // may recover without consuming the new-provider-call rate allowance.
+   const lookup=await privateClient!.rpc('research_lookup',{p_actor_id:id,p_plan_id:input.requestId,p_operation_id:input.requestId});
+   if(lookup.error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
+   const existing=lookup.data as OperationRecord|null;
+   if(existing&&existing.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
+   if(existing&&existing.state!=='prepared'){
+    const recovered=await store.get(input.requestId,input.requestId);
+    if(!recovered)throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    return publicResult(input.requestId,recovered);
+   }
+   await checkRateLimitAsync(id,'ai');
    await store.create(input.requestId,1100000,[{operationId:input.requestId,identityHash,maxQuoteUnits:1100000}]);
    const previous=await store.get(input.requestId,input.requestId);
    if(previous&&previous.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
-   // Recovery needs neither a provider connection nor a second search charge.
    if(previous&&previous.state!=='prepared')return publicResult(input.requestId,previous);
    await admission(input,id);
    const settings=await privateClient!.from('system_settings').select('key,value').in('key',['v3_web_search','search_surcharge_credits']);

@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
 import { databaseArtifactStore, commandSchema } from "./store";
 import { workflowSchema } from "./workflow";
-import { databaseBilledResearchStore } from "../research/store";
+import { databaseBilledResearchStore, databaseResearchStore } from "../research/store";
 import {
   publicWorkflowSchema,
   projectSchema,
@@ -13,6 +13,8 @@ import {
   reportSchema,
   reportMarkdown,
 } from "./public";
+import { researchIdentity } from '../research/agentKey';
+import { tavilyCapabilities, tavilyParameters } from '../research/tavilyContract';
 const uuid = z.string().uuid();
 export const webCommandSchema = z.discriminatedUnion("action", [
   commandSchema.options[2],
@@ -35,7 +37,7 @@ export const webCommandSchema = z.discriminatedUnion("action", [
       .refine((v) => Object.keys(v).length > 0 && Object.keys(v).length <= 32),
   }),
   commandSchema.options[6],
-  commandSchema.options[7],
+  commandSchema.options[7].extend({stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),query:z.string().min(1).max(200).refine(value=>value===value.trim())}),
   commandSchema.options[8],
   commandSchema.options[9],
 ]);
@@ -254,12 +256,14 @@ export function workbenchService(
       } else {
         const target = await store(v.projectId, v.roundId);
         if (v.action === "researchEvidence") {
+          const existing = await databaseResearchStore(privateClient!, await actor()).get(v.planId,v.operationId);
+          if(existing?.identityHash!==researchIdentity(tavilyCapabilities[0],tavilyParameters(v.query),{projectId:v.projectId,roundId:v.roundId,stepId:v.stepId}))throw new Error('ARTIFACT_EVIDENCE_UNAVAILABLE');
           const result = await databaseBilledResearchStore(privateClient!, await actor())
             .get(v.planId, v.operationId);
           if (result?.state !== "succeeded" || !result.result || result.resultAccess === "restricted")
             throw new Error("ARTIFACT_EVIDENCE_UNAVAILABLE");
         }
-        await target.execute(v);
+        if(v.action==='researchEvidence'){const {query,stepId,...adoption}=v;void query;void stepId;await target.execute(adoption);}else await target.execute(v);
       }
       return { accepted: true };
     },

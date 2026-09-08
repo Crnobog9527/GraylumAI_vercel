@@ -44,9 +44,9 @@ BEGIN
   END IF;
   UPDATE research_operations SET charged_credits=o.user_quote_credits,charged_at=now() WHERE id=o.id;
  ELSIF p_action='refund' THEN
-  IF o.state<>'cancelled' THEN RAISE EXCEPTION 'research dispatch cannot be refunded automatically'; END IF;
+  IF o.state NOT IN ('cancelled','failed') THEN RAISE EXCEPTION 'research unresolved dispatch cannot be refunded automatically'; END IF;
   IF o.pre_deduct_id IS NOT NULL AND o.charged_credits IS NULL THEN
-   PERFORM atomic_refund(p_actor_id,o.pre_deduct_id,'Research cancelled before dispatch');
+   PERFORM atomic_refund(p_actor_id,o.pre_deduct_id,CASE WHEN o.state='failed' THEN 'Research provider returned a terminal error' ELSE 'Research cancelled before dispatch' END);
    UPDATE research_operations SET charged_credits=0 WHERE id=o.id;
   END IF;
  ELSE RAISE EXCEPTION 'research charge action denied'; END IF;
@@ -75,4 +75,14 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.research_cancel(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.research_cancel(uuid,uuid) TO service_role;
+-- Non-creating lookup allows recovery before new-execution rate admission.
+CREATE OR REPLACE FUNCTION public.research_lookup(p_actor_id uuid,p_plan_id uuid,p_operation_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false') THEN RAISE EXCEPTION 'research denied' USING ERRCODE='42501'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM research_plans WHERE id=p_plan_id) THEN RETURN NULL; END IF;
+ RETURN research_transition('get',p_plan_id,p_actor_id,p_operation_id,'{}');
+END $$;
+REVOKE ALL ON FUNCTION public.research_lookup(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_lookup(uuid,uuid,uuid) TO service_role;
 COMMIT;
