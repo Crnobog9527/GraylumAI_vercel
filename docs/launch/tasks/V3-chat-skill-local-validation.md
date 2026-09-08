@@ -102,3 +102,9 @@ project/round，并继续使用原有来源和权限校验。浏览器存储不�
 本地恢复的直接来源与完整来源记录分开保存。显示脏稿、恢复候选和重放冻结保存前，
 重新校验完整来源可用性；候选还必须在当前服务端投影中可读。缺少完整来源记录的旧
 本地恢复项不作为可读内容恢复。历史回复只读展示，不承诺已失效候选能够再次恢复写入。
+
+### Real-model current-result refinement (2026-09-08)
+
+Local Qwen `qwen/qwen3.8-flash` testing found that an older conversation reply could displace a directly edited topic despite the saved body being present in the general step context. Chat generation now names `currentStepResult` explicitly and instructs the model to use the latest saved result before older replies, applying the current requested changes. This does not confirm the step. Four configured-workflow SQL/HTTP tests verify the saved body/version reaches the generation transport; web TypeScript passed.
+
+Real browser retesting retained community-family audience, online sharing, pet-action photography, October 12, Tencent Meeting and 60 minutes, then changed only the requested budget from 1200 to 1100. Model results saved automatically. This is observed text-model behavior, not a guarantee for arbitrary Skills or every model output. An earlier separate provider operation remained unknown after timeout and was not retried; its conservative budget reservation remains held. The temporary credential and budget control stay outside the repository and apply only to the local test.

@@ -2344,11 +2344,14 @@ aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, hist
 
 aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and generation',async(n)=>{
  const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(n),chat=skillChatService(t.user,db);
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Manual topic: pet action photography',evidenceIds:[]});
  const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Synthetic configured conversation';
  await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
  const v={...await t.request(),conversationId:binding.conversationId,turnId:requestId,requestId,instruction:body};
  const q=await t.ai.quote({projectId:v.projectId,roundId:v.roundId,stepId:v.stepId,conversationId:v.conversationId,turnId:v.turnId,instruction:body,expectedSteps:v.expectedSteps});
  expect((await t.ai.generate({...v,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sent=JSON.parse(t.captured.at(-1)!);
+ expect(JSON.parse(sent[1].content).currentStepResult).toEqual({body:'Manual topic: pet action photography',version:1});
  expect((await chat.read({conversationId:binding.conversationId})).turns).toHaveLength(1);
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).workflow.steps).toHaveLength(n);
 },30000);
