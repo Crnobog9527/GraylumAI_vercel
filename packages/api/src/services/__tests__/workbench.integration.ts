@@ -2559,7 +2559,7 @@ aiTest('CHAT: social rebind preserves the single-account project and explicitly 
  expect(await page.getByRole('link',{name:'找回已有项目与正式报告',exact:true}).getAttribute('href')).toBe('/workbench');await context.close();
 },90000);
 
-aiTest('CHAT: ordinary init persists the URL without remounting; abort and error retain free/document history',async()=>{
+aiTest('CHAT: ordinary init persists the URL without remounting; abort and error retain free/document identity',async()=>{
  const t=await generationFixture(),requests:string[]=[];
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const skillId=randomUUID(),moduleId=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Synthetic ordinary interrupted method')",[skillId,skillId]);
@@ -2589,7 +2589,13 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
   expect(freshId).not.toBe(conversationId);
   await page.goto(app+'/chat?conversation='+conversationId);
   }
-  await page.reload();await page.getByTestId('chat-message-content').filter({hasText:mode}).waitFor();
+  if(mode==='ORDINARY_ERROR') {
+   await page.getByText('AI 响应生成失败，请稍后重试',{exact:true}).waitFor();
+   expect((await sql.query("select status from ai_usage_logs where conversation_id=$1",[conversationId])).rows).toEqual([{status:'failed'}]);
+   expect((await sql.query('select id from messages where conversation_id=$1',[conversationId])).rows).toHaveLength(0);
+  }
+  // Ordinary failure preserves conversation identity and failure usage, not unsaved input.
+  await page.reload();await page.getByRole('heading',{name:mode,exact:true}).waitFor();
   expect(new URL(page.url()).searchParams.get('conversation')).toBe(conversationId);
   const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
   expect(row).toMatchObject({module_id:mode==='ORDINARY_ERROR'?moduleId:null,skill_mode:false});
