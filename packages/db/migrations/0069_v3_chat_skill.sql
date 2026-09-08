@@ -51,7 +51,9 @@ BEGIN
  END IF;
  IF p_action='mode' THEN
   IF NOT EXISTS(SELECT 1 FROM modules m JOIN skills s ON s.id=m.skill_id WHERE m.id=(p_payload->>'moduleId')::uuid AND m.active AND s.status='published') THEN RAISE EXCEPTION 'module unavailable' USING ERRCODE='42501'; END IF;
-  RETURN jsonb_build_object('guided',EXISTS(SELECT 1 FROM artifact_workflows WHERE module_id=(p_payload->>'moduleId')::uuid));
+  -- A disabled current workflow stays guided/unavailable: do not silently run
+  -- its Skill as a plain text method. Historical bindings do not classify a new Skill.
+  RETURN jsonb_build_object('guided',EXISTS(SELECT 1 FROM artifact_workflows w JOIN modules m ON m.id=w.module_id AND m.skill_id=w.skill_id WHERE w.module_id=(p_payload->>'moduleId')::uuid));
  END IF;
  IF p_action='attach' THEN
   SELECT * INTO p FROM artifact_projects WHERE id=(p_payload->>'projectId')::uuid AND actor_id=p_actor_id FOR UPDATE;

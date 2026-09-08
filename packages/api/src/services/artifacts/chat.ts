@@ -117,6 +117,7 @@ export function skillChatService(
       const projects = (await workbench.projects()).filter(
         (p) =>
           p.moduleId === v.moduleId &&
+          p.skillId === entry.skillId &&
           (entry.workflow.kind !== "social" || p.account === v.account),
       );
       const project = projects[0];

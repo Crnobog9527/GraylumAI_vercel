@@ -2485,3 +2485,50 @@ aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old 
  await expect.poll(async()=>await page.getByRole('button',{name:'查看本次费用',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
  expect(await page.getByRole('button',{name:/^发送（最多/}).count()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('CURRENT_B');await context.close();
 },90000);
+
+aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{
+ const t=await generationFixture();
+ await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
+ const skillId=randomUUID(),moduleId=randomUUID();
+ await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'METHOD_CANARY_DOCUMENT_STREAM Private document instruction')",[skillId,skillId]);
+ await sql.query("insert into modules(id,title,skill_id,model_id,active) values($1,'Document streaming fixture',$2,$3,true)",[moduleId,skillId,localModel]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ const requests:string[]=[],{page,context}=await pageFor(credentials,requests);
+ for(const module of [null,moduleId]) {
+  if(module){await page.goto(app+'/marketplace?module='+module);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();}
+  else {await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();}
+  await page.getByTestId('chat-input').fill(module?'DOCUMENT_SEND':'FREE_SEND');
+  const sent=page.waitForResponse(response=>response.url().includes('/api/ai/stream'));
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  const response=await sent,responseText=await response.text();expect(response.status(),responseText).toBe(200);expect(responseText).not.toContain('METHOD_CANARY');
+  await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor({timeout:45000});
+  await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'),{timeout:30000});
+  const conversationId=new URL(page.url()).searchParams.get('conversation');
+  const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
+  expect(row).toMatchObject({module_id:module,skill_mode:false});
+  await page.reload();await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ }
+ expect(requests.filter(path=>path.startsWith('/api/ai/stream'))).toHaveLength(2);
+ expect((await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[t.scope.projectId])).rows[0].n).toBe(0);
+ await context.close();
+},150000);
+
+aiTest('CHAT: module rebinding enters the current Skill while preserving the former Skill history',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const old=await generationFixture(),chat=skillChatService(old.user,db);
+ const previous=await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()});
+ await sql.query('update artifact_workflows set enabled=false where id=$1',[old.f.registration]);
+ expect(await chat.mode(old.f.moduleId)).toEqual({guided:true});
+ await expect(chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_INVALID_WORKFLOW');
+ await sql.query('update artifact_workflows set enabled=true where id=$1',[old.f.registration]);
+ const newer=await generationFixture();await sql.query('update modules set skill_id=$1 where id=$2',[newer.f.pack.id,old.f.moduleId]);
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',['rebind-'+randomUUID(),old.f.moduleId,newer.f.pack.id,newer.f.pack.revisionId,newer.f.flow,'Rebound current Skill']);
+ const current=await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()});
+ expect(current.skillId).toBe(newer.f.pack.id);expect(current.projectId).not.toBe(previous.projectId);
+ expect((await chat.read({conversationId:previous.conversationId})).binding.skillId).toBe(old.f.pack.id);
+ await expect(chat.submit({conversationId:previous.conversationId,requestId:randomUUID(),stepId:'step-0',body:'Old Skill new execution must fail'})).rejects.toThrow();
+ expect((await chat.enter({moduleId:old.f.moduleId,requestId:randomUUID()})).projectId).toBe(current.projectId);
+ const documentId=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Rebound ordinary document')",[documentId,documentId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:documentId,p_published_by:owner})).error).toBeNull();
+ await sql.query('update modules set skill_id=$1 where id=$2',[documentId,old.f.moduleId]);
+ expect(await chat.mode(old.f.moduleId)).toEqual({guided:false});
+},30000);

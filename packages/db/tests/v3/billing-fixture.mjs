@@ -16,7 +16,7 @@ ALTER TABLE billing_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_models ENABLE ROW LEVEL SECURITY;
 `);
   sql(`ALTER TABLE profiles ADD COLUMN avatar_url text; GRANT SELECT(avatar_url) ON profiles TO authenticated;
-ALTER TABLE ai_models ADD COLUMN description text, ADD COLUMN enable_web_search text DEFAULT 'false';
+ALTER TABLE ai_models ADD COLUMN description text, ADD COLUMN enable_web_search text DEFAULT 'false', ADD COLUMN updated_at timestamptz DEFAULT now(), ADD COLUMN token_counting_method text DEFAULT 'verified_openai_tokenizer';
 GRANT SELECT(id,name,model_id,provider,description,enable_web_search,max_tokens,is_active) ON ai_models TO authenticated; CREATE POLICY ai_models_active ON ai_models FOR SELECT TO authenticated USING(is_active='true');
 ALTER TABLE modules ADD COLUMN description text DEFAULT 'Synthetic local module', ADD COLUMN full_description text DEFAULT '', ADD COLUMN icon text DEFAULT 'Bot', ADD COLUMN features jsonb DEFAULT '[]', ADD COLUMN examples jsonb DEFAULT '[]', ADD COLUMN preparation_questions jsonb DEFAULT '[]', ADD COLUMN usage_count integer DEFAULT 0, ADD COLUMN credits_multiplier numeric DEFAULT 1, ADD COLUMN sort_order integer DEFAULT 0, ADD COLUMN is_featured boolean DEFAULT false, ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN updated_at timestamptz DEFAULT now(), ADD COLUMN image_url text, ADD COLUMN badge_type text, ADD COLUMN badge_text text, ADD COLUMN credits_display text, ADD COLUMN link_url text, ADD COLUMN link_module_id uuid;
 GRANT SELECT(id,title,description,full_description,icon,category,platform,features,examples,preparation_questions,usage_count,credits_multiplier,sort_order,is_featured,active,created_at,updated_at,image_url,badge_type,badge_text,credits_display,link_url,link_module_id) ON modules TO anon,authenticated;`);
@@ -42,13 +42,16 @@ REVOKE ALL ON credit_transactions FROM PUBLIC,anon,authenticated; GRANT SELECT O
   sql(`ALTER TABLE token_stats ADD COLUMN metadata jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE token_stats ENABLE ROW LEVEL SECURITY; ALTER TABLE ai_usage_logs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON token_stats,ai_usage_logs,payment_orders FROM PUBLIC,anon,authenticated;
-GRANT SELECT ON token_stats,ai_usage_logs,payment_orders TO service_role;
+GRANT SELECT ON token_stats,ai_usage_logs,payment_orders TO service_role; GRANT INSERT ON token_stats,ai_usage_logs TO service_role;
 GRANT SELECT ON token_stats TO authenticated; CREATE POLICY token_stats_select_own ON token_stats FOR SELECT TO authenticated USING(user_id=auth.uid());`);
   for (const [file, name] of [
     ['0053_refund_1b_consumed_amount_termination.sql', 'refund_1b_is_canonical_period_identity'],
     ['0061_refund_1b_expired_quarantine_repair.sql', 'atomic_pre_deduct'],
     ['0057_refund_1b_actual_refund_accounting_repair.sql', 'atomic_settle'],
     ['0057_refund_1b_actual_refund_accounting_repair.sql', 'atomic_refund'],
+    ['0058_refund_1b_canonical_metadata_merge_repair.sql', 'atomic_finalize_ai_success'],
+    ['0059_refund_1b_failure_period_metadata_repair.sql', 'atomic_finalize_ai_failure'],
+    ['0058_refund_1b_canonical_metadata_merge_repair.sql', 'atomic_finalize_ai_abort'],
   ]) {
     const source = readFileSync(resolve(root, 'packages/db/migrations', file), 'utf8');
     const start = source.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`);
@@ -57,5 +60,5 @@ GRANT SELECT ON token_stats TO authenticated; CREATE POLICY token_stats_select_o
     if (end <= start) throw new Error('invalid billing function boundary');
     sql(source.slice(start, end));
   }
-  sql(`DO $$ DECLARE sig text; BEGIN FOR sig IN SELECT oid::regprocedure::text FROM pg_proc WHERE proname IN ('atomic_pre_deduct','atomic_settle','atomic_refund','refund_1b_is_canonical_period_identity') LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated',sig); EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',sig); END LOOP; END $$;`);
+  sql(`DO $$ DECLARE sig text; BEGIN FOR sig IN SELECT oid::regprocedure::text FROM pg_proc WHERE proname IN ('atomic_pre_deduct','atomic_settle','atomic_refund','refund_1b_is_canonical_period_identity','atomic_finalize_ai_success','atomic_finalize_ai_failure','atomic_finalize_ai_abort') LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated',sig); EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',sig); END LOOP; END $$;`);
 }
