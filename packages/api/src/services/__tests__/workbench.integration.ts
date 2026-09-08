@@ -2316,14 +2316,15 @@ aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, hist
  await page.getByRole('heading',{name:t.f.label,exact:true}).first().click();
  await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
  await page.getByLabel('给当前步骤发消息').waitFor();
+ await page.waitForURL(u=>!!u.searchParams.get('conversation'));
  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
  async function send(body:string){await page.getByLabel('给当前步骤发消息').fill(body);await page.getByRole('button',{name:'发送',exact:true}).click();await poll(async()=>await page.getByLabel('给当前步骤发消息').inputValue()).toBe('');}
  await send('BROWSER_FIRST_REQUIREMENT');await send('BROWSER_SECOND_REVISION');
  await poll(async()=>await page.locator('[data-message-role="assistant"]').count()).toBe(2);
- await page.getByRole('button',{name:'采用为工作稿',exact:true}).last().click();
- await page.getByRole('button',{name:'保存工作稿',exact:true}).click();
- await poll(async()=>await page.getByRole('button',{name:'明确确认此步骤',exact:true}).isEnabled()).toBe(true);
- await page.getByRole('button',{name:'明确确认此步骤',exact:true}).click();
+ await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('Synthetic local HTTP candidate');
+ expect(await page.getByRole('button',{name:'保存工作稿',exact:true}).count()).toBe(0);
+ await poll(async()=>await page.getByRole('button',{name:'确认并进入下一步',exact:true}).isEnabled()).toBe(true);
+ await page.getByRole('button',{name:'确认并进入下一步',exact:true}).click();
  await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(true);
  await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
  await poll(async()=>await page.locator('[data-message-role="user"]').count()).toBe(0);
@@ -2405,8 +2406,8 @@ aiTest('CHAT: late response preserves later input and draft; rejected quotes and
  await composer.fill('LATER_UNSENT_MESSAGE');await draft.fill('LATER_LOCAL_DRAFT');release();
  await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(1);
  expect(await composer.inputValue()).toBe('LATER_UNSENT_MESSAGE');expect(await draft.inputValue()).toBe('LATER_LOCAL_DRAFT');
- await page.getByRole('button',{name:'新建对话',exact:true}).click();expect(new URL(page.url()).searchParams.get('conversation')).toBeTruthy();
- await composer.fill('');await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).click();await page.unroute('**/api/trpc/workbench.generate*');
+
+ await composer.fill('');await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('LATER_LOCAL_DRAFT');await page.unroute('**/api/trpc/workbench.generate*');
  await page.route('**/api/trpc/workbench.generationQuote*',async route=>{
   const response=await route.fetch();await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);await route.fulfill({response});
  });
@@ -2570,7 +2571,8 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
   await page.goto(mode==='ORDINARY_ABORT'?app+'/chat':app+'/chat?module='+moduleId);
   await page.getByTestId('chat-input').fill(mode);await page.getByRole('button',{name:'发送',exact:true}).click();
   await page.waitForURL(u=>!!u.searchParams.get('conversation'));
-  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+  await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const conversationId=new URL(page.url()).searchParams.get('conversation')!;
   // Provider output is buffered for server-side checks, so stop while init is
   // visible and the provider is still pending rather than waiting for final text.
   await page.getByRole('button',{name:'停止',exact:true}).waitFor();
@@ -2618,7 +2620,7 @@ aiTest('CHAT: removing prior evidence permits new context and safe same-text ret
  const staleValue=await value(staleId,retryBody),staleQuote=await t.ai.quote(staleValue);
  const {page,context}=await pageFor();await page.goto(app+'/chat?conversation='+binding.conversationId);
  await page.getByText('参考资料（可选）',{exact:true}).click();await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).uncheck();
- await page.getByLabel('当前步骤工作稿').fill('Independent rewritten draft');await page.getByRole('button',{name:'保存工作稿',exact:true}).click();
+ await page.getByLabel('当前步骤工作稿').fill('Independent rewritten draft');
  await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:30000}).toEqual([]);
  const b=randomUUID();expect((await generate(b,'NEW_INDEPENDENT_TURN')).state).toBe('succeeded');
  expect(t.captured.at(-1)).not.toContain('OLD_TURN_WITH_REMOVED_SOURCE');expect(t.captured.at(-1)).not.toContain('REMOVED_SOURCE_CANARY');
@@ -2629,10 +2631,63 @@ aiTest('CHAT: removing prior evidence permits new context and safe same-text ret
  await expect(t.ai.generate({...staleValue,requestId:staleId,quoteHash:staleQuote.quoteHash,budgetCredits:staleQuote.reservedCredits})).rejects.toThrow();expect(t.calls()).toBe(2);
  await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
  expect(await page.getByRole('button',{name:'恢复原操作',exact:true}).count()).toBe(0);
- await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Synthetic local HTTP candidate',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByLabel('当前步骤讨论').getByText('Synthetic local HTTP candidate',{exact:true}).waitFor();
  const turns=(await chat.read({conversationId:binding.conversationId})).turns,newTurn=turns.find(x=>x.body===retryBody&&x.requestId!==staleId)!;expect(newTurn.generationState).toBe('succeeded');
  expect((await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[newTurn.requestId])).rows[0]).toEqual({context_turn_ids:[b],evidence_ids:[]});
  await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
  const history=await chat.read({conversationId:binding.conversationId});expect(history.turns.find(x=>x.requestId===a)?.available).toBe(false);expect(history.turns.find(x=>x.requestId===b)?.available).toBe(true);expect(history.turns.find(x=>x.requestId===newTurn.requestId)?.available).toBe(true);
+ await context.close();
+},90000);
+
+aiTest('CHAT: autosave acknowledges a candidate while preserving edits made during its save', async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let arrived!:()=>void,release!:()=>void,finished!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r),handled=new Promise<void>(r=>finished=r);
+ await page.route('**/api/trpc/workbench.execute*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});finished();});
+ await page.getByLabel('给当前步骤发消息').fill('First complete result');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await page.getByLabel('当前步骤工作稿').fill('User refinement during candidate save');release();await handled;await page.unroute('**/api/trpc/workbench.execute*');
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('User refinement during candidate save');
+ const step=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];expect(step.version).toBe(2);expect(step.valid).toBe(false);
+ await context.close();
+},90000);
+
+aiTest.each(['retry','reload'])('CHAT: autosave replays frozen save after lost acknowledgement via %s before newer edits',async(recovery)=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ let arrived!:()=>void,release!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r);
+ await page.route('**/api/trpc/workbench.execute*',async route=>{await route.fetch();arrived();await hold;await route.abort('failed');});
+ await page.getByLabel('当前步骤工作稿').fill('Saved A with missing acknowledgement');await seen;
+ await page.getByLabel('当前步骤工作稿').fill('Newer B must survive');release();
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();await page.unroute('**/api/trpc/workbench.execute*');
+ expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).isDisabled()).toBe(true);
+ if(recovery==='reload') await page.reload(); else await page.getByRole('button',{name:'重试保存',exact:true}).click();
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Newer B must survive');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(2);
+ await context.close();
+},90000);
+
+aiTest('CHAT: immediate browser back restores the unsaved draft and composer for the same authenticated conversation',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/marketplace');await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ const url=page.url();await page.getByLabel('当前步骤工作稿').fill('Recover after immediate browser back');
+ await page.getByLabel('给当前步骤发消息').fill('Unsent discussion survives');
+ await page.goBack();await page.goto(url);
+ await expect.poll(async()=>page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe('Recover after immediate browser back');
+ expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('Unsent discussion survives');
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Recover after immediate browser back');
+ await context.close();
+},90000);
+
+aiTest('CHAT: a definite external save conflict releases the frozen attempt and permits explicit rebase',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.getByLabel('当前步骤工作稿').waitFor();
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'External version one',evidenceIds:[]});
+ await page.getByLabel('当前步骤工作稿').fill('Local revision after external change');
+ await page.getByText('保存版本已变化；本地输入已保留，请加载服务端版本并比较。',{exact:true}).waitFor();
+ await expect.poll(async()=>page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ await page.getByRole('button',{name:'保留本地内容，采用最新保存版本',exact:true}).click();
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Local revision after external change');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(2);
  await context.close();
 },90000);

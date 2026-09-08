@@ -62,7 +62,7 @@ export function ChatEntry() {
     return <StandardConversation key={ownedOrdinary.key} moduleId={ownedOrdinary.moduleId}
       initialConversationId={ownedOrdinary.id} navigate={navigate} onCreated={persistOrdinary} />;
   if (conversationId) {
-    if (history.isPending) return <EntryNotice>正在恢复对话…</EntryNotice>;
+    if (history.isPending) return <PreparingConversation navigate={navigate} />;
     if (history.error || !conversation)
       return <EntryNotice>对话不可用，请从聊天记录重新选择。</EntryNotice>;
     return conversation.skill_mode ? (
@@ -82,7 +82,7 @@ export function ChatEntry() {
     );
   }
   if (moduleId && mode.isPending)
-    return <EntryNotice>正在检查 Skill…</EntryNotice>;
+    return <PreparingConversation navigate={navigate} />;
   if (moduleId && mode.error)
     return (
       <EntryNotice>
@@ -174,11 +174,10 @@ function SkillPicker({
       entering.current = false;
     }
   };
+  const selectedEntry = [...entries].sort((a, b) => b.workflow.version - a.workflow.version)[0];
   useEffect(() => {
     if (!moduleId || !catalog.data || entering.current) return;
-    const entry = [...entries].sort(
-      (a, b) => b.workflow.version - a.workflow.version,
-    )[0];
+    const entry = selectedEntry;
     if (
       entry &&
       (entry.workflow.kind !== "social" || entry.accounts.length === 1)
@@ -189,6 +188,9 @@ function SkillPicker({
         entry.workflow.kind === "social" ? entry.accounts[0] : undefined,
       );
   }, [moduleId, catalog.data]);
+  const automaticEntry = !!moduleId && !error && !catalog.error &&
+    (catalog.isPending || (selectedEntry && (selectedEntry.workflow.kind !== "social" || selectedEntry.accounts.length === 1)));
+  if (automaticEntry) return <PreparingConversation title={selectedEntry?.label} navigate={navigate} />;
   return (
     <div className="flex h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <AppHeader />
@@ -249,6 +251,22 @@ function SkillPicker({
           <a className="ml-4 underline" href="/workbench">
             找回已有项目与正式报告
           </a>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function PreparingConversation({ title, navigate }: { title?: string; navigate: (id?: string) => void }) {
+  return (
+    <div className="flex h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <AppHeader />
+      <div className="flex min-h-0 flex-1">
+        <ChatSidebar onNewChat={() => navigate()} onSelectConversation={navigate} />
+        <main className="flex flex-1 flex-col" aria-label="Skill 对话" aria-busy="true">
+          <header className="border-b border-[var(--border-primary)] p-4"><h1>{title ?? "功能对话"}</h1></header>
+          <div className="flex-1 p-6" role="status">正在准备对话…</div>
+          <div className="border-t border-[var(--border-primary)] p-4"><textarea disabled aria-label="给当前步骤发消息" placeholder="对话准备好后，即可开始讨论…" className="w-full rounded-lg bg-[var(--bg-secondary)] p-3" /></div>
         </main>
       </div>
     </div>

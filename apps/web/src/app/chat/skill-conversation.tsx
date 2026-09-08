@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { ReferenceContent } from "./reference-content";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { saveVersionConflictMessage, candidateInvalidatedMessage } from "@repo/api/src/services/artifacts/public";
 import type { ArtifactSnapshot } from "@repo/api/src/services/artifacts/public";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@repo/api/src/root";
@@ -50,7 +52,13 @@ export function SkillConversation({
     locked = useRef(false),
     pendingWrite = useRef<(() => Promise<void>) | null>(null),
     revision = useRef(0),
-    inputRevision = useRef(0);
+    inputRevision = useRef(0),
+    autoSaveAttempt = useRef(""),
+    pendingNavigation = useRef<(() => void) | null>(null),
+    journalKey = useRef(""),
+    journalReady = useRef(false),
+    journalSaved = useRef(false),
+    pendingSave = useRef<{ step: string; draft: Draft } | null>(null);
   const step = chat?.binding.stepId ?? "",
     draft = drafts[step],
     input = inputs[step] ?? "",
@@ -92,7 +100,12 @@ export function SkillConversation({
   useEffect(() => {
     alive.current = true;
     setShowSteps(window.matchMedia("(min-width: 1024px)").matches);
-    void reload().catch((e) => {
+    void (async () => {
+      const { data } = await createClient().auth.getUser();
+      if (!data.user || !alive.current) return;
+      journalKey.current = `skill-draft:${data.user.id}:${conversationId}`;
+      await reload();
+    })().catch((e) => {
       if (alive.current)
         setError(e instanceof Error ? e.message : "恢复对话失败");
     });
@@ -101,9 +114,17 @@ export function SkillConversation({
       revision.current++;
     };
   }, []);
+  useLayoutEffect(() => {
+    if (!journalReady.current || !journalKey.current || !snapshot) return;
+    try {
+      sessionStorage.setItem(journalKey.current, JSON.stringify({ projectId: snapshot.projectId,
+        roundId: snapshot.roundId, drafts, inputs, sources, pendingSave: pendingSave.current }));
+      journalSaved.current = true;
+    } catch { journalSaved.current = false; }
+  }, [drafts, inputs, sources, snapshot, busy]);
   useEffect(() => {
     if (!dirty && !busy) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    const warn = (e: BeforeUnloadEvent) => { if (!journalSaved.current || busy) e.preventDefault(); };
     window.addEventListener("beforeunload", warn);
     const guard = (event: MouseEvent) => {
       const anchor = (event.target as Element)?.closest?.(
@@ -117,9 +138,14 @@ export function SkillConversation({
       )
         return;
       if (anchor.href !== window.location.href) {
+        if (!busy && journalSaved.current) return;
         event.preventDefault();
         event.stopPropagation();
-        setError("请先保存或清空未提交内容，等待操作完成后再离开。");
+        if (Object.values(inputs).some(Boolean) || Object.values(sources).some(Boolean)) {
+          setError("有未发送的消息或未提交的参考资料，请先发送或清空。");
+        } else {
+          pendingNavigation.current = () => window.location.assign(anchor.href);
+        }
       }
     };
     document.addEventListener("click", guard, true);
@@ -127,7 +153,15 @@ export function SkillConversation({
       window.removeEventListener("beforeunload", warn);
       document.removeEventListener("click", guard, true);
     };
-  }, [dirty, busy]);
+  }, [dirty, busy, inputs, sources]);
+  useEffect(() => {
+    if (error) pendingNavigation.current = null;
+    if (!dirty && !busy && pendingNavigation.current) {
+      const next = pendingNavigation.current;
+      pendingNavigation.current = null;
+      next();
+    }
+  }, [dirty, busy, error]);
   useEffect(() => {
     if (!storage) return;
     try {
@@ -169,8 +203,38 @@ export function SkillConversation({
     setChat(next);
     setSnapshot(snap);
     setRounds(history);
-    setDrafts((old) =>
-      Object.fromEntries(
+    let recovered: Record<string, Draft> = {};
+    if (!journalReady.current && journalKey.current) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(journalKey.current) ?? "null");
+        if (saved?.projectId === snap.projectId && saved?.roundId === snap.roundId) {
+          for (const [k, d] of Object.entries(saved.drafts ?? {}) as [string, Draft][]) {
+            if (snap.steps[k] && d?.dirty === true && typeof d.body === "string" && d.body.length <= 20000 &&
+                Number.isSafeInteger(d.version) && d.version >= 0 && typeof d.editId === "string" && /^[a-f0-9-]{36}$/.test(d.editId) &&
+                Array.isArray(d.evidenceIds) && d.evidenceIds.length <= 64 && d.evidenceIds.every(x => typeof x === "string") &&
+                (d.candidateId === undefined || (typeof d.candidateId === "string" && /^[a-f0-9-]{36}$/.test(d.candidateId)))) recovered[k] = d;
+          }
+          const frozen = saved.pendingSave;
+          if (frozen && recovered[frozen.step] && frozen.draft?.editId &&
+              typeof frozen.draft.body === "string" && frozen.draft.body.length <= 20000 &&
+              Number.isSafeInteger(frozen.draft.version) && frozen.draft.version >= 0 &&
+              /^[a-f0-9-]{36}$/.test(frozen.draft.editId) &&
+              Array.isArray(frozen.draft.evidenceIds) && frozen.draft.evidenceIds.length <= 64 &&
+              frozen.draft.evidenceIds.every((x: unknown) => typeof x === "string") &&
+              (frozen.draft.candidateId === undefined || /^[a-f0-9-]{36}$/.test(frozen.draft.candidateId))) {
+            pendingSave.current = { step: frozen.step, draft: frozen.draft };
+          }
+          const texts = (values: Record<string, unknown> | undefined, max: number) => Object.fromEntries(
+            Object.entries(values ?? {}).filter(([k, v]) => !!snap.steps[k] && typeof v === "string" && v.length <= max));
+          setInputs(texts(saved.inputs, 2000) as Record<string, string>);
+          setSources(texts(saved.sources, 20000) as Record<string, string>);
+        }
+      } catch {}
+      journalReady.current = true;
+    }
+    setDrafts((previous) => {
+      const old = { ...recovered, ...previous };
+      return Object.fromEntries(
         Object.entries(snap.steps).map(([k, s]) => [
           k,
           old[k]?.dirty &&
@@ -187,8 +251,8 @@ export function SkillConversation({
                 evidenceIds: s.evidenceIds,
               },
         ]),
-      ),
-    );
+      );
+    });
     void utils.chat.getConversations.invalidate();
   }
   async function run(action: () => Promise<void>, recoverable = false) {
@@ -233,44 +297,72 @@ export function SkillConversation({
     if (alive.current) setReceipts(next);
   }
   function go(next?: string) {
+    if (!busy && journalSaved.current) { navigate(next); return; }
+    if (Object.values(inputs).some(Boolean) || Object.values(sources).some(Boolean)) {
+      setError("有未发送的消息或未提交的参考资料，请先发送或清空。");
+      return;
+    }
     if (dirty || busy) {
-      setError("请先保存或清空未提交内容，再切换对话。");
+      pendingNavigation.current = () => navigate(next);
       return;
     }
     navigate(next);
   }
   async function save(k: string, d: Draft) {
-    if (!scope) return;
-    const requestId = id();
+    if (!scope || locked.current) return;
     const command = {
-      ...scope,
-      requestId,
-      stepId: k,
-      expectedVersion: d.version,
-      body: d.body,
+      ...scope, requestId: d.editId, stepId: k,
+      expectedVersion: d.version, body: d.body,
       ...(d.candidateId
         ? { action: "saveCandidate" as const, candidateId: d.candidateId }
         : { action: "save" as const, evidenceIds: d.evidenceIds }),
     };
+    pendingSave.current = { step: k, draft: d };
     await run(async () => {
-      await api.execute.mutate(command);
-      if (alive.current)
-        setDrafts((old) =>
-          old[k]?.editId === d.editId
-            ? {
-                ...old,
-                [k]: {
-                  ...old[k],
-                  dirty: false,
-                  version: d.version + 1,
-                  candidateId: undefined,
-                },
-              }
-            : old,
-        );
+      try { await api.execute.mutate(command); }
+      catch (error) {
+        // These two server responses are emitted only after an explicit rejected
+        // write, with no saved request receipt. Unknown/network errors keep A frozen.
+        if (error instanceof Error && (error as { data?: { code?: string } }).data?.code === "CONFLICT" &&
+            [saveVersionConflictMessage, candidateInvalidatedMessage].includes(error.message)) {
+          pendingSave.current = null;
+          pendingWrite.current = null;
+          await reload().catch(() => undefined);
+        }
+        throw error;
+      }
+      pendingSave.current = null;
+      if (alive.current) setDrafts(old => {
+        const current = old[k];
+        if (!current || current.version !== d.version) return old;
+        return { ...old, [k]: { ...current, version: d.version + 1,
+          dirty: current.editId !== d.editId,
+          candidateId: current.candidateId === d.candidateId ? undefined : current.candidateId } };
+      });
       await reload();
     }, true);
   }
+  useEffect(() => {
+    if (busy || !scope || snapshot?.state !== "draft" || pendingWrite.current) return;
+    if (pendingSave.current) {
+      const saved = pendingSave.current;
+      if (autoSaveAttempt.current !== saved.draft.editId) {
+        autoSaveAttempt.current = saved.draft.editId;
+        void save(saved.step, saved.draft);
+      }
+      return;
+    }
+    const pending = Object.entries(drafts).find(([k, d]) => d.dirty &&
+      d.version === snapshot.steps[k]?.version && d.editId !== autoSaveAttempt.current);
+    if (!pending) return;
+    const [k, d] = pending;
+    const timer = window.setTimeout(() => {
+      if (locked.current) return;
+      autoSaveAttempt.current = d.editId;
+      void save(k, d);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [drafts, busy, snapshot]);
   async function send() {
     if (!scope || !snapshot || !input.trim()) return;
     const body = input.trim(),
@@ -376,7 +468,26 @@ export function SkillConversation({
       }));
     }
     await reload();
-    rememberDelivery(null);
+    await applyGeneratedResult(value, status);
+    if (status.state === "succeeded" || status.state === "refunded") rememberDelivery(null);
+  }
+  async function applyGeneratedResult(value: Parameters<typeof api.generate.mutate>[0],
+    status: { state: string; candidateId: string | null }) {
+    if (status.state === "succeeded" && status.candidateId) {
+      const latest = await api.read.query({ projectId: value.projectId, roundId: value.roundId });
+      const candidate = latest.candidates.find(c => c.id === status.candidateId);
+      const expectedVersion = value.expectedSteps[value.stepId]?.version;
+      if (alive.current && candidate?.body != null && candidate.directEvidenceIds != null && latest.steps[value.stepId]?.version === expectedVersion) {
+        const body = candidate.body;
+        setDrafts(old => {
+          const current = old[value.stepId];
+          if (!current || current.dirty || current.version !== expectedVersion) return old;
+          return { ...old, [value.stepId]: { ...current, body,
+            candidateId: candidate.id, evidenceIds: candidate.directEvidenceIds!,
+            dirty: true, editId: candidate.id } };
+        });
+      }
+    }
   }
   const unresolved = snapshot?.generations?.some((g) =>
     ["prepared", "dispatched", "responded", "unknown"].includes(g.state),
@@ -398,7 +509,7 @@ export function SkillConversation({
               </h1>
               <p className="text-sm text-[var(--text-tertiary)]">
                 {snapshot?.workflow.steps.find((s) => s.id === step)?.title} ·
-                回复仅为候选，需要你明确确认
+                成果自动保存，确认后进入下一步
               </p>
             </div>
             <Button
@@ -498,7 +609,7 @@ export function SkillConversation({
                           setShowSteps(true);
                         }}
                       >
-                        采用为工作稿
+                        恢复此版本到成果
                       </Button>
                     </div>
                   )}
@@ -549,7 +660,7 @@ export function SkillConversation({
                 刷新状态
               </Button>
               {draft?.dirty && (
-                <span className="text-sm">请先保存右侧工作稿。</span>
+                <span className="text-sm">正在自动保存本步骤成果…</span>
               )}
             </div>
             {snapshot?.generations
@@ -571,13 +682,17 @@ export function SkillConversation({
                       variant="outline"
                       onClick={() =>
                         void run(async () => {
-                          await api.recoverGeneration.mutate({
+                          const recovered = await api.recoverGeneration.mutate({
                             ...scope!,
                             requestId: g.requestId,
                             recoveryReceipt: receipts[g.requestId],
                           });
                           remember(g.requestId);
                           await reload();
+                          if (delivery?.requestId === g.requestId) {
+                            await applyGeneratedResult(delivery, recovered);
+                            if (recovered.state === "succeeded" || recovered.state === "refunded") rememberDelivery(null);
+                          }
                         })
                       }
                     >
@@ -652,7 +767,7 @@ export function SkillConversation({
             </nav>
             {draft && (
               <section className="mt-5 space-y-3">
-                <h3>当前工作稿</h3>
+                <h3>本步骤成果</h3>
                 <textarea
                   aria-label="当前步骤工作稿"
                   rows={7}
@@ -676,14 +791,10 @@ export function SkillConversation({
                   }
                 />
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    disabled={
-                      busy || !draft.dirty || snapshot.state !== "draft"
-                    }
-                    onClick={() => void save(step, draft)}
-                  >
-                    保存工作稿
-                  </Button>
+                  <span role="status" className="self-center text-sm text-[var(--text-tertiary)]">
+                    {draft.dirty ? ((error || (!busy && pendingSave.current)) ? "尚未保存，请重试" : "保存中…") : "已保存"}
+                  </span>
+                  {draft.dirty && (error || (!busy && pendingSave.current)) && <Button onClick={() => { if (pendingWrite.current) void run(pendingWrite.current, true); else if (pendingSave.current) void save(pendingSave.current.step, pendingSave.current.draft); else void save(step, draft); }} disabled={busy}>重试保存</Button>}
                   <Button
                     disabled={
                       busy ||
@@ -704,11 +815,16 @@ export function SkillConversation({
                       };
                       void run(async () => {
                         await api.execute.mutate(cmd);
+                        const confirmed = await api.read.query(scope!);
+                        const position = confirmed.workflow.steps.findIndex(s => s.id === step);
+                        const next = confirmed.workflow.steps.slice(position + 1).find(s =>
+                          !confirmed.steps[s.id].valid && s.dependsOn.every(k => confirmed.steps[k].valid));
+                        if (next) await api.chatSelect.mutate({ conversationId, stepId: next.id });
                         await reload();
                       }, true);
                     }}
                   >
-                    明确确认此步骤
+                    {snapshot.workflow.steps.at(-1)?.id === step ? "确认本步骤成果" : "确认并进入下一步"}
                   </Button>
                 </div>
                 {draft.dirty &&
@@ -739,7 +855,7 @@ export function SkillConversation({
                 {draft.dirty && (
                   <Button
                     variant="ghost"
-                    disabled={busy}
+                    disabled={busy || !!pendingSave.current}
                     onClick={() => {
                       setDrafts((old) => ({
                         ...old,

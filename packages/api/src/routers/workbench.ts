@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { saveVersionConflictMessage, candidateInvalidatedMessage } from "../services/artifacts/public";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
@@ -51,8 +52,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
       },
       ARTIFACT_VERSION_CONFLICT: {
         code: "CONFLICT",
-        message: "保存版本已变化；本地输入已保留，请加载服务端版本并比较。",
+        message: saveVersionConflictMessage,
       },
+      ARTIFACT_CANDIDATE_INVALIDATED: { code: "CONFLICT", message: candidateInvalidatedMessage },
       ARTIFACT_REVIEW_REQUIRED: {
         code: "CONFLICT",
         message: "确认状态或依赖已变化，请重新加载并复核。",

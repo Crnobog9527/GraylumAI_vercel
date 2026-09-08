@@ -236,6 +236,8 @@ export function workbenchService(
               ? "ARTIFACT_DENIED"
               : result.error.message === "save conflict"
                 ? "ARTIFACT_VERSION_CONFLICT"
+                : v.action === "saveCandidate" && ["candidate input changed", "candidate provenance changed"].includes(result.error.message)
+                  ? "ARTIFACT_CANDIDATE_INVALIDATED"
                 : result.error.code === "P0001"
                   ? "ARTIFACT_REVIEW_REQUIRED"
                   : "ARTIFACT_UNAVAILABLE",
