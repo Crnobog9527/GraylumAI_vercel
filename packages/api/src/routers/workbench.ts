@@ -8,6 +8,7 @@ import {
   startSchema,
   webCommandSchema,
 } from "../services/artifacts/workbench";
+import { skillChatService, chatScope, chatEntry, chatTurnInput } from '../services/artifacts/chat';
 const scope = z
   .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
   .strict();
@@ -16,6 +17,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   const result = await next({
     ctx: {
       ...ctx,
+      skillChat: skillChatService(ctx.userScopedSupabase, ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null),
       generation: workbenchGeneration(ctx.userScopedSupabase, ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null),
       workbench: workbenchService(
         ctx.userScopedSupabase,
@@ -76,6 +78,11 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   return result;
 });
 export const workbenchRouter = router({
+  chatMode: procedure.input(z.object({moduleId:z.string().uuid()}).strict()).query(({ctx,input})=>ctx.skillChat.mode(input.moduleId)),
+  chatEnter: procedure.input(chatEntry).mutation(({ ctx, input }) => ctx.skillChat.enter(input)),
+  chatRead: procedure.input(chatScope).query(({ ctx, input }) => ctx.skillChat.read(input)),
+  chatSelect: procedure.input(chatScope.extend({stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).strict()).mutation(({ ctx, input }) => ctx.skillChat.select(input)),
+  chatSubmit: procedure.input(chatTurnInput).mutation(({ ctx, input }) => ctx.skillChat.submit(input)),
   generationQuote: procedure.input(generationQuoteInput).mutation(({ ctx, input }) => ctx.generation.quote(input)),
   generate: procedure.input(generationInput).mutation(({ ctx, input }) => ctx.generation.generate(input)),
   generations: procedure.input(generationScope).query(({ ctx, input }) => ctx.generation.list(input)),

@@ -24,6 +24,8 @@ export const conversations = pgTable('conversations', {
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   title: text('title').notNull(),
   modelId: uuid('model_id').references(() => aiModels.id),
+  skillMode: boolean('skill_mode').default(false).notNull(),
+  moduleId: uuid('module_id').references(() => modules.id),
   summary: text('summary'), // Conversation summary for context compression
   summaryTokens: integer('summary_tokens'), // Token count of summary
   summaryUpdatedAt: timestamp('summary_updated_at', { withTimezone: true }),

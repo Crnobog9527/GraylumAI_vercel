@@ -1,0 +1,738 @@
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { logClientDevError } from '@/lib/client-log';
+import { AppHeader } from '@/components/layout/AppHeader';
+import GlobalBanner from '@/components/layout/GlobalBanner';
+import { ChatSidebar } from '@/components/chat/ChatSidebar';
+import ChatHeader from '@/components/chat/ChatHeader';
+import ModelSelector from '@/components/chat/ModelSelector';
+import ExportDialog from '@/components/chat/ExportDialog';
+import TokenUsageStats from '@/components/chat/TokenUsageStats';
+import { MessageSquare, Paperclip, Send, Loader2, User, Bot, AlertCircle, Square } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { trpc } from '@/trpc/client';
+import { useChatStore } from '@/stores';
+import { useBanner } from '@/hooks/use-banner';
+import { useStreamingChat, type StreamMessage } from '@/hooks/useStreamingChat';
+import { useCreditsBalance, type WarningLevel } from '@/hooks/use-credits';
+import { LowBalanceDialog } from '@/components/credits/LowBalanceDialog';
+import { CHAT_BALANCE_UNAVAILABLE_PRESENTATION, runChatBalancePreflight } from './balancePreflight';
+
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+  isStreaming?: boolean;
+}
+
+function estimateTokens(text: string) {
+  const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const otherChars = text.length - chineseChars;
+  return Math.ceil(chineseChars / 1.5 + otherChars / 4);
+}
+
+export function StandardConversation({ moduleId, initialConversationId, navigate }: {moduleId?:string;initialConversationId?:string;navigate:(id?:string)=>void}) {
+  const [activeConversationId, setActiveConversation] = useState<string|null>(initialConversationId??null);
+  const { refreshConversationList } = useChatStore();
+  const [inputMessage, setInputMessage] = useState('');
+  const createdConversationRef=useRef<string|null>(null);
+  const [navigationNotice,setNavigationNotice]=useState('');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitleValue, setEditingTitleValue] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [lowBalanceDialogOpen, setLowBalanceDialogOpen] = useState(false);
+  const [lowBalanceNotice, setLowBalanceNotice] = useState<{
+    credits: number;
+    warningLevel: WarningLevel;
+  }>({ credits: 0, warningLevel: 'empty' });
+  const [balanceUnavailableDialogOpen, setBalanceUnavailableDialogOpen] = useState(false);
+  const [isRetryingBalance, setIsRetryingBalance] = useState(false);
+  const [longTextConfirmOpen, setLongTextConfirmOpen] = useState(false);
+  const [pendingLongTextMessage, setPendingLongTextMessage] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { banners } = useBanner();
+
+  const utils = trpc.useUtils();
+
+  // Credits balance for pre-send check
+  const {
+    credits,
+    refetch: refetchCreditsBalance,
+  } = useCreditsBalance();
+
+  // Fetch system settings for chat page configuration
+  const { data: systemSettings, refetch: refetchSystemSettings } = trpc.settings.getSystemSettings.useQuery();
+  const showModelSelector = systemSettings?.chat_show_model_selector === true || systemSettings?.chat_show_model_selector === 'true';
+  const maxInputCharacters = Number(systemSettings?.max_input_characters ?? 2500) || 2500;
+  const enableFreeTier = systemSettings?.enable_free_tier === true || systemSettings?.enable_free_tier === 'true';
+  const enableLongTextWarning =
+    systemSettings?.enable_long_text_warning === undefined
+      ? true
+      : systemSettings?.enable_long_text_warning === true || systemSettings?.enable_long_text_warning === 'true';
+  const longTextWarningThreshold = Number(systemSettings?.long_text_warning_threshold ?? 5000) || 5000;
+  const showTokenUsageStats =
+    systemSettings?.show_token_usage_stats === undefined
+      ? true
+      : systemSettings?.show_token_usage_stats === true || systemSettings?.show_token_usage_stats === 'true';
+  const chatPromptText =
+    typeof systemSettings?.chat_prompt_text === 'string' && systemSettings.chat_prompt_text.trim()
+      ? systemSettings.chat_prompt_text.trim()
+      : '请输入您的问题...';
+  const chatWelcomeMessage =
+    typeof systemSettings?.chat_welcome_message === 'string' && systemSettings.chat_welcome_message.trim()
+      ? systemSettings.chat_welcome_message.trim()
+      : '请输入您的问题，AI将为您解答';
+  const chatBillingHint = typeof systemSettings?.chat_billing_hint === 'string' && systemSettings.chat_billing_hint
+    ? systemSettings.chat_billing_hint
+      .replace('{input}', String(systemSettings?.input_credits_per_1k ?? 1))
+      .replace('{output}', String(systemSettings?.output_credits_per_1k ?? 5))
+    : '🔔 温馨提示：为了保证回复质量，建议不要在一个聊天窗口里聊太久。\n单次对话过长会导致 AI "失忆"，忘记咱们开始聊了什么。';
+  const inputCreditsPer1k = Number(systemSettings?.input_credits_per_1k ?? 1) || 1;
+  const outputCreditsPer1k = Number(systemSettings?.output_credits_per_1k ?? 5) || 5;
+
+  // Fetch export permissions (based on membership level)
+  const { data: exportPermissions } = trpc.chat.getExportPermissions.useQuery();
+  const canExport = exportPermissions?.allowExport ?? false;
+  const canBatchExport = exportPermissions?.allowBatchExport ?? false;
+
+  // Fetch active AI models for model selector
+  const { data: modelsData } = trpc.model.getActiveModels.useQuery();
+  const activeModels = (modelsData ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    description: m.description ?? undefined,
+    credits_per_message: 0, // 按实际 token 计费，不显示固定积分
+    is_active: true,
+  }));
+
+  // Set default model when models are loaded
+  useEffect(() => {
+    if (activeModels.length > 0 && !selectedModelId) {
+      setSelectedModelId(activeModels[0].id);
+    }
+  }, [activeModels, selectedModelId]);
+
+  // Fetch conversations
+  const { data: conversationsData, isLoading: conversationsLoading } = trpc.chat.getConversations.useQuery();
+  const conversations = conversationsData?.data || [];
+
+  // Get current conversation
+  const currentConversation = activeConversationId
+    ? conversations.find((c) => c.id === activeConversationId)
+    : null;
+
+  // Streaming chat hook - 使用流式 AI 对话
+  const {
+    messages: streamingMessages,
+    isLoading: streamingLoading,
+    isStreaming,
+    error: streamingError,
+    sendMessage: sendStreamingMessage,
+    abort: abortStreaming,
+    loadHistory,
+    clearChat,
+  } = useStreamingChat({
+    conversationId: activeConversationId ?? undefined,
+    moduleId,
+    onMessageComplete: () => {
+      // 消息完成后刷新对话列表（可能创建了新对话）
+      utils.chat.getConversations.invalidate();
+      utils.chat.getConversationTokenStats.invalidate();
+      refreshConversationList();
+      if(createdConversationRef.current){const id=createdConversationRef.current;createdConversationRef.current=null;navigate(id);}
+    },
+    onConversationCreated: (newConversationId) => {
+      // 新对话创建后同步到 store，使侧边栏正确高亮
+      createdConversationRef.current=newConversationId;
+      setActiveConversation(newConversationId);
+    },
+    onError: () => {
+      logClientDevError('Streaming error');
+    },
+    onBalanceChange: () => {
+      // 积分变化时刷新积分显示
+      utils.credits.getBalance.invalidate();
+    },
+  });
+
+  useEffect(() => {
+    if (
+      !activeConversationId ||
+      !conversationsData ||
+      conversationsLoading ||
+      isStreaming ||
+      streamingLoading ||
+      streamingMessages.length > 0
+    ) {
+      return;
+    }
+
+    const activeConversationExists = conversations.some((conversation) => conversation.id === activeConversationId);
+    if (!activeConversationExists) {
+      setActiveConversation(null);
+      clearChat();
+    }
+  }, [
+    activeConversationId,
+    clearChat,
+    conversations,
+    conversationsData,
+    conversationsLoading,
+    isStreaming,
+    setActiveConversation,
+    streamingLoading,
+    streamingMessages.length,
+  ]);
+
+  // Fetch messages for active conversation (用于切换对话时加载历史)
+  const { data: messagesData, isLoading: messagesLoading } = trpc.chat.getMessages.useQuery(
+    { conversationId: activeConversationId! },
+    { enabled: !!activeConversationId && streamingMessages.length === 0 }
+  );
+
+  // 合并历史消息和流式消息
+  const historyMessages: Message[] = messagesData?.data || [];
+  const messages: Message[] = streamingMessages.length > 0
+    ? streamingMessages.map((m: StreamMessage) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        created_at: m.createdAt,
+        isStreaming: m.isStreaming,
+      }))
+    : historyMessages;
+  const { data: conversationTokenStats } = trpc.chat.getConversationTokenStats.useQuery(
+    { conversationId: activeConversationId! },
+    {
+      enabled: showTokenUsageStats && !!activeConversationId,
+    }
+  );
+  const latestAssistantUsage = [...streamingMessages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && (message.usage || message.cost));
+  const latestStreamInputTokens = latestAssistantUsage?.usage?.inputTokens ?? 0;
+  const latestStreamOutputTokens = latestAssistantUsage?.usage?.outputTokens ?? 0;
+  const latestStreamCredits = latestAssistantUsage?.cost?.credits ?? 0;
+  const usingLiveUsage = latestStreamInputTokens > 0 || latestStreamOutputTokens > 0 || latestStreamCredits > 0;
+  const tokenStatsSummary = {
+    lastInputTokens: usingLiveUsage ? latestStreamInputTokens : conversationTokenStats?.lastInputTokens ?? 0,
+    lastOutputTokens: usingLiveUsage ? latestStreamOutputTokens : conversationTokenStats?.lastOutputTokens ?? 0,
+    lastCredits: usingLiveUsage ? latestStreamCredits : 0,
+    totalInputTokens: (conversationTokenStats?.totalInputTokens ?? 0) + (usingLiveUsage ? latestStreamInputTokens : 0),
+    totalOutputTokens: (conversationTokenStats?.totalOutputTokens ?? 0) + (usingLiveUsage ? latestStreamOutputTokens : 0),
+    totalCredits: (conversationTokenStats?.totalCredits ?? 0) + (usingLiveUsage ? latestStreamCredits : 0),
+  };
+
+  // 当切换对话时，加载历史记录
+  useEffect(() => {
+    if (activeConversationId && streamingMessages.length === 0) {
+      loadHistory(activeConversationId);
+    }
+  }, [activeConversationId, loadHistory, streamingMessages.length]);
+
+  // Auto-scroll to bottom when messages change
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Mutations for conversation management
+  const updateTitle = trpc.chat.updateConversationTitle.useMutation({
+    onSuccess: () => {
+      utils.chat.getConversations.invalidate();
+      setIsEditingTitle(false);
+    },
+  });
+
+  const isProcessing = streamingLoading || isStreaming;
+
+  const handleNewChat = useCallback(() => {
+    setActiveConversation(null);
+    setInputMessage('');
+    setPendingLongTextMessage(null);
+    clearChat();
+  }, [clearChat, setActiveConversation]);
+
+  const maxReachableTokensAtCharLimit = Math.ceil(maxInputCharacters / 1.5);
+  const longTextFallbackCharThreshold = Math.max(1, Math.floor(maxInputCharacters * 0.8));
+
+  const handleSend = useCallback(async (forceLongText = false) => {
+    if (!inputMessage.trim() || isProcessing) return;
+
+    if (inputMessage.length > maxInputCharacters) {
+      return;
+    }
+
+    const estimatedInputTokens = estimateTokens(inputMessage);
+    const shouldWarnForLength =
+      longTextWarningThreshold > maxReachableTokensAtCharLimit &&
+      inputMessage.length >= longTextFallbackCharThreshold;
+    if (
+      enableLongTextWarning &&
+      (estimatedInputTokens >= longTextWarningThreshold || shouldWarnForLength) &&
+      !forceLongText &&
+      pendingLongTextMessage !== inputMessage
+    ) {
+      setPendingLongTextMessage(inputMessage);
+      setLongTextConfirmOpen(true);
+      return;
+    }
+
+    const decision = await runChatBalancePreflight({
+      cachedCredits: credits,
+      refetchBalance: refetchCreditsBalance,
+      resolveFreeTierEnabled: async () => {
+        const result = systemSettings
+          ? { data: systemSettings, error: null }
+          : await refetchSystemSettings();
+        if (result.error || !result.data) {
+          throw new Error('chat settings unavailable');
+        }
+        return result.data.enable_free_tier === true || result.data.enable_free_tier === 'true';
+      },
+      onReady: async ({ credits: latestCredits, warningLevel: latestWarningLevel }) => {
+        if (latestWarningLevel === 'critical' && latestCredits > 0) {
+          setLowBalanceNotice({ credits: latestCredits, warningLevel: latestWarningLevel });
+          setLowBalanceDialogOpen(true);
+        }
+
+        const messageToSend = inputMessage;
+        setInputMessage('');
+        await sendStreamingMessage(messageToSend, {
+          modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
+          moduleId,
+        });
+        if (pendingLongTextMessage === messageToSend) {
+          setPendingLongTextMessage(null);
+        }
+      },
+    });
+
+    if (decision.status === 'unavailable') {
+      setBalanceUnavailableDialogOpen(true);
+      return;
+    }
+
+    if (decision.status === 'blocked_zero') {
+      setLowBalanceNotice({ credits: decision.credits, warningLevel: decision.warningLevel });
+      setLowBalanceDialogOpen(true);
+      return;
+    }
+  }, [
+    credits,
+    enableLongTextWarning,
+    inputMessage,
+    isProcessing,
+    longTextFallbackCharThreshold,
+    longTextWarningThreshold,
+    maxReachableTokensAtCharLimit,
+    maxInputCharacters,
+    moduleId,
+    pendingLongTextMessage,
+    refetchCreditsBalance,
+    refetchSystemSettings,
+    selectedModelId,
+    sendStreamingMessage,
+    showModelSelector,
+    systemSettings,
+  ]);
+
+  const handleRetryBalance = useCallback(async () => {
+    setBalanceUnavailableDialogOpen(false);
+    setIsRetryingBalance(true);
+    try {
+      await handleSend();
+    } finally {
+      setIsRetryingBalance(false);
+    }
+  }, [handleSend]);
+
+  const estimatedPendingInputTokens = pendingLongTextMessage ? estimateTokens(pendingLongTextMessage) : 0;
+  const estimatedPendingCredits = pendingLongTextMessage
+    ? ((estimatedPendingInputTokens / 1000) * inputCreditsPer1k + outputCreditsPer1k)
+    : 0;
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }, [handleSend]);
+
+  const handleAbort = useCallback(() => {
+    abortStreaming();
+  }, [abortStreaming]);
+
+  const handleSaveTitle = () => {
+    if (!activeConversationId || !editingTitleValue.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+    updateTitle.mutate({ conversationId: activeConversationId, title: editingTitleValue.trim() });
+  };
+
+  // Export handler - opens export dialog
+  const handleExport = useCallback(() => {
+    if (canExport && activeConversationId) {
+      setExportDialogOpen(true);
+    }
+  }, [canExport, activeConversationId]);
+
+  // Set editing title value when editing starts
+  useEffect(() => {
+    if (isEditingTitle && currentConversation) {
+      setEditingTitleValue(currentConversation.title || '');
+    }
+  }, [isEditingTitle, currentConversation]);
+
+  return (
+    <div className="flex flex-col h-screen" style={{ background: 'var(--bg-primary)' }}>
+      {/* 顶部导航 */}
+      <AppHeader />
+
+      {/* 全站横幅公告 */}
+      <GlobalBanner banners={banners} />
+
+      {/* 主体区域 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 精简动画样式 */}
+        <style>{`
+          .chat-input-box:focus-within {
+            border-color: rgba(255, 215, 0, 0.5) !important;
+          }
+        `}</style>
+
+        {/* 左侧边栏 - 对话列表 */}
+        <ChatSidebar
+          onSelectConversation={id => { if (isProcessing || inputMessage) {setNavigationNotice('请先完成发送或清空输入，再切换对话。');return;} navigate(id); }}
+          onNewChat={() => { if (isProcessing || inputMessage) {setNavigationNotice('请先完成发送或清空输入，再新建对话。');return;} handleNewChat(); navigate(); }}
+          activeConversationId={activeConversationId ?? undefined}
+        />
+
+        {/* 主聊天区域 */}
+        <div
+          className="flex-1 flex flex-col relative overflow-hidden"
+          style={{ background: 'var(--bg-primary)' }}
+        >
+          {navigationNotice&&<p role="alert" className="p-3 text-amber-400">{navigationNotice}</p>}
+          {/* 静态背景光晕 */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0, contain: 'layout paint' }}>
+            <div
+              className="absolute -top-1/4 -right-1/4 w-[40%] h-[40%] rounded-full opacity-[0.06] blur-[84px]"
+              style={{ background: 'var(--color-primary)' }}
+            />
+            <div
+              className="absolute -bottom-1/4 -left-1/4 w-[42%] h-[42%] rounded-full opacity-[0.1] blur-[96px]"
+              style={{ background: 'var(--color-secondary)' }}
+            />
+          </div>
+
+          {/* 顶部标题栏 */}
+          <ChatHeader
+            currentConversation={currentConversation}
+            isEditingTitle={isEditingTitle}
+            setIsEditingTitle={setIsEditingTitle}
+            editingTitleValue={editingTitleValue}
+            setEditingTitleValue={setEditingTitleValue}
+            onSaveTitle={handleSaveTitle}
+            canExport={canExport}
+            onExport={handleExport}
+          />
+
+          {/* 错误提示 */}
+          {streamingError && (
+            <div
+              className="mx-4 mt-2 px-4 py-3 rounded-lg flex items-center gap-2"
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+              }}
+            >
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <span className="text-sm">{streamingError}</span>
+            </div>
+          )}
+
+          {/* 消息区域 - 空状态或消息列表 */}
+          <div className="flex-1 flex flex-col overflow-y-auto relative z-10">
+            {!activeConversationId && messages.length === 0 ? (
+              /* 空状态 - 开始新对话 */
+              <div className="flex-1 flex flex-col items-center justify-center">
+                <div
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                  style={{
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-primary)',
+                  }}
+                >
+                  <MessageSquare className="h-8 w-8" style={{ color: 'var(--color-primary)' }} />
+                </div>
+                <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                  开始新对话
+                </h2>
+                <p className="text-sm whitespace-pre-line text-center max-w-lg" style={{ color: 'var(--text-tertiary)' }}>
+                  {chatWelcomeMessage}
+                </p>
+              </div>
+            ) : (
+              /* 消息列表 */
+              <div className="flex-1 p-4 space-y-4 max-w-4xl mx-auto w-full">
+                {messagesLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
+                  </div>
+                ) : (
+                  messages.map((message) => (
+                    <div
+                      key={message.id}
+                      data-testid="chat-message"
+                      data-message-role={message.role}
+                      className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {message.role === 'assistant' && (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                          style={{
+                            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                          }}
+                        >
+                          <Bot className="h-4 w-4" style={{ color: 'var(--bg-primary)' }} />
+                        </div>
+                      )}
+                      <div
+                        className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                          message.role === 'user' ? 'rounded-br-sm' : 'rounded-bl-sm'
+                        }`}
+                        style={{
+                          background: message.role === 'user'
+                            ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)'
+                            : 'var(--bg-secondary)',
+                          color: message.role === 'user' ? 'var(--bg-primary)' : 'var(--text-primary)',
+                          border: message.role === 'assistant' ? '1px solid var(--border-primary)' : 'none',
+                        }}
+                      >
+                        <p data-testid="chat-message-content" className="whitespace-pre-wrap break-words">
+                          {message.content}
+                          {message.isStreaming && (
+                            <span className="inline-block w-2 h-4 ml-1 animate-pulse" style={{ background: 'var(--color-primary)' }} />
+                          )}
+                        </p>
+                      </div>
+                      {message.role === 'user' && (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                          style={{ background: 'var(--bg-tertiary)' }}
+                        >
+                          <User className="h-4 w-4" style={{ color: 'var(--text-secondary)' }} />
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* 输入区域 */}
+          <div
+            className="p-4 relative"
+            style={{ borderTop: '1px solid var(--border-primary)', background: 'var(--bg-secondary)', zIndex: 1 }}
+          >
+            <div className="max-w-3xl mx-auto">
+              {/* 模型选择器 */}
+              {showModelSelector && activeModels.length > 0 && (
+                <div className="mb-3">
+                  <ModelSelector
+                    models={activeModels}
+                    selectedModel={selectedModelId}
+                    onSelect={setSelectedModelId}
+                    disabled={isProcessing}
+                  />
+                </div>
+              )}
+
+              {/* 输入框 */}
+              <div
+                className="relative rounded-2xl chat-input-box"
+                style={{
+                  background: 'var(--bg-primary)',
+                  border: '1px solid rgba(255, 215, 0, 0.15)',
+                }}
+              >
+                <div className="flex items-end p-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.txt,.csv"
+                    className="hidden"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 shrink-0 hover:opacity-80"
+                    style={{ color: 'var(--text-tertiary)' }}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Paperclip className="h-5 w-5" />
+                  </Button>
+                  <Textarea
+                    data-testid="chat-input"
+                    ref={textareaRef}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={chatPromptText}
+                    disabled={isProcessing}
+                    maxLength={maxInputCharacters}
+                    className="flex-1 min-h-[44px] max-h-[120px] resize-none border-0 focus-visible:ring-0 py-2 px-2 text-base bg-transparent"
+                    style={{ color: 'var(--text-primary)' }}
+                    rows={1}
+                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
+                      {inputMessage.length}/{maxInputCharacters}
+                    </span>
+                    {isStreaming ? (
+                      <Button
+                        onClick={handleAbort}
+                        className="h-9 px-5 gap-2 rounded-xl font-medium"
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.8)',
+                          color: '#ffffff',
+                        }}
+                      >
+                        <Square className="h-4 w-4" />
+                        停止
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={() => void handleSend()}
+                        disabled={!inputMessage.trim() || isProcessing || inputMessage.length > maxInputCharacters}
+                        className="h-9 px-5 gap-2 rounded-xl font-medium"
+                        style={{
+                          background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                          color: 'var(--bg-primary)',
+                        }}
+                      >
+                        {streamingLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            发送
+                            <Send className="h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 聊天提示文案 */}
+              <div
+                className="mt-3 px-4 py-3 text-sm leading-relaxed text-center whitespace-pre-line"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                {chatBillingHint}
+              </div>
+              {showTokenUsageStats && activeConversationId && (
+                <TokenUsageStats {...tokenStatsSummary} />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 导出对话对话框 */}
+      {activeConversationId && (
+        <ExportDialog
+          open={exportDialogOpen}
+          onOpenChange={setExportDialogOpen}
+          conversationId={activeConversationId}
+          conversationTitle={currentConversation?.title || '对话'}
+          canBatchExport={canBatchExport}
+        />
+      )}
+
+      {/* Low balance warning dialog */}
+      <LowBalanceDialog
+        open={lowBalanceDialogOpen}
+        onOpenChange={setLowBalanceDialogOpen}
+        credits={lowBalanceNotice.credits}
+        warningLevel={lowBalanceNotice.warningLevel}
+      />
+      <AlertDialog open={balanceUnavailableDialogOpen} onOpenChange={setBalanceUnavailableDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{CHAT_BALANCE_UNAVAILABLE_PRESENTATION.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {CHAT_BALANCE_UNAVAILABLE_PRESENTATION.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{CHAT_BALANCE_UNAVAILABLE_PRESENTATION.cancelLabel}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isRetryingBalance}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleRetryBalance();
+              }}
+            >
+              {isRetryingBalance && <Loader2 className="h-4 w-4 animate-spin" />}
+              {CHAT_BALANCE_UNAVAILABLE_PRESENTATION.retryLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={longTextConfirmOpen}
+        onOpenChange={(open) => {
+          setLongTextConfirmOpen(open);
+          if (!open) {
+            setPendingLongTextMessage(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>长文本发送确认</AlertDialogTitle>
+            <AlertDialogDescription>
+              当前输入预计约 {estimatedPendingInputTokens.toLocaleString()} tokens，
+              可能消耗约 {estimatedPendingCredits.toFixed(2)} 积分。继续发送后会按实际输出结算。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再检查一下</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setLongTextConfirmOpen(false);
+                void handleSend(true);
+              }}
+            >
+              继续发送
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

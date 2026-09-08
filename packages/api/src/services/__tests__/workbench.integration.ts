@@ -2264,3 +2264,224 @@ aiTest('AI: 64 long-path resources remain complete while quote identity fits dur
   const stored=(await sql.query('select quote,octet_length(quote::text) as bytes from artifact_generations where request_id=$1',[v.requestId])).rows[0];
   expect(stored.bytes).toBeLessThan(16384);expect(stored.quote.resourcesHash).toMatch(/^[a-f0-9]{64}$/);expect(stored.quote.resources).toBeUndefined();
 },30000);
+
+// Chat linkage uses the same real local Auth/PostgREST/credit transaction fixture.
+aiTest('CHAT: durable multi-turn linkage, dependency-limited history, single settlement and denied identities',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const flow=makeWorkflow(3);flow.steps[1].dependsOn=['step-0'];flow.steps[2].dependsOn=[];
+ const t=await generationFixture(3,'Synthetic chat method.',{workflow:flow});
+ const chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ expect(await chat.enter({...t.scope,requestId:randomUUID()})).toEqual(binding);
+ expect(await chat.mode(t.f.moduleId)).toEqual({guided:true});
+ async function send(stepId:string,body:string){
+  const requestId=randomUUID();const submitted=await db.rpc('artifact_chat',{p_actor_id:actor,p_action:'submit',p_conversation_id:binding.conversationId,p_payload:{requestId,stepId,body}});expect(submitted.error).toBeNull();await chat.submit({conversationId:binding.conversationId,stepId,body,requestId});
+  const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+  const input={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId,instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+  const q=await t.ai.quote(input),request={...input,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
+  const result=await t.ai.generate(request);expect(result.state).toBe('succeeded');expect((await t.ai.generate(request)).candidateId).toBe(result.candidateId);
+  return {requestId,result};
+ }
+ const first=await send('step-0','FIRST_CHAT_REQUIREMENT');
+ await send('step-0','SECOND_CHAT_REVISION');
+ expect(t.captured.at(-1)).toContain('FIRST_CHAT_REQUIREMENT');expect(t.captured.at(-1)).toContain('SECOND_CHAT_REVISION');
+ expect(t.captured.at(-1)).toContain('Synthetic AI candidate text.');
+ await send('step-2','UNRELATED_BRANCH_DISCUSSION');
+ expect(t.captured.at(-1)).not.toContain('FIRST_CHAT_REQUIREMENT');
+ await t.service.execute({...t.scope,requestId:randomUUID(),action:'saveCandidate',stepId:'step-0',expectedVersion:0,body:'Confirmed basis',candidateId:first.result.candidateId!});
+ const saved=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];
+ await t.service.execute({...t.scope,requestId:randomUUID(),action:'confirm',stepId:'step-0',expectedVersion:saved.version,expectedReviewVersion:saved.reviewVersion});
+ await send('step-1','DEPENDENT_DISCUSSION');
+ expect(t.captured.at(-1)).toContain('FIRST_CHAT_REQUIREMENT');expect(t.captured.at(-1)).not.toContain('UNRELATED_BRANCH_DISCUSSION');
+ const restored=await skillChatService(await authenticated(),db).read({conversationId:binding.conversationId});
+ expect(restored.binding.stepId).toBe('step-1');expect(restored.turns).toHaveLength(4);expect(t.calls()).toBe(4);expect((await chat.stats()).find(s=>s.conversationId===binding.conversationId)?.messageCount).toBe(8);
+ const row=(await sql.query('select count(*)::int as n from messages where conversation_id=$1',[binding.conversationId])).rows[0];expect(row.n).toBe(0);
+ const usage=(await sql.query('select count(*)::int as n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0];expect(usage.n).toBe(4);
+ const foreign=await newUser();await expect(skillChatService(await authenticated(foreign),db).read({conversationId:binding.conversationId})).rejects.toThrow('ARTIFACT_DENIED');
+ expect((await t.user.from('artifact_chat_turns').select('*')).error).toBeTruthy();
+ await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns.length).toBeGreaterThan(0);
+ await expect(chat.submit({conversationId:binding.conversationId,requestId:randomUUID(),stepId:'step-0',body:'denied new execution'})).rejects.toThrow();
+ console.log('CHAT real SQL/Auth: durable scoped history, explicit artifact adoption, exact replay and denied user/revoked Skill PASS');
+},60000);
+
+aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, history restore and narrow layout',async()=>{
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),requests:string[]=[];
+ await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
+ const {page,context}=await pageFor(credentials,requests);
+ await page.goto(app+'/');await page.getByRole('button',{name:'开始分析',exact:true}).click();
+ await page.waitForURL(u=>u.pathname==='/chat'&&u.searchParams.get('mode')==='skill');
+ const choice=page.locator('section').filter({has:page.getByRole('heading',{name:t.f.label,exact:true})});
+ await choice.getByRole('button',{name:'使用此 Skill',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();
+ const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ async function send(body:string){await page.getByLabel('给当前步骤发消息').fill(body);await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await page.getByRole('button',{name:/^发送（最多/}).click();await poll(async()=>await page.getByLabel('给当前步骤发消息').inputValue()).toBe('');}
+ await send('BROWSER_FIRST_REQUIREMENT');await send('BROWSER_SECOND_REVISION');
+ await poll(async()=>await page.locator('[data-message-role="assistant"]').count()).toBe(2);
+ await page.getByRole('button',{name:'采用为工作稿',exact:true}).last().click();
+ await page.getByRole('button',{name:'保存工作稿',exact:true}).click();
+ await poll(async()=>await page.getByRole('button',{name:'明确确认此步骤',exact:true}).isEnabled()).toBe(true);
+ await page.getByRole('button',{name:'明确确认此步骤',exact:true}).click();
+ await poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(true);
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await poll(async()=>await page.locator('[data-message-role="user"]').count()).toBe(0);
+ await page.getByRole('button',{name:'新建对话',exact:true}).click();
+ await poll(async()=>await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ await page.getByText(t.f.label,{exact:true}).last().click();
+ await page.waitForURL(u=>u.searchParams.get('conversation')===conversationId);await page.reload();
+ await poll(async()=>await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).getAttribute('aria-current')).toBe('step');
+ await page.setViewportSize({width:390,height:844});await page.reload();await page.getByLabel('给当前步骤发消息').waitFor();
+ expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+ await page.getByRole('button',{name:'步骤与成果',exact:true}).click();await page.getByRole('button',{name:'收起',exact:true}).click();
+ const width=await page.getByLabel('给当前步骤发消息').boundingBox();expect(width!.width).toBeGreaterThan(260);
+ expect(requests.filter(p=>p.startsWith('/api/ai/stream'))).toHaveLength(0);
+ await page.screenshot({path:output+'/chat-narrow.png'});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.getByLabel('Skill 步骤与成果').waitFor();await page.screenshot({path:output+'/chat-desktop.png'});
+ await context.close();console.log('CHAT real homepage/browser/HTTP: two turns, explicit adoption/confirmation, history refresh, no ordinary generation and narrow drawer PASS');
+},150000);
+
+aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and generation',async(n)=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(n),chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Synthetic configured conversation';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
+ const v={...await t.request(),conversationId:binding.conversationId,turnId:requestId,requestId,instruction:body};
+ const q=await t.ai.quote({projectId:v.projectId,roundId:v.roundId,stepId:v.stepId,conversationId:v.conversationId,turnId:v.turnId,instruction:body,expectedSteps:v.expectedSteps});
+ expect((await t.ai.generate({...v,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ expect((await chat.read({conversationId:binding.conversationId})).turns).toHaveLength(1);
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).workflow.steps).toHaveLength(n);
+},30000);
+aiTest('CHAT: source revocation hides historic turns and rejects reuse before new credit effects',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db);
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'SENSITIVE_CONTEXT_CANARY',observedAt:null,supersedes:null});
+ const evidence=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0];
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Source-backed draft',evidenceIds:[evidence.id]});
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='SENSITIVE_CONTEXT_CANARY follow up';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
+ const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId),value={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await t.ai.quote(value);await t.ai.generate({...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});
+ const before=(await sql.query('select count(*)::int n from billing_history')).rows[0].n;
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId:evidence.id,deleted:true,expiresAt:null});
+ const read=await chat.read({conversationId:binding.conversationId});expect(JSON.stringify(read)).not.toContain('SENSITIVE_CONTEXT_CANARY');expect(read.turns[0]).toMatchObject({available:false,body:null,answer:null});
+ await expect(chat.submit({conversationId:binding.conversationId,requestId:randomUUID(),stepId:'step-0',body:'Continue'})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from billing_history')).rows[0].n).toBe(before);
+ const plain=await t.user.from('messages').insert({conversation_id:binding.conversationId,role:'user',content:'Must not use ordinary messages'});expect(plain.error?.code).toBe('42501');
+},30000);
+
+aiTest('CHAT: module Use selects guided mode; free and ordinary document history survive unrelated catalog failure',async()=>{
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),requests:string[]=[];const {page,context}=await pageFor(credentials,requests);
+ await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();await page.getByLabel('Skill 步骤与成果').waitFor();
+ const bound=new URL(page.url()).searchParams.get('conversation');expect(bound).toBeTruthy();
+ const skillId=randomUUID(),moduleId=randomUUID();
+ await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Private document method')",[skillId,skillId]);
+ await sql.query("insert into modules(id,title,skill_id,active) values($1,'Ordinary document',$2,true)",[moduleId,skillId]);
+ expect((await db.rpc('atomic_publish_skill',{p_skill_id:skillId,p_published_by:owner})).error).toBeNull();
+ const conversationId=randomUUID();expect((await t.user.from('conversations').insert({id:conversationId,user_id:actor,title:'Saved document conversation',module_id:moduleId})).error).toBeNull();
+ expect((await t.user.from('messages').insert({conversation_id:conversationId,role:'user',content:'Ordinary saved message'})).error).toBeNull();
+ const invalidId='chat-invalid-'+randomUUID(),invalid=structuredClone(t.f.flow);invalid.steps[0].dependsOn=[invalid.steps.at(-1)!.id];
+ await sql.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',[invalidId,t.f.moduleId,t.f.pack.id,t.f.pack.revisionId,invalid,'Invalid local catalog']);
+ try {
+  requests.length=0;await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();
+  await poll(async()=>page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+  await page.goto(app+'/marketplace?module='+moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
+  await page.waitForURL(u=>u.pathname==='/chat'&&u.searchParams.get('module')===moduleId);
+  await page.getByTestId('chat-input').waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
+  await page.getByText('Saved document conversation',{exact:true}).click();await page.getByText('Ordinary saved message',{exact:true}).waitFor();await page.reload();await page.getByText('Ordinary saved message',{exact:true}).waitFor();
+  expect(requests.some(p=>p.includes('workbench.catalog'))).toBe(false);expect(requests.some(p=>p.startsWith('/api/ai/stream'))).toBe(false);
+ } finally {await sql.query('delete from artifact_workflows where id=$1',[invalidId]);await context.close();}
+},150000);
+
+aiTest('CHAT: late response preserves later input and draft; rejected quotes and sealed receipts recover without another dispatch',async()=>{
+ const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
+ const t=await generationFixture(),{page,context}=await pageFor();
+ await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
+ const composer=page.getByLabel('给当前步骤发消息'),draft=page.getByLabel('当前步骤工作稿');
+ await composer.fill('ORIGINAL_SENT_MESSAGE');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();
+ let arrived!:()=>void,release!:()=>void;const seen=new Promise<void>(r=>arrived=r),hold=new Promise<void>(r=>release=r);
+ await page.route('**/api/trpc/workbench.generate*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByRole('button',{name:/^发送（最多/}).click();await seen;
+ await composer.fill('LATER_UNSENT_MESSAGE');await draft.fill('LATER_LOCAL_DRAFT');release();
+ await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(1);
+ expect(await composer.inputValue()).toBe('LATER_UNSENT_MESSAGE');expect(await draft.inputValue()).toBe('LATER_LOCAL_DRAFT');
+ await page.getByRole('button',{name:'新建对话',exact:true}).click();expect(new URL(page.url()).searchParams.get('conversation')).toBeTruthy();
+ await composer.fill('');await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).click();await page.unroute('**/api/trpc/workbench.generate*');
+ await composer.fill('REQUOTE_MESSAGE');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await page.getByRole('button',{name:/^发送（最多/}).waitFor();
+ await sql.query('update ai_models set output_token_cost=output_token_cost+100000 where id=$1',[localModel]);await page.getByRole('button',{name:/^发送（最多/}).click();
+ await poll(async()=>page.getByRole('button',{name:'查看本次费用',exact:true}).isEnabled()).toBe(true);
+ await page.getByRole('button',{name:'查看本次费用',exact:true}).click();
+ await sql.query("create function local_chat_receipt_fault() returns trigger language plpgsql as $$ begin if NEW.state='responded' then raise exception 'local receipt unavailable'; end if; return NEW; end $$; create trigger local_chat_receipt_fault before update on artifact_generations for each row execute function local_chat_receipt_fault()");
+ try {await page.getByRole('button',{name:/^发送（最多/}).click();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();await page.reload();await page.getByText('已收到结果，待恢复保存',{exact:false}).waitFor();}
+ finally {await sql.query('drop trigger local_chat_receipt_fault on artifact_generations; drop function local_chat_receipt_fault()');}
+ await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
+ await page.reload();await page.getByRole('button',{name:'恢复已知结果',exact:true}).waitFor();
+ await page.getByRole('button',{name:'恢复已知结果',exact:true}).click();await poll(async()=>page.locator('[data-message-role="assistant"]').count()).toBe(2);
+ expect((await t.ai.list(t.scope))).toHaveLength(2);expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates).toHaveLength(2);
+ expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='generation_abandoned'",[t.scope.projectId])).rows[0].n).toBe(1);
+ await context.close();console.log('CHAT late UI input/draft, no dirty navigation, quote tombstone and encrypted reload recovery PASS');
+},150000);
+
+aiTest('CHAT: prepared replay keeps its original context and reservation while rechecking consumption',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Resume original contextual turn';
+ await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const value={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))},q=await t.ai.quote(value),v={...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
+ const stopped=new Proxy(db,{get(target,key){if(key==='rpc')return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'?{abortSignal:async()=>{const result=await target.rpc(name,args);if(result.error)throw result.error;throw new Error('local stopped after reserve');}}:target.rpc(name,args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not dispatch');}).generate(v)).rejects.toThrow('local stopped after reserve');
+ expect((await t.ai.quote(value)).quoteHash).toBe(q.quoteHash);
+ const marker=randomUUID();await sql.query("insert into billing_history(id,user_id,operation_type,amount,metadata) values($1,$2,'settle',-10000,'{}')",[marker,actor]);
+ try{await expect(t.ai.generate(v)).rejects.toThrow('每小时消费已达上限');expect(t.calls()).toBe(0);}finally{await sql.query('delete from billing_history where id=$1',[marker]);}
+ await sql.query('update profiles set credits=0 where id=$1',[actor]);expect((await t.ai.generate(v)).state).toBe('succeeded');expect(t.calls()).toBe(1);
+},30000);
+
+aiTest('CHAT: legacy workbench entry preserves old candidate and fixed-round conversation across relogin',async()=>{
+ const t=await generationFixture();await t.ai.generate(await t.request());
+ const before=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const {page,context}=await pageFor();
+ await page.getByRole('button',{name:new RegExp(t.f.label)}).first().click();await quiet(page);
+ await page.getByRole('button',{name:'在聊天中继续此轮次',exact:true}).click();
+ await page.getByLabel('给当前步骤发消息').waitFor();const target=page.url();
+ const conversationId=new URL(target).searchParams.get('conversation')!;
+ const {skillChatService}=await import('../artifacts/chat');
+ const restored=await skillChatService(t.user,db).read({conversationId});
+ expect(restored.binding.roundId).toBe(t.scope.roundId);
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates.map(c=>c.id)).toEqual(before.candidates.map(c=>c.id));
+ await page.getByText('此步骤的历史候选',{exact:true}).click();
+ await expect.poll(async()=>await page.getByRole('button',{name:'采用历史候选',exact:true}).count(),{timeout:30000}).toBeGreaterThan(0);
+ await context.close();
+ const again=await pageFor();await again.page.goto(target);await again.page.getByLabel('给当前步骤发消息').waitFor();
+ expect(new URL(again.page.url()).searchParams.get('conversation')).toBe(conversationId);await again.context.close();
+},90000);
+
+aiTest('CHAT: a late preceding result cannot enter a submitted turn without its sources',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'SOURCE_E_RESTRICTABLE',observedAt:null,supersedes:null});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'A draft using E',evidenceIds:[evidenceId]});
+ const a=randomUUID(),b=randomUUID();
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ await chat.submit({conversationId:binding.conversationId,requestId:a,stepId:'step-0',body:'A earlier turn'});
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
+ const slow=t.workbenchGeneration(t.user,db,async()=>{arrived();await hold;return {body:'LATE_A_ANSWER_WITH_SOURCE_E',inputTokens:800,outputTokens:30};});
+ const av=await value(a,'A earlier turn'),aq=await slow.quote(av),running=slow.generate({...av,requestId:a,quoteHash:aq.quoteHash,budgetCredits:aq.reservedCredits});
+ await seen;
+ try {
+  snap=await t.service.read(t.scope.projectId,t.scope.roundId);
+  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'Rewritten independent draft',evidenceIds:[]});
+  await chat.submit({conversationId:binding.conversationId,requestId:b,stepId:'step-0',body:'B submitted before A result'});
+ } finally {release();await running;}
+ const bv=await value(b,'B submitted before A result'),bq=await t.ai.quote(bv);await t.ai.generate({...bv,requestId:b,quoteHash:bq.quoteHash,budgetCredits:bq.reservedCredits});
+ expect(t.captured.at(-1)).not.toContain('LATE_A_ANSWER_WITH_SOURCE_E');expect(t.captured.at(-1)).not.toContain('A earlier turn');
+ const fixed=(await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[b])).rows[0];expect(fixed.context_turn_ids).toEqual([]);expect(fixed.evidence_ids).toEqual([]);
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const history=await chat.read({conversationId:binding.conversationId});expect(history.turns.find(x=>x.requestId===a)?.answer).toBeNull();expect(history.turns.find(x=>x.requestId===b)?.available).toBe(true);
+},45000);
+
+aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old message',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor();await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();await page.getByLabel('给当前步骤发消息').waitFor();
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByLabel('给当前步骤发消息').fill('QUOTED_A');await page.getByRole('button',{name:'查看本次费用',exact:true}).click();await seen;
+ await page.getByLabel('给当前步骤发消息').fill('CURRENT_B');release();
+ await expect.poll(async()=>await page.getByRole('button',{name:'查看本次费用',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByRole('button',{name:/^发送（最多/}).count()).toBe(0);expect(await t.ai.list(t.scope)).toHaveLength(0);expect(await page.getByLabel('给当前步骤发消息').inputValue()).toBe('CURRENT_B');await context.close();
+},90000);

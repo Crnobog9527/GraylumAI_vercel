@@ -4,7 +4,8 @@
   "git": {
     "deploymentEnabled": {
       "main": true,
-      "staging": true
+      "staging": true,
+      "codex/v3-chat-skill-20260908": false
     }
   },
   "crons": [

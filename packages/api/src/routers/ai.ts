@@ -55,12 +55,13 @@ async function getOrCreateConversation(
     // 验证对话存在且属于当前用户
     const { data: existing } = await supabase
       .from('conversations')
-      .select('id')
+      .select('*')
       .eq('id', conversationId)
       .eq('user_id', userId)
       .single();
 
     if (existing) {
+      if (existing.skill_mode === true || existing.module_id) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
       return { id: existing.id, isNew: false };
     }
   }

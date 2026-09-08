@@ -215,7 +215,18 @@ function ConversationItem({
   );
 }
 
-export function ChatSidebar({
+export function ChatSidebar(props: ChatSidebarProps) {
+  const [open,setOpen]=useState(false);
+  return <div className="w-12 shrink-0 md:w-64">
+    <Button variant="ghost" className="mt-2 w-12 px-1 md:hidden" aria-label="打开聊天历史" aria-expanded={open} onClick={()=>setOpen(true)}>历史</Button>
+    <div className={`${open?'fixed inset-y-16 left-0 z-40 block shadow-xl':'hidden'} h-full bg-[var(--bg-secondary)] md:static md:block md:shadow-none`}>
+      <Button variant="ghost" className="md:hidden" onClick={()=>setOpen(false)}>收起聊天历史</Button>
+      <HistoryPanel {...props} onSelectConversation={id=>{props.onSelectConversation(id);setOpen(false);}} onNewChat={()=>{props.onNewChat();setOpen(false);}}/>
+    </div>
+  </div>;
+}
+
+function HistoryPanel({
   onSelectConversation,
   onNewChat,
   activeConversationId
