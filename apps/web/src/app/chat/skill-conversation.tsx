@@ -308,7 +308,18 @@ export function SkillConversation({
         instruction: body,
         expectedSteps,
       };
-      const q = await api.generationQuote.mutate(value);
+      let q;
+      try {
+        q = await api.generationQuote.mutate(value);
+      } catch (error) {
+        // A rejected read-only quote must not pin future sends to stale frozen
+        // context. The existing SQL tombstone refuses any reserved/dispatched ID.
+        const cancelled = await api.abandonGeneration.mutate({ ...scope, requestId })
+          .catch(() => ({ abandoned: false }));
+        if (cancelled.abandoned) pendingWrite.current = null;
+        await reload().catch(() => undefined);
+        throw error;
+      }
       if (!alive.current || inputRevision.current !== inputEpoch ||
           state.current.chat?.binding.stepId !== selected) {
         // Editing while admission is pending cancels this intent before dispatch.

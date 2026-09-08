@@ -2603,3 +2603,36 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
  expect(requests.filter(p=>p.startsWith('/api/ai/stream'))).toHaveLength(3);
  await context.close();
 },150000);
+
+
+aiTest('CHAT: removing prior evidence permits new context and safe same-text retry after a stale quote',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'REMOVED_SOURCE_CANARY',observedAt:null,supersedes:null});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'Draft using original evidence',evidenceIds:[evidenceId]});
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ async function generate(requestId:string,body:string){await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const v=await value(requestId,body),q=await t.ai.quote(v);return t.ai.generate({...v,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});}
+ const a=randomUUID();expect((await generate(a,'OLD_TURN_WITH_REMOVED_SOURCE')).state).toBe('succeeded');
+ const staleId=randomUUID(),retryBody='Continue with the independent rewritten draft';
+ await chat.submit({conversationId:binding.conversationId,requestId:staleId,stepId:'step-0',body:retryBody});
+ const staleValue=await value(staleId,retryBody),staleQuote=await t.ai.quote(staleValue);
+ const {page,context}=await pageFor();await page.goto(app+'/chat?conversation='+binding.conversationId);
+ await page.getByText('参考资料（可选）',{exact:true}).click();await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).uncheck();
+ await page.getByLabel('当前步骤工作稿').fill('Independent rewritten draft');await page.getByRole('button',{name:'保存工作稿',exact:true}).click();
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:30000}).toEqual([]);
+ const b=randomUUID();expect((await generate(b,'NEW_INDEPENDENT_TURN')).state).toBe('succeeded');
+ expect(t.captured.at(-1)).not.toContain('OLD_TURN_WITH_REMOVED_SOURCE');expect(t.captured.at(-1)).not.toContain('REMOVED_SOURCE_CANARY');
+ const fixed=(await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[b])).rows[0];expect(fixed).toEqual({context_turn_ids:[],evidence_ids:[]});
+ expect((await chat.read({conversationId:binding.conversationId})).turns.find(x=>x.requestId===a)?.available).toBe(true);
+ await page.getByRole('button',{name:'刷新状态',exact:true}).click();await page.getByLabel('给当前步骤发消息').fill(retryBody);await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect.poll(async()=>(await chat.read({conversationId:binding.conversationId})).turns.find(x=>x.requestId===staleId)?.abandoned,{timeout:30000}).toBe(true);
+ await expect(t.ai.generate({...staleValue,requestId:staleId,quoteHash:staleQuote.quoteHash,budgetCredits:staleQuote.reservedCredits})).rejects.toThrow();expect(t.calls()).toBe(2);
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByRole('button',{name:'恢复原操作',exact:true}).count()).toBe(0);
+ await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Synthetic local HTTP candidate',{exact:true}).waitFor();
+ const turns=(await chat.read({conversationId:binding.conversationId})).turns,newTurn=turns.find(x=>x.body===retryBody&&x.requestId!==staleId)!;expect(newTurn.generationState).toBe('succeeded');
+ expect((await sql.query('select context_turn_ids,evidence_ids from artifact_chat_turns where request_id=$1',[newTurn.requestId])).rows[0]).toEqual({context_turn_ids:[b],evidence_ids:[]});
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const history=await chat.read({conversationId:binding.conversationId});expect(history.turns.find(x=>x.requestId===a)?.available).toBe(false);expect(history.turns.find(x=>x.requestId===b)?.available).toBe(true);expect(history.turns.find(x=>x.requestId===newTurn.requestId)?.available).toBe(true);
+ await context.close();
+},90000);

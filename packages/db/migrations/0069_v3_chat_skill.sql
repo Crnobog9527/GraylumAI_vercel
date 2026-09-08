@@ -98,7 +98,10 @@ BEGIN
   -- completes after submission cannot silently enter this turn's model context.
   SELECT coalesce(jsonb_agg(a.request_id),'[]') INTO frozen_turn_ids FROM artifact_chat_turns a
    JOIN artifact_generations g ON g.project_id=p.id AND g.round_id=r.id AND g.request_id=a.request_id
-   WHERE a.conversation_id=c.conversation_id AND context_basis ? a.step_id AND g.state='succeeded';
+   WHERE a.conversation_id=c.conversation_id AND context_basis ? a.step_id AND g.state='succeeded'
+    -- Removing a source from the rewritten step also removes dependent old
+    -- discussion from new model context; readable history remains immutable.
+    AND (a.evidence_ids||coalesce(g.evidence_ids,'[]')) <@ ids;
   -- Freeze sources from the same preceding discussions, including model replies.
   SELECT coalesce(jsonb_agg(DISTINCT e),'[]') INTO ids FROM (
    SELECT jsonb_array_elements(ids) e UNION ALL
