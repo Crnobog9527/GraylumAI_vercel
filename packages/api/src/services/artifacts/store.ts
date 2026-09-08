@@ -40,6 +40,7 @@ export function databaseArtifactStore(options:{userClient:SupabaseClient;private
   if(error){
    if(action==='start' && error.code==='23505' && error.message.includes('artifact_social_account'))throw new Error('ARTIFACT_ACCOUNT_CONFLICT');
    if(error.code==='42501')throw new Error('ARTIFACT_DENIED');
+   if(action==='save' && error.message==='round closed')throw new Error('ARTIFACT_SAVE_ROUND_CLOSED');
    if(error.message==='save conflict')throw new Error('ARTIFACT_VERSION_CONFLICT');
    if(['confirmation conflict','dependency review required','confirmation required','snapshot conflict'].includes(error.message))throw new Error('ARTIFACT_REVIEW_REQUIRED');
    throw new Error(['P0001','23505','23514','40001'].includes(error.code)?'ARTIFACT_CONFLICT_OR_DENIED':'ARTIFACT_UNAVAILABLE');

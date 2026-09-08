@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { saveVersionConflictMessage, candidateInvalidatedMessage } from "../services/artifacts/public";
+import { saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage } from "../services/artifacts/public";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
@@ -40,6 +40,10 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         message: string;
       }
     > = {
+      SUMMARY_MODEL_NOT_CONFIGURED: { code: "SERVICE_UNAVAILABLE", message: "回复已保存，整理模型尚未配置，原成果保持不变。" },
+      SUMMARY_MODEL_MUST_DIFFER: { code: "SERVICE_UNAVAILABLE", message: "整理模型必须与对话模型不同，请在后台调整。" },
+      SUMMARY_OUTPUT_LIMIT_INVALID: { code: "SERVICE_UNAVAILABLE", message: "整理输出上限配置无效，未调用整理模型。" },
+      SUMMARY_REPLY_UNAVAILABLE: { code: "CONFLICT", message: "对应回复尚未完成或来源已变化，暂不能整理。" },
       GENERATION_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "AI 生成尚未启用，仍可编辑和保存内容。" },
       GENERATION_UNSUPPORTED_MODEL: { code: "SERVICE_UNAVAILABLE", message: "当前模型尚未通过工作台容量与计费配置校验。" },
       GENERATION_CAPACITY: { code: "BAD_REQUEST", message: "完整方法和项目内容超过当前模型容量，未扣费。" },
@@ -54,6 +58,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         code: "CONFLICT",
         message: saveVersionConflictMessage,
       },
+      ARTIFACT_SAVE_ROUND_CLOSED: { code: "CONFLICT", message: saveRoundClosedMessage },
       ARTIFACT_CANDIDATE_INVALIDATED: { code: "CONFLICT", message: candidateInvalidatedMessage },
       ARTIFACT_REVIEW_REQUIRED: {
         code: "CONFLICT",
@@ -85,6 +90,8 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
 export const workbenchRouter = router({
   chatMode: procedure.input(z.object({moduleId:z.string().uuid()}).strict()).query(({ctx,input})=>ctx.skillChat.mode(input.moduleId)),
   chatEnter: procedure.input(chatEntry).mutation(({ ctx, input }) => ctx.skillChat.enter(input)),
+  chatDismissSummary: procedure.input(chatScope.extend({candidateId:z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.dismissSummary(input)),
+  chatSummary: procedure.input(chatScope.extend({requestId: z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.summary(input)),
   chatRead: procedure.input(chatScope).query(({ ctx, input }) => ctx.skillChat.read(input)),
   chatSelect: procedure.input(chatScope.extend({stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).strict()).mutation(({ ctx, input }) => ctx.skillChat.select(input)),
   chatSubmit: procedure.input(chatTurnInput).mutation(({ ctx, input }) => ctx.skillChat.submit(input)),
@@ -94,7 +101,7 @@ export const workbenchRouter = router({
   cancelGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.cancel(input)),
   abandonGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.abandon(input)),
   recoverGeneration: procedure.input(generationRecoveryInput).mutation(({ ctx, input }) => ctx.generation.recover(input)),
-  catalog: procedure.query(({ ctx }) => ctx.workbench.catalog()),
+  catalog: procedure.input(z.object({moduleId:z.string().uuid()}).strict().optional()).query(({ ctx,input }) => ctx.workbench.catalog(input?.moduleId)),
   projects: procedure.query(({ ctx }) => ctx.workbench.projects()),
   rounds: procedure
     .input(z.object({ projectId: z.string().uuid() }).strict())

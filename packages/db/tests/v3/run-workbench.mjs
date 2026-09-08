@@ -20,6 +20,10 @@ if(args.some(arg=>!['--ai-only','--chat-only','--serve'].includes(arg))||new Set
 const serve=args.includes('--serve'),aiOnly=args.includes('--ai-only')||args.includes('--chat-only');
 const testPattern=args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
+const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
+mkdirSync(evidenceRoot, { recursive:true });
+const evidenceDirectory = mkdtempSync(resolve(evidenceRoot, "graylum-workbench-evidence-"));
+console.log("LOCAL_EVIDENCE_DIRECTORY " + evidenceDirectory);
 const files = execFileSync("git", ["ls-files", "-z"], {
   cwd: source,
   encoding: "utf8",
@@ -164,6 +168,8 @@ try {
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
+  apply("packages/db/migrations/0070_v3_separate_summary.sql");
+  apply("packages/db/migrations/0070_v3_separate_summary.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -349,7 +355,7 @@ try {
     NEXT_PUBLIC_SITE_URL: `http://127.0.0.1:${appPort}`,
     V3_LOCAL_APP: `http://127.0.0.1:${appPort}`,
     V3_WORKBENCH_OUTPUT:
-      process.env.V3_WORKBENCH_OUTPUT || "/tmp/graylum-workbench-browser",
+      evidenceDirectory,
   };
   mkdirSync(env.V3_WORKBENCH_OUTPUT, { recursive: true });
 
@@ -472,7 +478,7 @@ try {
   } catch {}
   rmSync(
     resolve(
-      process.env.V3_WORKBENCH_OUTPUT || "/tmp/graylum-workbench-browser",
+      evidenceDirectory,
       "restore.json",
     ),
     { force: true },

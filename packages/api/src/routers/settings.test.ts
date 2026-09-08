@@ -585,3 +585,27 @@ describe('PAY-1 positive-amount catalog readiness', () => {
     }
   });
 });
+
+describe('summary model admin endpoint',()=>{
+  const row={id:'11111111-1111-4111-8111-111111111111',name:'Summary',model_id:'openai/gpt-4o-mini-2024-07-18',is_active:'true',max_tokens:2048,input_limit:128000,api_key:'SECRET_CANARY',api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'openai'};
+  function caller(role:'admin'|'user'|null,error=false){
+    const query=vi.fn(()=>createQueryBuilder(Promise.resolve(error?{data:null,error:{message:'SECRET_CANARY'}}:{data:[row,{...row,id:'22222222-2222-4222-8222-222222222222',api_key:''}],error:null})));
+    const client={from(table:string){
+      if(table==='ai_models')return query();
+      if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{id:'test-user',role,status:'active',nickname:'Test',email:'test@example.test'},error:null})};
+      throw new Error('Unexpected table');
+    }};
+    return {query,api:settingsRouter.createCaller({headers:new Headers(),user:role?{id:'test-user',email:'test@example.test',app_metadata:{provider:'email'},user_metadata:{email_verified:true}}:null,isEmailVerified:!!role,authProvider:'email',supabase:client,supabaseAdmin:client,supabasePublic:{},hasSupabaseAdminPrivileges:true} as any)};
+  }
+  it.each([[null,'UNAUTHORIZED'],['user','FORBIDDEN']] as const)('rejects %s before reading model credentials',async(role,code)=>{
+    const t=caller(role);await expect(t.api.getSummaryModels()).rejects.toMatchObject({code});expect(t.query).not.toHaveBeenCalled();
+  });
+  it('returns only display fields to an administrator for valid and invalid configurations',async()=>{
+    const t=caller('admin'),result=await t.api.getSummaryModels();expect(result.map(x=>x.available)).toEqual([true,false]);
+    for(const option of result)expect(Object.keys(option).sort()).toEqual(['available','id','model_id','name']);
+    expect(JSON.stringify(result)).not.toContain('SECRET_CANARY');
+  });
+  it('does not expose database error details',async()=>{
+    const t=caller('admin',true);await expect(t.api.getSummaryModels()).rejects.toMatchObject({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
+  });
+});

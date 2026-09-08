@@ -248,7 +248,8 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => {
   if (process.env.V3_WORKBENCH_PHASE !== "restore") {
-    const state = existsSync(output + "/restore.json") ? JSON.parse(readFileSync(output + "/restore.json", "utf8")) : { credentials, fixtures, actor, owner };
+    const prior = existsSync(output + "/restore.json") ? JSON.parse(readFileSync(output + "/restore.json", "utf8")) : null;
+    const state = prior?.actor === actor ? prior : { credentials, fixtures, actor, owner };
     const service = workbenchService(await authenticated(), db);
     state.expectedSnapshots = [];
     for (const p of await service.projects()) {
@@ -257,7 +258,7 @@ afterAll(async () => {
         rounds.find((r) => r.state === "draft") ??
         rounds
           .filter((r) => r.state === "published")
-          .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+          .sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0] ?? rounds[0];
       state.expectedSnapshots.push(
         await service.read(p.projectId, current.roundId),
       );
@@ -1876,12 +1877,15 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
 // AI transport is explicitly injected here. SQL, Auth, Skill reads, pricing and
 // the existing credit RPCs are real local services; no provider request is made.
 const localModel = randomUUID();
+const localSummaryModel = randomUUID();
 async function generationFixture(n = 3, methodText = 'Synthetic generation method.', options: {workflow?: ReturnType<typeof makeWorkflow>; package?: ReturnType<typeof makePackage>} = {}) {
   const { workbenchGeneration } = await import('../artifacts/generation');
   const flow = options.workflow ?? makeWorkflow(n, n === 6); flow.report.title = `本地 AI ${randomUUID()}`;
   const f = await fixture({ id: `ai-${randomUUID()}`, label: flow.report.title, methodText, workflow: flow, package: options.package });
   await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Local fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localModel]);
   await sql.query('update modules set model_id=$1 where id=$2', [localModel, f.moduleId]);
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-2024-08-06','Summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000) on conflict(id) do nothing", [localSummaryModel]);
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localSummaryModel)]);
   await sql.query("insert into system_settings(key,value) values('v3_workbench_ai','true') on conflict(key) do update set value='true'");
   await sql.query('update profiles set credits=100000 where id=$1', [actor]);
   const user = await authenticated(), service = workbenchService(user, db);
@@ -2277,7 +2281,7 @@ aiTest('CHAT: durable multi-turn linkage, dependency-limited history, single set
  async function send(stepId:string,body:string){
   const requestId=randomUUID();const submitted=await db.rpc('artifact_chat',{p_actor_id:actor,p_action:'submit',p_conversation_id:binding.conversationId,p_payload:{requestId,stepId,body}});expect(submitted.error).toBeNull();await chat.submit({conversationId:binding.conversationId,stepId,body,requestId});
   const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
-  const input={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId,instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+  const input={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId,instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
   const q=await t.ai.quote(input),request={...input,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
   const result=await t.ai.generate(request);expect(result.state).toBe('succeeded');expect((await t.ai.generate(request)).candidateId).toBe(result.candidateId);
   return {requestId,result};
@@ -2288,15 +2292,19 @@ aiTest('CHAT: durable multi-turn linkage, dependency-limited history, single set
  expect(t.captured.at(-1)).toContain('Synthetic AI candidate text.');
  await send('step-2','UNRELATED_BRANCH_DISCUSSION');
  expect(t.captured.at(-1)).not.toContain('FIRST_CHAT_REQUIREMENT');
- await t.service.execute({...t.scope,requestId:randomUUID(),action:'saveCandidate',stepId:'step-0',expectedVersion:0,body:'Confirmed basis',candidateId:first.result.candidateId!});
+ const summaryBinding=await chat.summary({conversationId:binding.conversationId,requestId:first.requestId});
+ const summarySnapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const summaryInput={...t.scope,conversationId:binding.conversationId,turnId:first.requestId,purpose:'summary' as const,stepId:'step-0',instruction:'FIRST_CHAT_REQUIREMENT',expectedSteps:Object.fromEntries(Object.entries(summarySnapshot.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};
+ const summaryQuote=await t.ai.quote(summaryInput),summaryResult=await t.ai.generate({...summaryInput,requestId:summaryBinding.requestId,quoteHash:summaryQuote.quoteHash,budgetCredits:summaryQuote.reservedCredits});
+ await t.service.execute({...t.scope,requestId:randomUUID(),action:'saveCandidate',stepId:'step-0',expectedVersion:0,body:'Confirmed basis',candidateId:summaryResult.candidateId!});
  const saved=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];
  await t.service.execute({...t.scope,requestId:randomUUID(),action:'confirm',stepId:'step-0',expectedVersion:saved.version,expectedReviewVersion:saved.reviewVersion});
  await send('step-1','DEPENDENT_DISCUSSION');
  expect(t.captured.at(-1)).toContain('FIRST_CHAT_REQUIREMENT');expect(t.captured.at(-1)).not.toContain('UNRELATED_BRANCH_DISCUSSION');
  const restored=await skillChatService(await authenticated(),db).read({conversationId:binding.conversationId});
- expect(restored.binding.stepId).toBe('step-1');expect(restored.turns).toHaveLength(4);expect(t.calls()).toBe(4);expect((await chat.stats()).find(s=>s.conversationId===binding.conversationId)?.messageCount).toBe(8);
+ expect(restored.binding.stepId).toBe('step-1');expect(restored.turns).toHaveLength(4);expect(t.calls()).toBe(5);expect((await chat.stats()).find(s=>s.conversationId===binding.conversationId)?.messageCount).toBe(8);
  const row=(await sql.query('select count(*)::int as n from messages where conversation_id=$1',[binding.conversationId])).rows[0];expect(row.n).toBe(0);
- const usage=(await sql.query('select count(*)::int as n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0];expect(usage.n).toBe(4);
+ const usage=(await sql.query('select count(*)::int as n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0];expect(usage.n).toBe(5);
  const foreign=await newUser();await expect(skillChatService(await authenticated(foreign),db).read({conversationId:binding.conversationId})).rejects.toThrow('ARTIFACT_DENIED');
  expect((await t.user.from('artifact_chat_turns').select('*')).error).toBeTruthy();
  await sql.query("update skills set status='draft' where id=$1",[t.f.pack.id]);
@@ -2347,8 +2355,8 @@ aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and gene
  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Manual topic: pet action photography',evidenceIds:[]});
  const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Synthetic configured conversation';
  await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
- const v={...await t.request(),conversationId:binding.conversationId,turnId:requestId,requestId,instruction:body};
- const q=await t.ai.quote({projectId:v.projectId,roundId:v.roundId,stepId:v.stepId,conversationId:v.conversationId,turnId:v.turnId,instruction:body,expectedSteps:v.expectedSteps});
+ const v={...await t.request(),conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,requestId,instruction:body};
+ const q=await t.ai.quote({projectId:v.projectId,roundId:v.roundId,stepId:v.stepId,conversationId:v.conversationId,turnId:v.turnId,purpose:'reply' as const,instruction:body,expectedSteps:v.expectedSteps});
  expect((await t.ai.generate({...v,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
  const sent=JSON.parse(t.captured.at(-1)!);
  expect(JSON.parse(sent[1].content).currentStepResult).toEqual({body:'Manual topic: pet action photography',version:1});
@@ -2362,7 +2370,7 @@ aiTest('CHAT: source revocation hides historic turns and rejects reuse before ne
  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Source-backed draft',evidenceIds:[evidence.id]});
  const binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='SENSITIVE_CONTEXT_CANARY follow up';
  await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});
- const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId),value={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId),value={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
  const q=await t.ai.quote(value);await t.ai.generate({...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});
  const before=(await sql.query('select count(*)::int n from billing_history')).rows[0].n;
  await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId:evidence.id,deleted:true,expiresAt:null});
@@ -2373,6 +2381,7 @@ aiTest('CHAT: source revocation hides historic turns and rejects reuse before ne
 },30000);
 
 aiTest('CHAT: module Use selects guided mode; free and ordinary document history survive unrelated catalog failure',async()=>{
+ await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
  const poll=<T>(fn:()=>Promise<T>)=>expect.poll(fn,{timeout:30000});
  const t=await generationFixture(),requests:string[]=[];const {page,context}=await pageFor(credentials,requests);
  await page.goto(app+'/marketplace?module='+t.f.moduleId);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();
@@ -2431,7 +2440,7 @@ aiTest('CHAT: late response preserves later input and draft; rejected quotes and
 aiTest('CHAT: prepared replay keeps its original context and reservation while rechecking consumption',async()=>{
  const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()}),requestId=randomUUID(),body='Resume original contextual turn';
  await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);
- const value={...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))},q=await t.ai.quote(value),v={...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
+ const value={...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))},q=await t.ai.quote(value),v={...value,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits};
  const stopped=new Proxy(db,{get(target,key){if(key==='rpc')return (name:string,args:Record<string,unknown>)=>args.p_action==='prepare'?{abortSignal:async()=>{const result=await target.rpc(name,args);if(result.error)throw result.error;throw new Error('local stopped after reserve');}}:target.rpc(name,args);const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
  await expect(t.workbenchGeneration(t.user,stopped,async()=>{throw new Error('must not dispatch');}).generate(v)).rejects.toThrow('local stopped after reserve');
  expect((await t.ai.quote(value)).quoteHash).toBe(q.quoteHash);
@@ -2465,7 +2474,7 @@ aiTest('CHAT: a late preceding result cannot enter a submitted turn without its 
  let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'A draft using E',evidenceIds:[evidenceId]});
  const a=randomUUID(),b=randomUUID();
- async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
  await chat.submit({conversationId:binding.conversationId,requestId:a,stepId:'step-0',body:'A earlier turn'});
  let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);
  const slow=t.workbenchGeneration(t.user,db,async()=>{arrived();await hold;return {body:'LATE_A_ANSWER_WITH_SOURCE_E',inputTokens:800,outputTokens:30};});
@@ -2615,7 +2624,7 @@ aiTest('CHAT: removing prior evidence permits new context and safe same-text ret
  await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'REMOVED_SOURCE_CANARY',observedAt:null,supersedes:null});
  let snap=await t.service.read(t.scope.projectId,t.scope.roundId);const evidenceId=snap.evidence[0].id;
  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:snap.steps['step-0'].version,body:'Draft using original evidence',evidenceIds:[evidenceId]});
- async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
+ async function value(requestId:string,body:string){const s=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId:requestId,purpose:'reply' as const,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,x])=>[k,{version:x.version,reviewVersion:x.reviewVersion}]))};}
  async function generate(requestId:string,body:string){await chat.submit({conversationId:binding.conversationId,requestId,stepId:'step-0',body});const v=await value(requestId,body),q=await t.ai.quote(v);return t.ai.generate({...v,requestId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});}
  const a=randomUUID();expect((await generate(a,'OLD_TURN_WITH_REMOVED_SOURCE')).state).toBe('succeeded');
  const staleId=randomUUID(),retryBody='Continue with the independent rewritten draft';
@@ -2727,3 +2736,227 @@ aiTest.each(['candidate','saved'])('CHAT: revoked inherited sources hide %s loca
  expect(await page.getByRole('button',{name:'恢复此版本到成果',exact:true}).count()).toBe(0);
  await context.close();
 },120000);
+
+aiTest.each(['openai','qwen'])('CHAT: dual model stages persist separate usage and only summary becomes a result with %s',async(provider)=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const primaryId=provider==='qwen'?randomUUID():localModel;
+ if(provider==='qwen'){
+  await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost,tokenizer_family) values($1,'qwen/qwen3.8-flash','Qwen fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,470000,'openai')",[primaryId]);
+  await sql.query('update modules set model_id=$1 where id=$2',[primaryId,t.f.moduleId]);
+ }
+ const summaryId=randomUUID();
+ await sql.query("insert into ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-2024-08-06','Separate summary fixture','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryId]);
+ await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(summaryId)]);
+ const seen:string[]=[];
+ const ai=t.workbenchGeneration(t.user,db,async request=>{
+  seen.push(request.model.id);
+  return {body:request.model.id===summaryId?'Combined result: family audience, budget 1200.':'Let us refine the event together.',inputTokens:800,outputTokens:30};
+ });
+ const turnId=randomUUID(),body='Plan a family event';
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const expectedSteps=Object.fromEntries(Object.entries((await t.service.read(t.scope.projectId,t.scope.roundId)).steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]));
+ const input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,expectedSteps,purpose:'reply' as const};
+ const quote=await ai.quote(input),replyRequest={...input,requestId:turnId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits};
+ const reply=await ai.generate(replyRequest);expect(reply.state).toBe('succeeded');
+ await expect(t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Must not save dialogue',candidateId:reply.candidateId!})).rejects.toThrow();
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+ const summaryBinding=await chat.summary({conversationId:binding.conversationId,requestId:turnId});
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(summaryBinding);
+ const summaryInput={...input,purpose:'summary' as const},summaryQuote=await ai.quote(summaryInput);
+ const request={...summaryInput,requestId:summaryBinding.requestId,quoteHash:summaryQuote.quoteHash,budgetCredits:summaryQuote.reservedCredits};
+ const result=await ai.generate(request);expect(result.state).toBe('succeeded');
+ expect((await ai.generate(request)).candidateId).toBe(result.candidateId);
+ expect((await ai.generate(replyRequest)).candidateId).toBe(reply.candidateId);
+ expect(seen).toEqual([primaryId,summaryId]);
+ if(provider==='qwen'){const quoteRow=await sql.query('select quote from artifact_generations where project_id=$1 and request_id=$2',[t.scope.projectId,turnId]);expect(quoteRow.rows[0].quote.providerModel).toBe('qwen/qwen3.8-flash');expect(quoteRow.rows[0].quote.inputTokens).toBe(128000-4096);}
+ await t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Combined result: family audience, budget 1200.',candidateId:result.candidateId!});
+ const view=await chat.read({conversationId:binding.conversationId});
+ expect(view.turns).toHaveLength(1);expect(view.turns[0]).toMatchObject({answer:'Let us refine the event together.',summaryState:'succeeded',summaryCandidateId:result.candidateId,generationMode:'dual'});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(false);
+ const logs=await sql.query("select metadata->>'role' role from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1) order by metadata->>'role'",[t.scope.projectId]);
+ expect(logs.rows.map(x=>x.role)).toEqual(['reply','summary']);
+ await sql.query("delete from system_settings where key='v3_summary_model_id'");
+},60000);
+
+aiTest('CHAT: missing summary configuration and unknown summary never replay the paid reply',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Previously saved result',evidenceIds:[]});
+ const seen:string[]=[];const ai=t.workbenchGeneration(t.user,db,async req=>{seen.push(req.model.id);if(req.model.id===localSummaryModel)throw new Error('Synthetic lost provider result');return {body:'Dialogue answer survives',inputTokens:800,outputTokens:30};});
+ const turnId=randomUUID(),body='Change budget';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);const reply=await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits});expect(reply.state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),summaryInput={...input,purpose:'summary' as const};
+ await sql.query("delete from system_settings where key='v3_summary_model_id'");
+ await expect(ai.quote(summaryInput)).rejects.toThrow('SUMMARY_MODEL_NOT_CONFIGURED');expect(seen).toEqual([localModel]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0].answer).toBe('Dialogue answer survives');
+ await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1)",[JSON.stringify(localSummaryModel)]);
+ const sq=await ai.quote(summaryInput),request={...summaryInput,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ await expect(ai.generate({...request,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_DENIED');
+ expect((await ai.generate(request)).state).toBe('unknown');expect((await ai.generate(request)).state).toBe('unknown');
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(sb);
+ expect(seen).toEqual([localModel,localSummaryModel]);
+ const restored=await skillChatService(await authenticated(),db).read({conversationId:binding.conversationId});
+ expect(restored.turns[0]).toMatchObject({answer:'Dialogue answer survives',summaryState:'unknown',summaryCandidateId:null});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('Previously saved result');
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(1);
+},60000);
+
+aiTest('CHAT: summary dispatched before source revocation settles once but remains unreadable',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'Restricted test reference',observedAt:null,supersedes:null});
+ const evidenceId=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Source-backed saved basis',evidenceIds:[evidenceId]});
+ let calls=0;const ai=t.workbenchGeneration(t.user,db,async req=>{
+  calls++;
+  if(req.model.id===localSummaryModel)await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+  return {body:'Known response with restricted source',inputTokens:800,outputTokens:30};
+ });
+ const turnId=randomUUID(),body='Discuss the reference';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si={...input,purpose:'summary' as const},sq=await ai.quote(si),request={...si,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ const done=await ai.generate(request);expect(done.state).toBe('succeeded');
+ expect((await ai.generate(request)).state).toBe('succeeded');expect(calls).toBe(2);
+ const view=await t.service.read(t.scope.projectId,t.scope.roundId);expect(view.candidates.find(c=>c.id===done.candidateId)?.body).toBeNull();
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0]).toMatchObject({answer:null,available:false,summaryState:'succeeded'});
+ await expect(t.service.execute({...t.scope,action:'saveCandidate',requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'Forbidden result',candidateId:done.candidateId!})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(2);
+},60000);
+
+aiTest('CHAT: a summary rejected before dispatch can restart without replaying the reply',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),body='Refine activity';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ async function input(purpose:'reply'|'summary') {const snap=await t.service.read(t.scope.projectId,t.scope.roundId);return {...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};}
+ const ri=await input('reply'),rq=await t.ai.quote(ri);expect((await t.ai.generate({...ri,requestId:turnId,quoteHash:rq.quoteHash,budgetCredits:rq.reservedCredits})).state).toBe('succeeded');
+ const old=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si=await input('summary'),sq=await t.ai.quote(si),oldRequest={...si,requestId:old.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Edited after summary quote',evidenceIds:[]});
+ await expect(t.ai.generate(oldRequest)).rejects.toThrow('GENERATION_CONFLICT');
+ expect((await t.ai.abandon({...t.scope,requestId:old.requestId})).abandoned).toBe(true);
+ const next=await chat.summary({conversationId:binding.conversationId,requestId:turnId});expect(next.requestId).not.toBe(old.requestId);
+ expect(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).toEqual(next);
+ await expect(t.ai.generate(oldRequest)).rejects.toThrow();
+ const ni=await input('summary'),nq=await t.ai.quote(ni);expect((await t.ai.generate({...ni,requestId:next.requestId,quoteHash:nq.quoteHash,budgetCredits:nq.reservedCredits})).state).toBe('succeeded');
+ expect(t.calls()).toBe(2);
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(2);
+},60000);
+
+aiTest.each(['recover','dismiss','closed','remote-dirty','remote-frozen','remote-unknown','save-race','save-receipt'])('CHAT: server-only summary recovery respects %s state',async(mode)=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(),chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const turnId=randomUUID(),body='A fictional event request';await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ let calls=0;const ai=t.workbenchGeneration(t.user,db,async req=>{calls++;if(mode==='closed'&&req.model.id===localSummaryModel)await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});return {body:req.model.id===localSummaryModel?'Saved summary from a different browser session':'A dialogue response',inputTokens:800,outputTokens:30};});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),si={...input,purpose:'summary' as const},sq=await ai.quote(si);expect((await ai.generate({...si,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits})).state).toBe('succeeded');
+ if(mode==='save-race'||mode==='save-receipt') {
+  const candidateId=(await chat.read({conversationId:binding.conversationId})).turns[0].summaryCandidateId!;
+  const save={...t.scope,action:'saveCandidate' as const,requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'Saved summary from a different browser session',candidateId};
+  if(mode==='save-receipt') {
+   await t.service.execute(save);await chat.dismissSummary({conversationId:binding.conversationId,candidateId});
+   expect(await t.service.execute(save)).toEqual({accepted:true});
+   expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(1);
+  } else {
+   const blocker=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await blocker.connect();
+   try {
+    await blocker.query('begin');await blocker.query('select id from artifact_projects where id=$1 for update',[t.scope.projectId]);
+    const pending=t.service.execute(save).then(()=> 'unexpected success',(e:Error)=>e.message);
+    await expect.poll(async()=>Number((await sql.query("select count(*) n from pg_stat_activity where datname=current_database() and wait_event_type='Lock' and query like '%artifact_save_candidate%'" )).rows[0].n),{timeout:5000}).toBeGreaterThan(0);
+    await blocker.query("insert into artifact_requests(project_id,request_id,round_id,action,payload,response) values($1,$2,$3,'summary_dismissed',$4,'{\"dismissed\":true}')",[t.scope.projectId,randomUUID(),t.scope.roundId,JSON.stringify({candidateId})]);
+    await blocker.query('commit');expect(await pending).toBe('ARTIFACT_CANDIDATE_INVALIDATED');
+    expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+   } finally {await blocker.query('rollback');await blocker.end();}
+  }
+  expect(calls).toBe(2);return;
+ }
+ const {page,context}=await pageFor(credentials,[]),writes:string[]=[];
+ if(mode==='dismiss'||mode==='remote-dirty')await page.addInitScript(()=>{const real=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>real(handler,timeout===450?30000:timeout,...args)) as typeof window.setTimeout;});
+ if(mode==='remote-frozen'||mode==='remote-unknown')await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+ page.on('request',request=>{if(request.url().includes('workbench.execute')||request.url().includes('workbench.generate'))writes.push(request.url());});
+ await page.goto(app+'/chat?conversation='+binding.conversationId);await page.getByLabel('当前步骤工作稿').waitFor();
+ if(mode==='recover'){
+  await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Saved summary from a different browser session');
+  expect(writes.filter(x=>x.includes('workbench.generate'))).toHaveLength(0);
+ } else if(mode==='remote-dirty'||mode==='remote-frozen'||mode==='remote-unknown') {
+  if(mode==='remote-frozen'||mode==='remote-unknown')await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+  else await expect.poll(()=>page.getByLabel('当前步骤工作稿').inputValue()).toBe('Saved summary from a different browser session');
+  const candidateId=(await chat.read({conversationId:binding.conversationId})).turns[0].summaryCandidateId!;
+  if(mode==='remote-unknown')await page.getByLabel('当前步骤工作稿').fill('Newer B survives second unknown acknowledgement');
+  await chat.dismissSummary({conversationId:binding.conversationId,candidateId});
+  if(mode==='remote-unknown'){
+   await page.reload();await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+   expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('Newer B survives second unknown acknowledgement');
+   await page.unroute('**/api/trpc/workbench.execute*');
+  }
+  if(mode==='remote-frozen')await page.unroute('**/api/trpc/workbench.execute*');
+  await page.reload();
+  await expect.poll(async()=>await page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe('');
+  await expect.poll(()=>page.getByRole('button',{name:'重试保存',exact:true}).count()).toBe(0);
+  await page.waitForTimeout(1000);
+  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe('');
+  expect(writes.filter(x=>x.includes('workbench.generate'))).toHaveLength(0);
+ } else if(mode==='dismiss') {
+  await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).click();
+  await expect.poll(async()=>(await chat.read({conversationId:binding.conversationId})).turns[0].summaryDismissed,{timeout:30000}).toBe(true);
+  await page.reload();await page.getByLabel('当前步骤工作稿').waitFor();
+  expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('');
+  expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).count()).toBe(0);
+  expect(writes).toHaveLength(0);
+ } else {
+  expect(await page.getByRole('button',{name:'放弃本地编辑并载入已保存内容',exact:true}).count()).toBe(0);
+  expect(await page.getByLabel('当前步骤工作稿').inputValue()).toBe('');expect(writes).toHaveLength(0);
+ }
+ expect(calls).toBe(2);await context.close();
+},120000);
+
+
+aiTest.each([false,true])('CHAT: closed manual save resolves original acknowledgement committed=%s',async(committed)=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.route('**/api/trpc/workbench.execute*',async route=>{if(committed)await route.fetch();await route.abort('failed');});
+ await page.getByLabel('当前步骤工作稿').fill('Manual A with unknown acknowledgement');
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});
+ await page.unroute('**/api/trpc/workbench.execute*');await page.reload();
+ await expect.poll(async()=>page.getByLabel('当前步骤工作稿').inputValue(),{timeout:30000}).toBe(committed?'Manual A with unknown acknowledgement':'');
+ await expect.poll(()=>page.getByRole('button',{name:'重试保存',exact:true}).count()).toBe(0);
+ const final=await t.service.read(t.scope.projectId,t.scope.roundId);expect(final.steps['step-0'].version).toBe(committed?1:0);
+ expect(t.calls()).toBe(0);await context.close();
+},90000);
+
+aiTest('CHAT: provider input usage beyond reservation preserves reconciliation evidence without a candidate or retry',async()=>{
+ const t=await generationFixture();let calls=0;
+ const ai=t.workbenchGeneration(t.user,db,async()=>{calls++;return {body:'Do not publish an over-budget result',inputTokens:2000000,outputTokens:20};});
+ const request=await t.request(ai),result=await ai.generate(request);
+ expect(result.state).toBe('unknown');expect(result.candidateId).toBeNull();
+ expect((await ai.generate(request)).state).toBe('unknown');expect(calls).toBe(1);
+ const evidence=await sql.query("select payload from artifact_requests where project_id=$1 and action='generation_usage_exceeded'",[t.scope.projectId]);
+ expect(evidence.rows).toHaveLength(1);expect(evidence.rows[0].payload.inputTokens).toBe(2000000);
+ expect(JSON.stringify(evidence.rows)).not.toContain('Do not publish');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates).toHaveLength(0);
+ expect((await sql.query('select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)',[t.scope.projectId])).rows[0].n).toBe(0);
+},60000);
+
+aiTest('CHAT: selected module catalog avoids unrelated registrations while retaining authorization',async()=>{
+ const t=await generationFixture(),other=await generationFixture();
+ const broken='unrelated-'+randomUUID();
+ await sql.query("insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) select $1,module_id,skill_id,revision_id,jsonb_set(workflow,'{steps}','[]'),'Unrelated invalid fixture',true from artifact_workflows where module_id=$2 limit 1",[broken,other.f.moduleId]);
+ try{
+  await expect(t.service.catalog()).rejects.toThrow();
+  const scoped=await t.service.catalog(t.f.moduleId);expect(scoped.length).toBeGreaterThan(0);expect(scoped.every(x=>x.moduleId===t.f.moduleId)).toBe(true);
+  const {skillChatService}=await import('../artifacts/chat');
+  expect((await skillChatService(t.user,db).enter({moduleId:t.f.moduleId,requestId:randomUUID()})).projectId).toBe(t.scope.projectId);
+  await expect(t.service.catalog(other.f.moduleId)).rejects.toThrow();
+  const fresh=await fixture({id:'scoped-'+randomUUID(),label:'Fresh scoped module',methodText:'Fictional scoped entry method.',workflow:makeWorkflow(3)});
+  const entry={moduleId:fresh.moduleId,requestId:randomUUID()},chat=skillChatService(t.user,db);
+  const created=await chat.enter(entry);expect(created.projectId).toBe(entry.requestId);
+  expect(await chat.enter(entry)).toEqual(created);
+  expect((await t.service.projects()).filter(p=>p.moduleId===fresh.moduleId)).toHaveLength(1);
+  const denied=new pg.Client({connectionString:process.env.V3_LOCAL_DB});await denied.connect();
+  try{
+   await denied.query('set role authenticated');
+   await expect(denied.query('select artifact_module_catalog($1,$2)',[actor,t.f.moduleId])).rejects.toThrow('permission denied');
+  }finally{await denied.end();}
+  const stopped=await newUser();await sql.query("update profiles set status='disabled' where id=$1",[stopped.id]);
+  await expect(sql.query('select artifact_module_catalog($1,$2)',[stopped.id,t.f.moduleId])).rejects.toThrow('artifact denied');
+ }finally{await sql.query('delete from artifact_workflows where id=$1',[broken]);}
+},60000);

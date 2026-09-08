@@ -39,6 +39,12 @@ export const chatTurn = z.object({
   available: z.boolean(),
   candidateId: uuid.nullable(),
   generationState: z.string(),
+  generationMode: z.enum(["legacy", "dual"]).default("legacy"),
+  summaryRequestId: uuid.nullable().optional(),
+  summaryState: z.string().optional(),
+  summaryCandidateId: uuid.nullable().optional(),
+  summaryDismissed: z.boolean().optional(),
+  summaryBasis: z.record(z.string(),z.object({version:z.number(),reviewVersion:z.number()})).nullable().optional(),
   abandoned: z.boolean(),
   createdAt: z.string(),
 });
@@ -106,7 +112,7 @@ export function skillChatService(
       if (!v.moduleId || v.projectId || v.roundId)
         throw new Error("ARTIFACT_DENIED");
       // Discover only on explicit Skill entry. Free chat never calls this path.
-      const entries = (await workbench.catalog()).filter(
+      const entries = (await workbench.catalog(v.moduleId)).filter(
         (e) => e.moduleId === v.moduleId,
       );
       if (!entries.length) throw new Error("ARTIFACT_INVALID_WORKFLOW");
@@ -150,7 +156,7 @@ export function skillChatService(
         requestId: v.requestId,
         registration: entry.id,
         account: v.account ?? null,
-      });
+      }, v.moduleId);
       return chatBinding.parse(
         await call("attach", undefined, {
           projectId: v.requestId,
@@ -158,6 +164,13 @@ export function skillChatService(
           requestId: v.requestId,
         }),
       );
+    },
+    async dismissSummary(input: z.infer<typeof chatScope> & { candidateId: string }) {
+      return z.object({dismissed:z.literal(true)}).parse(await call("dismiss_summary",uuid.parse(input.conversationId),{candidateId:uuid.parse(input.candidateId)}));
+    },
+    async summary(input: z.infer<typeof chatScope> & { requestId: string }) {
+      return z.object({requestId: uuid, turnId: uuid, stepId: z.string(), body: z.string()}).parse(
+        await call("summary", uuid.parse(input.conversationId), {requestId: uuid.parse(input.requestId)}));
     },
     async read(input: z.infer<typeof chatScope>) {
       const { conversationId } = chatScope.parse(input);

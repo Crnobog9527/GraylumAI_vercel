@@ -130,7 +130,7 @@ function SkillPicker({
   navigate: (id?: string) => void;
 }) {
   const utils = trpc.useUtils(),
-    catalog = trpc.workbench.catalog.useQuery(undefined, { retry: false });
+    catalog = trpc.workbench.catalog.useQuery(moduleId ? {moduleId} : undefined, { retry: false });
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const requestIds = useRef(new Map<string, string>()),

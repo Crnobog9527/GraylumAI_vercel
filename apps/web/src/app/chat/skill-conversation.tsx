@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { ReferenceContent } from "./reference-content";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { saveVersionConflictMessage, candidateInvalidatedMessage } from "@repo/api/src/services/artifacts/public";
+import { saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage } from "@repo/api/src/services/artifacts/public";
 import type { ArtifactSnapshot } from "@repo/api/src/services/artifacts/public";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@repo/api/src/root";
@@ -244,13 +244,26 @@ export function SkillConversation({
       pendingSave.current = null;
       pendingWrite.current = null;
     }
+    const obsolete = (d: Draft) => snap.state !== "draft" || !!d.candidateId &&
+      next.turns.some(t => t.summaryCandidateId === d.candidateId && t.summaryDismissed);
+    // Hydrate the complete journal before resolving an unknown original save.
+    // The existing serialized save queue alone recovers its immutable receipt.
     setDrafts((previous) => {
       const old = { ...recovered, ...previous };
+      // Recover an already paid summary from server identity/basis, including
+      // after another browser session. Never regenerate to recover its text.
+      for (const turn of [...next.turns].reverse()) {
+        if (snap.state !== "draft" || turn.summaryDismissed || turn.generationMode !== "dual" || turn.summaryState !== "succeeded" || !turn.summaryBasis || old[turn.stepId]?.dirty) continue;
+        if (Object.entries(turn.summaryBasis).some(([key,basis]) => snap.steps[key]?.version !== basis.version || snap.steps[key]?.reviewVersion !== basis.reviewVersion)) continue;
+        const candidate = snap.candidates.find(c => c.id === turn.summaryCandidateId);
+        if (!candidate || candidate.body == null || candidate.directEvidenceIds == null || !visible({...old[turn.stepId],body:candidate.body,version:snap.steps[turn.stepId].version,dirty:true,editId:candidate.id,candidateId:candidate.id,evidenceIds:candidate.directEvidenceIds,provenanceIds:candidate.evidenceIds},turn.stepId)) continue;
+        old[turn.stepId] = {body:candidate.body,version:snap.steps[turn.stepId].version,dirty:true,editId:candidate.id,candidateId:candidate.id,evidenceIds:candidate.directEvidenceIds,provenanceIds:candidate.evidenceIds};
+      }
       return Object.fromEntries(
         Object.entries(snap.steps).map(([k, s]) => [
           k,
           old[k]?.dirty &&
-          visible(old[k], k)
+          visible(old[k], k) && (!obsolete(old[k]) || pendingSave.current?.step === k)
             ? old[k]
             : {
                 body: s.body ?? "",
@@ -331,10 +344,10 @@ export function SkillConversation({
     await run(async () => {
       try { await api.execute.mutate(command); }
       catch (error) {
-        // These two server responses are emitted only after an explicit rejected
+        // These precise server responses are emitted only after an explicit rejected
         // write, with no saved request receipt. Unknown/network errors keep A frozen.
         if (error instanceof Error && (error as { data?: { code?: string } }).data?.code === "CONFLICT" &&
-            [saveVersionConflictMessage, candidateInvalidatedMessage].includes(error.message)) {
+            [saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage].includes(error.message)) {
           pendingSave.current = null;
           pendingWrite.current = null;
           await reload().catch(() => undefined);
@@ -353,7 +366,7 @@ export function SkillConversation({
     }, true);
   }
   useEffect(() => {
-    if (busy || !scope || snapshot?.state !== "draft" || pendingWrite.current) return;
+    if (busy || !scope || !snapshot || (snapshot.state !== "draft" && !pendingSave.current) || pendingWrite.current) return;
     if (pendingSave.current) {
       const saved = pendingSave.current;
       if (autoSaveAttempt.current !== saved.draft.editId) {
@@ -381,6 +394,7 @@ export function SkillConversation({
     const prior = chat?.turns
       .filter(
         (t) =>
+          t.generationMode === "dual" &&
           t.stepId === selected &&
           t.body === body &&
           !t.candidateId &&
@@ -406,6 +420,7 @@ export function SkillConversation({
         ...scope,
         conversationId,
         turnId: requestId,
+        purpose: "reply" as const,
         stepId: selected,
         instruction: body,
         expectedSteps,
@@ -480,14 +495,32 @@ export function SkillConversation({
     await reload();
     await applyGeneratedResult(value, status);
     if (status.state === "succeeded" || status.state === "refunded") rememberDelivery(null);
+    if (value.purpose === "reply" && status.state === "succeeded") {
+      pendingWrite.current = null;
+      await summarize(value.turnId!);
+    }
+  }
+  async function summarize(turnId: string) {
+    if (!scope || Object.values(state.current.drafts).some(d => d.dirty)) throw new Error("请等待成果自动保存后再整理。");
+    const binding = await api.chatSummary.mutate({conversationId, requestId: turnId});
+    const latest = await api.read.query(scope);
+    const value = {...scope, conversationId, turnId, purpose: "summary" as const,
+      stepId: binding.stepId, instruction: binding.body,
+      expectedSteps: Object.fromEntries(Object.entries(latest.steps).map(([k,s]) => [k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+    const quote = await api.generationQuote.mutate(value);
+    await deliver({...value, requestId:binding.requestId, quoteHash:quote.quoteHash, budgetCredits:quote.reservedCredits});
   }
   async function applyGeneratedResult(value: Parameters<typeof api.generate.mutate>[0],
     status: { state: string; candidateId: string | null }) {
-    if (status.state === "succeeded" && status.candidateId) {
+    if (value.purpose !== "reply" && status.state === "succeeded" && status.candidateId) {
       const latest = await api.read.query({ projectId: value.projectId, roundId: value.roundId });
+      if (value.purpose === "summary" && value.conversationId) {
+        const authoritativeChat = await api.chatRead.query({conversationId:value.conversationId});
+        if (authoritativeChat.turns.some(t => t.summaryCandidateId === status.candidateId && t.summaryDismissed)) return;
+      }
       const candidate = latest.candidates.find(c => c.id === status.candidateId);
       const expectedVersion = value.expectedSteps[value.stepId]?.version;
-      if (alive.current && candidate?.body != null && candidate.directEvidenceIds != null && latest.steps[value.stepId]?.version === expectedVersion) {
+      if (alive.current && latest.state === "draft" && candidate?.body != null && candidate.directEvidenceIds != null && latest.steps[value.stepId]?.version === expectedVersion) {
         const body = candidate.body;
         setDrafts(old => {
           const current = old[value.stepId];
@@ -584,7 +617,7 @@ export function SkillConversation({
                       data-message-role="assistant"
                     >
                       <p className="mb-2 text-xs text-[var(--text-tertiary)]">
-                        AI · 本步骤成果
+                        AI · 对话回复
                       </p>
                       <p className="whitespace-pre-wrap break-words">
                         {t.answer}
@@ -592,6 +625,11 @@ export function SkillConversation({
 
                     </div>
                   )}
+                  {t.generationMode === "dual" && t.generationState === "succeeded" && t.summaryState !== "succeeded" && <div className="text-sm text-[var(--text-secondary)]">
+                    <p>回复已保存，成果待整理。</p>
+                    {(!t.summaryState || t.summaryState === "pending" || t.summaryState === "prepared" || t.summaryState === "refunded") && <Button disabled={busy || !!unresolved && t.summaryState !== "prepared"} onClick={() => void run(() => summarize(t.requestId))}>继续整理成果</Button>}
+                    {t.summaryState === "unknown" && <p>整理结果待核对，请勿重新发送。</p>}
+                  </div>}
                 </article>
               ))}
           </div>
@@ -835,7 +873,10 @@ export function SkillConversation({
                   <Button
                     variant="ghost"
                     disabled={busy || !!pendingSave.current}
-                    onClick={() => {
+                    onClick={() => void run(async () => {
+                      if (draft.candidateId && chat?.turns.some(t => t.summaryCandidateId === draft.candidateId)) {
+                        await api.chatDismissSummary.mutate({conversationId,candidateId:draft.candidateId});
+                      }
                       setDrafts((old) => ({
                         ...old,
                         [step]: {
@@ -849,7 +890,8 @@ export function SkillConversation({
                           editId: id(),
                         },
                       }));
-                    }}
+                      await reload();
+                    }, true)}
                   >
                     放弃本地编辑并载入已保存内容
                   </Button>
