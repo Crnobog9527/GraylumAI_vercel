@@ -143,3 +143,7 @@ Owner 指定整理模型 `openai/gpt-5.6-luna`；公开 OpenRouter models/endpoi
 GitHub 审查的两项同时修复：scoped catalog 的 100 项上限只计算目标模块，原全局 catalog 上限保留；对话回复使用独立 20000 文本上限及 token 上限，summary/legacy 仍受成果步骤长度限制。
 
 最新本地专项 `graylum-luna-review-regression.log`：5 PASS / 78 SKIP，覆盖 OpenAI/Qwen/Luna 三种双阶段组合、长于成果上限的正常对话、父模型 UUID/alias 漂移在服务和直接 SQL 准入时拒绝、来源撤回后已发出整理的结算恢复、超过 100 个无关注册时当前模块入口。迁移重复应用和日志 canary 检查通过。相关模型/transport 单测 40 PASS，Web typecheck 通过。真实双模型成功仍未验证；旧候选审查与 CI 不替代下一候选复审。
+
+补充反向专项 `graylum-oversized-summary-validation.log`：1 PASS / 83 SKIP，真实本地 SQL 验证 summary 101 字符超过步骤 100 上限后进入 unknown、原 reply 可读、无成功 summary 候选、仅原 reply 一条 token 结算、同请求重放不再调用 transport；canary 通过。
+
+后续独立 Luna 虚构整理试跑返回供应商 HTTP 403，未得到内容，未自动重试。当前累计 10 次调用保守预留 0.10129650 USD；只读 key 元数据仍显示余量 1.997864138 USD，但本地 Owner 总上限保持 1 USD，不能据余额推断拒绝原因或释放未知预留。该独立探测不代表完整产品两阶段链路通过。

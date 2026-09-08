@@ -2985,3 +2985,22 @@ aiTest('CHAT: selected module catalog avoids unrelated registrations while retai
   await expect(sql.query('select artifact_module_catalog($1,$2)',[stopped.id,t.f.moduleId])).rejects.toThrow('artifact denied');
  }finally{await sql.query('delete from artifact_workflows where id=$1 or id like $2',[broken,bulk+'-%']);}
 },60000);
+
+aiTest('CHAT: oversized summary preserves the reply and never replays or settles a result',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const flow=makeWorkflow(3);flow.steps[0].maxLength=100;
+ const t=await generationFixture(3,'Synthetic bounded summary method.',{workflow:flow}),chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),turnId=randomUUID(),body='Discuss a fictional family event';
+ await chat.submit({conversationId:binding.conversationId,requestId:turnId,stepId:'step-0',body});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId),seen:string[]=[];
+ const ai=t.workbenchGeneration(t.user,db,async req=>{seen.push(req.model.id);return {body:req.model.id===localModel?'Readable dialogue':'x'.repeat(101),inputTokens:800,outputTokens:30};});
+ const input={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,purpose:'reply' as const,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const q=await ai.quote(input);expect((await ai.generate({...input,requestId:turnId,quoteHash:q.quoteHash,budgetCredits:q.reservedCredits})).state).toBe('succeeded');
+ const sb=await chat.summary({conversationId:binding.conversationId,requestId:turnId}),summary={...input,purpose:'summary' as const},sq=await ai.quote(summary);
+ const request={...summary,requestId:sb.requestId,quoteHash:sq.quoteHash,budgetCredits:sq.reservedCredits};
+ expect((await ai.generate(request)).state).toBe('unknown');expect((await ai.generate(request)).state).toBe('unknown');
+ expect(seen).toEqual([localModel,localSummaryModel]);
+ expect((await chat.read({conversationId:binding.conversationId})).turns[0]).toMatchObject({answer:'Readable dialogue',summaryState:'unknown',summaryCandidateId:null});
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe(snap.steps['step-0'].body);
+ expect((await sql.query("select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)",[t.scope.projectId])).rows[0].n).toBe(1);
+},60000);
