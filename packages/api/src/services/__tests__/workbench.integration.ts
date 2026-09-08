@@ -2449,8 +2449,8 @@ aiTest('CHAT: legacy workbench entry preserves old candidate and fixed-round con
  const restored=await skillChatService(t.user,db).read({conversationId});
  expect(restored.binding.roundId).toBe(t.scope.roundId);
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).candidates.map(c=>c.id)).toEqual(before.candidates.map(c=>c.id));
- await page.getByText('此步骤的历史候选',{exact:true}).click();
- await expect.poll(async()=>await page.getByRole('button',{name:'采用历史候选',exact:true}).count(),{timeout:30000}).toBeGreaterThan(0);
+ await page.getByText('此步骤的历史回复（只读）',{exact:true}).click();
+ expect(await page.getByRole('button',{name:'采用历史候选',exact:true}).count()).toBe(0);
  await context.close();
  const again=await pageFor();await again.page.goto(target);await again.page.getByLabel('给当前步骤发消息').waitFor();
  expect(new URL(again.page.url()).searchParams.get('conversation')).toBe(conversationId);await again.context.close();
@@ -2719,7 +2719,8 @@ aiTest.each(['candidate','saved'])('CHAT: revoked inherited sources hide %s loca
  const replayed:string[]=[];page.on('request',request=>{if(request.url().includes('workbench.execute'))replayed.push(request.postData()??'');});
  await page.goto(chatUrl);await expect.poll(async()=>page.getByLabel('当前步骤工作稿').isEnabled(),{timeout:30000}).toBe(true);
  expect(await page.getByLabel('当前步骤工作稿').inputValue()).not.toContain('REVOKED_LOCAL_DRAFT_CANARY');
- expect(replayed.join('')).not.toContain('REVOKED_LOCAL_DRAFT_CANARY');
+ await page.waitForTimeout(1000);
+ expect(replayed).toHaveLength(0);
  expect(await page.getByRole('button',{name:'恢复此版本到成果',exact:true}).count()).toBe(0);
  await context.close();
 },120000);
