@@ -3004,3 +3004,44 @@ aiTest('CHAT: oversized summary preserves the reply and never replays or settles
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body).toBe(snap.steps['step-0'].body);
  expect((await sql.query("select count(*)::int n from token_stats where artifact_generation_id in (select id from artifact_generations where project_id=$1)",[t.scope.projectId])).rows[0].n).toBe(1);
 },60000);
+
+aiTest('CHAT: dirty ancestor blocks descendant send until autosave and fresh confirmation',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture();
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'Old confirmed ancestor',evidenceIds:[]});
+ const saved=(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'];
+ await t.service.execute({...t.scope,action:'confirm',stepId:'step-0',requestId:randomUUID(),expectedVersion:saved.version,expectedReviewVersion:saved.reviewVersion});
+ const chat=skillChatService(t.user,db),binding=await chat.enter({...t.scope,requestId:randomUUID()});
+ const {page,context}=await pageFor(credentials,[]);
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?5000:timeout,...args)) as typeof window.setTimeout;});
+ let quotes=0,dispatches=0;page.on('request',r=>{if(r.url().includes('workbench.generationQuote'))quotes++;if(r.url().includes('workbench.generate'))dispatches++;});
+ await page.goto(app+'/chat?conversation='+binding.conversationId);
+ await page.getByLabel('当前步骤工作稿').fill('New ancestor must be saved before any reply');
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await page.getByLabel('给当前步骤发消息').fill('Discuss the dependent step');
+ expect(await page.getByRole('button',{name:'发送',exact:true}).isDisabled()).toBe(true);
+ expect(quotes).toBe(0);expect(dispatches).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:20000}).toBe('New ancestor must be saved before any reply');
+ expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].valid).toBe(false);
+ expect(dispatches).toBe(0);
+ await context.close();
+},90000);
+
+aiTest('CHAT: editing a result while quote is pending abandons before model dispatch',async()=>{
+ const t=await generationFixture(),{page,context}=await pageFor(credentials,[]);
+ let release!:()=>void,arrived!:()=>void;const hold=new Promise<void>(r=>release=r),seen=new Promise<void>(r=>arrived=r);let dispatches=0;
+ page.on('request',r=>{if(r.url().includes('workbench.generate'))dispatches++;});
+ await page.addInitScript(()=>{const original=window.setTimeout.bind(window);window.setTimeout=((handler:TimerHandler,timeout?:number,...args:unknown[])=>original(handler,timeout===450?3000:timeout,...args)) as typeof window.setTimeout;});
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));
+ await page.route('**/api/trpc/workbench.generationQuote*',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
+ await page.getByLabel('给当前步骤发消息').fill('Discuss without replacing manual decisions');await page.getByRole('button',{name:'发送',exact:true}).click();await seen;
+ await page.getByLabel('当前步骤工作稿').fill('Manual decision changed during quotation');release();
+ const {skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db);const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>t.abandoned),{timeout:30000}).toBe(true);
+ expect(dispatches).toBe(0);
+ await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Manual decision changed during quotation');
+ await page.unroute('**/api/trpc/workbench.generationQuote*');
+ await expect.poll(async()=>page.getByRole('button',{name:'发送',exact:true}).isEnabled(),{timeout:30000}).toBe(true);
+ await page.getByRole('button',{name:'发送',exact:true}).click();
+ await expect.poll(async()=>(await chat.read({conversationId})).turns.some(t=>!t.abandoned&&t.generationState==='succeeded'),{timeout:30000}).toBe(true);
+ expect(dispatches).toBeGreaterThan(0);await context.close();
+},90000);

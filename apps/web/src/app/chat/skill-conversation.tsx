@@ -388,6 +388,7 @@ export function SkillConversation({
   }, [drafts, busy, snapshot]);
   async function send() {
     if (!scope || !snapshot || !input.trim()) return;
+    if (Object.values(state.current.drafts).some(d => d.dirty)) { setError("请等待成果自动保存后再发送。"); return; }
     const body = input.trim(),
       selected = step,
       inputEpoch = inputRevision.current;
@@ -404,6 +405,7 @@ export function SkillConversation({
       .at(-1);
     const requestId = prior?.requestId ?? id();
     await run(async () => {
+      if (Object.values(state.current.drafts).some(d => d.dirty)) throw new Error("请等待成果自动保存后再发送。");
       await api.chatSubmit.mutate({
         conversationId,
         requestId,
@@ -438,7 +440,8 @@ export function SkillConversation({
         throw error;
       }
       if (!alive.current || inputRevision.current !== inputEpoch ||
-          state.current.chat?.binding.stepId !== selected) {
+          state.current.chat?.binding.stepId !== selected ||
+          Object.values(state.current.drafts).some(d => d.dirty)) {
         // Editing while admission is pending cancels this intent before dispatch.
         // Tombstone it so it cannot later enter history/context as a sent message.
         await api.abandonGeneration.mutate({ ...scope, requestId });
@@ -653,7 +656,7 @@ export function SkillConversation({
                   !input.trim() ||
                   !!unresolved ||
                   !!delivery ||
-                  !!draft?.dirty ||
+                  Object.values(drafts).some(d => d.dirty) ||
                   snapshot?.state !== "draft"
                 }
                 onClick={() => void send()}
@@ -676,8 +679,8 @@ export function SkillConversation({
               >
                 刷新状态
               </Button>
-              {draft?.dirty && (
-                <span className="text-sm">正在自动保存本步骤成果…</span>
+              {Object.values(drafts).some(d => d.dirty) && (
+                <span className="text-sm">正在自动保存成果…</span>
               )}
             </div>
             {snapshot?.generations

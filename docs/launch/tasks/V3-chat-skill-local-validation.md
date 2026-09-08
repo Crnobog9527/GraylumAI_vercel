@@ -147,3 +147,9 @@ GitHub 审查的两项同时修复：scoped catalog 的 100 项上限只计算�
 补充反向专项 `graylum-oversized-summary-validation.log`：1 PASS / 83 SKIP，真实本地 SQL 验证 summary 101 字符超过步骤 100 上限后进入 unknown、原 reply 可读、无成功 summary 候选、仅原 reply 一条 token 结算、同请求重放不再调用 transport；canary 通过。
 
 后续独立 Luna 虚构整理试跑返回供应商 HTTP 403，未得到内容，未自动重试。当前累计 10 次调用保守预留 0.10129650 USD；只读 key 元数据仍显示余量 1.997864138 USD，但本地 Owner 总上限保持 1 USD，不能据余额推断拒绝原因或释放未知预留。该独立探测不代表完整产品两阶段链路通过。
+
+## 跨步骤未保存成果与发送（2026-09-08）
+
+GitHub P1 3956133617 已修复：发送按钮、send 函数入口、可恢复 run 回调均检查所有步骤的 dirty 成果；报价返回后再检查，发生编辑则按原未预留请求执行 abandon，不能携带旧已确认前序内容生成收费回复。已发出/unknown 请求仍保留原身份恢复。
+
+`graylum-dirty-send-final-validation.log`：2 PASS / 84 SKIP，真实本地浏览器/HTTP/SQL验证：前序编辑后切后序在自动保存前不发 quote/generate；保存后前序失去确认。另一个场景将quote响应挂起，此期间编辑成果，释放后零generate且旧意图abandon；编辑保存后显式再次发送成功。私有canary检查通过。Web typecheck PASS。该专项不代表真实模型或完整V3验收。
