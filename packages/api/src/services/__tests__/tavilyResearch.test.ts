@@ -15,7 +15,7 @@ describe('reviewed Tavily basic search contract',()=>{
   expect(out.objects[0]).toMatchObject({id:'fictional-1',sourceUrl:'https://example.test/exhibition',observedAt:null,missingFields:['publishedAt'],fields:{title:'Fictional exhibition guide',content:'Fictional planning notes.',coverage:'ranked-results-not-exhaustive',providerUsage:{unit:'tavily-credit',credits:1}}});
   expect(out.pagination).toEqual({complete:true,nextCursor:null});
  });
- it.each([{search_depth:'advanced'},{auto_parameters:true},{include_answer:true},{include_raw_content:true},{include_images:true},{max_results:4},{topic:'news'},{privateSkillBody:'never send'},{query:''}])('rejects unapproved parameters before admission: %j',patch=>{
+ it.each([{search_depth:'advanced'},{auto_parameters:true},{include_answer:true},{include_raw_content:true},{include_images:true},{max_results:4},{topic:'news'},{privateSkillBody:'never send'},{query:''},{query:' leading space'},{query:'trailing space '}])('rejects unapproved parameters before admission: %j',patch=>{
   expect(()=>tavilyContract.validateInput!({...context,params:{...params,...patch}})).toThrow();
  });
  it('rejects parameter schema drift and alternate execution templates',()=>{

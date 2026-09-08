@@ -4,7 +4,8 @@ import { contractHash, creditsToUnits, ResearchError, type ProviderContract, typ
 import { tavilySchema } from './tavilySchema';
 
 export const TAVILY_SEARCH = 'Tavily/post_search';
-const query=z.string().trim().min(1).max(200);
+// Validate the exact dispatched query; never normalize only the comparison copy.
+const query=z.string().min(1).max(200).refine(value=>value===value.trim());
 const input=z.object({query,search_depth:z.literal('basic'),max_results:z.number().int().min(1).max(3),auto_parameters:z.literal(false),include_answer:z.literal(false),include_raw_content:z.literal(false),include_images:z.literal(false),include_usage:z.literal(true),topic:z.literal('general')}).strict();
 export const tavilyCapabilities:readonly ReviewedCapability[]=[{internalName:'tavily.webSearch',canonicalName:TAVILY_SEARCH,schemaHash:contractHash(tavilySchema),parameterKeys:Object.keys(input.shape),maxQuoteCredits:1.1}];
 function parse<T>(schema:z.ZodType<T>,value:unknown):T {const parsed=schema.safeParse(value);if(!parsed.success)throw new ResearchError('PROVIDER_CONTRACT_INVALID');return parsed.data;}
