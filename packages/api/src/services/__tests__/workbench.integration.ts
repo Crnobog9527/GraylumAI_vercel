@@ -2691,3 +2691,35 @@ aiTest('CHAT: a definite external save conflict releases the frozen attempt and 
  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].version).toBe(2);
  await context.close();
 },90000);
+
+aiTest.each(['candidate','saved'])('CHAT: revoked inherited sources hide %s local drafts and frozen saves after browser restoration',async(kind)=>{
+ const t=await generationFixture();
+ await t.service.execute({...t.scope,action:'userEvidence',requestId:randomUUID(),body:'Inherited source E',observedAt:null,supersedes:null});
+ const evidenceId=(await t.service.read(t.scope.projectId,t.scope.roundId)).evidence[0].id;
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:0,body:'Basis from E',evidenceIds:[evidenceId]});
+ let snap=await t.service.read(t.scope.projectId,t.scope.roundId);
+ await t.service.execute({...t.scope,action:'confirm',stepId:'step-0',requestId:randomUUID(),expectedVersion:snap.steps['step-0'].version,expectedReviewVersion:snap.steps['step-0'].reviewVersion});
+ if(kind==='saved')await t.service.execute({...t.scope,action:'save',stepId:'step-1',requestId:randomUUID(),expectedVersion:0,body:'Persisted descendant from E',evidenceIds:[]});
+ const {page,context}=await pageFor(credentials,[]);
+ await page.goto(app+'/chat?module='+t.f.moduleId);await page.waitForURL(u=>!!u.searchParams.get('conversation'));const chatUrl=page.url();
+ await page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).click();
+ await expect.poll(async()=>page.getByRole('button',{name:new RegExp('^2\\. '+t.f.flow.steps[1].title)}).getAttribute('aria-current'),{timeout:30000}).toBe('step');
+ await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+ if(kind==='candidate'){
+  await page.getByLabel('给当前步骤发消息').fill('Draft a descendant result');await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ }
+ await page.getByLabel('当前步骤工作稿').fill('REVOKED_LOCAL_DRAFT_CANARY');
+ await page.getByRole('button',{name:'重试保存',exact:true}).waitFor();
+ await page.getByRole('button',{name:'新建对话',exact:true}).click();await page.waitForURL(u=>!u.searchParams.has('conversation'));
+ await page.unroute('**/api/trpc/workbench.execute*');
+ await t.service.execute({...t.scope,action:'save',stepId:'step-0',requestId:randomUUID(),expectedVersion:1,body:'Independent rewritten ancestor',evidenceIds:[]});
+ if(kind==='saved')await t.service.execute({...t.scope,action:'save',stepId:'step-1',requestId:randomUUID(),expectedVersion:1,body:'Independent rewritten descendant',evidenceIds:[]});
+ await t.service.execute({...t.scope,action:'restrictEvidence',requestId:randomUUID(),evidenceId,deleted:true,expiresAt:null});
+ const replayed:string[]=[];page.on('request',request=>{if(request.url().includes('workbench.execute'))replayed.push(request.postData()??'');});
+ await page.goto(chatUrl);await expect.poll(async()=>page.getByLabel('当前步骤工作稿').isEnabled(),{timeout:30000}).toBe(true);
+ expect(await page.getByLabel('当前步骤工作稿').inputValue()).not.toContain('REVOKED_LOCAL_DRAFT_CANARY');
+ expect(replayed.join('')).not.toContain('REVOKED_LOCAL_DRAFT_CANARY');
+ expect(await page.getByRole('button',{name:'恢复此版本到成果',exact:true}).count()).toBe(0);
+ await context.close();
+},120000);

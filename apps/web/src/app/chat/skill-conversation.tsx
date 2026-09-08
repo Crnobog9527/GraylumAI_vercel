@@ -19,6 +19,7 @@ type Draft = {
   editId: string;
   candidateId?: string;
   evidenceIds: string[];
+  provenanceIds: string[];
 };
 const id = () => crypto.randomUUID();
 const surface =
@@ -211,6 +212,7 @@ export function SkillConversation({
           for (const [k, d] of Object.entries(saved.drafts ?? {}) as [string, Draft][]) {
             if (snap.steps[k] && d?.dirty === true && typeof d.body === "string" && d.body.length <= 20000 &&
                 Number.isSafeInteger(d.version) && d.version >= 0 && typeof d.editId === "string" && /^[a-f0-9-]{36}$/.test(d.editId) &&
+                Array.isArray(d.provenanceIds) && d.provenanceIds.length <= 2048 && d.provenanceIds.every(x => typeof x === "string") &&
                 Array.isArray(d.evidenceIds) && d.evidenceIds.length <= 64 && d.evidenceIds.every(x => typeof x === "string") &&
                 (d.candidateId === undefined || (typeof d.candidateId === "string" && /^[a-f0-9-]{36}$/.test(d.candidateId)))) recovered[k] = d;
           }
@@ -219,6 +221,7 @@ export function SkillConversation({
               typeof frozen.draft.body === "string" && frozen.draft.body.length <= 20000 &&
               Number.isSafeInteger(frozen.draft.version) && frozen.draft.version >= 0 &&
               /^[a-f0-9-]{36}$/.test(frozen.draft.editId) &&
+              Array.isArray(frozen.draft.provenanceIds) && frozen.draft.provenanceIds.length <= 2048 && frozen.draft.provenanceIds.every((x: unknown) => typeof x === "string") &&
               Array.isArray(frozen.draft.evidenceIds) && frozen.draft.evidenceIds.length <= 64 &&
               frozen.draft.evidenceIds.every((x: unknown) => typeof x === "string") &&
               (frozen.draft.candidateId === undefined || /^[a-f0-9-]{36}$/.test(frozen.draft.candidateId))) {
@@ -232,16 +235,22 @@ export function SkillConversation({
       } catch {}
       journalReady.current = true;
     }
+    const visible = (d: Draft, k: string) => snap.steps[k]?.available !== false &&
+      [...d.evidenceIds, ...d.provenanceIds].every(id => snap.evidence.some(e => e.id === id && e.available)) &&
+      (!d.candidateId || snap.candidates.some(c => c.id === d.candidateId && c.stepId === k && c.body !== null));
+    if (pendingSave.current && !visible(pendingSave.current.draft, pendingSave.current.step)) {
+      // The authoritative read no longer permits this local text. Do not replay
+      // restricted payloads even when the previous acknowledgement was unknown.
+      pendingSave.current = null;
+      pendingWrite.current = null;
+    }
     setDrafts((previous) => {
       const old = { ...recovered, ...previous };
       return Object.fromEntries(
         Object.entries(snap.steps).map(([k, s]) => [
           k,
           old[k]?.dirty &&
-          s.available !== false &&
-          old[k].evidenceIds.every((id) =>
-            snap.evidence.some((e) => e.id === id && e.available),
-          )
+          visible(old[k], k)
             ? old[k]
             : {
                 body: s.body ?? "",
@@ -249,6 +258,7 @@ export function SkillConversation({
                 dirty: false,
                 editId: id(),
                 evidenceIds: s.evidenceIds,
+                provenanceIds: s.provenanceIds,
               },
         ]),
       );
@@ -483,7 +493,7 @@ export function SkillConversation({
           const current = old[value.stepId];
           if (!current || current.dirty || current.version !== expectedVersion) return old;
           return { ...old, [value.stepId]: { ...current, body,
-            candidateId: candidate.id, evidenceIds: candidate.directEvidenceIds!,
+            candidateId: candidate.id, evidenceIds: candidate.directEvidenceIds!, provenanceIds: candidate.evidenceIds,
             dirty: true, editId: candidate.id } };
         });
       }
@@ -574,43 +584,12 @@ export function SkillConversation({
                       data-message-role="assistant"
                     >
                       <p className="mb-2 text-xs text-[var(--text-tertiary)]">
-                        AI · 候选
+                        AI · 本步骤成果
                       </p>
                       <p className="whitespace-pre-wrap break-words">
                         {t.answer}
                       </p>
-                      <Button
-                        variant="outline"
-                        className="mt-3"
-                        disabled={
-                          busy || snapshot?.state !== "draft" || draft?.dirty
-                        }
-                        onClick={() => {
-                          const candidate = snapshot?.candidates.find(
-                            (c) => c.id === t.candidateId,
-                          );
-                          if (
-                            !candidate?.body ||
-                            !candidate.directEvidenceIds ||
-                            !draft
-                          )
-                            return;
-                          setDrafts((old) => ({
-                            ...old,
-                            [step]: {
-                              ...draft,
-                              body: candidate.body!,
-                              candidateId: candidate.id,
-                              evidenceIds: candidate.directEvidenceIds!,
-                              dirty: true,
-                              editId: id(),
-                            },
-                          }));
-                          setShowSteps(true);
-                        }}
-                      >
-                        恢复此版本到成果
-                      </Button>
+
                     </div>
                   )}
                 </article>
@@ -864,6 +843,7 @@ export function SkillConversation({
                           body: snapshot.steps[step].body ?? "",
                           version: snapshot.steps[step].version,
                           evidenceIds: snapshot.steps[step].evidenceIds,
+                          provenanceIds: snapshot.steps[step].provenanceIds,
                           candidateId: undefined,
                           dirty: false,
                           editId: id(),
@@ -882,7 +862,7 @@ export function SkillConversation({
                 !chat.turns.some((t) => t.candidateId === c.id),
             ) && (
               <details className="mt-5">
-                <summary>此步骤的历史候选</summary>
+                <summary>此步骤的历史回复（只读）</summary>
                 {snapshot.candidates
                   .filter(
                     (c) =>
@@ -894,32 +874,7 @@ export function SkillConversation({
                       <p className="whitespace-pre-wrap break-words text-sm">
                         {c.body ?? "来源已受限，候选不可用"}
                       </p>
-                      <Button
-                        variant="outline"
-                        disabled={
-                          busy ||
-                          draft?.dirty ||
-                          !c.body ||
-                          !c.directEvidenceIds ||
-                          snapshot.state !== "draft"
-                        }
-                        onClick={() => {
-                          if (!draft || !c.body || !c.directEvidenceIds) return;
-                          setDrafts((old) => ({
-                            ...old,
-                            [step]: {
-                              ...draft,
-                              body: c.body!,
-                              candidateId: c.id,
-                              evidenceIds: c.directEvidenceIds!,
-                              dirty: true,
-                              editId: id(),
-                            },
-                          }));
-                        }}
-                      >
-                        采用历史候选
-                      </Button>
+
                     </div>
                   ))}
               </details>
