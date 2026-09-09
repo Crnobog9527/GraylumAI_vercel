@@ -511,14 +511,13 @@ export const modelRouter = router({
       id: z.string().uuid(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { error } = await ctx.supabase
-        .from('ai_models')
-        .delete()
-        .eq('id', input.id);
-
-      if (error) {
-        throw createModelOperationError('删除模型', error);
-      }
+      const { error } = await ctx.supabase.rpc('admin_delete_unused_model', {
+        p_actor_id: ctx.user.id, p_model_id: input.id,
+      });
+      if (error?.code === '23503') throw new TRPCError({
+        code: 'CONFLICT', message: '这个模型仍被功能模块、对话或系统配置使用，不能删除。请先更换引用它的配置；历史对话使用的模型可停用。',
+      });
+      if (error) throw createModelOperationError('删除模型', error);
       return { success: true };
     }),
 

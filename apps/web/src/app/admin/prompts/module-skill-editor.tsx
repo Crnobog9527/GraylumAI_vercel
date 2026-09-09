@@ -78,7 +78,9 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
         <Input aria-label={`步骤 ${i + 1} 名称`} value={step.title} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, title: e.target.value } : s) })} />
         <Button type="button" variant="outline" disabled={value.steps.length === 1} onClick={() => patch({ steps: value.steps.filter((_,j) => j !== i) })}>删除</Button>
       </div>
-      <details><summary className="text-sm">本步参考文件（{step.resources.length}）</summary>
+      <details><summary className="text-sm">本步骤给 AI 阅读的资料（{step.resources.filter(path => value.files.some(f => f.path === path)).length}）</summary>
+        <p className="text-xs text-[var(--text-secondary)]">选择这个步骤需要的补充方法或模板，例如对标步骤用对标分析资料。只供 AI 阅读，不要求最终用户上传。SKILL.md 是各步骤共用的主说明。</p>
+        {value.files.length === 0 && <p className="text-sm">请先导入 Skill 文件，导入后可在这里选择资料。</p>}
         {value.files.map(f => <label key={f.path} className="flex gap-2 text-sm py-1 break-all">
           <input type="checkbox" checked={step.resources.includes(f.path)} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, resources: e.target.checked ? [...s.resources,f.path] : s.resources.filter(p => p !== f.path) } : s) })} />{f.path}
         </label>)}

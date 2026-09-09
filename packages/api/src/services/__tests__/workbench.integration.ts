@@ -3527,8 +3527,13 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     const unusedModule = randomUUID();
     await sql.query("insert into modules(id,title,active) values($1,'Inactive deletion browser fixture',false)",[unusedModule]);
     await page.reload();
-    page.once('dialog', dialog => dialog.accept());
+    // Simulate a browser extension blocking native dialogs; our page dialog must still work.
+    await page.evaluate(() => { window.confirm = () => false; });
     await page.getByTestId('admin-prompt-delete-' + unusedModule).click();
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    expect((await sql.query('select id from modules where id=$1',[unusedModule])).rowCount).toBe(1);
+    await page.getByTestId('admin-prompt-delete-' + unusedModule).click();
+    await page.getByRole('button', { name: '确认删除', exact: true }).click();
     await expect.poll(async () => (await sql.query('select id from modules where id=$1',[unusedModule])).rowCount).toBe(0);
 
     await page.getByRole('button', { name: '新建模块', exact: true }).click();
@@ -3619,6 +3624,33 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   const ordinary = await pageFor();
   expect((await ordinary.page.request.post(app + '/api/trpc/model.updateModel',{data:{id:model,name:'Denied'}})).status()).toBe(403);
   expect((await ordinary.page.request.post(app + '/api/trpc/admin.removePrompt',{data:{id:fixtures[0].moduleId}})).status()).toBe(403);
+  expect((await ordinary.page.request.post(app + '/api/trpc/model.deleteModel',{data:{id:model}})).status()).toBe(403);
+  expect((await client.rpc('admin_delete_unused_model',{p_actor_id:admin.id,p_model_id:model})).error?.code).toBe('42501');
+  const target = randomUUID();
+  await sql.query("insert into ai_models(id,model_id,name) values($1,'unused-model','Unused deletion model')",[target]);
+  await sql.query("insert into system_settings(key,value) values('delete-test-config',$1)",[JSON.stringify({modelId:target.toUpperCase()})]);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(409);
+  await sql.query("delete from system_settings where key='delete-test-config'");
+  const prompt = randomUUID();
+  await sql.query('insert into prompts(id,model_id) values($1,$2)',[prompt,target]);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(409);
+  expect((await sql.query('select model_id from prompts where id=$1',[prompt])).rows[0].model_id).toBe(target);
+  await sql.query('delete from prompts where id=$1',[prompt]);
+  const linkedModule = randomUUID();
+  await sql.query("insert into modules(id,title,model_id) values($1,'Model reference',$2)",[linkedModule,target]);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(409);
+  expect((await sql.query('select model_id from modules where id=$1',[linkedModule])).rows[0].model_id).toBe(target);
+  await sql.query('delete from modules where id=$1',[linkedModule]);
+  await page.goto(app + '/admin/models');
+  await page.getByTestId('admin-model-delete-' + target).click();
+  await page.getByRole('button',{name:'取消',exact:true}).click();
+  expect((await sql.query('select id from ai_models where id=$1',[target])).rowCount).toBe(1);
+  await page.getByTestId('admin-model-delete-' + target).click();
+  await page.getByTestId('admin-model-delete-confirm').click();
+  await expect.poll(async () => (await sql.query('select id from ai_models where id=$1',[target])).rowCount).toBe(0);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(200);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(200);
+  expect((await sql.query('select id from ai_models where id=$1',[target])).rowCount).toBe(0);
   await ordinary.context.close(); await context.close();
   const privileges = await sql.query("select has_table_privilege('anon','ai_models','UPDATE') as anon,has_table_privilege('authenticated','modules','DELETE') as authenticated");
   expect(privileges.rows[0]).toEqual({anon:false,authenticated:false});

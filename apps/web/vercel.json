@@ -8,7 +8,8 @@
       "codex/v3-chat-skill-20260908": false,
       "codex/v3-web-search-contract-20260908": false,
       "codex/admin-skill-publication-20260909": false,
-      "codex/admin-management-repair-20260909": false
+      "codex/admin-management-repair-20260909": false,
+      "codex/admin-delete-dialogs-20260909": false
     }
   },
   "crons": [

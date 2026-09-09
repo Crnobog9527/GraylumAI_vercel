@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ModuleSkillEditor, emptySkillForm, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
+import { toast } from 'sonner';
 import {
   Wand2, Plus, Pencil, Trash2, Check, X,
   Code, Sparkles, BarChart3, Layers, RefreshCw,
@@ -200,6 +201,8 @@ export default function AdminPromptsPage() {
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<FeatureModule | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | 'all'>('all');
+  const [confirmation, setConfirmation] = useState<{ kind: 'delete' | 'disable'; ids: string[]; title: string } | null>(null);
+  const [confirmationError, setConfirmationError] = useState('');
   const [selectedModuleIds, setSelectedModuleIds] = useState<string[]>([]);
   const [formData, setFormData] = useState<ModuleForm>(() => createEmptyForm());
   const [batchForm, setBatchForm] = useState<BatchEditForm>({
@@ -214,6 +217,12 @@ export default function AdminPromptsPage() {
     limit: 50,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
   });
+
+  useEffect(() => {
+    if (!dashboard) return;
+    const present = new Set((dashboard.modules ?? dashboard.prompts ?? []).map(m => m.id));
+    setSelectedModuleIds(ids => ids.filter(id => present.has(id)));
+  }, [dashboard]);
 
   const createPrompt = trpc.admin.createPrompt.useMutation({
     onSuccess: async () => {
@@ -230,8 +239,9 @@ export default function AdminPromptsPage() {
   });
 
   const deletePrompt = trpc.admin.removePrompt.useMutation({
-    onError: error => alert(error.message),
+    onError: error => setConfirmationError(error.message),
     onSuccess: async () => {
+      setConfirmation(null);
       await refetch();
     }
   });
@@ -252,7 +262,9 @@ export default function AdminPromptsPage() {
   });
 
   const batchDeletePrompts = trpc.admin.batchDeletePrompts.useMutation({
+    onError: error => setConfirmationError(error.message),
     onSuccess: async () => {
+      setConfirmation(null);
       await refetch();
       setSelectedModuleIds([]);
     }
@@ -402,9 +414,8 @@ export default function AdminPromptsPage() {
   };
 
   const handleDelete = (module: FeatureModule) => {
-    if (confirm(`确定要删除功能模块 "${module.title}" 吗？删除后无法恢复；已关联对话或项目的模块会保留。`)) {
-      deletePrompt.mutate({ id: module.id });
-    }
+    setConfirmationError('');
+    setConfirmation({ kind: 'delete', ids: [module.id], title: module.title });
   };
 
   const handleToggleModuleSelection = (moduleId: string, checked: boolean) => {
@@ -455,7 +466,7 @@ export default function AdminPromptsPage() {
     if (batchForm.isFeatured !== BATCH_NO_CHANGE) patch.isFeatured = batchForm.isFeatured === 'featured';
 
     if (Object.keys(patch).length === 0) {
-      alert('请至少选择一个要批量更新的字段');
+      toast.error('请至少选择一个要批量更新的字段');
       return;
     }
 
@@ -467,14 +478,10 @@ export default function AdminPromptsPage() {
 
   const handleBatchDisable = () => {
     if (selectedModuleIds.length === 0) return;
-    if (!confirm(`确定要下架选中的 ${selectedModuleIds.length} 个功能模块吗？下架后前台功能广场将不再展示。`)) {
-      return;
-    }
-
-    batchDeletePrompts.mutate({
-      ids: selectedModuleIds,
-    });
+    setConfirmationError('');
+    setConfirmation({ kind: 'disable', ids: [...selectedModuleIds], title: `${selectedModuleIds.length} 个模块` });
   };
+  const confirmationPending = deletePrompt.isPending || batchDeletePrompts.isPending;
 
   if (isLoading) {
     return <AdminLoadingState />;
@@ -797,6 +804,29 @@ export default function AdminPromptsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={confirmation !== null} onOpenChange={open => { if (!open && !confirmationPending) setConfirmation(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmation?.kind === 'delete' ? '删除功能模块' : '下架功能模块'}</DialogTitle>
+            <DialogDescription>
+              {confirmation?.kind === 'delete'
+                ? `确定删除“${confirmation.title}”吗？删除后无法恢复。被功能卡片、对话或项目引用的模块会保留。`
+                : `确定下架选中的 ${confirmation?.title} 吗？前台将不再展示，已有记录保留。`}
+            </DialogDescription>
+          </DialogHeader>
+          {confirmationError && <p role="alert" className="text-red-400">{confirmationError}</p>}
+          <DialogFooter>
+            <Button variant="outline" disabled={confirmationPending} onClick={() => setConfirmation(null)}>取消</Button>
+            <Button data-testid="admin-module-confirm" disabled={confirmationPending} onClick={() => {
+              if (!confirmation || confirmationPending) return;
+              setConfirmationError('');
+              if (confirmation.kind === 'delete') deletePrompt.mutate({id: confirmation.ids[0]});
+              else batchDeletePrompts.mutate({ids: confirmation.ids});
+            }}>{confirmationPending ? '处理中…' : confirmation?.kind === 'delete' ? '确认删除' : '确认下架'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
         <DialogContent
