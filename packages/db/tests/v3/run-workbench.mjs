@@ -16,9 +16,9 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--ai-only','--chat-only','--research-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only or --research-only, optionally --serve');
+if(args.some(arg=>!['--ai-only','--chat-only','--research-only','--admin-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only or --admin-only, optionally --serve');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
-const testPattern=args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const testPattern=args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -172,6 +172,10 @@ try {
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0071_v3_research_billing.sql");
   apply("packages/db/migrations/0071_v3_research_billing.sql");
+  // Match the production module metadata types for administrator publication.
+  sql("ALTER TABLE modules ADD COLUMN created_by uuid, ADD COLUMN prompt_content text, ADD COLUMN system_prompt text, ADD COLUMN user_prompt_template text; ALTER TABLE modules ALTER COLUMN features TYPE text USING features::text, ALTER COLUMN examples TYPE text USING examples::text, ALTER COLUMN preparation_questions TYPE text USING preparation_questions::text;");
+  apply("packages/db/migrations/0072_v3_admin_skill_modules.sql");
+  apply("packages/db/migrations/0072_v3_admin_skill_modules.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

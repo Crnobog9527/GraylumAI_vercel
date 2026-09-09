@@ -15,6 +15,17 @@ export type PackagePublication = z.infer<typeof packagePublicationInput>;
 
 /** Only call behind adminProcedure; this service never reads environment credentials. */
 export async function publishSkillPackage(db: SupabaseClient, actorId: string, value: PackagePublication) {
+  const { input, descriptor: p, files } = validatePublication(value);
+  const { data, error } = await db.rpc('atomic_publish_skill_package', {
+    p_skill_id: input.id, p_actor_id: actorId, p_revision_id: input.revisionId,
+    p_request_id: input.requestId, p_expected_version: input.expectedVersion,
+    p_manifest: p, p_hash_payload: packageHashPayload(p), p_files: files,
+  });
+  if (error || !data) fail('SOURCE_FAILURE');
+  return { revisionId: input.revisionId, packageHash: p.packageHash, version: Number(data) };
+}
+
+export function validatePublication(value: PackagePublication) {
   const input = packagePublicationInput.parse(value);
   const p = validateDescriptor(input.descriptor);
   if (p.packageId !== input.id || p.revisionId !== input.revisionId || input.files.length !== p.files.length) fail('INVALID_PACKAGE');
@@ -36,11 +47,5 @@ export async function publishSkillPackage(db: SupabaseClient, actorId: string, v
     }
     return { path: file.path, base64: file.base64 };
   });
-  const { data, error } = await db.rpc('atomic_publish_skill_package', {
-    p_skill_id: input.id, p_actor_id: actorId, p_revision_id: input.revisionId,
-    p_request_id: input.requestId, p_expected_version: input.expectedVersion,
-    p_manifest: p, p_hash_payload: packageHashPayload(p), p_files: files,
-  });
-  if (error || !data) fail('SOURCE_FAILURE');
-  return { revisionId: input.revisionId, packageHash: p.packageHash, version: Number(data) };
+  return { input, descriptor: p, files };
 }

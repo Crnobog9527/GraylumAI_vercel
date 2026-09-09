@@ -3,8 +3,9 @@ import { beforeAll, afterAll, it, expect } from "vitest";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { saveModuleSkill, type ModuleSkillInput } from '../skills/modulePublication';
 import { publishSkillPackage } from "../skills/publication";
 import { makePackage, makeWorkflow } from "./fixtures/artifacts";
 import { packageHash, sha256 } from "../skills/loader";
@@ -3456,3 +3457,97 @@ aiTest('AI: research explicit provider failure refunds once while unknown stays 
   expect((await sql.query('select charged_credits from research_operations where id=$1',[id])).rows[0].charged_credits).toBe(state==='failed'?0:null);
  }
 },30000);
+
+function adminModuleInput(): ModuleSkillInput {
+  const pack = makePackage();
+  return { moduleId: randomUUID(), skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
+    expectedUpdatedAt: null, expectedVersion: 0, directoryName: 'synthetic-method', kind: 'document',
+    files: [...pack.files, { path: 'assets/state.yaml', base64: Buffer.from('state: draft\n').toString('base64') }],
+    steps: [{ title: '需求确认', resources: ['references/step-0.md', 'assets/state.yaml'] }, { title: '定位成果', resources: ['references/step-1.md'] }],
+    resourcePlanReviewed: true, module: { title: 'ADMIN synthetic method ' + randomUUID(), description: 'Synthetic admin validation', full_description: null,
+      model_id: randomUUID(), platform: 'all', category: 'analysis', icon: 'Wand2', image_url: null,
+      badge_type: null, badge_text: null, credits_display: null, sort_order: 0, active: true, is_featured: false,
+      features: null, examples: null, preparation_questions: null },
+  };
+}
+it('ADMIN: atomic package, YAML template, workflow and module publication with replay, rollback and stale-write protection', async () => {
+  const input = adminModuleInput();
+  await sql.query("insert into ai_models(id,model_id,name) values($1,'local-synthetic','Admin fixture model')", [input.module.model_id]);
+  const result = await saveModuleSkill(db, owner, input);
+  expect(result.version).toBe(1);
+  expect(await saveModuleSkill(db, owner, input)).toEqual(result);
+  const read = await db.rpc('admin_read_skill_module', { p_actor_id: owner, p_module_id: input.moduleId });
+  expect(read.error).toBeNull(); expect(read.data.files).toHaveLength(input.files.length);
+  expect(read.data.workflow.steps.map((s: any) => s.title)).toEqual(['需求确认','定位成果']);
+  expect(read.data.files.find((f: any) => f.path === 'assets/state.yaml').base64).toBe(input.files.at(-1)!.base64);
+  const catalog = await db.rpc('artifact_query', { p_actor_id: actor, p_action: 'catalog' });
+  expect(catalog.data.filter((w: any) => w.moduleId === input.moduleId)).toHaveLength(1);
+  const before = (await sql.query('select updated_at::text from modules where id=$1', [input.moduleId])).rows[0];
+  const next = { ...input, revisionId: randomUUID(), requestId: randomUUID(), expectedVersion: 1, expectedUpdatedAt: before.updated_at };
+  next.files = input.files.map(f => f.path === 'references/step-0.md' ? { ...f, base64: Buffer.from('Revised private method').toString('base64') } : f);
+  expect((await saveModuleSkill(db, owner, next)).version).toBe(2);
+  await expect(saveModuleSkill(db, owner, { ...next, revisionId: randomUUID(), requestId: randomUUID() })).rejects.toThrow();
+  const history = await db.rpc('read_skill_package', { p_actor_id: actor, p_module_id: input.moduleId, p_skill_id: input.skillId, p_revision_id: input.revisionId });
+  expect(history.error).toBeNull();
+  expect((await sql.query('select count(*)::int as n from artifact_workflows where module_id=$1 and enabled', [input.moduleId])).rows[0].n).toBe(1);
+  const invalid = adminModuleInput(); // Missing model must roll back Skill/module/registration creation.
+  await expect(saveModuleSkill(db, owner, invalid)).rejects.toThrow();
+  expect((await sql.query('select count(*)::int as n from skills where id=$1', [invalid.skillId])).rows[0].n).toBe(0);
+  expect((await sql.query('select count(*)::int as n from modules where id=$1', [invalid.moduleId])).rows[0].n).toBe(0);
+});
+it('ADMIN: unauthorized users cannot read private configuration or publish, including direct RPC', async () => {
+  const input = adminModuleInput();
+  await expect(saveModuleSkill(db, actor, input)).rejects.toThrow();
+  const denied = await db.rpc('admin_read_skill_module', { p_actor_id: actor, p_module_id: fixtures[0].moduleId });
+  expect(denied.error?.code).toBe('42501');
+  const user = await authenticated();
+  expect((await user.rpc('admin_read_skill_module', { p_actor_id: owner, p_module_id: fixtures[0].moduleId })).error?.code).toBe('42501');
+  const privilege = await sql.query("select has_function_privilege('anon','public.admin_read_skill_module(uuid,uuid)','EXECUTE') as anon, has_function_privilege('authenticated','public.admin_publish_skill_module(uuid,uuid,timestamptz,jsonb,uuid,uuid,uuid,integer,jsonb,text,jsonb,jsonb)','EXECUTE') as authenticated");
+  expect(privilege.rows[0]).toEqual({ anon: false, authenticated: false });
+});
+it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens the resulting conversation', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
+  writeFileSync(output + '/admin-preview.json', JSON.stringify({ url: app, email: admin.email, password: admin.password }), { mode: 0o600 });
+  const input = adminModuleInput();
+  await sql.query("insert into ai_models(id,model_id,name) values($1,'local-synthetic','Browser admin model')", [input.module.model_id]);
+  const directory = output + '/synthetic-method'; mkdirSync(directory, { recursive: true });
+  for (const f of input.files) {
+    const target = directory + '/' + f.path; mkdirSync(target.slice(0,target.lastIndexOf('/')), { recursive: true });
+    writeFileSync(target, Buffer.from(f.base64,'base64'));
+  }
+  const context = await browser.newContext(), page = await context.newPage();
+  try {
+    const ready = page.waitForResponse(r => r.url().includes('/api/trpc/settings.getSystemSettings') && r.ok());
+    await page.goto(app + '/login?redirect=/admin/prompts'); await ready;
+    await page.getByPlaceholder('name@example.com').fill(admin.email);
+    await page.getByPlaceholder('输入你的密码').fill(admin.password);
+    await page.getByRole('button', { name: '登录', exact: true }).last().click();
+    await page.waitForURL(u => u.pathname === '/admin/prompts', { timeout: 90000 });
+    await page.getByRole('button', { name: '新建模块', exact: true }).click();
+    await page.getByLabel('功能类型', { exact: true }).selectOption('skill');
+    await page.getByLabel('导入 Skill 文件夹', { exact: true }).setInputFiles(directory);
+    await page.getByText('已载入 10 个文件', { exact: true }).waitFor();
+    await page.getByTestId('prompt-name-input').fill(input.module.title);
+    await page.getByLabel('步骤 1 名称', { exact: true }).fill('需求确认');
+    await page.getByRole('button', { name: '添加步骤', exact: true }).click();
+    await page.getByLabel('步骤 2 名称', { exact: true }).fill('定位成果');
+    const modelTrigger = page.getByRole('dialog').getByRole('combobox').filter({ hasText: '不限制' });
+    await modelTrigger.click(); await page.getByRole('option', { name: 'Browser admin model', exact: true }).click();
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.getByTestId('prompt-save').click();
+    await expect.poll(() => page.getByRole('dialog').count(), { timeout: 30000 }).toBe(0);
+    const module = (await sql.query('select id,skill_id from modules where title=$1', [input.module.title])).rows[0];
+    expect(module.skill_id).toBeTruthy();
+    await page.goto(app + '/chat?module=' + module.id);
+    await page.getByRole('heading', { name: input.module.title, exact: true }).waitFor({ timeout: 30000 });
+    await page.getByRole('button', { name: /^1\. 需求确认/ }).waitFor();
+    await page.screenshot({ path: output + '/admin-skill-conversation.png' });
+    await page.goto(app + '/admin/prompts');
+    const row = page.getByRole('row').filter({ hasText: input.module.title });
+    await row.getByRole('button').first().click();
+    await page.getByLabel('步骤 1 名称', { exact: true }).waitFor();
+    await expect.poll(() => page.getByLabel('步骤 1 名称', { exact: true }).inputValue(), { timeout: 20000 }).toBe('需求确认');
+    await page.screenshot({ path: output + '/admin-skill-editor.png' });
+  } finally { await context.close(); }
+}, 180000);

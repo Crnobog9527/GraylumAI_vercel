@@ -130,3 +130,17 @@ describe('skillsRouter contract writes', () => {
     await expect(caller.get({ id: ID })).rejects.toMatchObject({ message: 'Skill 不存在或读取失败' });
   });
 });
+
+// New publication/read endpoints must reject unauthorized callers before validation or database access.
+describe('module Skill administration authorization', () => {
+  it.each(['anonymous', 'user'])('denies %s access to package configuration', async role => {
+    const { caller, db } = setup(role);
+    await expect(caller.readModule({ id: MODULE })).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    await expect(caller.saveModule({} as any)).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+    expect(db.rpc).not.toHaveBeenCalled(); expect(db.from).not.toHaveBeenCalled();
+  });
+  it('reads configuration only with the authenticated administrator identity', async () => {
+    const { caller, db } = setup(); await caller.readModule({ id: MODULE });
+    expect(db.rpc).toHaveBeenCalledWith('admin_read_skill_module', { p_actor_id: 'admin-user', p_module_id: MODULE });
+  });
+});

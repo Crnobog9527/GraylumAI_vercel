@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ModuleSkillEditor, emptySkillForm, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
 import {
@@ -75,6 +76,8 @@ interface FeatureModule {
   active: boolean;
   sort_order: number;
   created_at: string;
+  updated_at: string;
+  skill_id: string | null;
 }
 
 type ModuleForm = {
@@ -178,6 +181,18 @@ function stringToArray(value: string): string[] {
 
 export default function AdminPromptsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [mode, setMode] = useState<'prompt' | 'skill'>('prompt');
+  const [skillForm, setSkillForm] = useState<SkillForm>(emptySkillForm);
+  const [skillIdentity, setSkillIdentity] = useState<{ moduleId: string; skillId: string; revisionId: string; requestId: string; expectedVersion: number } | null>(null);
+  const [skillError, setSkillError] = useState('');
+  const [skillLoading, setSkillLoading] = useState(false);
+  const utils = trpc.useUtils();
+  const saveSkill = trpc.skills.saveModule.useMutation({ onSuccess: async () => { await refetch(); setDialogOpen(false); setEditingModule(null); setSkillIdentity(null); setFormData(createEmptyForm()); } });
+  const resetSkill = (module?: FeatureModule) => {
+    setSkillForm(emptySkillForm()); setSkillError('');
+    setSkillIdentity({ moduleId: module?.id ?? crypto.randomUUID(), skillId: module?.skill_id ?? crypto.randomUUID(),
+      revisionId: crypto.randomUUID(), requestId: crypto.randomUUID(), expectedVersion: 0 });
+  };
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<FeatureModule | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | 'all'>('all');
@@ -239,12 +254,23 @@ export default function AdminPromptsPage() {
   });
 
   const openCreateDialog = () => {
+    resetSkill(); setMode('prompt');
     setEditingModule(null);
     setFormData(createEmptyForm());
     setDialogOpen(true);
   };
 
   const openEditDialog = (module: FeatureModule) => {
+    resetSkill(module); setMode(module.skill_id ? 'skill' : 'prompt');
+    if (module.skill_id) {
+      setSkillLoading(true);
+      void utils.skills.readModule.fetch({ id: module.id }).then(data => {
+        if (!data) throw new Error('Skill 配置不存在');
+        setSkillIdentity(current => current?.moduleId === module.id ? { ...current, skillId: data.skillId, expectedVersion: data.expectedVersion } : current);
+        setSkillForm({ directoryName: data.directoryName, kind: data.workflow.kind, files: data.files,
+          steps: data.workflow.steps.map(s => ({ title: s.title, resources: s.resources })), reviewed: false });
+      }).catch(e => setSkillError(e instanceof Error ? e.message : '读取 Skill 失败')).finally(() => setSkillLoading(false));
+    }
     setEditingModule(module);
     setFormData({
       title: module.title,
@@ -272,7 +298,9 @@ export default function AdminPromptsPage() {
   };
 
   const closeDialog = () => {
+    if (saveSkill.isPending || skillLoading) return;
     setDialogOpen(false);
+    setSkillIdentity(null);
     setEditingModule(null);
     setFormData(createEmptyForm());
   };
@@ -308,6 +336,25 @@ export default function AdminPromptsPage() {
 
   const handleSubmit = () => {
     const payload = buildPayload();
+    if (mode === 'skill') {
+      if (!skillIdentity || !formData.modelId || !skillForm.reviewed) return;
+      setSkillError('');
+      saveSkill.mutate({ ...skillIdentity, expectedUpdatedAt: editingModule?.updated_at ?? null,
+        directoryName: skillForm.directoryName, kind: skillForm.kind, files: skillForm.files,
+        steps: skillForm.steps, resourcePlanReviewed: true,
+        module: { title: formData.title, description: formData.description || null,
+          full_description: formData.fullDescription || null, model_id: formData.modelId,
+          platform: formData.platform, category: formData.category, icon: formData.icon,
+          image_url: formData.imageUrl || null, badge_type: formData.badgeType === 'none' ? null : formData.badgeType,
+          badge_text: formData.badgeText || null, credits_display: formData.creditsDisplay || null,
+          sort_order: parseInt(formData.sortOrder) || 0, active: formData.active, is_featured: formData.isFeatured,
+          features: payload.features ? JSON.stringify(payload.features) : null,
+          examples: payload.examples ? JSON.stringify(payload.examples) : null,
+          preparation_questions: payload.userQuestions ? JSON.stringify(payload.userQuestions) : null,
+        },
+      }, { onError: e => setSkillError(e.message) });
+      return;
+    }
 
     if (editingModule) {
       updatePrompt.mutate({
@@ -752,11 +799,20 @@ export default function AdminPromptsPage() {
               {editingModule ? '编辑功能模块' : '新建功能模块'}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              编辑功能广场展示信息和该模块进入聊天时使用的提示词配置。
+              编辑功能广场展示信息，配置提示词或带步骤的 Skill。
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
+          <fieldset disabled={saveSkill.isPending || skillLoading} className="space-y-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
+            <label className="block text-sm">功能类型
+              <select aria-label="功能类型" value={mode} disabled={!!editingModule?.skill_id || saveSkill.isPending}
+                onChange={e => setMode(e.target.value as 'prompt' | 'skill')} className="ml-3 rounded bg-[var(--bg-tertiary)] p-2">
+                <option value="prompt">提示词对话</option><option value="skill">Skill 分步对话</option>
+              </select>
+            </label>
+            {mode === 'skill' && !skillLoading && <ModuleSkillEditor value={skillForm} onChange={setSkillForm} error={skillError} onError={setSkillError} disabled={saveSkill.isPending || skillLoading} />}
+            {skillLoading && <p role="status">正在读取已发布 Skill…</p>}
+            {editingModule?.skill_id && skillError && <a href="/admin/skills" className="text-sm underline">打开旧版文本 Skill 管理</a>}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>模块名称 *</Label>
@@ -828,7 +884,7 @@ export default function AdminPromptsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label style={{ color: 'var(--text-secondary)' }}>指定模型</Label>
+                <Label style={{ color: 'var(--text-secondary)' }}>{mode === 'skill' ? '对话模型 *' : '指定模型'}</Label>
                 <Select
                   value={formData.modelId || 'none'}
                   onValueChange={(value) => setFormData({ ...formData, modelId: value === 'none' ? '' : value })}
@@ -931,6 +987,7 @@ export default function AdminPromptsPage() {
               </div>
             </div>
 
+            {mode === 'prompt' && <>
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>模块提示词 *</Label>
               <Textarea
@@ -965,6 +1022,7 @@ export default function AdminPromptsPage() {
               />
             </div>
 
+            </>}
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>功能特点</Label>
@@ -1029,7 +1087,7 @@ export default function AdminPromptsPage() {
                 />
               </div>
             </div>
-          </div>
+          </fieldset>
 
           <DialogFooter>
             <Button
@@ -1042,10 +1100,10 @@ export default function AdminPromptsPage() {
             <Button
               data-testid="prompt-save"
               onClick={handleSubmit}
-              disabled={!formData.title || !formData.content || createPrompt.isPending || updatePrompt.isPending}
+              disabled={!formData.title || (mode === 'prompt' ? !formData.content : !skillIdentity || !formData.modelId || !skillForm.reviewed || !skillForm.files.length || skillForm.steps.some(s => !s.title.trim() || !s.resources.length)) || skillLoading || saveSkill.isPending || createPrompt.isPending || updatePrompt.isPending}
               className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
             >
-              {createPrompt.isPending || updatePrompt.isPending ? '保存中...' : '保存'}
+              {saveSkill.isPending || createPrompt.isPending || updatePrompt.isPending ? '保存中...' : mode === 'skill' ? '发布 Skill 与模块' : '保存'}
             </Button>
           </DialogFooter>
         </DialogContent>
