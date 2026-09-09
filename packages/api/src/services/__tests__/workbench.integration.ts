@@ -2571,6 +2571,11 @@ aiTest('CHAT: HTTP 429 preserves the message and refunds; explicit retry receive
   expect(await page.locator('[data-message-role="assistant"]').count()).toBe(0);
   expect(requests.some(p=>p.includes('workbench.chatOpen'))).toBe(true);
   expect(requests.some(p=>p.includes('workbench.chatRead'))).toBe(false);
+  // Reproduce an older client that closed before clearing its delivery journal.
+  await page.evaluate(({scope,conversationId,requestId})=>sessionStorage.setItem(`workbench-receipts:${scope.projectId}:${scope.roundId}:pending`,JSON.stringify({...scope,conversationId,requestId})),{scope:t.scope,conversationId:binding.conversationId,requestId:list[0].requestId});
+  await page.reload();await expect.poll(()=>send.isEnabled(),{timeout:30000}).toBe(true);
+  expect(await input.inputValue()).toBe('LOCAL_RATE_LIMIT_ONCE');
+  expect(await page.getByRole('button',{name:'恢复原发送状态',exact:true}).count()).toBe(0);
   await send.click();
   await expect.poll(()=>page.locator('[data-message-role="assistant"]').count(),{timeout:30000}).toBe(1);
   await expect.poll(()=>input.inputValue(),{timeout:30000}).toBe('');
@@ -2579,6 +2584,56 @@ aiTest('CHAT: HTTP 429 preserves the message and refunds; explicit retry receive
  }finally{releaseHistory();await context.close();}
  console.log('CHAT local browser HTTP 429: one refund, retained input, manual retry and reply plus saved summary PASS');
 },90000);
+
+aiTest('CHAT: summary HTTP 429 keeps the paid reply and retries only the summary',async()=>{
+ const t=await generationFixture();const {skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const {page,context}=await pageFor();
+ try{
+  await page.goto(app+'/chat?conversation='+binding.conversationId);
+  const input=page.getByLabel('给当前步骤发消息');await input.fill('LOCAL_SUMMARY_RATE_LIMIT_ONCE');
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('成果整理服务繁忙，整理预留积分已退还。已有回复保留，请稍后点击“继续整理成果”。',{exact:true}).waitFor();
+  expect(await input.inputValue()).toBe('');
+  expect(await page.locator('[data-message-role="assistant"]').count()).toBe(1);
+  const before=await t.ai.list(t.scope);expect(before).toHaveLength(2);
+  const reply=before.find(g=>g.state==='succeeded')!;expect(reply.chargedCredits).toBeGreaterThan(0);
+  expect(before.find(g=>g.state==='refunded')).toMatchObject({chargedCredits:0,failureCode:'provider_rate_limited'});
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100000-reply.chargedCredits!);
+  const retry=page.getByRole('button',{name:'继续整理成果',exact:true});
+  await expect.poll(()=>retry.isEnabled(),{timeout:30000}).toBe(true);await retry.click();
+  await expect.poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Synthetic local HTTP candidate');
+  expect(await page.locator('[data-message-role="assistant"]').count()).toBe(1);
+  const rows=(await sql.query("select input->>'purpose' as purpose,state from artifact_generations where project_id=$1",[t.scope.projectId])).rows;
+  expect(rows.filter(g=>g.purpose==='reply')).toEqual([{purpose:'reply',state:'succeeded'}]);
+  expect(rows.filter(g=>g.purpose==='summary').map(g=>g.state).sort()).toEqual(['refunded','succeeded']);
+  expect((await t.ai.list(t.scope)).find(g=>g.requestId===reply.requestId)).toEqual(reply);
+ }finally{await context.close();}
+ console.log('CHAT summary 429: reply retained and charged once; only summary reservation refunded and retried PASS');
+},90000);
+
+aiTest('CHAT: late initial read cannot overwrite a newer explicit refresh',async()=>{
+ const t=await generationFixture();const {skillChatService}=await import('../artifacts/chat');
+ await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:0,body:'EARLIER_DRAFT',evidenceIds:[]});
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const {page,context}=await pageFor();let first=true,release!:()=>void,arrived!:()=>void;
+ const held=new Promise<void>(r=>{release=r;}),ready=new Promise<void>(r=>{arrived=r;});
+ await page.route('**/api/trpc/workbench.chatOpen*',async route=>{
+  if(!first){await route.continue();return;}first=false;
+  const response=await route.fetch();arrived();await held;await route.fulfill({response});
+ });
+ try{
+  await page.goto(app+'/chat?conversation='+binding.conversationId);await ready;
+  await t.service.execute({...t.scope,action:'save',requestId:randomUUID(),stepId:'step-0',expectedVersion:1,body:'LATEST_AUTHORITATIVE_DRAFT',evidenceIds:[]});
+  await page.getByRole('button',{name:'刷新状态',exact:true}).click();
+  const draft=page.getByLabel('当前步骤工作稿');
+  await expect.poll(()=>draft.inputValue(),{timeout:30000}).toBe('LATEST_AUTHORITATIVE_DRAFT');
+  const late=page.waitForResponse(r=>r.url().includes('/workbench.chatOpen'));release();await late;
+  await page.evaluate(()=>new Promise<void>(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>r()))));
+  expect(await draft.inputValue()).toBe('LATEST_AUTHORITATIVE_DRAFT');
+ }finally{release();await context.close();}
+ console.log('CHAT late initial read: newer authoritative refresh remains visible PASS');
+},60000);
 
 aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and generation',async(n)=>{
  const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(n),chat=skillChatService(t.user,db);
@@ -3851,6 +3906,10 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
 
 
 aiTest('CHAT: provider usage is persisted exactly while missing or interrupted usage cannot settle success',async()=>{
+ // Earlier Skill cases deliberately create additional Luna records. This
+ // ordinary-chat usage fixture needs one active pricing record per model name.
+ const priorLuna=(await sql.query("select id from ai_models where model_id='openai/gpt-5.6-luna' and is_active='true' and id<>$1",[localModel])).rows.map(r=>r.id);
+ await sql.query("update ai_models set is_active='false' where id=any($1::uuid[])",[priorLuna]);
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const {page,context}=await pageFor();
  const auth=await authenticated();const token=(await auth.auth.getSession()).data.session!.access_token;
@@ -3873,7 +3932,7 @@ aiTest('CHAT: provider usage is persisted exactly while missing or interrupted u
    }
   }
   expect((await sql.query('select token_counting_supported,api_endpoint from ai_models where id=$1',[localModel])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:''});
- }finally{await context.close();}
+ }finally{await sql.query("update ai_models set is_active='true' where id=any($1::uuid[])",[priorLuna]);await context.close();}
 });
 
 // Optional local acceptance uses the Owner-supplied private directory payload.
