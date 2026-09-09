@@ -3704,3 +3704,26 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
     await holder.end(); await waiter.end();
   }
 });
+
+
+aiTest('CHAT: provider usage is persisted exactly while missing or interrupted usage cannot settle success',async()=>{
+ await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
+ const {page,context}=await pageFor();
+ try{
+  for(const mode of ['NATIVE','ZERO','MISSING','INVALID','TRUNCATED']){
+   const requestId=randomUUID();
+   const response=await page.request.post(app+'/api/ai/stream',{data:{message:'USAGE_CASE_'+mode,requestId}});
+   const text=await response.text();expect(response.status(),text).toBe(200);
+   const events=text.split('\n').filter(l=>l.startsWith('data: ')).map(l=>JSON.parse(l.slice(6)));
+   const conversationId=events.find(e=>e.type==='init')?.conversationId;expect(conversationId,text).toBeTruthy();
+   const stats=(await sql.query('select input_tokens,output_tokens,metadata from token_stats where conversation_id=$1',[conversationId])).rows;
+   if(['NATIVE','ZERO'].includes(mode)){
+    const input=mode==='ZERO'?0:800,output=mode==='ZERO'?0:30;
+    expect(events.find(e=>e.type==='complete')?.usage).toMatchObject({inputTokens:input,outputTokens:output});
+    expect(stats).toHaveLength(1);expect(stats[0]).toMatchObject({input_tokens:input,output_tokens:output,metadata:{count_source:'provider_usage'}});
+   }else{
+    expect(events.some(e=>e.type==='error')).toBe(true);expect(events.some(e=>e.type==='complete')).toBe(false);expect(stats).toHaveLength(0);
+   }
+  }
+ }finally{await context.close();}
+});

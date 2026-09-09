@@ -439,7 +439,7 @@ describe('modelRouter error sanitization', () => {
                 data: [
                   {
                     id: 'model-1',
-                    name: 'Model 1',
+                    name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
                     model_id: 'gpt-4o',
                     provider: 'openai',
                     api_key: 'sk-test',
@@ -588,14 +588,14 @@ describe('modelRouter error sanitization', () => {
                 data: [
                   {
                     id: 'model-1',
-                    name: 'Model 1',
+                    name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
                     api_key: 'sk-test',
                     config: { connection_status: 'connected', last_tested: '2026-03-29T00:00:00.000Z' },
                     is_active: 'true',
                   },
                   {
                     id: 'model-2',
-                    name: 'Model 2',
+                    name: 'Model 2', provider: 'openai', model_id: 'openai/gpt-5.6-luna', api_endpoint: '', token_counting_supported: 'false',
                     api_key: null,
                     config: {},
                     is_active: 'false',
@@ -615,6 +615,7 @@ describe('modelRouter error sanitization', () => {
     const result = await caller.getAdminModelsDashboard();
 
     expect(result.models).toHaveLength(2);
+    expect(result.models.every(model => model.token_counting_supported === 'true' && model.token_counting_method === 'provider_usage')).toBe(true);
     expect(result.models[0]).not.toHaveProperty('api_key');
     expect(result.models[1]).not.toHaveProperty('api_key');
     expect(result.connectionStatus).toEqual([

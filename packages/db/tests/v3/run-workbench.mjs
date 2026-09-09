@@ -16,9 +16,9 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--ai-only','--chat-only','--research-only','--admin-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only or --admin-only, optionally --serve');
+if(args.some(arg=>!['--ai-only','--chat-only','--research-only','--admin-only','--usage-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only or --admin-only, optionally --serve');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
-const testPattern=args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const testPattern=args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -273,6 +273,12 @@ try {
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const requestText=Buffer.concat(chunks).toString();
       res.writeHead(200,{'Content-Type':'text/event-stream'});
+      if(requestText.includes('USAGE_CASE_')) {
+        const usage=requestText.includes('USAGE_CASE_ZERO')?{prompt_tokens:0,completion_tokens:0,total_tokens:0}:requestText.includes('USAGE_CASE_INVALID')?{prompt_tokens:-1,completion_tokens:30}:{prompt_tokens:800,completion_tokens:30,total_tokens:830,prompt_tokens_details:{cached_tokens:400},completion_tokens_details:{reasoning_tokens:20}};
+        res.write('data: '+JSON.stringify({choices:[{delta:{content:'Synthetic metered answer'}}]})+'\n\n');
+        if(!requestText.includes('USAGE_CASE_MISSING'))res.write('data: '+JSON.stringify({choices:[],usage})+'\n\n');
+        res.end(requestText.includes('USAGE_CASE_TRUNCATED')?'':'data: [DONE]');return;
+      }
       res.write('data: '+JSON.stringify({choices:[{delta:{content:'Synthetic local free/document reply'},finish_reason:null}],usage:{prompt_tokens:800,completion_tokens:30}})+'\n\n');
       if(requestText.includes('ORDINARY_ABORT')||requestText.includes('ORDINARY_ERROR')) {
         await new Promise(r=>setTimeout(r,1500));

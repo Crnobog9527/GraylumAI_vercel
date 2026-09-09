@@ -269,55 +269,13 @@ describe('aiRouter error sanitization', () => {
     expect(billingState.checkIdempotency).not.toHaveBeenCalled();
   });
 
-  it('uses the admin client for abortRequest billing writes', async () => {
-    billingState.settleAbort.mockResolvedValueOnce({
-      consumedCredits: 1,
-      refundedCredits: 9,
-      balanceAfter: 991,
-    });
-    billingState.recordUsageLog.mockResolvedValueOnce(undefined);
-    const supabaseAdmin = { client: 'admin' };
-    const supabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                role: 'user',
-                status: 'active',
-                nickname: 'User',
-                email: 'user@example.com',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        throw new Error(`Unexpected table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller(supabase, supabaseAdmin);
-
-    await expect(caller.abortRequest({
-      requestId: '123e4567-e89b-42d3-a456-426614174000',
-      preDeductId: '123e4567-e89b-42d3-a456-426614174001',
-      consumedTokens: {
-        inputTokens: 10,
-        outputTokens: 20,
-      },
-      modelId: 'dynamic-model',
-    })).resolves.toMatchObject({
-      success: true,
-      consumedCredits: 1,
-      refundedCredits: 9,
-    });
-
-    expect(billingState.constructorArgs[0]).toMatchObject({
-      supabase: supabaseAdmin,
-      userId: 'user-1',
-    });
+  it.each([0, 10, 999999])('rejects client token settlement (%s) without accounting writes', async count => {
+    const supabase = {from: () => createSingleQueryBuilder(Promise.resolve({data:{id:'user-1',role:'user',status:'active',nickname:'User',email:'user@example.com'},error:null}))};
+    const caller = createProtectedCaller(supabase, {client:'admin'});
+    await expect(caller.abortRequest({requestId:'123e4567-e89b-42d3-a456-426614174000',preDeductId:'123e4567-e89b-42d3-a456-426614174001',consumedTokens:{inputTokens:count,outputTokens:count},modelId:'spoofed-model'})).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
+    expect(billingState.constructorArgs).toHaveLength(0);
+    expect(billingState.settleAbort).not.toHaveBeenCalled();
+    expect(billingState.recordUsageLog).not.toHaveBeenCalled();
   });
 
   it('fails fast before abortRequest billing when admin privileges are unavailable', async () => {
@@ -362,123 +320,4 @@ describe('aiRouter error sanitization', () => {
     expect(billingState.recordUsageLog).not.toHaveBeenCalled();
   });
 
-  it('records abort pricing metadata from settleAbort in the usage log', async () => {
-    billingState.settleAbort.mockResolvedValueOnce({
-      consumedCredits: 1,
-      refundedCredits: 9,
-      balanceAfter: 991,
-      pricing: {
-        modelId: 'dynamic-model',
-        inputPer1M: 2,
-        outputPer1M: 4,
-        searchPer1K: 0,
-        pricingSource: 'ai_models',
-      },
-      billingSettingsSnapshot: {
-        creditsPerUsd: 100,
-        tokenPriceMultiplier: 2,
-        minPreDeduct: 10,
-        maxPreDeduct: 10000,
-        safetyMargin: 0.2,
-      },
-    });
-    billingState.recordUsageLog.mockResolvedValueOnce(undefined);
-
-    const supabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                role: 'user',
-                status: 'active',
-                nickname: 'User',
-                email: 'user@example.com',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        throw new Error(`Unexpected table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller(supabase);
-
-    await expect(caller.abortRequest({
-      requestId: '123e4567-e89b-42d3-a456-426614174000',
-      preDeductId: '123e4567-e89b-42d3-a456-426614174001',
-      consumedTokens: {
-        inputTokens: 10,
-        outputTokens: 20,
-      },
-      modelId: 'dynamic-model',
-    })).resolves.toMatchObject({
-      success: true,
-      consumedCredits: 1,
-      refundedCredits: 9,
-    });
-
-    expect(billingState.recordUsageLog).toHaveBeenCalledWith(expect.objectContaining({
-      metadata: expect.objectContaining({
-        pricing: expect.objectContaining({
-          modelId: 'dynamic-model',
-          inputPer1M: 2,
-          outputPer1M: 4,
-          searchPer1K: 0,
-          pricingSource: 'ai_models',
-        }),
-        billingSettingsSnapshot: expect.objectContaining({
-          creditsPerUsd: 100,
-          tokenPriceMultiplier: 2,
-        }),
-      }),
-    }));
-  });
-
-  it('sanitizes abortRequest settlement failures', async () => {
-    billingState.settleAbort.mockRejectedValueOnce(
-      new Error('relation ai_usage_logs does not exist'),
-    );
-
-    const supabase = {
-      from(table: string) {
-        if (table === 'profiles') {
-          return createSingleQueryBuilder(
-            Promise.resolve({
-              data: {
-                id: 'user-1',
-                role: 'user',
-                status: 'active',
-                nickname: 'User',
-                email: 'user@example.com',
-              },
-              error: null,
-            }),
-          );
-        }
-
-        throw new Error(`Unexpected table ${table}`);
-      },
-    };
-
-    const caller = createProtectedCaller(supabase);
-
-    await expect(
-      caller.abortRequest({
-        requestId: '123e4567-e89b-42d3-a456-426614174000',
-        preDeductId: '123e4567-e89b-42d3-a456-426614174001',
-        consumedTokens: {
-          inputTokens: 10,
-          outputTokens: 20,
-        },
-        modelId: 'claude-3-5-sonnet',
-      }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '中断结算失败，请稍后重试',
-    });
-  });
 });
