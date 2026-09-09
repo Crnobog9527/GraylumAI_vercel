@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from './loader';
 import { validatePublication } from './publication';
 import { validateWorkflow } from '../artifacts/workflow';
+import { summaryModelOption } from '../artifacts/modelPolicy';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const moduleSkillInput = z.object({
@@ -58,6 +59,10 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
 
 export async function saveModuleSkill(db: SupabaseClient, actorId: string, value: ModuleSkillInput) {
   const prepared = prepareModuleSkill(value);
+  const model = await db.from('ai_models').select('id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id',value.module.model_id).single();
+  if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
+  const option=summaryModelOption(model.data);
+  if(!option.available) throw new Error(option.reason ?? '对话模型配置不完整');
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {
     p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: value.expectedUpdatedAt,

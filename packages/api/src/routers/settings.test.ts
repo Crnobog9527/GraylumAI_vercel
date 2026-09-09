@@ -88,6 +88,7 @@ describe('getPublicReadClient', () => {
       supabase: {},
       supabasePublic: {
         from(table: string) {
+          if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{role:'admin',status:'active',is_deleted:'false'},error:null})};
           expect(table).toBe('system_settings');
           return createQueryBuilder(
             Promise.resolve({
@@ -242,6 +243,7 @@ describe('getPublicReadClient', () => {
       supabasePublic: {},
       supabaseAdmin: {
         from(table: string) {
+          if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{role:'admin',status:'active',is_deleted:'false'},error:null})};
           expect(table).toBe('system_settings');
           return {
             upsert(rows: Array<{ key: string; value: unknown }>, options: { onConflict: string }) {
@@ -313,6 +315,7 @@ describe('getPublicReadClient', () => {
       supabasePublic: {},
       supabaseAdmin: {
         from(table: string) {
+          if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{role:'admin',status:'active',is_deleted:'false'},error:null})};
           expect(table).toBe('system_settings');
           const builder = {
             select: () => builder,
@@ -381,6 +384,7 @@ describe('getPublicReadClient', () => {
       supabasePublic: {},
       supabaseAdmin: {
         from(table: string) {
+          if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{role:'admin',status:'active',is_deleted:'false'},error:null})};
           expect(table).toBe('system_settings');
           const builder = {
             select: () => builder,
@@ -602,7 +606,7 @@ describe('summary model admin endpoint',()=>{
   });
   it('returns only display fields to an administrator for valid and invalid configurations',async()=>{
     const t=caller('admin'),result=await t.api.getSummaryModels();expect(result.map(x=>x.available)).toEqual([true,false]);
-    for(const option of result)expect(Object.keys(option).sort()).toEqual(['available','id','model_id','name']);
+    for(const option of result)expect(Object.keys(option).sort()).toEqual(['available','id','model_id','name','reason']);
     expect(JSON.stringify(result)).not.toContain('SECRET_CANARY');
   });
   it('does not expose database error details',async()=>{

@@ -43,7 +43,7 @@ describe('administrator module publication', () => {
       await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow(); expect(db.rpc).not.toHaveBeenCalled(); }
   });
   it('writes package, binding, workflow and visibility through one atomic RPC with server actor', async () => {
-    const input = moduleInput(), actor = randomUUID(), db = { rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    const input = moduleInput(), actor = randomUUID(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:''},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await saveModuleSkill(db as any, actor, input);
     expect(db.rpc).toHaveBeenCalledExactlyOnceWith('admin_publish_skill_module', expect.objectContaining({
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,

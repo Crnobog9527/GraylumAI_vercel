@@ -77,7 +77,7 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45000),
     headers: { Authorization: `Bearer ${model.api_key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, plugins: [], tools: [], tool_choice: 'none', ...(model.model_id === 'qwen/qwen3.8-flash' ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
+    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, plugins: [], tools: [], tool_choice: 'none', ...(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'].includes(model.model_id) ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
   });
   // No automatic refund after dispatch: even an HTTP/parse error may follow a
   // billed provider execution. Reconciliation never blindly resends the request.
@@ -129,18 +129,22 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     if (row.error || !row.data?.model_id) throw new Error('GENERATION_DISABLED');
     let selectedModelId = row.data.model_id;
     let summaryLimit: number | undefined;
-    if (v.purpose === 'summary') {
+    let secondaryPreflight: {model:z.infer<typeof modelSchema>;maxTokens:number} | undefined;
+    if (v.purpose === 'summary' || v.purpose === 'reply') {
       if (!v.conversationId || !v.turnId) throw new Error('ARTIFACT_DENIED');
       const settings = await privateClient!.from('system_settings').select('key,value').in('key', ['v3_summary_model_id','v3_summary_max_tokens']);
       if (settings.error) throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
       const policy = summaryPolicy(Object.fromEntries((settings.data ?? []).map(s => [s.key,s.value])), row.data.model_id);
-      selectedModelId = policy.modelId; summaryLimit = policy.maxTokens;
+      if(v.purpose === 'summary'){selectedModelId = policy.modelId; summaryLimit = policy.maxTokens;}
       const primary = await privateClient!.from('ai_models').select('model_id').eq('id',row.data.model_id).single();
-      const secondary = await privateClient!.from('ai_models').select('model_id').eq('id',selectedModelId).single();
+      const secondary = await privateClient!.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id',policy.modelId).single();
       if (primary.error || secondary.error) throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
       assertSeparateSummaryModel(primary.data.model_id, secondary.data.model_id);
+      const parsedSecondary=modelSchema.safeParse(secondary.data);
+      if(!parsedSecondary.success)throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
+      if(v.purpose === 'reply')secondaryPreflight={model:parsedSecondary.data,maxTokens:Math.min(parsedSecondary.data.max_tokens,policy.maxTokens)};
     }
-    const modelRow = await privateClient!.from('ai_models').select('id,model_id,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id', selectedModelId).single();
+    const modelRow = await privateClient!.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id', selectedModelId).single();
     if (modelRow.error) throw new Error('GENERATION_DISABLED');
     const parsedModel = modelSchema.safeParse(modelRow.data);
     if (!parsedModel.success) throw new Error('GENERATION_UNSUPPORTED_MODEL');
@@ -190,9 +194,21 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       steps: Object.fromEntries([...ancestors].sort().map(k => [k, snapshot.steps[k]])), evidence });
     checkInputSecurity(context);
     const messages: ModelRequest['messages'] = [{ role: 'system', content: `${v.purpose === 'reply' ? dialogueSystemInstruction : v.conversationId ? chatSystemInstruction : systemInstruction}\n${loaded.forModel()}` }, { role: 'user', content: context }];
+    // Catch already-known secondary capacity/pricing failures before paying for
+    // a dialogue response. The actual response and current config are rechecked
+    // when preparing summary; this is not a promise about future provider availability.
+    if(secondaryPreflight){
+      const {model:secondary,maxTokens:limit}=secondaryPreflight;
+      let knownInput:number;
+      try{knownInput=providerInputReservation(secondary,messages,limit) ?? countWorkbenchTokens(messages);}
+      catch{throw new Error('SUMMARY_INPUT_CAPACITY');}
+      if(knownInput+limit>Math.min(secondary.input_limit,128000))throw new Error('SUMMARY_INPUT_CAPACITY');
+      const pricing=await getModelPricing(privateClient!,secondary.model_id,{requireModelPricing:true,modelRecordId:secondary.id});
+      if(Object.values(pricing).some(x=>!Number.isFinite(x)||x<0))throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
+    }
     const maxTokens = Math.min(model.max_tokens, summaryLimit ?? 4096);
     const inputTokens = providerInputReservation(model,messages,maxTokens) ?? countWorkbenchTokens(messages);
-    if (inputTokens + maxTokens > model.input_limit) throw new Error('GENERATION_CAPACITY');
+    if (inputTokens + maxTokens > Math.min(model.input_limit,128000)) throw new Error('GENERATION_CAPACITY');
     const settings = await getBillingRuntimeSettings(privateClient!), pricing = await getModelPricing(privateClient!, model.model_id, { requireModelPricing: true, modelRecordId: model.id });
     if (Object.values(pricing).some(x => !Number.isFinite(x) || x < 0)) throw new Error('GENERATION_DISABLED');
     const upper = calculateTokenCostWithPricing({ inputTokens, outputTokens: maxTokens, cacheReadTokens: 0, cacheCreationTokens: 0 }, pricing, {}, settings).credits;

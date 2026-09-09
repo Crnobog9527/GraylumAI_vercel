@@ -183,6 +183,7 @@ function stringToArray(value: string): string[] {
 export default function AdminPromptsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState<'prompt' | 'skill'>('prompt');
+  const skillModels = trpc.settings.getSummaryModels.useQuery(undefined,{enabled:mode==='skill'});
   const [skillForm, setSkillForm] = useState<SkillForm>(emptySkillForm);
   const [skillIdentity, setSkillIdentity] = useState<{ moduleId: string; skillId: string; revisionId: string; requestId: string; expectedVersion: number } | null>(null);
   const [skillError, setSkillError] = useState('');
@@ -932,8 +933,8 @@ export default function AdminPromptsPage() {
                   </SelectTrigger>
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
                     <SelectItem value="none">不限制</SelectItem>
-                    {modelsData?.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>{model.name}</SelectItem>
+                    {(mode === 'skill' ? skillModels.data ?? [] : modelsData)?.map((model) => (
+                      <SelectItem key={model.id} value={model.id} disabled={'available' in model && !model.available}>{model.name}{'reason' in model && model.reason ? `（${model.reason}）` : ''}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1226,8 +1227,8 @@ export default function AdminPromptsPage() {
                   <SelectContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
                     <SelectItem value={BATCH_NO_CHANGE}>保持不变</SelectItem>
                     <SelectItem value="none">清空模型限制</SelectItem>
-                    {modelsData?.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>{model.name}</SelectItem>
+                    {(mode === 'skill' ? skillModels.data ?? [] : modelsData)?.map((model) => (
+                      <SelectItem key={model.id} value={model.id} disabled={'available' in model && !model.available}>{model.name}{'reason' in model && model.reason ? `（${model.reason}）` : ''}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
