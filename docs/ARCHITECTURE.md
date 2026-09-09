@@ -139,7 +139,7 @@ Access depends on both PostgreSQL grants and table-specific RLS policies. Server
 
 The settings page loads `admin.getSettingsDashboard` and model option queries, then saves through `settings.updateSystemSettingsBulk`. The server rechecks the administrator, validates model references, and upserts the batch. `ai_models.id` is the settings reference; `model_id` is the provider identifier shown to help selection.
 
-The modules dashboard uses `admin.getPromptsDashboard`. Confirmed removal calls `admin.removePrompts` with up to 100 IDs and executes one atomic database DELETE guarded by existing foreign keys. The UI removes only acknowledged `deletedIds` from cached rows and counts, then refreshes in the background. A refresh failure retains the confirmed result with an error notice. `removePrompt` remains for compatibility; `deletePrompt` and `batchDeletePrompts` disable modules.
+The modules dashboard uses `admin.getPromptsDashboard`. Confirmed removal calls `admin.removePrompts` with up to 100 IDs and executes one atomic database DELETE guarded by existing foreign keys. After server success, the UI removes the submitted IDs from cached rows and counts, including IDs already absent on a replay; returned `deletedIds` determine the success message count. It then refreshes in the background. A refresh failure retains the confirmed result with an error notice. `removePrompt` remains for compatibility; `deletePrompt` and `batchDeletePrompts` disable modules.
 
 See [admin operations](runbooks/ADMIN_OPERATIONS.md) for API inputs, failure handling and verification.
 
