@@ -1,3 +1,5 @@
+import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
+import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream } from '@repo/api/src/services/providerUsage';
 /**
  * AI Streaming API Route
  *
@@ -41,6 +43,7 @@ import {
   getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
   normalizeOpenAICompatibleEndpoint,
+  resolveOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
 } from '@repo/api/src/services/providerUtils';
 import type { ClaudeMessage } from '@repo/api/src/types/ai';
@@ -180,12 +183,6 @@ async function getFreeTierUsageCount(supabase: any, userId: string): Promise<num
   return count ?? 0;
 }
 
-function estimateTokens(text: string): number {
-  const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-  const otherChars = text.length - chineseChars;
-  return Math.ceil(chineseChars / 1.5 + otherChars / 4);
-}
-
 function recordStageTiming(stageTimings: Record<string, number>, name: string, startedAt: number) {
   stageTimings[name] = Date.now() - startedAt;
 }
@@ -266,6 +263,7 @@ async function getRuntimeModelConfig(
       .single();
 
     if (data) {
+      const effective = withTokenCountingMetadata(data);
       return {
         id: data.id,
         modelId: data.model_id,
@@ -275,11 +273,11 @@ async function getRuntimeModelConfig(
         outputTokenCost: data.output_token_cost,
         apiKey: data.api_key || null,
         provider: data.provider || 'anthropic',
-        apiEndpoint: data.api_endpoint || null,
+        apiEndpoint: resolveOpenAICompatibleEndpoint(data.provider, data.api_endpoint),
         enableWebSearch: data.enable_web_search === 'true',
-        tokenCountingSupported: data.token_counting_supported === 'true',
-        tokenCountingMethod: data.token_counting_method || 'unsupported',
-        tokenizerFamily: data.tokenizer_family || null,
+        tokenCountingSupported: effective.token_counting_supported === 'true',
+        tokenCountingMethod: effective.token_counting_method || 'unsupported',
+        tokenizerFamily: effective.tokenizer_family || null,
       };
     }
   }
@@ -861,6 +859,7 @@ export async function POST(request: NextRequest) {
         let cachePoints = 0;
         let actualSearchCount = 0;
         let webSearchExecuted = false;
+        let usageEvidence: ReturnType<typeof parseProviderUsage>['evidence'] | undefined;
         let usage: TokenUsage = {
           inputTokens: 0,
           outputTokens: 0,
@@ -940,46 +939,11 @@ export async function POST(request: NextRequest) {
               throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
             }
 
-            const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            }
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (firstProviderChunkAt === null) {
-                firstProviderChunkAt = Date.now();
-              }
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6);
-                if (!data || data === '[DONE]') continue;
-
-                try {
-                  const event = JSON.parse(data);
-                  const delta = event.choices?.[0]?.delta?.content || '';
-                  if (delta) {
-                    fullContent += delta;
-                  }
-
-                  if (event.usage) {
-                    usage.inputTokens = event.usage.prompt_tokens || usage.inputTokens;
-                    usage.outputTokens = event.usage.completion_tokens || usage.outputTokens;
-                  }
-                } catch {
-                  // Ignore non-JSON keepalive lines from upstream providers.
-                }
-              }
-            }
+            if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
+            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); });
+            fullContent = result.content;
+            usage = result.usage;
+            usageEvidence = result.evidence;
           } else if (runtimeModel.provider === 'google') {
             const response = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(runtimeModel.modelId)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey ?? '')}`,
@@ -1027,50 +991,11 @@ export async function POST(request: NextRequest) {
             webSearchExecuted = webSearchAvailable;
             actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
 
-            const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            }
-
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (firstProviderChunkAt === null) {
-                firstProviderChunkAt = Date.now();
-              }
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
-
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6).trim();
-                if (!data) continue;
-
-                try {
-                  const event = JSON.parse(data);
-                  const parts = event.candidates?.[0]?.content?.parts ?? [];
-                  const delta = parts
-                    .map((part: { text?: string }) => part.text ?? '')
-                    .join('');
-
-                  if (delta) {
-                    fullContent += delta;
-                  }
-
-                  if (event.usageMetadata) {
-                    usage.inputTokens = event.usageMetadata.promptTokenCount || usage.inputTokens;
-                    usage.outputTokens = event.usageMetadata.candidatesTokenCount || usage.outputTokens;
-                  }
-                } catch {
-                  // Ignore malformed Gemini stream frames.
-                }
-              }
-            }
+            if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
+            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); });
+            fullContent = result.content;
+            usage = result.usage;
+            usageEvidence = result.evidence;
           } else {
             logAiStreamError('ai_stream_provider_not_openrouter_compatible', {
               provider: runtimeModel.provider,
@@ -1094,12 +1019,7 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          if (!usage.inputTokens) {
-            usage.inputTokens = countedInput.inputTokens;
-          }
-          if (!usage.outputTokens) {
-            usage.outputTokens = estimateTokens(fullContent);
-          }
+          if (!usageEvidence) throw new Error('PROVIDER_USAGE_UNAVAILABLE');
 
           const filteredOutput = filterAIOutput(fullContent);
           const assistantContent = filteredOutput.content;
@@ -1168,7 +1088,9 @@ export async function POST(request: NextRequest) {
             tokenMetadata: {
               ...skillMetadata,
               count_method: runtimeModel.tokenCountingMethod,
-              count_source: countedInput.countSource,
+              count_source: 'provider_usage',
+              preflight_count_source: countedInput.countSource,
+              provider_usage: usageEvidence,
               counter_version: countedInput.counterVersion,
               routing_decision: routingDecision,
               pricing: pricingMetadata,

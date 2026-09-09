@@ -228,7 +228,7 @@ describe('modelRouter error sanitization', () => {
     });
   });
 
-  it('stores updateModel pricing fields as micro-dollars', async () => {
+  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while updating pricing for %s %s', async (provider, endpoint) => {
     const updated: Array<Record<string, unknown>> = [];
     const supabase = {
       from(table: string) {
@@ -256,9 +256,9 @@ describe('modelRouter error sanitization', () => {
                     single() {
                       return Promise.resolve({
                         data: {
-                          provider: 'openai',
+                          provider,
                           model_id: 'anthropic/claude-sonnet-4.6',
-                          api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+                          api_endpoint: endpoint,
                         },
                         error: null,
                       });
@@ -307,6 +307,8 @@ describe('modelRouter error sanitization', () => {
     });
 
     expect(updated[0]).toMatchObject({
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
       input_token_cost: 3_000_000,
       output_token_cost: 15_000_000,
       input_token_cost_above_200k: 6_000_000,
@@ -439,7 +441,7 @@ describe('modelRouter error sanitization', () => {
                 data: [
                   {
                     id: 'model-1',
-                    name: 'Model 1',
+                    name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
                     model_id: 'gpt-4o',
                     provider: 'openai',
                     api_key: 'sk-test',
@@ -588,14 +590,14 @@ describe('modelRouter error sanitization', () => {
                 data: [
                   {
                     id: 'model-1',
-                    name: 'Model 1',
+                    name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
                     api_key: 'sk-test',
                     config: { connection_status: 'connected', last_tested: '2026-03-29T00:00:00.000Z' },
                     is_active: 'true',
                   },
                   {
                     id: 'model-2',
-                    name: 'Model 2',
+                    name: 'Model 2', provider: 'openai', model_id: 'openai/gpt-5.6-luna', api_endpoint: '', token_counting_supported: 'false',
                     api_key: null,
                     config: {},
                     is_active: 'false',
@@ -615,6 +617,7 @@ describe('modelRouter error sanitization', () => {
     const result = await caller.getAdminModelsDashboard();
 
     expect(result.models).toHaveLength(2);
+    expect(result.models.every(model => model.token_counting_supported === 'true' && model.token_counting_method === 'provider_usage')).toBe(true);
     expect(result.models[0]).not.toHaveProperty('api_key');
     expect(result.models[1]).not.toHaveProperty('api_key');
     expect(result.connectionStatus).toEqual([

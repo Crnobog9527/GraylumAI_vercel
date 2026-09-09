@@ -146,7 +146,8 @@ vi.mock('@repo/api/src/services/tokenCounter', () => ({
   estimateOutputTokens: routeMocks.estimateOutputTokens,
 }));
 
-vi.mock('@repo/api/src/services/providerUtils', () => ({
+vi.mock('@repo/api/src/services/providerUtils', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/providerUtils')>(),
   getConfiguredProviderApiKey: routeMocks.getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders: routeMocks.getOpenAICompatibleHeaders,
   normalizeOpenAICompatibleEndpoint: routeMocks.normalizeOpenAICompatibleEndpoint,
@@ -667,5 +668,18 @@ describe('guided Skill uses one generation path',()=>{
   setupSkillRoute();routeMocks.skillMode.mockRejectedValue(new Error('workflow unavailable'));
   const response=await POST(makeAuthenticatedStreamRequest({message:'Free chat'}) as any);
   await response.text();expect(routeMocks.skillMode).not.toHaveBeenCalled();expect(response.status).toBe(200);
+ });
+});
+
+describe('provider usage settlement boundary',()=>{
+ it.each([undefined,{}, {prompt_tokens:10,completion_tokens:-1}])('does not finalize success with missing or invalid usage %j',async usage=>{
+  setupSkillRoute();fetchSpy.mockResolvedValue(new Response('data: '+JSON.stringify({choices:[{delta:{content:'answer'}}],usage})+'\n\ndata: [DONE]\n'));
+  const response=await POST(makeAuthenticatedStreamRequest({moduleId:VALID_MODULE_ID}) as any);const text=await response.text();
+  expect(text).toContain('"type":"error"');expect(routeMocks.billingFinalizeSuccess).not.toHaveBeenCalled();expect(routeMocks.billingFinalizeFailure).toHaveBeenCalledTimes(1);
+ });
+ it('keeps provider zero instead of preflight estimates',async()=>{
+  setupSkillRoute();fetchSpy.mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"cached answer"}}],"usage":{"prompt_tokens":0,"completion_tokens":0}}\n\ndata: [DONE]'));
+  const response=await POST(makeAuthenticatedStreamRequest({moduleId:VALID_MODULE_ID}) as any);await response.text();
+  expect(routeMocks.billingFinalizeSuccess).toHaveBeenCalledWith(expect.objectContaining({usage:{inputTokens:0,outputTokens:0,cacheReadTokens:0,cacheCreationTokens:0},tokenMetadata:expect.objectContaining({count_source:'provider_usage'})}));
  });
 });

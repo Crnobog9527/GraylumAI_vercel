@@ -1,3 +1,4 @@
+import { parseProviderUsage } from '../services/providerUsage';
 /**
  * AI Router - AI 对话核心路由
  *
@@ -177,7 +178,7 @@ async function updateConversationTitle(
  * 调用 Claude via OpenRouter / OpenAI-compatible API.
  * Anthropic 官方 API 已退役，不再作为运行时 fallback。
  */
-async function callClaudeViaOpenRouter(params: {
+export async function callClaudeViaOpenRouter(params: {
   model: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   systemPrompt?: string;
@@ -187,6 +188,7 @@ async function callClaudeViaOpenRouter(params: {
 }): Promise<{
   content: string;
   usage: TokenUsage;
+  usageEvidence: ReturnType<typeof parseProviderUsage>['evidence'];
   stopReason: string;
 }> {
   const apiKey = getConfiguredProviderApiKey(params.apiKey);
@@ -245,6 +247,7 @@ async function callClaudeViaOpenRouter(params: {
   }
 
   const data = await response.json() as {
+    error?: unknown;
     choices?: Array<{
       message?: {
         content?: string | Array<{ type?: string; text?: string }>;
@@ -257,20 +260,18 @@ async function callClaudeViaOpenRouter(params: {
     };
   };
 
+  if (data.error) throw new Error('PROVIDER_STREAM_FAILED');
   const messageContent = data.choices?.[0]?.message?.content;
   const content = Array.isArray(messageContent)
     ? messageContent.map((part) => part.text ?? '').join('')
     : (messageContent ?? '');
   const finishReason = data.choices?.[0]?.finish_reason;
 
+  const accounting = parseProviderUsage(data.usage);
   return {
     content,
-    usage: {
-      inputTokens: data.usage?.prompt_tokens ?? 0,
-      outputTokens: data.usage?.completion_tokens ?? 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-    },
+    usage: accounting.usage,
+    usageEvidence: accounting.evidence,
     stopReason: finishReason === 'length'
       ? 'max_tokens'
       : finishReason === 'tool_calls'
@@ -506,7 +507,9 @@ export const aiRouter = router({
           userAgent,
           tokenMetadata: {
             count_method: modelConfig.tokenCountingMethod ?? countedInput.method,
-            count_source: countedInput.countSource,
+            count_source: 'provider_usage',
+            preflight_count_source: countedInput.countSource,
+            provider_usage: aiResponse.usageEvidence,
             counter_version: countedInput.counterVersion,
             pricing: pricingMetadata,
             billingSettingsSnapshot: {
@@ -613,46 +616,12 @@ export const aiRouter = router({
       modelId: z.string(),
       reason: z.string().optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ ctx }) => {
       assertAiBillingAdminPrivileges(ctx.hasSupabaseAdminPrivileges);
-      const billingService = new BillingService({
-        supabase: ctx.supabaseAdmin,
-        userId: ctx.profileId,
-      });
+      // Browser counts are untrusted and cannot settle or refund a reservation.
+      // The active server request owns settlement from provider usage.
+      throw new TRPCError({code:'PRECONDITION_FAILED',message:'用量由服务端核算，不能使用客户端上报的 Token 数量结算。'});
 
-      try {
-        const result = await billingService.settleAbort(
-          input.preDeductId,
-          input.consumedTokens,
-          input.modelId,
-          input.reason ?? '用户中断'
-        );
-
-        // 记录中断日志
-        await billingService.recordUsageLog({
-          requestId: input.requestId,
-          modelId: input.modelId,
-          status: 'failed',
-          errorMessage: input.reason ?? '用户中断',
-          metadata: {
-            aborted: true,
-            consumedTokens: input.consumedTokens,
-            refundedCredits: result.refundedCredits,
-            pricing: result.pricing,
-            billingSettingsSnapshot: result.billingSettingsSnapshot,
-          },
-        });
-
-        return {
-          success: true,
-          consumedCredits: result.consumedCredits,
-          refundedCredits: result.refundedCredits,
-          balanceAfter: result.balanceAfter,
-        };
-      } catch (error) {
-        logger.error('ai', 'ai_abort_settle_failed');
-        throw createSafeInternalError(error, '中断结算失败，请稍后重试');
-      }
     }),
 
   /**

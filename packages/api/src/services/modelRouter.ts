@@ -1,3 +1,5 @@
+import { withTokenCountingMetadata } from './modelCapabilities';
+import { resolveOpenAICompatibleEndpoint } from './providerUtils';
 /**
  * Model Router Service
  *
@@ -306,6 +308,7 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
 
   if (!data) return null;
 
+  const effective = withTokenCountingMetadata(data);
   return {
     id: data.id,
     name: data.name,
@@ -317,11 +320,11 @@ async function getModelConfigFromDb(supabase: SupabaseClient, modelId?: string):
     inputTokenCost: data.input_token_cost,
     outputTokenCost: data.output_token_cost,
     apiKey: data.api_key ?? null,
-    apiEndpoint: data.api_endpoint ?? null,
+    apiEndpoint: resolveOpenAICompatibleEndpoint(data.provider, data.api_endpoint),
     isActive: data.is_active === 'true',
-    tokenCountingSupported: data.token_counting_supported === 'true',
-    tokenCountingMethod: data.token_counting_method,
-    tokenizerFamily: data.tokenizer_family,
+    tokenCountingSupported: effective.token_counting_supported === 'true',
+    tokenCountingMethod: effective.token_counting_method,
+    tokenizerFamily: effective.tokenizer_family,
     config: data.config,
   };
 }
@@ -335,7 +338,7 @@ async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelCon
 
   if (error || !data) return [];
 
-  return data.map((model) => ({
+  return data.map(withTokenCountingMetadata).map((model) => ({
     id: model.id,
     name: model.name,
     modelId: model.model_id,
@@ -346,7 +349,7 @@ async function getActiveModelConfigs(supabase: SupabaseClient): Promise<ModelCon
     inputTokenCost: model.input_token_cost,
     outputTokenCost: model.output_token_cost,
     apiKey: model.api_key ?? null,
-    apiEndpoint: model.api_endpoint ?? null,
+    apiEndpoint: resolveOpenAICompatibleEndpoint(model.provider, model.api_endpoint),
     isActive: model.is_active === 'true',
     tokenCountingSupported: model.token_counting_supported === 'true',
     tokenCountingMethod: model.token_counting_method,

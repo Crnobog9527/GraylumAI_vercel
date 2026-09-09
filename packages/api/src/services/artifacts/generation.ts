@@ -1,3 +1,4 @@
+import { parseProviderUsage } from '../providerUsage';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { workbenchModelSchema as modelSchema, providerInputReservation } from "./modelPolicy";
 import { z } from 'zod';
@@ -85,9 +86,10 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
   try {
     for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 131072) throw new Error('GENERATION_OUTCOME_UNKNOWN'); chunks.push(value); }
   } finally { await reader.cancel(); }
-  const raw = z.object({ choices: z.array(z.object({ finish_reason: z.literal('stop'), message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).max(0).optional() }) })).length(1), usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }) })
+  const raw = z.object({ choices: z.array(z.object({ finish_reason: z.literal('stop'), message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).max(0).optional() }) })).length(1), usage: z.unknown() })
     .parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-  return answerSchema.parse({ body: raw.choices[0].message.content, inputTokens: raw.usage.prompt_tokens, outputTokens: raw.usage.completion_tokens });
+  const {usage} = parseProviderUsage(raw.usage);
+  return answerSchema.parse({ body: raw.choices[0].message.content, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 };
 let tokenizer: Tiktoken | undefined;
 export function countWorkbenchTokens(messages: ModelRequest['messages']) {

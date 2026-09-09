@@ -1,3 +1,4 @@
+import { inferTokenCountingMetadata, withTokenCountingMetadata } from '../services/modelCapabilities';
 import { router, adminProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -47,26 +48,10 @@ type AdminModelRow = Omit<PersistedModel, 'config'> & {
   config?: Record<string, unknown> | null;
 };
 
-type TokenCountingMetadata = {
-  token_counting_supported: 'true' | 'false';
-  token_counting_method: string;
-  tokenizer_family: string | null;
-};
-
 function stripSensitiveModelFields<T extends { api_key?: string | null }>(model: T): Omit<T, 'api_key'> {
   const { api_key: _apiKey, ...safeModel } = model;
   return safeModel;
 }
-
-const VERIFIED_OPENAI_TOKENIZER_PREFIXES = [
-  'gpt-4.1',
-  'gpt-4o',
-  'gpt-4.5',
-  'gpt-5',
-  'o1',
-  'o3',
-  'text-embedding-3',
-];
 
 const GENERIC_CONNECTION_ERROR = 'API 连接失败，请检查配置后重试';
 const GENERIC_CONNECTION_ERROR_DETAIL = '连接测试失败，请查看服务端日志';
@@ -115,67 +100,6 @@ function buildConnectionStatusFromModels(data: Array<{
       lastError: typeof config.last_error === 'string' ? config.last_error : null,
     };
   });
-}
-
-function inferTokenCountingMetadata(params: {
-  provider: PersistedModel['provider'] | NonNullable<PersistedModel['provider']>;
-  modelId: string;
-  apiEndpoint?: string | null;
-}): TokenCountingMetadata {
-  const provider = params.provider ?? 'custom';
-  const modelId = params.modelId.toLowerCase();
-  const endpoint = params.apiEndpoint?.toLowerCase() ?? '';
-  const openAICompatibleProvider = provider === 'openai' ||
-    endpoint.includes('openrouter') ||
-    endpoint.includes('chat/completions');
-
-  if (openAICompatibleProvider && (modelId.includes('claude') || modelId.startsWith('anthropic/'))) {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'provider_usage',
-      tokenizer_family: 'openai',
-    };
-  }
-
-  if (provider === 'anthropic') {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'anthropic_count_tokens',
-      tokenizer_family: 'anthropic',
-    };
-  }
-
-  if (provider === 'google') {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'gemini_count_tokens',
-      tokenizer_family: 'gemini',
-    };
-  }
-
-  const openAITokenizerVerified = VERIFIED_OPENAI_TOKENIZER_PREFIXES.some((prefix) => modelId.startsWith(prefix));
-
-  if (openAICompatibleProvider && endpoint.includes('openrouter')) {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'provider_usage',
-      tokenizer_family: 'openai',
-    };
-  }
-
-  if (openAICompatibleProvider && openAITokenizerVerified) {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'verified_openai_tokenizer',
-      tokenizer_family: 'openai',
-    };
-  }
-
-  return {
-    token_counting_supported: 'false',
-    token_counting_method: 'unsupported',
-    tokenizer_family: openAICompatibleProvider ? 'openai' : null,
-  };
 }
 
 async function persistConnectionState(
@@ -317,7 +241,7 @@ export const modelRouter = router({
     if (error) {
       throw createModelOperationError('读取模型列表', error);
     }
-    return (data ?? []).map((model) => stripSensitiveModelFields(model));
+    return (data ?? []).map((model) => stripSensitiveModelFields(withTokenCountingMetadata(model)));
   }),
 
   // Admin only: Get models page bootstrap data
@@ -341,7 +265,7 @@ export const modelRouter = router({
       is_active: string;
     }>;
     const result = {
-      models: models.map((model) => stripSensitiveModelFields(model)),
+      models: models.map((model) => stripSensitiveModelFields(withTokenCountingMetadata(model))),
       connectionStatus: buildConnectionStatusFromModels(connectionSource),
     };
 
