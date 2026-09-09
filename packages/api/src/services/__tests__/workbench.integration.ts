@@ -1949,6 +1949,45 @@ aiTest('AI: concurrent duplicate does not dispatch twice; late output preserves 
   expect(snapshot.candidates[0].body).toBe('Late synthetic candidate');
   await expect(t.service.execute({ ...t.scope, action: 'saveCandidate', requestId: randomUUID(), stepId: 'step-0', candidateId: result.candidateId!, expectedVersion: 1, body: 'Late synthetic candidate' })).rejects.toThrow();
 }, 30000);
+aiTest('AI: verified provider refusal refunds once under concurrent replay and keeps dispatch authority private', async () => {
+  const { ProviderRateLimited } = await import('../artifacts/generation');
+  const t = await generationFixture(); let calls = 0;
+  const ai = t.workbenchGeneration(t.user, db, async () => { calls++; throw new ProviderRateLimited(); });
+  const v = await t.request(ai), result = await ai.generate(v);
+  expect(result).toMatchObject({state:'refunded',chargedCredits:0,candidateId:null,failureCode:'provider_rate_limited'});
+  const row=(await sql.query('select dispatch_token,pre_deduct_id from artifact_generations where request_id=$1',[v.requestId])).rows[0];
+  const args={p_actor_id:actor,p_project_id:v.projectId,p_round_id:v.roundId,p_request_id:v.requestId,p_token:row.dispatch_token};
+  const replays=await Promise.all(Array.from({length:4},()=>db.rpc('artifact_reject_generation',args)));
+  for(const r of replays){expect(r.error).toBeNull();expect(r.data).toEqual(result);}
+  expect(await ai.generate(v)).toEqual(result);expect(calls).toBe(1);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100000);
+  expect((await sql.query("select id from billing_history where operation_type='refund' and metadata->>'preDeductId'=$1",[row.pre_deduct_id])).rows).toHaveLength(1);
+  expect((await t.service.read(v.projectId,v.roundId)).candidates).toHaveLength(0);
+  for(const extra of [{p_actor_id:randomUUID()},{p_project_id:randomUUID()},{p_round_id:randomUUID()},{p_request_id:randomUUID()},{p_token:randomUUID()}])
+    expect((await db.rpc('artifact_reject_generation',{...args,...extra})).error).not.toBeNull();
+  expect((await t.user.rpc('artifact_reject_generation',args)).error).not.toBeNull();
+  expect((await sql.query("select has_function_privilege('anon','public.artifact_reject_generation(uuid,uuid,uuid,uuid,uuid)','execute') as allowed")).rows[0].allowed).toBe(false);
+  await sql.query("update profiles set status='banned' where id=$1",[actor]);
+  try{expect((await db.rpc('artifact_reject_generation',args)).error).not.toBeNull();}
+  finally{await sql.query("update profiles set status='active' where id=$1",[actor]);}
+  const next=await t.request();expect((await t.ai.generate(next)).state).toBe('succeeded');
+  const completed=(await sql.query('select dispatch_token from artifact_generations where request_id=$1',[next.requestId])).rows[0];
+  expect((await db.rpc('artifact_reject_generation',{...args,p_request_id:next.requestId,p_token:completed.dispatch_token})).error).not.toBeNull();
+  console.log('AI refusal: real SQL/Auth refund exactly once, scope/token/profile/anon denied, explicit retry and succeeded guard PASS');
+},60000);
+aiTest('AI: failed refund rolls back credit and status together; unknown requests cannot use refusal recovery',async()=>{
+  const { ProviderRateLimited }=await import('../artifacts/generation');const t=await generationFixture();
+  const ai=t.workbenchGeneration(t.user,db,async()=>{throw new ProviderRateLimited();}),v=await t.request(ai);
+  await sql.query("create function local_fail_refusal() returns trigger language plpgsql as $$ begin if NEW.operation_type='refund' then raise exception 'local refund unavailable'; end if; return NEW; end $$; create trigger local_fail_refusal before insert on billing_history for each row execute function local_fail_refusal()");
+  let result;
+  try{result=await ai.generate(v);}finally{await sql.query('drop trigger local_fail_refusal on billing_history; drop function local_fail_refusal()');}
+  expect(result!.state).toBe('unknown');
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100000-result!.reservedCredits);
+  const row=(await sql.query('select dispatch_token,pre_deduct_id,failure_code from artifact_generations where request_id=$1',[v.requestId])).rows[0];
+  expect(row.failure_code).toBeNull();
+  expect((await db.rpc('artifact_reject_generation',{p_actor_id:actor,p_project_id:v.projectId,p_round_id:v.roundId,p_request_id:v.requestId,p_token:row.dispatch_token})).error).not.toBeNull();
+  expect((await sql.query("select id from billing_history where operation_type='refund' and metadata->>'preDeductId'=$1",[row.pre_deduct_id])).rows).toHaveLength(0);
+},30000);
 aiTest('AI: unknown provider outcome holds the reservation and prevents blind resend or replacement', async () => {
   const t = await generationFixture(); let calls = 0;
   const ai = t.workbenchGeneration(t.user, db, async () => { calls++; throw new Error('synthetic provider timeout'); });
@@ -1981,8 +2020,9 @@ aiTest('AI: disabled, model capacity, insufficient credits, unavailable dependen
   await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_DISABLED');
   await sql.query("update system_settings set value='true' where key='v3_workbench_ai'");
   await sql.query('update ai_models set input_limit=100 where id=$1', [localModel]);
-  await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_CAPACITY');
-  await sql.query('update ai_models set input_limit=128000 where id=$1', [localModel]);
+  // Model policy rejects an impossible configured capacity before tokenization.
+  try { await expect(t.ai.generate(v)).rejects.toThrow('GENERATION_UNSUPPORTED_MODEL'); }
+  finally { await sql.query('update ai_models set input_limit=128000 where id=$1', [localModel]); }
   await sql.query('update profiles set credits=0 where id=$1', [actor]);
   await expect(t.ai.generate(v)).rejects.toThrow();
   await sql.query('update profiles set credits=100000 where id=$1', [actor]);
@@ -2496,6 +2536,49 @@ aiTest('CHAT: homepage entry, real HTTP multi-turn, adoption, confirmation, hist
  await page.screenshot({path:output+'/chat-narrow.png'});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.getByLabel('Skill 步骤与成果').waitFor();await page.screenshot({path:output+'/chat-desktop.png'});
  await context.close();console.log('CHAT real homepage/browser/HTTP: two turns, explicit adoption/confirmation, history refresh, no ordinary generation and narrow drawer PASS');
 },150000);
+
+aiTest('CHAT: HTTP 429 preserves the message and refunds; explicit retry receives a real local HTTP reply',async()=>{
+ const t=await generationFixture(),requests:string[]=[];
+ const {skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const {page,context}=await pageFor(credentials,requests);
+ let releaseHistory!:()=>void;
+ const heldHistory=new Promise<void>(r=>{releaseHistory=r;});
+ await page.route('**/api/trpc/**',async route=>{
+  if(route.request().url().includes('chat.getConversations'))await heldHistory;
+  await route.continue();
+ });
+ try{
+  await page.goto(app+'/chat?conversation='+binding.conversationId);
+  const input=page.getByLabel('给当前步骤发消息'),send=page.getByRole('button',{name:'发送',exact:true});
+  // Typing becomes available even when the entire sidebar statistics request is held.
+  await input.fill('LOCAL_RATE_LIMIT_ONCE');releaseHistory();
+  const stranger=await newUser(),foreign=await authenticated(stranger);
+  const foreignId=randomUUID();
+  await sql.query("insert into conversations(id,user_id,title,is_deleted,skill_mode) values($1,$2,'foreign','false',false)",[foreignId,(await foreign.auth.getUser()).data.user!.id]);
+  for(const route of ['chatLocate','chatOpen']){
+   const denied=await page.request.get(app+'/api/trpc/workbench.'+route,{params:{input:JSON.stringify({conversationId:foreignId})}});
+   expect(denied.status()).toBe(403);expect(await denied.text()).not.toContain(foreignId);
+   expect((await fetch(app+'/api/trpc/workbench.'+route+'?input='+encodeURIComponent(JSON.stringify({conversationId:binding.conversationId})))).status).toBe(401);
+  }
+  await send.click();
+  await page.getByRole('status').filter({hasText:'AI 正在生成回复…'}).waitFor();
+  await page.getByText('模型服务繁忙，本次未生成回复，预留积分已退还。消息已保留，请稍后重新发送。',{exact:true}).waitFor();
+  expect(await input.inputValue()).toBe('LOCAL_RATE_LIMIT_ONCE');
+  await expect.poll(()=>send.isEnabled(),{timeout:30000}).toBe(true);
+  const list=await t.ai.list(t.scope);expect(list).toHaveLength(1);expect(list[0]).toMatchObject({state:'refunded',chargedCredits:0});
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100000);
+  expect(await page.locator('[data-message-role="assistant"]').count()).toBe(0);
+  expect(requests.some(p=>p.includes('workbench.chatOpen'))).toBe(true);
+  expect(requests.some(p=>p.includes('workbench.chatRead'))).toBe(false);
+  await send.click();
+  await expect.poll(()=>page.locator('[data-message-role="assistant"]').count(),{timeout:30000}).toBe(1);
+  await expect.poll(()=>input.inputValue(),{timeout:30000}).toBe('');
+  await expect.poll(async()=> (await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].body,{timeout:30000}).toBe('Synthetic local HTTP candidate');
+  await page.screenshot({path:output+'/chat-rate-limit-retry.png'});
+ }finally{releaseHistory();await context.close();}
+ console.log('CHAT local browser HTTP 429: one refund, retained input, manual retry and reply plus saved summary PASS');
+},90000);
 
 aiTest.each([3,6,8,4])('CHAT: %i configured steps share durable linkage and generation',async(n)=>{
  const {skillChatService}=await import('../artifacts/chat');const t=await generationFixture(n),chat=skillChatService(t.user,db);

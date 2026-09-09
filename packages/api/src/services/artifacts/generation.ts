@@ -1,4 +1,5 @@
 import { parseProviderUsage } from '../providerUsage';
+import { logger } from '../../lib/logger';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { workbenchModelSchema as modelSchema, providerInputReservation } from "./modelPolicy";
 import { z } from 'zod';
@@ -70,6 +71,10 @@ export function echoesPrivateMethod(answer: string, privateContext: string): boo
 type Model = z.infer<typeof modelSchema>;
 export type ModelRequest = { model: Model; messages: Array<{ role: 'system' | 'user'; content: string }>; maxTokens: number };
 export type GenerationTransport = (request: ModelRequest) => Promise<z.infer<typeof answerSchema>>;
+export class ProviderRateLimited extends Error {
+  constructor() { super('PROVIDER_RATE_LIMITED'); }
+}
+
 // A fixed endpoint, explicit server credential, bounded reply and no redirects,
 // tools, plugins, fallback models or agent loop. No environment-key fallback.
 export const openRouterGeneration: GenerationTransport = async ({ model, messages, maxTokens }) => {
@@ -81,13 +86,17 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
   });
   // No automatic refund after dispatch: even an HTTP/parse error may follow a
   // billed provider execution. Reconciliation never blindly resends the request.
-  if (!response.ok || !response.body) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+  if (!response.body) throw new Error('GENERATION_OUTCOME_UNKNOWN');
   const reader = response.body.getReader(); let size = 0; const chunks: Uint8Array[] = [];
   try {
     for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 131072) throw new Error('GENERATION_OUTCOME_UNKNOWN'); chunks.push(value); }
   } finally { await reader.cancel(); }
-  const raw = z.object({ choices: z.array(z.object({ finish_reason: z.literal('stop'), message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).max(0).optional() }) })).length(1), usage: z.unknown() })
-    .parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+  const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (response.status === 429 && payload?.error?.code === 429 &&
+      payload.choices == null && payload.usage == null) throw new ProviderRateLimited();
+  if (!response.ok) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+  const raw = z.object({ choices: z.array(z.object({ finish_reason: z.literal('stop'), message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).max(0).nullish() }) })).length(1), usage: z.unknown() })
+    .parse(payload);
   const {usage} = parseProviderUsage(raw.usage);
   return answerSchema.parse({ body: raw.choices[0].message.content, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
 };
@@ -107,11 +116,16 @@ export function buildWorkbenchMessages(method:string, context:Record<string,unkn
 }
 
 export function workbenchGeneration(userClient: SupabaseClient, privateClient: SupabaseClient | null, transport: GenerationTransport = openRouterGeneration) {
-  async function actor() {
-    if (typeof window !== 'undefined' || !privateClient) throw new Error('ARTIFACT_UNAVAILABLE');
-    const auth = await userClient.auth.getUser();
-    if (auth.error || !auth.data.user || !isEmailVerified(auth.data.user)) throw new Error('ARTIFACT_DENIED');
-    return auth.data.user.id;
+  // The service instance lives for one authenticated API request. Database RPCs
+  // still recheck live ownership/profile/dispatch authority on every operation.
+  let actorPromise: Promise<string> | undefined;
+  function actor(): Promise<string> {
+    return actorPromise ??= (async () => {
+      if (typeof window !== 'undefined' || !privateClient) throw new Error('ARTIFACT_UNAVAILABLE');
+      const auth = await userClient.auth.getUser();
+      if (auth.error || !auth.data.user || !isEmailVerified(auth.data.user)) throw new Error('ARTIFACT_DENIED');
+      return auth.data.user.id;
+    })();
   }
   async function rpc(scope: z.infer<typeof generationScope>, action: string, requestId?: string, payload: Record<string, unknown> = {}) {
     const id = await actor();
@@ -123,16 +137,19 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
   }
   async function prepare(input: z.infer<typeof generationQuoteInput>) {
     const v = generationQuoteInput.parse(input), id = await actor();
-    const flag = await privateClient!.from('system_settings').select('value').eq('key', 'v3_workbench_ai').single();
+    const [flag, fixed] = await Promise.all([
+      privateClient!.from('system_settings').select('value').eq('key', 'v3_workbench_ai').single(),
+      privateClient!.rpc('artifact_query', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'resolve' }),
+    ]);
     if (flag.error || flag.data?.value !== true) throw new Error('GENERATION_DISABLED');
-    const fixed = await privateClient!.rpc('artifact_query', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'resolve' });
     if (fixed.error) throw new Error('ARTIFACT_DENIED');
     const binding = z.object({ moduleId: uuid, skillId: uuid, revisionId: uuid, workflow: workflowSchema }).parse(fixed.data);
     const visible = await userClient.from('modules').select('id,active').eq('id', binding.moduleId).eq('active', true).single();
     if (visible.error || !visible.data) throw new Error('ARTIFACT_DENIED');
     const row = await privateClient!.from('modules').select('model_id').eq('id', binding.moduleId).single();
     if (row.error || !row.data?.model_id) throw new Error('GENERATION_DISABLED');
-    let selectedModelId = row.data.model_id;
+    const fields = 'id,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family';
+    let modelRow;
     let summaryLimit: number | undefined;
     let secondaryPreflight: {model:z.infer<typeof modelSchema>;maxTokens:number} | undefined;
     if (v.purpose === 'summary' || v.purpose === 'reply') {
@@ -140,16 +157,19 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       const settings = await privateClient!.from('system_settings').select('key,value').in('key', ['v3_summary_model_id','v3_summary_max_tokens']);
       if (settings.error) throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
       const policy = summaryPolicy(Object.fromEntries((settings.data ?? []).map(s => [s.key,s.value])), row.data.model_id);
-      if(v.purpose === 'summary'){selectedModelId = policy.modelId; summaryLimit = policy.maxTokens;}
-      const primary = await privateClient!.from('ai_models').select('model_id').eq('id',row.data.model_id).single();
-      const secondary = await privateClient!.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id',policy.modelId).single();
+      if(v.purpose === 'summary') summaryLimit = policy.maxTokens;
+      const [primary, secondary] = await Promise.all([
+        privateClient!.from('ai_models').select(fields).eq('id',row.data.model_id).single(),
+        privateClient!.from('ai_models').select(fields).eq('id',policy.modelId).single(),
+      ]);
+      modelRow = v.purpose === 'summary' ? secondary : primary;
       if (primary.error || secondary.error) throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
       assertSeparateSummaryModel(primary.data.model_id, secondary.data.model_id);
       const parsedSecondary=modelSchema.safeParse(secondary.data);
       if(!parsedSecondary.success)throw new Error('SUMMARY_MODEL_NOT_CONFIGURED');
       if(v.purpose === 'reply')secondaryPreflight={model:parsedSecondary.data,maxTokens:Math.min(parsedSecondary.data.max_tokens,policy.maxTokens)};
     }
-    const modelRow = await privateClient!.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id', selectedModelId).single();
+    modelRow ??= await privateClient!.from('ai_models').select(fields).eq('id',row.data.model_id).single();
     if (modelRow.error) throw new Error('GENERATION_DISABLED');
     const parsedModel = modelSchema.safeParse(modelRow.data);
     if (!parsedModel.success) throw new Error('GENERATION_UNSUPPORTED_MODEL');
@@ -215,7 +235,10 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     const maxTokens = Math.min(model.max_tokens, summaryLimit ?? 4096);
     const inputTokens = providerInputReservation(model,messages,maxTokens) ?? countWorkbenchTokens(messages);
     if (inputTokens + maxTokens > Math.min(model.input_limit,128000)) throw new Error('GENERATION_CAPACITY');
-    const settings = await getBillingRuntimeSettings(privateClient!), pricing = await getModelPricing(privateClient!, model.model_id, { requireModelPricing: true, modelRecordId: model.id });
+    const [settings, pricing] = await Promise.all([
+      getBillingRuntimeSettings(privateClient!),
+      getModelPricing(privateClient!, model.model_id, { requireModelPricing: true, modelRecordId: model.id }),
+    ]);
     if (Object.values(pricing).some(x => !Number.isFinite(x) || x < 0)) throw new Error('GENERATION_DISABLED');
     const upper = calculateTokenCostWithPricing({ inputTokens, outputTokens: maxTokens, cacheReadTokens: 0, cacheCreationTokens: 0 }, pricing, {}, settings).credits;
     const reservedCredits = estimatePreDeductCredits(upper, settings);
@@ -297,7 +320,15 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         known = receiptSchema.parse({ ...answer, body: filtered.content, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd });
         await rpc(v, 'receipt', v.requestId, { token: reserved.token, result: known });
         return generationStatus.parse(await rpc(v, 'settle', v.requestId));
-      } catch {
+      } catch (error) {
+        logger.warn('ai', 'workbench_generation_incomplete', { requestId: v.requestId, modelId: ready.model.model_id, reason: error instanceof ProviderRateLimited ? 'provider_rate_limited' : known ? 'receipt_persistence' : 'outcome_unknown' });
+        if (error instanceof ProviderRateLimited) {
+          const rejected = await privateClient!.rpc('artifact_reject_generation', { p_actor_id: ready.id, p_project_id: v.projectId, p_round_id: v.roundId, p_request_id: v.requestId, p_token: reserved.token }).abortSignal(AbortSignal.timeout(10000));
+          if (!rejected.error) return generationStatus.parse(rejected.data);
+          // Read an uncertain refund back before further action; never redispatch.
+          const current = await rpc(v, 'get', v.requestId, { input: v });
+          if (current?.state === 'refunded') return generationStatus.parse(current);
+        }
         if (known) {
           const recoveryReceipt = sealGenerationReceipt(known, reserved.token, JSON.stringify([ready.id, v.projectId, v.roundId, v.requestId]));
           // Read back an ambiguous durable write before retrying. If DB recovery

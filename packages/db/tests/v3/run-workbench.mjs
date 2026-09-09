@@ -186,6 +186,8 @@ try {
   apply("packages/db/migrations/0075_admin_settings_and_home_entry.sql");
   apply("packages/db/migrations/0076_admin_settings_writer_profile_read.sql");
   apply("packages/db/migrations/0076_admin_settings_writer_profile_read.sql");
+  apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
+  apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   sql("ALTER TABLE ai_models ADD COLUMN config jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN input_token_cost_above_200k integer DEFAULT 0, ADD COLUMN output_token_cost_above_200k integer DEFAULT 0;");
   console.log("SQL additive migration and repeat application PASS");
   docker(
@@ -261,6 +263,7 @@ try {
     if (!ok) throw new Error("local service not ready");
   }
   let modelCalls = 0;
+  let rateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
     if (req.url === '/__workbench_model_fixture') {
       const chunks = []; let bytes = 0;
@@ -269,6 +272,10 @@ try {
       if (req.method !== 'POST' || body.tools?.length || body.plugins?.length || body.stream !== false) { res.writeHead(400).end(); return; }
       modelCalls++;
       await new Promise(r => setTimeout(r, 1500));
+      if (!rateLimitFixtureRejected && JSON.stringify(body.messages).includes('LOCAL_RATE_LIMIT_ONCE')) {
+        rateLimitFixtureRejected = true;
+        res.writeHead(429, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { code: 429, message: 'Synthetic local rate limit' } })); return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: 'Synthetic local HTTP candidate' } }],
         usage: { prompt_tokens: 800, completion_tokens: 30 },
