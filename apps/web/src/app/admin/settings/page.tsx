@@ -230,8 +230,8 @@ export default function AdminSettingsPage() {
       );
       toast.success('设置保存成功');
       void refetchDashboard();
-    } catch {
-      toast.error('保存设置失败');
+    } catch (error) {
+      toast.error(getSafeErrorMessage(error, '保存设置失败，请稍后重试'));
     } finally {
       setSaving(false);
     }

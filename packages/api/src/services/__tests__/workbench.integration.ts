@@ -3835,3 +3835,85 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)('REAL SKILL: original six-step publi
   }
  }finally{await adminBrowser.context.close();}
 },180000);
+
+it('ADMIN: settings save recovers under staging column grants without weakening authorization', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
+  await sql.query("create table if not exists membership_plans(id uuid primary key,sort_order integer); grant select on membership_plans to service_role; notify pgrst,'reload schema'");
+  const { page, context } = await pageFor(admin);
+  const beforeSettings = (await sql.query('select key,value from system_settings order by key')).rows;
+  const profileColumns = (await sql.query("select column_name from information_schema.columns where table_schema='public' and table_name='profiles'")).rows.map(r => r.column_name);
+  const migration = readFileSync(new URL('../../../../db/migrations/0076_admin_settings_writer_profile_read.sql', import.meta.url), 'utf8');
+  const request = (name: string, data: unknown) => page.request.post(app + '/api/trpc/' + name, { data });
+  const target = { key: 'max_input_characters', value: '10000' };
+  try {
+    // Reproduce the observed staging posture, instead of the fixture's GRANT ALL.
+    await sql.query('revoke select on profiles from service_role');
+    await sql.query('revoke select (' + profileColumns.map(c => '"' + c + '"').join(',') + ') on profiles from service_role');
+    await sql.query('grant select(id,role,status,nickname,email,credits,membership_level,created_at) on profiles to service_role');
+    const deniedRead = await db.from('profiles').select('role,status,is_deleted').eq('id',admin.id).single();
+    expect(deniedRead.error?.code).toBe('42501');
+    for (const [name,data] of [['settings.updateSystemSettings',target],['settings.updateSystemSettingsBulk',[target]]] as const) {
+      const response = await request(name,data);
+      expect(response.status()).toBe(503);
+      const body = await response.text();
+      expect(body).toContain('暂时无法验证设置保存权限');
+      expect(body).not.toMatch(/permission denied|42501|is_deleted/);
+    }
+    await page.goto(app + '/admin/settings');
+    await page.getByRole('tab',{name:'功能设置',exact:true}).click();
+    await page.getByTestId('admin-setting-max_input_characters').fill('10000');
+    await page.getByTestId('admin-setting-free_tier_messages').fill('0');
+    await page.getByTestId('admin-settings-save-all').click();
+    await page.getByText('暂时无法验证设置保存权限，请稍后重试',{exact:true}).waitFor();
+    expect((await sql.query('select key,value from system_settings order by key')).rows).toEqual(beforeSettings);
+
+    const grants = () => sql.query("select grantee,column_name,privilege_type from information_schema.column_privileges where table_schema='public' and table_name='profiles' and grantee in ('anon','authenticated','service_role') order by grantee,column_name,privilege_type").then(r=>r.rows);
+    const beforeGrants = await grants();
+    await sql.query(migration);
+    const afterGrants = await grants();
+    expect(afterGrants.filter(g=>!beforeGrants.some(b=>JSON.stringify(b)===JSON.stringify(g))))
+      .toEqual([{grantee:'service_role',column_name:'is_deleted',privilege_type:'SELECT'}]);
+    expect(beforeGrants.every(b=>afterGrants.some(g=>JSON.stringify(b)===JSON.stringify(g)))).toBe(true);
+    await sql.query(migration);
+    expect(await grants()).toEqual(afterGrants);
+    expect((await sql.query('select key,value from system_settings order by key')).rows).toEqual(beforeSettings);
+
+    // The failed draft stays on screen and succeeds with the same Save All click.
+    await page.getByTestId('admin-settings-save-all').click();
+    await page.getByText('设置保存成功',{exact:true}).waitFor();
+    await page.reload();
+    await page.getByRole('tab',{name:'功能设置',exact:true}).click();
+    expect(await page.getByTestId('admin-setting-max_input_characters').inputValue()).toBe('10000');
+    expect(await page.getByTestId('admin-setting-free_tier_messages').inputValue()).toBe('0');
+    expect((await sql.query("select value from system_settings where key='max_input_characters'")).rows[0].value).toBe('10000');
+    expect((await request('settings.updateSystemSettings',{key:'max_input_characters',value:'12000'})).status()).toBe(200);
+    await page.screenshot({path:output + '/admin-settings-save-recovered.png'});
+    const saved = (await sql.query('select key,value from system_settings order by key')).rows;
+
+    for (const patch of ["is_deleted='true'", "status='disabled'", "status='banned'", "role='user'"]) {
+      await sql.query('update profiles set ' + patch + ' where id=$1',[admin.id]);
+      for (const [name,data] of [['settings.updateSystemSettings',target],['settings.updateSystemSettingsBulk',[target]]] as const) {
+        expect((await request(name,data)).status()).toBe(403);
+      }
+      expect((await sql.query('select key,value from system_settings order by key')).rows).toEqual(saved);
+      await sql.query("update profiles set is_deleted='false',status='active',role='admin' where id=$1",[admin.id]);
+    }
+    const user = await authenticated();
+    const anon = createClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+    for (const client of [user,anon]) expect((await client.from('system_settings').upsert(target)).error).not.toBeNull();
+    for (const [name,data] of [['settings.updateSystemSettings',target],['settings.updateSystemSettingsBulk',[target]]] as const) {
+      expect((await fetch(app+'/api/trpc/'+name,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)})).status).toBe(401);
+    }
+    // Recovery revokes only the new column grant, preserves data, and fails closed.
+    await sql.query('revoke select(is_deleted) on profiles from service_role');
+    expect((await request('settings.updateSystemSettings',target)).status()).toBe(503);
+    expect((await sql.query('select key,value from system_settings order by key')).rows).toEqual(saved);
+    await sql.query(migration);
+    expect((await request('settings.updateSystemSettings',target)).status()).toBe(200);
+  } finally {
+    await sql.query('grant select on profiles to service_role');
+    await sql.query("update profiles set is_deleted='false',status='active',role='admin' where id=$1",[admin.id]);
+    await context.close();
+  }
+},180000);

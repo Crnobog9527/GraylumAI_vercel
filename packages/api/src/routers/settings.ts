@@ -123,7 +123,11 @@ export function getPublicReadClient(ctx: {
 
 async function assertSettingsWriter(client: SupabaseClient<any, 'public', any>, profileId:string) {
   const {data,error}=await client.from('profiles').select('role,status,is_deleted').eq('id',profileId).single();
-  if(error || data?.role!=='admin' || data?.status!=='active' || data?.is_deleted!=='false')
+  if (error) {
+    logger.warn('system', 'settings_writer_profile_read_failed', { code: error.code });
+    throw createSafeServiceUnavailableError(error, '暂时无法验证设置保存权限，请稍后重试');
+  }
+  if(data?.role!=='admin' || data?.status!=='active' || data?.is_deleted!=='false')
     throw new TRPCError({code:'FORBIDDEN',message:'当前账号无权修改系统设置'});
 }
 
