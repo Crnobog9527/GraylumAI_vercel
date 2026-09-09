@@ -3660,6 +3660,7 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
     const response = await page.request.post(app + '/api/trpc/' + name, { data });
     return {status: response.status()};
   };
+  const previousSummarySetting = (await sql.query("select value from system_settings where key='v3_summary_model_id'")).rows;
   const model = randomUUID(), module = randomUUID();
   await sql.query("insert into ai_models(id,model_id,name,api_key) values($1,'local-synthetic','Before','LOCAL_ONLY')", [model]);
   const response = await call('model.updateModel', { id: model, name: 'After', description: 'Saved without provider call' });
@@ -3721,6 +3722,10 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   await expect(sql.query("insert into system_settings(key,value) values('ai_models',$1)",[JSON.stringify({haikuModelId:target})])).rejects.toMatchObject({code:'23503'});
   // Unknown setting UUIDs are ordinary content, not model references.
   await sql.query("insert into system_settings(key,value) values('delete-test-note',$1)",[JSON.stringify(target)]);
+  // Do not leak the synthetic model-reference fixture into the later full-form
+  // settings save, which validates whether the selected summary model is usable.
+  await sql.query("delete from system_settings where key in ('v3_summary_model_id','delete-test-note')");
+  if (previousSummarySetting.length) await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1)", [JSON.stringify(previousSummarySetting[0].value)]);
 
   await ordinary.context.close(); await context.close();
   const privileges = await sql.query("select has_table_privilege('anon','ai_models','UPDATE') as anon,has_table_privilege('authenticated','modules','DELETE') as authenticated");
