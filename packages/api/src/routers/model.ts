@@ -517,6 +517,7 @@ export const modelRouter = router({
       if (error?.code === '23503') throw new TRPCError({
         code: 'CONFLICT', message: '这个模型仍被功能模块、对话或系统配置使用，不能删除。请先更换引用它的配置；历史对话使用的模型可停用。',
       });
+      if (error?.code === '55P03') throw new TRPCError({code:'CONFLICT',message:'模型配置正在更新，请稍后再删除。'});
       if (error) throw createModelOperationError('删除模型', error);
       return { success: true };
     }),

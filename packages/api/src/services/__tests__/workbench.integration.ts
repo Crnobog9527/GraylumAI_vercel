@@ -3629,9 +3629,9 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   expect((await db.rpc('admin_delete_unused_model',{p_actor_id:actor,p_model_id:model})).error?.code).toBe('42501');
   const target = randomUUID();
   await sql.query("insert into ai_models(id,model_id,name) values($1,'unused-model','Unused deletion model')",[target]);
-  await sql.query("insert into system_settings(key,value) values('delete-test-config',$1)",[JSON.stringify({modelId:target.toUpperCase()})]);
+  await sql.query("insert into system_settings(key,value) values('ai_models',$1)",[JSON.stringify({primaryModelId:target.toUpperCase()})]);
   expect((await call('model.deleteModel',{id:target})).status).toBe(409);
-  await sql.query("delete from system_settings where key='delete-test-config'");
+  await sql.query("delete from system_settings where key='ai_models'");
   const prompt = randomUUID();
   await sql.query('insert into prompts(id,model_id) values($1,$2)',[prompt,target]);
   expect((await call('model.deleteModel',{id:target})).status).toBe(409);
@@ -3657,7 +3657,50 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   expect((await call('model.deleteModel',{id:target})).status).toBe(200);
   expect((await call('model.deleteModel',{id:target})).status).toBe(200);
   expect((await sql.query('select id from ai_models where id=$1',[target])).rowCount).toBe(0);
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(model)]);
+  await expect(sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(target)])).rejects.toMatchObject({code:'23503'});
+  expect((await sql.query("select value from system_settings where key='v3_summary_model_id'")).rows[0].value).toBe(model);
+  await expect(sql.query("insert into system_settings(key,value) values('delete-test-untouched','true'),('v3_summary_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(target)])).rejects.toMatchObject({code:'23503'});
+  expect((await sql.query("select value from system_settings where key='delete-test-untouched'")).rowCount).toBe(0);
+  await expect(sql.query("insert into system_settings(key,value) values('ai_models',$1)",[JSON.stringify({haikuModelId:target})])).rejects.toMatchObject({code:'23503'});
+  // Unknown setting UUIDs are ordinary content, not model references.
+  await sql.query("insert into system_settings(key,value) values('delete-test-note',$1)",[JSON.stringify(target)]);
+
   await ordinary.context.close(); await context.close();
   const privileges = await sql.query("select has_table_privilege('anon','ai_models','UPDATE') as anon,has_table_privilege('authenticated','modules','DELETE') as authenticated");
   expect(privileges.rows[0]).toEqual({anon:false,authenticated:false});
+});
+
+
+it('ADMIN: model deletion and settings writes serialize in both transaction orders', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
+  const holder = new pg.Client({connectionString:process.env.V3_LOCAL_DB});
+  const waiter = new pg.Client({connectionString:process.env.V3_LOCAL_DB});
+  await holder.connect(); await waiter.connect();
+  const pid = (await waiter.query('select pg_backend_pid() as pid')).rows[0].pid;
+  const waitForLock = () => expect.poll(async () => (await sql.query("select wait_event_type from pg_stat_activity where pid=$1",[pid])).rows[0]?.wait_event_type, {timeout:2000,intervals:[20,50,100]}).toBe('Lock');
+  const model = randomUUID();
+  await sql.query("insert into ai_models(id,model_id,name) values($1,'concurrent-delete','Concurrent deletion model')",[model]);
+  try {
+    // Settings writes first: deletion waits, then refuses the committed reference.
+    await holder.query('begin');
+    await holder.query("insert into system_settings(key,value) values('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(model)]);
+    const deletion = waiter.query('select admin_delete_unused_model($1,$2)',[admin.id,model]).then(()=>'deleted', e=>e.code);
+    await waitForLock(); await holder.query('commit');
+    expect(await deletion).toBe('23503');
+    expect((await sql.query('select id from ai_models where id=$1',[model])).rowCount).toBe(1);
+    await sql.query("delete from system_settings where key='assistant_model_id'");
+    // Deletion first: the queued stale settings write is rejected after deletion commits.
+    await holder.query('begin');
+    await holder.query('select admin_delete_unused_model($1,$2)',[admin.id,model]);
+    const setting = waiter.query("insert into system_settings(key,value) values('assistant_model_id',$1)",[JSON.stringify(model)]).then(()=>'saved', e=>e.code);
+    await waitForLock(); await holder.query('commit');
+    expect(await setting).toBe('23503');
+    expect((await sql.query("select key from system_settings where key='assistant_model_id'")).rowCount).toBe(0);
+    expect((await sql.query('select id from ai_models where id=$1',[model])).rowCount).toBe(0);
+  } finally {
+    await holder.query('rollback'); await waiter.query('rollback');
+    await holder.end(); await waiter.end();
+  }
 });
