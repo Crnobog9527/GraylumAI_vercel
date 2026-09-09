@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ModuleSkillEditor, emptySkillForm, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
@@ -186,9 +186,13 @@ export default function AdminPromptsPage() {
   const [skillIdentity, setSkillIdentity] = useState<{ moduleId: string; skillId: string; revisionId: string; requestId: string; expectedVersion: number } | null>(null);
   const [skillError, setSkillError] = useState('');
   const [skillLoading, setSkillLoading] = useState(false);
+  const [skillReading, setSkillReading] = useState(false);
+  const editorSession = useRef(0);
+  const currentEditorSession = editorSession.current;
   const utils = trpc.useUtils();
-  const saveSkill = trpc.skills.saveModule.useMutation({ onSuccess: async () => { await refetch(); setDialogOpen(false); setEditingModule(null); setSkillIdentity(null); setFormData(createEmptyForm()); } });
+  const saveSkill = trpc.skills.saveModule.useMutation({ onSuccess: async () => { await refetch(); editorSession.current++; setDialogOpen(false); setEditingModule(null); setSkillIdentity(null); setFormData(createEmptyForm()); } });
   const resetSkill = (module?: FeatureModule) => {
+    editorSession.current++; setSkillReading(false); setSkillLoading(false);
     setSkillForm(emptySkillForm()); setSkillError('');
     setSkillIdentity({ moduleId: module?.id ?? crypto.randomUUID(), skillId: module?.skill_id ?? crypto.randomUUID(),
       revisionId: crypto.randomUUID(), requestId: crypto.randomUUID(), expectedVersion: 0 });
@@ -263,13 +267,15 @@ export default function AdminPromptsPage() {
   const openEditDialog = (module: FeatureModule) => {
     resetSkill(module); setMode(module.skill_id ? 'skill' : 'prompt');
     if (module.skill_id) {
+      const session = editorSession.current;
       setSkillLoading(true);
       void utils.skills.readModule.fetch({ id: module.id }).then(data => {
+        if (session !== editorSession.current) return;
         if (!data) throw new Error('Skill 配置不存在');
         setSkillIdentity(current => current?.moduleId === module.id ? { ...current, skillId: data.skillId, expectedVersion: data.expectedVersion } : current);
         setSkillForm({ directoryName: data.directoryName, kind: data.workflow.kind, files: data.files,
           steps: data.workflow.steps.map(s => ({ title: s.title, resources: s.resources })), reviewed: false });
-      }).catch(e => setSkillError(e instanceof Error ? e.message : '读取 Skill 失败')).finally(() => setSkillLoading(false));
+      }).catch(e => { if (session === editorSession.current) setSkillError(e instanceof Error ? e.message : '读取 Skill 失败'); }).finally(() => { if (session === editorSession.current) setSkillLoading(false); });
     }
     setEditingModule(module);
     setFormData({
@@ -298,7 +304,8 @@ export default function AdminPromptsPage() {
   };
 
   const closeDialog = () => {
-    if (saveSkill.isPending || skillLoading) return;
+    if (saveSkill.isPending) return;
+    editorSession.current++; setSkillReading(false); setSkillLoading(false);
     setDialogOpen(false);
     setSkillIdentity(null);
     setEditingModule(null);
@@ -337,7 +344,7 @@ export default function AdminPromptsPage() {
   const handleSubmit = () => {
     const payload = buildPayload();
     if (mode === 'skill') {
-      if (!skillIdentity || !formData.modelId || !skillForm.reviewed) return;
+      if (skillReading || skillLoading || saveSkill.isPending || !skillIdentity || !formData.modelId || !skillForm.reviewed) return;
       setSkillError('');
       saveSkill.mutate({ ...skillIdentity, expectedUpdatedAt: editingModule?.updated_at ?? null,
         directoryName: skillForm.directoryName, kind: skillForm.kind, files: skillForm.files,
@@ -503,10 +510,10 @@ export default function AdminPromptsPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            功能模块 / 提示词
+            功能模块
           </h1>
           <p className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            管理功能广场展示、排序、精选状态和模块运行提示词
+            管理功能广场展示、提示词对话和 Skill 分步流程
           </p>
         </div>
         <div className="flex gap-2">
@@ -803,14 +810,13 @@ export default function AdminPromptsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <fieldset disabled={saveSkill.isPending || skillLoading} className="space-y-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
+          <fieldset disabled={saveSkill.isPending || skillLoading || skillReading} className="space-y-4 py-4 max-h-[65vh] overflow-y-auto pr-1">
             <label className="block text-sm">功能类型
               <select aria-label="功能类型" value={mode} disabled={!!editingModule?.skill_id || saveSkill.isPending}
                 onChange={e => setMode(e.target.value as 'prompt' | 'skill')} className="ml-3 rounded bg-[var(--bg-tertiary)] p-2">
                 <option value="prompt">提示词对话</option><option value="skill">Skill 分步对话</option>
               </select>
             </label>
-            {mode === 'skill' && !skillLoading && <ModuleSkillEditor value={skillForm} onChange={setSkillForm} error={skillError} onError={setSkillError} disabled={saveSkill.isPending || skillLoading} />}
             {skillLoading && <p role="status">正在读取已发布 Skill…</p>}
             {editingModule?.skill_id && skillError && <a href="/admin/skills" className="text-sm underline">打开旧版文本 Skill 管理</a>}
             <div className="grid grid-cols-2 gap-4">
@@ -901,6 +907,15 @@ export default function AdminPromptsPage() {
                 </Select>
               </div>
             </div>
+
+            {mode === 'skill' && !skillLoading && <ModuleSkillEditor key={currentEditorSession} value={skillForm}
+              onChange={value => { if (currentEditorSession === editorSession.current) setSkillForm(value); }}
+              error={skillError} onError={message => { if (currentEditorSession === editorSession.current) setSkillError(message); }}
+              onReadingChange={reading => {
+                if (currentEditorSession !== editorSession.current) return;
+                setSkillReading(reading);
+                if (reading) setSkillForm(value => ({ ...value, reviewed: false }));
+              }} disabled={saveSkill.isPending || skillLoading} />}
 
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>卡片描述</Label>
@@ -1100,7 +1115,7 @@ export default function AdminPromptsPage() {
             <Button
               data-testid="prompt-save"
               onClick={handleSubmit}
-              disabled={!formData.title || (mode === 'prompt' ? !formData.content : !skillIdentity || !formData.modelId || !skillForm.reviewed || !skillForm.files.length || skillForm.steps.some(s => !s.title.trim() || !s.resources.length)) || skillLoading || saveSkill.isPending || createPrompt.isPending || updatePrompt.isPending}
+              disabled={!formData.title || (mode === 'prompt' ? !formData.content : !skillIdentity || !formData.modelId || !skillForm.reviewed || !skillForm.files.length || skillForm.steps.some(s => !s.title.trim() || !s.resources.length)) || skillReading || skillLoading || saveSkill.isPending || createPrompt.isPending || updatePrompt.isPending}
               className="bg-[var(--color-primary)] text-black hover:bg-[var(--color-primary)]/90"
             >
               {saveSkill.isPending || createPrompt.isPending || updatePrompt.isPending ? '保存中...' : mode === 'skill' ? '发布 Skill 与模块' : '保存'}

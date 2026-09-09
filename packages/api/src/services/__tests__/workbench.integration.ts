@@ -3549,5 +3549,29 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     await page.getByLabel('步骤 1 名称', { exact: true }).waitFor();
     await expect.poll(() => page.getByLabel('步骤 1 名称', { exact: true }).inputValue(), { timeout: 20000 }).toBe('需求确认');
     await page.screenshot({ path: output + '/admin-skill-editor.png' });
+    // A slow second import must revoke confirmation before bytes finish reading.
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.evaluate(() => {
+      const original = File.prototype.arrayBuffer;
+      let release!: () => void;
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      (window as any).releaseAdminImport = () => { File.prototype.arrayBuffer = original; release(); };
+      File.prototype.arrayBuffer = async function () { await pending; return original.call(this); };
+    });
+    await page.getByLabel('导入 Skill 文件夹', { exact: true }).setInputFiles(directory);
+    await page.getByText('正在读取 Skill 文件…', { exact: true }).waitFor();
+    expect(await page.getByTestId('prompt-save').isEnabled()).toBe(false);
+    expect(await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').isChecked()).toBe(false);
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+    await page.getByRole('button', { name: '新建模块', exact: true }).click();
+    await page.getByLabel('功能类型', { exact: true }).selectOption('skill');
+    await page.getByLabel('步骤 1 名称', { exact: true }).fill('新会话内容');
+    await page.evaluate(() => (window as any).releaseAdminImport());
+    // Flush the original read promise through its actual microtask completion.
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve,100)));
+    expect(await page.getByLabel('步骤 1 名称', { exact: true }).inputValue()).toBe('新会话内容');
+    expect(await page.getByText('已载入 10 个文件', { exact: true }).count()).toBe(0);
+    await page.getByRole('button', { name: '取消', exact: true }).click();
+
   } finally { await context.close(); }
 }, 180000);

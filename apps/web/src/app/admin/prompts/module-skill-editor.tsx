@@ -33,20 +33,20 @@ export async function readSkillFiles(files: FileList | File[]) {
   return { directoryName: [...roots][0] ?? '', files: result };
 }
 
-export function ModuleSkillEditor({ value, onChange, error, onError, disabled = false }: {
-  value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void; disabled?: boolean;
+export function ModuleSkillEditor({ value, onChange, error, onError, onReadingChange, disabled = false }: {
+  value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void; onReadingChange: (reading: boolean) => void; disabled?: boolean;
 }) {
   const [reading, setReading] = useState(false);
   const patch = (next: Partial<SkillForm>) => onChange({ ...value, ...next, reviewed: false });
   const load = async (files: FileList | null) => {
     if (!files) return;
-    setReading(true);
+    setReading(true); onReadingChange(true);
     try {
       const result = await readSkillFiles(files);
       patch({ ...result, directoryName: result.directoryName || value.directoryName,
         steps: value.steps.map(step => ({ ...step, resources: step.resources.filter(p => result.files.some(f => f.path === p)) })) });
       onError('');
-    } catch (e) { onError(e instanceof Error ? e.message : '读取文件失败'); } finally { setReading(false); }
+    } catch (e) { onError(e instanceof Error ? e.message : '读取文件失败'); } finally { setReading(false); onReadingChange(false); }
   };
   return <fieldset disabled={disabled || reading} className="space-y-4 rounded-lg border border-[var(--border-primary)] p-4">
     <legend className="px-2 font-medium">Skill 文件与步骤</legend>
