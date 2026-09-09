@@ -22,39 +22,29 @@ describe('separate summary model policy', () => {
 });
 
 
-describe('admin summary model eligibility', () => {
-  const row={id:summary,name:'Configured secondary',model_id:'openai/gpt-4o-mini-2024-07-18',is_active:'true',max_tokens:2048,input_limit:128000,api_key:'SECRET_CANARY',api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'o200k_base'};
-  it('returns only public display fields and the same runtime eligibility',async()=>{
-    const {summaryModelOption}=await import('../artifacts/modelPolicy');
-    expect(summaryModelOption(row)).toEqual({id:summary,name:row.name,model_id:row.model_id,available:true});
-    expect(JSON.stringify(summaryModelOption(row))).not.toContain('SECRET_CANARY');
+describe('admin and runtime use one OpenRouter configuration policy', () => {
+  const row={id:summary,name:'Configured secondary',model_id:'openai/gpt-5.6-luna',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'SECRET_CANARY',api_endpoint:'',token_counting_supported:'false',tokenizer_family:'openai'};
+  it.each(['qwen/qwen3.8-27b','openai/gpt-5.6-luna','anthropic/claude-opus-4.5'])('accepts configured %s using derived usage and the default endpoint without rewriting storage',async model_id=>{
+    const {summaryModelOption,workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
+    const input={...row,model_id},before=JSON.stringify(input),option=summaryModelOption(input),model=workbenchModelSchema.parse(input);
+    expect(option).toEqual({id:summary,name:row.name,model_id,available:true,reason:null});
+    expect(JSON.stringify(option)).not.toContain('SECRET_CANARY');
+    expect(JSON.stringify(input)).toBe(before);
+    expect(model.api_endpoint).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(model.token_counting_supported).toBe('true');
+    const messages=[{content:'中文 🐈 <|endoftext|>'}];
+    expect(providerInputReservation(model,messages,2048)).toBe(128000-2048);
+    expect(providerInputReservation(model,messages,2048)).toBeLessThan(128000);
   });
-  it.each([{api_key:''},{model_id:'not-adapted/model'},{is_active:'false'},{api_endpoint:'https://example.test'},{tokenizer_family:'wrong'}])('marks incomplete or unsupported configuration unavailable: %j',async patch=>{
+  it.each([{api_key:''},{model_id:''},{model_id:'openrouter/auto'},{model_id:'@preset/test'},{is_active:'false'},{api_endpoint:'https://example.test'},{input_limit:0},{max_tokens:0}])('gives an actionable reason for unavailable configuration: %j',async patch=>{
     const {summaryModelOption}=await import('../artifacts/modelPolicy');
-    expect(summaryModelOption({...row,...patch}).available).toBe(false);
+    const option=summaryModelOption({...row,...patch});
+    expect(option.available).toBe(false);expect(option.reason).toBeTruthy();expect(JSON.stringify(option)).not.toContain('SECRET_CANARY');
   });
-});
-
-
-describe('Qwen input reservation',()=>{
- const row={id:summary,model_id:'qwen/qwen3.8-flash' as const,is_active:'true' as const,max_tokens:2048,input_limit:128000,api_key:'SYNTHETIC',api_endpoint:'https://openrouter.ai/api/v1' as const,token_counting_supported:'true' as const,tokenizer_family:'openai' as const};
- it('admits the real model name with admin provider-usage metadata and reserves its full input capacity',async()=>{
-  const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
-  expect(workbenchModelSchema.safeParse(row).success).toBe(true);
-  expect(providerInputReservation(row,[{content:'中文 🐈 <|endoftext|>'}],2048)).toBe(125952);
- });
- it('rejects a prompt beyond the byte envelope without truncation or paid dispatch',async()=>{
-  const {providerInputReservation}=await import('../artifacts/modelPolicy');
-  expect(()=>providerInputReservation(row,[{content:'猫'.repeat(50000)}],2048)).toThrow('GENERATION_CAPACITY');
- });
-});
-
-// Luna uses provider usage with conservative admission, never a guessed tokenizer.
-describe('Luna summary model admission',()=>{
- it('accepts the exact Owner-selected API ID and reserves full configured capacity',async()=>{
-  const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
-  const model=workbenchModelSchema.parse({id:summary,model_id:'openai/gpt-5.6-luna',is_active:'true',max_tokens:2048,input_limit:32768,api_key:'SYNTHETIC',api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'openai'});
-  expect(providerInputReservation(model,[{content:'整理已讨论的预算、受众和形式'}],2048)).toBe(30720);
-  expect(()=>providerInputReservation(model,[{content:'猫'.repeat(11000)}],2048)).toThrow('GENERATION_CAPACITY');
- });
+  it('bounds the task independently of advertised context and rejects oversize without truncation',async()=>{
+    const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
+    const model=workbenchModelSchema.parse(row);
+    expect(()=>providerInputReservation(model,[{content:'猫'.repeat(50000)}],2048)).toThrow('GENERATION_CAPACITY');
+    expect(()=>providerInputReservation({...model,input_limit:8000},[{content:'a'}],2048)).toThrow('GENERATION_CAPACITY');
+  });
 });

@@ -17,6 +17,7 @@ const USER_FACING_SYSTEM_SETTING_KEYS = [
   'support_email',
   'maintenance_mode',
   'home_show_onboarding',
+  'home_analysis_module_id',
   'home_show_featured_modules',
   'chat_show_model_selector',
   'max_input_characters',
@@ -120,10 +121,25 @@ export function getPublicReadClient(ctx: {
   return ctx.supabasePublic ?? ctx.supabase;
 }
 
+async function assertSettingsWriter(client: SupabaseClient<any, 'public', any>, profileId:string) {
+  const {data,error}=await client.from('profiles').select('role,status,is_deleted').eq('id',profileId).single();
+  if(error || data?.role!=='admin' || data?.status!=='active' || data?.is_deleted!=='false')
+    throw new TRPCError({code:'FORBIDDEN',message:'当前账号无权修改系统设置'});
+}
+
+async function validateSummarySelection(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
+  const value=input.find(item=>item.key==='v3_summary_model_id')?.value;
+  if(typeof value!=='string' || !value)return;
+  const {data,error}=await client.from('ai_models').select('id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family').eq('id',value).single();
+  if(error || !data)throw new TRPCError({code:'BAD_REQUEST',message:'所选整理模型不存在，请刷新模型列表'});
+  const option=summaryModelOption(data);
+  if(!option.available)throw new TRPCError({code:'BAD_REQUEST',message:option.reason??'整理模型不可用'});
+}
+
 export const settingsRouter = router({
   getSummaryModels: adminProcedure.query(async ({ctx}) => {
     const {data,error}=await ctx.supabase.from('ai_models')
-      .select('id,name,model_id,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family')
+      .select('id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family')
       .eq('is_active','true').order('name');
     if(error)throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
     // Credentials participate only in server eligibility checks and never leave this projection.
@@ -244,6 +260,8 @@ export const settingsRouter = router({
   updateSystemSettings: adminProcedure
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
+      await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')
         .upsert({ key: input.key, value: input.value }, { onConflict: 'key' })
@@ -258,6 +276,8 @@ export const settingsRouter = router({
   updateSystemSettingsBulk: adminProcedure
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
+      await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')
         .upsert(input, { onConflict: 'key' })

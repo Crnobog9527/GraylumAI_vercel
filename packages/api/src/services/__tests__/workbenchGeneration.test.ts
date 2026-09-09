@@ -2,10 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as security from '../../middleware/securityChecks';
 import { TRPCError } from '@trpc/server';
-import { workbenchGeneration, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
+import { workbenchGeneration, buildWorkbenchMessages, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
 import { activateSkill, identityOf, packageHash, type SkillSource } from '../skills/loader';
 import { makePackage } from './fixtures/artifacts';
-const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1', token_counting_supported: 'true', tokenizer_family: 'o200k_base' };
+const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', token_counting_supported: 'true', tokenizer_family: 'openai' };
 const request: ModelRequest = { model, messages: [{ role: 'system', content: 'synthetic method' }, { role: 'user', content: 'fictional content' }], maxTokens: 100 };
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('workbench model boundary', () => {
@@ -19,12 +19,12 @@ describe('workbench model boundary', () => {
     expect(options.redirect).toBe('error');
     expect(JSON.parse(String(options.body))).toMatchObject({ tools: [], plugins: [], tool_choice: 'none', stream: false, max_tokens: 100, provider: { allow_fallbacks: false } });
   });
-  it('sends the real Qwen identity with reasoning disabled and no fallback or tools',async()=>{
+  it.each(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'] as const)('sends %s with reasoning disabled and no fallback or tools',async model_id=>{
     const fetch=vi.fn(async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'Qwen result'}}],usage:{prompt_tokens:100,completion_tokens:10}})));vi.stubGlobal('fetch',fetch);
-    await openRouterGeneration({...request,model:{...model,model_id:'qwen/qwen3.8-flash',tokenizer_family:'openai'}});
+    await openRouterGeneration({...request,model:{...model,model_id,tokenizer_family:'openai'}});
     expect(fetch).toHaveBeenCalledTimes(1);
     const [,options]=fetch.mock.calls[0] as unknown as [string,RequestInit];
-    expect(JSON.parse(String(options.body))).toMatchObject({model:'qwen/qwen3.8-flash',reasoning:{enabled:false},provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
+    expect(JSON.parse(String(options.body))).toMatchObject({model:model_id,reasoning:{enabled:false},provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
     expect(options.redirect).toBe('error');
   });
   it('sends Luna with low reasoning and fixed bounded text-only transport',async()=>{
@@ -129,4 +129,15 @@ it('allows generic domain phrases without allowing substantial private excerpts'
   const context=JSON.stringify({resources:[{path:'SKILL.md',content:'Use competitive-analysis and entrepreneurship to reason about fictional markets.'}]});
   expect(echoesPrivateMethod('Competitive analysis helps entrepreneurship.',context)).toBe(false);
   expect(echoesPrivateMethod('Use competitive analysis and entrepreneurship to reason about fictional markets.',context)).toBe(true);
+});
+
+it('preflights the actual summary framing even before the unknown reply exists',async()=>{
+ const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
+ const secondary=workbenchModelSchema.parse({...model,model_id:'openai/gpt-5.6-luna',input_limit:20000});
+ const context={conversation:[],instruction:''};
+ const size=(messages:ModelRequest['messages'])=>8192+messages.reduce((sum,m)=>sum+Buffer.byteLength(m.content),0);
+ const capacity=20000-2048;
+ context.instruction='x'.repeat(capacity-100-size(buildWorkbenchMessages('',context,'reply')));
+ expect(()=>providerInputReservation(secondary,buildWorkbenchMessages('',context,'reply'),2048)).not.toThrow();
+ expect(()=>providerInputReservation(secondary,buildWorkbenchMessages('',{...context,currentReply:''},'summary'),2048)).toThrow('GENERATION_CAPACITY');
 });

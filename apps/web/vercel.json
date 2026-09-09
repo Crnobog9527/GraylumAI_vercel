@@ -10,7 +10,8 @@
       "codex/admin-skill-publication-20260909": false,
       "codex/admin-management-repair-20260909": false,
       "codex/admin-delete-dialogs-20260909": false,
-      "codex/model-usage-accuracy-20260909": false
+      "codex/model-usage-accuracy-20260909": false,
+      "codex/skill-model-readiness-20260909": false
     }
   },
   "crons": [

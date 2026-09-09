@@ -168,7 +168,10 @@ export default function HomePage() {
         }}
       >
         <WelcomeBanner user={user} />
-        {showOnboarding && <SixStepsGuide />}
+        {showOnboarding && <SixStepsGuide onStartAnalysis={() => {
+          const id = systemSettings?.home_analysis_module_id;
+          router.push(typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? `/chat?module=${encodeURIComponent(id)}` : '/marketplace');
+        }} />}
         {showFeaturedModules && !isFeaturedModulesLoading && featuredModules && featuredModules.length > 0 && (
           <FeaturedModules
             featuredModules={featuredModules.map((module) => ({

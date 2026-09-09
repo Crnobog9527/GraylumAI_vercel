@@ -253,7 +253,7 @@ export default function AdminSettingsPage() {
           className="w-full rounded-md border p-2 bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]">
           <option value="">未配置（不使用主力模型代替）</option>
           {data.value && !summaryModels.data?.some(model => model.id === data.value) && <option value={data.value}>当前配置模型不可用</option>}
-          {summaryModels.data?.map(model => <option key={model.id} value={model.id} disabled={!model.available}>{model.name} · {model.model_id}{model.available ? "" : "（尚未适配或配置不完整）"}</option>)}
+          {summaryModels.data?.map(model => <option key={model.id} value={model.id} disabled={!model.available}>{model.name} · {model.model_id}{model.available ? "" : `（${model.reason}）`}</option>)}
         </select>
         {summaryModels.error && <p role="alert">无法读取模型列表，请刷新后重试。</p>}
       </div>;

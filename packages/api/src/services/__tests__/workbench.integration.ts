@@ -8,7 +8,7 @@ import { createClient } from "@supabase/supabase-js";
 import { saveModuleSkill, type ModuleSkillInput } from '../skills/modulePublication';
 import { publishSkillPackage } from "../skills/publication";
 import { makePackage, makeWorkflow } from "./fixtures/artifacts";
-import { packageHash, sha256 } from "../skills/loader";
+import { packageHash, packageHashPayload, sha256 } from "../skills/loader";
 import { databaseArtifactStore } from "../artifacts/store";
 import { webCommandSchema, workbenchService } from "../artifacts/workbench";
 const requireWeb = createRequire(
@@ -218,7 +218,7 @@ beforeAll(async () => {
   actor = a.id;
   credentials = { email: a.email, password: a.password };
   fixtures = [];
-  for (const file of readdirSync(
+  if (!process.env.V3_REAL_SKILL_INPUT) for (const file of readdirSync(
     new URL("./fixtures/workbench/", import.meta.url),
   ).sort())
     fixtures.push(
@@ -3473,7 +3473,7 @@ function adminModuleInput(): ModuleSkillInput {
 }
 it('ADMIN: atomic package, YAML template, workflow and module publication with replay, rollback and stale-write protection', async () => {
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name) values($1,'local-synthetic','Admin fixture model')", [input.module.model_id]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Admin fixture model','openai','LOCAL_ONLY',4096,800000)", [input.module.model_id]);
   const result = await saveModuleSkill(db, owner, input);
   expect(result.version).toBe(1);
   expect(await saveModuleSkill(db, owner, input)).toEqual(result);
@@ -3511,7 +3511,7 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
   await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
   writeFileSync(output + '/admin-preview.json', JSON.stringify({ url: app, email: admin.email, password: admin.password }), { mode: 0o600 });
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name) values($1,'local-synthetic','Browser admin model')", [input.module.model_id]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit) values($1,'qwen/qwen3.8-27b','Browser admin model','openai','LOCAL_ONLY',4096,800000)", [input.module.model_id]);
   const directory = output + '/synthetic-method'; mkdirSync(directory, { recursive: true });
   for (const f of input.files) {
     const target = directory + '/' + f.path; mkdirSync(target.slice(0,target.lastIndexOf('/')), { recursive: true });
@@ -3732,3 +3732,106 @@ aiTest('CHAT: provider usage is persisted exactly while missing or interrupted u
   expect((await sql.query('select token_counting_supported,api_endpoint from ai_models where id=$1',[localModel])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:''});
  }finally{await context.close();}
 });
+
+// Optional local acceptance uses the Owner-supplied private directory payload.
+// Method bytes stay outside git. This test never dispatches a model request.
+it.skipIf(!process.env.V3_REAL_SKILL_INPUT)('REAL SKILL: original six-step publication, homepage entry and dual-model preflight without paid dispatch',async()=>{
+ const {prepareModuleSkill}=await import('../skills/modulePublication');
+ const {workbenchGeneration}=await import('../artifacts/generation');
+ const {skillChatService}=await import('../artifacts/chat');
+ const input=JSON.parse(readFileSync(process.env.V3_REAL_SKILL_INPUT!,'utf8')) as ModuleSkillInput;
+ const primary=input.module.model_id,secondary=randomUUID();
+ for(const [id,model_id,name] of [[primary,'qwen/qwen3.8-27b','Qwen dialogue'],[secondary,'openai/gpt-5.6-luna','Luna summary']]){
+  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,input_token_cost,output_token_cost) values($1,$2,$3,'openai','LOCAL_ONLY','','4096',800000,'false','openai',150000,2000000)",[id,model_id,name]);
+ }
+ await sql.query("update ai_models set api_key='' where id=$1",[primary]);
+ await expect(saveModuleSkill(db,owner,input)).rejects.toThrow('请先配置 API 密钥');
+ expect((await sql.query('select id from modules where id=$1',[input.moduleId])).rowCount).toBe(0);
+ await sql.query("update ai_models set api_key='LOCAL_ONLY' where id=$1",[primary]);
+ await sql.query("alter table system_settings enable row level security; create policy local_existing_public_settings on system_settings for select to anon,authenticated using(key in ('maintenance_mode','home_show_onboarding','home_show_featured_modules','chat_show_model_selector','max_input_characters','site_name','support_email')); ");
+ const prepared=prepareModuleSkill(input);
+ writeFileSync(output+'/private-publication.json',JSON.stringify({...prepared,hashPayload:packageHashPayload(prepared.descriptor)}),{mode:0o600});
+ await saveModuleSkill(db,owner,input);
+ const read=await db.rpc('admin_read_skill_module',{p_actor_id:owner,p_module_id:input.moduleId});
+ expect(read.error).toBeNull();
+ for(const original of input.files)expect(read.data.files.find((f:any)=>f.path===original.path)?.base64).toBe(original.base64);
+ expect(read.data.workflow.steps.map((s:any)=>s.title)).toEqual(input.steps.map(s=>s.title));
+ await sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,input.moduleId,input.skillId,'youtube:new-account']);
+ for(const [key,value] of [['home_show_onboarding',true],['home_analysis_module_id',input.moduleId],['v3_workbench_ai',true],['v3_summary_model_id',secondary],['v3_summary_max_tokens',2048]] as const)
+  await sql.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);
+ const {page,context}=await pageFor();
+ try{
+  let dispatches=0;page.on('request',r=>{if(r.url().includes('/workbench.generate'))dispatches++;});
+  await page.goto(app+'/');await page.getByRole('button',{name:'开始分析',exact:true}).click();
+  await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'),{timeout:60000});
+  await page.getByRole('heading',{name:input.module.title,exact:true}).waitFor();
+  for(let n=0;n<input.steps.length;n++)await page.getByRole('button',{name:new RegExp('^'+(n+1)+'\\. '+input.steps[n].title)}).waitFor();
+  expect(await page.getByRole('button',{name:'使用此 Skill',exact:true}).count()).toBe(0);
+  await page.screenshot({path:output+'/real-skill-home-entry.png'});
+  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+  const user=await authenticated(),service=workbenchService(user,db),chat=skillChatService(user,db);
+  const {databaseSkillSource}=await import('../skills/databaseSource');
+  const {activateSkill,identityOf}=await import('../skills/loader');
+  const source=databaseSkillSource({userClient:user,privateClient:db,moduleId:input.moduleId,skillId:input.skillId,revisionId:input.revisionId});
+  for(const step of input.steps){
+   const loaded=await activateSkill(source,identityOf(prepared.descriptor),{resources:step.resources,maxContextBytes:2097152});
+   expect(loaded.resourceIdentities().map(r=>r.path).sort()).toEqual(['SKILL.md',...step.resources].sort());
+  }
+  const project=(await service.projects()).find(p=>p.moduleId===input.moduleId)!;
+  const round=(await service.rounds(project.projectId)).find(r=>r.state==='draft')!;
+  const scope={projectId:project.projectId,roundId:round.roundId};
+  let calls=0;const ai=workbenchGeneration(user,db,async()=>{calls++;throw new Error('Real-model dispatch is not authorized in this test');});
+  const turnId=randomUUID(),body='我准备从零创建 YouTube 账号，请先了解我的经验、目标观众和时间预算。';
+  await chat.submit({conversationId,requestId:turnId,stepId:'step-1',body});
+  const snapshot=await service.read(scope.projectId,scope.roundId);
+  const request={...scope,conversationId,turnId,purpose:'reply' as const,stepId:'step-1',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snapshot.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+  const quote=await ai.quote(request);expect(quote.reservedCredits).toBeGreaterThan(0);
+  for(const patch of ["api_key=''","is_active='false'","input_limit=1","input_limit=13000","input_token_cost=0"]){
+   await sql.query('update ai_models set '+patch+' where id=$1',[secondary]);
+   await expect(ai.quote(request)).rejects.toThrow();
+   await sql.query("update ai_models set api_key='LOCAL_ONLY',is_active='true',input_limit=800000,input_token_cost=150000 where id=$1",[secondary]);
+  }
+  await sql.query("update system_settings set value=$1 where key='v3_summary_model_id'",[JSON.stringify(primary)]);
+  await expect(ai.quote(request)).rejects.toThrow('SUMMARY_MODEL_MUST_DIFFER');
+  await sql.query("delete from system_settings where key='v3_summary_model_id'");
+  await expect(ai.quote(request)).rejects.toThrow('SUMMARY_MODEL_NOT_CONFIGURED');
+  await sql.query("insert into system_settings(key,value) values('v3_summary_model_id',$1)",[JSON.stringify(secondary)]);
+  const anonymous=createClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+  expect((await anonymous.from('system_settings').select('key,value').eq('key','home_analysis_module_id')).data).toEqual([{key:'home_analysis_module_id',value:input.moduleId}]);
+  expect((await anonymous.from('system_settings').select('key,value').eq('key','v3_summary_model_id')).data).toEqual([]);
+  expect((await user.from('system_settings').upsert({key:'v3_summary_model_id',value:secondary})).error).not.toBeNull();
+  expect((await anonymous.from('system_settings').upsert({key:'home_analysis_module_id',value:input.moduleId})).error).not.toBeNull();
+  expect((await page.request.post(app+'/api/trpc/settings.updateSystemSettings',{data:{key:'v3_summary_model_id',value:secondary}})).status()).toBe(403);
+  expect(calls).toBe(0);expect(dispatches).toBe(0);
+  expect((await sql.query('select id from billing_history where user_id=$1',[actor])).rowCount).toBe(0);
+  expect((await sql.query('select token_counting_supported,api_endpoint,input_limit from ai_models where id=$1',[primary])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:'',input_limit:800000});
+  writeFileSync(output+'/real-skill-result.json',JSON.stringify({files:input.files.length,packageHash:prepared.descriptor.packageHash,steps:input.steps.map(s=>s.title),homepageEntry:true,models:['qwen/qwen3.8-27b','openai/gpt-5.6-luna'],providerCalls:calls,billingRows:0}));
+ }finally{await context.close();}
+ const admin=await newUser();await sql.query("update profiles set role='admin' where id=$1",[admin.id]);
+ // The disposable app's settings bootstrap also reads an empty membership catalog.
+ await sql.query('create table if not exists membership_plans(id uuid primary key,sort_order integer); grant select on membership_plans to service_role; notify pgrst,\'reload schema\'');
+ const adminBrowser=await pageFor(admin);
+ try{
+  const p=adminBrowser.page;
+  await p.goto(app+'/admin/settings');await p.getByRole('tab',{name:'功能设置',exact:true}).click();
+  const select=p.getByLabel('步骤成果整理模型',{exact:true});
+  await expect.poll(()=>select.locator('option[value="'+secondary+'"]').isEnabled()).toBe(true);
+  await select.selectOption(secondary);
+  await p.getByRole('button',{name:'保存所有设置',exact:true}).click();
+  await p.getByText('设置保存成功',{exact:true}).waitFor();
+  await p.screenshot({path:output+'/real-skill-summary-settings.png'});
+  await sql.query("update ai_models set api_key='' where id=$1",[secondary]);
+  for(const [name,data] of [['settings.updateSystemSettings',{key:'v3_summary_model_id',value:secondary}],['settings.updateSystemSettingsBulk',[{key:'v3_summary_model_id',value:secondary}]]] as const){
+   const response=await p.request.post(app+'/api/trpc/'+name,{data});expect(response.status()).toBe(400);
+   expect(await response.text()).not.toContain('LOCAL_ONLY');
+  }
+  await sql.query("update ai_models set api_key='LOCAL_ONLY' where id=$1",[secondary]);
+  for(const patch of ["is_deleted='true'","status='disabled'"]){
+   await sql.query('update profiles set '+patch+' where id=$1',[admin.id]);
+   const response=await p.request.post(app+'/api/trpc/settings.updateSystemSettings',{data:{key:'v3_summary_model_id',value:primary}});
+   expect(response.status()).toBe(403);
+   expect((await sql.query("select value from system_settings where key='v3_summary_model_id'")).rows[0].value).toBe(secondary);
+   await sql.query("update profiles set is_deleted='false',status='active' where id=$1",[admin.id]);
+  }
+ }finally{await adminBrowser.context.close();}
+},180000);
