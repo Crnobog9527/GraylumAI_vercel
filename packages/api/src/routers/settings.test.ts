@@ -6,6 +6,28 @@ vi.mock('../services/stripe', () => ({
 }));
 import { getPublicReadClient, settingsRouter } from './settings';
 
+describe('settings writer verification', () => {
+  it.each(['single', 'bulk'] as const)('fails closed with a safe service error when the %s writer profile cannot be read', async (mode) => {
+    const upsert = vi.fn();
+    const profile = { id: 'admin-user', role: 'admin', status: 'active', nickname: 'Admin', email: 'admin@example.test' };
+    const client = (result: unknown) => ({ from: (table: string) => {
+      if (table === 'system_settings') return { upsert };
+      return { select() { return this; }, eq() { return this; }, single: async () => result };
+    } });
+    const caller = settingsRouter.createCaller({
+      headers: new Headers(),
+      user: { id: profile.id, email: profile.email, app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
+      isEmailVerified: true, authProvider: 'email', hasSupabaseAdminPrivileges: true,
+      supabase: client({ data: profile, error: null }), supabasePublic: {},
+      supabaseAdmin: client({ data: null, error: { code: '42501', message: 'permission denied SECRET_CANARY' } }),
+    } as any);
+    const input = { key: 'max_input_characters', value: '10000' };
+    await expect(mode === 'single' ? caller.updateSystemSettings(input) : caller.updateSystemSettingsBulk([input]))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '暂时无法验证设置保存权限，请稍后重试' });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
 function createQueryBuilder(result: Promise<unknown>) {
   return {
     select() {
