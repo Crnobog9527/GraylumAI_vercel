@@ -256,8 +256,15 @@ Every implementation PR should minimally record:
 - Remaining risk; and
 - relevant product specification or Issue when useful.
 
-GitHub Codex Review is mandatory semantic review for the exact current
-candidate.
+Independent Codex semantic review is mandatory for the exact current candidate.
+The reviewer must use a fresh context separate from implementation and verify
+live GitHub state through the GitHub plugin or another available read-only
+GitHub API/CLI. The review does not have to run in the GitHub cloud bot.
+
+Record the review conclusion, findings, validation limits, and exact base/head
+on the PR, with clear attribution to the independent reviewer. Reading GitHub
+metadata or passing CI alone is not semantic review. A review blocked by missing
+access or evidence must not be recorded as passed.
 
 Review must cover the complete intended base-to-head change, not only the latest
 patch.
@@ -280,7 +287,7 @@ A candidate is clean when:
 
 - applicable Section 6 validation is complete, including required runtime proof;
 - required CI and Security checks pass;
-- GitHub Codex Review covers the exact current candidate;
+- independent Codex review covers the exact current candidate and is recorded on the PR;
 - no concrete actionable blocker remains; and
 - remaining material risk is stated accurately.
 
