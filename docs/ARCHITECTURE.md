@@ -76,14 +76,15 @@ GraylumAI_vercel/
 │   ├── api/                    # Backend API package
 │   │   ├── src/
 │   │   │   ├── routers/        # tRPC routers
+│   │   │   │   └── ai.ts       # AI request entry points
 │   │   │   ├── services/       # Business logic
-│   │   │   │   ├── ai.ts       # AI engine
+│   │   │   │   ├── chatRuntime.ts # Runtime orchestration
+│   │   │   │   ├── rateLimiter.ts # Request rate limits
 │   │   │   │   ├── billing.ts  # Credit system
 │   │   │   │   ├── modelRouter.ts    # Smart routing
 │   │   │   │   └── contextManager.ts # Context compression
 │   │   │   ├── lib/            # Utilities
-│   │   │   │   ├── logger.ts   # Structured logging
-│   │   │   │   └── rateLimiter.ts
+│   │   │   │   └── logger.ts   # Structured logging
 │   │   │   └── middleware/     # Request middleware
 │   │   └── package.json
 │   │
@@ -98,7 +99,7 @@ GraylumAI_vercel/
 
 ## Key Components
 
-### 1. AI Engine (`packages/api/src/services/ai.ts`)
+### 1. AI Router (`packages/api/src/routers/ai.ts`)
 
 Handles AI provider interactions; Claude uses the OpenRouter-compatible path:
 - Streaming responses
