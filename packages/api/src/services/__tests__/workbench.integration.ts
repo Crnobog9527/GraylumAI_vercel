@@ -3626,6 +3626,7 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   expect((await ordinary.page.request.post(app + '/api/trpc/admin.removePrompt',{data:{id:fixtures[0].moduleId}})).status()).toBe(403);
   expect((await ordinary.page.request.post(app + '/api/trpc/model.deleteModel',{data:{id:model}})).status()).toBe(403);
   expect((await client.rpc('admin_delete_unused_model',{p_actor_id:admin.id,p_model_id:model})).error?.code).toBe('42501');
+  expect((await db.rpc('admin_delete_unused_model',{p_actor_id:actor,p_model_id:model})).error?.code).toBe('42501');
   const target = randomUUID();
   await sql.query("insert into ai_models(id,model_id,name) values($1,'unused-model','Unused deletion model')",[target]);
   await sql.query("insert into system_settings(key,value) values('delete-test-config',$1)",[JSON.stringify({modelId:target.toUpperCase()})]);
@@ -3641,6 +3642,11 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   expect((await call('model.deleteModel',{id:target})).status).toBe(409);
   expect((await sql.query('select model_id from modules where id=$1',[linkedModule])).rows[0].model_id).toBe(target);
   await sql.query('delete from modules where id=$1',[linkedModule]);
+  const historicalChat = randomUUID();
+  await sql.query("insert into conversations(id,user_id,model_id,title) values($1,$2,$3,'Retained model history')",[historicalChat,admin.id,target]);
+  expect((await call('model.deleteModel',{id:target})).status).toBe(409);
+  expect((await sql.query('select model_id from conversations where id=$1',[historicalChat])).rows[0].model_id).toBe(target);
+  await sql.query('delete from conversations where id=$1',[historicalChat]);
   await page.goto(app + '/admin/models');
   await page.getByTestId('admin-model-delete-' + target).click();
   await page.getByRole('button',{name:'取消',exact:true}).click();
