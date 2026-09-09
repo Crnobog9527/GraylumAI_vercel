@@ -2,7 +2,7 @@
 
 ## System Overview
 
-GraylumAI is a production-ready AI chat application built with modern technologies, featuring intelligent model routing, cost optimization, and enterprise-grade security.
+GraylumAI is a Next.js/tRPC application using Supabase for data and authentication. This overview describes repository structure; release readiness requires candidate-specific evidence.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -27,7 +27,7 @@ GraylumAI is a production-ready AI chat application built with modern technologi
 │                       Service Layer                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │ AI Engine    │  │ Billing      │  │ Context Manager      │  │
-│  │ (Anthropic)  │  │ Service      │  │ (Compression)        │  │
+│  │ (OpenRouter) │  │ Service      │  │ (Compression)        │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │ Model Router │  │ Rate Limiter │  │ Logger               │  │
@@ -40,7 +40,7 @@ GraylumAI is a production-ready AI chat application built with modern technologi
 │                       Data Layer                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │ Supabase     │  │ Drizzle ORM  │  │ Row Level Security   │  │
-│  │ PostgreSQL   │  │ (Type-safe)  │  │ (21 Tables)          │  │
+│  │ PostgreSQL   │  │ (Type-safe)  │  │ (Per-table)          │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -48,8 +48,8 @@ GraylumAI is a production-ready AI chat application built with modern technologi
 ┌─────────────────────────────────────────────────────────────────┐
 │                    External Services                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Anthropic    │  │ Sentry       │  │ Vercel               │  │
-│  │ Claude API   │  │ (Monitoring) │  │ (Hosting/Analytics)  │  │
+│  │ OpenRouter   │  │ Sentry       │  │ Vercel               │  │
+│  │ Model API    │  │ (Monitoring) │  │ (Hosting/Analytics)  │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -62,14 +62,15 @@ GraylumAI_vercel/
 │   └── web/                    # Next.js 16 Application
 │       ├── src/
 │       │   ├── app/            # App Router pages
-│       │   │   ├── (chat)/     # Chat interface
+│       │   │   ├── chat/       # Chat interface
 │       │   │   ├── admin/      # Admin dashboard
 │       │   │   └── api/        # API routes
 │       │   ├── components/     # React components
 │       │   ├── hooks/          # Custom React hooks
 │       │   └── trpc/           # tRPC client setup
 │       ├── sentry.*.config.ts  # Sentry configuration
-│       └── next.config.ts      # Next.js configuration
+│       ├── next.config.ts      # Next.js configuration
+│       └── vercel.json         # Vercel configuration
 │
 ├── packages/
 │   ├── api/                    # Backend API package
@@ -84,23 +85,22 @@ GraylumAI_vercel/
 │   │   │   │   ├── logger.ts   # Structured logging
 │   │   │   │   └── rateLimiter.ts
 │   │   │   └── middleware/     # Request middleware
-│   │   └── index.ts
+│   │   └── package.json
 │   │
 │   └── db/                     # Database package
 │       ├── schema.ts           # Drizzle schema
 │       ├── migrations/         # SQL migrations
-│       └── index.ts
+│       └── package.json
 │
 ├── docs/                       # Documentation
-├── .github/                    # CI/CD workflows
-└── vercel.json                 # Vercel configuration
+└── .github/                    # CI/CD workflows
 ```
 
 ## Key Components
 
 ### 1. AI Engine (`packages/api/src/services/ai.ts`)
 
-Handles all AI interactions with Claude API:
+Handles AI provider interactions; Claude uses the OpenRouter-compatible path:
 - Streaming responses
 - Tool use (web search)
 - Request idempotency
@@ -108,13 +108,7 @@ Handles all AI interactions with Claude API:
 
 ### 2. Smart Model Router (`packages/api/src/services/modelRouter.ts`)
 
-Intelligent routing based on query complexity:
-
-| Query Type | Model | Criteria |
-|------------|-------|----------|
-| Simple | claude-3-5-haiku | Short queries, simple tasks |
-| Complex | claude-sonnet-4 | Code, analysis, long context |
-| Realtime | claude-sonnet-4 + Web Search | News, weather, stock keywords |
+Routing decisions combine task classification with runtime configuration loaded by `chatRuntime.ts`. `primary_model_id` and `assistant_model_id` refer to database model records; the selected model is not fixed to an old provider model name. Search decisions and provider capability are evaluated separately. See [settings effects](ADMIN_SETTINGS_EFFECT_MATRIX.md).
 
 ### 3. Three-Phase Billing (`packages/api/src/services/billing.ts`)
 
@@ -139,10 +133,15 @@ Manages conversation context within token limits:
 
 ### 5. Row Level Security (RLS)
 
-All 21 tables have RLS policies:
-- Users can only access their own data
-- Admins have elevated access for management
-- Service role bypasses for system operations
+Access depends on both PostgreSQL grants and table-specific RLS policies. Server admin procedures authenticate and authorize the caller before using privileged database access. `service_role` bypasses RLS but still needs the table/column privileges used by each query; it does not make missing grants harmless.
+
+## Admin Settings and Module Removal
+
+The settings page loads `admin.getSettingsDashboard` and model option queries, then saves through `settings.updateSystemSettingsBulk`. The server rechecks the administrator, validates model references, and upserts the batch. `ai_models.id` is the settings reference; `model_id` is the provider identifier shown to help selection.
+
+The modules dashboard uses `admin.getPromptsDashboard`. Confirmed removal calls `admin.removePrompts` with up to 100 IDs and executes one atomic database DELETE guarded by existing foreign keys. The UI removes only acknowledged `deletedIds` from cached rows and counts, then refreshes in the background. A refresh failure retains the confirmed result with an error notice. `removePrompt` remains for compatibility; `deletePrompt` and `batchDeletePrompts` disable modules.
+
+See [admin operations](runbooks/ADMIN_OPERATIONS.md) for API inputs, failure handling and verification.
 
 ## Data Flow
 
@@ -164,7 +163,7 @@ All 21 tables have RLS policies:
 5. Context compression if needed (contextManager.ts)
        │
        ▼
-6. Stream AI response (ai.ts → Anthropic API)
+6. Stream AI response (ai.ts → configured provider)
        │
        ▼
 7. Settle billing with actual usage
@@ -199,7 +198,7 @@ All 21 tables have RLS policies:
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `OPENROUTER_API_KEY` | For OpenRouter models | Server-side provider credential; official Anthropic key is retired |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Sentry error tracking |
 
 ## Monitoring & Observability
@@ -228,7 +227,7 @@ All 21 tables have RLS policies:
 
 ## Security Measures
 
-1. **RLS**: Row-level security on all tables
+1. **Database access**: Table-specific RLS and least-privilege grants
 2. **Rate Limiting**: Per-user request limits
 3. **Consumption Circuit Breaker**: Spending limits
 4. **Request Signing**: HMAC-SHA256 validation

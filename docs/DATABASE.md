@@ -2,7 +2,7 @@
 
 ## Overview
 
-GraylumAI uses Supabase PostgreSQL with Drizzle ORM. All tables have Row Level Security (RLS) enabled.
+GraylumAI uses Supabase PostgreSQL with Drizzle ORM. This page is a core-table overview, not the complete migration ledger. Consult [schema.ts](../packages/db/schema.ts), [SQL migrations](../packages/db/migrations/) and live catalogs for the target environment.
 
 ## Entity Relationship Diagram
 
@@ -37,9 +37,9 @@ User accounts linked to Supabase Auth.
 | email | text | User email |
 | nickname | text | Display name |
 | avatar_url | text | Profile picture URL |
-| role | enum | 'user' \| 'admin' |
-| status | enum | 'active' \| 'disabled' \| 'banned' |
-| membership_level | enum | 'free' \| 'pro' \| 'gold' |
+| role | text (typed values) | 'user' \| 'admin' |
+| status | text (typed values) | 'active' \| 'disabled' \| 'banned' |
+| membership_level | text (typed values) | 'free' \| 'pro' \| 'gold' |
 | credits | integer | Available credits (default: 100) |
 | last_login_at | timestamp | Last login time |
 | is_deleted | text | Soft delete flag |
@@ -67,7 +67,7 @@ Individual chat messages.
 |--------|------|-------------|
 | id | uuid (PK) | Auto-generated |
 | conversation_id | uuid (FK) | Parent conversation |
-| role | enum | 'user' \| 'assistant' |
+| role | text (typed values) | 'user' \| 'assistant' |
 | content | text | Message content |
 | is_deleted | text | Soft delete flag |
 | created_at | timestamp | Message time |
@@ -131,7 +131,7 @@ Detailed AI request logging for debugging.
 | conversation_id | uuid (FK) | Related conversation |
 | request_id | text | Anthropic request ID |
 | model_id | text | Requested model |
-| status | enum | 'success' \| 'failed' \| 'timeout' \| 'rate_limited' |
+| status | text (typed values) | 'success' \| 'failed' \| 'timeout' \| 'rate_limited' |
 | error_message | text | Error details if failed |
 | latency_ms | integer | Request duration |
 | ip_address | text | Client IP |
@@ -151,7 +151,7 @@ Support ticket system.
 | description | text | Detailed description |
 | category | enum | 'bug' \| 'feature' \| 'question' \| etc. |
 | priority | enum | 'low' \| 'medium' \| 'high' \| 'urgent' |
-| status | enum | 'open' \| 'in_progress' \| 'closed' |
+| status | text (typed values) | 'open' \| 'in_progress' \| 'closed' |
 | attachments | jsonb | Attachment URLs array |
 | is_deleted | text | Soft delete flag |
 | created_at | timestamp | Submission time |
@@ -190,7 +190,7 @@ Invitation code system.
 | code | text (PK) | Invitation code |
 | created_by | uuid (FK) | Creator profile |
 | used_by | uuid (FK) | User who used code |
-| status | enum | 'active' \| 'used' \| 'expired' |
+| status | text (typed values) | 'active' \| 'used' \| 'expired' |
 | created_at | timestamp | Creation time |
 
 ### announcements
@@ -261,6 +261,8 @@ System health check results.
 
 ## Migrations
 
+The table below lists the initial migrations only. Later migrations remain in the [migration directory](../packages/db/migrations/); schema push alone does not reproduce grants, triggers or RPCs.
+
 | File | Description |
 |------|-------------|
 | 0001_ai_billing_tables.sql | Token stats, billing history, AI logs |
@@ -291,28 +293,13 @@ idx_ai_usage_logs_user_created ON ai_usage_logs(user_id, created_at DESC)
 
 See `0007_performance_indexes.sql` for complete index list.
 
-## RLS Policies
+## Admin Write Dependencies and Access
 
-All tables have:
-1. **User policies**: Users can only access their own data
-2. **Admin policies**: Admins can access all data
-3. **Service role**: Bypasses RLS for system operations
+- [0073](../packages/db/migrations/0073_admin_management_write_grants.sql): server model writes and module DELETE grant; feature-card references restrict module deletion.
+- [0074](../packages/db/migrations/0074_admin_model_delete.sql): guarded model deletion and settings-model reference protection.
+- [0075](../packages/db/migrations/0075_admin_settings_and_home_entry.sql): server settings INSERT/UPDATE and the public feature-card destination read policy.
+- [0076](../packages/db/migrations/0076_admin_settings_writer_profile_read.sql): only adds server SELECT on `profiles.is_deleted`, required by the settings administrator recheck.
 
-Example policy structure:
-```sql
--- Users can read their own conversations
-CREATE POLICY "Users can view own conversations" ON conversations
-  FOR SELECT TO authenticated
-  USING (auth.uid() = user_id);
+Verify filenames and migration contents before applying any approved database change. PR #399 and #400 add no migration. [Admin operations](runbooks/ADMIN_OPERATIONS.md) explains the save/delete paths and evidence limits.
 
--- Admins can read all conversations
-CREATE POLICY "Admins can view all conversations" ON conversations
-  FOR SELECT TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-      AND profiles.role = 'admin'
-    )
-  );
-```
+RLS and SQL privileges are separate checks. Policies and grants vary by table and role; do not copy a generic admin-all policy onto every table. The service role bypasses RLS but still needs explicit table/column privileges. Use reviewed migrations and the [staging reproducibility runbook](runbooks/STAGING_REPRODUCIBILITY.md) for target-specific verification and recovery.

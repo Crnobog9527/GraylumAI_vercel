@@ -1,14 +1,14 @@
 # Admin Destructive Validation Checklist
 
-Last updated: 2026-03-10
+Last reconciled: 2026-09-10
 
 ## Execution Rule
 
 These flows must run only in an isolated preview or fixture-backed environment with:
 
 1. Disposable or restorable seed data
-2. Explicit `ENABLE_PARITY_DESTRUCTIVE_E2E=true`
-3. Automated rollback in the same test
+2. Explicit `ENABLE_PARITY_DESTRUCTIVE_E2E=true` for the legacy parity destructive suite
+3. Automated restoration for shared fixtures, or teardown of a disposable local environment
 
 ## Required Flow Pattern
 
@@ -17,10 +17,22 @@ Each destructive scenario must follow:
 1. Build fixture
 2. Execute destructive action
 3. Verify changed state
-4. Roll back to original state
-5. Verify restored state
+4. Restore shared fixtures or tear down the disposable environment
+5. Verify restoration/cleanup
 
-## Checklist
+## Disposable Admin Regression
+
+From the repository root, with dependencies installed and Docker available:
+
+```bash
+node packages/db/tests/v3/run-workbench.mjs --admin-only
+```
+
+This runner creates isolated PostgreSQL, Auth, PostgREST and web fixtures. Its admin-only selection does not use the legacy parity flag. Do not substitute a staging or production database to benchmark deletion. See [admin operations](runbooks/ADMIN_OPERATIONS.md) for the request contract and recorded validation boundaries.
+
+Covered batch removal cases: three fixtures deleted through one request, referenced-module conflict leaving the entire batch intact, anonymous/non-admin rejection, cancel without a write, replay with no further deletion, and acknowledged rows disappearing while list refresh is deliberately blocked. Cleanup removes the disposable environment; it does not recover deleted live records.
+
+## Legacy Parity Checklist
 
 | Flow | Route | Fixture required | Execute | Verify changed state | Rollback | Verify restored state | Current automation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -38,4 +50,4 @@ Each destructive scenario must follow:
 
 - A gated destructive test does not count toward default acceptance.
 - Destructive coverage becomes part of release acceptance only when the environment can guarantee rollback safety.
-- Any destructive admin operation without a rollback path must remain blocked from shared acceptance environments.
+- Use disposable fixtures for irreversible deletion; never treat a successful test as authorization to delete shared or production records.
