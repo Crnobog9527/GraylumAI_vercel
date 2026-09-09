@@ -140,7 +140,36 @@ async function validateSummarySelection(client: SupabaseClient<any, 'public', an
   if(!option.available)throw new TRPCError({code:'BAD_REQUEST',message:option.reason??'整理模型不可用'});
 }
 
+async function validateRoutingSelections(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
+  for (const setting of input) {
+    if (setting.key !== 'primary_model_id' && setting.key !== 'assistant_model_id') continue;
+    if (setting.value === '') continue;
+    const label = setting.key === 'primary_model_id' ? '主力模型' : '辅助模型';
+    if (!z.string().uuid().safeParse(setting.value).success) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `请从列表中选择${label}，不要填写模型名称` });
+    }
+    const { data, error } = await client.from('ai_models').select('id,is_active').eq('id', setting.value).maybeSingle();
+    if (error) throw createSafeServiceUnavailableError(error, '暂时无法验证模型配置，请稍后重试');
+    if (!data || data.is_active !== 'true') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `所选${label}已删除或停用，请刷新模型列表后重新选择` });
+    }
+  }
+}
+
+function throwSettingsWriteError(error: { code?: string }, fallback: string) {
+  if (error.code === '23503') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: '模型配置已变化，请刷新模型列表后重新选择' });
+  }
+  throw createSafeInternalError(error, fallback);
+}
+
 export const settingsRouter = router({
+  getRoutingModels: adminProcedure.query(async ({ ctx }) => {
+    const { data, error } = await ctx.supabase.from('ai_models')
+      .select('id,name,model_id').eq('is_active', 'true').order('name');
+    if (error) throw createSafeServiceUnavailableError(error, '无法读取模型列表，请稍后重试');
+    return (data ?? []).map(({ id, name, model_id }) => ({ id, name, model_id }));
+  }),
   getSummaryModels: adminProcedure.query(async ({ctx}) => {
     const {data,error}=await ctx.supabase.from('ai_models')
       .select('id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,token_counting_supported,tokenizer_family')
@@ -265,6 +294,7 @@ export const settingsRouter = router({
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await validateRoutingSelections(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')
@@ -272,7 +302,7 @@ export const settingsRouter = router({
         .select();
 
       if (error) {
-        throw createSafeInternalError(error, '更新系统设置失败，请稍后重试');
+        throwSettingsWriteError(error, '更新系统设置失败，请稍后重试');
       }
       return data;
     }),
@@ -281,6 +311,7 @@ export const settingsRouter = router({
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await validateRoutingSelections(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')
@@ -288,7 +319,7 @@ export const settingsRouter = router({
         .select();
 
       if (error) {
-        throw createSafeInternalError(error, '批量更新系统设置失败，请稍后重试');
+        throwSettingsWriteError(error, '批量更新系统设置失败，请稍后重试');
       }
 
       return data;

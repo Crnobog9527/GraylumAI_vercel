@@ -635,3 +635,65 @@ describe('summary model admin endpoint',()=>{
     const t=caller('admin',true);await expect(t.api.getSummaryModels()).rejects.toMatchObject({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
   });
 });
+
+describe('routing model settings', () => {
+  const modelId = '22222222-2222-4222-8222-222222222222';
+  function setup(options: { role?: string | null; model?: unknown; modelError?: unknown; writeError?: unknown } = {}) {
+    const role = options.role === undefined ? 'admin' : options.role;
+    const profile = { id:'admin-user',role,status:'active',is_deleted:'false',nickname:'Admin',email:'admin@example.test' };
+    const upsert = vi.fn((rows: unknown) => ({ select: async()=>({data:rows,error:options.writeError ?? null}) }));
+    const models = vi.fn(() => ({
+      select() { return this; }, eq() { return this; },
+      maybeSingle: async()=>({ data:options.model === undefined ? {id:modelId,is_active:'true'} : options.model,error:options.modelError ?? null }),
+      order: async()=>({data:[{id:modelId,name:'Luna',model_id:'openai/gpt-5.6-luna',api_key:'SECRET_CANARY'}],error:options.modelError ?? null}),
+    }));
+    const client = {from(table: string) {
+      if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:profile,error:null})};
+      if(table==='ai_models')return models();
+      if(table==='system_settings')return {upsert};
+      throw new Error('Unexpected table');
+    }};
+    return {upsert,models,caller:settingsRouter.createCaller({headers:new Headers(),
+      user:role?{id:profile.id,email:profile.email,app_metadata:{provider:'email'},user_metadata:{email_verified:true}}:null,
+      isEmailVerified:!!role,authProvider:'email',hasSupabaseAdminPrivileges:true,supabase:client,supabaseAdmin:client,supabasePublic:{},
+    } as any)};
+  }
+  it.each(['primary_model_id','assistant_model_id'])('rejects provider names in %s for both endpoints before writes',async key=>{
+    for(const bulk of [false,true]) {
+      const t=setup(),input={key,value:'openai/gpt-5.6-luna'};
+      await expect(bulk?t.caller.updateSystemSettingsBulk([{key:'max_input_characters',value:'10000'},input]):t.caller.updateSystemSettings(input))
+        .rejects.toMatchObject({code:'BAD_REQUEST',message:expect.stringContaining('请从列表中选择')});
+      expect(t.models).not.toHaveBeenCalled();expect(t.upsert).not.toHaveBeenCalled();
+    }
+  });
+  it.each([null,{id:modelId,is_active:'false'}])('rejects missing or disabled selections without partial writes (%j)',async model=>{
+    const t=setup({model});
+    await expect(t.caller.updateSystemSettingsBulk([{key:'max_input_characters',value:'10000'},{key:'assistant_model_id',value:modelId}])).rejects.toMatchObject({code:'BAD_REQUEST'});
+    expect(t.upsert).not.toHaveBeenCalled();
+  });
+  it('fails closed on a model lookup error',async()=>{
+    const t=setup({modelError:{message:'SECRET_CANARY'}});
+    await expect(t.caller.updateSystemSettings({key:'primary_model_id',value:modelId})).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:'暂时无法验证模型配置，请稍后重试'});
+    expect(t.upsert).not.toHaveBeenCalled();
+  });
+  it('accepts active UUIDs and optional empty model selections',async()=>{
+    const t=setup();
+    const input=[{key:'primary_model_id',value:''},{key:'assistant_model_id',value:modelId}];
+    await expect(t.caller.updateSystemSettingsBulk(input)).resolves.toEqual(input);
+    expect(t.models).toHaveBeenCalledTimes(1);
+  });
+  it.each([false,true])('maps a concurrent reference deletion to a safe correction message (bulk=%s)',async bulk=>{
+    const t=setup({writeError:{code:'23503',message:'selected model no longer exists SECRET_CANARY'}}),input={key:'assistant_model_id',value:modelId};
+    await expect(bulk?t.caller.updateSystemSettingsBulk([input]):t.caller.updateSystemSettings(input)).rejects.toMatchObject({code:'BAD_REQUEST',message:'模型配置已变化，请刷新模型列表后重新选择'});
+  });
+  it('returns only routing display fields, without summary eligibility restrictions or credentials',async()=>{
+    const t=setup();
+    expect(await t.caller.getRoutingModels()).toEqual([{id:modelId,name:'Luna',model_id:'openai/gpt-5.6-luna'}]);
+  });
+  it.each([[null,'UNAUTHORIZED'],['user','FORBIDDEN']])('denies catalog access for %s',async(role,code)=>{
+    const t=setup({role});await expect(t.caller.getRoutingModels()).rejects.toMatchObject({code});expect(t.models).not.toHaveBeenCalled();
+  });
+  it('reports unavailable catalog safely',async()=>{
+    await expect(setup({modelError:{message:'SECRET_CANARY'}}).caller.getRoutingModels()).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:'无法读取模型列表，请稍后重试'});
+  });
+});
