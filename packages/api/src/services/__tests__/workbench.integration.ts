@@ -3917,3 +3917,82 @@ it('ADMIN: settings save recovers under staging column grants without weakening 
     await context.close();
   }
 },180000);
+
+it('ADMIN: settings save submits the complete form with selected model records and rejects stale or named models atomically', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1",[admin.id]);
+  await sql.query("create table if not exists membership_plans(id uuid primary key,sort_order integer); grant select on membership_plans to service_role; notify pgrst,'reload schema'");
+  const primary=randomUUID(),assistant=randomUUID();
+  for(const [id,name,model] of [[primary,'Settings Qwen','qwen/qwen3.8-27b'],[assistant,'Settings Luna','openai/gpt-5.6-luna']]) {
+    await sql.query("insert into ai_models(id,name,model_id,provider,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,input_token_cost,output_token_cost) values($1,$2,$3,'openai','SETTINGS_PRIVATE_CANARY','',4096,800000,'false','openai',150000,2000000)",[id,name,model]);
+  }
+  const snapshot=()=>sql.query('select key,value from system_settings order by key').then(r=>r.rows);
+  const before=await snapshot();
+  // Actual canonical model-reference trigger reproduces the user's old failure.
+  const oldWrite=await db.from('system_settings').upsert([{key:'max_input_characters',value:'10000'},{key:'assistant_model_id',value:'openai/gpt-5.6-luna'}],{onConflict:'key'});
+  expect(oldWrite.error?.code).toBe('23503');expect(await snapshot()).toEqual(before);
+  const {page,context}=await pageFor(admin);
+  try {
+    await page.goto(app+'/admin/settings');
+    await page.getByRole('tab',{name:'功能设置',exact:true}).click();
+    await expect.poll(()=>page.getByLabel('辅助模型',{exact:true}).locator('option[value="'+assistant+'"]').count()).toBe(1);
+    await page.getByLabel('主力模型',{exact:true}).selectOption(primary);
+    await page.getByLabel('辅助模型',{exact:true}).selectOption(assistant);
+    await page.getByLabel('步骤成果整理模型',{exact:true}).selectOption(assistant);
+    for(const [key,value] of [['max_input_characters','10000'],['free_tier_messages','0'],['search_surcharge_credits','5']])await page.getByTestId('admin-setting-'+key).fill(value);
+    let submitted: Record<string,Array<{key:string;value:string}>> | null=null;
+    const pattern='**/api/trpc/settings.updateSystemSettingsBulk**';
+    const capture=async(route:import('../../../../../apps/web/node_modules/@playwright/test').Route)=>{submitted=route.request().postDataJSON();await route.abort();};
+    await page.route(pattern,capture);
+    await page.getByTestId('admin-settings-save-all').click();
+    await expect.poll(()=>submitted!==null).toBe(true);
+    await page.unroute(pattern,capture);
+    const full=(submitted! as Record<string,Array<{key:string;value:string}>>)['0'];
+    expect(full.length).toBe(53);
+    expect(full).toEqual(expect.arrayContaining([{key:'primary_model_id',value:primary},{key:'assistant_model_id',value:assistant},{key:'v3_summary_model_id',value:assistant},{key:'max_input_characters',value:'10000'},{key:'free_tier_messages',value:'0'},{key:'search_surcharge_credits',value:'5'}]));
+    // Exercise the full batch envelope, not a single-row surrogate.
+    for(const invalid of ['openai/gpt-5.6-luna',randomUUID()]) {
+      const payload=full.map(item=>item.key==='assistant_model_id'?{...item,value:invalid}:item);
+      const response=await page.request.post(app+'/api/trpc/settings.updateSystemSettingsBulk?batch=1',{data:{0:payload}});
+      expect(response.status()).toBe(400);expect(await response.text()).not.toContain('SETTINGS_PRIVATE_CANARY');
+      expect(await snapshot()).toEqual(before);
+    }
+    // A model can become unavailable after loading the selector. The actual UI
+    // shows the actionable server message and retains every draft value.
+    await sql.query("update ai_models set is_active='false' where id=$1",[primary]);
+    await page.getByTestId('admin-settings-save-all').click();
+    await page.getByText('所选主力模型已删除或停用，请刷新模型列表后重新选择',{exact:true}).waitFor();
+    expect(await snapshot()).toEqual(before);
+    expect(await page.getByTestId('admin-setting-max_input_characters').inputValue()).toBe('10000');
+    await sql.query("update ai_models set is_active='true' where id=$1",[primary]);
+    const savedResponse=page.waitForResponse(r=>r.url().includes('settings.updateSystemSettingsBulk')&&r.request().method()==='POST');
+    await page.getByTestId('admin-settings-save-all').click();
+    expect((await savedResponse).status()).toBe(200);
+    await page.getByText('设置保存成功',{exact:true}).waitFor();
+    const persisted=await snapshot();
+    for(const item of full)expect(persisted.find(row=>row.key===item.key)?.value).toEqual(item.value);
+    await page.reload();
+    await page.getByRole('tab',{name:'功能设置',exact:true}).click();
+    for(const item of full.filter(item=>['primary_model_id','assistant_model_id','v3_summary_model_id','max_input_characters','free_tier_messages','search_surcharge_credits'].includes(item.key)))expect(await page.getByTestId('admin-setting-'+item.key).inputValue()).toBe(item.value);
+    await page.screenshot({path:output+'/settings-models-full-save.png'});
+    // Optional blank selections remain valid and survive reload.
+    await page.getByLabel('主力模型',{exact:true}).selectOption('');
+    await page.getByLabel('辅助模型',{exact:true}).selectOption('');
+    await page.getByTestId('admin-settings-save-all').click();
+    await page.getByText('设置保存成功',{exact:true}).waitFor();
+    await page.reload();await page.getByRole('tab',{name:'功能设置',exact:true}).click();
+    expect(await page.getByLabel('主力模型',{exact:true}).inputValue()).toBe('');
+    expect(await page.getByLabel('辅助模型',{exact:true}).inputValue()).toBe('');
+    // The new lightweight catalog neither exposes credentials nor requires a
+    // model to be eligible for Skill summary work.
+    const catalog=await page.request.get(app+'/api/trpc/settings.getRoutingModels');
+    expect(catalog.status()).toBe(200);expect(await catalog.text()).not.toContain('SETTINGS_PRIVATE_CANARY');
+    const normal=await pageFor();
+    try {expect((await normal.page.request.get(app+'/api/trpc/settings.getRoutingModels')).status()).toBe(403);}
+    finally {await normal.context.close();}
+    expect((await fetch(app+'/api/trpc/settings.getRoutingModels')).status).toBe(401);
+  } finally {
+    await context.close();
+    await sql.query("update ai_models set is_active='true' where id=$1",[primary]);
+  }
+},180000);
