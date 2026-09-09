@@ -178,6 +178,7 @@ export default function AdminModelsPage() {
     },
   });
 
+  const [deleteError, setDeleteError] = useState('');
   const deleteModel = trpc.model.deleteModel.useMutation({
     onSuccess: () => {
       toast.success('模型已删除');
@@ -186,7 +187,7 @@ export default function AdminModelsPage() {
       setSelectedModel(null);
     },
     onError: (error) => {
-      toast.error(getSafeErrorMessage(error, '删除模型失败，请稍后重试'));
+      setDeleteError(getSafeErrorMessage(error, '删除模型失败，请稍后重试'));
     },
   });
 
@@ -333,12 +334,14 @@ export default function AdminModelsPage() {
   };
 
   const handleDelete = (model: AIModel) => {
+    setDeleteError('');
     setSelectedModel(model);
     setDeleteDialogOpen(true);
   };
 
   const confirmDelete = () => {
-    if (selectedModel) {
+    if (selectedModel && !deleteModel.isPending) {
+      setDeleteError('');
       deleteModel.mutate({ id: selectedModel.id });
     }
   };
@@ -877,7 +880,7 @@ export default function AdminModelsPage() {
         </Dialog>
 
         {/* Delete Confirmation Dialog */}
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialog open={deleteDialogOpen} onOpenChange={open => { if (!deleteModel.isPending) setDeleteDialogOpen(open); }}>
           <AlertDialogContent style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <AlertDialogHeader>
               <AlertDialogTitle style={{ color: 'var(--text-primary)' }}>删除模型</AlertDialogTitle>
@@ -885,15 +888,17 @@ export default function AdminModelsPage() {
                 确定要删除模型 &quot;{selectedModel?.name}&quot; 吗？此操作无法撤销。
               </AlertDialogDescription>
             </AlertDialogHeader>
+            {deleteError && <p role="alert" className="text-red-400">{deleteError}</p>}
             <AlertDialogFooter>
-              <AlertDialogCancel
+              <AlertDialogCancel disabled={deleteModel.isPending}
                 className="border-[var(--border-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
               >
                 取消
               </AlertDialogCancel>
               <AlertDialogAction
                 data-testid="admin-model-delete-confirm"
-                onClick={confirmDelete}
+                disabled={deleteModel.isPending}
+                onClick={event => { event.preventDefault(); confirmDelete(); }}
                 className="bg-rose-600 text-white hover:bg-rose-700"
               >
                 {deleteModel.isPending ? (

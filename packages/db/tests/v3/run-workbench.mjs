@@ -178,6 +178,10 @@ try {
   apply("packages/db/migrations/0072_v3_admin_skill_modules.sql");
   apply("packages/db/migrations/0073_admin_management_write_grants.sql");
   apply("packages/db/migrations/0073_admin_management_write_grants.sql");
+  sql("CREATE TABLE prompts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), model_id uuid REFERENCES ai_models(id) ON DELETE SET NULL);");
+  apply("packages/db/migrations/0074_admin_model_delete.sql");
+  apply("packages/db/migrations/0074_admin_model_delete.sql");
+  sql("ALTER TABLE ai_models ADD COLUMN config jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN input_token_cost_above_200k integer DEFAULT 0, ADD COLUMN output_token_cost_above_200k integer DEFAULT 0;");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

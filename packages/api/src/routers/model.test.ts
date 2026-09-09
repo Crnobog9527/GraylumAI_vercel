@@ -707,3 +707,17 @@ describe('modelRouter error sanitization', () => {
     });
   });
 });
+
+describe('unused model deletion', () => {
+  it.each([null, {code:'23503'}, {code:'42501'}])('binds the admin actor and reports deletion result %j', async error => {
+    const rpc = vi.fn(async () => ({data:null,error}));
+    const supabase = { from: () => createSingleQueryBuilder(Promise.resolve({data:{id:'admin-user',role:'admin',status:'active',nickname:'Admin',email:'admin@example.com'},error:null})), rpc };
+    const caller = createProtectedCaller({role:'admin',supabase});
+    const id = '00000000-0000-4000-8000-000000000099';
+    const result = caller.deleteModel({id});
+    if(error?.code === '23503') await expect(result).rejects.toMatchObject({code:'CONFLICT'});
+    else if(error) await expect(result).rejects.toThrow();
+    else expect(await result).toEqual({success:true});
+    expect(rpc).toHaveBeenCalledWith('admin_delete_unused_model',{p_actor_id:'admin-user',p_model_id:id});
+  });
+});
