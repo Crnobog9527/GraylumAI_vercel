@@ -1,3 +1,4 @@
+import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
 import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream } from '@repo/api/src/services/providerUsage';
 /**
  * AI Streaming API Route
@@ -42,6 +43,7 @@ import {
   getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
   normalizeOpenAICompatibleEndpoint,
+  resolveOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
 } from '@repo/api/src/services/providerUtils';
 import type { ClaudeMessage } from '@repo/api/src/types/ai';
@@ -261,6 +263,7 @@ async function getRuntimeModelConfig(
       .single();
 
     if (data) {
+      const effective = withTokenCountingMetadata(data);
       return {
         id: data.id,
         modelId: data.model_id,
@@ -270,11 +273,11 @@ async function getRuntimeModelConfig(
         outputTokenCost: data.output_token_cost,
         apiKey: data.api_key || null,
         provider: data.provider || 'anthropic',
-        apiEndpoint: data.api_endpoint || null,
+        apiEndpoint: resolveOpenAICompatibleEndpoint(data.provider, data.api_endpoint),
         enableWebSearch: data.enable_web_search === 'true',
-        tokenCountingSupported: data.token_counting_supported === 'true',
-        tokenCountingMethod: data.token_counting_method || 'unsupported',
-        tokenizerFamily: data.tokenizer_family || null,
+        tokenCountingSupported: effective.token_counting_supported === 'true',
+        tokenCountingMethod: effective.token_counting_method || 'unsupported',
+        tokenizerFamily: effective.tokenizer_family || null,
       };
     }
   }

@@ -9,3 +9,5 @@ it('corrects stale derived flags without changing stored endpoint, key, pricing 
  expect(withTokenCountingMetadata(row)).toMatchObject({...row,token_counting_supported:'true'});expect(row.token_counting_supported).toBe('false');
 });
 it.each(['https://openrouter.ai.evil.test/api/v1/chat/completions','https://proxy.test/chat/completions?url=openrouter.ai','http://openrouter.ai/api/v1/chat/completions'])('does not grant native usage support from a deceptive endpoint %s',apiEndpoint=>expect(inferTokenCountingMetadata({provider:'openai',modelId:'qwen/qwen3.8-27b',apiEndpoint}).token_counting_supported).toBe('false'));
+
+it.each([['anthropic','https://openrouter.ai/api/v1'],['custom','https://proxy.test/chat/completions']])('preserves legacy Claude compatible contract for %s', (provider,apiEndpoint)=>expect(inferTokenCountingMetadata({provider,modelId:'anthropic/claude-opus-4.5',apiEndpoint})).toMatchObject({token_counting_supported:'true',token_counting_method:'provider_usage'}));

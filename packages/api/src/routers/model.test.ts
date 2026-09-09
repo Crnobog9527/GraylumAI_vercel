@@ -228,7 +228,7 @@ describe('modelRouter error sanitization', () => {
     });
   });
 
-  it('stores updateModel pricing fields as micro-dollars', async () => {
+  it.each([['openai','https://openrouter.ai/api/v1/chat/completions'],['anthropic','https://openrouter.ai/api/v1/chat/completions'],['openai','https://proxy.example.com/v1/chat/completions']])('preserves provider usage while updating pricing for %s %s', async (provider, endpoint) => {
     const updated: Array<Record<string, unknown>> = [];
     const supabase = {
       from(table: string) {
@@ -256,9 +256,9 @@ describe('modelRouter error sanitization', () => {
                     single() {
                       return Promise.resolve({
                         data: {
-                          provider: 'openai',
+                          provider,
                           model_id: 'anthropic/claude-sonnet-4.6',
-                          api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+                          api_endpoint: endpoint,
                         },
                         error: null,
                       });
@@ -307,6 +307,8 @@ describe('modelRouter error sanitization', () => {
     });
 
     expect(updated[0]).toMatchObject({
+      token_counting_supported: 'true',
+      token_counting_method: 'provider_usage',
       input_token_cost: 3_000_000,
       output_token_cost: 15_000_000,
       input_token_cost_above_200k: 6_000_000,

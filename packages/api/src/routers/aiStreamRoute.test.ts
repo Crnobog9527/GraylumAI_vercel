@@ -146,7 +146,8 @@ vi.mock('@repo/api/src/services/tokenCounter', () => ({
   estimateOutputTokens: routeMocks.estimateOutputTokens,
 }));
 
-vi.mock('@repo/api/src/services/providerUtils', () => ({
+vi.mock('@repo/api/src/services/providerUtils', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/providerUtils')>(),
   getConfiguredProviderApiKey: routeMocks.getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders: routeMocks.getOpenAICompatibleHeaders,
   normalizeOpenAICompatibleEndpoint: routeMocks.normalizeOpenAICompatibleEndpoint,

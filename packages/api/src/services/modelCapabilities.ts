@@ -28,6 +28,11 @@ export function inferTokenCountingMetadata(params: {
     isOpenRouterEndpoint(endpoint) ||
     endpoint.includes('chat/completions');
 
+  // Actual OpenRouter routing takes precedence over a legacy provider label.
+  if (isOpenRouterEndpoint(endpoint) || (openAICompatibleProvider && (modelId.includes('claude') || modelId.startsWith('anthropic/')))) {
+    return {token_counting_supported:'true',token_counting_method:'provider_usage',tokenizer_family:'openai'};
+  }
+
   if (provider === 'anthropic') {
     return {
       token_counting_supported: 'true',
@@ -45,14 +50,6 @@ export function inferTokenCountingMetadata(params: {
   }
 
   const openAITokenizerVerified = VERIFIED_OPENAI_TOKENIZER_PREFIXES.some((prefix) => modelId.startsWith(prefix));
-
-  if (openAICompatibleProvider && isOpenRouterEndpoint(endpoint)) {
-    return {
-      token_counting_supported: 'true',
-      token_counting_method: 'provider_usage',
-      tokenizer_family: 'openai',
-    };
-  }
 
   if (openAICompatibleProvider && openAITokenizerVerified) {
     return {

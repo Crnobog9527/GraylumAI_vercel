@@ -22,3 +22,15 @@ it('rejects invalid Gemini usage after an earlier valid frame',async()=>{
  const good={candidates:[{finishReason:'STOP'}],usageMetadata:{promptTokenCount:1,candidatesTokenCount:1}};
  await expect(readGeminiUsageStream(bytes('data: '+JSON.stringify(good)+'\ndata: {"usageMetadata":{"promptTokenCount":-1,"candidatesTokenCount":1}}'))).rejects.toThrow();
 });
+
+it.each([{content:'later output'},{reasoning:'later thought'},{tool_calls:[{id:'call-1'}]}])('requires fresh usage after subsequent OpenAI output %j',async delta=>{
+ const prefix='data: '+JSON.stringify({choices:[],usage})+'\ndata: '+JSON.stringify({choices:[{delta}],usage:null})+'\n';
+ await expect(readOpenAIUsageStream(bytes(prefix+'data: [DONE]'))).rejects.toThrow('PROVIDER_USAGE_UNAVAILABLE');
+ await expect(readOpenAIUsageStream(bytes(prefix+'data: '+JSON.stringify({usage})+'\ndata: [DONE]'))).resolves.toMatchObject({usage:{inputTokens:100,outputTokens:20}});
+});
+it.each([false,true])('requires fresh Gemini usage after subsequent content or thought (%s)',async thought=>{
+ const metadata={promptTokenCount:100,candidatesTokenCount:20,totalTokenCount:120};
+ const prefix='data: '+JSON.stringify({usageMetadata:metadata})+'\ndata: '+JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:'later',thought}]}}]})+'\n';
+ await expect(readGeminiUsageStream(bytes(prefix))).rejects.toThrow('PROVIDER_USAGE_UNAVAILABLE');
+ await expect(readGeminiUsageStream(bytes(prefix+'data: '+JSON.stringify({usageMetadata:metadata})))).resolves.toMatchObject({usage:{inputTokens:100,outputTokens:20}});
+});

@@ -286,6 +286,7 @@ try {
         await new Promise(r=>setTimeout(r,3500));
         if(requestText.includes('ORDINARY_ERROR')) {res.destroy();return;}
       }
+      res.write('data: '+JSON.stringify({choices:[],usage:{prompt_tokens:800,completion_tokens:30}})+'\n\n');
       res.end('data: [DONE]\n\n');return;
     }
     if (req.url === '/__workbench_model_calls') { res.writeHead(200).end(JSON.stringify({ calls: modelCalls })); return; }

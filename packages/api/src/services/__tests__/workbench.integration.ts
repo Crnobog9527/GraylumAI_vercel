@@ -2650,6 +2650,7 @@ aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old 
 },90000);
 
 aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{
+ await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
  const t=await generationFixture();
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const skillId=randomUUID(),moduleId=randomUUID();
@@ -3709,15 +3710,18 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
 aiTest('CHAT: provider usage is persisted exactly while missing or interrupted usage cannot settle success',async()=>{
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const {page,context}=await pageFor();
+ const auth=await authenticated();const token=(await auth.auth.getSession()).data.session!.access_token;
+ await sql.query("update ai_models set model_id='qwen/qwen3.8-27b',provider='openai',api_endpoint='',token_counting_supported='false',token_counting_method='unsupported' where id=$1",[localModel]);
  try{
-  for(const mode of ['NATIVE','ZERO','MISSING','INVALID','TRUNCATED']){
+  for(const mode of ['NATIVE','ZERO','MISSING','INVALID','TRUNCATED','LUNA']){
+   if(mode==='LUNA')await sql.query("update ai_models set model_id='openai/gpt-5.6-luna' where id=$1",[localModel]);
    const requestId=randomUUID();
-   const response=await page.request.post(app+'/api/ai/stream',{data:{message:'USAGE_CASE_'+mode,requestId}});
+   const response=await page.request.post(app+'/api/ai/stream',{headers:{Authorization:'Bearer '+token},data:{message:'USAGE_CASE_'+mode,requestId}});
    const text=await response.text();expect(response.status(),text).toBe(200);
    const events=text.split('\n').filter(l=>l.startsWith('data: ')).map(l=>JSON.parse(l.slice(6)));
    const conversationId=events.find(e=>e.type==='init')?.conversationId;expect(conversationId,text).toBeTruthy();
    const stats=(await sql.query('select input_tokens,output_tokens,metadata from token_stats where conversation_id=$1',[conversationId])).rows;
-   if(['NATIVE','ZERO'].includes(mode)){
+   if(['NATIVE','ZERO','LUNA'].includes(mode)){
     const input=mode==='ZERO'?0:800,output=mode==='ZERO'?0:30;
     expect(events.find(e=>e.type==='complete')?.usage).toMatchObject({inputTokens:input,outputTokens:output});
     expect(stats).toHaveLength(1);expect(stats[0]).toMatchObject({input_tokens:input,output_tokens:output,metadata:{count_source:'provider_usage'}});
@@ -3725,5 +3729,6 @@ aiTest('CHAT: provider usage is persisted exactly while missing or interrupted u
     expect(events.some(e=>e.type==='error')).toBe(true);expect(events.some(e=>e.type==='complete')).toBe(false);expect(stats).toHaveLength(0);
    }
   }
+  expect((await sql.query('select token_counting_supported,api_endpoint from ai_models where id=$1',[localModel])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:''});
  }finally{await context.close();}
 });
