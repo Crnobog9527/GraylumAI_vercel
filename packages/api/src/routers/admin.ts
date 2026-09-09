@@ -2178,6 +2178,20 @@ export const adminRouter = router({
       return { success: true, disabledId: data?.id ?? input.id };
     }),
 
+  removePrompts: adminProcedure
+    .input(z.object({ ids: z.array(z.string().uuid()).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      // One statement keeps the batch atomic and lets existing foreign keys
+      // protect references, including references created concurrently.
+      const { data, error } = await ctx.supabase.from('modules')
+        .delete().in('id', [...new Set(input.ids)]).select('id');
+      if (error?.code === '23503') {
+        throw new TRPCError({ code: 'CONFLICT', message: '选中的模块存在功能卡片、对话或项目引用，本次未删除任何模块。请取消选择被引用的模块，或使用下架。' });
+      }
+      if (error) throw createAdminOperationError('批量删除功能模块', error);
+      return { success: true, deletedIds: (data ?? []).map(module => module.id) };
+    }),
+
   removePrompt: adminProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
