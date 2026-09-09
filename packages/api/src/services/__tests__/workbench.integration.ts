@@ -3524,6 +3524,13 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     await page.getByPlaceholder('输入你的密码').fill(admin.password);
     await page.getByRole('button', { name: '登录', exact: true }).last().click();
     await page.waitForURL(u => u.pathname === '/admin/prompts', { timeout: 90000 });
+    const unusedModule = randomUUID();
+    await sql.query("insert into modules(id,title,active) values($1,'Inactive deletion browser fixture',false)",[unusedModule]);
+    await page.reload();
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByTestId('admin-prompt-delete-' + unusedModule).click();
+    await expect.poll(async () => (await sql.query('select id from modules where id=$1',[unusedModule])).rowCount).toBe(0);
+
     await page.getByRole('button', { name: '新建模块', exact: true }).click();
     await page.getByLabel('功能类型', { exact: true }).selectOption('skill');
     await page.getByLabel('导入 Skill 文件夹', { exact: true }).setInputFiles(directory);
@@ -3575,3 +3582,39 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
 
   } finally { await context.close(); }
 }, 180000);
+
+it('ADMIN: model edits and unused-module deletion work through authenticated HTTP while client writes and referenced deletion are denied', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
+  const client = createClient(url, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  const login = await client.auth.signInWithPassword({ email: admin.email, password: admin.password });
+  expect(login.error).toBeNull();
+  const context = await browser.newContext(), page = await context.newPage();
+  await page.goto(app + '/login?redirect=/admin/prompts');
+  await page.getByPlaceholder('name@example.com').fill(admin.email);
+  await page.getByPlaceholder('输入你的密码').fill(admin.password);
+  await page.getByRole('button', { name: '登录', exact: true }).last().click();
+  await page.waitForURL(u => u.pathname === '/admin/prompts', {timeout:90000});
+  const call = async (name: string, data: any) => {
+    const response = await page.request.post(app + '/api/trpc/' + name, { data });
+    return {status: response.status()};
+  };
+  const model = randomUUID(), module = randomUUID();
+  await sql.query("insert into ai_models(id,model_id,name,api_key) values($1,'local-synthetic','Before','LOCAL_ONLY')", [model]);
+  const response = await call('model.updateModel', { id: model, name: 'After', description: 'Saved without provider call' });
+  expect(response.status).toBe(200);
+  expect((await sql.query('select name,api_key from ai_models where id=$1',[model])).rows[0]).toEqual({name:'After',api_key:'LOCAL_ONLY'});
+  expect((await client.from('ai_models').update({name:'Denied'}).eq('id',model)).error).not.toBeNull();
+  await sql.query("insert into modules(id,title,active) values($1,'Unused test module',false)",[module]);
+  expect((await call('admin.removePrompt',{id:module})).status).toBe(200);
+  expect((await sql.query('select id from modules where id=$1',[module])).rowCount).toBe(0);
+  expect((await call('admin.removePrompt',{id:module})).status).toBe(200);
+  expect((await call('admin.removePrompt',{id:fixtures[0].moduleId})).status).toBe(409);
+  expect((await sql.query('select id from modules where id=$1',[fixtures[0].moduleId])).rowCount).toBe(1);
+  const ordinary = await pageFor();
+  expect((await ordinary.page.request.post(app + '/api/trpc/model.updateModel',{data:{id:model,name:'Denied'}})).status()).toBe(403);
+  expect((await ordinary.page.request.post(app + '/api/trpc/admin.removePrompt',{data:{id:fixtures[0].moduleId}})).status()).toBe(403);
+  await ordinary.context.close(); await context.close();
+  const privileges = await sql.query("select has_table_privilege('anon','ai_models','UPDATE') as anon,has_table_privilege('authenticated','modules','DELETE') as authenticated");
+  expect(privileges.rows[0]).toEqual({anon:false,authenticated:false});
+});

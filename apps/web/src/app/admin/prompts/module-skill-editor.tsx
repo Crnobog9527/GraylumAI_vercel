@@ -52,12 +52,15 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
     <legend className="px-2 font-medium">Skill 文件与步骤</legend>
     {reading && <p role="status">正在读取 Skill 文件…</p>}
     <p className="text-sm text-[var(--text-secondary)]">导入解压后的 Skill 文件夹，支持 SKILL.md、Markdown 参考文件和只读 YAML 模板。文件只对管理员和运行时开放。</p>
-    <label className="block text-sm">使用方式
-      <select aria-label="Skill 使用方式" value={value.kind} onChange={e => patch({ kind: e.target.value as SkillForm['kind'] })} className="ml-2 bg-[var(--bg-tertiary)] p-2 rounded">
-        <option value="document">通用分步成果</option><option value="social">社媒账号规划</option>
-      </select>
-    </label>
-    {value.kind === 'social' && <p className="text-sm">社媒规划保留同账号一个项目的规则。使用者需要已有的账号授权；导入文件不会自动授权任何账号。</p>}
+    <details>
+      <summary className="text-sm">项目保存方式（可选）{value.kind === 'social' ? ' · 已按账号保存' : ''}</summary>
+      <label className="mt-2 flex gap-2 text-sm">
+        <input aria-label="按社媒账号保存项目" type="checkbox" checked={value.kind === 'social'}
+          onChange={e => patch({ kind: e.target.checked ? 'social' : 'document' })} />
+        为每个社媒账号保留一个长期项目
+      </label>
+      <p className="mt-2 text-sm text-[var(--text-secondary)]">默认每次可新建独立项目。勾选后，用户先选择已获授权的账号，同一账号继续使用原项目。只影响项目的保存和访问，不改变 Skill 的分析能力，也不会连接或授权外部账号。</p>
+    </details>
     <label className="block text-sm">导入文件夹
       <input aria-label="导入 Skill 文件夹" type="file" multiple {...{ webkitdirectory: '' }}
         onChange={e => void load(e.target.files)} className="mt-2 block w-full" />
