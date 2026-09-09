@@ -3606,6 +3606,11 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   expect((await sql.query('select name,api_key from ai_models where id=$1',[model])).rows[0]).toEqual({name:'After',api_key:'LOCAL_ONLY'});
   expect((await client.from('ai_models').update({name:'Denied'}).eq('id',model)).error).not.toBeNull();
   await sql.query("insert into modules(id,title,active) values($1,'Unused test module',false)",[module]);
+  const card = randomUUID();
+  await sql.query("insert into modules(id,title,active,link_module_id) values($1,'Linked card',true,$2)",[card,module]);
+  expect((await call('admin.removePrompt',{id:module})).status).toBe(409);
+  expect((await sql.query('select link_module_id from modules where id=$1',[card])).rows[0].link_module_id).toBe(module);
+  await sql.query('delete from modules where id=$1',[card]);
   expect((await call('admin.removePrompt',{id:module})).status).toBe(200);
   expect((await sql.query('select id from modules where id=$1',[module])).rowCount).toBe(0);
   expect((await call('admin.removePrompt',{id:module})).status).toBe(200);

@@ -2185,7 +2185,7 @@ export const adminRouter = router({
       const { data, error } = await ctx.supabase.from('modules')
         .delete().eq('id', input.id).select('id').maybeSingle();
       if (error?.code === '23503') {
-        throw new TRPCError({ code: 'CONFLICT', message: '这个模块已关联对话或 Skill 项目，不能删除。请使用下架，已有记录会保留。' });
+        throw new TRPCError({ code: 'CONFLICT', message: '这个模块已被功能卡片、对话或 Skill 项目引用，不能删除。请使用下架，已有记录会保留。' });
       }
       if (error) throw createAdminOperationError('删除功能模块', error);
       return { success: true, deletedId: data?.id ?? input.id };
