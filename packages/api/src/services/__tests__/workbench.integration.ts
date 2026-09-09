@@ -3679,7 +3679,7 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
   const waiter = new pg.Client({connectionString:process.env.V3_LOCAL_DB});
   await holder.connect(); await waiter.connect();
   const pid = (await waiter.query('select pg_backend_pid() as pid')).rows[0].pid;
-  const waitForLock = () => expect.poll(async () => (await sql.query("select wait_event_type from pg_stat_activity where pid=$1",[pid])).rows[0]?.wait_event_type, {timeout:2000,intervals:[20,50,100]}).toBe('Lock');
+  const waitForLock = () => expect.poll(async () => (await sql.query("select wait_event_type from pg_stat_activity where pid=$1",[pid])).rows[0]?.wait_event_type, {timeout:2000,interval:20}).toBe('Lock');
   const model = randomUUID();
   await sql.query("insert into ai_models(id,model_id,name) values($1,'concurrent-delete','Concurrent deletion model')",[model]);
   try {
