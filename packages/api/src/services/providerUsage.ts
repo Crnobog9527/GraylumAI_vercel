@@ -3,6 +3,7 @@ import { z } from 'zod';
 const tokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const usageSchema = z.object({
  prompt_tokens: tokens, completion_tokens: tokens, total_tokens: tokens.optional(),
+ tool_use_prompt_tokens: tokens.optional(),
  prompt_tokens_details: z.object({cached_tokens:tokens.optional(),cache_write_tokens:tokens.optional()}).nullish(),
  completion_tokens_details: z.object({reasoning_tokens:tokens.optional()}).nullish(),
 }).superRefine((v,ctx) => {
@@ -16,7 +17,7 @@ export function parseProviderUsage(value: unknown) {
   // OpenAI-compatible input/output totals already INCLUDE cached/reasoning
   // subsets. Do not add these subsets again or tokenize visible output instead.
   usage:{inputTokens:v.prompt_tokens,outputTokens:v.completion_tokens,cacheReadTokens:0,cacheCreationTokens:0},
-  evidence:{source:'provider_usage' as const,promptTokens:v.prompt_tokens,completionTokens:v.completion_tokens,totalTokens:v.prompt_tokens+v.completion_tokens,cachedTokens:v.prompt_tokens_details?.cached_tokens,cacheWriteTokens:v.prompt_tokens_details?.cache_write_tokens,reasoningTokens:v.completion_tokens_details?.reasoning_tokens},
+  evidence:{source:'provider_usage' as const,promptTokens:v.prompt_tokens,completionTokens:v.completion_tokens,totalTokens:v.prompt_tokens+v.completion_tokens,toolUsePromptTokens:v.tool_use_prompt_tokens,cachedTokens:v.prompt_tokens_details?.cached_tokens,cacheWriteTokens:v.prompt_tokens_details?.cache_write_tokens,reasoningTokens:v.completion_tokens_details?.reasoning_tokens},
  };
 }
 
@@ -68,8 +69,10 @@ export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onCh
   if(candidate?.finishReason)finished=true;
   if(event.usageMetadata){
    const v=event.usageMetadata;
+   const toolInput=tokens.parse(v.toolUsePromptTokenCount??0);
+   const input=tokens.parse(v.promptTokenCount)+toolInput;
    const output=tokens.parse(v.candidatesTokenCount)+tokens.parse(v.thoughtsTokenCount??0);
-   accounting=parseProviderUsage({prompt_tokens:v.promptTokenCount,completion_tokens:output,total_tokens:v.totalTokenCount,prompt_tokens_details:{cached_tokens:v.cachedContentTokenCount},completion_tokens_details:{reasoning_tokens:v.thoughtsTokenCount}});
+   accounting=parseProviderUsage({prompt_tokens:input,tool_use_prompt_tokens:toolInput,completion_tokens:output,total_tokens:v.totalTokenCount,prompt_tokens_details:{cached_tokens:v.cachedContentTokenCount},completion_tokens_details:{reasoning_tokens:v.thoughtsTokenCount}});
   }
  };
  try{

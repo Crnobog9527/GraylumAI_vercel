@@ -34,3 +34,13 @@ it.each([false,true])('requires fresh Gemini usage after subsequent content or t
  await expect(readGeminiUsageStream(bytes(prefix))).rejects.toThrow('PROVIDER_USAGE_UNAVAILABLE');
  await expect(readGeminiUsageStream(bytes(prefix+'data: '+JSON.stringify({usageMetadata:metadata})))).resolves.toMatchObject({usage:{inputTokens:100,outputTokens:20}});
 });
+
+it('includes Gemini tool-use prompt tokens in input and retains the breakdown',async()=>{
+ const event={candidates:[{finishReason:'STOP',content:{parts:[{text:'grounded answer'}]}}],usageMetadata:{promptTokenCount:100,toolUsePromptTokenCount:40,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:170}};
+ const result=await readGeminiUsageStream(bytes('data: '+JSON.stringify(event)));
+ expect(result.usage).toMatchObject({inputTokens:140,outputTokens:30});expect(result.evidence).toMatchObject({toolUsePromptTokens:40,totalTokens:170});
+});
+it.each([-1,1.5,'40',Number.MAX_SAFE_INTEGER])('rejects invalid or overflowing Gemini tool input %s',async tool=>{
+ const event={candidates:[{finishReason:'STOP'}],usageMetadata:{promptTokenCount:100,toolUsePromptTokenCount:tool,candidatesTokenCount:20}};
+ await expect(readGeminiUsageStream(bytes('data: '+JSON.stringify(event)))).rejects.toThrow();
+});
