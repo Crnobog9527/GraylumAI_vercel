@@ -2759,39 +2759,14 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     });
   });
 
-  it('soft-disables modules instead of physically deleting them', async () => {
-    const updates: Array<Record<string, unknown>> = [];
-    const adminSupabase = {
-      from(table: string) {
-        expect(table).toBe('modules');
-        const builder = {
-          update(payload: Record<string, unknown>) {
-            updates.push(payload);
-            return builder;
-          },
-          eq() {
-            return builder;
-          },
-          select() {
-            return builder;
-          },
-          single() {
-            return Promise.resolve({
-              data: { id: '00000000-0000-4000-8000-000000000003' },
-              error: null,
-            });
-          },
-        };
-
-        return builder;
-      },
-    };
-
-    const caller = createAdminCaller(adminSupabase);
-    const result = await caller.deletePrompt({ id: '00000000-0000-4000-8000-000000000003' });
-
-    expect(result).toMatchObject({ success: true });
-    expect(updates[0]).toMatchObject({ active: false });
+  it.each([null, { code: '23503' }, { code: '42501' }])('deletes unused modules and reports failures: %j', async (error) => {
+    const builder: any = { delete: () => builder, eq: () => builder, select: () => builder,
+      maybeSingle: async () => ({ data: error ? null : { id: '00000000-0000-4000-8000-000000000003' }, error }) };
+    const caller = createAdminCaller({ from: () => builder });
+    const action = caller.removePrompt({ id: '00000000-0000-4000-8000-000000000003' });
+    if (error?.code === '23503') await expect(action).rejects.toMatchObject({ code: 'CONFLICT' });
+    else if (error) await expect(action).rejects.toThrow();
+    else expect(await action).toMatchObject({ success: true, deletedId: '00000000-0000-4000-8000-000000000003' });
   });
 
   it('batch-updates featured flags as boolean module fields', async () => {

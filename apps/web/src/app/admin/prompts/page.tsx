@@ -229,7 +229,8 @@ export default function AdminPromptsPage() {
     }
   });
 
-  const deletePrompt = trpc.admin.deletePrompt.useMutation({
+  const deletePrompt = trpc.admin.removePrompt.useMutation({
+    onError: error => alert(error.message),
     onSuccess: async () => {
       await refetch();
     }
@@ -400,8 +401,8 @@ export default function AdminPromptsPage() {
     });
   };
 
-  const handleDisable = (module: FeatureModule) => {
-    if (confirm(`确定要下架功能模块 "${module.title}" 吗？下架后前台功能广场将不再展示。`)) {
+  const handleDelete = (module: FeatureModule) => {
+    if (confirm(`确定要删除功能模块 "${module.title}" 吗？删除后无法恢复；已关联对话或项目的模块会保留。`)) {
       deletePrompt.mutate({ id: module.id });
     }
   };
@@ -773,8 +774,9 @@ export default function AdminPromptsPage() {
                           variant="ghost"
                           size="icon"
                           data-testid={`admin-prompt-delete-${module.id}`}
-                          onClick={() => handleDisable(module)}
-                          disabled={!module.active}
+                          onClick={() => handleDelete(module)}
+                          disabled={deletePrompt.isPending}
+                          aria-label={`删除 ${module.title}`}
                           className="h-8 w-8 text-rose-400 hover:bg-rose-500/20 disabled:opacity-30"
                         >
                           <Trash2 className="h-4 w-4" />

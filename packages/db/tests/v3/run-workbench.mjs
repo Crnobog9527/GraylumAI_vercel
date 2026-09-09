@@ -176,6 +176,8 @@ try {
   sql("ALTER TABLE modules ADD COLUMN created_by uuid, ADD COLUMN prompt_content text, ADD COLUMN system_prompt text, ADD COLUMN user_prompt_template text; ALTER TABLE modules ALTER COLUMN features TYPE text USING features::text, ALTER COLUMN examples TYPE text USING examples::text, ALTER COLUMN preparation_questions TYPE text USING preparation_questions::text;");
   apply("packages/db/migrations/0072_v3_admin_skill_modules.sql");
   apply("packages/db/migrations/0072_v3_admin_skill_modules.sql");
+  apply("packages/db/migrations/0073_admin_management_write_grants.sql");
+  apply("packages/db/migrations/0073_admin_management_write_grants.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
