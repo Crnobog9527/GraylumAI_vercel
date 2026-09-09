@@ -1,25 +1,22 @@
 # 部署指南
 
-## 当前发布顺序
+## 发布依据
 
-1. 先完成非支付发布准备
-2. 在锁定的 Vercel preview / staging 环境做完整预发布演练
-3. 关闭演练中发现的最后非支付问题
-4. 最后接入并验收 Stripe
-5. 再做正式生产发布
+执行边界以 [AGENTS.md](../AGENTS.md) 为准；产品任务从 [Launch 入口](launch/START_HERE.md) 查阅。历史发布检查表提供测试场景，不代表当前版本已签核或获得生产授权。
 
-相关文档：
-
-- [RELEASE_PREP_CHECKLIST.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/RELEASE_PREP_CHECKLIST.md)
-- [PRE_RELEASE_REHEARSAL.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/runbooks/PRE_RELEASE_REHEARSAL.md)
-- [STRIPE_ENABLEMENT_CHECKLIST.md](/Volumes/灰度映画/灰度映画/美国怀俄明州-Grayscale%20Luminary%20LLC/Graylum_AI/GraylumAI_vercel/docs/STRIPE_ENABLEMENT_CHECKLIST.md)
+- [发布检查表](RELEASE_PREP_CHECKLIST.md)
+- [预发布演练](runbooks/PRE_RELEASE_REHEARSAL.md)
+- [Stripe 验收](STRIPE_ENABLEMENT_CHECKLIST.md)
+- [后台设置与模块删除运维](runbooks/ADMIN_OPERATIONS.md)
 
 ## 环境概览
 
 | 环境 | 作用 | 说明 |
 |------|------|------|
 | `Preview / Staging` | 预发布演练 | 锁定单个部署版本，不允许中途切换 |
-| `Production` | 正式上线 | 只在 preview 演练通过且 Stripe 验收通过后发布 |
+| `Production` | 正式上线 | 完成本次候选适用的验收并取得独立生产授权后发布 |
+
+独立 Vercel 项目 `graylumai-staging` 使用 Vercel 的 `Production` 环境服务 staging 分支，域名为 `graylumai-staging.vercel.app`。平台环境标签不等于主站生产；操作前同时核对项目、分支和域名。
 
 ## 关键环境变量
 
@@ -49,7 +46,7 @@
 - Stripe Checkout return URLs
 - Stripe webhook endpoint
 
-> Anthropic 官方 API 已退役。Preview / Production 不应再配置 `ANTHROPIC_API_KEY`；如历史环境仍存在旧 key，应在 Anthropic 后台 revoke/delete。
+> Anthropic 官方 API 已退役。Preview / Production 不应再配置 `ANTHROPIC_API_KEY`；如历史环境仍存在旧 key，先核对依赖，再按 AGENTS.md 取得凭据变更授权后撤销。
 
 ## 推荐命令
 
@@ -73,20 +70,11 @@ pnpm release:preflight:destructive -- --preview-url <preview-url> --bypass-cooki
 
 ## 回滚
 
-### Vercel Dashboard（推荐）
+先核对故障部署与拟恢复版本。Vercel 的部署提升/回滚属于外部变更，须按 [AGENTS.md](../AGENTS.md) 取得对应环境和操作的授权；生产操作不能沿用 staging 合并批准。
 
-1. 打开 `Deployments`
-2. 找到上一个稳定版本
-3. `Promote to Production`
+代码回滚在独立任务分支生成 revert 提交，通过 PR、验证和审查后由 Owner 批准合并。不得直接推送 `staging` 或 `main`。部署回滚不自动撤销数据库迁移；数据库恢复需单独评估兼容性、数据影响及授权。
 
-### Git 回滚
-
-```bash
-git revert HEAD
-git push origin main
-```
-
-## accepted risk
+## 历史风险记录
 
 - Supabase 免费套餐无法启用 `Leaked Password Protection`
-- 当前将其记录为平台级 accepted risk，不阻塞非支付上线准备
+- 上述免费套餐限制是历史记录；发布前核对目标项目现状和本次适用的风险接受结论

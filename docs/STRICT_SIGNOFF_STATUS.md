@@ -1,5 +1,8 @@
 # 全站严格签核状态总表
 
+> 历史签核快照：本文记录原验收时点的结果，不证明当前 staging/production 已通过，也不授予发布权限。本阶段后台修复的范围与未验证项见 [后台运维](runbooks/ADMIN_OPERATIONS.md)。
+
+
 Last updated: 2026-03-30
 
 ## Summary

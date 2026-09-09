@@ -1,6 +1,8 @@
 # Admin Settings Effect Matrix
 
-Last updated: 2026-04-28
+Last reconciled: 2026-09-10
+
+Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh full-platform signoff. [Admin operations](runbooks/ADMIN_OPERATIONS.md) documents the settings save contract and the scoped PR #398–400 evidence.
 
 ## Status Legend
 
@@ -13,6 +15,8 @@ Last updated: 2026-04-28
 
 | Setting key | Admin owner page | Runtime / user surface | Expected effect | Existing automated proof | Status |
 | --- | --- | --- | --- | --- | --- |
+| `primary_model_id`, `assistant_model_id` | `/admin/settings` | `chatRuntime.ts` routing configuration | Select an active `ai_models.id` UUID; empty string clears the override | Real local full-form save/read-back, invalid batch atomicity, 401/403 in `workbench.integration.ts`; downstream provider effect not re-run | `partial` |
+| `v3_summary_model_id`, `v3_summary_max_tokens` | `/admin/settings` | Step artifact summarization | Independently eligible model record; output cap 128–4096; unavailable/unconfigured summarizer preserves the original artifact | Local full-form persistence plus existing summary tests; not a fresh deployed provider run | `partial` |
 | `site_name` | `/admin/settings` | landing title, layout metadata, header/footer/admin sidebar | Brand/title updates after save | `admin-config.spec.ts` | `verified` |
 | `support_email` | `/admin/settings` | landing footer, maintenance page | Support contact changes after save | `admin-config.spec.ts` | `verified` |
 | `maintenance_mode` | `/admin/settings` | `/login`, `/maintenance`, admin bypass | Public users redirected; admins remain allowed | `admin-config.spec.ts` | `verified` |
@@ -87,16 +91,11 @@ No setting may be marked complete unless:
 3. The intended downstream surface changes in the same acceptance flow.
 4. If the setting affects security, billing, or destructive behavior, the effect is asserted through the actual runtime path.
 
-## Non-Payment Closure Note
+## Evidence Boundary
 
-All non-payment settings are now either:
+The earlier non-payment closure claim applies only to its dated acceptance scope. New model-selection rows remain `partial` until their downstream effect is proven for the relevant candidate. Stripe readiness and production approval are separate; this matrix does not establish either.
 
-- `verified` with automated or runtime proof, or
-- `retired-reference` because they are no longer treated as production truth.
-
-The only intentionally excluded unfinished area is Stripe enablement and the external credentials / `price_xxx` values it still requires.
-
-Preview-only runtime acceptance for `enable_smart_routing` and `enable_smart_search_decision` is now closed on the locked Vercel preview through deployed runtime probes rather than local persistence-only checks.
+Model settings store database record IDs, not provider names such as `openai/gpt-5.6-luna`. Routing model options expose only `id`, `name`, and `model_id`. Invalid, removed, or inactive routing selections reject the batch before upsert; summary-model eligibility has its own validation. A concurrent foreign-key conflict is returned as a safe `BAD_REQUEST`.
 
 ## Latest Local Regression
 
