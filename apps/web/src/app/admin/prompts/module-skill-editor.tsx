@@ -59,7 +59,7 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
           onChange={e => patch({ kind: e.target.checked ? 'social' : 'document' })} />
         为每个社媒账号保留一个长期项目
       </label>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">默认每次可新建独立项目。勾选后，用户先选择已获授权的账号，同一账号继续使用原项目。只影响项目的保存和访问，不改变 Skill 的分析能力，也不会连接或授权外部账号。</p>
+      <p className="mt-2 text-sm text-[var(--text-secondary)]">默认不关联社媒账号，同一用户使用同一 Skill 时继续原项目。勾选后，用户先选择已获授权的账号，每个账号分别保留项目。只影响项目的保存和访问，不改变 Skill 的分析能力，也不会连接或授权外部账号。</p>
     </details>
     <label className="block text-sm">导入文件夹
       <input aria-label="导入 Skill 文件夹" type="file" multiple {...{ webkitdirectory: '' }}
