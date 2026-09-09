@@ -21,7 +21,7 @@ const identitySchema = z.object({ packageId: id, revisionId: id, packageHash: ha
 export type PackageIdentity = z.infer<typeof identitySchema>;
 const fileSchema = z.object({
   path: z.string().min(1).max(240), bytes: z.number().int().min(0).max(2 * 1024 * 1024),
-  sha256: hash, mediaType: z.literal('text/markdown'), requires: z.array(z.string()).max(64),
+  sha256: hash, mediaType: z.enum(['text/markdown', 'text/yaml']), requires: z.array(z.string()).max(64),
 }).strict();
 const descriptorSchema = identitySchema.extend({
   directoryName: z.string().min(1).max(64),
@@ -70,8 +70,9 @@ export function validateDescriptor(input: unknown): PackageDescriptor {
   const paths = new Set<string>();
   for (const file of p.files) {
     assertPath(file.path);
-    // Local text-only host: optional scripts/binaries need a different reviewed host.
-    if (!file.path.endsWith('.md') || file.path.split('/').includes('scripts')) fail('UNSUPPORTED_CAPABILITY');
+    // Read-only text resources. YAML is supplied as text, never parsed or executed.
+    if (!(/\.(md|ya?ml)$/.test(file.path)) || file.path.split('/').includes('scripts')) fail('UNSUPPORTED_CAPABILITY');
+    if (file.mediaType !== (file.path.endsWith('.md') ? 'text/markdown' : 'text/yaml')) fail('INVALID_FORMAT');
     const key = file.path.toLowerCase();
     if (paths.has(key)) fail('AMBIGUOUS_IDENTITY');
     paths.add(key);
