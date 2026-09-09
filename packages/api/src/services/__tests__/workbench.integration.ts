@@ -3589,6 +3589,61 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
   } finally { await context.close(); }
 }, 180000);
 
+it('ADMIN: three modules delete in one atomic request and disappear before a slow dashboard refresh', async () => {
+  const admin = await newUser();
+  await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  for (const [i,id] of ids.entries()) await sql.query("insert into modules(id,title,active,sort_order) values($1,$2,false,9999)", [id, `Batch delete fixture ${i}`]);
+  const {page,context} = await pageFor(admin);
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>(resolve => { releaseRefresh = resolve; });
+  try {
+    // A referenced member rejects the entire batch, including unused members.
+    const rejected = await page.request.post(app + '/api/trpc/admin.removePrompts', {data:{ids:[ids[0],fixtures[0].moduleId]}});
+    expect(rejected.status()).toBe(409);
+    expect((await sql.query('select id from modules where id=any($1::uuid[])',[ids])).rowCount).toBe(3);
+    const ordinary = await pageFor();
+    expect((await ordinary.page.request.post(app + '/api/trpc/admin.removePrompts',{data:{ids}})).status()).toBe(403);
+    await ordinary.context.close();
+    const anon = await browser.newContext();
+    expect((await anon.request.post(app + '/api/trpc/admin.removePrompts',{data:{ids}})).status()).toBe(401);
+    await anon.close();
+    await page.goto(app + '/admin/prompts');
+    for (const id of ids) await page.getByRole('row').filter({has:page.getByTestId('admin-prompt-delete-' + id)}).getByRole('checkbox').check();
+    await page.getByRole('button',{name:'删除选中',exact:true}).click();
+    await page.getByRole('button',{name:'取消',exact:true}).click();
+    expect((await sql.query('select id from modules where id=any($1::uuid[])',[ids])).rowCount).toBe(3);
+    let mutationCount = 0, refreshStarted = false;
+    page.on('request', request => { if (request.url().includes('/api/trpc/admin.removePrompts')) mutationCount++; });
+    await page.route('**/api/trpc/admin.getPromptsDashboard*', async route => {
+      refreshStarted = true;
+      await refreshGate;
+      await route.continue();
+    });
+    await page.getByRole('button',{name:'删除选中',exact:true}).click();
+    const started = Date.now();
+    const response = page.waitForResponse(response => response.url().includes('/api/trpc/admin.removePrompts'));
+    await page.getByTestId('admin-module-confirm').click();
+    expect((await response).status()).toBe(200);
+    const acknowledged = Date.now();
+    await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
+    for (const id of ids) expect(await page.getByTestId('admin-prompt-delete-' + id).count()).toBe(0);
+    expect(mutationCount).toBe(1);
+    await expect.poll(() => refreshStarted).toBe(true);
+    expect((await sql.query('select id from modules where id=any($1::uuid[])',[ids])).rowCount).toBe(0);
+    console.log('MODULE_DELETE_LOCAL', JSON.stringify({modules:3,deleteRequests:mutationCount,requestMs:acknowledged-started,visibleAfterAckMs:Date.now()-acknowledged,refreshStillBlocked:true}));
+    releaseRefresh();
+    await page.unrouteAll({behavior:'wait'});
+    // Successful replay is harmless; there are no extra deletions.
+    const replay = await page.request.post(app + '/api/trpc/admin.removePrompts',{data:{ids}});
+    expect(replay.status()).toBe(200);
+    expect((await replay.json()).result.data.deletedIds).toEqual([]);
+    await page.reload();
+    await page.getByRole('heading',{name:'功能模块',exact:true}).waitFor();
+    for (const id of ids) expect(await page.getByTestId('admin-prompt-delete-' + id).count()).toBe(0);
+  } finally { releaseRefresh(); await context.close(); }
+}, 180000);
+
 it('ADMIN: model edits and unused-module deletion work through authenticated HTTP while client writes and referenced deletion are denied', async () => {
   const admin = await newUser();
   await sql.query("update profiles set role='admin' where id=$1", [admin.id]);

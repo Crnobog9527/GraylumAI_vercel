@@ -239,11 +239,35 @@ export default function AdminPromptsPage() {
     }
   });
 
-  const deletePrompt = trpc.admin.removePrompt.useMutation({
+  const deletePrompt = trpc.admin.removePrompts.useMutation({
     onError: error => setConfirmationError(error.message),
-    onSuccess: async () => {
+    onSuccess: async (result, input) => {
+      // Only remove rows after the server confirms the atomic deletion. Cancel
+      // older reads so they cannot put deleted rows back while we reconcile.
+      await utils.admin.getPromptsDashboard.cancel();
+      const deleted = new Set(input.ids);
+      utils.admin.getPromptsDashboard.setData({
+        limit: 50, category: categoryFilter === 'all' ? undefined : categoryFilter,
+      }, current => {
+        if (!current) return current;
+        const removed = current.modules.filter(module => deleted.has(module.id));
+        const modules = current.modules.filter(module => !deleted.has(module.id));
+        const stats = { ...current.stats, byCategory: { ...current.stats.byCategory } };
+        for (const module of removed) {
+          stats.total = Math.max(0, stats.total - 1);
+          if (module.active) stats.active = Math.max(0, stats.active - 1);
+          else stats.inactive = Math.max(0, stats.inactive - 1);
+          if (module.is_featured) stats.featured = Math.max(0, stats.featured - 1);
+          if (module.category) stats.byCategory[module.category] = Math.max(0, (stats.byCategory[module.category] ?? 0) - 1);
+        }
+        return { ...current, modules, prompts: modules, stats, total: Math.max(0, current.total - removed.length) };
+      });
+      setSelectedModuleIds(ids => ids.filter(id => !deleted.has(id)));
       setConfirmation(null);
-      await refetch();
+      toast.success(result.deletedIds.length ? `已删除 ${result.deletedIds.length} 个模块` : '所选模块已不存在');
+      // Refill the page and reconcile global counts without extending the
+      // delete pending state. Keep confirmed results if that read fails.
+      void utils.admin.getPromptsDashboard.invalidate();
     }
   });
 
@@ -488,7 +512,7 @@ export default function AdminPromptsPage() {
     return <AdminLoadingState />;
   }
 
-  if (error) {
+  if (error && !dashboard) {
     return <AdminErrorState error={error} onRetry={() => refetch()} />;
   }
 
@@ -516,6 +540,7 @@ export default function AdminPromptsPage() {
 
   return (
     <div className="p-8 overflow-auto">
+      {error && dashboard && <p role="alert" className="mb-4 text-amber-400">列表刷新失败，当前显示上次结果。已确认的删除不受影响，请点击刷新重试。</p>}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -574,7 +599,7 @@ export default function AdminPromptsPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => handleBatchSetActive(false)}
+                onClick={handleBatchDisable}
                 className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
               >
                 <X className="h-4 w-4 mr-2" />
@@ -582,11 +607,14 @@ export default function AdminPromptsPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={handleBatchDisable}
+                onClick={() => {
+                  setConfirmationError('');
+                  setConfirmation({ kind: 'delete', ids: [...selectedModuleIds], title: `${selectedModuleIds.length} 个模块` });
+                }}
                 className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
               >
                 <Trash2 className="h-4 w-4 mr-2" />
-                下架选中
+                删除选中
               </Button>
             </div>
           </CardContent>
@@ -812,7 +840,7 @@ export default function AdminPromptsPage() {
             <DialogTitle>{confirmation?.kind === 'delete' ? '删除功能模块' : '下架功能模块'}</DialogTitle>
             <DialogDescription>
               {confirmation?.kind === 'delete'
-                ? `确定删除“${confirmation.title}”吗？删除后无法恢复。被功能卡片、对话或项目引用的模块会保留。`
+                ? `确定删除“${confirmation.title}”吗？删除后无法恢复。若存在功能卡片、对话或项目引用，本次全部取消删除。`
                 : `确定下架选中的 ${confirmation?.title} 吗？前台将不再展示，已有记录保留。`}
             </DialogDescription>
           </DialogHeader>
@@ -822,7 +850,7 @@ export default function AdminPromptsPage() {
             <Button data-testid="admin-module-confirm" disabled={confirmationPending} onClick={() => {
               if (!confirmation || confirmationPending) return;
               setConfirmationError('');
-              if (confirmation.kind === 'delete') deletePrompt.mutate({id: confirmation.ids[0]});
+              if (confirmation.kind === 'delete') deletePrompt.mutate({ids: confirmation.ids});
               else batchDeletePrompts.mutate({ids: confirmation.ids});
             }}>{confirmationPending ? '处理中…' : confirmation?.kind === 'delete' ? '确认删除' : '确认下架'}</Button>
           </DialogFooter>

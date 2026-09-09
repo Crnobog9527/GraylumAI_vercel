@@ -2769,6 +2769,24 @@ describe('adminRouter remaining performance-sensitive queries', () => {
     else expect(await action).toMatchObject({ success: true, deletedId: '00000000-0000-4000-8000-000000000003' });
   });
 
+  it.each([null, { code: '23503' }, { code: '42501' }])('deletes one atomic batch and reports failures: %j', async error => {
+    const id = '00000000-0000-4000-8000-000000000003';
+    const remove = vi.fn();
+    const filter = vi.fn();
+    const builder: any = {
+      delete: () => { remove(); return builder; },
+      in: (column: string, ids: string[]) => { filter(column, ids); return builder; },
+      select: async () => ({ data: error ? null : [{ id }], error }),
+    };
+    const caller = createAdminCaller({ from: () => builder });
+    const action = caller.removePrompts({ ids: [id, id] });
+    if (error?.code === '23503') await expect(action).rejects.toMatchObject({ code: 'CONFLICT' });
+    else if (error) await expect(action).rejects.toThrow();
+    else expect(await action).toEqual({ success: true, deletedIds: [id] });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(filter).toHaveBeenCalledWith('id', [id]);
+  });
+
   it('batch-updates featured flags as boolean module fields', async () => {
     const updates: Array<Record<string, unknown>> = [];
     const filters: Array<Record<string, unknown>> = [];
