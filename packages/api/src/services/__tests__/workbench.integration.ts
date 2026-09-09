@@ -1470,7 +1470,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === "restore")(
       evidenceIds: [],
     });
     await expect(r.service.execute(adoption)).rejects.toThrow(
-      "ARTIFACT_REVIEW_REQUIRED",
+      "ARTIFACT_CANDIDATE_INVALIDATED",
     );
     expect(
       (await r.service.read(r.projectId, r.roundId)).steps["step-1"].version,
@@ -1892,7 +1892,7 @@ async function generationFixture(n = 3, methodText = 'Synthetic generation metho
   const scope = { projectId: randomUUID(), roundId: randomUUID() };
   const account = n === 6 ? `synthetic:${randomUUID()}` : undefined;
   if (account) await sql.query('insert into artifact_accounts values($1,$2,$3,$4)', [actor, f.moduleId, f.pack.id, account]);
-  await service.start({ ...scope, requestId: randomUUID(), registration: f.registration, account });
+  await service.start({ ...scope, requestId: randomUUID(), registration: f.registration, account },f.moduleId);
   let calls = 0;
   const captured: string[] = [];
   const ai = workbenchGeneration(user, db, async req => { calls++; captured.push(JSON.stringify(req.messages)); return { body: 'Synthetic AI candidate text.', inputTokens: 800, outputTokens: 30 }; });
@@ -2269,6 +2269,152 @@ aiTest('AI: 64 long-path resources remain complete while quote identity fits dur
   expect(stored.bytes).toBeLessThan(16384);expect(stored.quote.resourcesHash).toMatch(/^[a-f0-9]{64}$/);expect(stored.quote.resources).toBeUndefined();
 },30000);
 
+aiTest('AI: research uses canonical credits and recovers settlement without fetching again',async()=>{
+ const {databaseResearchStore}=await import('../research/store'),research=databaseResearchStore(db,actor);
+ await sql.query('update profiles set credits=100 where id=$1',[actor]);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ const planId=randomUUID(),operationId=randomUUID();await research.create(planId,1100000,[{operationId,identityHash:'a'.repeat(64),maxQuoteUnits:1100000}]);
+ const r=await research.reserve(planId,operationId,'a'.repeat(64),1100000);
+ const charge=async(action:string)=>{const r=await db.rpc('research_user_charge',{p_actor_id:actor,p_plan_id:planId,p_operation_id:operationId,p_action:action});if(r.error)throw r.error;};
+ await Promise.all([charge('reserve'),charge('reserve')]);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(95);
+ await charge('admit');await research.dispatch(planId,operationId,r.token!);
+ await research.finish(planId,operationId,r.token!,'succeeded',{source:'agentkey',fixture:true,canonicalTool:'Tavily/post_search',objects:[],fetchedAt:new Date().toISOString(),pagination:{complete:true,nextCursor:null},error:null,cost:{unit:'agentkey-credit',quoted:1.1,actual:null,status:'unknown'}});
+ await sql.query("create function research_test_reject_spend() returns trigger language plpgsql as $$begin raise exception 'test settlement unavailable'; end$$; create trigger research_test_spend before insert on credit_transactions for each row execute function research_test_reject_spend()");
+ try {await expect(charge('settle')).rejects.toBeTruthy();expect((await research.get(planId,operationId))?.state).toBe('succeeded');expect((await sql.query('select charged_credits from research_operations where id=$1',[operationId])).rows[0].charged_credits).toBeNull();}
+ finally {await sql.query('drop trigger research_test_spend on credit_transactions; drop function research_test_reject_spend()');}
+ await Promise.all([charge('settle'),charge('settle')]);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(95);
+ expect((await sql.query('select count(*)::int n from credit_transactions where source_id=$1',[operationId])).rows[0].n).toBe(1);
+ expect((await sql.query('select charged_credits from research_operations where id=$1',[operationId])).rows[0].charged_credits).toBe(5);
+ const denied=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession:false}});
+ expect((await denied.rpc('research_user_charge',{p_actor_id:actor,p_plan_id:planId,p_operation_id:operationId,p_action:'settle'})).error).not.toBeNull();
+ const chargedAt=(await sql.query('select charged_at from research_operations where id=$1',[operationId])).rows[0].charged_at;
+ const start=new Date(chargedAt).toISOString(),end=new Date(new Date(chargedAt).getTime()+1000).toISOString();
+ const totals=await db.rpc('research_billing_summary',{p_start:start,p_end:end});
+ expect(totals.error).toBeNull();expect(totals.data).toEqual({count:1,credits:5});
+ const excluded=await db.rpc('research_billing_summary',{p_start:start,p_end:start});
+ expect(excluded.error).toBeNull();expect(excluded.data).toEqual({count:0,credits:0});
+ expect((await denied.rpc('research_billing_summary',{p_start:start,p_end:end})).error).not.toBeNull();
+ expect((await db.rpc('research_billing_summary',{p_start:end,p_end:start})).error).not.toBeNull();
+
+},30000);
+
+aiTest('AI: research refunds only a cancelled unsent reservation',async()=>{
+ const {databaseResearchStore}=await import('../research/store'),research=databaseResearchStore(db,actor);
+ await sql.query('update profiles set credits=100 where id=$1',[actor]);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ for(const dispatched of [false,true]){
+  const planId=randomUUID(),operationId=randomUUID();await research.create(planId,1100000,[{operationId,identityHash:'b'.repeat(64),maxQuoteUnits:1100000}]);const r=await research.reserve(planId,operationId,'b'.repeat(64),1100000);
+  const charge=async(action:string)=>{const r=await db.rpc('research_user_charge',{p_actor_id:actor,p_plan_id:planId,p_operation_id:operationId,p_action:action});if(r.error)throw r.error;};
+  await charge('reserve');if(dispatched)await research.dispatch(planId,operationId,r.token!);
+  await research.cancel(planId);
+  if(dispatched)await expect(charge('refund')).rejects.toBeTruthy();else await Promise.all([charge('refund'),charge('refund')]);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(dispatched?95:100);
+ }
+},30000);
+
+aiTest('AI: research billed store recovers cancellation across recreation and rejects missing price',async()=>{
+ const {databaseBilledResearchStore}=await import('../research/store');let research=databaseBilledResearchStore(db,actor);
+ await sql.query('update profiles set credits=100 where id=$1',[actor]);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ const planId=randomUUID(),operations=[0,1].map(()=>({operationId:randomUUID(),identityHash:'c'.repeat(64),maxQuoteUnits:1100000}));
+ await research.create(planId,2200000,operations);for(const op of operations)await research.reserve(planId,op.operationId,op.identityHash,1100000);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(90);
+ research=databaseBilledResearchStore(db,actor);await research.cancel(planId);await research.cancel(planId);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100);
+ const p=randomUUID(),o=randomUUID();await research.create(p,1100000,[{operationId:o,identityHash:'d'.repeat(64),maxQuoteUnits:1100000}]);
+ await sql.query("update system_settings set value='0' where key='search_surcharge_credits'");
+ await expect(research.reserve(p,o,'d'.repeat(64),1100000)).rejects.toThrow('RESEARCH_BILLING_UNAVAILABLE');
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(100);
+ await expect(research.dispatch(p,o,randomUUID())).rejects.toThrow('RESEARCH_BILLING_UNAVAILABLE');
+ await sql.query("update system_settings set value='5' where key='search_surcharge_credits'");
+ const r=await research.reserve(p,o,'d'.repeat(64),1100000);await research.dispatch(p,o,r.token!);
+ await research.finish(p,o,r.token!,'succeeded',{source:'agentkey',fixture:true,canonicalTool:'Tavily/post_search',objects:[],fetchedAt:new Date().toISOString(),pagination:{complete:true,nextCursor:null},error:null,cost:{unit:'agentkey-credit',quoted:1.1,actual:null,status:'unknown'}});
+ await databaseBilledResearchStore(db,actor).get(p,o);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(95);
+},30000);
+
+aiTest('AI: research adoption waits for canonical settlement and preserves evidence restrictions',async()=>{
+ const {databaseBilledResearchStore,databaseResearchStore}=await import('../research/store');
+ const t=await generationFixture(),service=t.service,scope=t.scope;
+ await sql.query('update profiles set credits=100 where id=$1',[actor]);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ const {researchIdentity}=await import('../research/agentKey'),{tavilyCapabilities,tavilyParameters}=await import('../research/tavilyContract');
+ const query='Fixture query',stepId='step-0',identityHash=researchIdentity(tavilyCapabilities[0],tavilyParameters(query),{...scope,stepId});
+ const billed=databaseBilledResearchStore(db,actor),raw=databaseResearchStore(db,actor),planId=randomUUID(),operationId=randomUUID();
+ await billed.create(planId,1100000,[{operationId,identityHash,maxQuoteUnits:1100000}]);
+ const reservation=await billed.reserve(planId,operationId,identityHash,1100000);
+ await billed.dispatch(planId,operationId,reservation.token!);
+ await raw.finish(planId,operationId,reservation.token!,'succeeded',{source:'agentkey',fixture:true,canonicalTool:'Tavily/post_search',objects:[],fetchedAt:new Date().toISOString(),pagination:{complete:true,nextCursor:null},error:null,cost:{unit:'agentkey-credit',quoted:1.1,actual:null,status:'unknown'}});
+ const command={action:'researchEvidence' as const,...scope,stepId,query,requestId:randomUUID(),planId,operationId};
+ await sql.query("create function research_test_adopt_spend() returns trigger language plpgsql as $$begin raise exception 'test settlement unavailable'; end$$; create trigger research_test_adopt before insert on credit_transactions for each row execute function research_test_adopt_spend()");
+ try {
+  await expect(service.execute(command)).rejects.toThrow('RESEARCH_BILLING_UNAVAILABLE');
+  expect((await service.read(scope.projectId,scope.roundId)).evidence).toHaveLength(0);
+ } finally {await sql.query('drop trigger research_test_adopt on credit_transactions; drop function research_test_adopt_spend()');}
+ const otherFixture=await fixture({id:'search-other-'+randomUUID(),label:'Other search project',methodText:'Synthetic other method',workflow:makeWorkflow(3)});
+ const otherScope={projectId:randomUUID(),roundId:randomUUID()};await service.start({...otherScope,requestId:randomUUID(),registration:otherFixture.registration},otherFixture.moduleId);
+ await expect(service.execute({...command,...otherScope})).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
+ await expect(service.execute({...command,stepId:'step-1'})).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
+ await service.execute(command);await service.execute(command);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(95);
+ const saved=await service.read(scope.projectId,scope.roundId);expect(saved.evidence).toHaveLength(1);
+ const foreign=await newUser(),foreignService=workbenchService(await authenticated(foreign),db);
+ await expect(foreignService.execute({...command,requestId:randomUUID()})).rejects.toThrow();
+ await service.execute({action:'restrictEvidence',...scope,requestId:randomUUID(),evidenceId:saved.evidence[0].id,deleted:true,expiresAt:null});
+ await expect(service.execute({...command,requestId:randomUUID()})).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
+ expect((await sql.query('select count(*)::int n from credit_transactions where source_id=$1',[operationId])).rows[0].n).toBe(1);
+},30000);
+
+aiTest('AI: research host dispatches only explicit query and recovers without reconnecting',async()=>{
+ const t=await generationFixture(),{workbenchSearch}=await import('../research/workbenchSearch');
+ const {localMcpFixture}=await import('./fixtures/agentKeyServer'),{databaseBilledResearchStore}=await import('../research/store'),{tavilySchema}=await import('../research/tavilySchema');
+ const name='Tavily/post_search',query='Fictional public exhibition planning';
+ const wire={discovery:{tools:[{name}]},description:{name,category:'Search',provider:'Tavily',params:tavilySchema,cost:{credits_per_call:1.1},health:{healthy:true},execute_as:{name,params:{query:'<The search query to execute with Tavily.>'}}},result:{category:'search',provider:'Tavily',took_ms:10,data:{query,answer:null,follow_up_questions:null,images:[],response_time:0.01,results:[{id:'fixture-web-1',title:'Fictional guide',url:'https://example.test/guide',content:'Public fictional reference.',score:0.8,raw_content:null}],usage:{credits:1}}}};
+ const fixture=await localMcpFixture(databaseBilledResearchStore(db,actor),'json',wire);let connections=0;
+ const host=workbenchSearch(t.user,db,options=>{connections++;return fixture.connect(options);});
+ const input={...t.scope,requestId:randomUUID(),stepId:'step-0',query};
+ try {
+  await sql.query("insert into system_settings(key,value) values('v3_web_search','false'),('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+  await expect(host.search(input)).rejects.toThrow('RESEARCH_DISABLED');expect(connections).toBe(0);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+  const result=await host.search(input);expect(result.state).toBe('succeeded');expect(result.result?.objects[0].fields.content).toBe('Public fictional reference.');
+  expect(JSON.stringify(result)).not.toContain('quoted');expect(JSON.stringify(result)).not.toContain('agentkey-credit');
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);
+  await sql.query("update system_settings set value='false' where key='v3_web_search'");
+  expect(await host.search(input)).toEqual(result);expect(connections).toBe(1);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  expect(fixture.executedParams).toEqual([{query,search_depth:'basic',max_results:3,auto_parameters:false,include_answer:false,include_raw_content:false,include_images:false,include_usage:true,topic:'general'}]);
+  await expect(host.search({...input,query:'Changed query'})).rejects.toThrow();expect(connections).toBe(1);
+  await expect(host.search({...input,actorId:actor} as never)).rejects.toThrow();
+  const other=await generationFixture();
+  await expect(host.search({...input,...other.scope})).rejects.toThrow();expect(connections).toBe(1);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  const interrupted={...input,requestId:randomUUID()};
+  await sql.query("create function research_host_reject_spend() returns trigger language plpgsql as $$begin raise exception 'test settlement unavailable'; end$$; create trigger research_host_spend before insert on credit_transactions for each row execute function research_host_reject_spend()");
+  try {await expect(host.search(interrupted)).rejects.toThrow('RESEARCH_BILLING_UNAVAILABLE');}
+  finally {await sql.query('drop trigger research_host_spend on credit_transactions; drop function research_host_reject_spend()');}
+  expect((await sql.query('select state,charged_credits from research_operations where id=$1',[interrupted.requestId])).rows[0]).toEqual({state:'succeeded',charged_credits:null});
+  await sql.query('update modules set active=false where id=$1',[t.f.moduleId]);
+  try {
+   expect((await host.search(interrupted)).state).toBe('succeeded');
+   expect((await host.search(interrupted)).state).toBe('succeeded');
+   await expect(host.search({...input,requestId:randomUUID()})).rejects.toThrow();
+   expect(connections).toBe(2);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);
+   expect((await sql.query('select count(*)::int n from credit_transactions where source_id=$1',[interrupted.requestId])).rows[0].n).toBe(1);
+  } finally {await sql.query('update modules set active=true where id=$1',[t.f.moduleId]);}
+  const {getRateLimiter}=await import('../rateLimiter');
+  try {
+  for(let i=0;i<61;i++)getRateLimiter().check(actor,'ai');
+  expect((await host.search(interrupted)).state).toBe('succeeded');
+  const blocked={...input,requestId:randomUUID()};
+  await expect(host.search(blocked)).rejects.toThrow('请求过于频繁');
+  expect((await sql.query('select id from research_plans where id=$1',[blocked.requestId])).rows).toHaveLength(0);
+  expect(connections).toBe(2);
+  } finally {getRateLimiter().close();}
+ } finally {await fixture.stop();}
+},60000);
 // Chat linkage uses the same real local Auth/PostgREST/credit transaction fixture.
 aiTest('CHAT: durable multi-turn linkage, dependency-limited history, single settlement and denied identities',async()=>{
  const {skillChatService}=await import('../artifacts/chat');
@@ -3174,4 +3320,139 @@ aiTest('CHAT: retention skips a busy project without blocking concurrent convers
   await holder.query('commit');
   expect((await skillChatService(t.user,db).read({conversationId:binding.conversationId})).binding.conversationId).toBe(binding.conversationId);
  } finally {await holder.query('rollback');await holder.end();}
+},30000);
+
+aiTest('CHAT: search restores a lost response, adopts references once and cancels only unsent work',async()=>{
+ const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat');
+ const binding=await skillChatService(t.user,db).enter({...t.scope,requestId:randomUUID()});
+ const {localMcpFixture}=await import('./fixtures/agentKeyServer'),{databaseBilledResearchStore}=await import('../research/store'),{tavilySchema}=await import('../research/tavilySchema');
+ const name='Tavily/post_search',query='Fictional public guide';
+ const wire={discovery:{tools:[{name}]},description:{name,category:'Search',provider:'Tavily',params:tavilySchema,cost:{credits_per_call:1.1},health:{healthy:true},execute_as:{name,params:{query:'<The search query to execute with Tavily.>'}}},result:{category:'search',provider:'Tavily',took_ms:10,data:{query,answer:null,follow_up_questions:null,images:[],response_time:0.01,results:[{id:'browser-reference',title:'Browser search guide',url:'https://example.test/browser-guide',content:'Reference from the local MCP fixture.',score:0.8,raw_content:null}],usage:{credits:1}}}};
+ const fixture=await localMcpFixture(databaseBilledResearchStore(db,actor),'json',wire);
+ const {page,context}=await pageFor(credentials,[]);
+ try {
+  await sql.query("insert into system_settings(key,value) values('v3_web_search','true'),('search_surcharge_credits','5'),('local_research_endpoint',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(fixture.endpoint)]);
+  const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+  await page.goto(app+'/chat?conversation='+binding.conversationId);await page.getByText('参考资料（可选）',{exact:true}).click();
+  const panel=page.getByRole('region',{name:'网页搜索'});await panel.getByLabel('网页搜索关键词').fill(query);
+  await page.route('**/api/trpc/workbench.search*',async route=>{await route.fetch();await route.abort('failed');});
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await page.unroute('**/api/trpc/workbench.search*');await page.reload();await page.getByText('参考资料（可选）',{exact:true}).click();
+  expect(await panel.getByLabel('网页搜索关键词').inputValue()).toBe(query);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await panel.getByRole('button',{name:'恢复本次查询',exact:true}).click();await panel.getByText('已加入参考资料，可勾选关联到本步骤。',{exact:true}).waitFor();
+  await page.getByText('Reference from the local MCP fixture.',{exact:true}).waitFor();await page.getByText('发布时间未提供',{exact:true}).waitFor();
+  expect(await page.getByRole('link',{name:'查看原始来源',exact:true}).getAttribute('href')).toBe('https://example.test/browser-guide');
+  const snapshot=await t.service.read(t.scope.projectId,t.scope.roundId);expect(snapshot.evidence).toHaveLength(1);
+  await page.getByRole('checkbox',{name:'关联到本步骤',exact:true}).check();
+  await expect.poll(async()=>(await t.service.read(t.scope.projectId,t.scope.roundId)).steps['step-0'].evidenceIds,{timeout:15000}).toEqual([snapshot.evidence[0].id]);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-5);expect(fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();
+  // A terminal paid result must remain clearable even if evidence adoption fails.
+  await page.route('**/api/trpc/workbench.execute*',route=>route.abort('failed'));
+  await panel.getByLabel('网页搜索关键词').fill(query);
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();
+  expect(await panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
+  expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith('graylum-search:')))).toEqual([]);
+  await page.unroute('**/api/trpc/workbench.execute*');
+  await sql.query("update system_settings set value='false' where key='v3_web_search'");
+  await panel.getByLabel('网页搜索关键词').fill('Unsent query');await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  await panel.getByRole('button',{name:'取消未发送查询',exact:true}).click();await expect.poll(()=>panel.getByLabel('网页搜索关键词').isEnabled()).toBe(true);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(2);expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-10);
+  await sql.query("update system_settings set value='true' where key='v3_web_search'");
+  fixture.setBehavior('error');await panel.getByLabel('网页搜索关键词').fill(query);
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();
+  await panel.getByText('本次搜索失败，预扣积分已退回。你可以发起新搜索。',{exact:true}).waitFor();
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before-10);
+  await panel.getByRole('button',{name:'新搜索',exact:true}).click();fixture.setBehavior('success');
+  await panel.getByLabel('网页搜索关键词').fill(query);
+  await page.route('**/api/trpc/workbench.search*',async route=>{await route.fetch();await route.abort('failed');});
+  await panel.getByRole('button',{name:'搜索网页',exact:true}).click();await panel.getByRole('alert').waitFor();
+  await page.unroute('**/api/trpc/workbench.search*');
+  await t.service.execute({...t.scope,action:'abandon',requestId:randomUUID()});
+  await page.reload();await page.getByText('参考资料（可选）',{exact:true}).click();
+  expect(await panel.getByRole('button',{name:'恢复本次查询',exact:true}).isEnabled()).toBe(true);
+  await panel.getByRole('button',{name:'恢复本次查询',exact:true}).click();
+  await panel.getByText('Reference from the local MCP fixture.',{exact:true}).waitFor();
+  expect(await panel.getByLabel('网页搜索关键词').isEnabled()).toBe(false);
+  expect(await panel.getByRole('button',{name:'新搜索',exact:true}).count()).toBe(0);
+  expect((await t.service.read(t.scope.projectId,t.scope.roundId)).evidence).toHaveLength(1);
+  expect(fixture.events.filter(e=>e==='execute')).toHaveLength(4);
+ } finally {await context.close();await fixture.stop();}
+},120000);
+
+aiTest('AI: research cancellation reports unsent and dispatched outcomes under the plan lock',async()=>{
+ const {databaseBilledResearchStore}=await import('../research/store');const store=databaseBilledResearchStore(db,actor);
+ const t=await generationFixture(),{workbenchSearch}=await import('../research/workbenchSearch');
+ const host=workbenchSearch(t.user,db),request={...t.scope,stepId:'step-0',query:'Delayed query',requestId:randomUUID()};
+ const {getRateLimiter}=await import('../rateLimiter');
+ let reached!:()=>void,resume!:()=>void;
+ const paused=new Promise<void>(r=>{reached=r}),released=new Promise<void>(r=>{resume=r});
+ const delayedDb=new Proxy(db,{get(target,key){
+  if(key==='rpc')return async(name:string,args:Record<string,unknown>)=>{
+   if(name==='research_transition'&&args.p_action==='create'){reached();await released;}
+   return target.rpc(name,args);
+  };
+  return Reflect.get(target,key);
+ }});
+ let connections=0;
+ const delayed=workbenchSearch(t.user,delayedDb,async()=>{connections++;throw new Error('must not connect');});
+ const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ const pending=delayed.search(request).then(()=>null,error=>error);
+ await paused;
+ try {
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  // Simulate losing that successful cancellation response and retrying it.
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  await expect(host.cancel({...request,query:'Different scope'})).rejects.toThrow('RESEARCH_IDENTITY_CONFLICT');
+  await expect(host.cancel({...request,stepId:'step-1'})).rejects.toThrow('RESEARCH_IDENTITY_CONFLICT');
+  await expect(host.cancel({...request,stepId:'missing-step'})).rejects.toThrow('RESEARCH_SCOPE_UNAVAILABLE');
+  const foreign=await newUser();
+  await expect(workbenchSearch(await authenticated(foreign),db).cancel(request)).rejects.toThrow();
+  for(let i=0;i<61;i++)getRateLimiter().check(actor,'ai');
+  // Existing cancellation recovery remains available after exhausting new-intent limits.
+  expect(await host.cancel(request)).toEqual({cancelled:true});
+  const blocked=randomUUID();
+  await expect(host.cancel({...request,requestId:blocked})).rejects.toThrow('请求过于频繁');
+  expect((await sql.query('select id from research_plans where id=$1',[blocked])).rows).toHaveLength(0);
+ } finally {resume();getRateLimiter().close();}
+ expect(await pending).toBeInstanceOf(Error);
+ expect(connections).toBe(0);
+ expect((await sql.query('select id from research_operations where plan_id=$1',[request.requestId])).rows).toHaveLength(0);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before);
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ for(const state of ['empty','prepared','dispatched']){
+  await sql.query('update profiles set credits=100 where id=$1',[actor]);
+  const planId=randomUUID(),operationId=randomUUID();await store.create(planId,1100000,[{operationId,identityHash:'f'.repeat(64),maxQuoteUnits:1100000}]);
+  if(state!=='empty'){const r=await store.reserve(planId,operationId,'f'.repeat(64),1100000);if(state==='dispatched')await store.dispatch(planId,operationId,r.token!);}
+  expect(await store.cancel(planId)).toBe(state!=='dispatched');expect(await store.cancel(planId)).toBe(state!=='dispatched');
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(state==='dispatched'?95:100);
+  const denied=createClient(url,process.env.V3_LOCAL_USER_JWT!,{auth:{persistSession:false}});
+  expect((await denied.rpc('research_cancel',{p_actor_id:actor,p_plan_id:planId})).error).not.toBeNull();
+ }
+},30000);
+
+
+aiTest('AI: research explicit provider failure refunds once while unknown stays reserved',async()=>{
+ const {databaseBilledResearchStore}=await import('../research/store');const store=databaseBilledResearchStore(db,actor);
+ const missing=randomUUID(),lookup={p_actor_id:actor,p_plan_id:missing,p_operation_id:missing};
+ expect((await db.rpc('research_lookup',lookup)).data).toBeNull();
+ expect((await sql.query('select id from research_plans where id=$1',[missing])).rows).toHaveLength(0);
+ const ordinary=await authenticated();expect((await ordinary.rpc('research_lookup',lookup)).error).not.toBeNull();
+ const anonymous=createClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ expect((await anonymous.rpc('research_lookup',lookup)).error).not.toBeNull();
+
+ await sql.query("insert into system_settings(key,value) values('search_surcharge_credits','5') on conflict(key) do update set value=excluded.value");
+ for(const state of ['failed','unknown'] as const){
+  await sql.query('update profiles set credits=100 where id=$1',[actor]);
+  const id=randomUUID();await store.create(id,1100000,[{operationId:id,identityHash:'d'.repeat(64),maxQuoteUnits:1100000}]);
+  const foreign=await newUser();expect((await db.rpc('research_lookup',{p_actor_id:foreign.id,p_plan_id:id,p_operation_id:id})).error).not.toBeNull();
+  const reserved=await store.reserve(id,id,'d'.repeat(64),1100000);await store.dispatch(id,id,reserved.token!);
+  await store.finish(id,id,reserved.token!,state,{source:'agentkey',fixture:true,canonicalTool:'Tavily/post_search',objects:[],fetchedAt:new Date().toISOString(),pagination:{complete:false,nextCursor:null},error:state==='failed'?'PROVIDER_TOOL_ERROR':'RESULT_UNKNOWN',cost:{unit:'agentkey-credit',quoted:1.1,actual:null,status:'unknown'}});
+  await store.get(id,id);await store.get(id,id);
+  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(state==='failed'?100:95);
+  expect((await sql.query('select charged_credits from research_operations where id=$1',[id])).rows[0].charged_credits).toBe(state==='failed'?0:null);
+ }
 },30000);

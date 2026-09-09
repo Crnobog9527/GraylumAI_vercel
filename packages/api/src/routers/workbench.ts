@@ -2,6 +2,7 @@
 import { saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage } from "../services/artifacts/public";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { workbenchSearch, workbenchSearchInput } from "../services/research/workbenchSearch";
 import { protectedProcedure, router } from "../trpc";
 import { workbenchGeneration, generationQuoteInput, generationInput, generationScope, generationRecoveryInput } from "../services/artifacts/generation";
 import {
@@ -40,6 +41,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         message: string;
       }
     > = {
+      RESEARCH_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "网页搜索尚未启用，仍可补充自己的参考资料。" },
+      RESEARCH_BILLING_UNAVAILABLE: { code: "SERVICE_UNAVAILABLE", message: "搜索结算暂不可用，请保留本次记录后重试。" },
+      RESEARCH_SCOPE_UNAVAILABLE: { code: "CONFLICT", message: "当前步骤状态已变化，请刷新后再搜索。" },
       SUMMARY_MODEL_NOT_CONFIGURED: { code: "SERVICE_UNAVAILABLE", message: "回复已保存，整理模型尚未配置，原成果保持不变。" },
       SUMMARY_MODEL_MUST_DIFFER: { code: "SERVICE_UNAVAILABLE", message: "整理模型必须与对话模型不同，请在后台调整。" },
       SUMMARY_OUTPUT_LIMIT_INVALID: { code: "SERVICE_UNAVAILABLE", message: "整理输出上限配置无效，未调用整理模型。" },
@@ -88,6 +92,8 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   return result;
 });
 export const workbenchRouter = router({
+  cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
+  search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
   chatMode: procedure.input(z.object({moduleId:z.string().uuid()}).strict()).query(({ctx,input})=>ctx.skillChat.mode(input.moduleId)),
   chatEnter: procedure.input(chatEntry).mutation(({ ctx, input }) => ctx.skillChat.enter(input)),
   chatDismissSummary: procedure.input(chatScope.extend({candidateId:z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.dismissSummary(input)),

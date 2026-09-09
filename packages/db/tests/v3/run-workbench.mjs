@@ -16,9 +16,9 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--ai-only','--chat-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.includes('--ai-only')&&args.includes('--chat-only'))throw new Error('use --ai-only or --chat-only, optionally --serve');
-const serve=args.includes('--serve'),aiOnly=args.includes('--ai-only')||args.includes('--chat-only');
-const testPattern=args.includes('--chat-only')?'^CHAT:':'^AI:';
+if(args.some(arg=>!['--ai-only','--chat-only','--research-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only or --research-only, optionally --serve');
+const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
+const testPattern=args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -170,6 +170,8 @@ try {
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
+  apply("packages/db/migrations/0071_v3_research_billing.sql");
+  apply("packages/db/migrations/0071_v3_research_billing.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -333,6 +335,12 @@ try {
   const networkGuard=resolve(root,'local-loopback-only.cjs');
   writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
   console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
+  const searchPath=resolve(root,'packages/api/src/services/research/workbenchSearch.ts');
+  let searchSource=readFileSync(searchPath,'utf8');
+  const searchMarker="options=>connectAgentKey(options,process.env.AGENTKEY_API_KEY??'')";
+  if(searchSource.split(searchMarker).length!==2)throw new Error('research fixture boundary changed');
+  searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();return connectLocalAgentKey(options,new URL(row.data.value));}");
+  writeFileSync(searchPath,searchSource);
   const service = jwt("service_role"),
     anon = jwt("anon");
   const listener = createServer();

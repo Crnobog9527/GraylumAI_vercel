@@ -32,8 +32,8 @@ export function ReferenceContent({ payload }: { payload: unknown }) {
       const link = sourceLink(object.sourceUrl);
       return <article key={index} className="space-y-1 border-l border-[var(--border-primary)] pl-3">
         <p className="font-medium">{text(fields.title) || text(fields.display_name) || text(fields.username) || `资料 ${index + 1}`}</p>
-        <p className="whitespace-pre-wrap break-words">{text(fields.summary) || text(fields.full_text) || text(fields.description) || "此条结果未提供摘要。"}</p>
-        {text(fields.created_at) && <p className="text-xs">发布时间：{text(fields.created_at)}</p>}
+        <p className="whitespace-pre-wrap break-words">{text(fields.content) || text(fields.summary) || text(fields.full_text) || text(fields.description) || "此条结果未提供摘要。"}</p>
+        {text(fields.created_at) ? <p className="text-xs">发布时间：{text(fields.created_at)}</p> : fields.kind === "web-search" ? <p className="text-xs">发布时间未提供</p> : null}
         {link ? <a className="underline" href={link} target="_blank" rel="noopener noreferrer">查看原始来源</a> : <p className="text-xs">供应商未提供原始来源链接</p>}
         {Array.isArray(object.missingFields) && object.missingFields.length > 0 && <p className="text-xs">部分信息未提供，请结合其他资料核对。</p>}
       </article>;

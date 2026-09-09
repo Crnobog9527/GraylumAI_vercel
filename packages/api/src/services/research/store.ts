@@ -18,7 +18,7 @@ export interface ResearchStore {
   reserve(planId:string,operationId:string,identityHash:string,quoteUnits:number):Promise<OperationRecord>;
   dispatch(planId:string,operationId:string,token:string):Promise<boolean>;
   finish(planId:string,operationId:string,token:string,state:OperationState,result:ResearchResult|null):Promise<void>;
-  cancel(planId:string):Promise<void>;
+  cancel(planId:string):Promise<void|boolean>;
 }
 /** Construct only with the authenticated host actor after business admission.
  * RPC rechecks live actor status and plan ownership; never takes client owner claims. */
@@ -35,5 +35,23 @@ export function databaseResearchStore(db:SupabaseClient, actorId:string):Researc
     async dispatch(p,o,token){return (await call('dispatch',p,o,{token}))?.dispatch===true;},
     async finish(p,o,token,state,result){await call('finish',p,o,{token,state,result});},
     async cancel(p){await call('cancel',p,null);},
+  };
+}
+
+/** Product search uses the original credit RPCs. Persist provider results before
+ * settling: a failed settlement is recoverable without another provider call. */
+export function databaseBilledResearchStore(db:SupabaseClient,actorId:string):ResearchStore {
+  const base=databaseResearchStore(db,actorId);
+  const charge=async(planId:string,operationId:string|null,action:string)=>{
+    const {error}=await db.rpc('research_user_charge',{p_actor_id:actorId,p_plan_id:planId,p_operation_id:operationId,p_action:action});
+    if(error)throw new Error('RESEARCH_BILLING_UNAVAILABLE');
+  };
+  return {
+    create:base.create,
+    async get(p,o){const r=await base.get(p,o);if(r?.state==='succeeded')await charge(p,o,'settle');else if(r?.state==='failed')await charge(p,o,'refund');return r;},
+    async reserve(p,o,identity,quote){const r=await base.reserve(p,o,identity,quote);if(r.claimed)await charge(p,o,'reserve');else if(r.state==='succeeded')await charge(p,o,'settle');return r;},
+    async dispatch(p,o,token){await charge(p,o,'admit');return base.dispatch(p,o,token);},
+    async finish(p,o,token,state,result){await base.finish(p,o,token,state,result);if(state==='succeeded')await charge(p,o,'settle');else if(state==='failed')await charge(p,o,'refund');},
+    async cancel(p){const {data,error}=await db.rpc('research_cancel',{p_actor_id:actorId,p_plan_id:p});if(error)throw new Error('RESEARCH_BILLING_UNAVAILABLE');return data===true;},
   };
 }

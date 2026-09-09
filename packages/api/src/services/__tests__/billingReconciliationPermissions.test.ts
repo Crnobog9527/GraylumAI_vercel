@@ -63,6 +63,13 @@ const effectiveColumns = Object.fromEntries(Object.entries(columnsByTable).map((
 function permissionScopedClient(rows: Record<string, Record<string, unknown>[]> = {}, deniedTable?: string) {
   const selections: Array<{ table: string; columns: string[] }> = [];
   const client = {
+    async rpc(name: string) {
+      expect(name).toBe('research_billing_summary');
+      return {
+        data: deniedTable === name ? null : { count: 0, credits: 0 },
+        error: deniedTable === name ? { code: '42501', message: 'permission denied for research summary' } : null,
+      };
+    },
     from(table: string) {
       let columns: string[] = [];
       const result = () => ({
@@ -168,7 +175,7 @@ describe('BILL-1 column SELECT permission contract', () => {
     expect(result.summary.purchaseCredits).toBe(400);
   });
 
-  it.each(['billing_history', 'credit_transactions'])('does not suppress daily permission errors on %s', async (table) => {
+  it.each(['billing_history', 'credit_transactions', 'research_billing_summary'])('does not suppress daily permission errors on %s', async (table) => {
     const { client } = permissionScopedClient({}, table);
     await expect(runDailyBillingReconciliation(client)).rejects.toMatchObject({ code: '42501' });
   });

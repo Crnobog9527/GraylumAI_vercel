@@ -14,6 +14,7 @@ function createMockSupabase(data: {
   creditTransactions?: Array<Record<string, unknown>>;
   paymentOrders?: Array<Record<string, unknown>>;
   launchBaselineAt?: unknown;
+  researchTotals?: {count:number;credits:number};
 }) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
     token_stats: data.tokenStats ?? [],
@@ -33,6 +34,7 @@ function createMockSupabase(data: {
   let currentTable = '';
 
   return {
+    rpc: async () => ({data:data.researchTotals??{count:0,credits:0},error:null}),
     from: (table: string) => {
       if (table === 'system_settings') {
         const settingsBuilder = {
@@ -2125,4 +2127,17 @@ describe('launch baseline parsing', () => {
     expect(parseLaunchBaselineAt(null)).toMatchObject({ status: 'BLOCKED', reason: 'MISSING' });
     expect(parseLaunchBaselineAt('not-a-date')).toMatchObject({ status: 'BLOCKED', reason: 'INVALID' });
   });
+});
+
+describe('search settlement reconciliation',()=>{
+ it('counts independently persisted search spend without inventing model token rows',async()=>{
+  const db=createMockSupabase({researchTotals:{count:1,credits:5},billingHistory:[{operation_type:'settle',amount:-5}],creditTransactions:[{amount:-5,type:'deduction',ledger_type:'spend',reason_code:'ai_task_spend',counts_as_spend:true,source_type:'ai_task'}]});
+  const r=await runDailyBillingReconciliation(db,new Date('2026-03-10T00:00:00Z'));
+  expect(r.success).toBe(true);expect(r.summary).toMatchObject({tokenStatsCount:0,researchSettledCredits:5,researchSettledCount:1,webSearchCount:1});
+ });
+ it('detects a missing research settlement rather than excluding it from reconciliation',async()=>{
+  const db=createMockSupabase({researchTotals:{count:1,credits:5}});
+  const r=await runDailyBillingReconciliation(db,new Date('2026-03-10T00:00:00Z'));
+  expect(r.success).toBe(false);
+ });
 });
