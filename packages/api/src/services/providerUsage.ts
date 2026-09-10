@@ -57,13 +57,13 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
    }
    search!.observeAnnotations(event.choices?.[0]?.delta?.annotations);
    search!.observeAnnotations(event.choices?.[0]?.message?.annotations);
-   if(event.usage!==undefined&&event.usage!==null)search!.observeUsage(event.usage);
   }
   // A usage snapshot cannot account for subsequent output (including reasoning/tools).
   if(event.choices?.some((choice:any)=>choice.delta && Object.entries(choice.delta).some(([key,value])=>(!openRouter||!['annotations','role'].includes(key))&&value!==null && value!==undefined && value!=='')))accounting=undefined;
   const delta=event.choices?.[0]?.delta?.content;
   if(typeof delta==='string'){content+=delta;onContent?.(content);}
   if(openRouter&&event.choices?.some((choice:any)=>choice.error!=null||choice.finish_reason==='error'))throw new Error('PROVIDER_STREAM_FAILED');
+  if(openRouter&&event.usage!==undefined&&event.usage!==null)search!.observeUsage(event.usage);
   if(event.usage!==undefined && event.usage!==null)accounting=parseProviderUsage(event.usage);
  };
  try{

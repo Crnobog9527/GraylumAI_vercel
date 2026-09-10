@@ -53,6 +53,11 @@ it('preserves partial answer when evidence is missing; denies unexpected search 
  let saved='';await expect(readOpenAIUsageStream(stream([{...event(1),usage:{prompt_tokens:100,completion_tokens:20}}]),undefined,v=>{saved=v;},{searchEnabled:true})).rejects.toThrow();expect(saved).toBe('answer');
  await expect(read([event(1)],false)).rejects.toThrow('SEARCH_EXECUTION_NOT_ALLOWED');
 });
+it.each([{server_tool_use:{web_search_requests:'invalid'}},{server_tool_use_details:{web_search_requests:2}}])('retains same-chunk content when search usage is corrupt or contradictory: %j',async counter=>{
+ let saved='';
+ await expect(readOpenAIUsageStream(stream([{...event(1),usage:{...usage(1),...counter}}]),undefined,v=>{saved=v;},{searchEnabled:true})).rejects.toThrow();
+ expect(saved).toBe('answer');
+});
 it.each([{error:{code:500,message:'server tool failed'}},{finish_reason:'error'}])('retains partial output and rejects official choice error %j even with valid final usage',async error=>{
  let saved='';const e={...event(1),choices:[{...event(1).choices[0],...error}]};
  await expect(readOpenAIUsageStream(stream([e]),undefined,v=>{saved=v;},{searchEnabled:true})).rejects.toThrow('PROVIDER_STREAM_FAILED');
