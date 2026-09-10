@@ -36,6 +36,7 @@ export function parseProviderUsage(value: unknown) {
 export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, onChunk?:()=>void, onContent?:(content:string)=>void, openRouter?:{searchEnabled:boolean}) {
  const search=openRouter?openRouterSearchCollector(openRouter.searchEnabled):undefined;
  let responseId:string|undefined;
+ let finishReason:string|undefined;
  const reader=body.getReader(), decoder=new TextDecoder();
  let buffer='', content='', done=false;
  let accounting:ReturnType<typeof parseProviderUsage>|undefined;
@@ -50,6 +51,10 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
   if(openRouter){
    if(event.id!==undefined){if(typeof event.id!=='string'||!event.id||(responseId&&responseId!==event.id))throw new Error('PROVIDER_RESPONSE_IDENTITY_CONFLICT');responseId=event.id;}
    if(event.choices?.length>1||event.choices?.some((c:any)=>c.index!==undefined&&c.index!==0))throw new Error('PROVIDER_CANDIDATE_INVALID');
+   if(event.choices?.[0]?.finish_reason!=null){
+    if(typeof event.choices[0].finish_reason!=='string')throw new Error('PROVIDER_STREAM_INVALID');
+    finishReason=event.choices[0].finish_reason;
+   }
    search!.observeAnnotations(event.choices?.[0]?.delta?.annotations);
    search!.observeAnnotations(event.choices?.[0]?.message?.annotations);
    if(event.usage!==undefined&&event.usage!==null)search!.observeUsage(event.usage);
@@ -58,6 +63,7 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
   if(event.choices?.some((choice:any)=>choice.delta && Object.entries(choice.delta).some(([key,value])=>(!openRouter||!['annotations','role'].includes(key))&&value!==null && value!==undefined && value!=='')))accounting=undefined;
   const delta=event.choices?.[0]?.delta?.content;
   if(typeof delta==='string'){content+=delta;onContent?.(content);}
+  if(openRouter&&event.choices?.some((choice:any)=>choice.error!=null||choice.finish_reason==='error'))throw new Error('PROVIDER_STREAM_FAILED');
   if(event.usage!==undefined && event.usage!==null)accounting=parseProviderUsage(event.usage);
  };
  try{
@@ -70,6 +76,7 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
   }
  }finally{await reader.cancel();}
  if(!done || !accounting)throw new Error('PROVIDER_USAGE_UNAVAILABLE');
+ if(openRouter&&(finishReason==='tool_calls'||finishReason==='function_call'))throw new Error('PROVIDER_TOOL_EXECUTION_INCOMPLETE');
  if(openRouter?.searchEnabled&&(!responseId||!accounting.evidence.openRouterCost))throw new Error('SEARCH_EVIDENCE_UNAVAILABLE');
  return {content,...accounting,evidence:{...accounting.evidence,...(responseId?{providerResponseId:responseId}:{})},search:search?.finish()};
 }

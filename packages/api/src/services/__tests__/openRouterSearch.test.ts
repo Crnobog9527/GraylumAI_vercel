@@ -53,6 +53,16 @@ it('preserves partial answer when evidence is missing; denies unexpected search 
  let saved='';await expect(readOpenAIUsageStream(stream([{...event(1),usage:{prompt_tokens:100,completion_tokens:20}}]),undefined,v=>{saved=v;},{searchEnabled:true})).rejects.toThrow();expect(saved).toBe('answer');
  await expect(read([event(1)],false)).rejects.toThrow('SEARCH_EXECUTION_NOT_ALLOWED');
 });
+it.each([{error:{code:500,message:'server tool failed'}},{finish_reason:'error'}])('retains partial output and rejects official choice error %j even with valid final usage',async error=>{
+ let saved='';const e={...event(1),choices:[{...event(1).choices[0],...error}]};
+ await expect(readOpenAIUsageStream(stream([e]),undefined,v=>{saved=v;},{searchEnabled:true})).rejects.toThrow('PROVIDER_STREAM_FAILED');
+ expect(saved).toBe('answer');
+});
+it.each([false,true])('rejects pending client tool execution with separate final usage=%s',async separate=>{
+ const e={...event(0),choices:[{index:0,delta:{content:'Let me search',tool_calls:[{type:'function',function:{name:'search',arguments:'{}'}}]},finish_reason:'tool_calls'}]};
+ await expect(read(separate?[{...e,usage:undefined},{id:e.id,choices:[],usage:usage(0)}]:[e])).rejects.toThrow('PROVIDER_TOOL_EXECUTION_INCOMPLETE');
+ expect((await read([e,event(0)])).search?.queryCount).toBe(0);
+});
 it('records provider total and upstream fields separately, without claiming the difference is search cost',()=>{
  const r=parseProviderUsage({...usage(1),is_byok:true,cost_details:{upstream_inference_cost:0.03,upstream_inference_prompt_cost:0.01,upstream_inference_completions_cost:0.02,server_tool_cost:0.001}});
  expect(r.evidence.openRouterCost).toEqual({totalUsd:0.021,upstreamInferenceUsd:0.03,upstreamPromptUsd:0.01,upstreamCompletionUsd:0.02,serverToolUsd:0.001,isByok:true,searchUsd:null});

@@ -34,6 +34,9 @@ export function searchProviderFixture(){
    if(message.includes('_COUNTER_CONFLICT_'))usage.server_tool_use_details={web_search_requests:count+1};
    res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{content:'Local answer '+key,annotations},finish_reason:'stop'}]})+'\n\n');
    const final={id:message.includes('_IDENTITY_CONFLICT_')?'gen-foreign':'gen-'+key,choices:[{index:0,delta:{},finish_reason:'stop'}],usage};
+   if(message.includes('_CHOICE_ERROR_'))final.choices[0].error={code:500,message:'Synthetic server tool failed'};
+   if(message.includes('_FINISH_ERROR_'))final.choices[0].finish_reason='error';
+   if(message.includes('_TOOL_PENDING_')){final.choices[0].finish_reason='tool_calls';final.choices[0].delta.tool_calls=[{type:'function',function:{name:'search',arguments:'{}'}}];}
    res.write('data: '+JSON.stringify(final)+'\n\n');if(message.includes('_DUPLICATE_'))res.write('data: '+JSON.stringify(final)+'\n\n');
    res.end('data: [DONE]\n\n');return true;
   }

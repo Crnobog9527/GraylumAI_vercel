@@ -294,7 +294,7 @@ function setupBalanceAuthorizationRoute() {
           single: vi.fn().mockResolvedValue({
             data: {
               id: 'model-record-1',
-              model_id: 'model-1',
+              model_id: 'openai/gpt-4o-mini-2024-07-18',
               name: 'Test model',
               provider: 'openai',
               max_tokens: 1024,
@@ -343,7 +343,7 @@ function setupBalanceAuthorizationRoute() {
   routeMocks.selectModel.mockResolvedValue({
     modelConfig: {
       id: 'model-record-1',
-      modelId: 'model-1',
+      modelId: 'openai/gpt-4o-mini-2024-07-18',
       name: 'Test model',
       provider: 'openai',
       maxTokens: 1024,

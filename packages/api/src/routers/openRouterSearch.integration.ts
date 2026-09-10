@@ -93,9 +93,9 @@ repaired.each(['anthropic/claude-opus-4.5','qwen/qwen3.8-27b','openai/gpt-5.6-lu
  expect(v.r.response_params.p_token_metadata.provider_usage.openRouterCost).toMatchObject({totalUsd:0.021,searchUsd:null});
  expect(v.r.response_params.p_total_cost_usd).toBeCloseTo(0.000138+3*0.007,6);
 });
-repaired.each(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT','COUNTER_CONFLICT','IDENTITY_CONFLICT','TIMEOUT','TRANSPORT_LOSS'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
+repaired.each(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT','COUNTER_CONFLICT','IDENTITY_CONFLICT','CHOICE_ERROR','FINISH_ERROR','TOOL_PENDING','TIMEOUT','TRANSPORT_LOSS'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
  await configureOpenRouter();const body=request(mode);await send(body);const v=await observed(body);
- expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT'].includes(mode))expect(v.public.content).toContain('Local answer');
+ expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT','CHOICE_ERROR','FINISH_ERROR'].includes(mode))expect(v.public.content).toContain('Local answer');
  await Promise.all([send(body),send(body),snapshot(body.requestId)]);const after=await observed(body);expect(after.provider).toHaveLength(1);expect(after.ledger).toEqual([{operation_type:'pre_deduct',count:1}]);
 });
 repaired.each(['disabled','model-disabled'])('%s has zero search fee and no tools',async mode=>{
