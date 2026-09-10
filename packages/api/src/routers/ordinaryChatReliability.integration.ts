@@ -191,8 +191,9 @@ async function pageFor() {
  const context=await browser.newContext();await context.route('**/*',r=>{const u=new URL(r.request().url());return ['127.0.0.1','localhost'].includes(u.hostname)||['data:','blob:'].includes(u.protocol)?r.continue():r.abort();});
  const page=await context.newPage();const ready=page.waitForResponse(r=>r.url().includes('/api/trpc/settings.getSystemSettings')&&r.ok());
  await page.goto(app+'/login?redirect=/chat');await ready;
+ const chatReady=page.waitForResponse(r=>r.url().includes('model.getActiveModels')&&r.ok());
  await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();
- await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});await page.getByTestId('chat-input').waitFor();
+ await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});await chatReady;await page.getByTestId('chat-input').waitFor();
  return {page,context};
 }
 repaired('browser reload before init restores the original request ID/input; late completion renders once',async()=>{
@@ -349,7 +350,7 @@ repaired('browser absent request suspends polling while explicit delivery keeps 
   await page.route('**/api/ai/stream',async route=>{submitted=route.request().postDataJSON();await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Local pre-claim rejection'})});});
   page.on('request',r=>{if(r.url().includes('/api/ai/requests?')&&r.method()==='GET')reads++;});
   await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
-  await page.getByText('尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
+  await page.getByText('Local pre-claim rejection 尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
   const before=reads;await page.waitForTimeout(6500);expect(reads).toBe(before);expect(await calls(body.message)).toBe(0);
   const id=submitted.requestId;await page.unroute('**/api/ai/stream');
   await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
