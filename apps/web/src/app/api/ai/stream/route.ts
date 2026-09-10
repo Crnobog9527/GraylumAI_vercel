@@ -409,7 +409,9 @@ export async function POST(request: NextRequest) {
       userSecurityProfile = await checkUserStatus({ supabase: supabaseAuth, userId });
       recordStageTiming(stageTimings, 'profile', profileStartedAt);
       const consumptionStartedAt = Date.now();
-      await assertAIConsumptionAllowed({ supabase: supabaseAdmin, userId });
+      // The authenticated own-row read has the filter-column grant; the
+      // service-role billing contract intentionally lacks SELECT(user_id).
+      await assertAIConsumptionAllowed({ supabase: supabaseAuth, userId });
       recordStageTiming(stageTimings, 'consumption', consumptionStartedAt);
     } catch (error) {
       // Only the common admission guards' intentional denials are public.

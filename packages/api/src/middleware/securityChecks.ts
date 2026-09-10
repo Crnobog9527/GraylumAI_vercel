@@ -186,33 +186,37 @@ export { checkRedisRateLimit, checkRedisRateLimitOrThrow };
  * 防止异常消费导致用户积分快速耗尽
  */
 export async function checkConsumptionCircuitBreaker(
-  ctx: SecurityContext
+  ctx: SecurityContext,
+  options: { requireCompleteRead?: boolean } = {}
 ): Promise<CircuitBreakerResult> {
   const now = new Date();
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-  // PostgREST may truncate rows at its configured maximum. An incomplete or
-  // failed read is unknown consumption, never a zero-spend allowance.
+  // Ordinary HTTP admission requires a complete authenticated read. Existing
+  // consumers keep their prior read semantics until their separate service-role
+  // grant/client work is addressed; this bounded repair does not migrate them.
+  const strict = options.requireCompleteRead === true;
   const readSpend = async (since: Date): Promise<number> => {
     try {
       const { data, error, count } = await ctx.supabase
         .from('billing_history')
-        .select('amount', { count: 'exact' })
+        .select('amount', strict ? { count: 'exact' } : undefined)
         .eq('user_id', ctx.userId)
         .eq('operation_type', 'settle')
         .gte('created_at', since.toISOString());
-      if (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length) {
+      if (strict && (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length)) {
         throw new Error('Consumption history unavailable or incomplete');
       }
       let total = 0;
-      for (const record of data) {
-        if (!Number.isSafeInteger(record?.amount)) throw new Error('Invalid consumption amount');
-        total += record.amount;
-        if (!Number.isSafeInteger(total)) throw new Error('Invalid consumption total');
+      for (const record of data ?? []) {
+        if (strict && !Number.isSafeInteger(record?.amount)) throw new Error('Invalid consumption amount');
+        total += record.amount ?? 0;
+        if (strict && !Number.isSafeInteger(total)) throw new Error('Invalid consumption total');
       }
       return Math.abs(total);
     } catch (error) {
+      if (!strict) throw error;
       throw createSafeServiceUnavailableError(error, '消费保护状态暂时无法验证，请稍后重试');
     }
   };
@@ -241,9 +245,9 @@ export async function checkConsumptionCircuitBreaker(
   return { allowed: true };
 }
 
-/** Enforce the same consumption policy in tRPC and direct HTTP AI entrypoints. */
+/** Enforce the shared limits with complete reads for ordinary HTTP admission. */
 export async function assertAIConsumptionAllowed(ctx: SecurityContext): Promise<void> {
-  const result = await checkConsumptionCircuitBreaker(ctx);
+  const result = await checkConsumptionCircuitBreaker(ctx, { requireCompleteRead: true });
   if (!result.allowed) {
     throw new TRPCError({ code: 'FORBIDDEN', message: result.reason ?? '消费熔断触发' });
   }
@@ -332,7 +336,13 @@ export async function preAICallSecurityChecks(
 
   // 3. 消费熔断检查
   if (!options.skipCircuitBreaker) {
-    await assertAIConsumptionAllowed(ctx);
+    const circuitBreaker = await checkConsumptionCircuitBreaker(ctx);
+    if (!circuitBreaker.allowed) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: circuitBreaker.reason ?? '消费熔断触发',
+      });
+    }
   }
 
   // 4. 余额预检

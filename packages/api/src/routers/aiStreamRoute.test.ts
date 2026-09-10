@@ -227,6 +227,10 @@ function setupBalanceAuthorizationRoute() {
       }),
     },
     from: vi.fn((table: string) => {
+      if (table === 'billing_history') return {
+        select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
+      };
       if (table === 'profiles') {
         return {
           select: vi.fn().mockReturnThis(),
@@ -262,10 +266,6 @@ function setupBalanceAuthorizationRoute() {
   };
   const adminClient = {
     from: vi.fn((table: string) => {
-      if (table === 'billing_history') return {
-        select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
-        gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
-      };
       if (table === 'system_settings') {
         return {
           select: vi.fn().mockReturnThis(),
@@ -414,6 +414,10 @@ describe('ai stream route balance availability gate', () => {
         }),
       },
       from: vi.fn((table: string) => {
+        if (table === 'billing_history') return {
+          select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+          gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
+        };
         if (table !== 'profiles') {
           throw new Error(`Unexpected authenticated table ${table}`);
         }
@@ -429,10 +433,6 @@ describe('ai stream route balance availability gate', () => {
     };
     const adminClient = {
       from: vi.fn((table: string) => {
-        if (table === 'billing_history') return {
-          select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
-          gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
-        };
         if (table !== 'system_settings') {
           throw new Error(`Unexpected admin table ${table}`);
         }
@@ -471,7 +471,7 @@ describe('ai stream route balance availability gate', () => {
       undefined,
     );
     expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain('private database detail');
-    expect(authenticatedClient.from).toHaveBeenCalledTimes(1);
+    expect(authenticatedClient.from).toHaveBeenCalledTimes(3);
     expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
     expect(routeMocks.countTokens).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -729,8 +729,13 @@ describe('ordinary HTTP handler admission regression', () => {
     // Resolve the same fixtures that the real route will receive; do not mock
     // email verification, profile admission or the public consumption guard.
     if ('user' in options) authenticatedClient.auth.getUser.mockResolvedValue({data:{user:options.user},error:null});
+    let reads=0;
     const from = authenticatedClient.from.getMockImplementation();
     authenticatedClient.from.mockImplementation((table: string) => {
+      if (table === 'billing_history') {
+        const value=reads++===0 ? options.hourly : options.daily;
+        return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gte:vi.fn().mockResolvedValue(value ?? {data:[],error:null,count:0})};
+      }
       if (table === 'ai_usage_logs') return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gte:vi.fn().mockResolvedValue({count:options.freeCount ?? 0,error:null})};
       if (table !== 'profiles') return from(table);
       return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),single:vi.fn().mockResolvedValue({
@@ -738,13 +743,10 @@ describe('ordinary HTTP handler admission regression', () => {
         error:options.profileError ? {message:'PRIVATE_DATABASE_DETAIL'} : null,
       })};
     });
-    let reads=0;
     const adminFrom = adminClient.from.getMockImplementation();
     adminClient.from.mockImplementation((table:string) => {
       if(table==='system_settings' && options.maintenance) return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),maybeSingle:vi.fn().mockResolvedValue({data:{value:true},error:null})};
-      if(table!=='billing_history') return adminFrom(table);
-      const value=reads++===0 ? options.hourly : options.daily;
-      return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gte:vi.fn().mockResolvedValue(value ?? {data:[],error:null,count:0})};
+      return adminFrom(table);
     });
     if (options.balance !== undefined) routeMocks.billingGetBalance.mockResolvedValue(options.balance);
     if (options.free) {
