@@ -145,10 +145,12 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     sendMessage: sendStreamingMessage,
     abort: abortStreaming,
     loadHistory,
-    clearChat,
+    clearChat, recover, resume, retryFailed, requestStatus, requestInput,
+    hasUnresolvedRequest, stopped, billing,
   } = useStreamingChat({
     conversationId: activeConversationId ?? undefined,
     moduleId,
+    onInputSaved: (content) => setInputMessage(previous => previous===content?'':previous),
     onMessageComplete: () => {
       // 消息完成后刷新对话列表（可能创建了新对话）
       utils.chat.getConversations.invalidate();
@@ -232,17 +234,17 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     lastInputTokens: usingLiveUsage ? latestStreamInputTokens : conversationTokenStats?.lastInputTokens ?? 0,
     lastOutputTokens: usingLiveUsage ? latestStreamOutputTokens : conversationTokenStats?.lastOutputTokens ?? 0,
     lastCredits: usingLiveUsage ? latestStreamCredits : 0,
-    totalInputTokens: (conversationTokenStats?.totalInputTokens ?? 0) + (usingLiveUsage ? latestStreamInputTokens : 0),
-    totalOutputTokens: (conversationTokenStats?.totalOutputTokens ?? 0) + (usingLiveUsage ? latestStreamOutputTokens : 0),
-    totalCredits: (conversationTokenStats?.totalCredits ?? 0) + (usingLiveUsage ? latestStreamCredits : 0),
+    totalInputTokens: conversationTokenStats?.totalInputTokens ?? latestStreamInputTokens,
+    totalOutputTokens: conversationTokenStats?.totalOutputTokens ?? latestStreamOutputTokens,
+    totalCredits: conversationTokenStats?.totalCredits ?? latestStreamCredits,
   };
 
   // 当切换对话时，加载历史记录
   useEffect(() => {
-    if (activeConversationId && streamingMessages.length === 0) {
+    if (activeConversationId) {
       loadHistory(activeConversationId);
     }
-  }, [activeConversationId, loadHistory, streamingMessages.length]);
+  }, [activeConversationId, loadHistory]);
 
   // Auto-scroll to bottom when messages change
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -271,7 +273,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
   const longTextFallbackCharThreshold = Math.max(1, Math.floor(maxInputCharacters * 0.8));
 
   const handleSend = useCallback(async (forceLongText = false) => {
-    if (!inputMessage.trim() || isProcessing) return;
+    if (!inputMessage.trim() || isProcessing || hasUnresolvedRequest) return;
 
     if (inputMessage.length > maxInputCharacters) {
       return;
@@ -311,7 +313,6 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
         }
 
         const messageToSend = inputMessage;
-        setInputMessage('');
         await sendStreamingMessage(messageToSend, {
           modelId: showModelSelector && selectedModelId ? selectedModelId : undefined,
           moduleId,
@@ -334,6 +335,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     }
   }, [
     credits,
+    hasUnresolvedRequest,
     enableLongTextWarning,
     inputMessage,
     isProcessing,
@@ -454,6 +456,25 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
           />
 
           {/* 错误提示 */}
+          {requestStatus && requestStatus !== 'succeeded' && (
+            <div role="status" className="mx-4 my-3 rounded-lg border border-[var(--border-color)] p-4 text-sm">
+              <p>{requestStatus === 'failed' ? '本次请求已明确失败，输入已保留，预扣已处理。'
+                : requestStatus === 'responded' ? '原回复已保存，费用结算待确认。恢复不会再次生成。'
+                : requestStatus === 'unknown' ? '原请求结果尚不确定，预扣状态保留。请恢复状态，暂不能重新生成。'
+                : stopped ? '已停止等待。后台可能继续生成，将按实际结果结算。'
+                : requestStatus === 'unconfirmed' ? '正在确认原请求是否已接收，输入与请求标识已保留。'
+                : '原请求正在处理中，刷新后可恢复。'}</p>
+              {billing && <p className="mt-1">费用状态：{billing.state === 'reserved' ? `已预扣 ${billing.estimatedCredits} 积分，待确认结算` : billing.state === 'released' ? `本次预扣已处理，实际恢复 ${billing.refunded ?? 0} 积分` : '尚无预扣'}</p>}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={isProcessing} onClick={() => void recover()}>恢复原请求</Button>
+                {requestStatus === 'unconfirmed' && !isProcessing && <Button variant="outline" size="sm" onClick={() => void resume()}>继续提交原请求</Button>}
+                {requestStatus === 'failed' && <>
+                  <Button variant="outline" size="sm" onClick={() => setInputMessage(requestInput ?? '')}>恢复输入</Button>
+                  <Button variant="outline" size="sm" disabled={isProcessing} onClick={() => void retryFailed()}>重新生成（新请求，重新计费）</Button>
+                </>}
+              </div>
+            </div>
+          )}
           {streamingError && (
             <div
               className="mx-4 mt-2 px-4 py-3 rounded-lg flex items-center gap-2"
@@ -619,12 +640,12 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                         }}
                       >
                         <Square className="h-4 w-4" />
-                        停止
+                        停止等待
                       </Button>
                     ) : (
                       <Button
                         onClick={() => void handleSend()}
-                        disabled={!inputMessage.trim() || isProcessing || inputMessage.length > maxInputCharacters}
+                        disabled={!inputMessage.trim() || isProcessing || hasUnresolvedRequest || inputMessage.length > maxInputCharacters}
                         className="h-9 px-5 gap-2 rounded-xl font-medium"
                         style={{
                           background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',

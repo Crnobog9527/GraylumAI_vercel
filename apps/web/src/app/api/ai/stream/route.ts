@@ -1,3 +1,5 @@
+import { ChatRequestError, claimChatRequest, ordinaryChatRequest, publicChatRequest, readChatRequest, recoverChatResult, isUnmeteredRateLimit, type ChatInput } from '@/lib/ordinary-chat-request';
+import { assertChatRecoveryAccess } from '@/lib/ordinary-chat-access';
 import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
 import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream } from '@repo/api/src/services/providerUsage';
 /**
@@ -97,23 +99,6 @@ function logAiStreamError(message: string, metadata?: Record<string, unknown>) {
   logger.error('ai', message, metadata);
 }
 
-function normalizeRequestId(requestId?: string): string | undefined {
-  const trimmed = requestId?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  if (UUID_PATTERN.test(trimmed)) {
-    return trimmed;
-  }
-
-  logAiStreamError('ai_stream_invalid_request_id_ignored', {
-    requestIdLength: trimmed.length,
-  });
-
-  return undefined;
-}
-
 function normalizeModuleId(moduleId?: unknown): string | undefined {
   if (moduleId == null) {
     return undefined;
@@ -168,45 +153,6 @@ async function getFreeTierUsageCount(supabase: any, userId: string): Promise<num
 
 function recordStageTiming(stageTimings: Record<string, number>, name: string, startedAt: number) {
   stageTimings[name] = Date.now() - startedAt;
-}
-
-async function getOrCreateConversation(
-  supabase: any,
-  userId: string,
-  conversationId?: string,
-  title?: string,
-  moduleId?: string
-): Promise<{ id: string; isNew: boolean }> {
-  if (conversationId) {
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('id', conversationId)
-      .eq('user_id', userId)
-      .eq('is_deleted', 'false')
-      .single();
-
-    if (existing) {
-      if (existing.skill_mode === true) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
-      return { id: existing.id, isNew: false };
-    }
-  }
-
-  const { data: newConversation, error } = await supabase
-    .from('conversations')
-    .insert({
-      user_id: userId,
-      title: title ?? '新对话',
-      module_id: moduleId ?? null,
-    })
-    .select('id')
-    .single();
-
-  if (error || !newConversation) {
-    throw new Error('创建对话失败');
-  }
-
-  return { id: newConversation.id, isNew: true };
 }
 
 async function getConversationHistory(
@@ -328,6 +274,9 @@ const MAX_CONTEXT_MESSAGES = 100;
 
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
+  let lifecycle: ReturnType<typeof ordinaryChatRequest> | null = null;
+  let dispatchStarted = false;
+
 
   try {
     const requestStartedAt = Date.now();
@@ -336,7 +285,14 @@ export async function POST(request: NextRequest) {
     const { conversationId, modelId } = body;
     let moduleId = normalizeModuleId(body.moduleId);
     const message = typeof body.message === 'string' ? body.message : '';
-    const requestId = normalizeRequestId(body.requestId) ?? crypto.randomUUID();
+    const requestId = body.requestId;
+    if (typeof requestId !== 'string' || !UUID_PATTERN.test(requestId) ||
+        Object.keys(body).some(key => !['message','conversationId','modelId','moduleId','requestId'].includes(key)) ||
+        (conversationId != null && (typeof conversationId !== 'string' || !UUID_PATTERN.test(conversationId))) ||
+        (modelId != null && (typeof modelId !== 'string' || !UUID_PATTERN.test(modelId)))) {
+      return Response.json({error:'请求标识或生成参数无效，请恢复原请求。'},{status:400});
+    }
+    const input: ChatInput = {message,conversationId:conversationId??null,modelId:modelId??null,moduleId:moduleId??null};
 
     if (!message.trim()) {
       return new Response(
@@ -398,7 +354,7 @@ export async function POST(request: NextRequest) {
 
     const userId = user.id;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-    const billingService = new BillingService({
+    let billingService = new BillingService({
       supabase: supabaseAdmin,
       userId,
     });
@@ -408,11 +364,6 @@ export async function POST(request: NextRequest) {
       const profileStartedAt = Date.now();
       userSecurityProfile = await checkUserStatus({ supabase: supabaseAuth, userId });
       recordStageTiming(stageTimings, 'profile', profileStartedAt);
-      const consumptionStartedAt = Date.now();
-      // The authenticated own-row read has the filter-column grant; the
-      // service-role billing contract intentionally lacks SELECT(user_id).
-      await assertAIConsumptionAllowed({ supabase: supabaseAuth, userId });
-      recordStageTiming(stageTimings, 'consumption', consumptionStartedAt);
     } catch (error) {
       // Only the common admission guards' intentional denials are public.
       // Database/network failures carry no internal detail and never authorize
@@ -422,6 +373,26 @@ export async function POST(request: NextRequest) {
         JSON.stringify({ error: denied ? error.message : '账号或消费保护状态暂时无法验证，请稍后重试' }),
         { status: denied ? 403 : 503, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    const existing = await readChatRequest(supabaseAdmin,userId,requestId);
+    if (existing) {
+      await assertChatRecoveryAccess(supabaseAuth,supabaseAdmin,userId,existing);
+      if (JSON.stringify(existing.input.message)!==JSON.stringify(input.message) ||
+          existing.input.conversationId!==input.conversationId || existing.input.modelId!==input.modelId || existing.input.moduleId!==input.moduleId) {
+        return Response.json({error:'同一请求标识不能用于不同的内容或配置。'},{status:409});
+      }
+      return Response.json({request:publicChatRequest(await recoverChatResult(supabaseAdmin,existing))});
+    }
+    try {
+      const consumptionStartedAt = Date.now();
+      // The authenticated own-row read has the filter-column grant; the
+      // service-role billing contract intentionally lacks SELECT(user_id).
+      await assertAIConsumptionAllowed({ supabase: supabaseAuth, userId });
+      recordStageTiming(stageTimings, 'consumption', consumptionStartedAt);
+    } catch(error) {
+      const denied=error instanceof TRPCError && error.code==='FORBIDDEN';
+      return Response.json({error:denied?error.message:'账号或消费保护状态暂时无法验证，请稍后重试'},{status:denied?403:503});
     }
 
     const maintenanceStartedAt = Date.now();
@@ -449,7 +420,6 @@ export async function POST(request: NextRequest) {
     if (!rateLimitResult.success) {
       const isRateLimitUnavailable = rateLimitResult.reason === 'unavailable';
       await billingService.recordUsageLog({
-        requestId,
         status: isRateLimitUnavailable ? 'failed' : 'rate_limited',
         modelId: 'unknown',
         inputLength: message.length,
@@ -521,16 +491,19 @@ export async function POST(request: NextRequest) {
     recordStageTiming(stageTimings, 'module_prompt_resolution', modulePromptStartedAt);
     const skillMetadata = skillSnapshotMetadata(activePrompt?.skillSnapshot);
 
+    if(message.length>runtimeSettings.maxInputCharacters)return Response.json({error:`输入内容超过限制，当前上限为 ${runtimeSettings.maxInputCharacters} 字符`},{status:400});
     const defaultModelsStartedAt = Date.now();
     const defaultModelsPromise = getSystemDefaultModels(supabaseAdmin, { runtimeSettings });
     const conversationStartedAt = Date.now();
-    const conversation = await getOrCreateConversation(
-      supabaseAuth,
-      userId,
-      conversationId,
-      message.substring(0, 50),
-      moduleId
-    );
+    const writerToken = crypto.randomUUID();
+    const claim = await claimChatRequest(supabaseAdmin,userId,requestId,input,writerToken);
+    if (!claim.claimed) {
+      await assertChatRecoveryAccess(supabaseAuth,supabaseAdmin,userId,claim.request);
+      return Response.json({request:publicChatRequest(await recoverChatResult(supabaseAdmin,claim.request))});
+    }
+    lifecycle = ordinaryChatRequest(supabaseAdmin,userId,requestId,writerToken);
+    billingService = lifecycle.billing;
+    const conversation = {id:claim.request.conversation_id,isNew:!conversationId};
     recordStageTiming(stageTimings, 'conversation_lookup_or_create', conversationStartedAt);
 
     const historyStartedAt = Date.now();
@@ -635,6 +608,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const apiKey = runtimeModel.provider === 'google'
+      ? getGoogleApiKey(runtimeModel.apiKey)
+      : getConfiguredProviderApiKey(runtimeModel.apiKey);
+    const openAICompatible = usesOpenAICompatibleApi({endpoint:runtimeModel.apiEndpoint,apiKey});
+    // A known unsupported transport has not executed. Reject it before token
+    // provider calls, reservation, and the durable dispatch boundary.
+    if (!openAICompatible && runtimeModel.provider !== 'google') {
+      return Response.json({error:STREAM_SERVICE_UNAVAILABLE_MESSAGE},{status:500});
+    }
+
     const contextManager = new ContextManager(supabaseAuth);
     const contextStartedAt = Date.now();
     const loadedContext = await contextManager.loadContext(conversation.id);
@@ -713,16 +696,15 @@ export async function POST(request: NextRequest) {
           modelId: runtimeModel.modelId,
           reason: error.reason,
         });
-        await billingService.recordUsageLog({
+        await billingService.finalizeAIFailure({
           conversationId: conversation.id,
           requestId,
-          modelId: runtimeModel.modelId,
-          status: 'failed',
-          errorMessage: 'model_pricing_unavailable',
+          modelUsed: runtimeModel.modelId,
+          reason: 'model_pricing_unavailable',
           inputLength: message.length,
           ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
           userAgent: request.headers.get('user-agent') ?? undefined,
-          metadata: {
+          usageMetadata: {
             routingReason,
             routingDecision,
             selectedModelRecordId: modelConfig.id,
@@ -770,16 +752,15 @@ export async function POST(request: NextRequest) {
       && balance <= 0
       && freeTierUsedToday < runtimeSettings.freeTierMessages;
     if (balance < estimatedCredits && !canUseFreeTier) {
-      await billingService.recordUsageLog({
+      await billingService.finalizeAIFailure({
         conversationId: conversation.id,
         requestId,
-        modelId: runtimeModel.modelId,
-        status: 'failed',
-        errorMessage: '积分不足',
+        modelUsed: runtimeModel.modelId,
+        reason: '积分不足',
         inputLength: message.length,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
-        metadata: {
+        usageMetadata: {
           estimatedCredits,
           balance,
           freeTierEnabled: runtimeSettings.enableFreeTier,
@@ -815,23 +796,17 @@ export async function POST(request: NextRequest) {
     const webSearchAvailable = webSearchRequested &&
       runtimeModel.enableWebSearch &&
       runtimeModel.provider === 'google';
-    const apiKey = runtimeModel.provider === 'google'
-      ? getGoogleApiKey(runtimeModel.apiKey)
-      : getConfiguredProviderApiKey(runtimeModel.apiKey);
 
     if (!apiKey) {
-      if (preDeduct) {
-        await billingService.refund(preDeduct.preDeductId, '未配置 API Key');
-      }
-      await billingService.recordUsageLog({
+
+      await billingService.finalizeAIFailure({
         conversationId: conversation.id,
         requestId,
-        modelId: runtimeModel.modelId,
-        status: 'failed',
-        errorMessage: '未配置 API Key',
+        modelUsed: runtimeModel.modelId,
+        reason: '未配置 API Key',
         inputLength: message.length,
         latencyMs: 0,
-        metadata: {
+        usageMetadata: {
           freeTierUsed: canUseFreeTier,
           freeTierUsedToday,
           freeTierMessages: runtimeSettings.freeTierMessages,
@@ -846,8 +821,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Cross the durable dispatch barrier once, before any generation HTTP call.
+    // An uncertain RPC response must not authorize a second dispatch.
+    dispatchStarted = true;
+    await lifecycle.transition('dispatch');
+    const execution = lifecycle;
     const stream = new ReadableStream({
       async start(controller) {
+        // The client may stop waiting. Delivery errors do not change supplier
+        // execution or accounting; keep processing and persisting late results.
+        const delivery = {
+          enqueue(value: Uint8Array) { try {controller.enqueue(value);} catch {} },
+          close() { try {controller.close();} catch {} },
+        };
+        let definiteRejection = false;
         const startedAt = Date.now();
         let firstProviderChunkAt: number | null = null;
         let fullContent = '';
@@ -863,7 +850,7 @@ export async function POST(request: NextRequest) {
         };
 
         try {
-          controller.enqueue(
+          delivery.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'init',
               conversationId: conversation.id,
@@ -880,13 +867,8 @@ export async function POST(request: NextRequest) {
             })}\n\n`)
           );
 
-          const openAICompatible = usesOpenAICompatibleApi({
-            endpoint: runtimeModel.apiEndpoint,
-            apiKey,
-          });
-
           if (webSearchAvailable) {
-            controller.enqueue(
+            delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({
                 type: 'search_started',
                 estimatedSearchCount: searchDecision.estimatedSearchCount,
@@ -896,7 +878,7 @@ export async function POST(request: NextRequest) {
           }
 
           if (preFlightUpgrade.shouldUpgrade && routingDecision.modelRole === 'primary') {
-            controller.enqueue(
+            delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({
                 type: 'route_upgraded',
                 modelUsed: runtimeModel.modelId,
@@ -926,6 +908,7 @@ export async function POST(request: NextRequest) {
             });
 
             if (!response.ok) {
+              definiteRejection = await isUnmeteredRateLimit(response);
               logAiStreamError('ai_stream_openai_compatible_provider_failed', {
                 provider: runtimeModel.provider,
                 modelId: runtimeModel.modelId,
@@ -935,7 +918,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); });
+            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;});
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
@@ -975,6 +958,7 @@ export async function POST(request: NextRequest) {
             );
 
             if (!response.ok) {
+              definiteRejection = await isUnmeteredRateLimit(response);
               logAiStreamError('ai_stream_gemini_provider_failed', {
                 provider: runtimeModel.provider,
                 modelId: runtimeModel.modelId,
@@ -987,7 +971,7 @@ export async function POST(request: NextRequest) {
             actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); });
+            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;});
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
@@ -1005,7 +989,7 @@ export async function POST(request: NextRequest) {
             : firstProviderChunkAt - providerStartedAt;
 
           if (webSearchAvailable) {
-            controller.enqueue(
+            delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({
                 type: 'search_finished',
                 executed: webSearchExecuted,
@@ -1161,12 +1145,12 @@ export async function POST(request: NextRequest) {
           }
 
           if (assistantContent) {
-            controller.enqueue(
+            delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: assistantContent })}\n\n`)
             );
           }
 
-          controller.enqueue(
+          delivery.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'complete',
               usage,
@@ -1186,11 +1170,12 @@ export async function POST(request: NextRequest) {
             modelId: runtimeModel.modelId,
             requestId,
           });
-          await billingService.finalizeAIFailure({
+          try {
+            if (definiteRejection) await billingService.finalizeAIFailure({
             conversationId: conversation.id,
             requestId,
             modelUsed: runtimeModel.modelId,
-            reason: 'AI 调用失败，请查看服务端日志',
+            reason: 'provider_rate_limited',
             preDeductId: preDeduct?.preDeductId ?? null,
             inputLength: message.length,
             latencyMs: Date.now() - startedAt,
@@ -1214,13 +1199,16 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          controller.enqueue(
+            else await execution.transition('unknown',{partialContent:filterAIOutput(fullContent).content});
+          } catch { /* An uncertain finalization is recovered by its original ID. */ }
+
+          delivery.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({ type: 'error', error: STREAM_RUNTIME_FAILURE_MESSAGE })}\n\n`
             )
           );
         } finally {
-          controller.close();
+          delivery.close();
         }
       },
     });
@@ -1234,9 +1222,15 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     logAiStreamError('ai_stream_request_bootstrap_failed');
+    if (error instanceof ChatRequestError) return Response.json({error:error.message},{status:error.status});
     return new Response(
       JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
-  }
+  } finally {
+    if (lifecycle && !dispatchStarted) {
+      try { await lifecycle.transition('failure',{p_reason:'preflight_failed',p_model_used:'unknown'}); }
+      catch { /* A durable unknown remains recoverable; no blind refund/retry. */ }
+    }
+}
 }

@@ -23,7 +23,7 @@ export function parseProviderUsage(value: unknown) {
 
 // Require both authoritative usage and a completed SSE stream. EOF without
 // [DONE], malformed data or provider errors must never become estimated success.
-export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, onChunk?:()=>void) {
+export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, onChunk?:()=>void, onContent?:(content:string)=>void) {
  const reader=body.getReader(), decoder=new TextDecoder();
  let buffer='', content='', done=false;
  let accounting:ReturnType<typeof parseProviderUsage>|undefined;
@@ -38,7 +38,7 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
   // A usage snapshot cannot account for subsequent output (including reasoning/tools).
   if(event.choices?.some((choice:any)=>choice.delta && Object.values(choice.delta).some(value=>value!==null && value!==undefined && value!=='')))accounting=undefined;
   const delta=event.choices?.[0]?.delta?.content;
-  if(typeof delta==='string')content+=delta;
+  if(typeof delta==='string'){content+=delta;onContent?.(content);}
   if(event.usage!==undefined && event.usage!==null)accounting=parseProviderUsage(event.usage);
  };
  try{
@@ -54,7 +54,7 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
  return {content,...accounting};
 }
 
-export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onChunk?:()=>void) {
+export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onChunk?:()=>void, onContent?:(content:string)=>void) {
  const reader=body.getReader(),decoder=new TextDecoder();
  let buffer='',content='',finished=false;
  let accounting:ReturnType<typeof parseProviderUsage>|undefined;
@@ -66,6 +66,7 @@ export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onCh
   const candidate=event.candidates?.[0];
   if(event.candidates?.some((value:any)=>value.content?.parts?.length))accounting=undefined;
   content+=(candidate?.content?.parts??[]).filter((p:{thought?:boolean})=>!p.thought).map((p:{text?:string})=>p.text??'').join('');
+  onContent?.(content);
   if(candidate?.finishReason)finished=true;
   if(event.usageMetadata){
    const v=event.usageMetadata;
