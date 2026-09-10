@@ -2,13 +2,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as security from '../../middleware/securityChecks';
 import { TRPCError } from '@trpc/server';
-import { workbenchGeneration, buildWorkbenchMessages, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, type ModelRequest } from '../artifacts/generation';
+import { workbenchGeneration, buildWorkbenchMessages, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, ProviderRateLimited, type ModelRequest } from '../artifacts/generation';
 import { activateSkill, identityOf, packageHash, type SkillSource } from '../skills/loader';
 import { makePackage } from './fixtures/artifacts';
 const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', token_counting_supported: 'true', tokenizer_family: 'openai' };
 const request: ModelRequest = { model, messages: [{ role: 'system', content: 'synthetic method' }, { role: 'user', content: 'fictional content' }], maxTokens: 100 };
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('workbench model boundary', () => {
+  it('recognizes only a pre-generation HTTP 429 refusal, without retrying', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { code: 429, message: 'Synthetic refusal' } }), { status: 429 }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(openRouterGeneration(request)).rejects.toBeInstanceOf(ProviderRateLimited);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    [200, { error: { code: 429 } }],
+    [429, { error: { code: 429 }, usage: { prompt_tokens: 10, completion_tokens: 0 } }],
+    [429, { error: { code: 429 }, choices: [] }],
+    [429, { error: { code: 500 } }],
+    [502, { error: { code: 429 } }],
+    [429, 'malformed'],
+  ])('keeps ambiguous status %s outcomes reserved', async (status, body) => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status: Number(status) }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(openRouterGeneration(request)).rejects.not.toBeInstanceOf(ProviderRateLimited);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('accepts a complete metered response with null tool_calls', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Complete text', tool_calls: null } }], usage: { prompt_tokens: 5, completion_tokens: 2 } }))));
+    expect(await openRouterGeneration(request)).toEqual({ body: 'Complete text', inputTokens: 5, outputTokens: 2 });
+  });
   it('sends one bounded text-only request to the fixed endpoint with no tool loop or redirects', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Synthetic result' } }], usage: { prompt_tokens: 100, completion_tokens: 10 } })));
     vi.stubGlobal('fetch', fetch);
