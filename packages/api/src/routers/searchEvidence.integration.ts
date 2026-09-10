@@ -55,8 +55,8 @@ async function snapshot(id:string){const r=await fetch(app+'/api/ai/requests?req
 async function row(id:string){return (await sql.query('select * from ordinary_chat_requests where request_id=$1',[id])).rows[0];}
 async function observed(body:ReturnType<typeof make>){const r=await row(body.requestId);const provider=(await (await fetch(api+'/__search_calls')).json()).filter((c:any)=>c.key===body.message.match(/SEARCH_CASE_[a-zA-Z0-9_-]+/)?.[0]);return {provider,r,ledger:await accounting(body.requestId),public:await snapshot(body.requestId)};}
 const request=(mode:string,prefix='搜索最新资料后改写：')=>{const body=make(mode);body.message=prefix+body.message;return body;};
-it('explicit prohibition prevents tools and search reservation',async()=>{
- await native();const body=request('ONE','不要联网，解释今天这个词：');await send(body);const v=await observed(body);
+it.each(['不要联网，解释今天这个词：','Don’t search the web; answer from memory: ','Do not perform a web search. Tell me the current weather: ','不需要搜索最新资料，直接总结：'])('explicit prohibition %s prevents tools and search reservation',async prefix=>{
+ await native();const body=request('ONE',prefix);await send(body);const v=await observed(body);
  console.log('SEARCH_PROHIBITION',JSON.stringify({tools:v.provider[0]?.tools,reservation:v.r.reservation,search:v.public.search}));
  expect(v.provider).toHaveLength(1);expect(v.provider[0].tools).toEqual([]);expect(v.public.search).toMatchObject({executed:false,queryCount:0});
 });
