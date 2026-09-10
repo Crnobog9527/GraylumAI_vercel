@@ -40,7 +40,9 @@ requests. Non-loopback fetch is blocked in the isolated application/test process
 Malformed result/count cases are explicitly injected in the disposable HTTP
 proxy because the SQL integer/non-null schema prevents those corrupt rows.
 Permission failures and truncation use actual SQL grants and PostgREST behavior.
-Only the disposable copy has provider substitutions or fault controls.
+Only the disposable copy has provider substitutions or fault controls. The
+consumption suite is explicitly enabled by this adapter; the original shared
+runner does not run tests requiring these specialized fixtures.
 
 `--baseline` replaces three runtime files in that copy with their immutable
 staging versions at `0a422ef228207e48c93959b3cede65953c149900`, containing merged

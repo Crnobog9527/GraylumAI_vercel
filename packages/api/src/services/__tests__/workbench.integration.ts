@@ -4200,6 +4200,8 @@ it('ADMIN: settings save submits the complete form with selected model records a
 },180000);
 
 // Consumption admission uses the same local Auth/PostgREST/SQL and real billing RPCs.
+// These cases require the narrow ACL/cap/fault proxy from the dedicated adapter.
+const consumptionTest=it.skipIf(process.env.V3_WORKBENCH_PHASE==='restore'||process.env.V3_CONSUMPTION_SUITE!=='1');
 async function consumptionHttp(user: Awaited<ReturnType<typeof authenticated>>, name: string, data: unknown) {
  const {createServerClient}=requireWeb('@supabase/ssr');
  const cookies:Array<{name:string;value:string}>=[];
@@ -4222,7 +4224,7 @@ async function consumptionSearch(t:Awaited<ReturnType<typeof generationFixture>>
  await sql.query("insert into system_settings(key,value) values('v3_web_search','true'),('search_surcharge_credits','5'),('local_research_endpoint',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(fixture.endpoint)]);
  return {fixture,input:{...t.scope,requestId:randomUUID(),stepId:'step-0',query}};
 }
-aiTest.each(['generation','search'])('CONSUMPTION: %s narrow ACL hourly refusal precedes external calls and reservation',async(kind)=>{
+consumptionTest.each(['generation','search'])('CONSUMPTION: %s narrow ACL hourly refusal precedes external calls and reservation',async(kind)=>{
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
  const acl=(await db.from('billing_history').select('amount',{count:'exact'}).eq('user_id',actor));
  expect(acl.error?.code).toBe('42501');
@@ -4237,7 +4239,7 @@ aiTest.each(['generation','search'])('CONSUMPTION: %s narrow ACL hourly refusal 
  } finally {await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
 },90000);
 
-aiTest.each(['generation','search'].flatMap(kind=>['permission','daily','truncated','positive-amount','missing-data','missing-count','missing-amount','string-amount','null-amount','balance'].map(mode=>[kind,mode])))('CONSUMPTION: %s rejects %s with zero provider and pre-deduction effects',async(kind,mode)=>{
+consumptionTest.each(['generation','search'].flatMap(kind=>['permission','daily','truncated','positive-amount','missing-data','missing-count','missing-amount','string-amount','null-amount','balance'].map(mode=>[kind,mode])))('CONSUMPTION: %s rejects %s with zero provider and pre-deduction effects',async(kind,mode)=>{
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
  await sql.query("insert into billing_history(id,user_id,operation_type,amount,created_at,metadata) values($1,$2,'settle',-1,now(),$3)",[marker,actor,{consumptionTest:marker}]);
  try {
@@ -4257,7 +4259,7 @@ aiTest.each(['generation','search'].flatMap(kind=>['permission','daily','truncat
   await search.fixture.stop();
  }
 },90000);
-aiTest.each(['generation','search'])('CONSUMPTION: %s reads only the actor and accepts complete history without duplicate billing',async(kind)=>{
+consumptionTest.each(['generation','search'])('CONSUMPTION: %s reads only the actor and accepts complete history without duplicate billing',async(kind)=>{
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
  await sql.query("insert into billing_history(user_id,operation_type,amount,metadata) select $1,'settle',-10000,$2 from generate_series(1,1001)",[owner,{consumptionTest:marker}]);
  try {
@@ -4278,7 +4280,7 @@ aiTest.each(['generation','search'])('CONSUMPTION: %s reads only the actor and a
   expect((await consumptionCounts()).pre).toBe(after.pre);
  } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await search.fixture.stop();}
 },90000);
-aiTest.each(['generation','search'])('CONSUMPTION: %s pending settlement recovers under original identity without new allowance',async(kind)=>{
+consumptionTest.each(['generation','search'])('CONSUMPTION: %s pending settlement recovers under original identity without new allowance',async(kind)=>{
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
  const before=await consumptionCounts(),data=kind==='generation'?v:search.input,name=kind==='generation'?'generate':'search';
  await sql.query("create function consumption_reject_settle() returns trigger language plpgsql as $$begin raise exception 'synthetic settlement outage';end$$;create trigger consumption_reject_settle before insert on credit_transactions for each row execute function consumption_reject_settle()");
@@ -4300,7 +4302,7 @@ aiTest.each(['generation','search'])('CONSUMPTION: %s pending settlement recover
   expect((await consumptionCounts()).pre).toBe(after.pre);
  } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
 },90000);
-aiTest('CONSUMPTION: reply and summary each check new spending while preserving original result recovery',async()=>{
+consumptionTest('CONSUMPTION: reply and summary each check new spending while preserving original result recovery',async()=>{
  const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db);
  const binding=await chat.enter({...t.scope,requestId:randomUUID()}),turnId=randomUUID(),body='Fictional reply and organization';
  await chat.submit({conversationId:binding.conversationId,stepId:'step-0',body,requestId:turnId});
@@ -4320,7 +4322,7 @@ aiTest('CONSUMPTION: reply and summary each check new spending while preserving 
  }
  const after=await consumptionCounts();expect(after.calls-before.calls).toBe(2);expect(after.pre-before.pre).toBe(2);expect(after.settle-before.settle).toBe(2);
 },90000);
-aiTest('CONSUMPTION: complete 1000-row own history is read and summed without foreign rows',async()=>{
+consumptionTest('CONSUMPTION: complete 1000-row own history is read and summed without foreign rows',async()=>{
  const t=await generationFixture(),v=await t.request(),marker=randomUUID();
  // Existing settlements are outside this fresh reader's test window.
  const previous=(await sql.query("update billing_history set created_at=created_at-interval '2 days' where user_id=$1 returning id",[actor])).rows.map(r=>r.id);

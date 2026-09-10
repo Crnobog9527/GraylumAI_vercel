@@ -42,6 +42,7 @@ replace('res.writeHead(response.status, Object.fromEntries(response.headers));',
       }
       res.writeHead(response.status, Object.fromEntries(response.headers));
 `);
+replace('...cleanEnv,\n    ...(args.includes', `...cleanEnv,\n    V3_CONSUMPTION_SUITE: '1',\n    ...(args.includes`);
 const temporary = new URL(`./.consumption-${randomUUID()}.mjs`, import.meta.url);
 writeFileSync(temporary, source);
 try {
