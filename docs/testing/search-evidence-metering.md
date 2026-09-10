@@ -211,3 +211,69 @@ a hard dollar ceiling. No arbitrary budget is silently chosen here. The existing
 AgentKey/Tavily path has separate optional acceptance and is not replaced or
 implicitly authorized. No Gemini-direct setup is required. No new configuration,
 refund, paid retry, explicit deployment or production operation is included.
+
+## Follow-up: deployed consumption read contract (0079)
+
+The 2026-09-10 staging attempt `dd2383b8-9f6e-448b-8de5-4b13b6f33c2b`
+returned 503 before durable request creation, followed by recovery 404. Read-only
+inspection on staging `0b067b9a2a39ee5dbccc148bc384ac4762ad8c83` found no
+`authenticated` SELECT grants or policies on `billing_history`, with RLS enabled.
+A zero-row authenticated SQL probe returned 42501. No request, reservation,
+settlement or provider-usage row was found for that identity. A disposable HTTP
+reproduction produced 503/404 with zero provider calls and billing records.
+The original 503 response body was not retained in the live browser; the HTTP
+error body was reproduced locally with the observed ACL, not fetched by retrying
+that live request.
+
+The prior runner had installed an old own-row policy and a table-wide grant in
+its fixture. Its earlier passes remain evidence for that synthetic environment,
+not for the deployed consumption read contract. The runner now starts with the
+observed deny-by-default state and obtains this permission only by applying the
+repository's new migration 0079, twice to check repeatability.
+
+0079 adds SELECT only on `user_id`, `operation_type`, `amount`, and `created_at`
+for `authenticated`, with a permissive own-row policy and a restrictive own-row
+boundary. The latter also constrains an older permissive administrator policy.
+It requires existing RLS and rejects unexpected broad client read grants. It
+changes no rows, prices, thresholds, writes, service-role grants, request RPCs,
+subscription rules or private Skill access. Migration failure rolls back its
+transaction. New executions remain fail-closed until the contract is deployed.
+
+The same reader is used by ordinary/document chat, workbench generation/summary,
+and explicit independent research. Existing saved-result recovery stays before
+new-consumption admission; `responded` recovery can settle and is not read-only.
+The ordinary client now preserves the original server rejection separately from
+404 receipt uncertainty, including across refresh. Explicit resubmission retains
+the exact original ID and input. Successful recovery clears the obsolete error.
+The selector says usage-based billing instead of a hardcoded zero; this changes
+no price. Ordinary non-search system messages no longer acquire `undefined`.
+
+Focused acceptance uses the existing isolated OpenRouter SQL/Auth/HTTP/browser
+runner. It covers missing contract -> 503/404/zero calls/zero reservation; browser
+error retention and refresh; migration application -> explicit same-ID success;
+verified search sources; one reservation/settlement/provider call; and immediate
+refresh without another dispatch. It also checks minimal columns, anonymous and
+cross-user denial, metadata/write denial, administrator isolation, migration
+repeatability/data preservation, and rejection of disabled RLS/broad grants.
+Existing OpenRouter, ordinary recovery and Skill/research admission regressions
+remain required. Exact run outcomes belong in the follow-up PR's Validation.
+
+### Remote preparation and approval boundary
+
+Do not replay 0001, 0077 or 0078 to fix this incident. Before separately approved
+application of 0079, verify the staging project/database, latest code and writer,
+RLS, the four-column read matrix, client metadata/write denial and current policy
+list. Capture these non-secret ACL facts for comparison; read no credentials or
+conversation bodies. After application, read back the four grants and both
+own-row policies and confirm other privileges and business-row counts unchanged.
+0079 is additive and compatible with the already-deployed #406 code. Recovery,
+if needed, is a separately reviewed forward removal of only the added four
+column grants and two policies; new executions will fail closed again.
+
+Branch/local test completion does not mean the website is repaired. Staging
+migration application and merge need Owner approval. A paid OpenRouter success
+check needs a separate approval, confirmed workspace/key ownership without
+revealing the key, and an executable cost boundary; max_tool_calls is not a
+dollar cap. Do not automatically resume the Owner's pending request after making
+permissions available, and do not settle, refund or retry it during read-only
+verification. No production access or configuration changes are included.

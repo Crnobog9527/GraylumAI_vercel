@@ -10,7 +10,7 @@ export interface StreamMessage {
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
-type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean};
+type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean;deliveryError?:string};
 interface Options {
   conversationId?:string;moduleId?:string;onMessageStart?:()=>void;
   onMessageComplete?:(message:StreamMessage)=>void;onConversationCreated?:(id:string)=>void;
@@ -57,7 +57,7 @@ export function useStreamingChat(options:Options={}) {
   const save=useCallback((p:Pending)=>{persist(p);current.current=p;setPending(p);},[]);
   const apply=useCallback((snapshot:Snapshot,p:Pending)=>{
     if(!alive.current || current.current?.requestId!==p.requestId)return;
-    const next={...p,conversationId:snapshot.conversationId,snapshot,absent:false};save(next);
+    const next={...p,conversationId:snapshot.conversationId,snapshot,absent:false,deliveryError:undefined};save(next);
     if(conversation.current!==snapshot.conversationId){conversation.current=snapshot.conversationId;setConversation(snapshot.conversationId);opts.current.onConversationCreated?.(snapshot.conversationId);}
     const userId=snapshot.userMessageId??`user-${p.requestId}`,assistantId=snapshot.assistantMessageId??`assistant-${p.requestId}`;
     const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),search:snapshot.search,
@@ -79,7 +79,7 @@ export function useStreamingChat(options:Options={}) {
       const response=await fetch(`/api/ai/requests?requestId=${p.requestId}`,{headers:{Authorization:`Bearer ${session.access_token}`},cache:'no-store'});
       const data=await response.json();
       if(!alive.current||epoch.current!==generation)return;
-      if(response.status===404){save({...p,absent:true});setError('尚未确认服务器接收。可使用原请求标识继续提交。');return;}
+      if(response.status===404){save({...p,absent:true});setError([p.deliveryError,'尚未确认服务器接收。可使用原请求标识继续提交。'].filter(Boolean).join(' '));return;}
       if(!response.ok)throw new Error(data.error??'暂时无法读取请求状态。');
       apply(data.request,p);return data.request as Snapshot;
     }catch(e){if(alive.current&&epoch.current===generation)setError(e instanceof Error?e.message:'恢复暂时不可用。');}
@@ -120,7 +120,14 @@ export function useStreamingChat(options:Options={}) {
       controller.current=new AbortController();setLoading(true);setStreaming(true);setError(null);
       opts.current.onMessageStart?.();
       const response=await fetch('/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({...p.input,requestId:p.requestId}),signal:controller.current.signal});
-      if(!response.ok){const body=await response.json();throw new Error(body.error??'请求暂时失败，请恢复原请求。');}
+      if(!response.ok){
+        const body=await response.json().catch(()=>null);
+        const reason=typeof body?.error==='string' && body.error.trim() ? body.error.slice(0,500) : '请求暂时失败，请恢复原请求。';
+        // Keep the server rejection separately from receipt uncertainty. A
+        // subsequent 404 must not erase the reason or authorize a new ID.
+        if(alive.current&&epoch.current===generation&&current.current?.requestId===p.requestId)save({...current.current,deliveryError:reason});
+        throw new Error(reason);
+      }
       if(response.headers.get('content-type')?.includes('application/json')){
         const data=await response.json();if(alive.current&&epoch.current===generation)apply(data.request,p);
       }else{
@@ -204,7 +211,7 @@ export function useStreamingChat(options:Options={}) {
   const requestStatus=pending?.snapshot?.state??(pending?'unconfirmed':null);
   return {conversationId,messages,isLoading,isStreaming,error,modelUsed:pending?.snapshot?.modelUsed??null,
     sendMessage,abort,loadHistory,clearChat,recover,resume,retryFailed,
-    requestStatus,requestInput:pending?.input.message??null,hasUnresolvedRequest:unresolved(pending),
+    requestStatus,requestAbsent:pending?.absent===true,requestInput:pending?.input.message??null,hasUnresolvedRequest:unresolved(pending),
     stopped:pending?.stopped||pending?.snapshot?.stopped,billing:pending?.snapshot?.billing??null};
 }
 export default useStreamingChat;

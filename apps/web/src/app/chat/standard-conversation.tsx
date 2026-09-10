@@ -119,7 +119,6 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     name: m.name,
     provider: m.provider,
     description: m.description ?? undefined,
-    credits_per_message: 0, // 按实际 token 计费，不显示固定积分
     is_active: true,
   }));
 
@@ -148,7 +147,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     sendMessage: sendStreamingMessage,
     abort: abortStreaming,
     loadHistory,
-    clearChat, recover, resume, retryFailed, requestStatus, requestInput,
+    clearChat, recover, resume, retryFailed, requestStatus, requestAbsent, requestInput,
     hasUnresolvedRequest, stopped, billing,
   } = useStreamingChat({
     conversationId: activeConversationId ?? undefined,
@@ -466,7 +465,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                 : requestStatus === 'responded' ? '原回复已保存，费用结算待确认。恢复不会再次生成。'
                 : requestStatus === 'unknown' ? '原请求结果尚不确定，预扣状态保留。请恢复状态，暂不能重新生成。'
                 : stopped ? '已停止等待。后台可能继续生成，将按实际结果结算。'
-                : requestStatus === 'unconfirmed' ? '正在确认原请求是否已接收，输入与请求标识已保留。'
+                : requestStatus === 'unconfirmed' ? (requestAbsent ? '服务器尚未登记此请求。请先处理下方原因；输入与请求标识已保留。' : '正在确认原请求是否已接收，输入与请求标识已保留。')
                 : '原请求正在处理中，刷新后可恢复。'}</p>
               {billing && <p className="mt-1">费用状态：{billing.state === 'reserved' ? `已预扣 ${billing.estimatedCredits} 积分，待确认结算` : billing.state === 'released' ? `本次预扣已处理，实际恢复 ${billing.refunded ?? 0} 积分` : '尚无预扣'}</p>}
               <div className="mt-2 flex flex-wrap gap-2">

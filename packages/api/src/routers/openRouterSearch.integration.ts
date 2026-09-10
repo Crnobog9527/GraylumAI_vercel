@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import pg from 'pg';
 import { createRequire } from 'node:module';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const requireWeb=createRequire(new URL('../../../../apps/web/package.json',import.meta.url));
 const {chromium}=requireWeb('@playwright/test') as typeof import('../../../../apps/web/node_modules/@playwright/test');
@@ -58,7 +58,7 @@ const request=(mode:string,prefix='搜索最新资料后改写：')=>{const body
 it.each(['不要联网，解释今天这个词：','Don’t search the web; answer from memory: ','Do not perform a web search. Tell me the current weather: ','不需要搜索最新资料，直接总结：'])('explicit prohibition %s prevents tools and search reservation',async prefix=>{
  await configureOpenRouter();const body=request('ONE',prefix);await send(body);const v=await observed(body);
  console.log('SEARCH_PROHIBITION',JSON.stringify({tools:v.provider[0]?.tools,reservation:v.r.reservation,search:v.public.search}));
- expect(v.provider).toHaveLength(1);expect(v.provider[0].body).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none'});expect(v.provider[0].performedQueries).toBe(0);expect(v.provider[0].legacyEnabled).toBe(false);expect(v.public.search).toMatchObject({executed:false,queryCount:0});
+ expect(v.provider).toHaveLength(1);expect(v.provider[0].body).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none'});expect(v.provider[0].body.messages.some((m:any)=>typeof m.content==='string'&&m.content.startsWith('undefined'))).toBe(false);expect(v.provider[0].performedQueries).toBe(0);expect(v.provider[0].legacyEnabled).toBe(false);expect(v.public.search).toMatchObject({executed:false,queryCount:0});
 });
 it('mixed intent really offers the OpenRouter server tool and records execution',async()=>{
  await configureOpenRouter();const body=request('ONE');await send(body);const v=await observed(body);
@@ -159,3 +159,71 @@ repaired.each(['@preset/research','anthropic/claude-opus-4.5@preset/research','a
 repaired.each(['ALIAS','BOTH_ALIASES'])('official counter %s settles once',async mode=>{
  await configureOpenRouter();const body=request(mode);await send(body);expect((await observed(body)).public.search).toMatchObject({queryCount:1,providerUnits:1});
 });
+
+
+const consumptionMigration=()=>readFileSync(new URL('../../../db/migrations/0079_ai_consumption_read_contract.sql',import.meta.url),'utf8');
+const ownReader=(access=token)=>createClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{global:{headers:{Authorization:'Bearer '+access}},auth:{persistSession:false}});
+repaired('consumption migration is narrow, idempotent and isolates ordinary/admin readers',async()=>{
+ const marker=randomUUID();
+ const second=(await ownReader(otherToken).auth.getUser()).data.user!.id;
+ await sql.query("insert into billing_history(user_id,operation_type,amount,metadata,created_at) values($1,'settle',-17,$3,'2000-01-01'),($2,'settle',-23,$3,'2000-01-01')",[actor,second,{consumptionContract:marker}]);
+ const before=(await sql.query('select id,user_id,amount,metadata from billing_history order by id')).rows;
+ const unrelated=(await sql.query("select relname,relacl::text from pg_class where relname in ('profiles','credit_transactions','ordinary_chat_requests') order by relname")).rows;
+ try{
+  await sql.query(consumptionMigration());await sql.query(consumptionMigration());
+  expect((await sql.query('select id,user_id,amount,metadata from billing_history order by id')).rows).toEqual(before);
+  expect((await sql.query("select relname,relacl::text from pg_class where relname in ('profiles','credit_transactions','ordinary_chat_requests') order by relname")).rows).toEqual(unrelated);
+  const privileges=(await sql.query("select attname from pg_attribute where attrelid='billing_history'::regclass and attnum>0 and has_column_privilege('authenticated','billing_history',attname,'SELECT') order by attname")).rows.map(r=>r.attname);
+  expect(privileges).toEqual(['amount','created_at','operation_type','user_id']);
+  expect((await ownReader().from('billing_history').select('metadata')).error?.code).toBe('42501');
+  expect((await ownReader(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!).from('billing_history').select('amount')).error?.code).toBe('42501');
+  expect((await ownReader().from('billing_history').insert({user_id:actor,operation_type:'settle',amount:-1})).error).toBeTruthy();
+  // Even an old permissive administrator policy cannot cross the own-row boundary.
+  await sql.query('create policy audit_old_permissive on billing_history for select to authenticated using(true)');
+  for(const role of ['user','admin']){
+   await sql.query('update profiles set role=$2 where id=$1',[actor,role]);
+   const own=await ownReader().from('billing_history').select('user_id,amount',{count:'exact'}).eq('created_at','2000-01-01');
+   expect(own.error).toBeNull();expect(own.count).toBe(1);expect(own.data).toEqual([{user_id:actor,amount:-17}]);
+   const other=await ownReader().from('billing_history').select('amount',{count:'exact'}).eq('user_id',second);
+   expect(other.error).toBeNull();expect(other.count).toBe(0);expect(other.data).toEqual([]);
+  }
+ }finally{await sql.query('drop policy if exists audit_old_permissive on billing_history');await sql.query("update profiles set role='user' where id=$1",[actor]);await sql.query("delete from billing_history where metadata->>'consumptionContract'=$1",[marker]);}
+});
+repaired.each(['rls-disabled','broad-read','extra-column'])('consumption migration refuses unsafe %s preconditions atomically',async mode=>{
+ try{
+  await sql.query(mode==='rls-disabled'?'alter table billing_history disable row level security':mode==='extra-column'?'grant select(reason) on billing_history to authenticated':'grant select on billing_history to authenticated');
+  await expect(sql.query(consumptionMigration())).rejects.toThrow(mode==='rls-disabled'?'requires billing_history RLS':'unexpected broad client grant');
+ }finally{
+  await sql.query('rollback');
+  await sql.query('alter table billing_history enable row level security; revoke select on billing_history from authenticated; revoke select(reason) on billing_history from authenticated');
+  await sql.query(consumptionMigration());
+ }
+});
+repaired('missing deployed contract keeps original rejection across refresh, then same ID succeeds after migration',async()=>{
+ await configureOpenRouter('qwen/qwen3.8-27b');await setting('chat_show_model_selector',true);
+ await sql.query('revoke select(user_id,operation_type,amount,created_at) on billing_history from authenticated; drop policy ai_consumption_select_own on billing_history; drop policy ai_consumption_select_own_boundary on billing_history');
+ const context=await browser.newContext();await context.route('**/*',r=>['127.0.0.1','localhost'].includes(new URL(r.request().url()).hostname)?r.continue():r.abort());const page=await context.newPage();const sent:any[]=[];
+ page.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))sent.push(r.postDataJSON());});
+ const body=request('ONE','请联网搜索 NASA 最新一条公开新闻，用两句话总结并列出来源。');
+ try{
+  await page.goto(app+'/login');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
+  await page.getByText('按实际用量计费',{exact:true}).waitFor();
+  const rejected=page.waitForResponse(r=>r.url().endsWith('/api/ai/stream')&&r.request().method()==='POST');
+  await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  const rejection=await rejected;expect(rejection.status()).toBe(503);expect((await rejection.json()).error).toContain('消费保护状态暂时无法验证');
+  await page.getByText('服务器尚未登记此请求。请先处理下方原因；输入与请求标识已保留。',{exact:true}).waitFor({timeout:30000});
+  await page.getByText(/账号或消费保护状态暂时无法验证/).waitFor();
+  const original=sent[0];expect(sent).toHaveLength(1);expect(original.message).toBe(body.message);
+  expect(await calls(body.message.match(/OPENROUTER_CASE_[a-zA-Z0-9_-]+/)![0])).toBe(0);expect(await accounting(original.requestId)).toEqual([]);expect(await row(original.requestId)).toBeUndefined();
+  await page.reload();await page.getByText(/账号或消费保护状态暂时无法验证/).waitFor();await page.getByText(body.message,{exact:true}).waitFor();expect(sent).toHaveLength(1);
+  await sql.query(consumptionMigration());await sql.query(consumptionMigration());
+  await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
+  await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:60000});
+  expect(sent).toHaveLength(2);expect(sent[1]).toEqual(original);
+  const v=await observed({...body,requestId:original.requestId});expect(v.public.state).toBe('succeeded');expect(v.public.search.queryCount).toBe(1);expect(v.provider).toHaveLength(1);
+  expect(v.ledger).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
+  await page.reload();await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:45000});expect(sent).toHaveLength(2);expect((await observed({...body,requestId:original.requestId})).provider).toHaveLength(1);
+  await page.screenshot({path:resolve(process.env.V3_WORKBENCH_OUTPUT!,'admission-contract-restored.png'),fullPage:true});
+  console.log('CONSUMPTION_CONTRACT_HTTP_BROWSER',JSON.stringify({rejectedStatus:503,requestRecordsBefore:0,preDeductionsBefore:0,providerBefore:0,sameId:true,providerAfter:1,searchQueries:1,preDeductionAfter:1,settlementAfter:1,refreshNewCalls:0}));
+ }finally{await sql.query(consumptionMigration());await context.close();}
+},180000);

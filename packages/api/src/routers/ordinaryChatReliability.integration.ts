@@ -183,8 +183,8 @@ repaired('retains #403 unverified and unreadable-consumption denials',async()=>{
  const body=make();await sql.query('update auth.users set email_confirmed_at=null where id=$1',[actor]);
  await sql.query("update auth.identities set identity_data=jsonb_set(identity_data,'{email_verified}','false') where user_id=$1",[actor]);
  try{expect((await send(body)).status).toBe(403);}finally{await sql.query('update auth.users set email_confirmed_at=now() where id=$1',[actor]);await sql.query("update auth.identities set identity_data=jsonb_set(identity_data,'{email_verified}','true') where user_id=$1",[actor]);}
- await sql.query('revoke select on billing_history from authenticated');
- try{expect((await send(body)).status).toBe(503);}finally{await sql.query('grant select on billing_history to authenticated');}
+ await sql.query('revoke select(user_id,operation_type,amount,created_at) on billing_history from authenticated');
+ try{expect((await send(body)).status).toBe(503);}finally{await sql.query('grant select(user_id,operation_type,amount,created_at) on billing_history to authenticated');}
  expect(await calls(body.message)).toBe(0);expect(await accounting(body.requestId)).toHaveLength(0);
 });
 async function pageFor() {

@@ -4248,7 +4248,7 @@ consumptionTest.each(['generation','search'].flatMap(kind=>['permission','daily'
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
  await sql.query("insert into billing_history(id,user_id,operation_type,amount,created_at,metadata) values($1,$2,'settle',-1,now(),$3)",[marker,actor,{consumptionTest:marker}]);
  try {
-  if(mode==='permission')await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  if(mode==='permission')await sql.query('REVOKE SELECT(user_id,operation_type,amount,created_at) ON billing_history FROM authenticated');
   else if(mode==='daily')await sql.query("update billing_history set amount=-50000,created_at=now()-interval '2 hours' where id=$1",[marker]);
   else if(mode==='positive-amount')await sql.query('update billing_history set amount=10000 where id=$1',[marker]);
   else if(mode==='truncated')await sql.query("insert into billing_history(user_id,operation_type,amount,metadata) select $1,'settle',-1,$2 from generate_series(1,1000)",[actor,{consumptionTest:marker}]);
@@ -4259,7 +4259,7 @@ consumptionTest.each(['generation','search'].flatMap(kind=>['permission','daily'
   expect(response.status).toBe(mode==='balance'?412:mode==='daily'?403:503);
   expect(JSON.stringify(response.body)).not.toContain('42501');
  } finally {
-  await fetch(url+'/__consumption_fault/none');await sql.query('GRANT SELECT ON billing_history TO authenticated');
+  await fetch(url+'/__consumption_fault/none');await sql.query('GRANT SELECT(user_id,operation_type,amount,created_at) ON billing_history TO authenticated');
   await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);
   await search.fixture.stop();
  }
@@ -4276,14 +4276,14 @@ consumptionTest.each(['generation','search'])('CONSUMPTION: %s reads only the ac
   const response=await consumptionHttp(t.user,name,data);expect(response.status).toBe(200);
   // Recover the exact durable result with no new allowance and unavailable consumption reads.
   await sql.query('update profiles set credits=0 where id=$1',[actor]);
-  await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  await sql.query('REVOKE SELECT(user_id,operation_type,amount,created_at) ON billing_history FROM authenticated');
   expect(await consumptionHttp(t.user,name,data)).toEqual(response);
   const after=await consumptionCounts();expect(after.pre-before.pre).toBe(1);expect(after.settle-before.settle).toBe(1);
   expect(after.calls-before.calls).toBe(kind==='generation'?1:0);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(kind==='search'?1:0);
   const other=await authenticated(await newUser());
   expect((await consumptionHttp(other,name,data)).status).toBe(403);
   expect((await consumptionCounts()).pre).toBe(after.pre);
- } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await search.fixture.stop();}
+ } finally {await sql.query('GRANT SELECT(user_id,operation_type,amount,created_at) ON billing_history TO authenticated');await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await search.fixture.stop();}
 },90000);
 consumptionTest.each(['generation','search'])('CONSUMPTION: %s pending settlement recovers under original identity without new allowance',async(kind)=>{
  const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
@@ -4297,7 +4297,7 @@ consumptionTest.each(['generation','search'])('CONSUMPTION: %s pending settlemen
  expect(pending).toEqual({state:kind==='generation'?'responded':'succeeded',charged_credits:null});
  await sql.query("insert into billing_history(id,user_id,operation_type,amount) values($1,$2,'settle',-10000)",[marker,actor]);
  await sql.query('update profiles set credits=0 where id=$1',[actor]);
- await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+ await sql.query('REVOKE SELECT(user_id,operation_type,amount,created_at) ON billing_history FROM authenticated');
  try {
   const response=await consumptionHttp(t.user,name,data);expect(response.status).toBe(200);
   expect(await consumptionHttp(t.user,name,data)).toEqual(response);
@@ -4305,7 +4305,7 @@ consumptionTest.each(['generation','search'])('CONSUMPTION: %s pending settlemen
   expect(after.calls-before.calls).toBe(kind==='generation'?1:0);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(kind==='search'?1:0);
   const foreign=await authenticated(await newUser());expect((await consumptionHttp(foreign,name,data)).status).toBe(403);
   expect((await consumptionCounts()).pre).toBe(after.pre);
- } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
+ } finally {await sql.query('GRANT SELECT(user_id,operation_type,amount,created_at) ON billing_history TO authenticated');await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
 },90000);
 consumptionTest('CONSUMPTION: reply and summary each check new spending while preserving original result recovery',async()=>{
  const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db);
@@ -4321,9 +4321,9 @@ consumptionTest('CONSUMPTION: reply and summary each check new spending while pr
   try {const a=await consumptionCounts();expect((await consumptionHttp(t.user,'generate',request)).status).toBe(403);const b=await consumptionCounts();expect(b.calls).toBe(a.calls);expect(b.pre).toBe(a.pre);}
   finally {await sql.query('delete from billing_history where id=$1',[marker]);}
   const response=await consumptionHttp(t.user,'generate',request);expect(response.status).toBe(200);
-  await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  await sql.query('REVOKE SELECT(user_id,operation_type,amount,created_at) ON billing_history FROM authenticated');
   try {expect(await consumptionHttp(t.user,'generate',request)).toEqual(response);}
-  finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');}
+  finally {await sql.query('GRANT SELECT(user_id,operation_type,amount,created_at) ON billing_history TO authenticated');}
  }
  const after=await consumptionCounts();expect(after.calls-before.calls).toBe(2);expect(after.pre-before.pre).toBe(2);expect(after.settle-before.settle).toBe(2);
 },90000);

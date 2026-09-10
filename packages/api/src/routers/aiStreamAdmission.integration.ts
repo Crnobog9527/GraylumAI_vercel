@@ -135,8 +135,8 @@ it.each([['hour',10000,'30 minutes'],['day',50000,'2 hours']] as const)('direct 
   await sql.query("insert into billing_history(user_id,operation_type,amount,created_at) values($1,'settle',$2,now()-$3::interval)",[actor,-amount,age]);await deny(403);
 });
 it('direct HTTP fails closed when consumption SELECT is denied',async()=>{
-  await sql.query('revoke select on billing_history from authenticated');
-  try {await deny(503);} finally {await sql.query('grant select on billing_history to authenticated');}
+  await sql.query('revoke select(user_id,operation_type,amount,created_at) on billing_history from authenticated');
+  try {await deny(503);} finally {await sql.query('grant select(user_id,operation_type,amount,created_at) on billing_history to authenticated');}
 });
 it('direct HTTP fails closed when profile state cannot be read',async()=>{
   await sql.query('revoke select(status,role) on profiles from authenticated');

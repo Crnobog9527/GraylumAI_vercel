@@ -33,11 +33,11 @@ replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', regression
   : '');
 
 replace('console.log("SQL additive migration and repeat application PASS");', `
-  // Real column grants from 0063, and own-row policies from 0001.
+  // Service-role column contract from 0063; caller consumption uses 0079.
   sql('REVOKE SELECT ON billing_history FROM service_role; REVOKE SELECT(user_id) ON billing_history FROM service_role; GRANT SELECT(operation_type,amount,created_at) ON billing_history TO service_role');
   sql('REVOKE ALL ON profiles FROM service_role; GRANT SELECT(id,email,nickname,role,status,membership_level,credits,created_at,is_deleted) ON profiles TO service_role');
   const canonical = readFileSync(resolve(root, 'packages/db/migrations/0001_ai_billing_tables.sql'), 'utf8');
-  // The shared runner now installs billing_history's canonical own-row policy.
+  // Consumption permissions are installed exclusively by migration 0079.
   for (const table of ['ai_usage_logs']) {
     const policy = 'users_own_' + table + '_select';
     const start = canonical.indexOf('CREATE POLICY "' + policy + '"'), end = canonical.indexOf(';', start) + 1;
