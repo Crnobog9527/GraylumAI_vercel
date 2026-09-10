@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 const baseline = process.argv.includes('--baseline');
 const regression = process.argv.includes('--regression');
 if ((baseline && regression) || process.argv.slice(2).some(v => !['--baseline','--regression'].includes(v))) throw new Error('Invalid option');
@@ -46,6 +47,6 @@ replace('...cleanEnv,\n    ...(args.includes', `...cleanEnv,\n    V3_CONSUMPTION
 const temporary = new URL(`./.consumption-${randomUUID()}.mjs`, import.meta.url);
 writeFileSync(temporary, source);
 try {
-  const child = spawn(process.execPath, [temporary.pathname], { stdio: 'inherit' });
+  const child = spawn(process.execPath, [fileURLToPath(temporary)], { stdio: 'inherit' });
   process.exitCode = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', code => resolve(code ?? 1)); });
 } finally { unlinkSync(temporary); }
