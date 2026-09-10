@@ -290,7 +290,9 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         if (binding.error || binding.data?.requestId !== v.requestId) throw new Error('ARTIFACT_DENIED');
       } else if (v.turnId && v.turnId !== v.requestId) throw new Error('ARTIFACT_DENIED');
       if (v.quoteHash !== ready.quoteHash || v.budgetCredits < ready.quote.reservedCredits) throw new Error('GENERATION_QUOTE_CHANGED');
-      await preAICallSecurityChecks({ supabase: privateClient!, userId: ready.id }, existing ? 0 : ready.quote.reservedCredits, { skipRateLimit: true });
+      // service_role cannot filter billing_history.user_id; the authenticated
+      // client has the existing own-row read contract. Recovery stays above.
+      await preAICallSecurityChecks({ supabase: userClient, userId: ready.id }, existing ? 0 : ready.quote.reservedCredits, { skipRateLimit: true });
       const reserved = generationStatus.extend({ token: uuid }).parse(await rpc(v, 'prepare', v.requestId, { input: v, quote: ready.quote }));
       // No provider effect until dispatch ownership is durably confirmed. A lost
       // dispatch acknowledgement is uncertain and must never be resent.

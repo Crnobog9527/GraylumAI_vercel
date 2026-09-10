@@ -4198,3 +4198,136 @@ it('ADMIN: settings save submits the complete form with selected model records a
     await sql.query("update ai_models set is_active='true' where id=$1",[primary]);
   }
 },180000);
+
+// Consumption admission uses the same local Auth/PostgREST/SQL and real billing RPCs.
+async function consumptionHttp(user: Awaited<ReturnType<typeof authenticated>>, name: string, data: unknown) {
+ const {createServerClient}=requireWeb('@supabase/ssr');
+ const cookies:Array<{name:string;value:string}>=[];
+ const session=(await user.auth.getSession()).data.session!;
+ const cookieClient=createServerClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[],setAll:(values:Array<{name:string;value:string}>)=>cookies.push(...values)}});
+ const auth=await cookieClient.auth.setSession(session);if(auth.error)throw auth.error;
+ const response=await fetch(app+'/api/trpc/workbench.'+name,{method:'POST',headers:{Cookie:cookies.map(c=>c.name+'='+c.value).join('; '),'Content-Type':'application/json'},body:JSON.stringify(data)});
+ return {status:response.status,body:await response.json()};
+}
+async function consumptionCounts() {
+ const rows=(await sql.query("select operation_type,count(*)::int n from billing_history where user_id=$1 group by operation_type",[actor])).rows;
+ const provider=await (await fetch(url+'/__workbench_model_calls')).json();
+ return {calls:provider.calls,pre:rows.find(r=>r.operation_type==='pre_deduct')?.n??0,settle:rows.find(r=>r.operation_type==='settle')?.n??0};
+}
+async function consumptionSearch(t:Awaited<ReturnType<typeof generationFixture>>) {
+ const {localMcpFixture}=await import('./fixtures/agentKeyServer'),{databaseBilledResearchStore}=await import('../research/store'),{tavilySchema}=await import('../research/tavilySchema');
+ const query='Fictional public exhibition',name='Tavily/post_search';
+ const wire={discovery:{tools:[{name}]},description:{name,category:'Search',provider:'Tavily',params:tavilySchema,cost:{credits_per_call:1.1},health:{healthy:true},execute_as:{name,params:{query:'<The search query to execute with Tavily.>'}}},result:{category:'search',provider:'Tavily',took_ms:10,data:{query,answer:null,follow_up_questions:null,images:[],response_time:0.01,results:[],usage:{credits:1}}}};
+ const fixture=await localMcpFixture(databaseBilledResearchStore(db,actor),'json',wire);
+ await sql.query("insert into system_settings(key,value) values('v3_web_search','true'),('search_surcharge_credits','5'),('local_research_endpoint',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(fixture.endpoint)]);
+ return {fixture,input:{...t.scope,requestId:randomUUID(),stepId:'step-0',query}};
+}
+aiTest.each(['generation','search'])('CONSUMPTION: %s narrow ACL hourly refusal precedes external calls and reservation',async(kind)=>{
+ const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
+ const acl=(await db.from('billing_history').select('amount',{count:'exact'}).eq('user_id',actor));
+ expect(acl.error?.code).toBe('42501');
+ await sql.query("insert into billing_history(id,user_id,operation_type,amount) values($1,$2,'settle',-10000)",[marker,actor]);
+ try {
+  const before=await consumptionCounts();
+  const response=await consumptionHttp(t.user,kind==='generation'?'generate':'search',kind==='generation'?v:search.input);
+  const after=await consumptionCounts();
+  console.log('CONSUMPTION_OBSERVED',JSON.stringify({kind,status:response.status,modelCalls:after.calls-before.calls,preDeductions:after.pre-before.pre,searchCalls:search.fixture.events.filter(e=>e==='execute').length}));
+  expect.soft(after.calls-before.calls).toBe(0);expect.soft(after.pre-before.pre).toBe(0);expect.soft(search.fixture.events).toHaveLength(0);
+  expect(response.status).toBe(403);
+ } finally {await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
+},90000);
+
+aiTest.each(['generation','search'].flatMap(kind=>['permission','daily','truncated','positive-amount','missing-data','missing-count','missing-amount','string-amount','null-amount','balance'].map(mode=>[kind,mode])))('CONSUMPTION: %s rejects %s with zero provider and pre-deduction effects',async(kind,mode)=>{
+ const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
+ await sql.query("insert into billing_history(id,user_id,operation_type,amount,created_at,metadata) values($1,$2,'settle',-1,now(),$3)",[marker,actor,{consumptionTest:marker}]);
+ try {
+  if(mode==='permission')await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  else if(mode==='daily')await sql.query("update billing_history set amount=-50000,created_at=now()-interval '2 hours' where id=$1",[marker]);
+  else if(mode==='positive-amount')await sql.query('update billing_history set amount=10000 where id=$1',[marker]);
+  else if(mode==='truncated')await sql.query("insert into billing_history(user_id,operation_type,amount,metadata) select $1,'settle',-1,$2 from generate_series(1,1000)",[actor,{consumptionTest:marker}]);
+  else if(mode==='balance')await sql.query('update profiles set credits=0 where id=$1',[actor]);
+  else await fetch(url+'/__consumption_fault/'+mode);
+  const before=await consumptionCounts(),response=await consumptionHttp(t.user,kind==='generation'?'generate':'search',kind==='generation'?v:search.input),after=await consumptionCounts();
+  expect.soft(after.calls-before.calls).toBe(0);expect.soft(after.pre-before.pre).toBe(0);expect.soft(search.fixture.events).toHaveLength(0);
+  expect(response.status).toBe(mode==='balance'?412:mode==='daily'?403:503);
+  expect(JSON.stringify(response.body)).not.toContain('42501');
+ } finally {
+  await fetch(url+'/__consumption_fault/none');await sql.query('GRANT SELECT ON billing_history TO authenticated');
+  await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);
+  await search.fixture.stop();
+ }
+},90000);
+aiTest.each(['generation','search'])('CONSUMPTION: %s reads only the actor and accepts complete history without duplicate billing',async(kind)=>{
+ const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
+ await sql.query("insert into billing_history(user_id,operation_type,amount,metadata) select $1,'settle',-10000,$2 from generate_series(1,1001)",[owner,{consumptionTest:marker}]);
+ try {
+  const mine=await t.user.from('billing_history').select('amount',{count:'exact'}).eq('user_id',actor);
+  expect(mine.error).toBeNull();expect(mine.count).toBe(mine.data!.length);
+  const foreign=await t.user.from('billing_history').select('amount',{count:'exact'}).eq('user_id',owner);
+  expect(foreign).toMatchObject({data:[],count:0,error:null});
+  const before=await consumptionCounts(),data=kind==='generation'?v:search.input,name=kind==='generation'?'generate':'search';
+  const response=await consumptionHttp(t.user,name,data);expect(response.status).toBe(200);
+  // Recover the exact durable result with no new allowance and unavailable consumption reads.
+  await sql.query('update profiles set credits=0 where id=$1',[actor]);
+  await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  expect(await consumptionHttp(t.user,name,data)).toEqual(response);
+  const after=await consumptionCounts();expect(after.pre-before.pre).toBe(1);expect(after.settle-before.settle).toBe(1);
+  expect(after.calls-before.calls).toBe(kind==='generation'?1:0);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(kind==='search'?1:0);
+  const other=await authenticated(await newUser());
+  expect((await consumptionHttp(other,name,data)).status).toBe(403);
+  expect((await consumptionCounts()).pre).toBe(after.pre);
+ } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await search.fixture.stop();}
+},90000);
+aiTest.each(['generation','search'])('CONSUMPTION: %s pending settlement recovers under original identity without new allowance',async(kind)=>{
+ const t=await generationFixture(),v=await t.request(),search=await consumptionSearch(t),marker=randomUUID();
+ const before=await consumptionCounts(),data=kind==='generation'?v:search.input,name=kind==='generation'?'generate':'search';
+ await sql.query("create function consumption_reject_settle() returns trigger language plpgsql as $$begin raise exception 'synthetic settlement outage';end$$;create trigger consumption_reject_settle before insert on credit_transactions for each row execute function consumption_reject_settle()");
+ try {await consumptionHttp(t.user,name,data);}
+ finally {await sql.query('drop trigger consumption_reject_settle on credit_transactions;drop function consumption_reject_settle()');}
+ const pending=kind==='generation'
+  ? (await sql.query('select state,charged_credits from artifact_generations where request_id=$1',[v.requestId])).rows[0]
+  : (await sql.query('select state,charged_credits from research_operations where id=$1',[search.input.requestId])).rows[0];
+ expect(pending).toEqual({state:kind==='generation'?'responded':'succeeded',charged_credits:null});
+ await sql.query("insert into billing_history(id,user_id,operation_type,amount) values($1,$2,'settle',-10000)",[marker,actor]);
+ await sql.query('update profiles set credits=0 where id=$1',[actor]);
+ await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+ try {
+  const response=await consumptionHttp(t.user,name,data);expect(response.status).toBe(200);
+  expect(await consumptionHttp(t.user,name,data)).toEqual(response);
+  const after=await consumptionCounts();expect(after.pre-before.pre).toBe(1);expect(after.settle-before.settle).toBe(2); // one marker and one original settlement
+  expect(after.calls-before.calls).toBe(kind==='generation'?1:0);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(kind==='search'?1:0);
+  const foreign=await authenticated(await newUser());expect((await consumptionHttp(foreign,name,data)).status).toBe(403);
+  expect((await consumptionCounts()).pre).toBe(after.pre);
+ } finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');await sql.query('delete from billing_history where id=$1',[marker]);await search.fixture.stop();}
+},90000);
+aiTest('CONSUMPTION: reply and summary each check new spending while preserving original result recovery',async()=>{
+ const t=await generationFixture(),{skillChatService}=await import('../artifacts/chat'),chat=skillChatService(t.user,db);
+ const binding=await chat.enter({...t.scope,requestId:randomUUID()}),turnId=randomUUID(),body='Fictional reply and organization';
+ await chat.submit({conversationId:binding.conversationId,stepId:'step-0',body,requestId:turnId});
+ const snap=await t.service.read(t.scope.projectId,t.scope.roundId);
+ const value={...t.scope,conversationId:binding.conversationId,turnId,stepId:'step-0',instruction:body,expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,s])=>[k,{version:s.version,reviewVersion:s.reviewVersion}]))};
+ const before=await consumptionCounts();
+ for(const purpose of ['reply','summary'] as const){
+  const requestId=purpose==='reply'?turnId:(await chat.summary({conversationId:binding.conversationId,requestId:turnId})).requestId;
+  const input={...value,purpose},quote=await t.ai.quote(input),request={...input,requestId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits},marker=randomUUID();
+  await sql.query("insert into billing_history(id,user_id,operation_type,amount) values($1,$2,'settle',-10000)",[marker,actor]);
+  try {const a=await consumptionCounts();expect((await consumptionHttp(t.user,'generate',request)).status).toBe(403);const b=await consumptionCounts();expect(b.calls).toBe(a.calls);expect(b.pre).toBe(a.pre);}
+  finally {await sql.query('delete from billing_history where id=$1',[marker]);}
+  const response=await consumptionHttp(t.user,'generate',request);expect(response.status).toBe(200);
+  await sql.query('REVOKE SELECT ON billing_history FROM authenticated');
+  try {expect(await consumptionHttp(t.user,'generate',request)).toEqual(response);}
+  finally {await sql.query('GRANT SELECT ON billing_history TO authenticated');}
+ }
+ const after=await consumptionCounts();expect(after.calls-before.calls).toBe(2);expect(after.pre-before.pre).toBe(2);expect(after.settle-before.settle).toBe(2);
+},90000);
+aiTest('CONSUMPTION: complete 1000-row own history is read and summed without foreign rows',async()=>{
+ const t=await generationFixture(),v=await t.request(),marker=randomUUID();
+ // Existing settlements are outside this fresh reader's test window.
+ const previous=(await sql.query("update billing_history set created_at=created_at-interval '2 days' where user_id=$1 returning id",[actor])).rows.map(r=>r.id);
+ await sql.query("insert into billing_history(user_id,operation_type,amount,metadata) select $1,'settle',-1,$2 from generate_series(1,1000)",[actor,{consumptionTest:marker}]);
+ try {
+  const read=await t.user.from('billing_history').select('amount',{count:'exact'}).eq('user_id',actor).eq('operation_type','settle').gte('created_at',new Date(Date.now()-3600000).toISOString());
+  expect(read.error).toBeNull();expect(read.count).toBe(1000);expect(read.data).toHaveLength(1000);
+  const before=await consumptionCounts();expect((await consumptionHttp(t.user,'generate',v)).status).toBe(200);const after=await consumptionCounts();expect(after.calls-before.calls).toBe(1);expect(after.pre-before.pre).toBe(1);
+ } finally {await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await sql.query("update billing_history set created_at=created_at+interval '2 days' where id=any($1::uuid[])",[previous]);}
+},90000);
