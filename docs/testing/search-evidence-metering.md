@@ -189,21 +189,24 @@ No billing policy was changed to make that assertion pass.
 ## Minimum separately authorized environment acceptance
 
 After the PR is clean and separately merged, verify an already configured test
-account/model and existing search settings in non-production. No migration is
-needed for this repair; dependencies #402/#404/#405 must already be available.
+account/model and existing search settings in non-production. The consumption
+follow-up below requires separately approved migration 0079 before acceptance;
+dependencies #402/#404/#405 must already be available and must not be reapplied.
 Do not enable a provider, change settings/keys, deploy or use paid calls merely
 to run this task's local suite.
 
 First inspect the existing OpenRouter account plugin/override-lock/preset state
 read-only, without showing credentials. Resolve the prohibition boundary before
 any private or no-search probe. Then use existing `qwen/qwen3.8-27b` through the
-exact OpenRouter endpoint for one public prompt: “搜索 OpenRouter 官方文档，概括
-web search 工具的用途并列出来源。” A second public prompt prohibits search: “不要联网，
+exact OpenRouter endpoint for one public prompt: “请联网搜索 NASA 最新一条公开
+新闻，用两句话总结并列出来源。” A second public prompt prohibits search: “不要联网，
 解释 HTTP 这个缩写。” Keep original request IDs, capture final structured usage and
 annotations, verify original SQL reservation/settlement and displayed sources,
 then refresh/recover with **zero additional provider dispatch or reservation**.
 
-The proposed minimum is two generation requests, no automatic retry; query
+The proposed minimum is two generation requests, no automatic retry. The search
+case passes only with structured evidence of actual execution greater than zero;
+merely offering a tool or observing zero queries is not search success. Query
 count may be 0–N and cannot be presented as a two-query hard cap. A maximum
 acceptable spend must be agreed and a genuinely enforceable existing account
 budget verified before approval; request tool-step settings alone do not enforce
