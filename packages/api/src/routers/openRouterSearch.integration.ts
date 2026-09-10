@@ -206,7 +206,7 @@ repaired('missing deployed contract keeps original rejection across refresh, the
  page.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))sent.push(r.postDataJSON());});
  const body=request('ONE','请联网搜索 NASA 最新一条公开新闻，用两句话总结并列出来源。');
  try{
-  await page.goto(app+'/login');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
+  await page.goto(app+'/login?redirect=/chat');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
   await page.getByText('按实际用量计费',{exact:true}).waitFor();
   const rejected=page.waitForResponse(r=>r.url().endsWith('/api/ai/stream')&&r.request().method()==='POST');
   await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
