@@ -6,6 +6,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+const networkFetch = globalThis.fetch;
 
 const routeMocks = vi.hoisted(() => ({
   skillMode: vi.fn(),
@@ -220,7 +222,7 @@ function setupBalanceAuthorizationRoute() {
   const authenticatedClient = {
     auth: {
       getUser: vi.fn().mockResolvedValue({
-        data: { user: { id: 'user-1' } },
+        data: { user: { id: 'user-1', email_confirmed_at: '2026-01-01T00:00:00Z' } },
         error: null,
       }),
     },
@@ -260,6 +262,10 @@ function setupBalanceAuthorizationRoute() {
   };
   const adminClient = {
     from: vi.fn((table: string) => {
+      if (table === 'billing_history') return {
+        select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
+      };
       if (table === 'system_settings') {
         return {
           select: vi.fn().mockReturnThis(),
@@ -403,7 +409,7 @@ describe('ai stream route balance availability gate', () => {
     const authenticatedClient = {
       auth: {
         getUser: vi.fn().mockResolvedValue({
-          data: { user: { id: 'user-1' } },
+          data: { user: { id: 'user-1', email_confirmed_at: '2026-01-01T00:00:00Z' } },
           error: null,
         }),
       },
@@ -423,6 +429,10 @@ describe('ai stream route balance availability gate', () => {
     };
     const adminClient = {
       from: vi.fn((table: string) => {
+        if (table === 'billing_history') return {
+          select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
+          gte: vi.fn().mockResolvedValue({data: [], error: null, count: 0}),
+        };
         if (table !== 'system_settings') {
           throw new Error(`Unexpected admin table ${table}`);
         }
@@ -581,7 +591,7 @@ function setupSkillRoute(options: { unbound?: boolean; skill?: Record<string, un
     events.push('provider');
     return new Response('data: {"choices":[{"delta":{"content":"Answer"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}\n\ndata: [DONE]\n\n');
   });
-  return { events, skill };
+  return { events, skill, ...clients };
 }
 
 describe('real web route Skill resolution, billing and provider ordering', () => {
@@ -682,4 +692,126 @@ describe('provider usage settlement boundary',()=>{
   const response=await POST(makeAuthenticatedStreamRequest({moduleId:VALID_MODULE_ID}) as any);await response.text();
   expect(routeMocks.billingFinalizeSuccess).toHaveBeenCalledWith(expect.objectContaining({usage:{inputTokens:0,outputTokens:0,cacheReadTokens:0,cacheCreationTokens:0},tokenMetadata:expect.objectContaining({count_source:'provider_usage'})}));
  });
+});
+
+
+describe('ordinary HTTP handler admission regression', () => {
+  // A real loopback HTTP client and server mount the shipped POST handler.
+  // Identity/database fixtures are synthetic; the public guards are not mocked.
+  // Provider requests cross a second real HTTP endpoint with an observed count.
+  async function requestOverHTTP(token: string | null = 'test-token') {
+    let providerCalls = 0;
+    const server = createServer(async (req, res) => {
+      if (req.url === '/provider') {
+        providerCalls++;
+        for await (const _chunk of req) { /* drain the real provider request */ }
+        res.writeHead(200, {'Content-Type':'text/event-stream'}).end('data: {"choices":[{"delta":{"content":"Answer"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}\n\ndata: [DONE]\n\n');
+        return;
+      }
+      try {
+        const chunks: Buffer[]=[]; for await (const chunk of req) chunks.push(Buffer.from(chunk));
+        const request=new Request('http://127.0.0.1/api/ai/stream', {method:'POST',headers:req.headers as Record<string,string>,body:Buffer.concat(chunks)});
+        const response=await POST(request as any);
+        res.writeHead(response.status,Object.fromEntries(response.headers)).end(await response.text());
+      } catch { res.writeHead(500).end('Test HTTP server failed'); }
+    });
+    await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+    fetchSpy.mockImplementation((_url,init)=>networkFetch(origin+'/provider',init));
+    try {
+      const response=await networkFetch(origin+'/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({message:'Hello'})});
+      return {status:response.status,body:await response.text(),providerCalls};
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve=>server.close(()=>resolve())); }
+  }
+
+  function admissionFixture(options: {user?: Record<string, unknown> | null; status?: unknown; hourly?: unknown; daily?: unknown; profileError?: boolean; role?: string; maintenance?: boolean; free?: boolean; freeCount?: number; balance?: number; rate?: boolean | 'unavailable'} = {}) {
+    const { events, authenticatedClient, adminClient } = setupSkillRoute();
+    // Resolve the same fixtures that the real route will receive; do not mock
+    // email verification, profile admission or the public consumption guard.
+    if ('user' in options) authenticatedClient.auth.getUser.mockResolvedValue({data:{user:options.user},error:null});
+    const from = authenticatedClient.from.getMockImplementation();
+    authenticatedClient.from.mockImplementation((table: string) => {
+      if (table === 'ai_usage_logs') return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gte:vi.fn().mockResolvedValue({count:options.freeCount ?? 0,error:null})};
+      if (table !== 'profiles') return from(table);
+      return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),single:vi.fn().mockResolvedValue({
+        data: {status:'status' in options ? options.status : 'active',role:options.role ?? 'user'},
+        error:options.profileError ? {message:'PRIVATE_DATABASE_DETAIL'} : null,
+      })};
+    });
+    let reads=0;
+    const adminFrom = adminClient.from.getMockImplementation();
+    adminClient.from.mockImplementation((table:string) => {
+      if(table==='system_settings' && options.maintenance) return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),maybeSingle:vi.fn().mockResolvedValue({data:{value:true},error:null})};
+      if(table!=='billing_history') return adminFrom(table);
+      const value=reads++===0 ? options.hourly : options.daily;
+      return {select:vi.fn().mockReturnThis(),eq:vi.fn().mockReturnThis(),gte:vi.fn().mockResolvedValue(value ?? {data:[],error:null,count:0})};
+    });
+    if (options.balance !== undefined) routeMocks.billingGetBalance.mockResolvedValue(options.balance);
+    if (options.free) {
+      const settings = routeMocks.getChatRuntimeSettings.getMockImplementation()!;
+      routeMocks.getChatRuntimeSettings.mockImplementation(async()=>({...await settings(),enableFreeTier:true,freeTierMessages:3}));
+    }
+    if (options.rate !== undefined) routeMocks.checkRateLimit.mockResolvedValue({success:options.rate===true,limit:20,remaining:0,reset:Date.now()+60000,retryAfter:60,reason:options.rate==='unavailable'?'unavailable':'rate_limited'});
+    return {events};
+  }
+  it('rejects an unauthenticated direct HTTP request before model or reservation',async()=>{
+    const {events}=admissionFixture();
+    const response=await requestOverHTTP(null);
+    expect(response.status).toBe(401); expect(response.providerCalls).toBe(0);
+    expect(events).toEqual([]); expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['invalid session',{user:null},401],
+    ['unverified email', {user:{id:'user-1',email:'fixture@example.test',app_metadata:{provider:'email'},user_metadata:{email_verified:true}}},403],
+    ['disabled', {status:'disabled'},403],
+    ['banned', {status:'banned'},403],
+    ['null status', {status:null},503],
+    ['unknown status', {status:'pending'},503],
+    ['profile read error', {profileError:true},503],
+    ['hourly limit', {hourly:{data:[{amount:-10000}],error:null,count:1}},403],
+    ['daily limit', {daily:{data:[{amount:-50000}],error:null,count:1}},403],
+    ['hourly query failure', {hourly:{data:null,error:{message:'PRIVATE_DATABASE_DETAIL'},count:null}},503],
+    ['daily query failure', {daily:{data:null,error:{message:'PRIVATE_DATABASE_DETAIL'},count:null}},503],
+    ['missing consumption rows', {hourly:{data:null,error:null,count:0}},503],
+    ['invalid consumption amount', {hourly:{data:[{amount:null}],error:null,count:1}},503],
+    ['truncated consumption rows', {hourly:{data:[{amount:-1}],error:null,count:1001}},503],
+  ] as const)('denies %s before token/provider calls or pre-deduction',async (_name,options,status)=>{
+    const {events}=admissionFixture(options);
+    const response=await requestOverHTTP();
+    const body=response.body;
+    expect({status:response.status,events,providerCalls:response.providerCalls}).toEqual({status,events:[],providerCalls:0});
+    expect(body).not.toContain('PRIVATE_DATABASE_DETAIL');
+    expect(routeMocks.billingPreDeduct).not.toHaveBeenCalled();
+    expect(routeMocks.countTokens).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['confirmed email',{id:'user-1',email_confirmed_at:'2026-01-01T00:00:00Z'}],
+    ['trusted Google OAuth',{id:'user-1',app_metadata:{provider:'google'}}],
+    ['verified identity',{id:'user-1',identities:[{identity_data:{email_verified:true}}]}],
+  ])('allows %s through the real handler with one limiter and one generation',async(_name,user)=>{
+    const {events}=admissionFixture({user:user as Record<string,unknown>});
+    const response=await requestOverHTTP();
+    expect(response.body).toContain('"type":"complete"');
+    expect(response.providerCalls).toBe(1);
+    expect(response.status).toBe(200);
+    expect(events).toEqual(['preDeduct']);
+    expect(routeMocks.checkRateLimit).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['maintenance',{maintenance:true},503,0,0],
+    ['rate limit',{rate:false},429,0,0],
+    ['rate backend unavailable',{rate:'unavailable'},503,0,0],
+    ['zero paid balance',{balance:0},402,0,0],
+    ['eligible free trial',{free:true,balance:0},200,1,0],
+    ['exhausted free trial',{free:true,balance:0,freeCount:3},402,0,0],
+    ['maintenance administrator',{maintenance:true,role:'admin'},200,1,1],
+  ] as const)('preserves %s through HTTP',async(_name,options,status,providers,reservations)=>{
+    admissionFixture(options);
+    const response=await requestOverHTTP();
+    expect({status:response.status,providers:response.providerCalls,reservations:routeMocks.billingPreDeduct.mock.calls.length}).toEqual({status,providers,reservations});
+    if(status===200) expect(response.body).toContain('"type":"complete"');
+    expect(routeMocks.checkRateLimit.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
 });

@@ -192,17 +192,31 @@ export async function checkConsumptionCircuitBreaker(
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-  // 查询最近一小时的消费
-  const { data: hourlySpend } = await ctx.supabase
-    .from('billing_history')
-    .select('amount')
-    .eq('user_id', ctx.userId)
-    .eq('operation_type', 'settle')
-    .gte('created_at', hourAgo.toISOString());
-
-  const hourlyTotal = Math.abs(
-    (hourlySpend ?? []).reduce((sum, record) => sum + (record.amount ?? 0), 0)
-  );
+  // PostgREST may truncate rows at its configured maximum. An incomplete or
+  // failed read is unknown consumption, never a zero-spend allowance.
+  const readSpend = async (since: Date): Promise<number> => {
+    try {
+      const { data, error, count } = await ctx.supabase
+        .from('billing_history')
+        .select('amount', { count: 'exact' })
+        .eq('user_id', ctx.userId)
+        .eq('operation_type', 'settle')
+        .gte('created_at', since.toISOString());
+      if (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length) {
+        throw new Error('Consumption history unavailable or incomplete');
+      }
+      let total = 0;
+      for (const record of data) {
+        if (!Number.isSafeInteger(record?.amount)) throw new Error('Invalid consumption amount');
+        total += record.amount;
+        if (!Number.isSafeInteger(total)) throw new Error('Invalid consumption total');
+      }
+      return Math.abs(total);
+    } catch (error) {
+      throw createSafeServiceUnavailableError(error, '消费保护状态暂时无法验证，请稍后重试');
+    }
+  };
+  const hourlyTotal = await readSpend(hourAgo);
 
   if (hourlyTotal >= CIRCUIT_BREAKER_CONFIG.hourlyLimit) {
     return {
@@ -213,17 +227,7 @@ export async function checkConsumptionCircuitBreaker(
     };
   }
 
-  // 查询最近一天的消费
-  const { data: dailySpend } = await ctx.supabase
-    .from('billing_history')
-    .select('amount')
-    .eq('user_id', ctx.userId)
-    .eq('operation_type', 'settle')
-    .gte('created_at', dayAgo.toISOString());
-
-  const dailyTotal = Math.abs(
-    (dailySpend ?? []).reduce((sum, record) => sum + (record.amount ?? 0), 0)
-  );
+  const dailyTotal = await readSpend(dayAgo);
 
   if (dailyTotal >= CIRCUIT_BREAKER_CONFIG.dailyLimit) {
     return {
@@ -235,6 +239,14 @@ export async function checkConsumptionCircuitBreaker(
   }
 
   return { allowed: true };
+}
+
+/** Enforce the same consumption policy in tRPC and direct HTTP AI entrypoints. */
+export async function assertAIConsumptionAllowed(ctx: SecurityContext): Promise<void> {
+  const result = await checkConsumptionCircuitBreaker(ctx);
+  if (!result.allowed) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: result.reason ?? '消费熔断触发' });
+  }
 }
 
 /**
@@ -255,7 +267,7 @@ export async function getUserBalance(ctx: SecurityContext): Promise<number> {
 /**
  * 检查用户状态
  */
-export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
+export async function checkUserStatus(ctx: SecurityContext): Promise<{ role: 'user' | 'admin' }> {
   const { data: profile, error } = await ctx.supabase
     .from('profiles')
     .select('status, role')
@@ -264,8 +276,8 @@ export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
 
   if (error || !profile) {
     throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: '用户资料不存在',
+      code: 'SERVICE_UNAVAILABLE',
+      message: '账号状态暂时无法验证，请稍后重试',
     });
   }
 
@@ -282,6 +294,10 @@ export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
       message: '账号已被封禁',
     });
   }
+  if (profile.status !== 'active') {
+    throw createSafeServiceUnavailableError(undefined, '账号状态暂时无法验证，请稍后重试');
+  }
+  return { role: profile.role === 'admin' ? 'admin' : 'user' };
 }
 
 // ============================================
@@ -316,13 +332,7 @@ export async function preAICallSecurityChecks(
 
   // 3. 消费熔断检查
   if (!options.skipCircuitBreaker) {
-    const circuitBreaker = await checkConsumptionCircuitBreaker(ctx);
-    if (!circuitBreaker.allowed) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: circuitBreaker.reason ?? '消费熔断触发',
-      });
-    }
+    await assertAIConsumptionAllowed(ctx);
   }
 
   // 4. 余额预检
