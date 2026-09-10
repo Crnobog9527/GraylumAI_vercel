@@ -1,3 +1,4 @@
+import { createStreamingOutput } from '@repo/api/src/services/streamingOutput';
 import { ChatRequestError, claimChatRequest, ordinaryChatRequest, publicChatRequest, readChatRequest, recoverChatResult, isUnmeteredRateLimit, type ChatInput } from '@/lib/ordinary-chat-request';
 import { assertChatRecoveryAccess } from '@/lib/ordinary-chat-access';
 import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
@@ -841,6 +842,13 @@ export async function POST(request: NextRequest) {
         const startedAt = Date.now();
         let firstProviderChunkAt: number | null = null;
         let fullContent = '';
+        const sendEvent = (event: Record<string, unknown>) => delivery.enqueue(
+          encoder.encode(`data: ${JSON.stringify({...event, requestId})}\n\n`));
+        const streamCheckedOutput = createStreamingOutput(!moduleId, content => {
+          sendEvent({type:'content', content, delta:true});
+        });
+        const onContent = (content: string) => { fullContent = content; streamCheckedOutput(content); };
+        const heartbeat = setInterval(() => sendEvent({type:'heartbeat'}), 5000);
         let cachePoints = 0;
         let actualSearchCount = 0;
         let webSearchExecuted = false;
@@ -861,6 +869,7 @@ export async function POST(request: NextRequest) {
           delivery.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'init',
+              createdAt: claim.request.created_at ?? null,
               conversationId: conversation.id,
               modelUsed: runtimeModel.modelId,
               requestId,
@@ -879,6 +888,7 @@ export async function POST(request: NextRequest) {
             delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({
                 type: 'search_started',
+                requestId,
                 estimatedSearchCount: searchDecision.estimatedSearchCount,
                 reasonCodes: searchDecision.reasonCodes,
               })}\n\n`)
@@ -927,7 +937,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;},openRouter?{searchEnabled:webSearchAvailable}:undefined);
+            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, onContent,openRouter?{searchEnabled:webSearchAvailable}:undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
@@ -983,7 +993,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;}, webSearchAvailable ? nativeCapability! : undefined);
+            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, onContent, webSearchAvailable ? nativeCapability! : undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
@@ -1011,6 +1021,7 @@ export async function POST(request: NextRequest) {
             delivery.enqueue(
               encoder.encode(`data: ${JSON.stringify({
                 type: 'search_finished',
+                requestId,
                 executed: webSearchExecuted,
                 searchCount: actualSearchCount,
               })}\n\n`)
@@ -1132,48 +1143,55 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          if (builtContext.truncated || loadedContext.summary) {
-            await upsertContextSnapshot(supabaseAuth, {
-              conversationId: conversation.id,
-              snapshotType: 'compression_checkpoint',
-              content: loadedContext.summary ?? providerMessages.slice(0, Math.max(1, providerMessages.length - 1))
-                .map((entry: ClaudeMessage) => `${entry.role}: ${typeof entry.content === 'string' ? entry.content : entry.content.map((block: { text?: string }) => block.text ?? '').join('\n')}`)
-                .join('\n\n'),
-              sourceMessageEndId: finalizeResult.assistantMessageId,
-              sourceMessageCount: providerMessages.length,
-              metadata: {
-                totalTokens: loadedContext.totalTokens,
-                truncated: builtContext.truncated,
-                truncationReason: builtContext.truncationReason ?? null,
-                hasSummary: loadedContext.summary ? true : false,
-              },
-            });
-          }
+          // The answer and its accounting are already durable. Auxiliary context
+          // maintenance must never turn that successful result into a stream error.
+          try {
+            if (builtContext.truncated || loadedContext.summary) {
+              await upsertContextSnapshot(supabaseAuth, {
+                conversationId: conversation.id,
+                snapshotType: 'compression_checkpoint',
+                content: loadedContext.summary ?? providerMessages.slice(0, Math.max(1, providerMessages.length - 1))
+                  .map((entry: ClaudeMessage) => `${entry.role}: ${typeof entry.content === 'string' ? entry.content : entry.content.map((block: { text?: string }) => block.text ?? '').join('\n')}`)
+                  .join('\n\n'),
+                sourceMessageEndId: finalizeResult.assistantMessageId,
+                sourceMessageCount: providerMessages.length,
+                metadata: {
+                  totalTokens: loadedContext.totalTokens,
+                  truncated: builtContext.truncated,
+                  truncationReason: builtContext.truncationReason ?? null,
+                  hasSummary: loadedContext.summary ? true : false,
+                },
+              });
+            }
 
-          if (webSearchExecuted && assistantContent) {
-            await upsertContextSnapshot(supabaseAuth, {
-              conversationId: conversation.id,
-              snapshotType: 'search_digest',
-              content: assistantContent,
-              sourceMessageEndId: finalizeResult.assistantMessageId,
-              sourceMessageCount: 2,
-              metadata: {
-                searchCount: actualSearchCount,
-                requestId,
-                modelUsed: runtimeModel.modelId,
-              },
-            });
+            if (webSearchExecuted && assistantContent) {
+              await upsertContextSnapshot(supabaseAuth, {
+                conversationId: conversation.id,
+                snapshotType: 'search_digest',
+                content: assistantContent,
+                sourceMessageEndId: finalizeResult.assistantMessageId,
+                sourceMessageCount: 2,
+                metadata: {
+                  searchCount: actualSearchCount,
+                  requestId,
+                  modelUsed: runtimeModel.modelId,
+                },
+              });
+            }
+          } catch {
+            logger.warn('ai', 'ai_stream_context_snapshot_unavailable', {requestId});
           }
 
           if (assistantContent) {
             delivery.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'delta', content: assistantContent })}\n\n`)
+              encoder.encode(`data: ${JSON.stringify({ type: 'content', requestId, content: assistantContent, final: true })}\n\n`)
             );
           }
 
           delivery.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'complete',
+              requestId,
               usage,
               cost: {
                 creditsDeducted: actualCredits,
@@ -1226,10 +1244,11 @@ export async function POST(request: NextRequest) {
 
           delivery.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: 'error', error: STREAM_RUNTIME_FAILURE_MESSAGE })}\n\n`
+              `data: ${JSON.stringify({ type: 'error', requestId, error: STREAM_RUNTIME_FAILURE_MESSAGE })}\n\n`
             )
           );
         } finally {
+          clearInterval(heartbeat);
           delivery.close();
         }
       },

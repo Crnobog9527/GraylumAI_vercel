@@ -34,6 +34,7 @@
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts",
     "./src/services/artifacts/public": "./src/services/artifacts/public.ts",
     "./src/services/artifacts/chat": "./src/services/artifacts/chat.ts",
+    "./src/services/streamingOutput": "./src/services/streamingOutput.ts",
     "./src/services/providerUsage": "./src/services/providerUsage.ts",
     "./src/services/modelCapabilities": "./src/services/modelCapabilities.ts"
   },

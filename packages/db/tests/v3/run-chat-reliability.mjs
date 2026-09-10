@@ -5,13 +5,15 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+const liveProgress=process.argv.includes('--live-progress')||process.argv.includes('--live-progress-baseline');
+const liveProgressBaseline=process.argv.includes('--live-progress-baseline');
 const baseline = process.argv.includes('--baseline');
 const regression = process.argv.includes('--regression');
 const searchEvidence = process.argv.includes('--search');
 const searchBaseline = process.argv.includes('--search-baseline');
-const openRouterSearch=process.argv.includes('--openrouter')||process.argv.includes('--openrouter-baseline');
+const openRouterSearch=liveProgress||process.argv.includes('--openrouter')||process.argv.includes('--openrouter-baseline');
 const openRouterBaseline=process.argv.includes('--openrouter-baseline');
-if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline'].includes(v))) throw new Error('Invalid option');
+if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression'].includes(v))) throw new Error('Invalid option');
 let source = readFileSync(new URL('./run-workbench.mjs', import.meta.url), 'utf8');
 function replace(from, to) {
   if (source.split(from).length !== 2) throw new Error('Shared fixture boundary changed: ' + from.slice(0, 80));
@@ -30,7 +32,7 @@ const tag = \`graylum-wb-`);
 if (!regression) replace('src/services/__tests__/workbench.integration.ts', openRouterSearch?'src/routers/openRouterSearch.integration.ts':searchEvidence || searchBaseline ? 'src/routers/searchEvidence.integration.ts' : 'src/routers/ordinaryChatReliability.integration.ts');
 replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', regression
   ? '"--testNamePattern", "^CHAT: (durable multi-turn linkage|homepage entry|[3468] configured steps|HTTP 429|summary HTTP 429|late initial read)",'
-  : '');
+  : process.argv.includes('--delivery-regression') ? '"--testNamePattern", "^UNREGISTERED:",' : liveProgress ? '"--testNamePattern", "^LIVE:",' : '');
 
 replace('console.log("SQL additive migration and repeat application PASS");', `
   // Service-role column contract from 0063; caller consumption uses 0079.
@@ -66,6 +68,12 @@ for(const path of ['apps/web/src/app/api/ai/stream/route.ts','packages/api/src/s
  writeFileSync(resolve(root,path),execFileSync('git',['show','70636732e505d8075f3287066522c13783f2312b:'+path],{cwd:source}));
 }
 console.log('OPENROUTER_BASELINE_RUNTIME 70636732e505d8075f3287066522c13783f2312b');
+const tag = \`graylum-wb-`);
+if(liveProgressBaseline)replace('const tag = `graylum-wb-', `
+for(const path of ['apps/web/src/app/api/ai/stream/route.ts','apps/web/src/hooks/useStreamingChat.ts','apps/web/src/app/chat/standard-conversation.tsx']) {
+ writeFileSync(resolve(root,path),execFileSync('git',['show','ce9b98f2ad2ecd0ee3c334e0abae0993ecc1053b:'+path],{cwd:source}));
+}
+console.log('LIVE_BASELINE_RUNTIME ce9b98f2ad2ecd0ee3c334e0abae0993ecc1053b');
 const tag = \`graylum-wb-`);
 const temporary = new URL(`./.chat-reliability-${randomUUID()}.mjs`, import.meta.url);
 writeFileSync(temporary, source);

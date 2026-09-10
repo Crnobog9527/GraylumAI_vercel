@@ -1,5 +1,6 @@
 'use client';
 
+import { ChatProgress } from './chat-progress';
 import { SearchStatus } from './search-status';
 import type { SearchEvidence } from '@repo/api/src/services/providerUsage';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -148,7 +149,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     abort: abortStreaming,
     loadHistory,
     clearChat, recover, resume, retryFailed, requestStatus, requestAbsent, requestInput,
-    hasUnresolvedRequest, stopped, billing,
+    hasUnresolvedRequest, stopped, billing, phase, startedAt, recoveryPaused,
   } = useStreamingChat({
     conversationId: activeConversationId ?? undefined,
     moduleId,
@@ -458,8 +459,9 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
             onExport={handleExport}
           />
 
+          <ChatProgress phase={hasUnresolvedRequest && !stopped && !recoveryPaused ? phase : null} startedAt={startedAt} />
           {/* 错误提示 */}
-          {requestStatus && requestStatus !== 'succeeded' && (
+          {requestStatus && requestStatus !== 'succeeded' && !isStreaming && (
             <div role="status" className="mx-4 my-3 rounded-lg border border-[var(--border-color)] p-4 text-sm">
               <p>{requestStatus === 'failed' ? '本次请求已明确失败，输入已保留，预扣已处理。'
                 : requestStatus === 'responded' ? '原回复已保存，费用结算待确认。恢复不会再次生成。'
@@ -467,6 +469,8 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                 : stopped ? '已停止等待。后台可能继续生成，将按实际结果结算。'
                 : requestStatus === 'unconfirmed' ? (requestAbsent ? '服务器尚未登记此请求。请先处理下方原因；输入与请求标识已保留。' : '正在确认原请求是否已接收，输入与请求标识已保留。')
                 : '原请求正在处理中，刷新后可恢复。'}</p>
+              {requestInput && <details className="mt-2"><summary>查看保留输入</summary><p className="whitespace-pre-wrap">本次输入：{requestInput}</p></details>}
+              {recoveryPaused && <p className="mt-1">自动查询已暂停。可以手动恢复原请求，确认最新状态。</p>}
               {billing && <p className="mt-1">费用状态：{billing.state === 'reserved' ? `已预扣 ${billing.estimatedCredits} 积分，待确认结算` : billing.state === 'released' ? `本次预扣已处理，实际恢复 ${billing.refunded ?? 0} 积分` : '尚无预扣'}</p>}
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" disabled={isProcessing} onClick={() => void recover()}>恢复原请求</Button>
@@ -634,7 +638,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                     <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
                       {inputMessage.length}/{maxInputCharacters}
                     </span>
-                    {isStreaming ? (
+                    {(isStreaming || (hasUnresolvedRequest && !stopped)) ? (
                       <Button
                         onClick={handleAbort}
                         className="h-9 px-5 gap-2 rounded-xl font-medium"

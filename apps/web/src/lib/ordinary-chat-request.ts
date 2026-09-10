@@ -5,7 +5,7 @@ import { BillingService } from '@repo/api/src/services/billing';
 export type ChatInput = { message: string; conversationId: string | null; modelId: string | null; moduleId: string | null };
 export type ChatRequest = {
   request_id: string; user_id: string; input: ChatInput; conversation_id: string;
-  writer_token: string; state: 'preparing'|'running'|'unknown'|'responded'|'succeeded'|'failed';
+  writer_token: string; created_at?: string; state: 'preparing'|'running'|'unknown'|'responded'|'succeeded'|'failed';
   partial_content: string|null; pre_deduct_id: string|null; reservation: any; response_params: any; billing_result: any;
   failure_reason: string|null; stop_requested_at: string|null; updated_at: string;
 };
@@ -62,7 +62,7 @@ export async function claimChatRequest(admin:any,userId:string,requestId:string,
 export function publicChatRequest(r:ChatRequest) {
   const p=r.response_params, b=r.billing_result;
   const state=(r.state==='preparing'||r.state==='running') && Date.now()-Date.parse(r.updated_at)>120000 ? 'unknown' : r.state;
-  return { requestId:r.request_id,conversationId:r.conversation_id,input:r.input,state,
+  return { requestId:r.request_id,conversationId:r.conversation_id,createdAt:r.created_at??null,input:r.input,state,
     stopped:!!r.stop_requested_at,retryable:state==='failed',
     content:p?.p_assistant_message ?? r.partial_content ?? null, modelUsed:p?.p_model_used ?? null,
     usage:p?.p_usage ?? null,search:publicSearchEvidence(p?.p_token_metadata?.search_evidence),

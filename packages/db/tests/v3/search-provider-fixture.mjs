@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 export function searchProviderFixture(){
- const calls=[];
+ const calls=[], releases=new Map();
  return async(req,res)=>{
+  if(req.url?.startsWith('/__search_release?')){const key=new URL(req.url,'http://localhost').searchParams.get('key');releases.get(key)?.();releases.delete(key);res.writeHead(200).end('{}');return true;}
   if(req.url==='/__search_calls'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(calls));return true;}
   if(!['/__gemini_search_fixture','/__chat_model_fixture'].includes(req.url))return false;
   const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks).toString());
@@ -32,7 +33,17 @@ export function searchProviderFixture(){
    if(message.includes('_ALIAS_')){delete usage.server_tool_use;usage.server_tool_use_details=counter;}
    if(message.includes('_BOTH_ALIASES_'))usage.server_tool_use_details=counter;
    if(message.includes('_COUNTER_CONFLICT_'))usage.server_tool_use_details={web_search_requests:count+1};
-   res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{content:'Local answer '+key,annotations},finish_reason:'stop'}]})+'\n\n');
+   const longSize=Number(message.match(/_LONG(8192|16384|32768)_/)?.[1]??0);
+   if(longSize){const answer='Public safe text. '.repeat(Math.ceil(longSize/18)).slice(0,longSize);for(let i=0;i<answer.length;i+=64)res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{content:answer.slice(i,i+64)}}]})+'\n\n');}
+   if(message.includes('_LIVE_')){
+    res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{role:'assistant'}}]})+'\n\n');
+    await new Promise(resolve=>setTimeout(resolve,2000));
+    for(const text of ['实时回答已经开始。 ','First checked block. '.repeat(15),'Second checked block. '.repeat(15)]){
+     res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{content:text}}]})+'\n\n');await new Promise(resolve=>setTimeout(resolve,150));
+    }
+    await new Promise(resolve=>{const timer=setTimeout(resolve,20000);releases.set(key,()=>{clearTimeout(timer);resolve();});});
+   }
+   res.write('data: '+JSON.stringify({id:'gen-'+key,choices:[{index:0,delta:{content:(message.includes('_CORRECTION_')?' alice@example.com ':'')+'Local answer '+key,annotations},finish_reason:'stop'}]})+'\n\n');
    const final={id:message.includes('_IDENTITY_CONFLICT_')?'gen-foreign':'gen-'+key,choices:[{index:0,delta:{},finish_reason:'stop'}],usage};
    if(message.includes('_CHOICE_ERROR_'))final.choices[0].error={code:500,message:'Synthetic server tool failed'};
    if(message.includes('_FINISH_ERROR_'))final.choices[0].finish_reason='error';
