@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Run against the existing run-workbench.mjs --chat-only --serve fixture.
+// Run against the existing run-workbench.mjs --settings-only --serve fixture.
 // ADMISSION_LOCAL_EVIDENCE is its local output directory; V3_LOCAL_DB must be
 // the matching disposable database. Never accepts a remote application or DB.
 import { beforeAll, beforeEach, afterAll, expect, it } from 'vitest';
@@ -28,7 +28,7 @@ let identitiesBefore: Array<{id: string; identity_data: unknown}>;
 
 beforeAll(async () => {
   await sql.connect();
-  browser = await chromium.launch({headless:true});
+  browser = await chromium.launch({headless:true, ...(process.platform === 'darwin' ? {executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'} : {})});
   const context = await browser.newContext();
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
@@ -48,7 +48,15 @@ beforeAll(async () => {
   await context.close();
   authBefore = (await sql.query('select email_confirmed_at, raw_app_meta_data from auth.users where id=$1',[actor])).rows[0];
   identitiesBefore = (await sql.query('select id, identity_data from auth.identities where user_id=$1',[actor])).rows;
-  modelId = (await sql.query("select id from ai_models where api_key='LOCAL_SYNTHETIC_KEY' limit 1")).rows[0].id;
+  if (!authBefore || !actor || !identitiesBefore.length) throw new Error('Application/database fixture identity mismatch');
+  // Reuse this suite's synthetic model when rerunning against the same fixture;
+  // duplicate provider aliases would make the production price lookup ambiguous.
+  modelId = (await sql.query("select id from ai_models where name='Admission fixture' and api_key='LOCAL_SYNTHETIC_KEY' limit 1")).rows[0]?.id;
+  if (!modelId) {
+    modelId = randomUUID();
+    await sql.query("insert into ai_models(id,model_id,name,provider,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,input_token_cost,output_token_cost) values($1,'openai/gpt-4o-mini-2024-07-18','Admission fixture','openai','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',4096,128000,'true','openai',150000,600000)",[modelId]);
+  }
+  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(modelId)]);
 }, 90000);
 
 beforeEach(async () => {
@@ -112,7 +120,7 @@ it('direct HTTP keeps maintenance and paid balance rejection',async()=>{
   await sql.query("update system_settings set value='false' where key='maintenance_mode'");
   await sql.query('update profiles set credits=0 where id=$1',[actor]);await deny(402);
 });
-it.each(['email','google'])('direct HTTP allows legitimate %s identities with one real reservation and saved answer',async provider=>{
+it.each(['email','google'])('direct HTTP allows legitimate %s identities with one real reservation and completed answer',async provider=>{
   if(provider==='google') {await unverify();await sql.query("update auth.users set raw_app_meta_data=jsonb_build_object('provider','google','providers',jsonb_build_array('google')) where id=$1",[actor]);}
   const result=await send();expect(result.status).toBe(200);expect(result.reservations).toBe(1);expect(result.body).toContain('"type":"complete"');
   expect(result.body).toContain('Synthetic local free/document reply');
