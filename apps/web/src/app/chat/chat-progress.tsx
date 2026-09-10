@@ -19,8 +19,9 @@ export function ChatProgress({phase,startedAt}:{phase:ChatProgressPhase;startedA
   const [title,description]=labels[phase],seconds=Math.max(0,Math.floor((now-(startedAt??now))/1000));
   const Icon=phase==='searching'?Search:phase==='waiting'?Sparkles:Loader2;
   return <div data-testid="chat-progress" className="mx-4 my-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">
+    <style>{'@keyframes graylum-chat-activity { from { transform: translateX(-100%); } to { transform: translateX(400%); } }'}</style>
     <div className="flex items-center justify-between gap-3 text-sm"><div role="status" className="flex items-center gap-2"><Icon className="h-4 w-4 motion-safe:animate-pulse"/><span>{title}</span></div><span className="tabular-nums text-[var(--text-tertiary)]">已等待 {seconds} 秒</span></div>
-    <div role="progressbar" aria-label={title} aria-valuetext="进行中，完成时间待确认" className="mt-3 h-1 overflow-hidden rounded bg-[var(--border-color)]"><div className="h-full w-1/3 rounded bg-[var(--color-primary)] motion-safe:animate-pulse"/></div>
+    <div role="progressbar" aria-label={title} aria-valuetext="进行中，完成时间待确认" className="mt-3 h-1 overflow-hidden rounded bg-[var(--border-color)]"><div className="h-full w-1/3 rounded bg-[var(--color-primary)] motion-safe:animate-[graylum-chat-activity_1.8s_ease-in-out_infinite] motion-reduce:w-full"/></div>
     <p className="mt-2 text-xs text-[var(--text-tertiary)]">{description}{seconds>=30?' 耗时较长，可以停止等待；后台请求可能继续执行。':''}</p>
   </div>;
 }

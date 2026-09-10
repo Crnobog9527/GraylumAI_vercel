@@ -57,6 +57,7 @@ export function useStreamingChat(options:Options={}) {
   const current=useRef<Pending|null>(null),conversation=useRef<string|null>(options.conversationId??null);
   const busy=useRef(false),epoch=useRef(0),alive=useRef(true),controller=useRef<AbortController|null>(null);
   const completed=useRef(new Set<string>()),historyEpoch=useRef(0);
+  const deferredHistory=useRef<{conversationId:string;messages:StreamMessage[]}|null>(null);
   const save=useCallback((p:Pending)=>{persist(p);current.current=p;setPending(p);},[]);
   const apply=useCallback((snapshot:Snapshot,p:Pending)=>{
     if(!alive.current || current.current?.requestId!==p.requestId)return;
@@ -65,8 +66,12 @@ export function useStreamingChat(options:Options={}) {
     const userId=snapshot.userMessageId??`user-${p.requestId}`,assistantId=snapshot.assistantMessageId??`assistant-${p.requestId}`;
     const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),search:snapshot.search,
       ...(snapshot.state==='succeeded'?{usage:snapshot.usage??undefined,cost:{credits:snapshot.billing.credits??0}}:{})};
+    const history=deferredHistory.current?.conversationId===snapshot.conversationId && ['succeeded','failed'].includes(snapshot.state)
+      ? deferredHistory.current.messages : null;
+    if(history)deferredHistory.current=null;
     setMessages(previous=>{
-      const without=previous.filter(m=>![userId,assistantId,`user-${p.requestId}`,`assistant-${p.requestId}`].includes(m.id));
+      const combined=history?[...new Map([...history,...previous].map(m=>[m.id,m])).values()]:previous;
+      const without=combined.filter(m=>![userId,assistantId,`user-${p.requestId}`,`assistant-${p.requestId}`].includes(m.id));
       return [...without,{id:userId,role:'user',content:snapshot.input.message,createdAt:new Date().toISOString()},...(snapshot.content?[answer]:[])];
     });
     if(snapshot.state==='succeeded'&&!completed.current.has(p.requestId)){completed.current.add(p.requestId);opts.current.onMessageComplete?.(answer);opts.current.onBalanceChange?.();}
@@ -104,13 +109,13 @@ export function useStreamingChat(options:Options={}) {
     })();
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
       if(event==='SIGNED_OUT'||(current.current&&session&&current.current.actor!==session.user.id)){
-        epoch.current++;controller.current?.abort();current.current=null;setPending(null);setMessages([]);busy.current=false;setLoading(false);setStreaming(false);
+        epoch.current++;controller.current?.abort();deferredHistory.current=null;current.current=null;setPending(null);setMessages([]);busy.current=false;setLoading(false);setStreaming(false);
       }
     });
     return()=>{cancelled=true;alive.current=false;epoch.current++;controller.current?.abort();subscription.unsubscribe();};
   },[recover]);
   useEffect(()=>{
-    if(!unresolved(pending)||pending?.absent||pending?.stopped||isStreaming||recoveryPaused||recoveryAttempts.current>=12)return;
+    if(!unresolved(pending)||pending?.absent||isStreaming||recoveryPaused||recoveryAttempts.current>=12)return;
     const timer=setTimeout(()=>{recoveryAttempts.current++;void recover({quiet:true});},Math.min(2000*2**Math.min(recoveryAttempts.current,3),15000));
     return()=>clearTimeout(timer);
   },[pending,recover,isStreaming,recoveryPaused,recoveryTick]);
@@ -210,8 +215,17 @@ export function useStreamingChat(options:Options={}) {
       if(error)throw error;
       if(!alive.current||version!==historyEpoch.current||conversation.current!==id)return;
       conversation.current=id;setConversation(id);
+      const loaded=data?.map(m=>({id:m.id,role:m.role as 'user'|'assistant',content:m.content,createdAt:m.created_at}))??[];
+      // A persisted answer can arrive here before the stream's authenticated
+      // result maps its provisional ID to the database message ID. Defer this
+      // merge until apply() has that mapping; never deduplicate by answer text.
+      if(unresolved(current.current)){
+        deferredHistory.current={conversationId:id,messages:loaded};
+        if(!busy.current)await recover();
+        return;
+      }
       setMessages(previous=>{
-        const history=data?.map(m=>({id:m.id,role:m.role as 'user'|'assistant',content:m.content,createdAt:m.created_at}))??[];
+        const history=loaded;
         const ids=new Set(history.map(m=>m.id));
         return [...history,...previous.filter(m=>!ids.has(m.id))];
       });
@@ -219,13 +233,13 @@ export function useStreamingChat(options:Options={}) {
     }catch{if(alive.current&&version===historyEpoch.current)setError('加载历史消息失败，请稍后重试。');}
   },[recover]);
   const clearChat=useCallback(()=>{
-    epoch.current++;historyEpoch.current++;controller.current?.abort();busy.current=false;current.current=null;conversation.current=null;
+    epoch.current++;historyEpoch.current++;deferredHistory.current=null;controller.current?.abort();busy.current=false;current.current=null;conversation.current=null;
     setPending(null);setConversation(null);setMessages([]);setLoading(false);setStreaming(false);setPhase(null);setError(null);
   },[]);
   const requestStatus=pending?.snapshot?.state??(pending?(pending.received?'running':'unconfirmed'):null);
   return {conversationId,messages,isLoading,isStreaming,error,modelUsed:pending?.snapshot?.modelUsed??null,
     sendMessage,abort,loadHistory,clearChat,recover,resume,retryFailed,
-    phase,startedAt:pending?.createdAt??null,recoveryPaused,
+    phase,startedAt:pending?.createdAt??null,recoveryPaused:recoveryPaused||recoveryAttempts.current>=12,
     requestStatus,requestAbsent:pending?.absent===true,requestInput:pending?.input.message??null,hasUnresolvedRequest:unresolved(pending),
     stopped:pending?.stopped||pending?.snapshot?.stopped,billing:pending?.snapshot?.billing??null};
 }

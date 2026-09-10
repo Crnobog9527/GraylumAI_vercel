@@ -24,8 +24,9 @@ or real-provider test is included.
   existing structured evidence and original result identity.
 - Healthy streams do not poll recovery. Disconnected requests use quiet single
   request polling with backoff (2/4/8/15 seconds), at most 12 automatic attempts;
-  explicit stop and authentication/permission denial stop automatic polling.
-  Manual recovery remains available. Recovery retains the existing billing
+  authentication/permission denial stops automatic polling. Stopping stream
+  waiting preserves the existing quiet confirmation of late results.
+  Exhaustion explicitly pauses the activity indicator; manual recovery remains available. Recovery retains the existing billing
   semantics: a saved `responded` result may settle, never regenerate.
 - Context snapshot maintenance errors after successful finalization are logged
   separately and cannot send a provider failure or suppress the completed answer.

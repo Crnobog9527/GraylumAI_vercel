@@ -346,6 +346,8 @@ repaired('expired running status remains recoverable and a late response still s
 
 repaired('browser absent request suspends polling while explicit delivery keeps the same identity',async()=>{
  const {page,context}=await pageFor();const body=make();let submitted:any;let reads=0;
+ let releaseSnapshot!:()=>void,historyDone!:()=>void,snapshotHit!:()=>void;
+ const snapshotBarrier=new Promise<void>(r=>{releaseSnapshot=r;}),historyArrived=new Promise<void>(r=>{historyDone=r;}),snapshotArrived=new Promise<void>(r=>{snapshotHit=r;});
  try{
   await page.route('**/api/ai/stream',async route=>{submitted=route.request().postDataJSON();await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Local pre-claim rejection'})});});
   page.on('request',r=>{if(r.url().includes('/api/ai/requests?')&&r.method()==='GET')reads++;});
@@ -353,10 +355,21 @@ repaired('browser absent request suspends polling while explicit delivery keeps 
   await page.getByText('Local pre-claim rejection 尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
   const before=reads;await page.waitForTimeout(6500);expect(reads).toBe(before);expect(await calls(body.message)).toBe(0);
   const id=submitted.requestId;await page.unroute('**/api/ai/stream');
+  // Force history to arrive with the stored database ID while the final
+  // authenticated request snapshot is held. The preview must remain singular.
+  await page.route('**/rest/v1/messages?**',async route=>{
+    await waitState(id,'succeeded');const response=await route.fetch();await route.fulfill({response});historyDone();
+  });
+  await page.route('**/api/ai/requests?**',async route=>{
+    const response=await route.fetch();snapshotHit();await snapshotBarrier;await route.fulfill({response});
+  });
   await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
   await page.getByText('Local answer '+body.message,{exact:true}).waitFor({timeout:45000});
+  await Promise.race([Promise.all([historyArrived,snapshotArrived]),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Delivery/history barrier missing')),15000))]);
+  await page.waitForTimeout(500);expect(await page.getByText('Local answer '+body.message,{exact:true}).count()).toBe(1);
+  releaseSnapshot();await page.waitForTimeout(500);expect(await page.getByText('Local answer '+body.message,{exact:true}).count()).toBe(1);
   expect(await calls(body.message)).toBe(1);expect((await totals(id)).usage).toEqual([{status:'success'}]);
- }finally{await context.close();}
+ }finally{releaseSnapshot();await context.close();}
 },90000);
 
 repaired.each(['pricing','balance'])('preflight %s failure has one failed usage row and no reservation',async kind=>{
