@@ -1,7 +1,7 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink } from '@trpc/client';
+import { httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
@@ -64,28 +64,26 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   }, [queryClient, supabase]);
 
   // Create tRPC client with Authorization header
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
-      links: [
-        httpBatchLink({
-          url: '/api/trpc',
-          async headers() {
-            const token =
-              accessTokenRef.current ??
-              (await sessionPromiseRef.current?.catch(() => null)) ??
-              null;
+  const [trpcClient] = useState(() => {
+    const options = {
+      url: '/api/trpc',
+      async headers() {
+        const token =
+          accessTokenRef.current ??
+          (await sessionPromiseRef.current?.catch(() => null)) ??
+          null;
 
-            if (token) {
-              return {
-                Authorization: `Bearer ${token}`,
-              };
-            }
-            return {};
-          },
-        }),
-      ],
-    })
-  );
+        if (token) return { Authorization: `Bearer ${token}` };
+        return {};
+      },
+    };
+    return trpc.createClient({ links: [splitLink({
+      // Entry must not wait for unrelated sidebar statistics in the same batch.
+      condition: op => op.path === 'workbench.chatLocate' || op.path === 'workbench.chatOpen',
+      true: httpLink(options),
+      false: httpBatchLink(options),
+    })] });
+  });
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

@@ -46,14 +46,15 @@ export function ChatEntry() {
     setOwnedOrdinary({ id, moduleId, key: entryKey });
     router.replace(`/chat?conversation=${encodeURIComponent(id)}`);
   };
-  const history = trpc.chat.getConversations.useQuery(undefined, {
+  const location = trpc.workbench.chatLocate.useQuery({conversationId:conversationId ?? ""}, {
     enabled: !!conversationId,
+    retry: false,
   });
   const mode = trpc.workbench.chatMode.useQuery(
     { moduleId: moduleId ?? "" },
     { enabled: !!moduleId && !conversationId, retry: false },
   );
-  const conversation = history.data?.data.find((c) => c.id === conversationId);
+  const conversation = location.data;
   if (identityChanged) return <EntryNotice>正在切换账号…</EntryNotice>;
   // An init event must update the URL immediately without replacing the active
   // stream component. Only this server-created, in-memory identity gets this path;
@@ -62,8 +63,8 @@ export function ChatEntry() {
     return <StandardConversation key={ownedOrdinary.key} moduleId={ownedOrdinary.moduleId}
       initialConversationId={ownedOrdinary.id} navigate={navigate} onCreated={persistOrdinary} />;
   if (conversationId) {
-    if (history.isPending) return <PreparingConversation navigate={navigate} />;
-    if (history.error || !conversation)
+    if (location.isPending) return <PreparingConversation navigate={navigate} />;
+    if (location.error || !conversation)
       return <EntryNotice>对话不可用，请从聊天记录重新选择。</EntryNotice>;
     return conversation.skill_mode ? (
       <SkillConversation
@@ -164,7 +165,7 @@ function SkillPicker({
         account,
         requestId,
       });
-      await utils.chat.getConversations.invalidate();
+      void utils.chat.getConversations.invalidate();
       if (mounted.current) navigate(result.conversationId);
     } catch (e) {
       if (mounted.current) {

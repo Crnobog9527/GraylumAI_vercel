@@ -93,6 +93,15 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   return result;
 });
 export const workbenchRouter = router({
+  // Route one owned conversation without loading history-wide message/credit
+  // statistics. The subsequent Skill/ordinary reads retain their own gates.
+  chatLocate: procedure.input(chatScope).query(async ({ ctx, input }) => {
+    const { data, error } = await ctx.userScopedSupabase.from('conversations')
+      .select('id,module_id,skill_mode').eq('id',input.conversationId)
+      .eq('user_id',ctx.profileId).eq('is_deleted','false').single();
+    if (error || !data) throw new Error('ARTIFACT_DENIED');
+    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable()}).parse(data);
+  }),
   cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
   search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
   chatMode: procedure.input(z.object({moduleId:z.string().uuid()}).strict()).query(({ctx,input})=>ctx.skillChat.mode(input.moduleId)),
@@ -100,6 +109,14 @@ export const workbenchRouter = router({
   chatDismissSummary: procedure.input(chatScope.extend({candidateId:z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.dismissSummary(input)),
   chatSummary: procedure.input(chatScope.extend({requestId: z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.summary(input)),
   chatRead: procedure.input(chatScope).query(({ ctx, input }) => ctx.skillChat.read(input)),
+  chatOpen: procedure.input(chatScope).query(async ({ ctx, input }) => {
+    const chat = await ctx.skillChat.read(input);
+    const [snapshot, rounds] = await Promise.all([
+      ctx.workbench.read(chat.binding.projectId, chat.binding.roundId),
+      ctx.workbench.rounds(chat.binding.projectId),
+    ]);
+    return { chat, snapshot, rounds };
+  }),
   chatSelect: procedure.input(chatScope.extend({stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).strict()).mutation(({ ctx, input }) => ctx.skillChat.select(input)),
   chatSubmit: procedure.input(chatTurnInput).mutation(({ ctx, input }) => ctx.skillChat.submit(input)),
   generationQuote: procedure.input(generationQuoteInput).mutation(({ ctx, input }) => ctx.generation.quote(input)),

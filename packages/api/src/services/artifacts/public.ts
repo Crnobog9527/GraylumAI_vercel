@@ -27,6 +27,7 @@ export const generationStatusSchema = z.object({
   requestId: uuid, stepId: z.string(), state: z.enum(['prepared', 'dispatched', 'responded', 'succeeded', 'refunded', 'unknown']),
   reservedCredits: z.number().int().nonnegative(), chargedCredits: z.number().int().nonnegative().nullable(),
   candidateId: uuid.nullable(), createdAt: z.string(),
+  failureCode: z.literal('provider_rate_limited').nullish(),
 });
 export const snapshotSchema = z.object({
   generations: generationStatusSchema.array().optional(),

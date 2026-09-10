@@ -39,6 +39,7 @@ export function SkillConversation({
   const [drafts, setDrafts] = useState<Record<string, Draft>>({}),
     [inputs, setInputs] = useState<Record<string, string>>({}),
     [error, setError] = useState(""),
+    [sendProgress, setSendProgress] = useState(""),
     [busy, setBusy] = useState(false),
     [showSteps, setShowSteps] = useState(true);
   const [delivery, setDelivery] = useState<
@@ -102,12 +103,7 @@ export function SkillConversation({
   useEffect(() => {
     alive.current = true;
     setShowSteps(window.matchMedia("(min-width: 1024px)").matches);
-    void (async () => {
-      const { data } = await createClient().auth.getUser();
-      if (!data.user || !alive.current) return;
-      journalKey.current = `skill-draft:${data.user.id}:${conversationId}`;
-      await reload();
-    })().catch((e) => {
+    void reload().catch((e) => {
       if (alive.current)
         setError(e instanceof Error ? e.message : "恢复对话失败");
     });
@@ -190,17 +186,26 @@ export function SkillConversation({
         setDelivery(pending);
     } catch {}
   }, [storage]);
+  useEffect(() => {
+    // A verified terminal refund may have happened after the previous page
+    // closed. Its old local delivery marker must not keep the composer locked.
+    if (delivery && snapshot?.generations?.some(g => g.requestId === delivery.requestId && g.state === "refunded")) {
+      try { sessionStorage.removeItem(storage + ":pending"); } catch {}
+      setDelivery(null);
+    }
+  }, [delivery, snapshot, storage]);
   async function reload() {
     const epoch = ++revision.current;
-    const next = await api.chatRead.query({ conversationId });
-    const [snap, history] = await Promise.all([
-      api.read.query({
-        projectId: next.binding.projectId,
-        roundId: next.binding.roundId,
-      }),
-      api.rounds.query({ projectId: next.binding.projectId }),
+    const [opened, identity] = await Promise.all([
+      api.chatOpen.query({ conversationId }),
+      journalKey.current ? Promise.resolve(null) : createClient().auth.getUser(),
     ]);
     if (!alive.current || epoch !== revision.current) return;
+    if (!journalKey.current) {
+      if (!identity?.data.user) throw new Error("登录状态已变化，请重新登录。");
+      journalKey.current = `skill-draft:${identity.data.user.id}:${conversationId}`;
+    }
+    const { chat: next, snapshot: snap, rounds: history } = opened;
     setReport(null);
     setChat(next);
     setSnapshot(snap);
@@ -293,7 +298,7 @@ export function SkillConversation({
         setError(e instanceof Error ? e.message : "操作未完成，请刷新状态。");
     } finally {
       locked.current = false;
-      if (alive.current) setBusy(false);
+      if (alive.current) { setBusy(false); setSendProgress(""); }
     }
   }
   function remember(requestId: string, receipt?: string) {
@@ -412,12 +417,14 @@ export function SkillConversation({
         pendingWrite.current = null;
         throw new Error("请等待成果自动保存后再发送。");
       }
+      setSendProgress("正在保存消息…");
       await api.chatSubmit.mutate({
         conversationId,
         requestId,
         stepId: selected,
         body,
       });
+      if (alive.current) setSendProgress("消息已收到，正在准备回复…");
       const expectedSteps = Object.fromEntries(
         Object.entries(snapshot.steps).map(([k, s]) => [
           k,
@@ -458,7 +465,6 @@ export function SkillConversation({
       // no amount is shown or accepted as a separate user interaction.
       await deliver({ ...value, requestId, quoteHash: q.quoteHash,
         budgetCredits: q.reservedCredits });
-      await reload();
     }, true);
   }
   function rememberDelivery(
@@ -480,6 +486,7 @@ export function SkillConversation({
       throw new Error("请等待成果自动保存后再恢复发送。");
     }
     rememberDelivery(value);
+    if (alive.current) setSendProgress(value.purpose === "summary" ? "回复已收到，正在整理本步骤成果…" : "AI 正在生成回复…");
     let status;
     try {
       status = await api.generate.mutate(value);
@@ -503,7 +510,7 @@ export function SkillConversation({
       setInputs((old) => ({
         ...old,
         [value.stepId]:
-          (old[value.stepId] ?? "").trim() === value.instruction
+          status.state !== "refunded" && (old[value.stepId] ?? "").trim() === value.instruction
             ? ""
             : (old[value.stepId] ?? ""),
       }));
@@ -511,6 +518,9 @@ export function SkillConversation({
     await reload();
     await applyGeneratedResult(value, status);
     if (status.state === "succeeded" || status.state === "refunded") rememberDelivery(null);
+    if (status.failureCode === "provider_rate_limited") setError(value.purpose === "summary"
+      ? "成果整理服务繁忙，整理预留积分已退还。已有回复保留，请稍后点击“继续整理成果”。"
+      : "模型服务繁忙，本次未生成回复，预留积分已退还。消息已保留，请稍后重新发送。");
     if (value.purpose === "reply" && status.state === "succeeded") {
       pendingWrite.current = null;
       await summarize(value.turnId!);
@@ -696,6 +706,7 @@ export function SkillConversation({
                 <span className="text-sm">正在自动保存成果…</span>
               )}
             </div>
+            {sendProgress && <p role="status" className="mt-2 text-sm text-[var(--text-secondary)]">{sendProgress}</p>}
             {snapshot?.generations
               ?.filter((g) => g.stepId === step && g.state !== "succeeded")
               .map((g) => (
@@ -707,7 +718,7 @@ export function SkillConversation({
                       : g.state === "prepared"
                         ? "已预留，尚未发送"
                         : g.state === "refunded"
-                          ? "未发送，预留已退还"
+                          ? g.failureCode === "provider_rate_limited" ? "模型服务繁忙，本次请求的预留积分已退还" : "未发送，预留已退还"
                           : "结果已保存，待结算"}
                   {(g.state === "responded" || receipts[g.requestId]) && (
                     <Button
