@@ -57,6 +57,12 @@ No SQL or historic setting format is rewritten.
   in the existing durable response before settlement, then in existing token
   metadata. Public recovery/history project only search fields. Suggestions use
   a scriptless, isolated iframe with CSP; source titles are escaped text.
+- Ordinary conversation identity is synchronously committed to the URL before
+  a saved answer renders, using Next's supported native History API. This closes
+  a reproduced refresh race while asynchronous navigation was still pending;
+  authenticated history lookup, active component identity and Skill routing are
+  unchanged. The browser test delays the former RSC navigation and immediately
+  checks the address and refreshes after sources become visible.
 - An unknown execution retains original input and filtered partial output, with
   the original reservation. It never becomes an estimated settlement, automatic
   new request or blind refund. A saved response with insufficient balance for

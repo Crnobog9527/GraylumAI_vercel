@@ -118,8 +118,11 @@ repaired('browser response loss and refresh restore original sources and cannot 
  try{
   await page.goto(app+'/login?redirect=/chat');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
   await page.route('**/api/ai/stream',async route=>{submitted=route.request().postDataJSON();await route.fetch();await route.abort();});
+  await page.route('**/chat?conversation=**',async route=>{if(route.request().headers().rsc==='1')await new Promise(r=>setTimeout(r,3000));await route.continue().catch(()=>{});});
   const body=request('MULTI_DUPLICATE');await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
-  await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:60000});await page.reload();await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:45000});
+  await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:60000});
+  const original=await snapshot(submitted.requestId);expect(new URL(page.url()).searchParams.get('conversation')).toBe(original.conversationId);
+  await page.reload();await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:45000});
   expect(await page.getByRole('link',{name:'Local verified source'}).getAttribute('href')).toBe('https://example.test/search-source');expect(await page.getByText('UNSAFE',{exact:true}).count()).toBe(0);
   expect((await observed(submitted)).provider).toHaveLength(1);await page.screenshot({path:resolve(process.env.V3_WORKBENCH_OUTPUT!,'search-recovery.png')});
  }finally{await context.close();}

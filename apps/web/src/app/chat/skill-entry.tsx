@@ -44,7 +44,9 @@ export function ChatEntry() {
   };
   const persistOrdinary = (id: string) => {
     setOwnedOrdinary({ id, moduleId, key: entryKey });
-    router.replace(`/chat?conversation=${encodeURIComponent(id)}`);
+    // Commit the recoverable identity before rendering the saved answer. An
+    // asynchronous navigation can still be pending when the user refreshes.
+    window.history.replaceState(null, "", `/chat?conversation=${encodeURIComponent(id)}`);
   };
   const location = trpc.workbench.chatLocate.useQuery({conversationId:conversationId ?? ""}, {
     enabled: !!conversationId,
