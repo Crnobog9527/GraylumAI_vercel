@@ -91,9 +91,9 @@ repaired('Gemini 2.5 cost uses one grounded prompt and retains three queries',as
  await native('gemini-2.5-flash');const body=request('MULTI');await send(body);const v=await observed(body);
  expect(v.public.search).toMatchObject({queryCount:3,providerUnit:'grounded-prompt',providerUnits:1});
 });
-repaired.each(['MISSING','CORRUPT','TIMEOUT'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
+repaired.each(['MISSING','CORRUPT','TIMEOUT','TRANSPORT_LOSS'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
  await native();const body=request(mode);await send(body);const v=await observed(body);
- expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(mode!=='TIMEOUT')expect(v.public.content).toContain('Local answer');
+ expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(['MISSING','CORRUPT'].includes(mode))expect(v.public.content).toContain('Local answer');
  await Promise.all([send(body),send(body),snapshot(body.requestId)]);const after=await observed(body);expect(after.provider).toHaveLength(1);expect(after.ledger).toEqual([{operation_type:'pre_deduct',count:1}]);
 });
 repaired.each(['disabled','model-disabled','unreviewed'])('%s has zero search fee and no tools',async mode=>{

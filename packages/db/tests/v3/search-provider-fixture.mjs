@@ -9,7 +9,8 @@ export function searchProviderFixture(){
   const message=native?body.contents.at(-1).parts[0].text:body.messages.at(-1).content;
   const key=message.match(/SEARCH_CASE_[a-zA-Z0-9_-]+/)?.[0];
   calls.push({key,native,tools:body.tools??[],body});
-  if(message.includes('_TIMEOUT_')){res.destroy();return true;}
+  if(message.includes('_TIMEOUT_')){res.writeHead(504,{'Content-Type':'application/json'}).end(JSON.stringify({error:{status:'DEADLINE_EXCEEDED',message:'Synthetic provider deadline exceeded'}}));return true;}
+  if(message.includes('_TRANSPORT_LOSS_')){res.destroy();return true;}
   res.writeHead(200,{'Content-Type':'text/event-stream'});
   if(!native){res.write('data: '+JSON.stringify({choices:[{delta:{content:'Local answer '+key}}]})+'\n\n');res.write('data: '+JSON.stringify({choices:[],usage:{prompt_tokens:800,completion_tokens:30,total_tokens:830}})+'\n\n');res.end('data: [DONE]\n\n');return true;}
   const queryCount=message.includes('_ZERO_')?0:message.includes('_MULTI_')?3:1;
