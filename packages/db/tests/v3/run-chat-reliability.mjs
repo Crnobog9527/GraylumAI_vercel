@@ -24,7 +24,7 @@ const tag = \`graylum-wb-`);
 
 if (!regression) replace('src/services/__tests__/workbench.integration.ts', 'src/routers/ordinaryChatReliability.integration.ts');
 replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', regression
-  ? '"--testNamePattern", "^CHAT: (durable multi-turn linkage|homepage entry|[3468] configured steps)",'
+  ? '"--testNamePattern", "^CHAT: (durable multi-turn linkage|homepage entry|[3468] configured steps|HTTP 429|summary HTTP 429|late initial read)",'
   : '');
 
 replace('console.log("SQL additive migration and repeat application PASS");', `
@@ -32,7 +32,8 @@ replace('console.log("SQL additive migration and repeat application PASS");', `
   sql('REVOKE SELECT ON billing_history FROM service_role; REVOKE SELECT(user_id) ON billing_history FROM service_role; GRANT SELECT(operation_type,amount,created_at) ON billing_history TO service_role');
   sql('REVOKE ALL ON profiles FROM service_role; GRANT SELECT(id,email,nickname,role,status,membership_level,credits,created_at,is_deleted) ON profiles TO service_role');
   const canonical = readFileSync(resolve(root, 'packages/db/migrations/0001_ai_billing_tables.sql'), 'utf8');
-  for (const table of ['billing_history', 'ai_usage_logs']) {
+  // The shared runner now installs billing_history's canonical own-row policy.
+  for (const table of ['ai_usage_logs']) {
     const policy = 'users_own_' + table + '_select';
     const start = canonical.indexOf('CREATE POLICY "' + policy + '"'), end = canonical.indexOf(';', start) + 1;
     if(start < 0 || end <= start) throw new Error('Missing own-row policy');

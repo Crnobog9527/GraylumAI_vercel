@@ -62,8 +62,10 @@ write interleaving, and unsupported native transport rejection before spending.
 It reads actual provider counters,
 billing rows, messages, token stats, balances, and browser output.
 
-Six relevant existing Skill SQL/Auth/HTTP/browser regressions passed (multi-turn,
-homepage entry, and 3/4/6/8 configured steps); 103 unrelated cases were skipped.
+The integrated Skill SQL/Auth/HTTP/browser selection covers multi-turn, homepage
+entry, 3/4/6/8 configured steps, refused reply/summary recovery and late initial
+reads; unrelated cases are explicitly skipped. The original six-case selection
+passed before #402 integration; the expanded results are recorded on the PR.
 The focused handler/provider-usage/billing/security suites passed 225 tests.
 The broad API suite initially had 1,661 passes and two unrelated failures under
 concurrent local load (PII timing and connection availability); the unchanged
@@ -78,11 +80,13 @@ local execution, not a paid-provider or deployed-environment result.
 
 ## Dependencies, activation, and limits
 
-0078 is additive and has no SQL dependency on #402's 0077. However, the repository
-migration ledger requires consecutive numbers. While #402 remains unmerged, the
-required Unit Tests job is blocked by missing 0077. This PR must wait for #402's
-original owner to finish that dependency, then integrate fresh staging and rerun
-affected checks/review. Do not copy 0077, take over its writer, or bypass the check.
+0078 is additive. The migration ledger dependency is resolved by integrating
+staging `0002307b6892537597fd6c6b840a990eabb53af8`, which contains merged #402
+and its 0077. No migration was copied or renumbered. The local adapter reuses
+the shared runner's canonical billing-history policy and applies 0078 twice
+after 0077. Combined runtime validation and exact-candidate review are required
+on this integrated candidate. No remote application of either migration is
+claimed by a Git merge.
 
 No remote database, deployment, real provider, production, or configuration
 mutation is part of this repair. This branch opts out of automatic Vercel builds.
