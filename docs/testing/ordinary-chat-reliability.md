@@ -50,13 +50,16 @@ provider **twice**, while each UUID had one pre-deduction and one settlement.
 Observed after: each scenario dispatched **once**, reserved once, settled once,
 and saved one user/assistant pair and one token-stat record.
 
-The repaired suite has 25 real integration/browser cases covering lost responses,
+The repaired suite has 28 real integration/browser cases covering lost responses,
 refresh before the initial response, restored input, manual new-generation retry,
 unknown/truncated output, four ambiguous refusal variants, late/aged execution,
 stop/completion races, forced atomic settlement rollback with concurrent recovery,
 identity mismatch, revoked access, actual balance changes, free chat, document
 chat, retention, denied direct RPC/table access (including null capabilities),
-and #403's allowed/denied admission paths. It reads actual provider counters,
+and #403's allowed/denied admission paths. Review regression cases also cover
+multi-turn history with latest-request recovery, a deterministic two-tab storage
+write interleaving, and unsupported native transport rejection before spending.
+It reads actual provider counters,
 billing rows, messages, token stats, balances, and browser output.
 
 Six relevant existing Skill SQL/Auth/HTTP/browser regressions passed (multi-turn,
@@ -99,3 +102,11 @@ Browser recovery uses per-account local storage. Clearing it removes automatic
 discovery of pending request IDs; server records and saved conversation messages
 remain. Product acceptance and any future staging/production database or rollout
 operations require their separate authorized workflow.
+
+Browser records use independent request keys, so one tab's late write cannot
+replace another request's discovery record. Stored snapshots omit answer bodies;
+older completed discovery records can be removed while every failed or unresolved
+input is retained. Refresh merges the recovered request with the existing history
+query without changing its pagination. Known unsupported generation transports
+fail before token-provider access or reservation, rather than becoming an unknown
+billable execution.

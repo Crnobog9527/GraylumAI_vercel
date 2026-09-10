@@ -240,6 +240,69 @@ repaired('browser failed input and explicit regeneration are separate from recov
   await release(hold);await page.getByText('Local answer '+hold.message,{exact:true}).waitFor({timeout:45000});expect(await calls(hold.message)).toBe(1);
  }finally{await context.close();}
 },180000);
+repaired('browser refresh restores the latest request together with earlier conversation messages',async()=>{
+ const {page,context}=await pageFor();const first=make(),second=make();let submitted:any;
+ page.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))submitted=r.postDataJSON();});
+ try{
+  for(const body of [first,second]){
+   await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+   await page.getByText('Local answer '+body.message,{exact:true}).waitFor({timeout:45000});
+  }
+  await page.reload();await page.getByText('Local answer '+second.message,{exact:true}).waitFor({timeout:45000});
+  await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:10000});
+  expect(await page.getByText('Local answer '+first.message,{exact:true}).count()).toBe(1);
+  expect(await page.getByText('Local answer '+second.message,{exact:true}).count()).toBe(1);
+  expect(await calls(first.message)).toBe(1);expect(await calls(second.message)).toBe(1);
+  expect((await totals(submitted.requestId)).messages).toHaveLength(4);
+ }finally{await context.close();}
+},180000);
+repaired('two browser tabs preserve both requests across an interleaved storage write and refresh',async()=>{
+ const {page,context}=await pageFor();const seedA=make(),seedB=make();await send(seedA);await send(seedB);
+ const conversationA=(await state(seedA.requestId)).request.conversationId,conversationB=(await state(seedB.requestId)).request.conversationId;
+ const secondPage=await context.newPage();const a=make('HOLD'),b=make('HOLD');let submittedA:any,submittedB:any;
+ page.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))submittedA=r.postDataJSON();});
+ secondPage.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))submittedB=r.postDataJSON();});
+ let hit!:()=>void,unblock!:()=>void;const barrierHit=new Promise<void>(r=>{hit=r;}),barrier=new Promise<void>(r=>{unblock=r;});
+ await context.route('**/__chat_storage_barrier',async route=>{hit();await barrier;await route.fulfill({status:200,body:'released'});});
+ try{
+  await page.goto(app+'/chat?conversation='+conversationA);await secondPage.goto(app+'/chat?conversation='+conversationB);
+  await page.getByTestId('chat-input').fill(a.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  for(let i=0;i<100&&await calls(a.message)===0;i++)await new Promise(r=>setTimeout(r,100));expect(await calls(a.message)).toBe(1);
+  // Pause A immediately before its storage write. In the original array layout
+  // A has already read the old list; B creates a new logical request meanwhile.
+  // This affects only a local browser scheduling boundary, not runtime SQL/Auth.
+  await page.evaluate(id=>{
+   const original=Storage.prototype.setItem;let once=true;
+   Storage.prototype.setItem=function(k,v){
+    if(once&&k.startsWith('ordinary-chat:v1:')&&v.includes(id)){
+     once=false;const request=new XMLHttpRequest();request.open('GET','/__chat_storage_barrier',false);request.send();
+    }
+    return original.call(this,k,v);
+   };
+  },submittedA.requestId);
+  const stopping=page.getByRole('button',{name:'停止等待',exact:true}).click();
+  await Promise.race([barrierHit,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Storage barrier not reached')),15000))]);
+  await secondPage.getByTestId('chat-input').fill(b.message);await secondPage.getByRole('button',{name:'发送',exact:true}).click();
+  for(let i=0;i<100&&await calls(b.message)===0;i++)await new Promise(r=>setTimeout(r,100));expect(await calls(b.message)).toBe(1);
+  unblock();await stopping;
+  const stored=await secondPage.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('ordinary-chat:v1:')).flatMap(k=>{const value=JSON.parse(localStorage.getItem(k)!);return Array.isArray(value)?value:[value];}));
+  expect(stored.map(p=>p.requestId)).toEqual(expect.arrayContaining([submittedA.requestId,submittedB.requestId]));
+  await Promise.all([page.reload(),secondPage.reload()]);
+  await page.getByText(a.message,{exact:true}).waitFor({timeout:45000});await secondPage.getByText(b.message,{exact:true}).waitFor({timeout:45000});
+  await Promise.all([release(a),release(b)]);
+  await page.getByText('Local answer '+a.message,{exact:true}).waitFor({timeout:45000});await secondPage.getByText('Local answer '+b.message,{exact:true}).waitFor({timeout:45000});
+  expect(await calls(a.message)).toBe(1);expect(await calls(b.message)).toBe(1);
+  for(const id of [submittedA.requestId,submittedB.requestId]){const rows=await totals(id);expect(rows.billing).toHaveLength(2);expect(rows.messages).toHaveLength(4);}
+ }finally{unblock();await Promise.all([release(a),release(b)]);await context.close();}
+},180000);
+repaired('unsupported native transport fails before provider calls or reservation and preserves input',async()=>{
+ const body=make();await sql.query("update ai_models set provider='anthropic',api_endpoint='https://api.anthropic.com/v1/messages',token_counting_method='anthropic_count_tokens',tokenizer_family='anthropic' where id=$1",[modelId]);
+ try{
+  expect((await send(body)).status).toBe(500);const snapshot=await waitState(body.requestId,'failed');
+  expect(snapshot.input.message).toBe(body.message);expect(snapshot.retryable).toBe(true);expect(await calls(body.message)).toBe(0);
+  expect((await totals(body.requestId)).billing).toHaveLength(0);await send(body);expect(await calls(body.message)).toBe(0);
+ }finally{await sql.query("update ai_models set provider='openai',api_endpoint='https://openrouter.ai/api/v1',token_counting_method=null,tokenizer_family='openai' where id=$1",[modelId]);}
+});
 repaired('document chat keeps module method binding; recovery denies revoked module access',async()=>{
  const skillId=randomUUID(),moduleId=randomUUID();
  await sql.query("insert into skills(id,skill_key,draft_content) values($1::uuid,$1::text,'METHOD_CANARY_DOCUMENT Private document instruction')",[skillId]);

@@ -231,6 +231,7 @@ function expectNoDownstreamRuntimeAccess() {
 }
 
 function setupBalanceAuthorizationRoute() {
+  routeMocks.usesOpenAICompatibleApi.mockReturnValue(true);
   const authenticatedClient = {
     auth: {
       getUser: vi.fn().mockResolvedValue({

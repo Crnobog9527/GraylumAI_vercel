@@ -608,6 +608,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const apiKey = runtimeModel.provider === 'google'
+      ? getGoogleApiKey(runtimeModel.apiKey)
+      : getConfiguredProviderApiKey(runtimeModel.apiKey);
+    const openAICompatible = usesOpenAICompatibleApi({endpoint:runtimeModel.apiEndpoint,apiKey});
+    // A known unsupported transport has not executed. Reject it before token
+    // provider calls, reservation, and the durable dispatch boundary.
+    if (!openAICompatible && runtimeModel.provider !== 'google') {
+      return Response.json({error:STREAM_SERVICE_UNAVAILABLE_MESSAGE},{status:500});
+    }
+
     const contextManager = new ContextManager(supabaseAuth);
     const contextStartedAt = Date.now();
     const loadedContext = await contextManager.loadContext(conversation.id);
@@ -788,9 +798,6 @@ export async function POST(request: NextRequest) {
     const webSearchAvailable = webSearchRequested &&
       runtimeModel.enableWebSearch &&
       runtimeModel.provider === 'google';
-    const apiKey = runtimeModel.provider === 'google'
-      ? getGoogleApiKey(runtimeModel.apiKey)
-      : getConfiguredProviderApiKey(runtimeModel.apiKey);
 
     if (!apiKey) {
 
@@ -862,11 +869,6 @@ export async function POST(request: NextRequest) {
               promptName: activePrompt?.name ?? null,
             })}\n\n`)
           );
-
-          const openAICompatible = usesOpenAICompatibleApi({
-            endpoint: runtimeModel.apiEndpoint,
-            apiKey,
-          });
 
           if (webSearchAvailable) {
             delivery.enqueue(

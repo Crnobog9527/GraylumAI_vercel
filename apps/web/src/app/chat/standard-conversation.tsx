@@ -241,10 +241,10 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
 
   // 当切换对话时，加载历史记录
   useEffect(() => {
-    if (activeConversationId && streamingMessages.length === 0) {
+    if (activeConversationId) {
       loadHistory(activeConversationId);
     }
-  }, [activeConversationId, loadHistory, streamingMessages.length]);
+  }, [activeConversationId, loadHistory]);
 
   // Auto-scroll to bottom when messages change
   const messagesEndRef = useRef<HTMLDivElement>(null);

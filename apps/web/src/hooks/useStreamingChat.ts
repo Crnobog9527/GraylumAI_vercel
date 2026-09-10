@@ -8,7 +8,7 @@ export interface StreamMessage {
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
-type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;snapshot?:Snapshot;stopped?:boolean};
+type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean};
 interface Options {
   conversationId?:string;moduleId?:string;onMessageStart?:()=>void;
   onMessageComplete?:(message:StreamMessage)=>void;onConversationCreated?:(id:string)=>void;
@@ -16,10 +16,31 @@ interface Options {
 }
 const supabase=createClient();
 const key=(actor:string)=>`ordinary-chat:v1:${actor}`;
-function saved(actor:string):Pending[] {return JSON.parse(localStorage.getItem(key(actor))??'[]');}
+function saved(actor:string):Pending[] {
+  const prefix=key(actor)+':',entries:Pending[]=[];
+  for(let i=0;i<localStorage.length;i++){
+    const item=localStorage.key(i);
+    if(item?.startsWith(prefix)){
+      const value=localStorage.getItem(item);
+      if(value)entries.push(JSON.parse(value));
+    }
+  }
+  return entries.sort((a,b)=>a.createdAt-b.createdAt);
+}
 function persist(p:Pending) {
-  const entries=saved(p.actor).filter(v=>v.requestId!==p.requestId && !(v.conversationId && v.conversationId===p.conversationId && v.snapshot?.state==='succeeded'));
-  localStorage.setItem(key(p.actor),JSON.stringify([...entries,p]));
+  // Independent keys prevent a late snapshot in one tab from overwriting an
+  // unrelated request created in another tab. The account lock below still
+  // serializes selection of a new logical submission for the same conversation.
+  // Answers are recovered from the server; avoid filling browser storage with
+  // full generations. Keep every unresolved/failed input and only the latest
+  // completed discovery record per conversation.
+  const stored={...p,snapshot:p.snapshot?{...p.snapshot,content:null}:undefined};
+  localStorage.setItem(`${key(p.actor)}:${p.requestId}`,JSON.stringify(stored));
+  for(const previous of saved(p.actor)){
+    if(previous.requestId!==p.requestId&&previous.createdAt<p.createdAt&&previous.conversationId===p.conversationId&&previous.snapshot?.state==='succeeded'){
+      localStorage.removeItem(`${key(p.actor)}:${previous.requestId}`);
+    }
+  }
 }
 const unresolved=(p:Pending|null)=>!!p && p.snapshot?.state!=='succeeded' && p.snapshot?.state!=='failed';
 
@@ -72,7 +93,7 @@ export function useStreamingChat(options:Options={}) {
         const p=entries.findLast(v=>v.actor===session.user.id && (opts.current.conversationId
           ? v.conversationId===opts.current.conversationId
           : !v.conversationId && v.input.moduleId===(opts.current.moduleId??null)));
-        if(p){current.current=p;setPending(p);setMessages([{id:`user-${p.requestId}`,role:'user',content:p.input.message,createdAt:new Date().toISOString()}]);await recover();}
+        if(p){current.current=p;setPending(p);setMessages(previous=>[...previous.filter(m=>m.id!==`user-${p.requestId}`),{id:`user-${p.requestId}`,role:'user',content:p.input.message,createdAt:new Date().toISOString()}]);await recover();}
       }catch{if(!cancelled)setError('无法读取本地请求记录，请检查浏览器存储。');}
     })();
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
@@ -125,18 +146,19 @@ export function useStreamingChat(options:Options={}) {
 
   const sendMessage=useCallback(async(content:string,sendOptions:{modelId?:string;moduleId?:string}={})=>{
     if(!content.trim()||busy.current||unresolved(current.current))return;
-    busy.current=true;
+    busy.current=true;const generation=epoch.current;
     try {
       const {data:{session}}=await supabase.auth.getSession();if(!session)throw new Error('请先登录，输入内容已保留。');
+      if(!alive.current||epoch.current!==generation)return;
       const input:ChatInput={message:content.trim(),conversationId:conversation.current,modelId:sendOptions.modelId??null,moduleId:sendOptions.moduleId??opts.current.moduleId??null};
       const choose=()=>{
         const existing=saved(session.user.id).findLast(v=>unresolved(v)&&v.conversationId===input.conversationId&&v.input.moduleId===input.moduleId);
         if(existing){if(JSON.stringify(existing.input)!==JSON.stringify(input))throw new Error('此对话还有需要恢复的请求，请先确认原请求状态。');return existing;}
-        const p:Pending={actor:session.user.id,requestId:crypto.randomUUID(),input,conversationId:input.conversationId};persist(p);return p;
+        const p:Pending={actor:session.user.id,requestId:crypto.randomUUID(),input,conversationId:input.conversationId,createdAt:Date.now()};persist(p);return p;
       };
       const p=navigator.locks?await navigator.locks.request(key(session.user.id),choose):choose();
-      if(!alive.current)return;
-      historyEpoch.current++;save(p);opts.current.onInputSaved?.(content);
+      if(!alive.current||epoch.current!==generation)return;
+      save(p);opts.current.onInputSaved?.(content);
       setMessages(previous=>[...previous,{id:`user-${p.requestId}`,role:'user',content:p.input.message,createdAt:new Date().toISOString()}]);
       await transmit(p);
     }catch(e){busy.current=false;if(alive.current)setError(e instanceof Error?e.message:'请求无法保存在浏览器中，输入内容已保留。');}
@@ -163,9 +185,13 @@ export function useStreamingChat(options:Options={}) {
     try {
       const {data,error}=await supabase.from('messages').select('id,role,content,created_at').eq('conversation_id',id).eq('is_deleted','false').order('created_at',{ascending:true}).limit(50);
       if(error)throw error;
-      if(!alive.current||version!==historyEpoch.current||busy.current)return;
+      if(!alive.current||version!==historyEpoch.current||conversation.current!==id)return;
       conversation.current=id;setConversation(id);
-      setMessages(data?.map(m=>({id:m.id,role:m.role as 'user'|'assistant',content:m.content,createdAt:m.created_at}))??[]);
+      setMessages(previous=>{
+        const history=data?.map(m=>({id:m.id,role:m.role as 'user'|'assistant',content:m.content,createdAt:m.created_at}))??[];
+        const ids=new Set(history.map(m=>m.id));
+        return [...history,...previous.filter(m=>!ids.has(m.id))];
+      });
       if(current.current)await recover();
     }catch{if(alive.current&&version===historyEpoch.current)setError('加载历史消息失败，请稍后重试。');}
   },[recover]);
