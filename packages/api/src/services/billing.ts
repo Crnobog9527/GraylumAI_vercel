@@ -16,7 +16,7 @@ import {
 } from '../types/billing';
 import { type TokenUsage, type CostBreakdown } from '../types/ai';
 import { logger } from '../lib/logger';
-import { classifyCreditBalanceFailure, readCreditBalance } from './creditBalance';
+import { creditBalanceDiagnostics, readCreditBalance, type CreditBalanceReadOptions } from './creditBalance';
 import { applyInvitationRebateForSpend } from './invitationRebate';
 
 // ============================================
@@ -718,13 +718,11 @@ export class BillingService {
   /**
    * 获取用户当前余额
    */
-  async getBalance(): Promise<number> {
+  async getBalance(options?: CreditBalanceReadOptions): Promise<number> {
     try {
-      return await readCreditBalance(this.supabase, this.userId);
+      return await readCreditBalance(this.supabase, this.userId, options);
     } catch (error) {
-      logger.error('billing', 'billing_balance_unavailable', {
-        reason: classifyCreditBalanceFailure(error),
-      });
+      logger.error('billing', 'billing_balance_unavailable', creditBalanceDiagnostics(error));
       throw error;
     }
   }

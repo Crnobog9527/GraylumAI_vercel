@@ -453,9 +453,9 @@ export async function POST(request: NextRequest) {
 
     const balanceStartedAt = Date.now();
     try {
-      await billingService.getBalance();
+      await billingService.getBalance({recoverTransient:true});
     } catch {
-      logAiStreamError('ai_stream_initial_balance_unavailable');
+      logAiStreamError('ai_stream_initial_balance_unavailable', {requestId});
       return new Response(
         JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
@@ -743,9 +743,9 @@ export async function POST(request: NextRequest) {
     let balance: number;
     const authorizationBalanceStartedAt = Date.now();
     try {
-      balance = await billingService.getBalance();
+      balance = await billingService.getBalance({recoverTransient:true});
     } catch {
-      logAiStreamError('ai_stream_authorization_balance_unavailable');
+      logAiStreamError('ai_stream_authorization_balance_unavailable', {requestId});
       return new Response(
         JSON.stringify({ error: STREAM_SERVICE_UNAVAILABLE_MESSAGE }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }

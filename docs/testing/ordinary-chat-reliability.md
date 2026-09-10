@@ -128,3 +128,66 @@ from the live staging schema; true, null and missing flags remain denied. The
 suite retains the staging-shaped text schema and additionally switches the local
 profile column to boolean for real HTTP allowed/revoked recovery and replay.
 No remote schema type is changed by this compatibility fix.
+
+## Bounded balance-read recovery and absent-request feedback
+
+The real #408 staging acceptance request `c2fc298d-c0b3-4779-b95c-c20c07e7cb99`
+returned 503 before claim/reservation/dispatch. Its deployed logs reported
+`billing_balance_unavailable` with `reason: timeout`, followed by
+`ai_stream_initial_balance_unavailable`. Read-back found no request, usage or
+billing rows and unchanged provider usage. The initial chat balance query uses
+the **service-role** client; the profile UI uses a user-authorized client. Earlier
+acceptance prose describing both as user-authorized was incorrect.
+
+The narrow own-profile policy and primary-key index were present. Historical
+logs collapsed SQL cancellation, pool acquisition and message-coded transport
+timeouts into one reason. They do **not** establish which infrastructure cause
+occurred. No permission/migration change or timeout increase is justified by
+that evidence. This repair bounds and recovers transient reads; it cannot promise
+that persistent remote database/network outages are fixed.
+
+Only the two existing ordinary/document chat balance gates opt into bounded
+recovery. Each gate makes at most two fresh `profiles?select=credits&id=eq...`
+GETs, with a 3-second deadline per attempt and one 100ms delay. The same client,
+role, actor and projection are retained. This query explicitly disables the
+installed PostgREST SDK's implicit 503/520/network retries, preventing nested
+retry multiplication. SQL `57014` (500), pool `PGRST003` (504), and transient
+transport errors can retry once; auth/ACL, missing rows, invalid balance and
+unclassified database errors still fail immediately. Persistent failure stays
+503, never zero balance, 402, cached authorization or a success fallback.
+
+The final authorization gate still re-reads the current balance independently
+of the initial read. Existing atomic pre-deduction remains the spending authority.
+No write, RPC, provider request, identity claim or settlement is retried by this
+helper. Other `readCreditBalance`/`getBalance` callers keep existing behavior.
+Logs add structured safe error codes, attempts and elapsed time; the route's
+balance failure logs now include its request ID. Raw SQL/error details, private
+content, credentials and tokens are not logged.
+
+An authenticated status 404 preserves the original error/input/request ID and
+suspends polling **and its activity indicator**. It does not turn unknown delivery
+into failed/refunded/succeeded or authorize automatic retransmission. Manual
+status checks and explicit original-ID submission retain their existing meanings.
+
+Reproduce against immutable deployed runtime, then run the candidate:
+
+```sh
+node packages/db/tests/v3/run-chat-reliability.mjs --balance-baseline
+node packages/db/tests/v3/run-chat-reliability.mjs --balance-regression
+node packages/db/tests/v3/run-chat-reliability.mjs
+node packages/db/tests/v3/run-chat-reliability.mjs --openrouter
+node packages/db/tests/v3/run-chat-reliability.mjs --regression
+pnpm --filter @repo/api exec vitest run src/services/__tests__/creditBalance.test.ts
+```
+
+The original six-case baseline reproduced five failures (500/504 transient
+recovery, two lingering-activity cases and unbounded hanging transport); the
+existing SDK network retry case passed. Tests use real disposable SQL/Auth/HTTP/UI
+and actual installed Supabase SDK, with faults injected only at the local test
+actor's service-role balance GET. No runtime fixture switch is shipped. The final
+suite additionally checks both initial and authorization read positions, exact
+HTTP counts, no claim/pre-deduction/provider call on exhausted failure, refresh
+without dispatch, and explicit original-ID submission with one settlement.
+Never-resolving transport deadlines, terminal failures and zero fresh balance are
+also tested through the installed SDK. Candidate results/CI/review attribution
+belong on the PR; none of this is new paid-provider acceptance or deployment proof.

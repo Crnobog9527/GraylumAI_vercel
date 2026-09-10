@@ -13,7 +13,7 @@ const searchEvidence = process.argv.includes('--search');
 const searchBaseline = process.argv.includes('--search-baseline');
 const openRouterSearch=liveProgress||process.argv.includes('--openrouter')||process.argv.includes('--openrouter-baseline');
 const openRouterBaseline=process.argv.includes('--openrouter-baseline');
-if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression'].includes(v))) throw new Error('Invalid option');
+if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression','--balance-regression','--balance-baseline'].includes(v))) throw new Error('Invalid option');
 let source = readFileSync(new URL('./run-workbench.mjs', import.meta.url), 'utf8');
 function replace(from, to) {
   if (source.split(from).length !== 2) throw new Error('Shared fixture boundary changed: ' + from.slice(0, 80));
@@ -32,7 +32,7 @@ const tag = \`graylum-wb-`);
 if (!regression) replace('src/services/__tests__/workbench.integration.ts', openRouterSearch?'src/routers/openRouterSearch.integration.ts':searchEvidence || searchBaseline ? 'src/routers/searchEvidence.integration.ts' : 'src/routers/ordinaryChatReliability.integration.ts');
 replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', regression
   ? '"--testNamePattern", "^CHAT: (durable multi-turn linkage|homepage entry|[3468] configured steps|HTTP 429|summary HTTP 429|late initial read)",'
-  : process.argv.includes('--delivery-regression') ? '"--testNamePattern", "^UNREGISTERED:",' : liveProgress ? '"--testNamePattern", "^LIVE:",' : '');
+  : (process.argv.includes('--balance-regression')||process.argv.includes('--balance-baseline')) ? '"--testNamePattern", "^BALANCE:",' : process.argv.includes('--delivery-regression') ? '"--testNamePattern", "^UNREGISTERED:",' : liveProgress ? '"--testNamePattern", "^LIVE:",' : '');
 
 replace('console.log("SQL additive migration and repeat application PASS");', `
   // Service-role column contract from 0063; caller consumption uses 0079.
@@ -74,6 +74,12 @@ for(const path of ['apps/web/src/app/api/ai/stream/route.ts','apps/web/src/hooks
  writeFileSync(resolve(root,path),execFileSync('git',['show','ce9b98f2ad2ecd0ee3c334e0abae0993ecc1053b:'+path],{cwd:source}));
 }
 console.log('LIVE_BASELINE_RUNTIME ce9b98f2ad2ecd0ee3c334e0abae0993ecc1053b');
+const tag = \`graylum-wb-`);
+if(process.argv.includes('--balance-baseline'))replace('const tag = `graylum-wb-', `
+for(const path of ['apps/web/src/app/api/ai/stream/route.ts','apps/web/src/hooks/useStreamingChat.ts','packages/api/src/services/creditBalance.ts','packages/api/src/services/billing.ts']) {
+ writeFileSync(resolve(root,path),execFileSync('git',['show','b6c007ae707a0740f6c21b2bb5d3cb440c8b0a4c:'+path],{cwd:source}));
+}
+console.log('BALANCE_BASELINE_RUNTIME b6c007ae707a0740f6c21b2bb5d3cb440c8b0a4c');
 const tag = \`graylum-wb-`);
 const temporary = new URL(`./.chat-reliability-${randomUUID()}.mjs`, import.meta.url);
 writeFileSync(temporary, source);
