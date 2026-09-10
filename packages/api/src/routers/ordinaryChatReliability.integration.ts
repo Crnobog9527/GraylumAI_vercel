@@ -401,3 +401,22 @@ repaired('boolean soft-delete schema permits active recovery and replay but reje
   await sql.query("alter table profiles alter column is_deleted drop default, alter column is_deleted type text using is_deleted::text, alter column is_deleted set default 'false'");
  }
 });
+
+
+repaired.each(['HOLD','UNKNOWN'])('browser preserves completed earlier turns while %s request is unresolved after refresh',async mode=>{
+ const {page,context}=await pageFor();const first=make();await send(first);
+ const conversationId=(await state(first.requestId)).request.conversationId;
+ const next={...make(mode),conversationId};
+ try{
+  await page.goto(app+'/chat?conversation='+conversationId);
+  await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:45000});
+  await page.getByTestId('chat-input').fill(next.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  for(let i=0;i<100&&await calls(next.message)===0;i++)await new Promise(r=>setTimeout(r,100));
+  expect(await calls(next.message)).toBe(1);
+  await page.reload();
+  await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:15000});
+  await page.getByText(next.message,{exact:true}).waitFor({timeout:15000});
+  expect(await page.getByText('Local answer '+first.message,{exact:true}).count()).toBe(1);
+  expect(await calls(next.message)).toBe(1);
+ }finally{if(mode==='HOLD')await release(next);await context.close();}
+},90000);

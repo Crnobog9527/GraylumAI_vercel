@@ -10,7 +10,7 @@ export interface StreamMessage {
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
-type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean;deliveryError?:string;received?:boolean};
+type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean;deliveryError?:string;received?:boolean;serverCreatedAt?:string};
 export type ChatProgressPhase = 'preparing'|'waiting'|'searching'|'answering'|'confirming'|'recovering'|null;
 interface Options {
   conversationId?:string;moduleId?:string;onMessageStart?:()=>void;
@@ -45,6 +45,17 @@ function persist(p:Pending) {
     }
   }
 }
+// PostgreSQL timestamps retain microseconds. Compare the fractional remainder
+// as well as JS milliseconds so a rapid earlier message is not mistaken for
+// the current request. This is only display reconciliation, never authorization.
+function precedesRequest(message:StreamMessage,createdAt:string|undefined) {
+  if(!createdAt)return false;
+  const a=Date.parse(message.createdAt),b=Date.parse(createdAt);
+  if(!Number.isFinite(a)||!Number.isFinite(b))return false;
+  if(a!==b)return a<b;
+  const fraction=(v:string)=>(v.match(/\.(\d+)/)?.[1]??'').padEnd(9,'0');
+  return fraction(message.createdAt)<fraction(createdAt);
+}
 const unresolved=(p:Pending|null)=>!!p && p.snapshot?.state!=='succeeded' && p.snapshot?.state!=='failed';
 
 export function useStreamingChat(options:Options={}) {
@@ -61,14 +72,15 @@ export function useStreamingChat(options:Options={}) {
   const save=useCallback((p:Pending)=>{persist(p);current.current=p;setPending(p);},[]);
   const apply=useCallback((snapshot:Snapshot,p:Pending)=>{
     if(!alive.current || current.current?.requestId!==p.requestId)return;
-    const next={...p,conversationId:snapshot.conversationId,snapshot,absent:false,deliveryError:undefined};save(next);
+    const next={...p,conversationId:snapshot.conversationId,serverCreatedAt:snapshot.createdAt??p.serverCreatedAt,snapshot,absent:false,deliveryError:undefined};save(next);
     if(conversation.current!==snapshot.conversationId){conversation.current=snapshot.conversationId;setConversation(snapshot.conversationId);opts.current.onConversationCreated?.(snapshot.conversationId);}
     const userId=snapshot.userMessageId??`user-${p.requestId}`,assistantId=snapshot.assistantMessageId??`assistant-${p.requestId}`;
     const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),search:snapshot.search,
       ...(snapshot.state==='succeeded'?{usage:snapshot.usage??undefined,cost:{credits:snapshot.billing.credits??0}}:{})};
-    const history=deferredHistory.current?.conversationId===snapshot.conversationId && ['succeeded','failed'].includes(snapshot.state)
-      ? deferredHistory.current.messages : null;
-    if(history)deferredHistory.current=null;
+    const terminal=['succeeded','failed'].includes(snapshot.state);
+    const batch=deferredHistory.current?.conversationId===snapshot.conversationId?deferredHistory.current.messages:null;
+    const history=batch?(terminal?batch:batch.filter(m=>precedesRequest(m,next.serverCreatedAt))):null;
+    if(terminal&&batch)deferredHistory.current=null;
     setMessages(previous=>{
       const combined=history?[...new Map([...history,...previous].map(m=>[m.id,m])).values()]:previous;
       const without=combined.filter(m=>![userId,assistantId,`user-${p.requestId}`,`assistant-${p.requestId}`].includes(m.id));
@@ -146,7 +158,7 @@ export function useStreamingChat(options:Options={}) {
           let end:number;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!line.startsWith('data: '))continue;
             const event=JSON.parse(line.slice(6));if(!alive.current||epoch.current!==generation)continue;
             if(event.type==='init'&&event.requestId===p.requestId&&event.conversationId){
-              const nextPending={...current.current!,conversationId:event.conversationId,received:true};save(nextPending);setPhase('waiting');
+              const nextPending={...current.current!,conversationId:event.conversationId,received:true,serverCreatedAt:typeof event.createdAt==='string'?event.createdAt:undefined};save(nextPending);setPhase('waiting');
               if(conversation.current!==event.conversationId){conversation.current=event.conversationId;setConversation(event.conversationId);opts.current.onConversationCreated?.(event.conversationId);}
             }
             if(event.requestId!==p.requestId)continue;
@@ -221,6 +233,8 @@ export function useStreamingChat(options:Options={}) {
       // merge until apply() has that mapping; never deduplicate by answer text.
       if(unresolved(current.current)){
         deferredHistory.current={conversationId:id,messages:loaded};
+        const earlier=loaded.filter(m=>precedesRequest(m,current.current?.serverCreatedAt));
+        setMessages(previous=>[...new Map([...earlier,...previous].map(m=>[m.id,m])).values()]);
         if(!busy.current)await recover();
         return;
       }

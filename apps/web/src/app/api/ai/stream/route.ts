@@ -869,6 +869,7 @@ export async function POST(request: NextRequest) {
           delivery.enqueue(
             encoder.encode(`data: ${JSON.stringify({
               type: 'init',
+              createdAt: claim.request.created_at ?? null,
               conversationId: conversation.id,
               modelUsed: runtimeModel.modelId,
               requestId,
