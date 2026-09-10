@@ -40,14 +40,14 @@ describe('workbench model boundary', () => {
     const [url, options] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(options.redirect).toBe('error');
-    expect(JSON.parse(String(options.body))).toMatchObject({ tools: [], plugins: [], tool_choice: 'none', stream: false, max_tokens: 100, provider: { allow_fallbacks: false } });
+    expect(JSON.parse(String(options.body))).toMatchObject({ tools: [], plugins: [{id:'web',enabled:false}], tool_choice: 'none', stream: false, max_tokens: 100, provider: { allow_fallbacks: false } });
   });
   it.each(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'] as const)('sends %s with reasoning disabled and no fallback or tools',async model_id=>{
     const fetch=vi.fn(async()=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'Qwen result'}}],usage:{prompt_tokens:100,completion_tokens:10}})));vi.stubGlobal('fetch',fetch);
     await openRouterGeneration({...request,model:{...model,model_id,tokenizer_family:'openai'}});
     expect(fetch).toHaveBeenCalledTimes(1);
     const [,options]=fetch.mock.calls[0] as unknown as [string,RequestInit];
-    expect(JSON.parse(String(options.body))).toMatchObject({model:model_id,reasoning:{enabled:false},provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
+    expect(JSON.parse(String(options.body))).toMatchObject({model:model_id,reasoning:{enabled:false},provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[{id:'web',enabled:false}],stream:false});
     expect(options.redirect).toBe('error');
   });
   it('sends Luna with low reasoning and fixed bounded text-only transport',async()=>{
@@ -57,7 +57,7 @@ describe('workbench model boundary', () => {
     const [url,options]=fetch.mock.calls[0] as unknown as [string,RequestInit];
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(options.redirect).toBe('error');
-    expect(JSON.parse(String(options.body))).toMatchObject({model:'openai/gpt-5.6-luna',reasoning:{effort:'low'},max_tokens:100,provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[],stream:false});
+    expect(JSON.parse(String(options.body))).toMatchObject({model:'openai/gpt-5.6-luna',reasoning:{effort:'low'},max_tokens:100,provider:{require_parameters:true,allow_fallbacks:false},tools:[],tool_choice:'none',plugins:[{id:'web',enabled:false}],stream:false});
   });
   it.each(['https://attacker.invalid', 'http://127.0.0.1:1234', 'https://openrouter.ai@attacker.invalid'])('rejects unreviewed endpoint %s before fetch', async endpoint => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
@@ -68,6 +68,8 @@ describe('workbench model boundary', () => {
     { choices: [{ finish_reason: 'length', message: { content: 'partial' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
     { choices: [{ finish_reason: 'stop', message: { content: 'tools', tool_calls: [{}] } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
     { choices: [{ finish_reason: 'stop', message: { content: 'missing usage' } }] },
+    { choices: [{ finish_reason: 'stop', message: { content: 'unexpected search' } }], usage: { prompt_tokens: 1, completion_tokens: 1, server_tool_use_details: { web_search_requests: 1 } } },
+    { choices: [{ finish_reason: 'stop', message: { content: 'unexpected source', annotations: [{ type: 'url_citation', url_citation: { url: 'https://example.test' } }] } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
   ])('does not turn incomplete, tool or unmetered output into a billable candidate', async body => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(body))); vi.stubGlobal('fetch', fetch);
     await expect(openRouterGeneration(request)).rejects.toThrow(); expect(fetch).toHaveBeenCalledTimes(1);

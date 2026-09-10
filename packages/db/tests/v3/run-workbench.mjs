@@ -271,6 +271,7 @@ try {
     if (!ok) throw new Error("local service not ready");
   }
   let modelCalls = 0;
+  const documentCalls=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
@@ -278,7 +279,7 @@ try {
       const chunks = []; let bytes = 0;
       for await (const chunk of req) { bytes += chunk.length; if (bytes > 2097152) { res.writeHead(413).end(); return; } chunks.push(chunk); }
       const body = JSON.parse(Buffer.concat(chunks).toString());
-      if (req.method !== 'POST' || body.tools?.length || body.plugins?.length || body.stream !== false) { res.writeHead(400).end(); return; }
+      if (req.method !== 'POST' || body.tools?.length || JSON.stringify(body.plugins)!==JSON.stringify([{id:'web',enabled:false}]) || body.tool_choice!=='none' || body.stream !== false) { res.writeHead(400).end(); return; }
       modelCalls++;
       await new Promise(r => setTimeout(r, 1500));
       if (!rateLimitFixtureRejected && JSON.stringify(body.messages).includes('LOCAL_RATE_LIMIT_ONCE')) {
@@ -297,6 +298,12 @@ try {
     if(req.url==='/__chat_model_fixture') {
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const requestText=Buffer.concat(chunks).toString();
+      const request=JSON.parse(requestText);
+      if(requestText.includes('DOCUMENT_SEND')||requestText.includes('FREE_SEND')){
+        const legacy=request.plugins?.find(p=>p.id==='web')?.enabled!==false;
+        documentCalls.push({model:request.model,tools:request.tools,plugins:request.plugins,tool_choice:request.tool_choice,performedQueries:legacy?1:0});
+        if(legacy||request.tools?.length||request.tool_choice!=='none'){res.writeHead(400).end();return;}
+      }
       res.writeHead(200,{'Content-Type':'text/event-stream'});
       if(requestText.includes('USAGE_CASE_')) {
         const usage=requestText.includes('USAGE_CASE_ZERO')?{prompt_tokens:0,completion_tokens:0,total_tokens:0}:requestText.includes('USAGE_CASE_INVALID')?{prompt_tokens:-1,completion_tokens:30}:{prompt_tokens:800,completion_tokens:30,total_tokens:830,prompt_tokens_details:{cached_tokens:400},completion_tokens_details:{reasoning_tokens:20}};
@@ -315,6 +322,7 @@ try {
       res.end('data: [DONE]\n\n');return;
     }
     if (req.url === '/__workbench_model_calls') { res.writeHead(200).end(JSON.stringify({ calls: modelCalls })); return; }
+    if (req.url === '/__document_model_calls') { res.writeHead(200).end(JSON.stringify(documentCalls)); return; }
 
     const prefix = req.url?.startsWith("/rest/v1/")
       ? "/rest/v1"

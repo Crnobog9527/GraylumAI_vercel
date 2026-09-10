@@ -1,7 +1,7 @@
 import { ChatRequestError, claimChatRequest, ordinaryChatRequest, publicChatRequest, readChatRequest, recoverChatResult, isUnmeteredRateLimit, type ChatInput } from '@/lib/ordinary-chat-request';
 import { assertChatRecoveryAccess } from '@/lib/ordinary-chat-access';
 import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
-import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream, nativeSearchCapability, type SearchEvidence } from '@repo/api/src/services/providerUsage';
+import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream, nativeSearchCapability, openRouterSearchCapability, openRouterSearchParameters, type SearchEvidence } from '@repo/api/src/services/providerUsage';
 /**
  * AI Streaming API Route
  *
@@ -50,6 +50,7 @@ import {
   normalizeOpenAICompatibleEndpoint,
   resolveOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
+  isOpenRouterEndpoint,
 } from '@repo/api/src/services/providerUtils';
 import type { ClaudeMessage } from '@repo/api/src/types/ai';
 
@@ -611,6 +612,8 @@ export async function POST(request: NextRequest) {
       ? getGoogleApiKey(runtimeModel.apiKey)
       : getConfiguredProviderApiKey(runtimeModel.apiKey);
     const openAICompatible = usesOpenAICompatibleApi({endpoint:runtimeModel.apiEndpoint,apiKey});
+    const compatibleEndpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions';
+    const openRouter = openAICompatible && isOpenRouterEndpoint(compatibleEndpoint);
     // A known unsupported transport has not executed. Reject it before token
     // provider calls, reservation, and the durable dispatch boundary.
     if (!openAICompatible && runtimeModel.provider !== 'google') {
@@ -620,8 +623,14 @@ export async function POST(request: NextRequest) {
     const searchDecision = decideWebSearch(message);
     const webSearchRequested = searchDecision.shouldSearch &&
       searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
-    const searchCapability = activePrompt?.skillSnapshot ? null : nativeSearchCapability(runtimeModel, openAICompatible);
+    const nativeCapability = nativeSearchCapability(runtimeModel, openAICompatible);
+    const searchCapability = activePrompt?.skillSnapshot ? null : openRouterSearchCapability(compatibleEndpoint,runtimeModel.modelId,runtimeModel.enableWebSearch)&&openRouter ? 'search-query' : nativeCapability;
     const webSearchAvailable = runtimeSettings.enableSmartSearchDecision && webSearchRequested && searchCapability !== null && !!apiKey;
+    let openRouterParameters:ReturnType<typeof openRouterSearchParameters>|undefined;
+    if(openRouter){
+      try{openRouterParameters=openRouterSearchParameters(runtimeModel.modelId,webSearchAvailable);}
+      catch{return Response.json({error:'此模型包含未核实的搜索或预设行为，原请求已保留且未预扣。'},{status:503});}
+    }
     const searchPrice = webSearchAvailable ? runtimeSettings.searchSurchargeCredits : 0;
     if (searchPrice === null) return Response.json({error:'联网计费配置不可用，请联系管理员。'},{status:503});
     if (!webSearchAvailable && !activePrompt?.skillSnapshot) systemPrompt += '\n本次未启用联网搜索。请基于已有知识回答，涉及实时信息时说明未核实，不得声称已联网或编造搜索来源。';
@@ -888,16 +897,17 @@ export async function POST(request: NextRequest) {
 
           const providerStartedAt = Date.now();
           if (openAICompatible) {
-            const endpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) ||
-              'https://openrouter.ai/api/v1/chat/completions';
+            const endpoint = compatibleEndpoint;
             const response = await fetch(endpoint, {
               method: 'POST',
+              redirect: 'error',
               headers: getOpenAICompatibleHeaders(apiKey, runtimeSettings.siteName),
               body: JSON.stringify({
                 model: runtimeModel.modelId,
                 max_tokens: runtimeModel.maxTokens,
                 stream: true,
                 stream_options: { include_usage: true },
+                ...openRouterParameters,
                 messages: buildOpenAICompatibleMessages({
                   systemPrompt,
                   messages: providerMessages,
@@ -916,10 +926,16 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;});
+            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;},openRouter?{searchEnabled:webSearchAvailable}:undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
+            if(result.search){
+              actualSearchCount=result.search.queryCount;
+              webSearchExecuted=actualSearchCount>0;
+              searchEvidence={...searchEvidence,...result.search,status:'verified',executed:webSearchExecuted,
+                surchargeUnits:Number(webSearchExecuted),surchargeCredits:canUseFreeTier?0:Number(webSearchExecuted)*searchPrice};
+            }
           } else if (runtimeModel.provider === 'google') {
             const response = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(runtimeModel.modelId)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey ?? '')}`,
@@ -966,7 +982,7 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;}, webSearchAvailable ? searchCapability! : undefined);
+            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;}, webSearchAvailable ? nativeCapability! : undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;

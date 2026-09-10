@@ -39,72 +39,74 @@ beforeAll(async () => {
 },180000);
 afterAll(async()=>{
  {const rows=await sql.query('select request_id,state,pre_deduct_id,stop_requested_at from ordinary_chat_requests where user_id=$1 order by created_at',[actor]);
- writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'search-observed.json'),JSON.stringify(rows.rows,null,2));}
+ writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'openrouter-search-observed.json'),JSON.stringify(rows.rows,null,2));}
  await browser?.close();await sql.end();
 },60000);
-const make = (mode='OK') => ({requestId:randomUUID(),modelId,message:'SEARCH_CASE_'+mode+'_'+randomUUID().replaceAll('-','')});
+const make = (mode='OK') => ({requestId:randomUUID(),modelId,message:'OPENROUTER_CASE_'+mode+'_'+randomUUID().replaceAll('-','')});
 async function send(body:ReturnType<typeof make>&{conversationId?:string;moduleId?:string},access=token){const r=await fetch(app+'/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+access},body:JSON.stringify(body)});return {status:r.status,body:await r.text()};}
 async function calls(key:string){const data=await (await fetch(api+'/__search_calls')).json() as Array<{key:string}>;return data.filter(c=>c.key===key).length;}
 async function accounting(requestId:string){return (await sql.query("select operation_type,count(*)::int count from billing_history where user_id=$1 and (metadata->>'requestId'=$2 or metadata->>'preDeductId' in (select id::text from billing_history where metadata->>'requestId'=$2)) group by operation_type",[actor,requestId])).rows;}
 async function setting(key:string,value:unknown){await sql.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);}
-async function native(model='gemini-3-flash-preview',enabled=true,endpoint:string|null=null){
- await sql.query("update ai_models set model_id=$2,provider='google',api_endpoint=$3,enable_web_search=$4,token_counting_method='provider_usage',tokenizer_family='gemini',web_search_cost=14000000 where id=$1",[modelId,model,endpoint,enabled?'true':'false']);
+async function configureOpenRouter(model='anthropic/claude-opus-4.5',enabled=true,endpoint:string|null=''){
+ await sql.query("update ai_models set model_id=$2,provider='openai',api_endpoint=$3,enable_web_search=$4,token_counting_supported='false',token_counting_method='unsupported',tokenizer_family='openai',web_search_cost=7000000 where id=$1",[modelId,model,endpoint,enabled?'true':'false']);
  await setting('enable_smart_search_decision',true);await setting('search_surcharge_credits','7');
 }
 async function snapshot(id:string){const r=await fetch(app+'/api/ai/requests?requestId='+id,{headers:{Authorization:'Bearer '+token}});expect(r.status).toBe(200);return (await r.json()).request;}
 async function row(id:string){return (await sql.query('select * from ordinary_chat_requests where request_id=$1',[id])).rows[0];}
-async function observed(body:ReturnType<typeof make>){const r=await row(body.requestId);const provider=(await (await fetch(api+'/__search_calls')).json()).filter((c:any)=>c.key===body.message.match(/SEARCH_CASE_[a-zA-Z0-9_-]+/)?.[0]);return {provider,r,ledger:await accounting(body.requestId),public:await snapshot(body.requestId)};}
+async function observed(body:ReturnType<typeof make>){const r=await row(body.requestId);const provider=(await (await fetch(api+'/__search_calls')).json()).filter((c:any)=>c.key===body.message.match(/OPENROUTER_CASE_[a-zA-Z0-9_-]+/)?.[0]);return {provider,r,ledger:await accounting(body.requestId),public:await snapshot(body.requestId)};}
 const request=(mode:string,prefix='搜索最新资料后改写：')=>{const body=make(mode);body.message=prefix+body.message;return body;};
 it.each(['不要联网，解释今天这个词：','Don’t search the web; answer from memory: ','Do not perform a web search. Tell me the current weather: ','不需要搜索最新资料，直接总结：'])('explicit prohibition %s prevents tools and search reservation',async prefix=>{
- await native();const body=request('ONE',prefix);await send(body);const v=await observed(body);
+ await configureOpenRouter();const body=request('ONE',prefix);await send(body);const v=await observed(body);
  console.log('SEARCH_PROHIBITION',JSON.stringify({tools:v.provider[0]?.tools,reservation:v.r.reservation,search:v.public.search}));
- expect(v.provider).toHaveLength(1);expect(v.provider[0].tools).toEqual([]);expect(v.public.search).toMatchObject({executed:false,queryCount:0});
+ expect(v.provider).toHaveLength(1);expect(v.provider[0].body).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none'});expect(v.provider[0].performedQueries).toBe(0);expect(v.provider[0].legacyEnabled).toBe(false);expect(v.public.search).toMatchObject({executed:false,queryCount:0});
 });
-it('mixed intent really offers the native tool and records execution',async()=>{
- await native();const body=request('ONE');await send(body);const v=await observed(body);
+it('mixed intent really offers the OpenRouter server tool and records execution',async()=>{
+ await configureOpenRouter();const body=request('ONE');await send(body);const v=await observed(body);
  console.log('SEARCH_MIXED',JSON.stringify({tools:v.provider[0]?.tools,search:v.public.search,ledger:v.ledger}));
- expect(v.provider[0].tools).toEqual([{google_search:{}}]);expect(v.public.search).toMatchObject({status:'verified',queryCount:1,providerUnits:1});
+ expect(v.provider[0].tools).toEqual([{type:'openrouter:web_search'}]);expect(v.public.search).toMatchObject({status:'verified',queryCount:1,providerUnits:1});
 });
 it('zero executions never count tool availability as one search',async()=>{
- await native();const body=request('ZERO','搜索最新资料：');await send(body);const v=await observed(body);
+ await configureOpenRouter();const body=request('ZERO','搜索最新资料：');await send(body);const v=await observed(body);
  console.log('SEARCH_ZERO',JSON.stringify({savedSearchCount:v.r.response_params?.p_search_count,search:v.public.search}));
  expect(v.r.response_params?.p_search_count).toBe(0);expect(v.public.search).toMatchObject({executed:false,queryCount:0,providerUnits:0,surchargeCredits:0});
 });
-it('unavailable compatible transport adds no search pre-deduction',async()=>{
- await native('gemini-2.5-flash',true,'https://compatible.example.test/v1');
- const body=request('ONE','搜索最新资料：');await send(body);const first=await observed(body);
+repaired('unverified compatible transport is denied before dispatch or pre-deduction',async()=>{
+ await configureOpenRouter('anthropic/claude-opus-4.5',true,'https://compatible.example.test/v1');
+ const body=request('ONE','搜索最新资料：');expect((await send(body)).status).toBe(500);const first=await observed(body);
  await setting('search_surcharge_credits','9000');await sql.query('update ai_models set web_search_cost=90000000 where id=$1',[modelId]);
- const secondBody=request('ONE','搜索最新资料：');await send(secondBody);const second=await observed(secondBody);
- const reserved=(r:any)=>Number(r.reservation.balance_before)-Number(r.reservation.balance_after);
- console.log('SEARCH_UNAVAILABLE',JSON.stringify({first:reserved(first.r),second:reserved(second.r)}));
- expect(first.provider[0].tools).toEqual([]);expect(reserved(first.r)).toBe(reserved(second.r));expect(second.public.search).toMatchObject({available:false,status:'unavailable',surchargeCredits:0});
+ const secondBody=request('ONE','搜索最新资料：');expect((await send(secondBody)).status).toBe(500);const second=await observed(secondBody);
+ for(const v of [first,second]){expect(v.provider).toHaveLength(0);expect(v.ledger).toEqual([]);}
 });
 repaired.each(['ZERO','ONE','MULTI','MULTI_DUPLICATE'])('actual %s execution settles and recovers once',async mode=>{
- await native();const body=request(mode);await send(body);const v=await observed(body);const count=mode==='ZERO'?0:mode==='ONE'?1:3;
+ await configureOpenRouter();const body=request(mode);await send(body);const v=await observed(body);const count=mode==='ZERO'?0:mode==='ONE'?1:3;
  expect(v.public.state).toBe('succeeded');expect(v.public.search).toMatchObject({queryCount:count,providerUnits:count,surchargeCredits:count?7:0});
- expect(Number(v.r.response_params.p_total_cost_usd)).toBeCloseTo(0.000138+count*0.014,6);
+ expect(Number(v.r.response_params.p_total_cost_usd)).toBeCloseTo(0.000138+count*0.007,6);
  expect(v.r.response_params.p_search_count).toBe(count);expect(v.provider).toHaveLength(1);
  await Promise.all([send(body),send(body),snapshot(body.requestId)]);expect((await observed(body)).provider).toHaveLength(1);
  expect(v.ledger).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
 });
-repaired('Gemini 2.5 cost uses one grounded prompt and retains three queries',async()=>{
- await native('gemini-2.5-flash');const body=request('MULTI');await send(body);const v=await observed(body);
- expect(v.public.search).toMatchObject({queryCount:3,providerUnit:'grounded-prompt',providerUnits:1});
+repaired.each(['anthropic/claude-opus-4.5','qwen/qwen3.8-27b','openai/gpt-5.6-luna','google/gemini-3-flash-preview'])('OpenRouter model %s uses the same server tool and performed query evidence',async model=>{
+ await configureOpenRouter(model);const body=request('MULTI');await send(body);const v=await observed(body);
+ expect(v.public.search).toMatchObject({queryCount:3,providerUnit:'search-query',providerUnits:3,queries:null});
+ expect(v.provider[0].body).toMatchObject({model,tools:[{type:'openrouter:web_search'}],plugins:[{id:'web',enabled:false}],max_tool_calls:3});
+ expect(v.provider[0].body.tools[0]).not.toHaveProperty('parameters.engine');
+ expect(v.r.response_params.p_token_metadata.provider_usage.openRouterCost).toMatchObject({totalUsd:0.021,searchUsd:null});
+ expect(v.r.response_params.p_total_cost_usd).toBeCloseTo(0.000138+3*0.007,6);
 });
-repaired.each(['MISSING','CORRUPT','TIMEOUT','TRANSPORT_LOSS'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
- await native();const body=request(mode);await send(body);const v=await observed(body);
- expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(['MISSING','CORRUPT'].includes(mode))expect(v.public.content).toContain('Local answer');
+repaired.each(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT','COUNTER_CONFLICT','IDENTITY_CONFLICT','TIMEOUT','TRANSPORT_LOSS'])('%s stays unknown, retains original input and never redispatches or refunds',async mode=>{
+ await configureOpenRouter();const body=request(mode);await send(body);const v=await observed(body);
+ expect(v.public.state).toBe('unknown');expect(v.public.input.message).toBe(body.message);if(['MISSING','CORRUPT','COST_MISSING','COST_CORRUPT'].includes(mode))expect(v.public.content).toContain('Local answer');
  await Promise.all([send(body),send(body),snapshot(body.requestId)]);const after=await observed(body);expect(after.provider).toHaveLength(1);expect(after.ledger).toEqual([{operation_type:'pre_deduct',count:1}]);
 });
-repaired.each(['disabled','model-disabled','unreviewed'])('%s has zero search fee and no tools',async mode=>{
- await native(mode==='unreviewed'?'gemini-unreviewed':'gemini-3-flash-preview',mode!=='model-disabled');if(mode==='disabled')await setting('enable_smart_search_decision',false);
- await setting('search_surcharge_credits','invalid');const body=request('ONE');await send(body);const v=await observed(body);expect(v.public.state).toBe('succeeded');expect(v.provider[0].tools).toEqual([]);expect(v.public.search.surchargeCredits).toBe(0);
+repaired.each(['disabled','model-disabled'])('%s has zero search fee and no tools',async mode=>{
+ await configureOpenRouter('anthropic/claude-opus-4.5',mode!=='model-disabled');if(mode==='disabled')await setting('enable_smart_search_decision',false);
+ await setting('search_surcharge_credits','invalid');const body=request('ONE');await send(body);const v=await observed(body);expect(v.public.state).toBe('succeeded');expect(v.provider[0].body).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none'});expect(v.public.search.surchargeCredits).toBe(0);
 });
 repaired.each([null,'','invalid',-1,1000000])('invalid stored search price %j denies before reservation and HTTP',async price=>{
- await native();await setting('search_surcharge_credits',price);const body=request('ONE');const response=await send(body);expect(response.status).toBe(503);const v=await observed(body);expect(v.provider).toHaveLength(0);expect(v.ledger).toEqual([]);
+ await configureOpenRouter();await setting('search_surcharge_credits',price);const body=request('ONE');const response=await send(body);expect(response.status).toBe(503);const v=await observed(body);expect(v.provider).toHaveLength(0);expect(v.ledger).toEqual([]);
 });
 repaired('admin price save / SQL read / chat consumption preserve number and canonical string',async()=>{
- await native();await sql.query("update profiles set role='admin' where id=$1",[actor]);
+ await configureOpenRouter();await sql.query("update profiles set role='admin' where id=$1",[actor]);
  const login=await createClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}}).auth.signInWithPassword(credentials);if(login.error)throw login.error;
  const {createServerClient}=requireWeb('@supabase/ssr');const cookies:any[]=[];const client=createServerClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[],setAll:(v:any[])=>cookies.push(...v)}});await client.auth.setSession(login.data.session);
  const update=async(value:unknown)=>fetch(app+'/api/trpc/settings.updateSystemSettingsBulk',{method:'POST',headers:{Cookie:cookies.map(c=>c.name+'='+c.value).join('; '),'Content-Type':'application/json'},body:JSON.stringify([{key:'search_surcharge_credits',value}])});
@@ -114,27 +116,27 @@ repaired('admin price save / SQL read / chat consumption preserve number and can
  }finally{await sql.query("update profiles set role='user' where id=$1",[actor]);}
 });
 repaired('browser response loss and refresh restore original sources and cannot execute provider HTML',async()=>{
- await native();await setting('chat_show_model_selector',false);const context=await browser.newContext();await context.route('**/*',r=>['127.0.0.1','localhost'].includes(new URL(r.request().url()).hostname)?r.continue():r.abort());const page=await context.newPage();let submitted:any;
+ await configureOpenRouter();await setting('chat_show_model_selector',false);const context=await browser.newContext();await context.route('**/*',r=>['127.0.0.1','localhost'].includes(new URL(r.request().url()).hostname)?r.continue():r.abort());const page=await context.newPage();let submitted:any;
  try{
   await page.goto(app+'/login?redirect=/chat');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
   await page.route('**/api/ai/stream',async route=>{submitted=route.request().postDataJSON();await route.fetch();await route.abort();});
   await page.route('**/chat?conversation=**',async route=>{if(route.request().headers().rsc==='1')await new Promise(r=>setTimeout(r,3000));await route.continue().catch(()=>{});});
   const body=request('MULTI_DUPLICATE');await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
-  await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:60000});
+  await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:60000});
   const original=await snapshot(submitted.requestId);expect(new URL(page.url()).searchParams.get('conversation')).toBe(original.conversationId);
-  await page.reload();await page.getByRole('link',{name:'Local verified source'}).waitFor({timeout:45000});
-  expect(await page.getByRole('link',{name:'Local verified source'}).getAttribute('href')).toBe('https://example.test/search-source');expect(await page.getByText('UNSAFE',{exact:true}).count()).toBe(0);
-  expect((await observed(submitted)).provider).toHaveLength(1);await page.screenshot({path:resolve(process.env.V3_WORKBENCH_OUTPUT!,'search-recovery.png')});
+  await page.reload();await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:45000});
+  expect(await page.getByRole('link',{name:'OpenRouter verified source'}).getAttribute('href')).toBe('https://example.test/openrouter-source');expect(await page.getByText('UNSAFE',{exact:true}).count()).toBe(0);
+  expect((await observed(submitted)).provider).toHaveLength(1);await page.screenshot({path:resolve(process.env.V3_WORKBENCH_OUTPUT!,'openrouter-search-recovery.png')});
  }finally{await context.close();}
 },120000);
 repaired('search result survives settlement rollback, denied new spending and same-request recovery',async()=>{
- await native();const body=request('MULTI');
+ await configureOpenRouter();const body=request('MULTI');
  await sql.query(`CREATE TABLE search_test_fail(enabled boolean); INSERT INTO search_test_fail VALUES(true);
  CREATE FUNCTION search_test_block_message() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF EXISTS(SELECT 1 FROM search_test_fail WHERE enabled) THEN RAISE EXCEPTION 'local search settlement fault'; END IF; RETURN NEW; END $$;
  CREATE TRIGGER search_test_message BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION search_test_block_message();`);
  try{
-  await send(body);const saved=await snapshot(body.requestId);expect(saved.state).toBe('responded');expect(saved.search.queryCount).toBe(3);expect(saved.search.sources[0].title).toBe('Local verified source');
+  await send(body);const saved=await snapshot(body.requestId);expect(saved.state).toBe('responded');expect(saved.search.queryCount).toBe(3);expect(saved.search.sources[0].title).toBe('OpenRouter verified source');
   await sql.query('update search_test_fail set enabled=false');await sql.query('update profiles set credits=0 where id=$1',[actor]);
   const results=await Promise.all([snapshot(body.requestId),send(body),snapshot(body.requestId)]);expect(results[0].state).toBe('responded');expect(results[0].search.queryCount).toBe(3);
   // Actual multi-query cost exceeds the estimate; insufficient remaining balance
@@ -145,7 +147,15 @@ repaired('search result survives settlement rollback, denied new spending and sa
  }finally{await sql.query('DROP TRIGGER search_test_message ON messages; DROP FUNCTION search_test_block_message(); DROP TABLE search_test_fail;');await sql.query('update profiles set credits=100000 where id=$1',[actor]);}
 });
 repaired('existing free-tier behavior records provider units but no site search surcharge',async()=>{
- await native();await sql.query('update profiles set credits=0 where id=$1',[actor]);await setting('enable_free_tier',true);await setting('free_tier_messages',1000);
+ await configureOpenRouter();await sql.query('update profiles set credits=0 where id=$1',[actor]);await setting('enable_free_tier',true);await setting('free_tier_messages',1000);
  try{const body=request('ONE');await send(body);const v=await observed(body);expect(v.public.state).toBe('succeeded');expect(v.public.search).toMatchObject({providerUnits:1,surchargeCredits:0});expect(v.public.billing.credits).toBe(0);expect(v.ledger.some((r:any)=>r.operation_type==='pre_deduct')).toBe(false);}
  finally{await setting('enable_free_tier',false);await sql.query('update profiles set credits=100000 where id=$1',[actor]);}
+});
+
+repaired.each(['@preset/research','anthropic/claude-opus-4.5@preset/research','anthropic/claude-opus-4.5:online','perplexity/sonar','openai/gpt-4o-search-preview','openrouter/auto'])('rejects implicit or intrinsic search model %s before dispatch and reservation',async model=>{
+ await configureOpenRouter(model);const body=request('ONE','不要联网：');expect((await send(body)).status).toBe(503);
+ expect((await calls(body.message.match(/OPENROUTER_CASE_[a-zA-Z0-9_-]+/)![0]))).toBe(0);expect(await accounting(body.requestId)).toEqual([]);
+});
+repaired.each(['ALIAS','BOTH_ALIASES'])('official counter %s settles once',async mode=>{
+ await configureOpenRouter();const body=request(mode);await send(body);expect((await observed(body)).public.search).toMatchObject({queryCount:1,providerUnits:1});
 });

@@ -2790,6 +2790,8 @@ aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old 
 aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{
  await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
  const t=await generationFixture();
+ await sql.query("update ai_models set enable_web_search='true' where id=$1",[localModel]);
+ await sql.query("insert into system_settings(key,value) values('enable_smart_search_decision','true') on conflict(key) do update set value='true'");
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const skillId=randomUUID(),moduleId=randomUUID();
  await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'METHOD_CANARY_DOCUMENT_STREAM Private document instruction')",[skillId,skillId]);
@@ -2799,7 +2801,7 @@ aiTest('CHAT: free and document UI send through ordinary streaming and restore t
  for(const module of [null,moduleId]) {
   if(module){await page.goto(app+'/marketplace?module='+module);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();}
   else {await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();}
-  await page.getByTestId('chat-input').fill(module?'DOCUMENT_SEND':'FREE_SEND');
+  await page.getByTestId('chat-input').fill(module?'搜索最新资料后总结：DOCUMENT_SEND':'FREE_SEND');
   const sent=page.waitForResponse(response=>response.url().includes('/api/ai/stream'));
   await page.getByRole('button',{name:'发送',exact:true}).click();
   const response=await sent,responseText=await response.text();expect(response.status(),responseText).toBe(200);expect(responseText).not.toContain('METHOD_CANARY');
@@ -2811,6 +2813,9 @@ aiTest('CHAT: free and document UI send through ordinary streaming and restore t
   await page.reload();await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
  }
  expect(requests.filter(path=>path.startsWith('/api/ai/stream'))).toHaveLength(2);
+ const providerCalls=await (await fetch(url+'/__document_model_calls')).json();
+ expect(providerCalls).toHaveLength(2);
+ for(const call of providerCalls)expect(call).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none',performedQueries:0});
  expect((await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[t.scope.projectId])).rows[0].n).toBe(0);
  await context.close();
 },150000);

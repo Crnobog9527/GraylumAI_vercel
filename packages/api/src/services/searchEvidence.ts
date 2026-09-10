@@ -16,7 +16,7 @@ const source=z.object({title:z.string().max(2000),url:z.string().max(4096).refin
 export const searchEvidenceSchema=z.object({
   requested:z.boolean(),available:z.boolean(),status:z.enum(['not_requested','unavailable','verified','unknown']),
   executed:z.boolean().nullable(),queries:z.array(z.string().max(4096)).max(1000).nullable(),queryCount:z.number().int().min(0).max(1000).nullable(),
-  providerUnit:z.enum(['grounded-prompt','unique-query']).nullable(),providerUnits:z.number().int().min(0).max(1000).nullable(),
+  providerUnit:z.enum(['grounded-prompt','unique-query','search-query']).nullable(),providerUnits:z.number().int().min(0).max(1000).nullable(),
   surchargeUnits:z.number().int().min(0).max(1000).nullable(),surchargeCredits:z.number().int().min(0).nullable(),
   sources:z.array(source).max(100),suggestionsHtml:z.string().max(65536).optional(),
 });
