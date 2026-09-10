@@ -246,7 +246,7 @@ export function decideWebSearch(message: string): SearchDecision {
     shouldSearch, confidence: shouldSearch ? 0.88 : 0.99,
     estimatedSearchCount: shouldSearch ? 1 : 0, reasonCodes: [reason],
   });
-  const denied = /(?:不要|不许|禁止|不必|无需|不用|别|不需要|不能|不允许)(?:(?:再|去|进行|使用|参考|调用|任何|外部|的)\s*)*(?:联网|上网|网络|搜索|检索|浏览|查询)|(?:^|[，。；\s])不(?:联网|上网|搜索|检索|浏览|查询)|(?:离线|仅凭已有|只用已有)|\b(?:do not|don't|never|without|no|avoid|must not|should not|cannot|can't)\s+(?:(?:use|using|any|the|a|an|doing|perform|performing|go|going|access|accessing|external|need to)\s+)*(?:web|internet|online|sources|search(?:ing|es)?|brows(?:e|ing))\b|\boffline\b/i;
+  const denied = /(?:不要|不许|禁止|不必|无需|不用|别|不需要|不能|不允许|请勿|切勿|不准)(?:(?:帮我|替我|为我|给我|再|去|进行|使用|用|参考|调用|任何|外部|的)\s*)*(?:联网|上网|网络|搜索|检索|浏览|查询)|(?:^|[，。；\s])不(?:联网|上网|搜索|检索|浏览|查询)|(?:离线|仅凭已有|只用已有)|\b(?:do not|don't|never|without|no|avoid|must not|should not|cannot|can't|refrain from|not to)\s+(?:(?:use|using|any|the|a|an|doing|perform|performing|go|going|access|accessing|external|need to|want you to|want to|need you to)\s+)*(?:web|internet|online|sources|search(?:ing|es)?|brows(?:e|ing))\b|\boffline\b/i;
   if (denied.test(instruction)) return result(false, 'explicit_search_denied');
   const conceptual = /(?:解释|介绍|什么是|如何实现|实现一个|写一个).{0,12}(?:搜索|检索|查询)|^(?:联网|网络|网页)?(?:搜索|检索|查询)(?:的)?(?:原理|算法|含义|是什么)/;
   if (conceptual.test(instruction) && !/(?:搜一下|查一下|(?:请|先|再|帮我|然后)(?:联网|上网|搜索)|(?:搜索|检索).*(?:最新|资料|来源))/.test(instruction)) return result(false, 'search_concept_not_instruction');
