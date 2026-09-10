@@ -186,23 +186,41 @@ export { checkRedisRateLimit, checkRedisRateLimitOrThrow };
  * 防止异常消费导致用户积分快速耗尽
  */
 export async function checkConsumptionCircuitBreaker(
-  ctx: SecurityContext
+  ctx: SecurityContext,
+  options: { requireCompleteRead?: boolean } = {}
 ): Promise<CircuitBreakerResult> {
   const now = new Date();
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
   const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-  // 查询最近一小时的消费
-  const { data: hourlySpend } = await ctx.supabase
-    .from('billing_history')
-    .select('amount')
-    .eq('user_id', ctx.userId)
-    .eq('operation_type', 'settle')
-    .gte('created_at', hourAgo.toISOString());
-
-  const hourlyTotal = Math.abs(
-    (hourlySpend ?? []).reduce((sum, record) => sum + (record.amount ?? 0), 0)
-  );
+  // Ordinary HTTP admission requires a complete authenticated read. Existing
+  // consumers keep their prior read semantics until their separate service-role
+  // grant/client work is addressed; this bounded repair does not migrate them.
+  const strict = options.requireCompleteRead === true;
+  const readSpend = async (since: Date): Promise<number> => {
+    try {
+      const { data, error, count } = await ctx.supabase
+        .from('billing_history')
+        .select('amount', strict ? { count: 'exact' } : undefined)
+        .eq('user_id', ctx.userId)
+        .eq('operation_type', 'settle')
+        .gte('created_at', since.toISOString());
+      if (strict && (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length)) {
+        throw new Error('Consumption history unavailable or incomplete');
+      }
+      let total = 0;
+      for (const record of data ?? []) {
+        if (strict && !Number.isSafeInteger(record?.amount)) throw new Error('Invalid consumption amount');
+        total += record.amount ?? 0;
+        if (strict && !Number.isSafeInteger(total)) throw new Error('Invalid consumption total');
+      }
+      return Math.abs(total);
+    } catch (error) {
+      if (!strict) throw error;
+      throw createSafeServiceUnavailableError(error, '消费保护状态暂时无法验证，请稍后重试');
+    }
+  };
+  const hourlyTotal = await readSpend(hourAgo);
 
   if (hourlyTotal >= CIRCUIT_BREAKER_CONFIG.hourlyLimit) {
     return {
@@ -213,17 +231,7 @@ export async function checkConsumptionCircuitBreaker(
     };
   }
 
-  // 查询最近一天的消费
-  const { data: dailySpend } = await ctx.supabase
-    .from('billing_history')
-    .select('amount')
-    .eq('user_id', ctx.userId)
-    .eq('operation_type', 'settle')
-    .gte('created_at', dayAgo.toISOString());
-
-  const dailyTotal = Math.abs(
-    (dailySpend ?? []).reduce((sum, record) => sum + (record.amount ?? 0), 0)
-  );
+  const dailyTotal = await readSpend(dayAgo);
 
   if (dailyTotal >= CIRCUIT_BREAKER_CONFIG.dailyLimit) {
     return {
@@ -235,6 +243,14 @@ export async function checkConsumptionCircuitBreaker(
   }
 
   return { allowed: true };
+}
+
+/** Enforce the shared limits with complete reads for ordinary HTTP admission. */
+export async function assertAIConsumptionAllowed(ctx: SecurityContext): Promise<void> {
+  const result = await checkConsumptionCircuitBreaker(ctx, { requireCompleteRead: true });
+  if (!result.allowed) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: result.reason ?? '消费熔断触发' });
+  }
 }
 
 /**
@@ -255,7 +271,7 @@ export async function getUserBalance(ctx: SecurityContext): Promise<number> {
 /**
  * 检查用户状态
  */
-export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
+export async function checkUserStatus(ctx: SecurityContext): Promise<{ role: 'user' | 'admin' }> {
   const { data: profile, error } = await ctx.supabase
     .from('profiles')
     .select('status, role')
@@ -264,8 +280,8 @@ export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
 
   if (error || !profile) {
     throw new TRPCError({
-      code: 'NOT_FOUND',
-      message: '用户资料不存在',
+      code: 'SERVICE_UNAVAILABLE',
+      message: '账号状态暂时无法验证，请稍后重试',
     });
   }
 
@@ -282,6 +298,10 @@ export async function checkUserStatus(ctx: SecurityContext): Promise<void> {
       message: '账号已被封禁',
     });
   }
+  if (profile.status !== 'active') {
+    throw createSafeServiceUnavailableError(undefined, '账号状态暂时无法验证，请稍后重试');
+  }
+  return { role: profile.role === 'admin' ? 'admin' : 'user' };
 }
 
 // ============================================

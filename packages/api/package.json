@@ -13,6 +13,8 @@
     "./src/root": "./src/root.ts",
     "./src/services": "./src/services/index.ts",
     "./src/trpc": "./src/trpc.ts",
+    "./src/lib/auth": "./src/lib/auth.ts",
+    "./src/middleware/securityChecks": "./src/middleware/securityChecks.ts",
     "./src/types": "./src/types/index.ts",
     "./src/types/ai": "./src/types/ai.ts",
     "./src/types/billing": "./src/types/billing.ts",

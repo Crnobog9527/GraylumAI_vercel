@@ -88,15 +88,12 @@ function loadNormalizeModuleIdForTest() {
     /const UUID_PATTERN =\n\s+\/\^\[0-9a-f\]\{8\}-[\s\S]*?\/i;/,
   );
   const moduleIdMatch = source.match(
-    /function normalizeModuleId[\s\S]*?\n\}\n\nasync function getUserSecurityProfile/,
+    /function normalizeModuleId[\s\S]*?\n\}/,
   );
 
   expect(uuidPatternMatch).not.toBeNull();
   expect(moduleIdMatch).not.toBeNull();
-  const helperSource = moduleIdMatch![0].slice(
-    0,
-    moduleIdMatch![0].lastIndexOf('\n\nasync function getUserSecurityProfile'),
-  );
+  const helperSource = moduleIdMatch![0];
   const runnableSource = helperSource.replace(
     /function normalizeModuleId\(moduleId\?: unknown\): string \| undefined/,
     'function normalizeModuleId(moduleId)',

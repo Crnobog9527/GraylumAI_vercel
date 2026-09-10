@@ -9,6 +9,9 @@ import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream } from
  */
 
 import { NextRequest } from 'next/server';
+import { TRPCError } from '@trpc/server';
+import { isEmailVerified } from '@repo/api/src/lib/auth';
+import { assertAIConsumptionAllowed, checkUserStatus } from '@repo/api/src/middleware/securityChecks';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { filterAIOutput, logger } from '@repo/api/src/services';
@@ -126,26 +129,6 @@ function normalizeModuleId(moduleId?: unknown): string | undefined {
   }
 
   return UUID_PATTERN.test(trimmed) ? trimmed : '';
-}
-
-async function getUserSecurityProfile(
-  supabase: any,
-  userId: string
-): Promise<{ status: 'active' | 'disabled' | 'banned'; role: 'user' | 'admin' }> {
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('status, role')
-    .eq('id', userId)
-    .single();
-
-  if (error || !profile) {
-    throw new Error('用户资料不存在');
-  }
-
-  return {
-    status: profile.status === 'disabled' || profile.status === 'banned' ? profile.status : 'active',
-    role: profile.role === 'admin' ? 'admin' : 'user',
-  };
 }
 
 async function isMaintenanceModeEnabled(supabase: any): Promise<boolean> {
@@ -406,6 +389,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!isEmailVerified(user)) {
+      return new Response(
+        JSON.stringify({ error: '请先验证邮箱后再使用 AI 对话', code: 'EMAIL_NOT_VERIFIED' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const userId = user.id;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const billingService = new BillingService({
@@ -413,33 +403,38 @@ export async function POST(request: NextRequest) {
       userId,
     });
 
-    const profileStartedAt = Date.now();
+    let userSecurityProfile: Awaited<ReturnType<typeof checkUserStatus>>;
+    try {
+      const profileStartedAt = Date.now();
+      userSecurityProfile = await checkUserStatus({ supabase: supabaseAuth, userId });
+      recordStageTiming(stageTimings, 'profile', profileStartedAt);
+      const consumptionStartedAt = Date.now();
+      // The authenticated own-row read has the filter-column grant; the
+      // service-role billing contract intentionally lacks SELECT(user_id).
+      await assertAIConsumptionAllowed({ supabase: supabaseAuth, userId });
+      recordStageTiming(stageTimings, 'consumption', consumptionStartedAt);
+    } catch (error) {
+      // Only the common admission guards' intentional denials are public.
+      // Database/network failures carry no internal detail and never authorize
+      // a token-provider call, reservation, or generation.
+      const denied = error instanceof TRPCError && error.code === 'FORBIDDEN';
+      return new Response(
+        JSON.stringify({ error: denied ? error.message : '账号或消费保护状态暂时无法验证，请稍后重试' }),
+        { status: denied ? 403 : 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const maintenanceStartedAt = Date.now();
     const runtimeSettingsStartedAt = Date.now();
     const billingSettingsStartedAt = Date.now();
-    const [userSecurityProfile, maintenanceModeEnabled, runtimeSettings, billingRuntimeSettings] = await Promise.all([
-      getUserSecurityProfile(supabaseAuth, userId),
+    const [maintenanceModeEnabled, runtimeSettings, billingRuntimeSettings] = await Promise.all([
       isMaintenanceModeEnabled(supabaseAdmin),
       getChatRuntimeSettings(supabaseAdmin),
       getBillingRuntimeSettings(supabaseAdmin),
     ]);
-    recordStageTiming(stageTimings, 'profile', profileStartedAt);
     recordStageTiming(stageTimings, 'maintenance', maintenanceStartedAt);
     recordStageTiming(stageTimings, 'runtime_settings', runtimeSettingsStartedAt);
     recordStageTiming(stageTimings, 'billing_settings', billingSettingsStartedAt);
-
-    if (userSecurityProfile.status === 'disabled') {
-      return new Response(
-        JSON.stringify({ error: '账号已被禁用，请联系管理员' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-    if (userSecurityProfile.status === 'banned') {
-      return new Response(
-        JSON.stringify({ error: '账号已被封禁' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
 
     if (maintenanceModeEnabled && userSecurityProfile.role !== 'admin') {
       return new Response(
