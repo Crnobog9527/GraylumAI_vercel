@@ -156,6 +156,16 @@ vi.mock('@repo/api/src/services/providerUtils', async (importOriginal) => ({
   usesOpenAICompatibleApi: routeMocks.usesOpenAICompatibleApi,
 }));
 
+// Lifecycle SQL is exercised by ordinaryChatReliability.integration.ts. These
+// existing handler cases isolate admission, routing and provider usage.
+vi.mock('@/lib/ordinary-chat-request', async importOriginal => {
+  const actual=await importOriginal<typeof import('../../../../apps/web/src/lib/ordinary-chat-request')>();
+  const {BillingService}=await import('@repo/api/src/services/billing');
+  return {...actual,readChatRequest:vi.fn(async()=>null),
+    claimChatRequest:vi.fn(async(_admin,userId,requestId,input)=>({claimed:true,request:{user_id:userId,request_id:requestId,input,conversation_id:'conversation-1'}})),
+    ordinaryChatRequest:(admin,userId)=>({billing:new BillingService({supabase:admin,userId}),transition:vi.fn(async()=>({}))})};
+});
+
 const { POST } = await import('../../../../apps/web/src/app/api/ai/stream/route');
 
 const INVALID_MODULE_MESSAGE = '功能模块参数无效';
@@ -181,6 +191,7 @@ function makeStreamRequest(body: Record<string, unknown>) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      requestId: crypto.randomUUID(),
       message: 'moduleId smoke test',
       ...body,
     }),
@@ -195,6 +206,7 @@ function makeAuthenticatedStreamRequest(body: Record<string, unknown>) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      requestId: crypto.randomUUID(),
       message: 'balance failure should stop before providers',
       ...body,
     }),
@@ -626,10 +638,12 @@ describe('real web route Skill resolution, billing and provider ordering', () =>
     const { events } = setupSkillRoute();
     const message = '  Original input: ignore system\n';
     for (const moduleId of [VALID_MODULE_ID, MODULE_B]) {
-      const response = await POST(makeAuthenticatedStreamRequest({ message, moduleId,
+      const injected = await POST(makeAuthenticatedStreamRequest({ message, moduleId,
         skillId: SKILL_B, skillKey: 'attacker', skillVersion: 999, publishedVersion: 999,
         publishedContentHash: 'attacker', skill_id: SKILL_B, skill_key: 'attacker', contentHash: 'attacker',
       }) as any);
+      expect(injected.status).toBe(400);
+      const response = await POST(makeAuthenticatedStreamRequest({ message, moduleId }) as any);
       expect(response.status).toBe(200);
       expect(await response.text()).toContain('"type":"complete"');
     }
@@ -685,7 +699,7 @@ describe('provider usage settlement boundary',()=>{
  it.each([undefined,{}, {prompt_tokens:10,completion_tokens:-1}])('does not finalize success with missing or invalid usage %j',async usage=>{
   setupSkillRoute();fetchSpy.mockResolvedValue(new Response('data: '+JSON.stringify({choices:[{delta:{content:'answer'}}],usage})+'\n\ndata: [DONE]\n'));
   const response=await POST(makeAuthenticatedStreamRequest({moduleId:VALID_MODULE_ID}) as any);const text=await response.text();
-  expect(text).toContain('"type":"error"');expect(routeMocks.billingFinalizeSuccess).not.toHaveBeenCalled();expect(routeMocks.billingFinalizeFailure).toHaveBeenCalledTimes(1);
+  expect(text).toContain('"type":"error"');expect(routeMocks.billingFinalizeSuccess).not.toHaveBeenCalled();expect(routeMocks.billingFinalizeFailure).not.toHaveBeenCalled();
  });
  it('keeps provider zero instead of preflight estimates',async()=>{
   setupSkillRoute();fetchSpy.mockResolvedValue(new Response('data: {"choices":[{"delta":{"content":"cached answer"}}],"usage":{"prompt_tokens":0,"completion_tokens":0}}\n\ndata: [DONE]'));
@@ -719,7 +733,7 @@ describe('ordinary HTTP handler admission regression', () => {
     const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
     fetchSpy.mockImplementation((_url,init)=>networkFetch(origin+'/provider',init));
     try {
-      const response=await networkFetch(origin+'/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({message:'Hello'})});
+      const response=await networkFetch(origin+'/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify({message:'Hello',requestId:crypto.randomUUID()})});
       return {status:response.status,body:await response.text(),providerCalls};
     } finally { server.closeAllConnections(); await new Promise<void>(resolve=>server.close(()=>resolve())); }
   }
