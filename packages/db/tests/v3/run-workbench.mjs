@@ -165,6 +165,14 @@ try {
     apply(`packages/db/migrations/${p}`);
   apply("packages/db/migrations/0067_v3_workbench_queries.sql");
   installWorkbenchBilling(sql, root);
+  // Ordinary HTTP admission reads the caller's own consumption history (#403).
+  // Use the repository policy rather than relaxing the runtime security check.
+  const billingPolicies = readFileSync(resolve(root, "packages/db/migrations/0001_ai_billing_tables.sql"), "utf8");
+  const billingPolicyStart = billingPolicies.indexOf('CREATE POLICY "users_own_billing_history_select"');
+  const billingPolicyEnd = billingPolicies.indexOf(';', billingPolicyStart) + 1;
+  if (billingPolicyStart < 0 || billingPolicyEnd <= billingPolicyStart) throw new Error('missing canonical billing history own-row policy');
+  sql(billingPolicies.slice(billingPolicyStart, billingPolicyEnd));
+  sql("GRANT SELECT ON billing_history TO authenticated;");
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
