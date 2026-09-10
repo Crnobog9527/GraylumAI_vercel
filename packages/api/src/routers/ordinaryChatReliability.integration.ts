@@ -420,3 +420,55 @@ repaired.each(['HOLD','UNKNOWN'])('browser preserves completed earlier turns whi
   expect(await calls(next.message)).toBe(1);
  }finally{if(mode==='HOLD')await release(next);await context.close();}
 },90000);
+
+repaired.each(['history-first','status-first','legacy-history-first','legacy-status-first'])('UNREGISTERED: prior turn survives pre-claim 503, 404 and refresh (%s)',async order=>{
+ const {page,context}=await pageFor();const first=make();await send(first);const cid=(await state(first.requestId)).request.conversationId;
+ const next=make();let submitted:any,posts=0;let unblock!:()=>void;const gate=new Promise<void>(r=>unblock=r);
+ try{
+  await page.goto(app+'/chat?conversation='+cid);await page.getByText('Local answer '+first.message,{exact:true}).waitFor();
+  await page.route('**/api/ai/stream',async route=>{posts++;submitted=route.request().postDataJSON();await route.fulfill({status:503,json:{error:'Local pre-claim rejection'}});});
+  await page.getByTestId('chat-input').fill(next.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('Local pre-claim rejection 尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
+  const id=submitted.requestId;
+  const delayed=order.endsWith('history-first')?'**/api/ai/requests?**':'**/rest/v1/messages?**';
+  await page.route(delayed,async route=>{const response=await route.fetch();await gate;await route.fulfill({response});});
+  if(order.startsWith('legacy'))await page.evaluate(()=>{for(const k of Object.keys(localStorage)){if(k.startsWith('ordinary-chat:v1:')){const v=JSON.parse(localStorage.getItem(k)!);delete v.historyIds;localStorage.setItem(k,JSON.stringify(v));}}});
+  await page.reload();await page.getByText('查看保留输入',{exact:true}).waitFor();
+  await page.getByText('查看保留输入',{exact:true}).click();await page.getByText('本次输入：'+next.message,{exact:true}).waitFor();
+  if(order.endsWith('history-first'))await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:7000});
+  unblock();await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:7000});
+  await page.getByText('Local pre-claim rejection 尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
+  expect(posts).toBe(1);expect(await calls(next.message)).toBe(0);expect(await accounting(id)).toEqual([]);
+  await page.unroute(delayed);await page.unroute('**/api/ai/stream');
+  page.on('request',r=>{if(r.url().endsWith('/api/ai/stream')){posts++;expect(r.postDataJSON().requestId).toBe(id);}});
+  await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
+  await page.getByText('Local answer '+next.message,{exact:true}).waitFor({timeout:45000});await waitState(id,'succeeded');
+  await page.reload();await page.getByText('Local answer '+next.message,{exact:true}).waitFor();
+  expect(await page.getByText('Local answer '+first.message,{exact:true}).count()).toBe(1);expect(await page.getByText('Local answer '+next.message,{exact:true}).count()).toBe(1);
+  expect(posts).toBe(2);expect(await calls(next.message)).toBe(1);expect((await accounting(id)).every((r:any)=>r.count===1)).toBe(true);
+ }finally{unblock();await context.close();}
+},90000);
+
+repaired.each(['history-first','status-first','legacy-history-first','legacy-status-first'])('UNREGISTERED: init lost with unreadable status preserves earlier turn (%s)',async order=>{
+ const {page,context}=await pageFor();const first=make();await send(first);const cid=(await state(first.requestId)).request.conversationId;
+ const next=make('HOLD');let submitted:any,posts=0,unblock!:()=>void;const gate=new Promise<void>(r=>unblock=r);
+ try{
+  await page.goto(app+'/chat?conversation='+cid);await page.getByText('Local answer '+first.message,{exact:true}).waitFor();
+  await page.route('**/api/ai/requests?**',route=>route.fulfill({status:503,json:{error:'Local status unavailable'}}));
+  await page.route('**/api/ai/stream',async route=>{posts++;submitted=route.request().postDataJSON();void route.fetch().catch(()=>{});await route.abort('failed');});
+  await page.getByTestId('chat-input').fill(next.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  for(let i=0;i<100&&await calls(next.message)===0;i++)await page.waitForTimeout(100);expect(await calls(next.message)).toBe(1);
+  const delayed=order.endsWith('history-first')?'**/api/ai/requests?**':'**/rest/v1/messages?**';
+  await page.route(delayed,async route=>{await gate;if(order.endsWith('history-first'))await route.fulfill({status:503,json:{error:'Local status unavailable'}});else await route.continue();});
+  if(order.startsWith('legacy'))await page.evaluate(()=>{for(const k of Object.keys(localStorage)){if(k.startsWith('ordinary-chat:v1:')){const v=JSON.parse(localStorage.getItem(k)!);delete v.historyIds;localStorage.setItem(k,JSON.stringify(v));}}});
+  await page.reload();await page.getByText('查看保留输入',{exact:true}).waitFor();
+  await page.getByText('查看保留输入',{exact:true}).click();await page.getByText('本次输入：'+next.message,{exact:true}).waitFor();
+  if(order.endsWith('history-first'))await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:7000});
+  unblock();await page.getByText('Local answer '+first.message,{exact:true}).waitFor({timeout:7000});
+  expect(posts).toBe(1);expect(await calls(next.message)).toBe(1);expect(await accounting(submitted.requestId)).toEqual([{operation_type:'pre_deduct',count:1}]);
+  await page.unroute(delayed);await page.unroute('**/api/ai/requests?**');await release(next);await waitState(submitted.requestId,'succeeded');
+  await page.getByRole('button',{name:'恢复原请求',exact:true}).click();await page.getByText('Local answer '+next.message,{exact:true}).waitFor({timeout:45000});
+  expect(await page.getByText('Local answer '+first.message,{exact:true}).count()).toBe(1);expect(await page.getByText('Local answer '+next.message,{exact:true}).count()).toBe(1);
+  expect(posts).toBe(1);expect(await calls(next.message)).toBe(1);expect((await accounting(submitted.requestId)).every((r:any)=>r.count===1)).toBe(true);
+ }finally{unblock();await release(next);await context.close();}
+},90000);

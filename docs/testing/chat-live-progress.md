@@ -14,6 +14,18 @@ or real-provider test is included.
   ASCII punctuation never splits an email, key or JWT. Module/Skill output is
   buffered for complete checking, with live status feedback throughout. Short
   answers or text without safe boundaries can still appear only at completion.
+- Intermediate `content` events carry only newly checked text with `delta: true`;
+  the client appends it only for the current request. The final full filtered
+  event replaces the preview. Legacy cumulative events without the delta marker
+  remain readable by the updated client. 8/16/32 KiB tests measure serialized SSE
+  bytes, including framing, through the actual local HTTP route.
+- Authorized history renders independently of new-request registration or status
+  availability. Known earlier message IDs (no stored answer text) and server
+  timestamps only identify possible display overlap. When overlap is unresolved,
+  durable rows take precedence over provisional bubbles until final IDs arrive.
+  Legacy browser entries without those hints keep their history visible and the
+  original input accessible under “查看保留输入”. No body-text deduplication,
+  client-time authorization, automatic redispatch or new accounting semantics.
 - Provisional text never establishes completion, search execution or cost. The
   final filtered text replaces the preview; original authenticated durable state
   remains authoritative. No raw reasoning/tool arguments are sent to the page.
@@ -42,6 +54,7 @@ Existing disposable PostgreSQL/Auth/PostgREST/Next/browser runner, no live keys:
 ```
 node packages/db/tests/v3/run-chat-reliability.mjs --live-progress-baseline
 node packages/db/tests/v3/run-chat-reliability.mjs --live-progress
+node packages/db/tests/v3/run-chat-reliability.mjs --delivery-regression
 node packages/db/tests/v3/run-chat-reliability.mjs --openrouter
 node packages/db/tests/v3/run-chat-reliability.mjs
 ```
@@ -56,7 +69,12 @@ failure is exercised against a real isolated table with denied client writes.
 
 Security unit tests split email, spaced card number, API key, JWT and assignment
 values across individual incoming characters. Private-method output cannot be
-previewed. Existing route/filter/provider tests passed (94 tests in four files).
+previewed. Existing route/filter/provider tests are rerun alongside the wire-volume test.
+The 93d9ae5 pre-remediation candidate reproduced four missing-history browser
+cases and quadratic SSE growth (531391 / 2111366 / 8417042 bytes in the serialized
+8/16/32 KiB regression). Browser coverage includes both history/status arrival
+orders, pre-claim 503 then 404, init loss with status 503, legacy stored entries,
+explicit original-ID delivery and recovery, final text correction and accounting.
 Final candidate validation and independent review are recorded on the PR.
 
 This demonstrates simulated provider behavior through real local SQL/HTTP/UI;

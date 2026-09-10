@@ -21,6 +21,6 @@ export function createStreamingOutput(enabled: boolean, emit: (content: string) 
     }
     if (end <= sent.length) return;
     const candidate = content.slice(0, end);
-    if (candidate.startsWith(sent)) { sent = candidate; emit(sent); }
+    if (candidate.startsWith(sent)) { const delta = candidate.slice(sent.length); sent = candidate; emit(delta); }
   };
 }

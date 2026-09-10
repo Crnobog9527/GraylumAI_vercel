@@ -845,7 +845,7 @@ export async function POST(request: NextRequest) {
         const sendEvent = (event: Record<string, unknown>) => delivery.enqueue(
           encoder.encode(`data: ${JSON.stringify({...event, requestId})}\n\n`));
         const streamCheckedOutput = createStreamingOutput(!moduleId, content => {
-          sendEvent({type:'content', content});
+          sendEvent({type:'content', content, delta:true});
         });
         const onContent = (content: string) => { fullContent = content; streamCheckedOutput(content); };
         const heartbeat = setInterval(() => sendEvent({type:'heartbeat'}), 5000);

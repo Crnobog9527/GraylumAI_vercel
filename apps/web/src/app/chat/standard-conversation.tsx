@@ -469,6 +469,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                 : stopped ? '已停止等待。后台可能继续生成，将按实际结果结算。'
                 : requestStatus === 'unconfirmed' ? (requestAbsent ? '服务器尚未登记此请求。请先处理下方原因；输入与请求标识已保留。' : '正在确认原请求是否已接收，输入与请求标识已保留。')
                 : '原请求正在处理中，刷新后可恢复。'}</p>
+              {requestInput && <details className="mt-2"><summary>查看保留输入</summary><p className="whitespace-pre-wrap">本次输入：{requestInput}</p></details>}
               {recoveryPaused && <p className="mt-1">自动查询已暂停。可以手动恢复原请求，确认最新状态。</p>}
               {billing && <p className="mt-1">费用状态：{billing.state === 'reserved' ? `已预扣 ${billing.estimatedCredits} 积分，待确认结算` : billing.state === 'released' ? `本次预扣已处理，实际恢复 ${billing.refunded ?? 0} 积分` : '尚无预扣'}</p>}
               <div className="mt-2 flex flex-wrap gap-2">

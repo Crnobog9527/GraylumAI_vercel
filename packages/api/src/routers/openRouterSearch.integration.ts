@@ -273,3 +273,37 @@ it('LIVE: browser shows checked text while provider is held, then refreshes with
   expect(await calls(key)).toBe(1);expect(await accounting(submitted.requestId)).toEqual(before);
  }finally{await fetch(api+'/__search_release?key='+key,{method:'POST'});await context.close();}
 },120000);
+
+it('LIVE: actual HTTP SSE byte volume grows linearly at 8/16/32 KiB',async()=>{
+ await configureOpenRouter('qwen/qwen3.8-27b');const sizes=[8192,16384,32768],bytes:number[]=[];
+ for(const size of sizes){
+  const body=request('LONG'+size),result=await send(body);
+  const events=result.body.split('\n').filter(l=>l.startsWith('data: ')).map(l=>JSON.parse(l.slice(6)));
+  const chunks=events.filter(e=>e.type==='content'&&!e.final),final=events.find(e=>e.type==='content'&&e.final);
+  expect(chunks.length).toBeGreaterThan(10);expect(chunks.every(e=>e.delta===true&&e.requestId===body.requestId)).toBe(true);
+  expect(final.content.startsWith(chunks.map(e=>e.content).join(''))).toBe(true);
+  bytes.push(Buffer.byteLength(result.body));expect(Buffer.byteLength(result.body)).toBeLessThan(size*5);
+  const v=await observed(body);expect(v.provider).toHaveLength(1);expect(v.public.content).toBe(final.content);
+  expect(v.ledger.every((r:any)=>r.count===1)).toBe(true);
+ }
+ console.log('ACTUAL_HTTP_STREAM_BYTES',JSON.stringify({sizes,bytes}));expect(bytes[1]/bytes[0]).toBeLessThan(2.1);expect(bytes[2]/bytes[1]).toBeLessThan(2.1);
+},90000);
+
+it('LIVE: client appends checked deltas and replaces preview with the final filtered answer',async()=>{
+ await configureOpenRouter('qwen/qwen3.8-27b');await setting('chat_show_model_selector',false);
+ const context=await browser.newContext();await context.route('**/*',r=>['127.0.0.1','localhost'].includes(new URL(r.request().url()).hostname)?r.continue():r.abort());
+ const page=await context.newPage();const body=request('LIVE_CORRECTION'),key=body.message.match(/OPENROUTER_CASE_[a-zA-Z0-9_-]+/)![0];let id='';
+ page.on('request',r=>{if(r.url().endsWith('/api/ai/stream'))id=r.postDataJSON().requestId;});
+ try{
+  await page.goto(app+'/login?redirect=/chat');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
+  await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  const answer=page.locator('[data-message-role="assistant"]');
+  await expect.poll(()=>answer.textContent()).toContain('Second checked block.');
+  expect(await answer.textContent()).toContain('实时回答已经开始。');expect(await answer.textContent()).toContain('First checked block.');
+  expect((await row(id)).state).toBe('running');await fetch(api+'/__search_release?key='+key,{method:'POST'});
+  await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:45000});
+  const saved=await snapshot(id),text=await answer.textContent();
+  expect(saved.content).not.toContain('alice@example.com');expect(text).toContain(saved.content);expect(text!.split('实时回答已经开始。')).toHaveLength(2);
+  expect(await calls(key)).toBe(1);const ledger=await accounting(id);await page.reload();await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor();expect(await accounting(id)).toEqual(ledger);expect(await calls(key)).toBe(1);
+ }finally{await fetch(api+'/__search_release?key='+key,{method:'POST'});await context.close();}
+},120000);

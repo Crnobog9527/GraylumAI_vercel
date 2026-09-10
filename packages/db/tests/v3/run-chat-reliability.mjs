@@ -13,7 +13,7 @@ const searchEvidence = process.argv.includes('--search');
 const searchBaseline = process.argv.includes('--search-baseline');
 const openRouterSearch=liveProgress||process.argv.includes('--openrouter')||process.argv.includes('--openrouter-baseline');
 const openRouterBaseline=process.argv.includes('--openrouter-baseline');
-if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline'].includes(v))) throw new Error('Invalid option');
+if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression'].includes(v))) throw new Error('Invalid option');
 let source = readFileSync(new URL('./run-workbench.mjs', import.meta.url), 'utf8');
 function replace(from, to) {
   if (source.split(from).length !== 2) throw new Error('Shared fixture boundary changed: ' + from.slice(0, 80));
@@ -32,7 +32,7 @@ const tag = \`graylum-wb-`);
 if (!regression) replace('src/services/__tests__/workbench.integration.ts', openRouterSearch?'src/routers/openRouterSearch.integration.ts':searchEvidence || searchBaseline ? 'src/routers/searchEvidence.integration.ts' : 'src/routers/ordinaryChatReliability.integration.ts');
 replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', regression
   ? '"--testNamePattern", "^CHAT: (durable multi-turn linkage|homepage entry|[3468] configured steps|HTTP 429|summary HTTP 429|late initial read)",'
-  : liveProgress ? '"--testNamePattern", "^LIVE:",' : '');
+  : process.argv.includes('--delivery-regression') ? '"--testNamePattern", "^UNREGISTERED:",' : liveProgress ? '"--testNamePattern", "^LIVE:",' : '');
 
 replace('console.log("SQL additive migration and repeat application PASS");', `
   // Service-role column contract from 0063; caller consumption uses 0079.
