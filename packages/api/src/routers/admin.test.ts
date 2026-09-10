@@ -1163,7 +1163,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.runtimeBilling).toMatchObject({
       creditsPerUsd: 1000,
       tokenPriceMultiplier: 1.5,
-      searchSurchargeCredits: 0,
+      searchSurchargeCredits: null,
       newUserCredits: 100,
     });
   });

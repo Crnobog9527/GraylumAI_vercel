@@ -693,7 +693,7 @@ export default function AdminFinancePage() {
                       </div>
                     </div>
                     <Badge className="bg-amber-500/20 text-amber-400 text-lg px-3">
-                      {runtimeBilling.searchSurchargeCredits}
+                      {runtimeBilling.searchSurchargeCredits ?? '未配置或无效'}
                     </Badge>
                   </div>
                 </div>

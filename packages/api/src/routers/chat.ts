@@ -1,3 +1,4 @@
+import { publicSearchEvidence } from '../services/providerUsage';
 import { createTRPCContext, router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -452,7 +453,7 @@ export const chatRouter = router({
 
       const { data: stats, error } = await ctx.supabase
         .from('token_stats')
-        .select('input_tokens, output_tokens, total_credits, created_at')
+        .select('input_tokens, output_tokens, total_credits, created_at, message_id, metadata')
         .eq('user_id', ctx.profileId)
         .eq('conversation_id', input.conversationId)
         .order('created_at', { ascending: false });
@@ -472,6 +473,10 @@ export const chatRouter = router({
       );
 
       return {
+        searchByMessage: Object.fromEntries((stats ?? []).flatMap(row => {
+          const search = publicSearchEvidence(row.metadata?.search_evidence);
+          return row.message_id && search ? [[row.message_id, search]] : [];
+        })),
         lastInputTokens: last?.input_tokens ?? 0,
         lastOutputTokens: last?.output_tokens ?? 0,
         totalInputTokens: totals.inputTokens,

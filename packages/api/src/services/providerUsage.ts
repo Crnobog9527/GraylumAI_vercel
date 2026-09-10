@@ -1,3 +1,5 @@
+import { geminiSearchCollector, type SearchBillingUnit } from './searchEvidence';
+export { nativeSearchCapability, publicSearchEvidence, type SearchEvidence } from './searchEvidence';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 const tokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -54,7 +56,9 @@ export async function readOpenAIUsageStream(body: ReadableStream<Uint8Array>, on
  return {content,...accounting};
 }
 
-export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onChunk?:()=>void, onContent?:(content:string)=>void) {
+export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onChunk?:()=>void, onContent?:(content:string)=>void, searchUnit?:SearchBillingUnit) {
+ const search=searchUnit?geminiSearchCollector(searchUnit):undefined;
+ let responseId:string|undefined;
  const reader=body.getReader(),decoder=new TextDecoder();
  let buffer='',content='',finished=false;
  let accounting:ReturnType<typeof parseProviderUsage>|undefined;
@@ -63,7 +67,10 @@ export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onCh
   const data=value.slice(5).trim();if(!data)return;
   const event=JSON.parse(data);
   if(event.error)throw new Error('PROVIDER_STREAM_FAILED');
+  if(event.responseId){if(responseId&&responseId!==event.responseId)throw new Error('PROVIDER_RESPONSE_IDENTITY_CONFLICT');responseId=event.responseId;}
+  if(event.candidates?.length>1||event.candidates?.some((c:any)=>c.index!==undefined&&c.index!==0))throw new Error('PROVIDER_CANDIDATE_INVALID');
   const candidate=event.candidates?.[0];
+  if(search && candidate?.groundingMetadata!==undefined)search.observe(candidate.groundingMetadata);
   if(event.candidates?.some((value:any)=>value.content?.parts?.length))accounting=undefined;
   content+=(candidate?.content?.parts??[]).filter((p:{thought?:boolean})=>!p.thought).map((p:{text?:string})=>p.text??'').join('');
   onContent?.(content);
@@ -83,5 +90,5 @@ export async function readGeminiUsageStream(body:ReadableStream<Uint8Array>,onCh
   }
  }finally{await reader.cancel();}
  if(!finished||!accounting)throw new Error('PROVIDER_USAGE_UNAVAILABLE');
- return {content,...accounting};
+ return {content,...accounting,search:search?.finish()};
 }

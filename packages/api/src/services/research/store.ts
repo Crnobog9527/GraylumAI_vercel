@@ -6,6 +6,7 @@ export interface OperationRecord {
   resultAccess?: 'restricted'; cost?: ResearchResult['cost'];
 }
 export interface ResearchResult {
+  searchEvidence?: {executed:true;queryCount:1;providerUsage:{unit:'tavily-credit';credits:number}};
   source: 'agentkey'; fixture: boolean; canonicalTool: string;
   objects: { id: string; sourceUrl?: string; fields: Record<string,unknown>; missingFields: string[]; observedAt: string|null }[];
   fetchedAt: string; pagination: { complete: boolean; nextCursor: string|null };

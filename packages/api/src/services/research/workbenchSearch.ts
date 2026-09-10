@@ -1,3 +1,4 @@
+import { parseSearchSurcharge } from '../searchPricing';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -21,7 +22,8 @@ type Input=z.infer<typeof workbenchSearchInput>;
 type Connection=Awaited<ReturnType<typeof connectAgentKey>>;
 
 const publicResult=(requestId:string,value:OperationRecord)=>({requestId,state:value.state,
- result:value.result?{objects:value.result.objects,fetchedAt:value.result.fetchedAt,pagination:value.result.pagination,fixture:value.result.fixture}:null,
+ result:value.result?{objects:value.result.objects,fetchedAt:value.result.fetchedAt,pagination:value.result.pagination,fixture:value.result.fixture,searchEvidence:value.result.searchEvidence}:null,
+ searchEvidence:value.result?.searchEvidence??null,
  restricted:value.resultAccess==='restricted',
 });
 /** One explicit query, one durable operation, no model-selected tools or hidden
@@ -94,8 +96,8 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    await admission(input,id);
    const settings=await privateClient!.from('system_settings').select('key,value').in('key',['v3_web_search','search_surcharge_credits']);
    if(settings.error||settings.data?.find(s=>s.key==='v3_web_search')?.value!==true)throw new Error('RESEARCH_DISABLED');
-   const price=settings.data.find(s=>s.key==='search_surcharge_credits')?.value;
-   if(!Number.isSafeInteger(price)||price<1||price>999999)throw new Error('RESEARCH_BILLING_UNAVAILABLE');
+   const price=parseSearchSurcharge(settings.data.find(s=>s.key==='search_surcharge_credits')?.value);
+   if(price===null||price<1)throw new Error('RESEARCH_BILLING_UNAVAILABLE');
    // Read consumption through the authenticated own-row client, not the RPC writer.
    await preAICallSecurityChecks({supabase:userClient,userId:id},previous?0:price,{skipRateLimit:true});
    const authorize=async()=>{

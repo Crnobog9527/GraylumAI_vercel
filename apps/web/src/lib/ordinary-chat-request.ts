@@ -1,3 +1,4 @@
+import { publicSearchEvidence } from '@repo/api/src/services/providerUsage';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { BillingService } from '@repo/api/src/services/billing';
 
@@ -64,7 +65,7 @@ export function publicChatRequest(r:ChatRequest) {
   return { requestId:r.request_id,conversationId:r.conversation_id,input:r.input,state,
     stopped:!!r.stop_requested_at,retryable:state==='failed',
     content:p?.p_assistant_message ?? r.partial_content ?? null, modelUsed:p?.p_model_used ?? null,
-    usage:p?.p_usage ?? null,
+    usage:p?.p_usage ?? null,search:publicSearchEvidence(p?.p_token_metadata?.search_evidence),
     billing:{state:state==='succeeded'?'settled':state==='failed'?'released':r.pre_deduct_id?'reserved':'unreserved',
       estimatedCredits:r.reservation ? Number(r.reservation.balance_before)-Number(r.reservation.balance_after) : 0,
       credits:state==='succeeded'?p?.p_total_credits:null,

@@ -34,7 +34,7 @@ describe('reviewed Tavily basic search contract',()=>{
   const generated={...response(),data:{...response().data,answer:'Unexpected provider-generated answer'}};expect(()=>tavilyContract.result(generated,context)).toThrow();
  });
  it('accepts zero matches without inventing evidence or actual AgentKey charges',()=>{
-  const empty=response();empty.data.results=[];expect(tavilyContract.result(empty,context)).toEqual({objects:[],pagination:{complete:true,nextCursor:null},actualCredits:null});
+  const empty=response();empty.data.results=[];expect(tavilyContract.result(empty,context)).toEqual({searchEvidence:{executed:true,queryCount:1,providerUsage:{unit:'tavily-credit',credits:1}},objects:[],pagination:{complete:true,nextCursor:null},actualCredits:null});
  });
 });
 

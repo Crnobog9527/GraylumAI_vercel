@@ -4333,3 +4333,23 @@ consumptionTest('CONSUMPTION: complete 1000-row own history is read and summed w
   const before=await consumptionCounts();expect((await consumptionHttp(t.user,'generate',v)).status).toBe(200);const after=await consumptionCounts();expect(after.calls-before.calls).toBe(1);expect(after.pre-before.pre).toBe(1);
  } finally {await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await sql.query("update billing_history set created_at=created_at+interval '2 days' where id=any($1::uuid[])",[previous]);}
 },90000);
+
+consumptionTest.each([5,'5'])('CONSUMPTION: admin saves search price %j then Skill reserves and settles the same value',async price=>{
+ const t=await generationFixture(),search=await consumptionSearch(t);
+ const {createServerClient}=requireWeb('@supabase/ssr');const cookies:any[]=[];
+ const session=(await t.user.auth.getSession()).data.session!;const client=createServerClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[],setAll:(v:any[])=>cookies.push(...v)}});await client.auth.setSession(session);
+ await sql.query("update profiles set role='admin' where id=$1",[actor]);
+ try{
+  const saved=await fetch(app+'/api/trpc/settings.updateSystemSettingsBulk',{method:'POST',headers:{Cookie:cookies.map(c=>c.name+'='+c.value).join('; '),'Content-Type':'application/json'},body:JSON.stringify([{key:'search_surcharge_credits',value:price}])});expect(saved.status).toBe(200);
+  expect((await sql.query("select value from system_settings where key='search_surcharge_credits'")).rows[0].value).toBe(price);
+  const response=await consumptionHttp(t.user,'search',search.input);expect(response.status).toBe(200);
+  const row=(await sql.query('select state,user_quote_credits,charged_credits,result from research_operations where id=$1',[search.input.requestId])).rows[0];
+  expect(row).toMatchObject({state:'succeeded',user_quote_credits:5,charged_credits:5});expect(row.result.searchEvidence).toEqual({executed:true,queryCount:1,providerUsage:{unit:'tavily-credit',credits:1}});expect(row.result.objects).toEqual([]);expect(row.result.cost.actual).toBeNull();
+  await settingPrice('invalid');expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(200);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+ }finally{await sql.query("update profiles set role='user' where id=$1",[actor]);await search.fixture.stop();}
+ async function settingPrice(value:unknown){await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(value)]);}
+},90000);
+consumptionTest.each([0,'0',null,'',-1,1000000])('CONSUMPTION: invalid or zero paid Skill search price %j refuses before provider/reservation',async price=>{
+ const t=await generationFixture(),search=await consumptionSearch(t);await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(price)]);
+ try{const before=await consumptionCounts();expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(503);expect(search.fixture.events).toEqual([]);expect((await consumptionCounts()).pre).toBe(before.pre);}finally{await search.fixture.stop();}
+},90000);

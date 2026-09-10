@@ -176,6 +176,7 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routeMocks.decideWebSearch.mockReturnValue({shouldSearch:false,confidence:1,estimatedSearchCount:0,reasonCodes:['no_realtime_signals']});
   routeMocks.skillMode.mockResolvedValue({guided:false});
   fetchSpy = vi.spyOn(globalThis, 'fetch');
 });
