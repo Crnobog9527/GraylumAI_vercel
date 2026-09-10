@@ -235,10 +235,10 @@ export function classifyTaskComplexity(message: string, conversationTurns: numbe
 
 // Only the instruction layer participates: quoted/code/material text is data.
 function searchInstruction(message: string): string {
-  return message.replace(/```[\s\S]*?(?:```|$)/g, ' ')
+  return message.replace(/[‘’]/g, "'").replace(/```[\s\S]*?(?:```|$)/g, ' ')
     .replace(/`[^`]*`|“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"|(?<![a-zA-Z])'[^'\n]*'/g, ' ')
     .replace(/^\s*>.*$/gm, ' ')
-    .split(/(?:以下|下面|如下)(?:这段|的)?(?:材料|内容|文本|文章)[：:\s]|(?:原文|引用材料|素材)[：:]|(?:source|quoted|provided|following)\s+(?:text|material)\s*:/i)[0]!.trim();
+    .split(/(?:以下|下面|如下)(?:这段|的)?(?:材料|内容|文本|文章)[：:\s]|(?:原文|引用材料|素材)[：:]|(?:source|quoted|provided|following|this)\s+(?:text|material)\s*:/i)[0]!.trim();
 }
 export function decideWebSearch(message: string): SearchDecision {
   const instruction = searchInstruction(message);
@@ -246,10 +246,10 @@ export function decideWebSearch(message: string): SearchDecision {
     shouldSearch, confidence: shouldSearch ? 0.88 : 0.99,
     estimatedSearchCount: shouldSearch ? 1 : 0, reasonCodes: [reason],
   });
-  const denied = /(?:不要|不许|禁止|不必|无需|不用|别)(?:再|去|进行|使用)?\s*(?:联网|上网|搜索|检索|浏览|查询)|(?:离线|仅凭已有|只用已有)|\b(?:do not|don't|never|without|no|avoid)\s+(?:(?:use|using|any|the)\s+)*(?:web|internet|online|search(?:ing)?|brows(?:e|ing))\b|\boffline\b/i;
+  const denied = /(?:不要|不许|禁止|不必|无需|不用|别|不需要|不能|不允许)(?:(?:再|去|进行|使用|参考|调用|任何|外部|的)\s*)*(?:联网|上网|网络|搜索|检索|浏览|查询)|(?:^|[，。；\s])不(?:联网|上网|搜索|检索|浏览|查询)|(?:离线|仅凭已有|只用已有)|\b(?:do not|don't|never|without|no|avoid|must not|should not|cannot|can't)\s+(?:(?:use|using|any|the|a|an|doing|perform|performing|go|going|access|accessing|external|need to)\s+)*(?:web|internet|online|sources|search(?:ing|es)?|brows(?:e|ing))\b|\boffline\b/i;
   if (denied.test(instruction)) return result(false, 'explicit_search_denied');
-  const conceptual = /(?:解释|介绍|什么是|如何实现|实现一个|写一个).{0,12}(?:搜索|检索|查询)(?:是什么|的原理|算法|功能|引擎|系统)?/;
-  if (conceptual.test(instruction) && !/(?:联网|上网|搜一下|查一下|(?:搜索|检索).*(?:最新|资料|来源))/.test(instruction)) return result(false, 'search_concept_not_instruction');
+  const conceptual = /(?:解释|介绍|什么是|如何实现|实现一个|写一个).{0,12}(?:搜索|检索|查询)|^(?:联网|网络|网页)?(?:搜索|检索|查询)(?:的)?(?:原理|算法|含义|是什么)/;
+  if (conceptual.test(instruction) && !/(?:搜一下|查一下|(?:请|先|再|帮我|然后)(?:联网|上网|搜索)|(?:搜索|检索).*(?:最新|资料|来源))/.test(instruction)) return result(false, 'search_concept_not_instruction');
   const explicit = /(?:联网|上网)(?:查|搜|搜索|检索|查询|浏览)?|查一下|搜一下|(?:搜索|检索|查询)(?!算法|功能|按钮|引擎|这个词)|\b(?:search|browse)\s+(?:the\s+)?(?:web|internet|online|latest|recent|sources|news|for)\b|\blook up\b|\bfind\s+(?:the\s+)?(?:latest|recent|sources|news)\b/i;
   if (explicit.test(instruction)) return result(true, 'explicit_search_instruction');
   if (LIGHTWEIGHT_TRANSFORM_PATTERNS.some(pattern => pattern.test(instruction)) || CREATIVE_PATTERNS.some(pattern => pattern.test(instruction))) return result(false, 'transform_no_search');
