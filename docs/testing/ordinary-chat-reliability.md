@@ -50,7 +50,7 @@ provider **twice**, while each UUID had one pre-deduction and one settlement.
 Observed after: each scenario dispatched **once**, reserved once, settled once,
 and saved one user/assistant pair and one token-stat record.
 
-The repaired suite has 35 real integration/browser cases covering lost responses,
+The repaired suite has 36 real integration/browser cases covering lost responses,
 refresh before the initial response, restored input, manual new-generation retry,
 unknown/truncated output, four ambiguous refusal variants, late/aged execution,
 stop/completion races, forced atomic settlement rollback with concurrent recovery,
@@ -122,3 +122,9 @@ existing atomic finalizer once, preserving failure metadata without duplicate
 usage rows. An authenticated recovery 404 suspends polling while preserving the
 input and original request identity for explicit delivery; it does not prove
 that an earlier delayed POST can never be accepted.
+
+Recovery explicitly accepts boolean false from migration 0004 and string 'false'
+from the live staging schema; true, null and missing flags remain denied. The
+suite retains the staging-shaped text schema and additionally switches the local
+profile column to boolean for real HTTP allowed/revoked recovery and replay.
+No remote schema type is changed by this compatibility fix.

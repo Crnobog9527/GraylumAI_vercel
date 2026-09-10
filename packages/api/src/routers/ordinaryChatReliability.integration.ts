@@ -372,3 +372,18 @@ repaired.each(['pricing','balance'])('preflight %s failure has one failed usage 
   await sql.query('update profiles set credits=$2 where id=$1',[actor,balance]);
  }
 });
+
+repaired('boolean soft-delete schema permits active recovery and replay but rejects deleted profiles',async()=>{
+ await sql.query("alter table profiles alter column is_deleted drop default, alter column is_deleted type boolean using is_deleted::boolean, alter column is_deleted set default false");
+ const body=make();
+ try{
+  expect((await send(body)).status).toBe(200);
+  expect((await state(body.requestId)).status).toBe(200);await waitState(body.requestId,'succeeded');
+  expect((await send(body)).status).toBe(200);expect(await calls(body.message)).toBe(1);
+  await sql.query('update profiles set is_deleted=true where id=$1',[actor]);
+  expect((await state(body.requestId)).status).toBe(403);expect((await send(body)).status).toBe(403);expect(await calls(body.message)).toBe(1);
+ }finally{
+  await sql.query('update profiles set is_deleted=false where id=$1',[actor]);
+  await sql.query("alter table profiles alter column is_deleted drop default, alter column is_deleted type text using is_deleted::text, alter column is_deleted set default 'false'");
+ }
+});

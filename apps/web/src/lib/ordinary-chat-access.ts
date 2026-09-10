@@ -7,7 +7,7 @@ import { ChatRequestError, type ChatRequest } from './ordinary-chat-request';
 // a new spending allowance to retrieve an already-paid answer.
 export async function assertChatRecoveryAccess(auth:any,admin:any,userId:string,r:ChatRequest) {
   const profile=await admin.from('profiles').select('is_deleted').eq('id',userId).single();
-  if(profile.error || profile.data?.is_deleted!=='false') throw new ChatRequestError(403,'账号不可用，无法恢复请求。');
+  if(profile.error || (profile.data?.is_deleted!==false && profile.data?.is_deleted!=='false')) throw new ChatRequestError(403,'账号不可用，无法恢复请求。');
   const {data:c,error}=await auth.from('conversations').select('*').eq('id',r.conversation_id).eq('user_id',userId).eq('is_deleted','false').single();
   if(error || !c || c.skill_mode) throw new ChatRequestError(403,'请求对应的对话不可用或无权访问。');
   if(c.module_id) {
