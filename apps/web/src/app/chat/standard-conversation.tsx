@@ -1,5 +1,7 @@
 'use client';
 
+import { SearchStatus } from './search-status';
+import type { SearchEvidence } from '@repo/api/src/services/providerUsage';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { logClientDevError } from '@/lib/client-log';
 import { AppHeader } from '@/components/layout/AppHeader';
@@ -36,6 +38,7 @@ interface Message {
   content: string;
   created_at: string;
   isStreaming?: boolean;
+  search?:SearchEvidence|null;
 }
 
 function estimateTokens(text: string) {
@@ -215,12 +218,13 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
         content: m.content,
         created_at: m.createdAt,
         isStreaming: m.isStreaming,
+        search:m.search,
       }))
     : historyMessages;
   const { data: conversationTokenStats } = trpc.chat.getConversationTokenStats.useQuery(
     { conversationId: activeConversationId! },
     {
-      enabled: showTokenUsageStats && !!activeConversationId,
+      enabled: !!activeConversationId,
     }
   );
   const latestAssistantUsage = [...streamingMessages]
@@ -553,6 +557,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                             <span className="inline-block w-2 h-4 ml-1 animate-pulse" style={{ background: 'var(--color-primary)' }} />
                           )}
                         </p>
+                        {message.role==='assistant'&&<SearchStatus evidence={message.search??conversationTokenStats?.searchByMessage?.[message.id]??null}/>}
                       </div>
                       {message.role === 'user' && (
                         <div

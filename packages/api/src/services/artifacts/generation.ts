@@ -1,4 +1,5 @@
 import { parseProviderUsage } from '../providerUsage';
+import {openRouterSearchParameters,openRouterSearchCount} from '../openRouterSearch';
 import { logger } from '../../lib/logger';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { workbenchModelSchema as modelSchema, providerInputReservation } from "./modelPolicy";
@@ -76,13 +77,13 @@ export class ProviderRateLimited extends Error {
 }
 
 // A fixed endpoint, explicit server credential, bounded reply and no redirects,
-// tools, plugins, fallback models or agent loop. No environment-key fallback.
+// tools, inherited web plugin, fallback models or agent loop. No environment-key fallback.
 export const openRouterGeneration: GenerationTransport = async ({ model, messages, maxTokens }) => {
   modelSchema.parse(model);
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45000),
     headers: { Authorization: `Bearer ${model.api_key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, plugins: [], tools: [], tool_choice: 'none', ...(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'].includes(model.model_id) ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
+    body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, ...openRouterSearchParameters(model.model_id,false), ...(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'].includes(model.model_id) ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
   });
   // No automatic refund after dispatch: even an HTTP/parse error may follow a
   // billed provider execution. Reconciliation never blindly resends the request.
@@ -95,6 +96,7 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
   if (response.status === 429 && payload?.error?.code === 429 &&
       payload.choices == null && payload.usage == null) throw new ProviderRateLimited();
   if (!response.ok) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+  if((openRouterSearchCount(payload.usage)??0)>0||payload.choices?.some((c:any)=>c.message?.annotations?.some((a:any)=>a.type==='url_citation')))throw new Error('GENERATION_OUTCOME_UNKNOWN');
   const raw = z.object({ choices: z.array(z.object({ finish_reason: z.literal('stop'), message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).max(0).nullish() }) })).length(1), usage: z.unknown() })
     .parse(payload);
   const {usage} = parseProviderUsage(raw.usage);

@@ -1,3 +1,4 @@
+import { parseSearchSurcharge } from './searchPricing';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
  * All rights reserved.
@@ -22,7 +23,7 @@ export interface ChatRuntimeSettings {
   showTokenUsageStats: boolean;
   smartRoutingMinConfidence: number;
   searchDecisionMinConfidence: number;
-  searchSurchargeCredits: number;
+  searchSurchargeCredits: number | null;
   primaryModelId?: string;
   assistantModelId?: string;
   defaultModelId?: string;
@@ -216,7 +217,7 @@ export async function getChatRuntimeSettings(
     showTokenUsageStats: parseBooleanValue(rawSettings.get('show_token_usage_stats'), true),
     smartRoutingMinConfidence: parseNumberValue(rawSettings.get('smart_routing_min_confidence'), 0.72),
     searchDecisionMinConfidence: parseNumberValue(rawSettings.get('search_decision_min_confidence'), 0.75),
-    searchSurchargeCredits: parseNumberValue(rawSettings.get('search_surcharge_credits'), 0),
+    searchSurchargeCredits: parseSearchSurcharge(rawSettings.get('search_surcharge_credits')),
     primaryModelId: parseStringValue(rawSettings.get('primary_model_id')) ?? parseStringValue(aiModelsConfig.primaryModelId),
     assistantModelId: parseStringValue(rawSettings.get('assistant_model_id')) ?? parseStringValue(aiModelsConfig.assistantModelId),
     defaultModelId: parseStringValue(aiModelsConfig.defaultModelId),

@@ -21,7 +21,7 @@ export interface ProviderContract {
   discovery(value:unknown):{names:string[]};
   description(value:unknown):{name:string;schema:Record<string,unknown>;creditsPerCall:number;executeAs?:unknown};
   validateInput?(context:ProviderContext):void;
-  result(value:unknown,context:ProviderContext):Pick<ResearchResult,'objects'|'pagination'> & {actualCredits:number|null};
+  result(value:unknown,context:ProviderContext):Pick<ResearchResult,'objects'|'pagination'|'searchEvidence'> & {actualCredits:number|null};
 }
 export type ResearchScope = {projectId:string;roundId:string;stepId:string};
 export function researchIdentity(cap:ReviewedCapability,params:Record<string,unknown>,scope?:ResearchScope){
@@ -160,7 +160,7 @@ async function connect(options:AdapterOptions,url:string,key:string|undefined,fi
         const parsed=options.contract.result(raw,{canonicalName:cap.canonicalName,params:input.params});
         if(parsed.objects.length>100||parsed.objects.some(x=>!x.id||x.missingFields.length>100))stop('RESULT_LIMIT');
         if(parsed.actualCredits!==null)creditsToUnits(parsed.actualCredits);
-        result={source:'agentkey',fixture,canonicalTool:cap.canonicalName,objects:parsed.objects,pagination:parsed.pagination,
+        result={source:'agentkey',fixture,canonicalTool:cap.canonicalName,objects:parsed.objects,pagination:parsed.pagination,...(parsed.searchEvidence?{searchEvidence:parsed.searchEvidence}:{}),
           fetchedAt:new Date().toISOString(),error:null,cost:{unit:'agentkey-credit',quoted:desc.creditsPerCall,actual:parsed.actualCredits,status:parsed.actualCredits===null?'unknown':'reported'}};
         state='succeeded';
       }catch(error){

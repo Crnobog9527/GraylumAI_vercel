@@ -89,5 +89,5 @@ export function resolveOpenAICompatibleEndpoint(provider?: string | null, endpoi
  return normalizeOpenAICompatibleEndpoint(endpoint) || (provider === 'openai' ? 'https://openrouter.ai/api/v1/chat/completions' : null);
 }
 export function isOpenRouterEndpoint(endpoint: string) {
- try { const url = new URL(endpoint); return url.protocol === 'https:' && url.hostname === 'openrouter.ai' && !url.username && !url.password && url.pathname === '/api/v1/chat/completions' && !url.search && !url.hash; } catch { return false; }
+ try { const url = new URL(endpoint); return url.origin === 'https://openrouter.ai' && !url.username && !url.password && url.pathname === '/api/v1/chat/completions' && !url.search && !url.hash; } catch { return false; }
 }

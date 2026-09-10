@@ -1,7 +1,7 @@
 import { ChatRequestError, claimChatRequest, ordinaryChatRequest, publicChatRequest, readChatRequest, recoverChatResult, isUnmeteredRateLimit, type ChatInput } from '@/lib/ordinary-chat-request';
 import { assertChatRecoveryAccess } from '@/lib/ordinary-chat-access';
 import { withTokenCountingMetadata } from '@repo/api/src/services/modelCapabilities';
-import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream } from '@repo/api/src/services/providerUsage';
+import { parseProviderUsage, readOpenAIUsageStream, readGeminiUsageStream, nativeSearchCapability, openRouterSearchCapability, openRouterSearchParameters, type SearchEvidence } from '@repo/api/src/services/providerUsage';
 /**
  * AI Streaming API Route
  *
@@ -50,6 +50,7 @@ import {
   normalizeOpenAICompatibleEndpoint,
   resolveOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi,
+  isOpenRouterEndpoint,
 } from '@repo/api/src/services/providerUtils';
 import type { ClaudeMessage } from '@repo/api/src/types/ai';
 
@@ -276,7 +277,6 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   let lifecycle: ReturnType<typeof ordinaryChatRequest> | null = null;
   let dispatchStarted = false;
-
 
   try {
     const requestStartedAt = Date.now();
@@ -598,7 +598,7 @@ export async function POST(request: NextRequest) {
       fallbackEnableWebSearch: modelConfig.enableWebSearch,
     });
     recordStageTiming(stageTimings, 'runtime_model', runtimeModelStartedAt);
-    const systemPrompt = buildRuntimeSystemPrompt(activePrompt);
+    let systemPrompt = buildRuntimeSystemPrompt(activePrompt);
     const transformedMessage = applyUserPromptTemplate(activePrompt, message);
 
     if (!runtimeModel.tokenCountingSupported) {
@@ -612,11 +612,28 @@ export async function POST(request: NextRequest) {
       ? getGoogleApiKey(runtimeModel.apiKey)
       : getConfiguredProviderApiKey(runtimeModel.apiKey);
     const openAICompatible = usesOpenAICompatibleApi({endpoint:runtimeModel.apiEndpoint,apiKey});
+    const compatibleEndpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) || 'https://openrouter.ai/api/v1/chat/completions';
+    const openRouter = openAICompatible && isOpenRouterEndpoint(compatibleEndpoint);
     // A known unsupported transport has not executed. Reject it before token
     // provider calls, reservation, and the durable dispatch boundary.
     if (!openAICompatible && runtimeModel.provider !== 'google') {
       return Response.json({error:STREAM_SERVICE_UNAVAILABLE_MESSAGE},{status:500});
     }
+
+    const searchDecision = decideWebSearch(message);
+    const webSearchRequested = searchDecision.shouldSearch &&
+      searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
+    const nativeCapability = nativeSearchCapability(runtimeModel, openAICompatible);
+    const searchCapability = activePrompt?.skillSnapshot ? null : openRouterSearchCapability(compatibleEndpoint,runtimeModel.modelId,runtimeModel.enableWebSearch)&&openRouter ? 'search-query' : nativeCapability;
+    const webSearchAvailable = runtimeSettings.enableSmartSearchDecision && webSearchRequested && searchCapability !== null && !!apiKey;
+    let openRouterParameters:ReturnType<typeof openRouterSearchParameters>|undefined;
+    if(openRouter){
+      try{openRouterParameters=openRouterSearchParameters(runtimeModel.modelId,webSearchAvailable);}
+      catch{return Response.json({error:'此模型包含未核实的搜索或预设行为，原请求已保留且未预扣。'},{status:503});}
+    }
+    const searchPrice = webSearchAvailable ? runtimeSettings.searchSurchargeCredits : 0;
+    if (searchPrice === null) return Response.json({error:'联网计费配置不可用，请联系管理员。'},{status:503});
+    if (!webSearchAvailable && !activePrompt?.skillSnapshot) systemPrompt += '\n本次未启用联网搜索。请基于已有知识回答，涉及实时信息时说明未核实，不得声称已联网或编造搜索来源。';
 
     const contextManager = new ContextManager(supabaseAuth);
     const contextStartedAt = Date.now();
@@ -669,15 +686,6 @@ export async function POST(request: NextRequest) {
     });
     recordStageTiming(stageTimings, 'token_counting', tokenCountStartedAt);
 
-    const searchDecision = runtimeSettings.enableSmartSearchDecision
-      ? decideWebSearch(message)
-      : {
-          shouldSearch: false,
-          confidence: 1,
-          estimatedSearchCount: 0,
-          reasonCodes: ['smart_search_disabled'],
-        };
-
     const estimatedUsage: TokenUsage = {
       inputTokens: countedInput.inputTokens,
       outputTokens: estimateOutputTokens(
@@ -722,11 +730,11 @@ export async function POST(request: NextRequest) {
     pricing = pricingResult.pricing;
     recordStageTiming(stageTimings, 'pricing_lookup', pricingStartedAt);
     const estimatedCost = calculateTokenCostWithPricing(estimatedUsage, pricing, {
-      searchCount: searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0,
+      searchCount: webSearchAvailable ? searchDecision.estimatedSearchCount : 0,
     }, billingRuntimeSettings);
     const estimatedCredits = estimatePreDeductCredits(
       estimatedCost.credits +
-        ((searchDecision.shouldSearch ? searchDecision.estimatedSearchCount : 0) * runtimeSettings.searchSurchargeCredits),
+        ((webSearchAvailable ? searchDecision.estimatedSearchCount : 0) * searchPrice),
       billingRuntimeSettings,
     );
 
@@ -791,12 +799,6 @@ export async function POST(request: NextRequest) {
 
     stageTimings.preflight = Date.now() - requestStartedAt;
 
-    const webSearchRequested = searchDecision.shouldSearch &&
-      searchDecision.confidence >= runtimeSettings.searchDecisionMinConfidence;
-    const webSearchAvailable = webSearchRequested &&
-      runtimeModel.enableWebSearch &&
-      runtimeModel.provider === 'google';
-
     if (!apiKey) {
 
       await billingService.finalizeAIFailure({
@@ -841,6 +843,11 @@ export async function POST(request: NextRequest) {
         let cachePoints = 0;
         let actualSearchCount = 0;
         let webSearchExecuted = false;
+        let searchEvidence: SearchEvidence = {requested:webSearchRequested,available:webSearchAvailable,
+          status:webSearchAvailable?'unknown':webSearchRequested?'unavailable':'not_requested',
+          executed:webSearchAvailable?null:false,queries:webSearchAvailable?null:[],queryCount:webSearchAvailable?null:0,
+          providerUnit:searchCapability,providerUnits:webSearchAvailable?null:0,
+          surchargeUnits:webSearchAvailable?null:0,surchargeCredits:webSearchAvailable?null:0,sources:[]};
         let usageEvidence: ReturnType<typeof parseProviderUsage>['evidence'] | undefined;
         let usage: TokenUsage = {
           inputTokens: 0,
@@ -890,16 +897,17 @@ export async function POST(request: NextRequest) {
 
           const providerStartedAt = Date.now();
           if (openAICompatible) {
-            const endpoint = normalizeOpenAICompatibleEndpoint(runtimeModel.apiEndpoint) ||
-              'https://openrouter.ai/api/v1/chat/completions';
+            const endpoint = compatibleEndpoint;
             const response = await fetch(endpoint, {
               method: 'POST',
+              redirect: 'error',
               headers: getOpenAICompatibleHeaders(apiKey, runtimeSettings.siteName),
               body: JSON.stringify({
                 model: runtimeModel.modelId,
                 max_tokens: runtimeModel.maxTokens,
                 stream: true,
                 stream_options: { include_usage: true },
+                ...openRouterParameters,
                 messages: buildOpenAICompatibleMessages({
                   systemPrompt,
                   messages: providerMessages,
@@ -918,10 +926,16 @@ export async function POST(request: NextRequest) {
             }
 
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;});
+            const result = await readOpenAIUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;},openRouter?{searchEnabled:webSearchAvailable}:undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
+            if(result.search){
+              actualSearchCount=result.search.queryCount;
+              webSearchExecuted=actualSearchCount>0;
+              searchEvidence={...searchEvidence,...result.search,status:'verified',executed:webSearchExecuted,
+                surchargeUnits:Number(webSearchExecuted),surchargeCredits:canUseFreeTier?0:Number(webSearchExecuted)*searchPrice};
+            }
           } else if (runtimeModel.provider === 'google') {
             const response = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(runtimeModel.modelId)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey ?? '')}`,
@@ -967,14 +981,18 @@ export async function POST(request: NextRequest) {
               throw new Error(STREAM_PROVIDER_FAILURE_MESSAGE);
             }
 
-            webSearchExecuted = webSearchAvailable;
-            actualSearchCount = webSearchAvailable ? searchDecision.estimatedSearchCount : 0;
-
             if (!response.body) throw new Error(STREAM_PROVIDER_EMPTY_BODY_MESSAGE);
-            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;});
+            const result = await readGeminiUsageStream(response.body, () => { firstProviderChunkAt ??= Date.now(); }, content => {fullContent=content;}, webSearchAvailable ? nativeCapability! : undefined);
             fullContent = result.content;
             usage = result.usage;
             usageEvidence = result.evidence;
+            if(result.search){
+              actualSearchCount=result.search.queryCount;
+              webSearchExecuted=actualSearchCount>0;
+              searchEvidence={...searchEvidence,...result.search,status:'verified',executed:webSearchExecuted,
+                surchargeUnits:Number(webSearchExecuted),surchargeCredits:canUseFreeTier?0:Number(webSearchExecuted)*searchPrice};
+            }
+
           } else {
             logAiStreamError('ai_stream_provider_not_openrouter_compatible', {
               provider: runtimeModel.provider,
@@ -1021,11 +1039,11 @@ export async function POST(request: NextRequest) {
           }
 
           const calculatedCost = calculateTokenCostWithPricing(usage, pricing, {
-            searchCount: actualSearchCount,
+            searchCount: searchEvidence.providerUnits ?? 0,
           }, billingRuntimeSettings);
           const actualCredits = canUseFreeTier
             ? 0
-            : calculatedCost.credits + (actualSearchCount * runtimeSettings.searchSurchargeCredits);
+            : calculatedCost.credits + (searchEvidence.surchargeCredits ?? 0);
           const pricingMetadata = {
             inputPer1M: pricing.inputPer1M,
             outputPer1M: pricing.outputPer1M,
@@ -1070,6 +1088,7 @@ export async function POST(request: NextRequest) {
               count_source: 'provider_usage',
               preflight_count_source: countedInput.countSource,
               provider_usage: usageEvidence,
+              search_evidence: searchEvidence,
               counter_version: countedInput.counterVersion,
               routing_decision: routingDecision,
               pricing: pricingMetadata,
@@ -1098,6 +1117,7 @@ export async function POST(request: NextRequest) {
               promptCacheEnabled: runtimeSettings.enablePromptCache,
               promptCacheApplied: cachePoints > 0,
               cachePoints,
+              search_evidence: searchEvidence,
               webSearchRequested,
               webSearchAvailable,
               webSearchExecuted,
@@ -1188,6 +1208,7 @@ export async function POST(request: NextRequest) {
               promptId: activePrompt?.id ?? null,
               promptName: activePrompt?.name ?? null,
               promptCacheEnabled: runtimeSettings.enablePromptCache,
+              search_evidence: searchEvidence,
               webSearchRequested,
               webSearchAvailable,
               webSearchExecuted,

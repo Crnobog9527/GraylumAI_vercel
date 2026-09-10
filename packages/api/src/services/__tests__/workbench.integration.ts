@@ -2790,6 +2790,8 @@ aiTest('CHAT: a delayed quote for edited input cannot offer or dispatch the old 
 aiTest('CHAT: free and document UI send through ordinary streaming and restore the durable URL',async()=>{
  await sql.query("insert into system_settings(key,value) values('home_show_onboarding','true') on conflict(key) do update set value='true'");
  const t=await generationFixture();
+ await sql.query("update ai_models set enable_web_search='true' where id=$1",[localModel]);
+ await sql.query("insert into system_settings(key,value) values('enable_smart_search_decision','true') on conflict(key) do update set value='true'");
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const skillId=randomUUID(),moduleId=randomUUID();
  await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'METHOD_CANARY_DOCUMENT_STREAM Private document instruction')",[skillId,skillId]);
@@ -2799,7 +2801,7 @@ aiTest('CHAT: free and document UI send through ordinary streaming and restore t
  for(const module of [null,moduleId]) {
   if(module){await page.goto(app+'/marketplace?module='+module);await page.getByRole('dialog').getByRole('button',{name:'立即使用',exact:true}).click();}
   else {await page.goto(app+'/');await page.getByRole('link',{name:'自由对话',exact:true}).click();}
-  await page.getByTestId('chat-input').fill(module?'DOCUMENT_SEND':'FREE_SEND');
+  await page.getByTestId('chat-input').fill(module?'搜索最新资料后总结：DOCUMENT_SEND':'FREE_SEND');
   const sent=page.waitForResponse(response=>response.url().includes('/api/ai/stream'));
   await page.getByRole('button',{name:'发送',exact:true}).click();
   const response=await sent,responseText=await response.text();expect(response.status(),responseText).toBe(200);expect(responseText).not.toContain('METHOD_CANARY');
@@ -2811,6 +2813,9 @@ aiTest('CHAT: free and document UI send through ordinary streaming and restore t
   await page.reload();await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor();expect(await page.getByLabel('Skill 步骤与成果').count()).toBe(0);
  }
  expect(requests.filter(path=>path.startsWith('/api/ai/stream'))).toHaveLength(2);
+ const providerCalls=await (await fetch(url+'/__document_model_calls')).json();
+ expect(providerCalls).toHaveLength(2);
+ for(const call of providerCalls)expect(call).toMatchObject({plugins:[{id:'web',enabled:false}],tools:[],tool_choice:'none',performedQueries:0});
  expect((await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[t.scope.projectId])).rows[0].n).toBe(0);
  await context.close();
 },150000);
@@ -4332,4 +4337,24 @@ consumptionTest('CONSUMPTION: complete 1000-row own history is read and summed w
   expect(read.error).toBeNull();expect(read.count).toBe(1000);expect(read.data).toHaveLength(1000);
   const before=await consumptionCounts();expect((await consumptionHttp(t.user,'generate',v)).status).toBe(200);const after=await consumptionCounts();expect(after.calls-before.calls).toBe(1);expect(after.pre-before.pre).toBe(1);
  } finally {await sql.query("delete from billing_history where metadata->>'consumptionTest'=$1",[marker]);await sql.query("update billing_history set created_at=created_at+interval '2 days' where id=any($1::uuid[])",[previous]);}
+},90000);
+
+consumptionTest.each([5,'5'])('CONSUMPTION: admin saves search price %j then Skill reserves and settles the same value',async price=>{
+ const t=await generationFixture(),search=await consumptionSearch(t);
+ const {createServerClient}=requireWeb('@supabase/ssr');const cookies:any[]=[];
+ const session=(await t.user.auth.getSession()).data.session!;const client=createServerClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[],setAll:(v:any[])=>cookies.push(...v)}});await client.auth.setSession(session);
+ await sql.query("update profiles set role='admin' where id=$1",[actor]);
+ try{
+  const saved=await fetch(app+'/api/trpc/settings.updateSystemSettingsBulk',{method:'POST',headers:{Cookie:cookies.map(c=>c.name+'='+c.value).join('; '),'Content-Type':'application/json'},body:JSON.stringify([{key:'search_surcharge_credits',value:price}])});expect(saved.status).toBe(200);
+  expect((await sql.query("select value from system_settings where key='search_surcharge_credits'")).rows[0].value).toBe(price);
+  const response=await consumptionHttp(t.user,'search',search.input);expect(response.status).toBe(200);
+  const row=(await sql.query('select state,user_quote_credits,charged_credits,result from research_operations where id=$1',[search.input.requestId])).rows[0];
+  expect(row).toMatchObject({state:'succeeded',user_quote_credits:5,charged_credits:5});expect(row.result.searchEvidence).toEqual({executed:true,queryCount:1,providerUsage:{unit:'tavily-credit',credits:1}});expect(row.result.objects).toEqual([]);expect(row.result.cost.actual).toBeNull();
+  await settingPrice('invalid');expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(200);expect(search.fixture.events.filter(e=>e==='execute')).toHaveLength(1);
+ }finally{await sql.query("update profiles set role='user' where id=$1",[actor]);await search.fixture.stop();}
+ async function settingPrice(value:unknown){await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(value)]);}
+},90000);
+consumptionTest.each([0,'0',null,'',-1,1000000])('CONSUMPTION: invalid or zero paid Skill search price %j refuses before provider/reservation',async price=>{
+ const t=await generationFixture(),search=await consumptionSearch(t);await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(price)]);
+ try{const before=await consumptionCounts();expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(503);expect(search.fixture.events).toEqual([]);expect((await consumptionCounts()).pre).toBe(before.pre);}finally{await search.fixture.stop();}
 },90000);

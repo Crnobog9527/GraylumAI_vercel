@@ -1,10 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createClient } from '@/lib/supabase';
+import type { SearchEvidence } from '@repo/api/src/services/providerUsage';
 import type { ChatInput, publicChatRequest } from '@/lib/ordinary-chat-request';
 
 export interface StreamMessage {
   id:string; role:'user'|'assistant'; content:string; createdAt:string; isStreaming?:boolean;
+  search?:SearchEvidence|null;
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
@@ -58,7 +60,7 @@ export function useStreamingChat(options:Options={}) {
     const next={...p,conversationId:snapshot.conversationId,snapshot,absent:false};save(next);
     if(conversation.current!==snapshot.conversationId){conversation.current=snapshot.conversationId;setConversation(snapshot.conversationId);opts.current.onConversationCreated?.(snapshot.conversationId);}
     const userId=snapshot.userMessageId??`user-${p.requestId}`,assistantId=snapshot.assistantMessageId??`assistant-${p.requestId}`;
-    const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),
+    const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),search:snapshot.search,
       ...(snapshot.state==='succeeded'?{usage:snapshot.usage??undefined,cost:{credits:snapshot.billing.credits??0}}:{})};
     setMessages(previous=>{
       const without=previous.filter(m=>![userId,assistantId,`user-${p.requestId}`,`assistant-${p.requestId}`].includes(m.id));

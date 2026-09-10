@@ -1,3 +1,4 @@
+import { parseSearchSurcharge } from '../services/searchPricing';
 import { summaryModelOption } from "../services/artifacts/modelPolicy";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
@@ -67,6 +68,9 @@ const systemSettingInputSchema = z.object({
   key: z.string().trim().min(1),
   value: z.any(),
 }).superRefine((setting, ctx) => {
+  if (setting.key === 'search_surcharge_credits' && parseSearchSurcharge(setting.value) === null) {
+    ctx.addIssue({code:'custom',path:['value'],message:'联网附加积分须为0至999999的整数；受控Skill搜索仍须配置正数'});
+  }
   if (setting.key === 'v3_summary_model_id' && setting.value !== '' && !z.string().uuid().safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '请选择有效的步骤成果整理模型' });
   }

@@ -29,7 +29,7 @@ export const tavilyContract:ProviderContract={
   const v=parse(z.object({category:z.literal('search'),provider:z.literal('Tavily'),took_ms:z.number().int().nonnegative(),data:z.object({query:z.string().max(200),answer:z.null(),follow_up_questions:z.null(),images:z.array(z.unknown()).length(0),response_time:z.number().finite().nonnegative(),results:z.array(result).max(3),usage:z.object({credits:z.number().int().nonnegative()}).strict()}).strict()}).strict(),value);
   if(v.data.query!==p.query||v.data.results.length>p.max_results)throw new ResearchError('RESULT_IDENTITY_MISMATCH');
   if(new Set(v.data.results.map(r=>r.id)).size!==v.data.results.length)throw new ResearchError('DUPLICATE_RESULT_ID');
-  return {objects:v.data.results.map(r=>({id:r.id,sourceUrl:r.url,observedAt:null,missingFields:['publishedAt'],fields:{kind:'web-search',title:r.title,content:r.content,score:r.score,query:p.query,coverage:'ranked-results-not-exhaustive',providerUsage:{unit:'tavily-credit',credits:v.data.usage.credits}}})),pagination:{complete:true,nextCursor:null},actualCredits:null};
+  return {searchEvidence:{executed:true,queryCount:1,providerUsage:{unit:'tavily-credit',credits:v.data.usage.credits}},objects:v.data.results.map(r=>({id:r.id,sourceUrl:r.url,observedAt:null,missingFields:['publishedAt'],fields:{kind:'web-search',title:r.title,content:r.content,score:r.score,query:p.query,coverage:'ranked-results-not-exhaustive',providerUsage:{unit:'tavily-credit',credits:v.data.usage.credits}}})),pagination:{complete:true,nextCursor:null},actualCredits:null};
  },
 };
 

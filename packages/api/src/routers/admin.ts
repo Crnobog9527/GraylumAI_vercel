@@ -1,3 +1,4 @@
+import { parseSearchSurcharge } from '../services/searchPricing';
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -2588,7 +2589,7 @@ export const adminRouter = router({
         inputCreditsPer1KRange: formatRange(inputCreditsPer1KValues),
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
         searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),
-        searchSurchargeCredits: parseNumericSetting(settingsMap, 'search_surcharge_credits', 0),
+        searchSurchargeCredits: parseSearchSurcharge(settingsMap['search_surcharge_credits']),
         newUserCredits: parseNumericSetting(settingsMap, 'new_user_credits', 100),
       };
 
