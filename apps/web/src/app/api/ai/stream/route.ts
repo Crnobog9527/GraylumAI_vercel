@@ -392,6 +392,7 @@ export async function POST(request: NextRequest) {
       recordStageTiming(stageTimings, 'consumption', consumptionStartedAt);
     } catch(error) {
       const denied=error instanceof TRPCError && error.code==='FORBIDDEN';
+      logAiStreamError('ai_stream_consumption_admission_rejected', { requestId, reason: denied ? 'limit_reached' : 'read_unavailable' });
       return Response.json({error:denied?error.message:'账号或消费保护状态暂时无法验证，请稍后重试'},{status:denied?403:503});
     }
 
@@ -633,7 +634,7 @@ export async function POST(request: NextRequest) {
     }
     const searchPrice = webSearchAvailable ? runtimeSettings.searchSurchargeCredits : 0;
     if (searchPrice === null) return Response.json({error:'联网计费配置不可用，请联系管理员。'},{status:503});
-    if (!webSearchAvailable && !activePrompt?.skillSnapshot) systemPrompt += '\n本次未启用联网搜索。请基于已有知识回答，涉及实时信息时说明未核实，不得声称已联网或编造搜索来源。';
+    if (!webSearchAvailable && !activePrompt?.skillSnapshot) systemPrompt = (systemPrompt ?? '') + '\n本次未启用联网搜索。请基于已有知识回答，涉及实时信息时说明未核实，不得声称已联网或编造搜索来源。';
 
     const contextManager = new ContextManager(supabaseAuth);
     const contextStartedAt = Date.now();

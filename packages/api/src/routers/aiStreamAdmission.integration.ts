@@ -72,10 +72,12 @@ beforeAll(async () => {
   }
   await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(modelId)]);
   // Replace the broad billing scaffold with the repository's 0063 service-role
-  // read shape and the canonical 0001 authenticated own-row policies.
+  // read shape; caller consumption is supplied only by migration 0079.
   await sql.query('revoke select on billing_history from service_role; revoke select(user_id) on billing_history from service_role; grant select(operation_type,amount,created_at) on billing_history to service_role');
   const canonical = readFileSync(new URL('../../../../packages/db/migrations/0001_ai_billing_tables.sql',import.meta.url),'utf8');
-  for (const table of ['billing_history','ai_usage_logs']) {
+  const consumptionMigration=readFileSync(new URL('../../../../packages/db/migrations/0079_ai_consumption_read_contract.sql',import.meta.url),'utf8');
+  await sql.query(consumptionMigration);await sql.query(consumptionMigration);
+  for (const table of ['ai_usage_logs']) {
     const name = `users_own_${table}_select`;
     const start = canonical.indexOf(`CREATE POLICY "${name}"`), end = canonical.indexOf(';',start)+1;
     if (start < 0 || end <= start) throw new Error('Missing canonical own-row policy');
@@ -135,8 +137,8 @@ it.each([['hour',10000,'30 minutes'],['day',50000,'2 hours']] as const)('direct 
   await sql.query("insert into billing_history(user_id,operation_type,amount,created_at) values($1,'settle',$2,now()-$3::interval)",[actor,-amount,age]);await deny(403);
 });
 it('direct HTTP fails closed when consumption SELECT is denied',async()=>{
-  await sql.query('revoke select on billing_history from authenticated');
-  try {await deny(503);} finally {await sql.query('grant select on billing_history to authenticated');}
+  await sql.query('revoke select(user_id,operation_type,amount,created_at) on billing_history from authenticated');
+  try {await deny(503);} finally {await sql.query('grant select(user_id,operation_type,amount,created_at) on billing_history to authenticated');}
 });
 it('direct HTTP fails closed when profile state cannot be read',async()=>{
   await sql.query('revoke select(status,role) on profiles from authenticated');

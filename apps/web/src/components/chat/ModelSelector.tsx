@@ -16,7 +16,6 @@ interface Model {
   name: string;
   provider: string;
   description?: string;
-  credits_per_message: number;
   is_active: boolean;
 }
 
@@ -79,7 +78,7 @@ export default function ModelSelector({
                   color: 'var(--color-primary)'
                 }}
               >
-                {selectedModelData.credits_per_message} 积分
+                按实际用量计费
               </span>
             </div>
           )}
@@ -125,7 +124,7 @@ export default function ModelSelector({
                   className="text-xs px-2 py-0.5 rounded-full border border-[var(--border-secondary)]"
                   style={{ color: 'var(--text-secondary)' }}
                 >
-                  {model.credits_per_message} 积分
+                  按实际用量计费
                 </span>
               </div>
             </SelectItem>

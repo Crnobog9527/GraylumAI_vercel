@@ -4,6 +4,7 @@
   "git": {
     "deploymentEnabled": {
       "main": true,
+      "codex/consumption-read-contract-20260910": false,
       "codex/search-evidence-metering-20260910": false,
       "staging": true,
       "codex/skill-search-consumption-20260910": false,
