@@ -1,5 +1,6 @@
 'use client';
 
+import { ChatProgress } from './chat-progress';
 import { SearchStatus } from './search-status';
 import type { SearchEvidence } from '@repo/api/src/services/providerUsage';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -148,7 +149,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
     abort: abortStreaming,
     loadHistory,
     clearChat, recover, resume, retryFailed, requestStatus, requestAbsent, requestInput,
-    hasUnresolvedRequest, stopped, billing,
+    hasUnresolvedRequest, stopped, billing, phase, startedAt,
   } = useStreamingChat({
     conversationId: activeConversationId ?? undefined,
     moduleId,
@@ -458,8 +459,9 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
             onExport={handleExport}
           />
 
+          <ChatProgress phase={hasUnresolvedRequest && !stopped ? phase : null} startedAt={startedAt} />
           {/* 错误提示 */}
-          {requestStatus && requestStatus !== 'succeeded' && (
+          {requestStatus && requestStatus !== 'succeeded' && !isStreaming && (
             <div role="status" className="mx-4 my-3 rounded-lg border border-[var(--border-color)] p-4 text-sm">
               <p>{requestStatus === 'failed' ? '本次请求已明确失败，输入已保留，预扣已处理。'
                 : requestStatus === 'responded' ? '原回复已保存，费用结算待确认。恢复不会再次生成。'
@@ -634,7 +636,7 @@ export function StandardConversation({ moduleId, initialConversationId, navigate
                     <span className="text-xs" style={{ color: 'var(--text-disabled)' }}>
                       {inputMessage.length}/{maxInputCharacters}
                     </span>
-                    {isStreaming ? (
+                    {(isStreaming || (hasUnresolvedRequest && !stopped)) ? (
                       <Button
                         onClick={handleAbort}
                         className="h-9 px-5 gap-2 rounded-xl font-medium"

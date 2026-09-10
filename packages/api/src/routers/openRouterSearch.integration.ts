@@ -227,3 +227,49 @@ repaired('missing deployed contract keeps original rejection across refresh, the
   console.log('CONSUMPTION_CONTRACT_HTTP_BROWSER',JSON.stringify({rejectedStatus:503,requestRecordsBefore:0,preDeductionsBefore:0,providerBefore:0,sameId:true,providerAfter:1,searchQueries:1,preDeductionAfter:1,settlementAfter:1,refreshNewCalls:0}));
  }finally{await sql.query(consumptionMigration());await context.close();}
 },180000);
+
+
+it('LIVE: successful search emits complete even when context snapshots are unavailable',async()=>{
+ await configureOpenRouter('qwen/qwen3.8-27b');
+ await sql.query(`CREATE TABLE IF NOT EXISTS conversation_context_snapshots (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),conversation_id uuid NOT NULL,snapshot_type text NOT NULL,content text NOT NULL,
+ source_message_start_id uuid,source_message_end_id uuid,source_message_count integer,metadata jsonb,created_at timestamptz default now(),updated_at timestamptz,
+ UNIQUE(conversation_id,snapshot_type)); ALTER TABLE conversation_context_snapshots ENABLE ROW LEVEL SECURITY;
+ REVOKE ALL ON conversation_context_snapshots FROM authenticated,anon;`);
+ expect((await sql.query("select has_table_privilege('authenticated','conversation_context_snapshots','INSERT') allowed")).rows[0].allowed).toBe(false);
+ const body=request('ONE');const result=await send(body);
+ expect(result.body).toContain('"type":"complete"');expect(result.body).not.toContain('"type":"error"');
+ const v=await observed(body);expect(v.public.state).toBe('succeeded');expect(v.provider).toHaveLength(1);
+ expect(v.ledger).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
+});
+
+it('LIVE: browser shows checked text while provider is held, then refreshes without another dispatch',async()=>{
+ await configureOpenRouter('qwen/qwen3.8-27b');await setting('chat_show_model_selector',false);
+ const context=await browser.newContext();await context.route('**/*',r=>['127.0.0.1','localhost'].includes(new URL(r.request().url()).hostname)?r.continue():r.abort());
+ const page=await context.newPage();let submitted:any,reads=0;
+ page.on('request',req=>{if(req.url().includes('/api/ai/stream')&&req.method()==='POST')submitted=req.postDataJSON();if(req.url().includes('/api/ai/requests?'))reads++;});
+ const body=request('LIVE');const key=body.message.match(/OPENROUTER_CASE_[a-zA-Z0-9_-]+/)![0];
+ try{
+  await page.goto(app+'/login?redirect=/chat');await page.getByPlaceholder('name@example.com').fill(credentials.email);await page.getByPlaceholder('输入你的密码').fill(credentials.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/chat',{timeout:90000});
+  await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByTestId('chat-progress').waitFor({timeout:15000});
+  await page.getByText('联网处理中',{exact:true}).waitFor({timeout:15000});
+  await page.locator('[data-message-role="assistant"]').filter({hasText:'实时回答已经开始。'}).waitFor({timeout:15000});
+  expect((await row(submitted.requestId)).state).toBe('running');expect(reads).toBe(0);
+  expect(await page.getByRole('progressbar').getAttribute('aria-valuenow')).toBeNull();
+  expect(await page.getByText('正在确认原请求是否已接收，输入与请求标识已保留。',{exact:true}).count()).toBe(0);
+  await page.screenshot({path:resolve(process.env.V3_WORKBENCH_OUTPUT!,'live-answer-before-provider-completes.png')});
+  await page.reload();
+  await page.getByText('正在确认原请求',{exact:true}).waitFor({timeout:15000});
+  const recoverButton=page.getByRole('button',{name:'恢复原请求',exact:true});
+  await expect.poll(()=>recoverButton.isEnabled()).toBe(true);
+  const readsBefore=reads;await new Promise(resolve=>setTimeout(resolve,5500));
+  expect(reads-readsBefore).toBeLessThanOrEqual(2);expect(await recoverButton.isEnabled()).toBe(true);
+  expect(await calls(key)).toBe(1);
+  await fetch(api+'/__search_release?key='+key,{method:'POST'});
+  await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:45000});
+  const before=await accounting(submitted.requestId);expect((await row(submitted.requestId)).state).toBe('succeeded');
+  await page.reload();await page.getByRole('link',{name:'OpenRouter verified source'}).waitFor({timeout:45000});
+  expect(await calls(key)).toBe(1);expect(await accounting(submitted.requestId)).toEqual(before);
+ }finally{await fetch(api+'/__search_release?key='+key,{method:'POST'});await context.close();}
+},120000);

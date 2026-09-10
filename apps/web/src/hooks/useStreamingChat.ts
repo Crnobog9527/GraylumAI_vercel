@@ -10,7 +10,8 @@ export interface StreamMessage {
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
-type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean;deliveryError?:string};
+type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean;deliveryError?:string;received?:boolean};
+export type ChatProgressPhase = 'preparing'|'waiting'|'searching'|'answering'|'confirming'|'recovering'|null;
 interface Options {
   conversationId?:string;moduleId?:string;onMessageStart?:()=>void;
   onMessageComplete?:(message:StreamMessage)=>void;onConversationCreated?:(id:string)=>void;
@@ -49,6 +50,8 @@ const unresolved=(p:Pending|null)=>!!p && p.snapshot?.state!=='succeeded' && p.s
 export function useStreamingChat(options:Options={}) {
   const [messages,setMessages]=useState<StreamMessage[]>([]),[pending,setPending]=useState<Pending|null>(null);
   const [isLoading,setLoading]=useState(false),[isStreaming,setStreaming]=useState(false),[error,setError]=useState<string|null>(null);
+  const [phase,setPhase]=useState<ChatProgressPhase>(null),[recoveryPaused,setRecoveryPaused]=useState(false),[recoveryTick,setRecoveryTick]=useState(0);
+  const recoveryAttempts=useRef(0);
   const [conversationId,setConversation]=useState<string|null>(options.conversationId??null);
   const opts=useRef(options);opts.current=options;
   const current=useRef<Pending|null>(null),conversation=useRef<string|null>(options.conversationId??null);
@@ -68,11 +71,12 @@ export function useStreamingChat(options:Options={}) {
     });
     if(snapshot.state==='succeeded'&&!completed.current.has(p.requestId)){completed.current.add(p.requestId);opts.current.onMessageComplete?.(answer);opts.current.onBalanceChange?.();}
     if(snapshot.state==='failed')opts.current.onBalanceChange?.();
+    setPhase(['succeeded','failed'].includes(snapshot.state)?null:snapshot.state==='responded'?'confirming':'recovering');
     setError(null);
   },[save]);
-  const recover=useCallback(async()=>{
+  const recover=useCallback(async(settings:{quiet?:boolean}={})=>{
     const p=current.current;if(!p||busy.current)return;
-    const generation=epoch.current;busy.current=true;setLoading(true);
+    const generation=epoch.current;busy.current=true;if(!settings.quiet){setLoading(true);setPhase('recovering');setRecoveryPaused(false);recoveryAttempts.current=0;}
     try {
       const {data:{session}}=await supabase.auth.getSession();
       if(!session||session.user.id!==p.actor)throw new Error('请使用原账号登录后恢复请求。');
@@ -80,10 +84,10 @@ export function useStreamingChat(options:Options={}) {
       const data=await response.json();
       if(!alive.current||epoch.current!==generation)return;
       if(response.status===404){save({...p,absent:true});setError([p.deliveryError,'尚未确认服务器接收。可使用原请求标识继续提交。'].filter(Boolean).join(' '));return;}
-      if(!response.ok)throw new Error(data.error??'暂时无法读取请求状态。');
+      if(!response.ok){if(response.status===401||response.status===403)setRecoveryPaused(true);throw new Error(data.error??'暂时无法读取请求状态。');}
       apply(data.request,p);return data.request as Snapshot;
     }catch(e){if(alive.current&&epoch.current===generation)setError(e instanceof Error?e.message:'恢复暂时不可用。');}
-    finally{if(epoch.current===generation){busy.current=false;if(alive.current)setLoading(false);}}
+    finally{if(epoch.current===generation){busy.current=false;if(alive.current){if(!settings.quiet)setLoading(false);setRecoveryTick(v=>v+1);}}}
   },[apply,save]);
   useEffect(()=>{
     alive.current=true;
@@ -106,10 +110,10 @@ export function useStreamingChat(options:Options={}) {
     return()=>{cancelled=true;alive.current=false;epoch.current++;controller.current?.abort();subscription.unsubscribe();};
   },[recover]);
   useEffect(()=>{
-    if(!unresolved(pending)||pending?.absent)return;
-    const timer=setInterval(()=>{void recover();},2000);
-    return()=>clearInterval(timer);
-  },[pending,recover]);
+    if(!unresolved(pending)||pending?.absent||pending?.stopped||isStreaming||recoveryPaused||recoveryAttempts.current>=12)return;
+    const timer=setTimeout(()=>{recoveryAttempts.current++;void recover({quiet:true});},Math.min(2000*2**Math.min(recoveryAttempts.current,3),15000));
+    return()=>clearTimeout(timer);
+  },[pending,recover,isStreaming,recoveryPaused,recoveryTick]);
 
   const transmit=useCallback(async(p:Pending)=>{
     const generation=epoch.current;
@@ -117,7 +121,7 @@ export function useStreamingChat(options:Options={}) {
       const {data:{session}}=await supabase.auth.getSession();
       if(!session||session.user.id!==p.actor)throw new Error('请重新登录后恢复原请求。');
       if(!alive.current||epoch.current!==generation)return;
-      controller.current=new AbortController();setLoading(true);setStreaming(true);setError(null);
+      controller.current=new AbortController();setLoading(true);setStreaming(true);setPhase('preparing');setRecoveryPaused(false);recoveryAttempts.current=0;setError(null);
       opts.current.onMessageStart?.();
       const response=await fetch('/api/ai/stream',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({...p.input,requestId:p.requestId}),signal:controller.current.signal});
       if(!response.ok){
@@ -137,13 +141,23 @@ export function useStreamingChat(options:Options={}) {
           let end:number;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!line.startsWith('data: '))continue;
             const event=JSON.parse(line.slice(6));if(!alive.current||epoch.current!==generation)continue;
             if(event.type==='init'&&event.requestId===p.requestId&&event.conversationId){
-              const nextPending={...current.current!,conversationId:event.conversationId};save(nextPending);
+              const nextPending={...current.current!,conversationId:event.conversationId,received:true};save(nextPending);setPhase('waiting');
               if(conversation.current!==event.conversationId){conversation.current=event.conversationId;setConversation(event.conversationId);opts.current.onConversationCreated?.(event.conversationId);}
             }
-            if(event.type==='complete')complete=true;
-            // Only the authenticated saved snapshot is rendered as a result.
-            // EOF, error events and stop never imply completion or refund.
+            if(event.requestId!==p.requestId)continue;
+            if(event.type==='search_started')setPhase('searching');
+            if(event.type==='content'&&typeof event.content==='string'){
+              // Checked server text is a provisional preview. Only the saved
+              // authenticated result can confirm completion, sources and charges.
+              setPhase(event.final?'confirming':'answering');
+              const answer:StreamMessage={id:`assistant-${p.requestId}`,role:'assistant',content:event.content,createdAt:new Date().toISOString(),isStreaming:!event.final};
+              setMessages(previous=>[...previous.filter(m=>m.id!==answer.id),answer]);
+            }
+            if(event.type==='error')throw new Error(typeof event.error==='string'?event.error:'响应中断，正在确认原请求。');
+            if(event.type==='complete'){complete=true;setPhase('confirming');break;}
+
           }
+          if(complete){await reader.cancel();break;}
         }
         if(!complete)throw new Error('响应未确认完成，正在恢复原请求状态。');
       }
@@ -155,7 +169,7 @@ export function useStreamingChat(options:Options={}) {
 
   const sendMessage=useCallback(async(content:string,sendOptions:{modelId?:string;moduleId?:string}={})=>{
     if(!content.trim()||busy.current||unresolved(current.current))return;
-    busy.current=true;const generation=epoch.current;
+    busy.current=true;setPhase('preparing');const generation=epoch.current;
     try {
       const {data:{session}}=await supabase.auth.getSession();if(!session)throw new Error('请先登录，输入内容已保留。');
       if(!alive.current||epoch.current!==generation)return;
@@ -186,7 +200,7 @@ export function useStreamingChat(options:Options={}) {
   const abort=useCallback(()=>{
     const p=current.current;if(!p)return;
     try{save({...p,stopped:true});}catch{}
-    controller.current?.abort();setStreaming(false);setLoading(false);
+    controller.current?.abort();setStreaming(false);setLoading(false);setPhase(null);
     void (async()=>{const {data:{session}}=await supabase.auth.getSession();if(session?.user.id===p.actor)await fetch(`/api/ai/requests?requestId=${p.requestId}`,{method:'POST',headers:{Authorization:`Bearer ${session.access_token}`}}).catch(()=>{});})();
   },[save]);
   const loadHistory=useCallback(async(id:string)=>{
@@ -206,11 +220,12 @@ export function useStreamingChat(options:Options={}) {
   },[recover]);
   const clearChat=useCallback(()=>{
     epoch.current++;historyEpoch.current++;controller.current?.abort();busy.current=false;current.current=null;conversation.current=null;
-    setPending(null);setConversation(null);setMessages([]);setLoading(false);setStreaming(false);setError(null);
+    setPending(null);setConversation(null);setMessages([]);setLoading(false);setStreaming(false);setPhase(null);setError(null);
   },[]);
-  const requestStatus=pending?.snapshot?.state??(pending?'unconfirmed':null);
+  const requestStatus=pending?.snapshot?.state??(pending?(pending.received?'running':'unconfirmed'):null);
   return {conversationId,messages,isLoading,isStreaming,error,modelUsed:pending?.snapshot?.modelUsed??null,
     sendMessage,abort,loadHistory,clearChat,recover,resume,retryFailed,
+    phase,startedAt:pending?.createdAt??null,recoveryPaused,
     requestStatus,requestAbsent:pending?.absent===true,requestInput:pending?.input.message??null,hasUnresolvedRequest:unresolved(pending),
     stopped:pending?.stopped||pending?.snapshot?.stopped,billing:pending?.snapshot?.billing??null};
 }
