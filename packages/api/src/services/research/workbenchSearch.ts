@@ -96,12 +96,13 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    if(settings.error||settings.data?.find(s=>s.key==='v3_web_search')?.value!==true)throw new Error('RESEARCH_DISABLED');
    const price=settings.data.find(s=>s.key==='search_surcharge_credits')?.value;
    if(!Number.isSafeInteger(price)||price<1||price>999999)throw new Error('RESEARCH_BILLING_UNAVAILABLE');
-   await preAICallSecurityChecks({supabase:privateClient!,userId:id},previous?0:price,{skipRateLimit:true});
+   // Read consumption through the authenticated own-row client, not the RPC writer.
+   await preAICallSecurityChecks({supabase:userClient,userId:id},previous?0:price,{skipRateLimit:true});
    const authorize=async()=>{
     await admission(input,id);
     const flag=await privateClient!.from('system_settings').select('value').eq('key','v3_web_search').single();
     if(flag.error||flag.data?.value!==true)throw new Error('RESEARCH_DISABLED');
-    await preAICallSecurityChecks({supabase:privateClient!,userId:id},0,{skipRateLimit:true});
+    await preAICallSecurityChecks({supabase:userClient,userId:id},0,{skipRateLimit:true});
    };
    const connection=await connect({store,scope,capabilities:tavilyCapabilities,contract:tavilyContract,authorize,timeoutMs:15000,maxResponseBytes:262144,maxCalls:4,maxPages:1});
    try {

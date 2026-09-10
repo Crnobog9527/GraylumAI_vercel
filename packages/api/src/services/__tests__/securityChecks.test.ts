@@ -559,17 +559,20 @@ describe('public AI consumption admission fails closed', () => {
     ['missing rows',{data:null,error:null,count:0}],
     ['missing amount',{data:[{}],error:null,count:1}],
     ['string amount',{data:[{amount:'100'}],error:null,count:1}],
+    ['positive settlement',{data:[{amount:-9999},{amount:9999}],error:null,count:2}],
+    ['fractional amount',{data:[{amount:-0.5}],error:null,count:1}],
+    ['null amount',{data:[{amount:null}],error:null,count:1}],
     ['missing count',{data:[],error:null,count:null}],
     ['truncated result',{data:[{amount:-1}],error:null,count:1001}],
     ['unsafe total',{data:[{amount:-Number.MAX_SAFE_INTEGER},{amount:-1}],error:null,count:2}],
   ])('rejects %s safely',async(_name,result)=>{
-    await expect(checkConsumptionCircuitBreaker(context([result,{data:[],error:null,count:0}]),{requireCompleteRead:true})).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:'消费保护状态暂时无法验证，请稍后重试'});
+    await expect(checkConsumptionCircuitBreaker(context([result,{data:[],error:null,count:0}]))).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE',message:'消费保护状态暂时无法验证，请稍后重试'});
   });
   it('allows complete empty history and keeps the existing hourly/day thresholds',async()=>{
     const empty={data:[],error:null,count:0};
-    await expect(checkConsumptionCircuitBreaker(context([empty,empty]),{requireCompleteRead:true})).resolves.toEqual({allowed:true});
-    await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-9999}],error:null,count:1},{data:[{amount:-50000}],error:null,count:1}]),{requireCompleteRead:true})).resolves.toMatchObject({allowed:false,limit:50000});
-    await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-10000}],error:null,count:1}]),{requireCompleteRead:true})).resolves.toMatchObject({allowed:false,limit:10000});
+    await expect(checkConsumptionCircuitBreaker(context([empty,empty]))).resolves.toEqual({allowed:true});
+    await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-9999}],error:null,count:1},{data:[{amount:-50000}],error:null,count:1}]))).resolves.toMatchObject({allowed:false,limit:50000});
+    await expect(checkConsumptionCircuitBreaker(context([{data:[{amount:-10000}],error:null,count:1}]))).resolves.toMatchObject({allowed:false,limit:10000});
   });
   it.each([null,'pending',undefined])('rejects unknown profile status %s',async status=>{
     const ctx={userId:'synthetic-user',supabase:{from:()=>({select(){return this},eq(){return this},single:async()=>({data:{status,role:'user'},error:null})})}} as any;
