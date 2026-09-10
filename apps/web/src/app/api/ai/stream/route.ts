@@ -696,16 +696,15 @@ export async function POST(request: NextRequest) {
           modelId: runtimeModel.modelId,
           reason: error.reason,
         });
-        await billingService.recordUsageLog({
+        await billingService.finalizeAIFailure({
           conversationId: conversation.id,
           requestId,
-          modelId: runtimeModel.modelId,
-          status: 'failed',
-          errorMessage: 'model_pricing_unavailable',
+          modelUsed: runtimeModel.modelId,
+          reason: 'model_pricing_unavailable',
           inputLength: message.length,
           ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
           userAgent: request.headers.get('user-agent') ?? undefined,
-          metadata: {
+          usageMetadata: {
             routingReason,
             routingDecision,
             selectedModelRecordId: modelConfig.id,
@@ -753,16 +752,15 @@ export async function POST(request: NextRequest) {
       && balance <= 0
       && freeTierUsedToday < runtimeSettings.freeTierMessages;
     if (balance < estimatedCredits && !canUseFreeTier) {
-      await billingService.recordUsageLog({
+      await billingService.finalizeAIFailure({
         conversationId: conversation.id,
         requestId,
-        modelId: runtimeModel.modelId,
-        status: 'failed',
-        errorMessage: '积分不足',
+        modelUsed: runtimeModel.modelId,
+        reason: '积分不足',
         inputLength: message.length,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
-        metadata: {
+        usageMetadata: {
           estimatedCredits,
           balance,
           freeTierEnabled: runtimeSettings.enableFreeTier,
@@ -801,15 +799,14 @@ export async function POST(request: NextRequest) {
 
     if (!apiKey) {
 
-      await billingService.recordUsageLog({
+      await billingService.finalizeAIFailure({
         conversationId: conversation.id,
         requestId,
-        modelId: runtimeModel.modelId,
-        status: 'failed',
-        errorMessage: '未配置 API Key',
+        modelUsed: runtimeModel.modelId,
+        reason: '未配置 API Key',
         inputLength: message.length,
         latencyMs: 0,
-        metadata: {
+        usageMetadata: {
           freeTierUsed: canUseFreeTier,
           freeTierUsedToday,
           freeTierMessages: runtimeSettings.freeTierMessages,

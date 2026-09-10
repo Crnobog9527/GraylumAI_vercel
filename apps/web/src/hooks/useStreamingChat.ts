@@ -8,7 +8,7 @@ export interface StreamMessage {
   usage?:{inputTokens:number;outputTokens:number;cacheReadTokens?:number}; cost?:{credits:number};
 }
 type Snapshot=ReturnType<typeof publicChatRequest>;
-type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean};
+type Pending={actor:string;requestId:string;input:ChatInput;conversationId:string|null;createdAt:number;snapshot?:Snapshot;stopped?:boolean;absent?:boolean};
 interface Options {
   conversationId?:string;moduleId?:string;onMessageStart?:()=>void;
   onMessageComplete?:(message:StreamMessage)=>void;onConversationCreated?:(id:string)=>void;
@@ -55,7 +55,7 @@ export function useStreamingChat(options:Options={}) {
   const save=useCallback((p:Pending)=>{persist(p);current.current=p;setPending(p);},[]);
   const apply=useCallback((snapshot:Snapshot,p:Pending)=>{
     if(!alive.current || current.current?.requestId!==p.requestId)return;
-    const next={...p,conversationId:snapshot.conversationId,snapshot};save(next);
+    const next={...p,conversationId:snapshot.conversationId,snapshot,absent:false};save(next);
     if(conversation.current!==snapshot.conversationId){conversation.current=snapshot.conversationId;setConversation(snapshot.conversationId);opts.current.onConversationCreated?.(snapshot.conversationId);}
     const userId=snapshot.userMessageId??`user-${p.requestId}`,assistantId=snapshot.assistantMessageId??`assistant-${p.requestId}`;
     const answer:StreamMessage={id:assistantId,role:'assistant',content:snapshot.content??'',createdAt:new Date().toISOString(),
@@ -77,12 +77,12 @@ export function useStreamingChat(options:Options={}) {
       const response=await fetch(`/api/ai/requests?requestId=${p.requestId}`,{headers:{Authorization:`Bearer ${session.access_token}`},cache:'no-store'});
       const data=await response.json();
       if(!alive.current||epoch.current!==generation)return;
-      if(response.status===404){setError('尚未确认服务器接收。可使用原请求标识继续提交。');return;}
+      if(response.status===404){save({...p,absent:true});setError('尚未确认服务器接收。可使用原请求标识继续提交。');return;}
       if(!response.ok)throw new Error(data.error??'暂时无法读取请求状态。');
       apply(data.request,p);return data.request as Snapshot;
     }catch(e){if(alive.current&&epoch.current===generation)setError(e instanceof Error?e.message:'恢复暂时不可用。');}
     finally{if(epoch.current===generation){busy.current=false;if(alive.current)setLoading(false);}}
-  },[apply]);
+  },[apply,save]);
   useEffect(()=>{
     alive.current=true;
     let cancelled=false;
@@ -104,7 +104,7 @@ export function useStreamingChat(options:Options={}) {
     return()=>{cancelled=true;alive.current=false;epoch.current++;controller.current?.abort();subscription.unsubscribe();};
   },[recover]);
   useEffect(()=>{
-    if(!unresolved(pending))return;
+    if(!unresolved(pending)||pending?.absent)return;
     const timer=setInterval(()=>{void recover();},2000);
     return()=>clearInterval(timer);
   },[pending,recover]);
@@ -166,8 +166,8 @@ export function useStreamingChat(options:Options={}) {
 
   const resume=useCallback(async()=>{
     const p=current.current;if(!p||busy.current||p.snapshot)return;
-    busy.current=true;await transmit(p); // Explicit delivery retry, same immutable ID.
-  },[transmit]);
+    busy.current=true;save({...p,absent:false});await transmit({...p,absent:false}); // Explicit delivery retry, same immutable ID.
+  },[transmit,save]);
   const retryFailed=useCallback(async()=>{
     const p=current.current;if(!p||busy.current||p.snapshot?.state!=='failed')return;
     const fresh=await recover();if(fresh?.state!=='failed')return;

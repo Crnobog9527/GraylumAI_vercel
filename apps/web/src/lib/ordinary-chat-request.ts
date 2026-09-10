@@ -96,7 +96,7 @@ export async function isUnmeteredRateLimit(response:Response) {
     return data && typeof data==='object' && !Array.isArray(data) &&
       !('choices' in data) && !('usage' in data) && !('data' in data) &&
       data.error && typeof data.error==='object' && !Array.isArray(data.error) &&
-      (data.error.code===429 || data.error.code==='429') &&
+      (data.error.code===429 || data.error.code==='429' || data.error.code==='rate_limit_exceeded') &&
       typeof data.error.message==='string' &&
       !('choices' in data.error) && !('usage' in data.error);
   } catch {return false;}

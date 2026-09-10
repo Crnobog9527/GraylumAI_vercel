@@ -50,7 +50,7 @@ provider **twice**, while each UUID had one pre-deduction and one settlement.
 Observed after: each scenario dispatched **once**, reserved once, settled once,
 and saved one user/assistant pair and one token-stat record.
 
-The repaired suite has 28 real integration/browser cases covering lost responses,
+The repaired suite has 35 real integration/browser cases covering lost responses,
 refresh before the initial response, restored input, manual new-generation retry,
 unknown/truncated output, four ambiguous refusal variants, late/aged execution,
 stop/completion races, forced atomic settlement rollback with concurrent recovery,
@@ -114,3 +114,11 @@ input is retained. Refresh merges the recovered request with the existing histor
 query without changing its pagination. Known unsupported generation transports
 fail before token-provider access or reservation, rather than becoming an unknown
 billable execution.
+
+Pre-merge cloud-review remediation additionally covers exact string-coded
+`rate_limit_exceeded` HTTP 429 refusals, including metered/output-bearing and
+HTTP 200 counterexamples. Preflight pricing, balance and key failures use the
+existing atomic finalizer once, preserving failure metadata without duplicate
+usage rows. An authenticated recovery 404 suspends polling while preserving the
+input and original request identity for explicit delivery; it does not prove
+that an earlier delayed POST can never be accepted.

@@ -16,10 +16,10 @@ export function chatProviderFixture() {
     const key = message.match(/CHAT_CASE_[a-zA-Z0-9_-]+/)?.[0] ?? message;
     calls.push({ key, model: body.model, receivedAt: Date.now() });
     if (message.includes('REFUSED')) {
-      const payload={error:{code:429,message:'Local rate limit'}};
+      const payload={error:{code:message.includes('STRING')?'rate_limit_exceeded':429,message:'Local rate limit'}};
       if(message.includes('METERED'))payload.usage={prompt_tokens:800,completion_tokens:30};
       if(message.includes('PARTIAL'))payload.choices=[{message:{content:'partial'}}];
-      res.writeHead(message.includes('SERVER_ERROR')?500:429, {'Content-Type':'application/json'}).end(message.includes('HTML')?'<html>unavailable</html>':JSON.stringify(payload)); return true;
+      res.writeHead(message.includes('HTTP200')?200:message.includes('SERVER_ERROR')?500:429, {'Content-Type':'application/json'}).end(message.includes('HTML')?'<html>unavailable</html>':JSON.stringify(payload)); return true;
     }
     if (message.includes('HOLD')) {
       const started = Date.now();

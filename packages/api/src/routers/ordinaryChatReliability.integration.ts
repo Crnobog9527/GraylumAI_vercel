@@ -94,9 +94,9 @@ repaired('response loss keeps execution and recovers original answer, cost and m
  expect(rows.billing).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
  expect(rows.billing).toHaveLength(2);expect(await calls(body.message)).toBe(1);
 },90000);
-repaired('strict provider refusal restores once and preserves failed input; replay does not regenerate',async()=>{
+repaired.each(['REFUSED','REFUSED_STRING'])('strict provider refusal %s restores once and preserves failed input; replay does not regenerate',async mode=>{
  const before=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
- const body=make('REFUSED');await send(body);const snapshot=await waitState(body.requestId,'failed');
+ const body=make(mode);await send(body);const snapshot=await waitState(body.requestId,'failed');
  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(before);
  expect(snapshot.input.message).toBe(body.message);expect(snapshot.retryable).toBe(true);expect(snapshot.billing.state).toBe('released');
  await Promise.all([send(body),send(body),state(body.requestId)]);
@@ -328,11 +328,11 @@ repaired('pre-dispatch key failure releases only its own reservation and keeps i
  const body=make();await sql.query('update ai_models set api_key=null where id=$1',[modelId]);
  try{
   expect((await send(body)).status).toBe(500);const snapshot=await waitState(body.requestId,'failed');expect(snapshot.input.message).toBe(body.message);expect(await calls(body.message)).toBe(0);
-  const rows=await totals(body.requestId);expect(rows.billing).toHaveLength(2);expect(rows.billing).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'refund',count:1}]));
+  const rows=await totals(body.requestId);expect(rows.usage).toEqual([{status:'failed'}]);expect(rows.billing).toHaveLength(2);expect(rows.billing).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'refund',count:1}]));
   await send(body);expect(await calls(body.message)).toBe(0);expect((await totals(body.requestId)).billing).toEqual(rows.billing);
  }finally{await sql.query("update ai_models set api_key='LOCAL_SYNTHETIC_KEY' where id=$1",[modelId]);}
 });
-repaired.each(['REFUSED_METERED','REFUSED_PARTIAL','REFUSED_HTML','REFUSED_SERVER_ERROR'])('ambiguous refusal %s retains reservation and blocks automatic retry',async mode=>{
+repaired.each(['REFUSED_METERED','REFUSED_PARTIAL','REFUSED_HTML','REFUSED_SERVER_ERROR','REFUSED_STRING_METERED','REFUSED_STRING_PARTIAL','REFUSED_STRING_HTTP200'])('ambiguous refusal %s retains reservation and blocks automatic retry',async mode=>{
  const body=make(mode);await send(body);const snapshot=await waitState(body.requestId,'unknown');expect(snapshot.retryable).toBe(false);expect(snapshot.billing.state).toBe('reserved');
  await send(body);expect(await calls(body.message)).toBe(1);expect((await totals(body.requestId)).billing).toEqual([{operation_type:'pre_deduct',count:1}]);
 });
@@ -342,3 +342,33 @@ repaired('expired running status remains recoverable and a late response still s
  expect((await state(body.requestId)).request.state).toBe('unknown');await send(body);expect(await calls(body.message)).toBe(1);
  await release(body);await waitState(body.requestId,'succeeded');expect((await totals(body.requestId)).messages).toHaveLength(2);expect(await calls(body.message)).toBe(1);
 },90000);
+
+repaired('browser absent request suspends polling while explicit delivery keeps the same identity',async()=>{
+ const {page,context}=await pageFor();const body=make();let submitted:any;let reads=0;
+ try{
+  await page.route('**/api/ai/stream',async route=>{submitted=route.request().postDataJSON();await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Local pre-claim rejection'})});});
+  page.on('request',r=>{if(r.url().includes('/api/ai/requests?')&&r.method()==='GET')reads++;});
+  await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText('尚未确认服务器接收。可使用原请求标识继续提交。',{exact:true}).waitFor();
+  const before=reads;await page.waitForTimeout(6500);expect(reads).toBe(before);expect(await calls(body.message)).toBe(0);
+  const id=submitted.requestId;await page.unroute('**/api/ai/stream');
+  await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
+  await page.getByText('Local answer '+body.message,{exact:true}).waitFor({timeout:45000});
+  expect(await calls(body.message)).toBe(1);expect((await totals(id)).usage).toEqual([{status:'success'}]);
+ }finally{await context.close();}
+},90000);
+
+repaired.each(['pricing','balance'])('preflight %s failure has one failed usage row and no reservation',async kind=>{
+ const body=make();
+ const balance=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ if(kind==='pricing')await sql.query('update ai_models set input_token_cost=null where id=$1',[modelId]);
+ else await sql.query('update profiles set credits=0 where id=$1',[actor]);
+ try{
+  expect((await send(body)).status).toBe(kind==='pricing'?503:402);
+  await waitState(body.requestId,'failed');await send(body);
+  const rows=await totals(body.requestId);expect(rows.usage).toEqual([{status:'failed'}]);expect(rows.billing).toHaveLength(0);expect(await calls(body.message)).toBe(0);
+ }finally{
+  await sql.query('update ai_models set input_token_cost=150000 where id=$1',[modelId]);
+  await sql.query('update profiles set credits=$2 where id=$1',[actor,balance]);
+ }
+});
