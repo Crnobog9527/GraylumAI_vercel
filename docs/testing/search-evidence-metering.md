@@ -71,22 +71,29 @@ staging configured search unit cost is USD 7/1000 and surcharge is 15 credits.
 These are not silently replaced by the public catalog's different native search
 prices. Exact provider search-cost breakdown remains unknown when unreported.
 
-## Unverified account configuration boundary
+## Account plugin configuration verification
 
 [Plugin precedence](https://openrouter.ai/docs/guides/features/plugins) documents
 that request `plugins:[{id:"web",enabled:false}]` disables an overridable account
 default, while an account **Prevent overrides** lock can defeat it. No official
-public API for effective plugin/lock state was found; read-only account UI access
-failed. Safe staging DB fields contain no preset/plugin/tool keys, which does
-**not** prove remote account defaults. No credentials were read or printed.
+public API for effective plugin/lock state was found. Initial read-only account
+UI access failed; the Owner subsequently opened the actual settings in Tabbit.
+On 2026-09-10 the writer read the Default Workspace Web Search configuration,
+closed without saving, reloaded the page and reopened Configure. The saved
+**Prevent overrides was off**. Engine was Auto (native if supported, otherwise
+Exa), Search Mode was Auto (displayed USD 7/1000 requests), and Max Results and
+Search Prompt retained Default placeholders. No settings were changed, no Save
+was pressed, and no credentials were read or printed.
 
 The tests explicitly model a default-on but request-overridable legacy plugin.
-They do not establish prevention under a forced account lock. This external
-condition remains unknown; do not claim reliable non-disclosure under an
-unverified forced plugin. The Owner decision on temporarily blocking prohibited
-and private requests until verification is pending. This is a delivery blocker,
-not a passed test or permission to activate search. Positive public-search work
-continues independently.
+They do not establish prevention under a forced account lock. The direct UI
+verification closes the previously blocked inspection for the observed
+workspace; temporary broad request blocking is not needed for this setting.
+It does not establish future settings or other workspaces, or replace real
+provider acceptance. Recheck the intended workspace before separately approved
+real calls. No configuration activation, paid call or merge was authorized by
+this read-only verification. The UI's legacy-plugin price is not proof of the
+actual server-tool invoice for every native model.
 
 [Preset tool union](https://openrouter.ai/docs/guides/features/presets) cannot be
 cleared by `tools:[]`. Opaque preset/`:online` model aliases, intrinsic search
