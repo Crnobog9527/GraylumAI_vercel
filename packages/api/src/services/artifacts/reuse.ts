@@ -12,7 +12,7 @@ export const workSourceScope = z.object({projectId:uuid,roundId:uuid}).strict();
 export const sourceSchema = z.object({
   evidenceId: uuid, sourceProjectId: uuid, sourceRoundId: uuid, sourceVersionId: uuid,
   version: z.number().int().positive(), hash:z.string(), configId:z.string(),
-  sections:z.array(z.object({title:z.string(),stepId:z.string(),body:z.string(),confirmationId:uuid,evidenceIds:z.array(uuid)})),
+  sections:z.array(z.object({title:z.string(),stepId:z.string(),body:z.string()})),
 });
 export function artifactReuse(userClient:SupabaseClient, privateClient:SupabaseClient|null) {
   async function rpc(name:string,args:Record<string,unknown>) {

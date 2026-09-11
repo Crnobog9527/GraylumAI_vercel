@@ -471,7 +471,7 @@ try {
       { cwd: root, env, stdio: "inherit" },
     );
   await childExit(runTests());
-  if (!aiOnly) {
+  if (!aiOnly || args.includes('--reuse-only')) {
   process.kill(-app.pid, "SIGTERM");
   await new Promise((r) => app.on("exit", r));
   env.V3_WORKBENCH_PHASE = "restore";
@@ -489,6 +489,14 @@ try {
   );
   console.log("Private canary absent from application logs PASS");
   if(serve){
+    // Re-enable only the synthetic source association after all revocation
+    // assertions, so Owner can create a fresh work in the disposable preview.
+    if(args.includes('--reuse-only')){
+      const sample=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'reuse-restore.json'),'utf8'));
+      const actor=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8')).actor;
+      if(![actor,sample.sourceModule,sample.sourceSkill].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid reuse preview identity');
+      sql(`INSERT INTO artifact_accounts VALUES('${actor}','${sample.sourceModule}','${sample.sourceSkill}','synthetic:local-account') ON CONFLICT DO NOTHING;`);
+    }
     const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8'));
     const demoIds=saved.fixtures.map(f=>f.moduleId);
     if(![saved.actor,...demoIds].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid local acceptance identity');

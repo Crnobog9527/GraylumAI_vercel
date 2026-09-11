@@ -384,10 +384,8 @@ export default function WorkbenchPage() {
         : {}),
     };
     const action = Object.assign(async () => {
-      const source = fromRoundId && currentProject?.workKind === 'script'
-        ? await api.workSource.query({projectId,roundId:fromRoundId}) : null;
-      const created = source ? await api.createWork.mutate({projectId,roundId:input.requestId,requestId:input.requestId,fromRoundId,
-        sourceVersionId:source.sourceVersionId,configId:source.configId,title:currentProject!.title}) : await api.start.mutate(input);
+      if (fromRoundId && currentProject?.workKind === 'script') throw new Error('请使用作品定位来源中的修订入口。');
+      const created = await api.start.mutate(input);
       const [discovery, project] = await Promise.all([
         discover(), readProject(projectId, created.roundId),
       ]);
@@ -402,7 +400,7 @@ export default function WorkbenchPage() {
     server = snapshot?.steps[selected];
   const newMethod = catalog.find((x) => x.id === upgrade);
   return (
-    <main aria-busy={busy} className="min-h-screen bg-[#111214] text-zinc-100">
+    <main aria-busy={busy} className="min-h-screen break-words bg-[#111214] text-zinc-100">
       <header className="border-b border-white/10 px-6 py-5 flex items-center justify-between">
         <Link href="/" className="font-semibold tracking-wide">
           Graylum
@@ -861,7 +859,7 @@ export default function WorkbenchPage() {
                   />
                   <select
                     aria-label="修订来源"
-                    className="my-3 bg-zinc-900 p-2"
+                    className="my-3 max-w-full bg-zinc-900 p-2"
                     value={supersedes}
                     onChange={(e) => setSupersedes(e.target.value)}
                   >
@@ -1076,7 +1074,7 @@ export default function WorkbenchPage() {
                     </div>
                   )}
                 </section>
-                {snapshot.state !== "draft" &&
+                {currentProject?.workKind !== "script" && snapshot.state !== "draft" &&
                   !rounds.some((r) => r.state === "draft") && (
                     <section className={panel}>
                       <h3>明确升级方法</h3>

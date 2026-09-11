@@ -4383,6 +4383,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
   const report=await publish(sourceProject,sourceRound,'POSITION_V1');
   await sql.query('insert into artifact_reference_configs values($1,$2,$3,$4,$5,true)',['position-script',src.registration,target.registration,JSON.stringify(['step-2']),20000]);
   expect(await reuse.choices(report.id!)).toEqual([{id:'position-script',label:target.label}]);
+  expect((await user.rpc('artifact_create_work',{p_actor_id:actor,p_project_id:randomUUID(),p_round_id:randomUUID(),p_request_id:randomUUID(),p_payload:{}})).error?.code).toBe('42501');
+  expect((await user.rpc('artifact_work_source',{p_actor_id:actor,p_project_id:sourceProject,p_round_id:sourceRound})).error?.code).toBe('42501');
   const a=randomUUID(),b=randomUUID();
   const input={projectId:a,roundId:a,requestId:a,sourceVersionId:report.id!,configId:'position-script',title:'独立脚本 A'};
   expect(await Promise.all([reuse.create(input),reuse.create(input)])).toEqual([{projectId:a,roundId:a},{projectId:a,roundId:a}]);
@@ -4399,7 +4401,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
   expect((await service.read(b,b)).steps['step-0'].body).toBe('');
   expect((await service.read(a,a2)).steps['step-0'].body).toBeNull();
   const sourceV2=randomUUID();await service.start({projectId:sourceProject,roundId:sourceV2,requestId:randomUUID(),fromRoundId:sourceRound});
-  const reportV2=await publish(sourceProject,sourceV2,'POSITION_V2');
+  const [reportV2,pinnedDuringPublish]=await Promise.all([publish(sourceProject,sourceV2,'POSITION_V2'),reuse.source({projectId:b,roundId:b})]);
+  expect(pinnedDuringPublish?.sourceVersionId).toBe(report.id);
   expect((await reuse.source({projectId:b,roundId:b}))?.sourceVersionId).toBe(report.id);
   await service.execute({action:'abandon',projectId:a,roundId:a2,requestId:randomUUID()});
   const a3=randomUUID();await reuse.create({...input,roundId:a3,requestId:a3,fromRoundId:a,sourceVersionId:reportV2.id!});
@@ -4419,29 +4422,36 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
   expect((await service.read(b,b)).steps['step-0'].evidenceIds).toHaveLength(1);
   // Browser uses the actual report, HTTP creation, chat reply/summary and saved result.
   const {page,context}=await pageFor();
+  let browserWork:{project_id:string;round_id:string}|undefined, browserConversation='';
   try {
     await page.getByRole('button',{name:/测试定位.*synthetic:local-account/}).click();await quiet(page);
     await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+    await page.setViewportSize({width:1280,height:900});
     await page.getByLabel('新作品名称').fill('浏览器独立脚本');
     await page.getByRole('button',{name:'基于此定位创作脚本',exact:true}).click();
     await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'));
-    const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+    const conversationId=new URL(page.url()).searchParams.get('conversation')!;browserConversation=conversationId;
     await page.getByLabel('给当前步骤发消息').fill('Write a short fictional script.');
     await page.getByRole('button',{name:'发送',exact:true}).click();
     await expect.poll(async()=>page.getByLabel('给当前步骤发消息').inputValue(),{timeout:60000}).toBe('');
-    const binding=(await sql.query('select project_id,round_id from artifact_chats where conversation_id=$1',[conversationId])).rows[0];
+    const binding=(await sql.query('select project_id,round_id from artifact_chats where conversation_id=$1',[conversationId])).rows[0];browserWork=binding;
     await expect.poll(async()=>(await service.read(binding.project_id,binding.round_id)).steps['step-0'].body,{timeout:60000}).toBe('Synthetic local HTTP candidate');
     const count=async()=>(await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[binding.project_id])).rows[0].n;
     expect(await count()).toBe(2);
     await page.reload();await page.getByLabel('给当前步骤发消息').waitFor();expect(await count()).toBe(2);
+    const secondTab=await context.newPage();await secondTab.goto(page.url());await secondTab.getByLabel('给当前步骤发消息').waitFor();expect(await count()).toBe(2);await secondTab.close();
     await page.goto(app+'/workbench');await page.getByRole('button',{name:/浏览器独立脚本/}).click();await quiet(page);
     await fillConfirm(page,target,'BROWSER_SAVED '+('长报告内容。'.repeat(120)));
     await page.getByRole('button',{name:'发布正式版',exact:true}).click();await quiet(page);
+    expect(await page.getByLabel('升级方法').count()).toBe(0);
     await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
     await page.screenshot({path:output+'/reuse-report.png'});
     await page.setViewportSize({width:390,height:844});
-    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
     await page.screenshot({path:output+'/reuse-report-mobile.png'});
+    const overflowing=await page.evaluate(()=>Array.from(document.querySelectorAll('main *')).filter(e=>e.getBoundingClientRect().right>window.innerWidth+1).map(e=>({tag:e.tagName,class:e.className,width:e.getBoundingClientRect().width})).slice(0,12));
+    expect(overflowing).toEqual([]);
     await page.setViewportSize({width:1280,height:900});
     expect((await service.report(binding.project_id,binding.round_id)).available).toBe(true);
     expect(await count()).toBe(2);
@@ -4453,11 +4463,18 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
   await sql.query("update artifact_reference_configs set enabled=true where id='position-script'");
   const revokeSource=()=>sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2',[actor,src.moduleId]);
   const restoreSource=()=>sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,src.moduleId,src.pack.id,'synthetic:local-account']);
-  for(const window of ['before','dispatched','unknown','settled'] as const){
+  for(const window of ['before','dispatched','unknown','settled','extra'] as const){
     const id=randomUUID();await reuse.create({...input,projectId:id,roundId:id,requestId:id,title:'Window '+window});
+    let extraId='';
+    if(window==='extra'){
+      await service.execute({action:'userEvidence',projectId:id,roundId:id,requestId:randomUUID(),body:'Extra dependency',observedAt:null,supersedes:null});
+      extraId=(await service.read(id,id)).evidence.find(e=>e.payload&&typeof e.payload==='object'&&!Array.isArray(e.payload)&&'text' in e.payload)!.id;
+      await service.execute({action:'save',projectId:id,roundId:id,requestId:randomUUID(),stepId:'step-0',body:'Extra basis',evidenceIds:[extraId],expectedVersion:0});
+    }
     let count=0;
     const ai=modelFixture.workbenchGeneration(user,db,async()=>{
       count++;
+      if(window==='extra')await service.execute({action:'restrictEvidence',projectId:id,roundId:id,requestId:randomUUID(),evidenceId:extraId,deleted:true,expiresAt:null});
       if(window==='dispatched'||window==='unknown')await revokeSource();
       if(window==='unknown')throw new Error('Synthetic unknown outcome');
       return {body:'Restricted window result',inputTokens:800,outputTokens:30};
@@ -4480,7 +4497,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
       const n=(await sql.query('select count(*)::int n from token_stats where artifact_generation_id=(select id from artifact_generations where request_id=$1)',[req.requestId])).rows[0].n;
       expect(n).toBe(window==='unknown'?0:1);
     }
-    await restoreSource();
+    if(window!=='extra')await restoreSource();
+    else {
+      expect((await reuse.source({projectId:id,roundId:id}))?.sourceVersionId).toBe(report.id);
+      expect((await sql.query('select body from artifact_candidates where round_id=$1',[id])).rows[0].body).toBe('[来源已不可用]');
+    }
   }
   // Real generation service + counting provider; receipt before revocation.
   const gs=await service.read(b,b), base={projectId:b,roundId:b,stepId:'step-0',instruction:'Write the script.',expectedSteps:Object.fromEntries(Object.entries(gs.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};
@@ -4503,8 +4524,13 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent work
   expect((await service.read(a,a)).steps['step-0'].body).toBeNull();
   expect((await service.read(b,b)).steps['step-0'].body).toBeNull();
   expect((await service.report(a,a)).available).toBe(false);
+  await expect(service.export(a,a)).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
+  const {skillChatService}=await import('../artifacts/chat');
+  const hidden=await skillChatService(user,db).read({conversationId:browserConversation});
+  expect(hidden.turns.every(t=>t.body===null&&t.answer===null&&!t.available)).toBe(true);
+  expect((await service.report(browserWork!.project_id,browserWork!.round_id)).available).toBe(false);
   await expect(reuse.source({projectId:a,roundId:a})).rejects.toThrow();
-  writeFileSync(output+'/reuse-restore.json',JSON.stringify({a,b,a3,requestId}));
+  writeFileSync(output+'/reuse-restore.json',JSON.stringify({a,b,a3,requestId,sourceProject,sourceModule:src.moduleId,sourceSkill:src.pack.id}));
 },240000);
 
 it.skipIf(process.env.V3_WORKBENCH_PHASE !== 'restore')('REUSE: restart preserves work identity and restricted content without generation',async()=>{
