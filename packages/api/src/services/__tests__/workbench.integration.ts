@@ -3914,10 +3914,10 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
 
 
 aiTest('CHAT: provider usage is persisted exactly while missing or interrupted usage cannot settle success',async()=>{
- // Earlier Skill cases deliberately create additional Luna records. This
+ // Earlier Skill/admin cases create additional Luna and Qwen records. This
  // ordinary-chat usage fixture needs one active pricing record per model name.
- const priorLuna=(await sql.query("select id from ai_models where model_id='openai/gpt-5.6-luna' and is_active='true' and id<>$1",[localModel])).rows.map(r=>r.id);
- await sql.query("update ai_models set is_active='false' where id=any($1::uuid[])",[priorLuna]);
+ const priorPricing=(await sql.query("select id from ai_models where model_id in ('openai/gpt-5.6-luna','qwen/qwen3.8-27b') and is_active='true' and id<>$1",[localModel])).rows.map(r=>r.id);
+ await sql.query("update ai_models set is_active='false' where id=any($1::uuid[])",[priorPricing]);
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const {page,context}=await pageFor();
  const auth=await authenticated();const token=(await auth.auth.getSession()).data.session!.access_token;
@@ -3940,7 +3940,7 @@ aiTest('CHAT: provider usage is persisted exactly while missing or interrupted u
    }
   }
   expect((await sql.query('select token_counting_supported,api_endpoint from ai_models where id=$1',[localModel])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:''});
- }finally{await sql.query("update ai_models set is_active='true' where id=any($1::uuid[])",[priorLuna]);await context.close();}
+ }finally{await sql.query("update ai_models set is_active='true' where id=any($1::uuid[])",[priorPricing]);await context.close();}
 });
 
 // Optional local acceptance uses the Owner-supplied private directory payload.

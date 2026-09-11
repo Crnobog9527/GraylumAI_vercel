@@ -199,7 +199,7 @@ try {
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   // Full and ordinary-chat regression use the current durable request schema.
   // Historical chat wrapper baselines supply their own migration choice.
-  if(!aiOnly || args.includes('--ordinary-only')){
+  if(!aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only')){
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
   }
