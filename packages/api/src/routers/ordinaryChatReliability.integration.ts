@@ -472,3 +472,38 @@ repaired.each(['history-first','status-first','legacy-history-first','legacy-sta
   expect(posts).toBe(1);expect(await calls(next.message)).toBe(1);expect((await accounting(submitted.requestId)).every((r:any)=>r.count===1)).toBe(true);
  }finally{unblock();await release(next);await context.close();}
 },90000);
+
+async function balanceFault(config:Record<string,unknown>|null) {
+ return (await fetch(api+'/__chat_balance_fault',config?{method:'POST',body:JSON.stringify(config)}:undefined)).json();
+}
+repaired.each(['timeout','pool','network'].flatMap(kind=>[0,1].map(skip=>({kind,skip}))))('BALANCE: transient $kind at read $skip retries only the balance GET and dispatches once',async ({kind,skip})=>{
+ const body=make();await balanceFault({actor,kind,remaining:1,skip});
+ try {
+  expect((await send(body)).status).toBe(200);await waitState(body.requestId,'succeeded');
+  expect((await balanceFault(null)).seen).toBe(3); // retry either initial or fresh authorization GET
+  expect(await calls(body.message)).toBe(1);expect(await accounting(body.requestId)).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
+  await state(body.requestId);await send(body);expect(await calls(body.message)).toBe(1);
+  expect((await balanceFault(null)).seen).toBe(3);
+ }finally{await balanceFault({actor:null});}
+},90000);
+repaired.each(['timeout','permission','hang'])('BALANCE: exhausted/denied %s keeps original input without indefinite confirmation',async kind=>{
+ const {page,context}=await pageFor();const body=make();let submitted:any,posts=0,reads=0;
+ try {
+  page.on('request',r=>{if(r.url().endsWith('/api/ai/stream')){posts++;submitted=r.postDataJSON();}if(r.url().includes('/api/ai/requests?'))reads++;});
+  await balanceFault({actor,kind,remaining:10});
+  await page.getByTestId('chat-input').fill(body.message);await page.getByRole('button',{name:'发送',exact:true}).click();
+  await page.getByText(/尚未确认服务器接收。可使用原请求标识继续提交。/).waitFor({timeout:20000});
+  await expect.poll(()=>page.getByTestId('chat-progress').count()).toBe(0);
+  expect((await balanceFault(null)).seen).toBe(kind==='permission'?1:2);
+  const id=submitted.requestId,before=reads;await page.waitForTimeout(2500);expect(reads).toBe(before);
+  expect(await calls(body.message)).toBe(0);expect(await accounting(id)).toEqual([]);
+  expect((await sql.query('select request_id from ordinary_chat_requests where request_id=$1',[id])).rows).toEqual([]);
+  await page.reload();await page.getByText(/尚未确认服务器接收。可使用原请求标识继续提交。/).waitFor();
+  await expect.poll(()=>page.getByTestId('chat-progress').count()).toBe(0);expect(posts).toBe(1);
+  await balanceFault({actor:null});
+  await page.getByRole('button',{name:'继续提交原请求',exact:true}).click();
+  await page.getByText('Local answer '+body.message,{exact:true}).waitFor({timeout:45000});await waitState(id,'succeeded');
+  expect(submitted.requestId).toBe(id);expect(posts).toBe(2);expect(await calls(body.message)).toBe(1);
+  expect(await accounting(id)).toEqual(expect.arrayContaining([{operation_type:'pre_deduct',count:1},{operation_type:'settle',count:1}]));
+ }finally{await balanceFault({actor:null});await context.close();}
+},90000);

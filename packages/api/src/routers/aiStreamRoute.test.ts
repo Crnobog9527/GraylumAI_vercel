@@ -482,7 +482,7 @@ describe('ai stream route balance availability gate', () => {
     expect(routeMocks.logger.error).toHaveBeenCalledWith(
       'ai',
       'ai_stream_initial_balance_unavailable',
-      undefined,
+      expect.objectContaining({requestId:expect.any(String)}),
     );
     expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain('private database detail');
     expect(authenticatedClient.from).toHaveBeenCalledTimes(3);
@@ -541,7 +541,7 @@ describe('ai stream route balance availability gate', () => {
     expect(routeMocks.logger.error).toHaveBeenCalledWith(
       'ai',
       'ai_stream_authorization_balance_unavailable',
-      undefined,
+      expect.objectContaining({requestId:expect.any(String)}),
     );
     expect(JSON.stringify(routeMocks.logger.error.mock.calls)).not.toContain(
       'private authorization database detail',

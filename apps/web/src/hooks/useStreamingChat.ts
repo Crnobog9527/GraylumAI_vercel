@@ -109,7 +109,7 @@ export function useStreamingChat(options:Options={}) {
       const response=await fetch(`/api/ai/requests?requestId=${p.requestId}`,{headers:{Authorization:`Bearer ${session.access_token}`},cache:'no-store'});
       const data=await response.json();
       if(!alive.current||epoch.current!==generation)return;
-      if(response.status===404){save({...p,absent:true});setError([p.deliveryError,'尚未确认服务器接收。可使用原请求标识继续提交。'].filter(Boolean).join(' '));return;}
+      if(response.status===404){save({...p,absent:true});setPhase(null);setError([p.deliveryError,'尚未确认服务器接收。可使用原请求标识继续提交。'].filter(Boolean).join(' '));return;}
       if(!response.ok){if(response.status===401||response.status===403)setRecoveryPaused(true);throw new Error(data.error??'暂时无法读取请求状态。');}
       apply(data.request,p);return data.request as Snapshot;
     }catch(e){if(alive.current&&epoch.current===generation)setError([p.deliveryError,e instanceof Error?e.message:'恢复暂时不可用。'].filter(Boolean).join(' '));}
