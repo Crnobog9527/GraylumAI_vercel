@@ -16,10 +16,10 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!['--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
-const testPattern=args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const testPattern=args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -197,6 +197,12 @@ try {
   apply("packages/db/migrations/0076_admin_settings_writer_profile_read.sql");
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
+  // Full and ordinary-chat regression use the current durable request schema.
+  // Historical chat wrapper baselines supply their own migration choice.
+  if(!aiOnly || args.includes('--ordinary-only')){
+    apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
+    apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
+  }
   sql("ALTER TABLE ai_models ADD COLUMN config jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN input_token_cost_above_200k integer DEFAULT 0, ADD COLUMN output_token_cost_above_200k integer DEFAULT 0;");
   apply("packages/db/migrations/0080_account_artifact_reuse.sql");
   apply("packages/db/migrations/0080_account_artifact_reuse.sql");
@@ -402,6 +408,7 @@ try {
   await new Promise((r) => listener.close(r));
   const env = {
     ...cleanEnv,
+    ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
     ...(args.includes('--real-skill-only') ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
