@@ -2,6 +2,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ReportWorkActions, WorkSource } from "./report-work-actions";
 import { GenerationPanel } from "./generation-panel";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -383,7 +384,10 @@ export default function WorkbenchPage() {
         : {}),
     };
     const action = Object.assign(async () => {
-      const created = await api.start.mutate(input);
+      const source = fromRoundId && currentProject?.workKind === 'script'
+        ? await api.workSource.query({projectId,roundId:fromRoundId}) : null;
+      const created = source ? await api.createWork.mutate({projectId,roundId:input.requestId,requestId:input.requestId,fromRoundId,
+        sourceVersionId:source.sourceVersionId,configId:source.configId,title:currentProject!.title}) : await api.start.mutate(input);
       const [discovery, project] = await Promise.all([
         discover(), readProject(projectId, created.roundId),
       ]);
@@ -426,6 +430,7 @@ export default function WorkbenchPage() {
             重新加载服务端状态
           </Button>
         </div>
+        {snapshot && currentProject?.workKind === "script" && <WorkSource projectId={snapshot.projectId} roundId={snapshot.roundId} title={currentProject.title} canRevise={!busy && !unsaved && snapshot.state === "published" && !rounds.some(r=>r.state === "draft")} onRevised={async roundId=>{await load(snapshot.projectId,roundId);applyDiscovery(await discover());}}/> }
         {snapshot && <Button className="mb-5" disabled={busy || unsaved} onClick={() => { const selected=snapshot; const requestId=crypto.randomUUID(); void run(async()=>{ const binding=await api.chatEnter.mutate({projectId:selected.projectId,roundId:selected.roundId,requestId});window.location.assign(`/chat?conversation=${binding.conversationId}`); }); }}>在聊天中继续此轮次</Button>}
         {error && (
           <div
@@ -476,11 +481,10 @@ export default function WorkbenchPage() {
                   onClick={() => void run(() => load(p.projectId))}
                 >
                   <span>
-                    {catalog.find((c) => c.skillId === p.skillId)?.label ??
-                      p.title}
+                    {p.workKind === "script" ? p.title : catalog.find((c) => c.skillId === p.skillId)?.label ?? p.title}
                   </span>
                   <span className="block text-xs text-zinc-400">
-                    {p.account ?? "文档项目"} · 正式 v{p.currentVersion}
+                    {p.linkedAccount ?? p.account ?? "文档项目"} · 正式 v{p.currentVersion}
                   </span>
                 </button>
               ))}
@@ -496,7 +500,7 @@ export default function WorkbenchPage() {
               {catalog
                 .filter((c) =>
                   c.workflow.kind === "document"
-                    ? !projects.some((p) => p.skillId === c.skillId)
+                    ? !projects.some((p) => p.workKind !== "script" && p.skillId === c.skillId)
                     : !c.accounts.length || availableAccounts(c).length > 0,
                 )
                 .map((c) => (
@@ -901,6 +905,7 @@ export default function WorkbenchPage() {
                       disabled={
                         busy ||
                         dirty ||
+                        currentProject?.workKind === "script" ||
                         snapshot.state === "draft" ||
                         rounds.some((r) => r.state === "draft")
                       }
@@ -1044,6 +1049,7 @@ export default function WorkbenchPage() {
                           <h4 className="text-xl">
                             {report.report.title} · v{report.version}
                           </h4>
+                          {currentProject?.workKind !== "script" && snapshot.workflow.kind === "social" && <ReportWorkActions report={report} />}
                           {report.report.sections.map((s, i) => (
                             <section key={i} className="mt-4">
                               <h5 className="text-amber-200">{s.title}</h5>

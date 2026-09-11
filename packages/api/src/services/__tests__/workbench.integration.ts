@@ -4358,3 +4358,161 @@ consumptionTest.each([0,'0',null,'',-1,1000000])('CONSUMPTION: invalid or zero p
  const t=await generationFixture(),search=await consumptionSearch(t);await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(price)]);
  try{const before=await consumptionCounts();expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(503);expect(search.fixture.events).toEqual([]);expect((await consumptionCounts()).pre).toBe(before.pre);}finally{await search.fixture.stop();}
 },90000);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent works, stable reference, revisions and revoked-source denial through real services', async()=>{
+  const {artifactReuse}=await import('../artifacts/reuse');
+  const user=await authenticated(), service=workbenchService(user,db), reuse=artifactReuse(user,db);
+  const src=await fixture({id:'reuse-positioning',label:'测试定位',methodText:'Synthetic positioning only.',workflow:makeWorkflow(6,true)});
+  const modelFixture=await generationFixture(3,'Synthetic script only.');
+  const target=modelFixture.f;
+  const sourceProject=randomUUID(),sourceRound=randomUUID();
+  await service.start({projectId:sourceProject,roundId:sourceRound,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'});
+  await service.execute({action:'userEvidence',projectId:sourceProject,roundId:sourceRound,requestId:randomUUID(),body:'SOURCE_EVIDENCE',observedAt:null,supersedes:null});
+  const sourceEvidenceId=(await service.read(sourceProject,sourceRound)).evidence[0].id;
+  async function publish(projectId:string,roundId:string, marker:string) {
+    let s=await service.read(projectId,roundId);
+    for(const step of s.workflow.steps){
+      await service.execute({action:'save',projectId,roundId,requestId:randomUUID(),stepId:step.id,body:marker+' '+step.title,evidenceIds:projectId===sourceProject?[sourceEvidenceId]:[],expectedVersion:s.steps[step.id].version});
+      s=await service.read(projectId,roundId);
+      await service.execute({action:'confirm',projectId,roundId,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,expectedReviewVersion:s.steps[step.id].reviewVersion});
+      s=await service.read(projectId,roundId);
+    }
+    await service.execute({action:'publish',projectId,roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))});
+    return service.report(projectId,roundId);
+  }
+  const report=await publish(sourceProject,sourceRound,'POSITION_V1');
+  await sql.query('insert into artifact_reference_configs values($1,$2,$3,$4,$5,true)',['position-script',src.registration,target.registration,JSON.stringify(['step-2']),20000]);
+  expect(await reuse.choices(report.id!)).toEqual([{id:'position-script',label:target.label}]);
+  const a=randomUUID(),b=randomUUID();
+  const input={projectId:a,roundId:a,requestId:a,sourceVersionId:report.id!,configId:'position-script',title:'独立脚本 A'};
+  expect(await Promise.all([reuse.create(input),reuse.create(input)])).toEqual([{projectId:a,roundId:a},{projectId:a,roundId:a}]);
+  expect(await reuse.create(input)).toEqual({projectId:a,roundId:a});
+  await expect(reuse.create({...input,title:'Conflicting replay'})).rejects.toThrow();
+  await reuse.create({...input,projectId:b,roundId:b,requestId:b,title:'独立脚本 B'});
+  expect((await service.read(a,a)).state).toBe('draft');expect((await service.read(b,b)).state).toBe('draft');
+  await service.execute({action:'userEvidence',projectId:a,roundId:a,requestId:randomUUID(),body:'Additional limited reference',observedAt:null,supersedes:null});
+  const extra=(await service.read(a,a)).evidence.find(e=>e.payload && typeof e.payload==='object' && !Array.isArray(e.payload) && 'text' in e.payload)!;
+  await service.execute({action:'save',projectId:a,roundId:a,requestId:randomUUID(),stepId:'step-0',body:'SCRIPT_A',evidenceIds:[extra.id],expectedVersion:0});
+  await publish(a,a,'SCRIPT_A');
+  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
+  const a2=randomUUID();await reuse.create({...input,roundId:a2,requestId:a2,fromRoundId:a});
+  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+  expect((await service.read(a,a2)).steps['step-0'].body).toBeNull();
+  const sourceV2=randomUUID();await service.start({projectId:sourceProject,roundId:sourceV2,requestId:randomUUID(),fromRoundId:sourceRound});
+  const reportV2=await publish(sourceProject,sourceV2,'POSITION_V2');
+  expect((await reuse.source({projectId:b,roundId:b}))?.sourceVersionId).toBe(report.id);
+  await service.execute({action:'abandon',projectId:a,roundId:a2,requestId:randomUUID()});
+  const a3=randomUUID();await reuse.create({...input,roundId:a3,requestId:a3,fromRoundId:a,sourceVersionId:reportV2.id!});
+  expect((await service.read(a,a3)).steps['step-0'].body).toBe('');
+  expect((await service.read(a,a3)).confirmations).toHaveLength(0);
+  await expect(service.start({projectId:randomUUID(),roundId:randomUUID(),requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'})).rejects.toThrow();
+  const sourceEvidence=(await service.read(sourceProject,sourceRound)).evidence[0]?.id;
+  expect(sourceEvidence).toBeTruthy();
+  await expect(service.execute({action:'save',projectId:b,roundId:b,requestId:randomUUID(),stepId:'step-0',body:'Forged',evidenceIds:[sourceEvidence!],expectedVersion:0})).rejects.toThrow();
+
+  expect((await reuse.source({projectId:a,roundId:a2}))?.sourceVersionId).toBe(report.id);
+  expect((await service.projects()).filter(p=>p.workKind==='script')).toHaveLength(2);
+  const other=await newUser();await expect(artifactReuse(await authenticated(other),db).source({projectId:a,roundId:a})).rejects.toThrow('ARTIFACT_DENIED');
+  // Existing project-local save cannot wash out the mandatory reference.
+  const snap=await service.read(b,b);
+  await service.execute({action:'save',projectId:b,roundId:b,requestId:randomUUID(),stepId:'step-0',body:'SCRIPT_B',evidenceIds:[],expectedVersion:snap.steps['step-0'].version});
+  expect((await service.read(b,b)).steps['step-0'].evidenceIds).toHaveLength(1);
+  // Browser uses the actual report, HTTP creation, chat reply/summary and saved result.
+  const {page,context}=await pageFor();
+  try {
+    await page.getByRole('button',{name:/测试定位.*synthetic:local-account/}).click();await quiet(page);
+    await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
+    await page.getByLabel('新作品名称').fill('浏览器独立脚本');
+    await page.getByRole('button',{name:'基于此定位创作脚本',exact:true}).click();
+    await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'));
+    const conversationId=new URL(page.url()).searchParams.get('conversation')!;
+    await page.getByLabel('给当前步骤发消息').fill('Write a short fictional script.');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>page.getByLabel('给当前步骤发消息').inputValue(),{timeout:60000}).toBe('');
+    const binding=(await sql.query('select project_id,round_id from artifact_chats where conversation_id=$1',[conversationId])).rows[0];
+    await expect.poll(async()=>(await service.read(binding.project_id,binding.round_id)).steps['step-0'].body,{timeout:60000}).toBe('Synthetic local HTTP candidate');
+    const count=async()=>(await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[binding.project_id])).rows[0].n;
+    expect(await count()).toBe(2);
+    await page.reload();await page.getByLabel('给当前步骤发消息').waitFor();expect(await count()).toBe(2);
+    await page.goto(app+'/workbench');await page.getByRole('button',{name:/浏览器独立脚本/}).click();await quiet(page);
+    await fillConfirm(page,target,'BROWSER_SAVED '+('长报告内容。'.repeat(120)));
+    await page.getByRole('button',{name:'发布正式版',exact:true}).click();await quiet(page);
+    await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
+    await page.screenshot({path:output+'/reuse-report.png'});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+    await page.screenshot({path:output+'/reuse-report-mobile.png'});
+    await page.setViewportSize({width:1280,height:900});
+    expect((await service.report(binding.project_id,binding.round_id)).available).toBe(true);
+    expect(await count()).toBe(2);
+  } finally {await context.close();}
+  // Mapping invalidation is content authorization, not a new Skill execution license.
+  await sql.query("update artifact_reference_configs set enabled=false where id='position-script'");
+  await expect(reuse.source({projectId:b,roundId:b})).rejects.toThrow();
+  expect((await service.read(b,b)).steps['step-0'].body).toBeNull();
+  await sql.query("update artifact_reference_configs set enabled=true where id='position-script'");
+  const revokeSource=()=>sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2',[actor,src.moduleId]);
+  const restoreSource=()=>sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,src.moduleId,src.pack.id,'synthetic:local-account']);
+  for(const window of ['before','dispatched','unknown','settled'] as const){
+    const id=randomUUID();await reuse.create({...input,projectId:id,roundId:id,requestId:id,title:'Window '+window});
+    let count=0;
+    const ai=modelFixture.workbenchGeneration(user,db,async()=>{
+      count++;
+      if(window==='dispatched'||window==='unknown')await revokeSource();
+      if(window==='unknown')throw new Error('Synthetic unknown outcome');
+      return {body:'Restricted window result',inputTokens:800,outputTokens:30};
+    });
+    const snap=await service.read(id,id),base={projectId:id,roundId:id,stepId:'step-0',instruction:'Fictional script',expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};
+    const quote=await ai.quote(base),req={...base,requestId:randomUUID(),quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits};
+    if(window==='before'){
+      await revokeSource();await expect(ai.generate(req)).rejects.toThrow();expect(count).toBe(0);
+      expect((await sql.query('select id from artifact_generations where project_id=$1',[id])).rows).toHaveLength(0);
+    }else{
+      const result=await ai.generate(req);expect(result.state).toBe(window==='unknown'?'unknown':'succeeded');
+      if(window==='settled')await revokeSource();
+      if(window==='unknown'){
+        await expect(ai.recover({projectId:id,roundId:id,requestId:req.requestId})).rejects.toThrow('GENERATION_CONFLICT');
+        expect((await ai.generate(req)).state).toBe('unknown');
+        expect((await ai.list({projectId:id,roundId:id}))[0].chargedCredits).toBeNull();
+      }else expect((await ai.recover({projectId:id,roundId:id,requestId:req.requestId})).state).toBe(result.state);
+      expect(count).toBe(1);
+      expect((await service.read(id,id)).candidates.every(c=>c.body===null)).toBe(true);
+      const n=(await sql.query('select count(*)::int n from token_stats where artifact_generation_id=(select id from artifact_generations where request_id=$1)',[req.requestId])).rows[0].n;
+      expect(n).toBe(window==='unknown'?0:1);
+    }
+    await restoreSource();
+  }
+  // Real generation service + counting provider; receipt before revocation.
+  const gs=await service.read(b,b), base={projectId:b,roundId:b,stepId:'step-0',instruction:'Write the script.',expectedSteps:Object.fromEntries(Object.entries(gs.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};
+  const quote=await modelFixture.ai.quote(base), requestId=randomUUID();
+  await sql.query("create function local_reuse_fail_settle() returns trigger language plpgsql as $$ begin if NEW.operation_type='settle' then raise exception 'test settle failure'; end if; return NEW; end $$; create trigger local_reuse_fail_settle before insert on billing_history for each row execute function local_reuse_fail_settle()");
+  try { await modelFixture.ai.generate({...base,requestId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits}); }
+  finally {await sql.query('drop trigger local_reuse_fail_settle on billing_history; drop function local_reuse_fail_settle()');}
+  expect(modelFixture.calls()).toBe(1);
+  expect(modelFixture.captured[0].split('POSITION_V1').length-1).toBe(1);
+  expect((await modelFixture.ai.list({projectId:b,roundId:b}))[0].state).toBe('responded');
+  await sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2',[actor,src.moduleId]);
+  const settled=await modelFixture.ai.recover({projectId:b,roundId:b,requestId});
+  expect(settled.state).toBe('succeeded');
+  expect(await modelFixture.ai.recover({projectId:b,roundId:b,requestId})).toEqual(settled);
+  expect(modelFixture.calls()).toBe(1);
+  const rawCandidate=(await sql.query('select body from artifact_candidates where id=$1',[settled.candidateId])).rows[0];
+  expect(rawCandidate.body).toBe('[来源已不可用]');
+  expect((await sql.query("select count(*)::int n from token_stats where artifact_generation_id=(select id from artifact_generations where request_id=$1)",[requestId])).rows[0].n).toBe(1);
+
+  expect((await service.read(a,a)).steps['step-0'].body).toBeNull();
+  expect((await service.read(b,b)).steps['step-0'].body).toBeNull();
+  expect((await service.report(a,a)).available).toBe(false);
+  await expect(reuse.source({projectId:a,roundId:a})).rejects.toThrow();
+  writeFileSync(output+'/reuse-restore.json',JSON.stringify({a,b,a3,requestId}));
+},240000);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE !== 'restore')('REUSE: restart preserves work identity and restricted content without generation',async()=>{
+  const saved=JSON.parse(readFileSync(output+'/reuse-restore.json','utf8'));
+  const service=workbenchService(await authenticated(),db);
+  expect((await service.projects()).filter(p=>[saved.a,saved.b].includes(p.projectId))).toHaveLength(2);
+  expect((await service.read(saved.a,saved.a3)).state).toBe('draft');
+  expect((await service.read(saved.b,saved.b)).steps['step-0'].body).toBeNull();
+  expect((await service.report(saved.a,saved.a)).available).toBe(false);
+  expect((await sql.query('select count(*)::int n from artifact_generations where request_id=$1',[saved.requestId])).rows[0].n).toBe(1);
+});

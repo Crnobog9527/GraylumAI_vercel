@@ -87,6 +87,9 @@ export const snapshotSchema = z.object({
 });
 export type ArtifactSnapshot = z.infer<typeof snapshotSchema>;
 export const projectSchema = z.object({
+  linkedAccount: z.string().nullable().optional(),
+  workKind: z.enum(["legacy", "script"]).optional(),
+  sourceProjectId: uuid.nullable().optional(),
   title: z.string(),
   projectId: uuid,
   moduleId: uuid,
