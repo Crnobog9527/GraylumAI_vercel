@@ -4398,6 +4398,11 @@ it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE === 'rest
   await service.execute({action:'userEvidence',projectId:a,roundId:a,requestId:randomUUID(),body:'Additional limited reference',observedAt:null,supersedes:null});
   const extra=(await service.read(a,a)).evidence.find(e=>e.payload && typeof e.payload==='object' && !Array.isArray(e.payload) && 'text' in e.payload)!;
   await service.execute({action:'save',projectId:a,roundId:a,requestId:randomUUID(),stepId:'step-0',body:'SCRIPT_A',evidenceIds:[extra.id],expectedVersion:0});
+  const inheritedSave={action:'save' as const,projectId:a,roundId:a,requestId:randomUUID(),stepId:'step-1',body:'Inherited dependency',evidenceIds:[],expectedVersion:0};
+  const saved=await service.execute(inheritedSave);
+  expect((await service.read(a,a)).steps['step-1'].provenanceIds).toContain(extra.id);
+  expect(await service.execute(inheritedSave)).toEqual(saved);
+  await expect(service.execute({...inheritedSave,body:'Different input'})).rejects.toThrow();
   await publish(a,a,'SCRIPT_A');
   await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
   const a2=randomUUID();await reuse.create({...input,roundId:a2,requestId:a2,fromRoundId:a});

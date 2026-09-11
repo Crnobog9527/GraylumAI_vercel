@@ -146,13 +146,23 @@ GRANT EXECUTE ON FUNCTION public.artifact_create_work(uuid,uuid,uuid,uuid,jsonb)
 CREATE OR REPLACE FUNCTION public.artifact_transition(p_actor_id uuid,p_module_id uuid,p_skill_id uuid,p_action text,
  p_project_id uuid,p_round_id uuid,p_request_id uuid DEFAULT NULL,p_payload jsonb DEFAULT '{}') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE ref artifact_work_references%ROWTYPE; ids jsonb;
+DECLARE ref artifact_work_references%ROWTYPE; ids jsonb; frozen jsonb; input_hash text;
 BEGIN
  IF p_action='start' AND EXISTS(SELECT 1 FROM artifact_projects WHERE id=p_project_id AND work_kind='script') THEN RAISE EXCEPTION 'use explicit work revision'; END IF;
  SELECT * INTO ref FROM artifact_work_references WHERE round_id=p_round_id AND project_id=p_project_id;
  IF FOUND AND p_action IN ('save','candidate') THEN
-  SELECT jsonb_agg(DISTINCT x) INTO ids FROM jsonb_array_elements(coalesce(p_payload->'evidenceIds','[]')||jsonb_build_array(ref.evidence_id)||coalesce((SELECT steps->(p_payload->>'stepId')->'provenanceIds' FROM artifact_rounds WHERE id=p_round_id),'[]')) x;
-  p_payload:=jsonb_set(p_payload,'{evidenceIds}',ids);
+  -- Serialize with the underlying transaction. Replay the frozen normalization,
+  -- never rebuild it from provenance that the first save may have changed.
+  PERFORM 1 FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id FOR UPDATE;
+  input_hash:=artifact_hash(p_payload);
+  SELECT payload INTO frozen FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id;
+  IF FOUND THEN
+   IF frozen->>'reuseInputHash' IS DISTINCT FROM input_hash THEN RAISE EXCEPTION 'request conflict'; END IF;
+   p_payload:=frozen;
+  ELSE
+   SELECT jsonb_agg(DISTINCT x ORDER BY x) INTO ids FROM jsonb_array_elements(coalesce(p_payload->'evidenceIds','[]')||jsonb_build_array(ref.evidence_id)||coalesce((SELECT steps->(p_payload->>'stepId')->'provenanceIds' FROM artifact_rounds WHERE id=p_round_id),'[]')) x;
+   p_payload:=jsonb_set(p_payload,'{evidenceIds}',ids)||jsonb_build_object('reuseInputHash',input_hash);
+  END IF;
  END IF;
  RETURN artifact_transition_before_reuse(p_actor_id,p_module_id,p_skill_id,p_action,p_project_id,p_round_id,p_request_id,p_payload);
 END $$;
