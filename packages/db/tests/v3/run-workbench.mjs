@@ -242,6 +242,11 @@ try {
   apply("packages/db/migrations/0097_agent_slice_prepared_recovery.sql");
   apply("packages/db/migrations/0098_agent_slice_revision_isolation.sql");
   apply("packages/db/migrations/0098_agent_slice_revision_isolation.sql");
+  apply("packages/db/migrations/0099_agent_slice_rejected_result_usage.sql");
+  apply("packages/db/migrations/0099_agent_slice_rejected_result_usage.sql");
+  apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
+  apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
+
 
   console.log("SQL additive migration and repeat application PASS");
   docker(

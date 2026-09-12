@@ -4368,9 +4368,13 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const user=await authenticated(),service=workbenchService(user,db),reuse=artifactReuse(user,db),links=sliceLinks(user,db);
  const src=await fixture({id:'slice-position',label:'虚构定位',methodText:'Synthetic positioning.',workflow:makeWorkflow(6,true)});
  const script=await fixture({id:'slice-script',label:'虚构脚本',methodText:'Synthetic script ALPHA: prose only.',workflow:makeWorkflow(1,false)});
- const title=await fixture({id:'slice-title',label:'虚构标题',methodText:'Synthetic title BETA: numbered titles only.',workflow:makeWorkflow(1,false)});
+ const titleFlow=makeWorkflow(1,false);titleFlow.steps[0].maxLength=1000;
+ const title=await fixture({id:'slice-title',label:'虚构标题',methodText:'Synthetic title BETA: numbered titles only.',workflow:titleFlow});
  const p=randomUUID(),r=randomUUID();
- await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'},src.moduleId);
+ // This suite shares an actor with earlier tests; positioning is unique per account.
+ const sliceAccount='synthetic:slice-'+p;
+ await sql.query('update artifact_accounts set account=$1 where actor_id=$2 and module_id=$3 and skill_id=$4',[sliceAccount,actor,src.moduleId,src.pack.id]);
+ await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:sliceAccount},src.moduleId);
  async function publish(projectId:string,roundId:string,body:string){
   let state=await service.read(projectId,roundId);
   for(const step of state.workflow.steps){
@@ -4671,6 +4675,21 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  }
  const tiePage=await readSliceConversation(user,db,{conversationId:conversation,limit:2});expect(tiePage.items.map(x=>x.executionId)).toEqual(tieIds.slice(0,2));
  const tieNext=await readSliceConversation(user,db,{conversationId:conversation,limit:2,before:tiePage.nextCursor!});expect(tieNext.items[0].executionId).toBe(tieIds[2]);
+ // Known provider usage survives a deterministic oversized summary rejection.
+ const oversizedExecution=randomUUID();await begin(t,t,oversizedExecution,'Synthetic bounded summary',100000);
+ let oversizedCalls=0;
+ const oversizedTransport=async(_url:unknown,init?:RequestInit)=>{
+  oversizedCalls++;const req=JSON.parse(String(init?.body));
+  const message=oversizedCalls===1?{role:'assistant',content:null,tool_calls:[{id:'oversize-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:oversizedCalls===2?'A readable reply':'Long synthetic explanation. '.repeat(60)};
+  return new Response(JSON.stringify({id:'oversized-'+oversizedCalls,object:'chat.completion',created:1,model:req.model,choices:[{index:0,finish_reason:oversizedCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:400,total_tokens:410}}),{headers:{'content-type':'application/json'}});
+ };
+ const oversizedExecutor=sliceExecutor(user,db,oversizedTransport);
+ expect((await oversizedExecutor.execute({executionId:oversizedExecution,phase:'reply'})).state).toBe('saved');
+ expect(await oversizedExecutor.execute({executionId:oversizedExecution,phase:'summary'})).toEqual({state:'unavailable',reason:'result_unavailable'});
+ expect(await oversizedExecutor.execute({executionId:oversizedExecution,phase:'summary'})).toEqual({state:'unavailable',reason:'result_unavailable'});
+ expect((await recoverSlice(user,db,{executionId:oversizedExecution})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(oversizedCalls).toBe(3);
+ expect((await sql.query("select count(*)::int n from token_stats where metadata->>'executionId'=$1",[oversizedExecution])).rows[0].n).toBe(3);
+ expect((await sql.query("select count(*)::int n from artifact_requests where payload->>'sliceExecution'=$1 and payload->>'slicePhase'='summary'",[oversizedExecution])).rows[0].n).toBe(0);
  // Recreate the service after losing prepare acknowledgement: no provider dispatch.
  const {sliceCallId}=await import('../agentSlice/accounting');
  const abandoned=randomUUID();await begin(b,b,abandoned,'Synthetic undispatched request');
@@ -4783,6 +4802,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const afterRevisionRevoked=await readSliceConversation(user,db,{conversationId:conversation});
  expect(afterRevisionRevoked.items.some(x=>x.projectId===b&&x.reply.state!=='restricted')).toBe(true);
  expect(afterRevisionRevoked.items.filter(x=>x.projectId===t).every(x=>x.reply.state==='restricted'&&x.input===null)).toBe(true);
+ const referenceChoices=await db.rpc('artifact_reference_choices',{p_actor_id:actor,p_source_version_id:position.id});expect(referenceChoices.error).toBeNull();expect(referenceChoices.data.map((c:{id:string})=>c.id)).toEqual(['slice-p-script']);
  const remainingTargets=await entry.targets();expect(remainingTargets.some(x=>x.projectId===b)).toBe(true);expect(remainingTargets.some(x=>x.projectId===t)).toBe(false);
  expect((await entry.sources()).some(x=>x.sourceVersionId===position.id)).toBe(true);
  await sql.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)',[script.pack.revisionId,actor]);
