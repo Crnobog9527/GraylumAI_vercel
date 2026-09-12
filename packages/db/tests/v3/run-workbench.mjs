@@ -16,10 +16,10 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!['--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
-const testPattern=args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const testPattern=args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -197,7 +197,61 @@ try {
   apply("packages/db/migrations/0076_admin_settings_writer_profile_read.sql");
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
+  // Full and ordinary-chat regression use the current durable request schema.
+  // Historical chat wrapper baselines supply their own migration choice.
+  if(!aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only') || args.includes('--agent-slice-only')){
+    apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
+    apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
+  }
   sql("ALTER TABLE ai_models ADD COLUMN config jsonb DEFAULT '{}', ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN input_token_cost_above_200k integer DEFAULT 0, ADD COLUMN output_token_cost_above_200k integer DEFAULT 0;");
+  apply("packages/db/migrations/0080_account_artifact_reuse.sql");
+  apply("packages/db/migrations/0080_account_artifact_reuse.sql");
+  apply("packages/db/migrations/0081_agent_slice_preferences.sql");
+  apply("packages/db/migrations/0081_agent_slice_preferences.sql");
+  apply("packages/db/migrations/0082_agent_slice_artifact_links.sql");
+  apply("packages/db/migrations/0082_agent_slice_artifact_links.sql");
+  apply("packages/db/migrations/0083_agent_slice_execution_identity.sql");
+  apply("packages/db/migrations/0083_agent_slice_execution_identity.sql");
+  apply("packages/db/migrations/0084_agent_slice_call_accounting.sql");
+  apply("packages/db/migrations/0084_agent_slice_call_accounting.sql");
+  apply("packages/db/migrations/0085_agent_slice_summary_identity.sql");
+  apply("packages/db/migrations/0085_agent_slice_summary_identity.sql");
+  apply("packages/db/migrations/0086_agent_slice_results.sql");
+  apply("packages/db/migrations/0086_agent_slice_results.sql");
+  apply("packages/db/migrations/0087_agent_slice_execution_context.sql");
+  apply("packages/db/migrations/0087_agent_slice_execution_context.sql");
+  apply("packages/db/migrations/0088_agent_slice_selected_source.sql");
+  apply("packages/db/migrations/0088_agent_slice_selected_source.sql");
+  apply("packages/db/migrations/0089_agent_slice_admission_replay.sql");
+  apply("packages/db/migrations/0089_agent_slice_admission_replay.sql");
+  apply("packages/db/migrations/0090_agent_slice_conversation.sql");
+  apply("packages/db/migrations/0090_agent_slice_conversation.sql");
+  apply("packages/db/migrations/0091_agent_slice_entry.sql");
+  apply("packages/db/migrations/0091_agent_slice_entry.sql");
+  apply("packages/db/migrations/0092_agent_slice_continue_work.sql");
+  apply("packages/db/migrations/0092_agent_slice_continue_work.sql");
+  apply("packages/db/migrations/0093_agent_slice_sources.sql");
+  apply("packages/db/migrations/0093_agent_slice_sources.sql");
+  apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
+  apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
+  apply("packages/db/migrations/0095_agent_slice_final_commit.sql");
+  apply("packages/db/migrations/0095_agent_slice_final_commit.sql");
+  apply("packages/db/migrations/0096_agent_slice_bounded_unavailable.sql");
+  apply("packages/db/migrations/0096_agent_slice_bounded_unavailable.sql");
+  apply("packages/db/migrations/0097_agent_slice_prepared_recovery.sql");
+  apply("packages/db/migrations/0097_agent_slice_prepared_recovery.sql");
+  apply("packages/db/migrations/0098_agent_slice_revision_isolation.sql");
+  apply("packages/db/migrations/0098_agent_slice_revision_isolation.sql");
+  apply("packages/db/migrations/0099_agent_slice_rejected_result_usage.sql");
+  apply("packages/db/migrations/0099_agent_slice_rejected_result_usage.sql");
+  apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
+  apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
+  apply("packages/db/migrations/0101_agent_slice_legacy_generation_boundary.sql");
+  apply("packages/db/migrations/0101_agent_slice_legacy_generation_boundary.sql");
+  apply("packages/db/migrations/0102_agent_slice_revision_handoff.sql");
+  apply("packages/db/migrations/0102_agent_slice_revision_handoff.sql");
+
+
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -272,10 +326,28 @@ try {
     if (!ok) throw new Error("local service not ready");
   }
   let modelCalls = 0;
+  const sliceCalls=[];
+  const controlToken=randomUUID();let holdSlice=false,restartApplication;
   const documentCalls=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
+    if(req.url==='/__slice_hold'||req.url==='/__restart_app'){
+      if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
+      try{if(req.url==='/__slice_hold')holdSlice=true;else await restartApplication();res.writeHead(200).end('ok');}catch{res.writeHead(500).end('local restart failed');}return;
+    }
+    if(req.url==='/__slice_calls'){res.writeHead(200).end(JSON.stringify(sliceCalls));return;}
+    if(req.url==='/__slice_model_fixture'){
+      const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>2097152){res.writeHead(413).end();return;}chunks.push(chunk);}
+      const body=JSON.parse(Buffer.concat(chunks).toString());const messages=JSON.stringify(body.messages);
+      const tool=body.tool_choice?.function?.name==='read_selected_artifact';
+      if(req.method!=='POST'||body.stream||body.provider?.allow_fallbacks!==false){res.writeHead(400).end();return;}
+      sliceCalls.push({model:body.model,tool,hasConfirmedPreference:messages.includes('结尾给行动建议'),hasOldPreference:messages.includes('先给具体例子')});
+      if(holdSlice){holdSlice=false;return;} // Keep the synthetic provider response pending until the app is killed.
+      await new Promise(resolve=>setTimeout(resolve,150));
+      const message=tool?{role:'assistant',content:null,tool_calls:[{id:'read-'+sliceCalls.length,type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:body.tools?.length?'浏览器真实接线回复':'浏览器整理成果'};
+      res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({id:'local-slice-'+sliceCalls.length,object:'chat.completion',created:1,model:body.model,choices:[{index:0,finish_reason:tool?'tool_calls':'stop',message}],usage:{prompt_tokens:800,completion_tokens:30,total_tokens:830}}));return;
+    }
     if (req.url === '/__workbench_model_fixture') {
       const chunks = []; let bytes = 0;
       for await (const chunk of req) { bytes += chunk.length; if (bytes > 2097152) { res.writeHead(413).end(); return; } chunks.push(chunk); }
@@ -378,6 +450,9 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
+  const slicePath=resolve(root,'packages/api/src/services/agentSlice/runner.ts'),sliceSource=readFileSync(slicePath,'utf8');
+  if(sliceSource.split('await transport(url,').length!==2)throw new Error('slice transport fixture boundary changed');
+  writeFileSync(slicePath,sliceSource.replace('await transport(url,',`await transport('${apiUrl}/__slice_model_fixture',`));
   const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
   if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
   writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));
@@ -400,6 +475,7 @@ try {
   await new Promise((r) => listener.close(r));
   const env = {
     ...cleanEnv,
+    ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
     ...(args.includes('--real-skill-only') ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
@@ -408,6 +484,7 @@ try {
     SUPABASE_SERVICE_ROLE_KEY: service,
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
+    V3_LOCAL_CONTROL: controlToken,
     V3_LOCAL_SERVICE_JWT: service,
     V3_LOCAL_USER_JWT: jwt("authenticated"),
     V3_LOCAL_JWT_SECRET: secret,
@@ -449,7 +526,8 @@ try {
       });
   };
   startApp();
-  // Test process can request a real process restart through a local-only pipe protocol.
+  restartApplication=async()=>{const previous=app;const exited=new Promise(resolve=>previous.once('exit',resolve));process.kill(-previous.pid,'SIGKILL');await exited;startApp();};
+  // Loopback test control restarts only this disposable application process group.
   const runTests = () =>
     spawn(
       "pnpm",
@@ -464,12 +542,16 @@ try {
         "src/services/__tests__/workbench.integration.ts",
         "--reporter",
         "verbose",
-        ...(aiOnly ? ["--testNamePattern", testPattern] : []),
+        ...(env.V3_WORKBENCH_PHASE === "restore"
+          ? ["--testNamePattern", args.includes('--reuse-only')
+              ? "^REUSE: restart preserves"
+              : "^restores all projects in a new browser login after a real application process restart$"]
+          : aiOnly ? ["--testNamePattern", testPattern] : []),
       ],
       { cwd: root, env, stdio: "inherit" },
     );
   await childExit(runTests());
-  if (!aiOnly) {
+  if (!aiOnly || args.includes('--reuse-only') || args.includes('--workbench-restart-only')) {
   process.kill(-app.pid, "SIGTERM");
   await new Promise((r) => app.on("exit", r));
   env.V3_WORKBENCH_PHASE = "restore";
@@ -487,6 +569,14 @@ try {
   );
   console.log("Private canary absent from application logs PASS");
   if(serve){
+    // Re-enable only the synthetic source association after all revocation
+    // assertions, so Owner can create a fresh work in the disposable preview.
+    if(args.includes('--reuse-only')){
+      const sample=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'reuse-restore.json'),'utf8'));
+      const actor=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8')).actor;
+      if(![actor,sample.sourceModule,sample.sourceSkill].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid reuse preview identity');
+      sql(`INSERT INTO artifact_accounts VALUES('${actor}','${sample.sourceModule}','${sample.sourceSkill}','synthetic:local-account') ON CONFLICT DO NOTHING;`);
+    }
     const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8'));
     const demoIds=saved.fixtures.map(f=>f.moduleId);
     if(![saved.actor,...demoIds].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid local acceptance identity');

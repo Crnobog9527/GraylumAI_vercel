@@ -139,6 +139,12 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
   }
   async function prepare(input: z.infer<typeof generationQuoteInput>) {
     const v = generationQuoteInput.parse(input), id = await actor();
+    const legacyBoundary = await privateClient!.rpc('agent_slice_assert_legacy_generation', {
+      p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId,
+    }).abortSignal(AbortSignal.timeout(10000));
+    if (legacyBoundary.error) throw new Error(legacyBoundary.error.code === '42501'
+      ? 'ARTIFACT_DENIED' : legacyBoundary.error.message === '请在连续创作对话中继续此作品，以保留已选择的来源。'
+        ? legacyBoundary.error.message : 'GENERATION_UNAVAILABLE');
     const [flag, fixed] = await Promise.all([
       privateClient!.from('system_settings').select('value').eq('key', 'v3_workbench_ai').single(),
       privateClient!.rpc('artifact_query', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'resolve' }),
@@ -191,6 +197,14 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     if ([...ancestors].some(k => snapshot.steps[k].provenanceIds.some(id => !evidenceIds.has(id)))) throw new Error('GENERATION_INPUT_UNAVAILABLE');
     const evidence = snapshot.evidence.filter(e => evidenceIds.has(e.id));
     if (evidence.length !== evidenceIds.size || evidence.some(e => !e.available) || (step.requiresEvidence && !evidence.length)) throw new Error('GENERATION_INPUT_UNAVAILABLE');
+    // Reference bodies are resolved server-side from the pinned formal snapshot.
+    // Ordinary evidence remains unchanged; no extra provider call is introduced.
+    let referencedSource: unknown;
+    if (evidence.some(e => e.payload && typeof e.payload === 'object' && !Array.isArray(e.payload) && 'sourceVersionId' in e.payload)) {
+      const ref = await privateClient!.rpc('artifact_work_source', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId }).abortSignal(AbortSignal.timeout(10000));
+      if (ref.error || !ref.data) throw new Error('GENERATION_INPUT_UNAVAILABLE');
+      referencedSource = ref.data;
+    }
     const source = databaseSkillSource({ userClient, privateClient, ...binding });
     const descriptor = (await source.list())[0];
     if (descriptor.packageHash !== snapshot.packageHash) throw new Error('GENERATION_CONFLICT');
@@ -217,7 +231,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         currentReply = turn.answer;
       }
     }
-    const contextData = { conversation, currentReply, ...(v.conversationId ? { currentStepResult: { body: snapshot.steps[v.stepId].body, version: snapshot.steps[v.stepId].version } } : {}), step: { id: step.id, title: step.title, minLength: step.minLength, maxLength: step.maxLength }, instruction: v.instruction,
+    const contextData = { referencedSource, conversation, currentReply, ...(v.conversationId ? { currentStepResult: { body: snapshot.steps[v.stepId].body, version: snapshot.steps[v.stepId].version } } : {}), step: { id: step.id, title: step.title, minLength: step.minLength, maxLength: step.maxLength }, instruction: v.instruction,
       steps: Object.fromEntries([...ancestors].sort().map(k => [k, snapshot.steps[k]])), evidence };
     checkInputSecurity(JSON.stringify(contextData));
     const messages=buildWorkbenchMessages(loaded.forModel(),contextData,v.purpose==='reply'?'reply':v.conversationId?'summary':'generation');

@@ -16,7 +16,9 @@
       "codex/admin-delete-dialogs-20260909": false,
       "codex/model-usage-accuracy-20260909": false,
       "codex/skill-model-readiness-20260909": false,
-      "codex/chat-balance-timeout-20260911": false
+      "codex/chat-balance-timeout-20260911": false,
+      "codex/account-artifact-reuse-20260912": false,
+      "codex/dual-skill-slice-413-20260912": false
     }
   },
   "crons": [

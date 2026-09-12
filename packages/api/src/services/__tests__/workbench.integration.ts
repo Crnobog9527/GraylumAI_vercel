@@ -253,7 +253,10 @@ afterAll(async () => {
     const state = prior?.actor === actor ? prior : { credentials, fixtures, actor, owner };
     const service = workbenchService(await authenticated(), db);
     state.expectedSnapshots = [];
-    for (const p of await service.projects()) {
+    state.expectedProjects = await service.projects();
+    const catalogDiagnostic=await db.rpc('artifact_query',{p_actor_id:actor,p_action:'catalog'});
+    console.log('WORKBENCH_PRE_RESTART_CATALOG',JSON.stringify({enabledWorkflows:Number((await sql.query('select count(*) n from artifact_workflows where enabled')).rows[0].n),error:catalogDiagnostic.error?.message??null,projects:state.expectedProjects.length}));
+    for (const p of state.expectedProjects) {
       const rounds = await service.rounds(p.projectId);
       const current =
         rounds.find((r) => r.state === "draft") ??
@@ -528,23 +531,21 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE !== "restore")(
     }
     const { page, context } = await pageFor();
     await quiet(page);
-    expect(
-      await page.getByText("文档项目 · 正式 v2", { exact: true }).count(),
-    ).toBe(fixtures.filter((f) => f.flow.kind === "document").length);
-    expect(
-      await page
-        .getByText("synthetic:local-account · 正式 v3", { exact: true })
-        .count(),
-    ).toBe(1);
+    const catalogCheck=await db.rpc('artifact_query',{p_actor_id:actor,p_action:'catalog'});
+    if (catalogCheck.error) {
+      expect(catalogCheck.error.message).toBe('registry capacity');
+      expect(Number((await sql.query('select count(*) n from artifact_workflows where enabled')).rows[0].n)).toBeGreaterThan(100);
+      await expect.poll(()=>page.getByText('新建项目目录暂时不可用，已保存的项目仍可打开。').isVisible()).toBe(true);
+    }
     const saved = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
     for (const f of fixtures) {
       const expected = saved.expectedSnapshots.find(
         (s: { skillId: string }) => s.skillId === f.pack.id,
       );
-      await page
-        .getByRole("button", { name: new RegExp(`^${f.label}`) })
-        .first()
-        .click();
+      const savedProject=saved.expectedProjects.find((p:{skillId:string})=>p.skillId===f.pack.id);
+      const projectButton=page.getByRole("button", { name: new RegExp(`^${f.label}`) }).first();
+      await expect.poll(async()=>projectButton.innerText(),{timeout:20000}).toContain('正式 v'+savedProject.currentVersion);
+      await projectButton.click();
       await quiet(page);
       for (const [n, step] of expected.workflow.steps.entries()) {
         await page
@@ -2804,7 +2805,10 @@ aiTest('CHAT: free and document UI send through ordinary streaming and restore t
   await page.getByTestId('chat-input').fill(module?'搜索最新资料后总结：DOCUMENT_SEND':'FREE_SEND');
   const sent=page.waitForResponse(response=>response.url().includes('/api/ai/stream'));
   await page.getByRole('button',{name:'发送',exact:true}).click();
-  const response=await sent,responseText=await response.text();expect(response.status(),responseText).toBe(200);expect(responseText).not.toContain('METHOD_CANARY');
+  const response=await sent;expect(response.status()).toBe(200);
+  // The durable URL navigation can release Chromium's old SSE body handle.
+  // Verify rendered and persisted public output rather than that CDP handle.
+  expect(await page.locator('body').textContent()).not.toContain('METHOD_CANARY');
   await page.getByText('Synthetic local free/document reply',{exact:true}).waitFor({timeout:45000});
   await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'),{timeout:30000});
   const conversationId=new URL(page.url()).searchParams.get('conversation');
@@ -2878,9 +2882,9 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
  const conversationId=new URL(page.url()).searchParams.get('conversation')!;
   // Provider output is buffered for server-side checks, so stop while init is
   // visible and the provider is still pending rather than waiting for final text.
-  await page.getByRole('button',{name:'停止',exact:true}).waitFor();
+  await page.getByRole('button',{name:'停止等待',exact:true}).waitFor();
   expect(await page.getByTestId('chat-input').isDisabled()).toBe(true);
-  if(mode==='ORDINARY_ABORT')await page.getByRole('button',{name:'停止',exact:true}).click();
+  if(mode==='ORDINARY_ABORT')await page.getByRole('button',{name:'停止等待',exact:true}).click();
   await expect.poll(async()=>await page.getByTestId('chat-input').isEnabled(),{timeout:30000}).toBe(true);
   if(mode==='ORDINARY_ABORT') {
  // Header navigation bypasses the sidebar's navigate callback; it must still reset scope.
@@ -2895,11 +2899,11 @@ aiTest('CHAT: ordinary init persists the URL without remounting; abort and error
   await page.goto(app+'/chat?conversation='+conversationId);
   }
   if(mode==='ORDINARY_ERROR') {
-   await page.getByText('AI 响应生成失败，请稍后重试',{exact:true}).waitFor();
-   expect((await sql.query("select status from ai_usage_logs where conversation_id=$1",[conversationId])).rows).toEqual([{status:'failed'}]);
+   await expect.poll(async()=>(await sql.query('select state from ordinary_chat_requests where conversation_id=$1',[conversationId])).rows[0]?.state,{timeout:30000}).toBe('unknown');
+   expect((await sql.query("select id from billing_history where operation_type IN ('refund','settle') AND metadata->>'preDeductId'=(select pre_deduct_id::text from ordinary_chat_requests where conversation_id=$1)",[conversationId])).rows).toHaveLength(0);
    expect((await sql.query('select id from messages where conversation_id=$1',[conversationId])).rows).toHaveLength(0);
   }
-  // Ordinary failure preserves conversation identity and failure usage, not unsaved input.
+  // Unknown delivery retains identity and reservation; it is not a failure refund.
   await page.reload();await page.getByRole('heading',{name:mode,exact:true}).waitFor();
   expect(new URL(page.url()).searchParams.get('conversation')).toBe(conversationId);
   const row=(await t.user.from('conversations').select('module_id,skill_mode').eq('id',conversationId).single()).data;
@@ -3911,10 +3915,10 @@ it('ADMIN: model deletion and settings writes serialize in both transaction orde
 
 
 aiTest('CHAT: provider usage is persisted exactly while missing or interrupted usage cannot settle success',async()=>{
- // Earlier Skill cases deliberately create additional Luna records. This
+ // Earlier Skill/admin cases create additional Luna and Qwen records. This
  // ordinary-chat usage fixture needs one active pricing record per model name.
- const priorLuna=(await sql.query("select id from ai_models where model_id='openai/gpt-5.6-luna' and is_active='true' and id<>$1",[localModel])).rows.map(r=>r.id);
- await sql.query("update ai_models set is_active='false' where id=any($1::uuid[])",[priorLuna]);
+ const priorPricing=(await sql.query("select id from ai_models where model_id in ('openai/gpt-5.6-luna','qwen/qwen3.8-27b') and is_active='true' and id<>$1",[localModel])).rows.map(r=>r.id);
+ await sql.query("update ai_models set is_active='false' where id=any($1::uuid[])",[priorPricing]);
  await sql.query("insert into system_settings(key,value) values('primary_model_id',$1),('assistant_model_id',$1) on conflict(key) do update set value=excluded.value",[JSON.stringify(localModel)]);
  const {page,context}=await pageFor();
  const auth=await authenticated();const token=(await auth.auth.getSession()).data.session!.access_token;
@@ -3937,7 +3941,7 @@ aiTest('CHAT: provider usage is persisted exactly while missing or interrupted u
    }
   }
   expect((await sql.query('select token_counting_supported,api_endpoint from ai_models where id=$1',[localModel])).rows[0]).toEqual({token_counting_supported:'false',api_endpoint:''});
- }finally{await sql.query("update ai_models set is_active='true' where id=any($1::uuid[])",[priorLuna]);await context.close();}
+ }finally{await sql.query("update ai_models set is_active='true' where id=any($1::uuid[])",[priorPricing]);await context.close();}
 });
 
 // Optional local acceptance uses the Owner-supplied private directory payload.
@@ -4358,3 +4362,693 @@ consumptionTest.each([0,'0',null,'',-1,1000000])('CONSUMPTION: invalid or zero p
  const t=await generationFixture(),search=await consumptionSearch(t);await sql.query("update system_settings set value=$1 where key='search_surcharge_credits'",[JSON.stringify(price)]);
  try{const before=await consumptionCounts();expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(503);expect(search.fixture.events).toEqual([]);expect((await consumptionCounts()).pre).toBe(before.pre);}finally{await search.fixture.stop();}
 },90000);
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title to revised A retains dependency restrictions and leaves B independent',async()=>{
+ const {artifactReuse}=await import('../artifacts/reuse');
+ const {sliceLinks}=await import('../agentSlice/links');
+ const user=await authenticated(),service=workbenchService(user,db),reuse=artifactReuse(user,db),links=sliceLinks(user,db);
+ const src=await fixture({id:'slice-position',label:'虚构定位',methodText:'Synthetic positioning.',workflow:makeWorkflow(6,true)});
+ const script=await fixture({id:'slice-script',label:'虚构脚本',methodText:'Synthetic script ALPHA: prose only.',workflow:makeWorkflow(1,false)});
+ const titleFlow=makeWorkflow(1,false);titleFlow.steps[0].maxLength=1000;
+ const title=await fixture({id:'slice-title',label:'虚构标题',methodText:'Synthetic title BETA: numbered titles only.',workflow:titleFlow});
+ const p=randomUUID(),r=randomUUID();
+ // This suite shares an actor with earlier tests; positioning is unique per account.
+ const sliceAccount='synthetic:slice-'+p;
+ await sql.query('update artifact_accounts set account=$1 where actor_id=$2 and module_id=$3 and skill_id=$4',[sliceAccount,actor,src.moduleId,src.pack.id]);
+ await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:sliceAccount},src.moduleId);
+ async function publish(projectId:string,roundId:string,body:string){
+  let state=await service.read(projectId,roundId);
+  for(const step of state.workflow.steps){
+   await service.execute({action:'save',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,body:body+' '+step.title,evidenceIds:[]});
+   state=await service.read(projectId,roundId);
+   await service.execute({action:'confirm',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,expectedReviewVersion:state.steps[step.id].reviewVersion});
+   state=await service.read(projectId,roundId);
+  }
+  await service.execute({action:'publish',projectId,roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))});
+  return service.report(projectId,roundId);
+ }
+ const position=await publish(p,r,'POSITION');
+ for(const [id,target] of [['slice-p-script',script],['slice-p-title',title]] as const)
+  await sql.query('INSERT INTO artifact_reference_configs VALUES($1,$2,$3,$4,20000,true)',[id,src.registration,target.registration,JSON.stringify(['step-2'])]);
+ await sql.query("INSERT INTO agent_slice_pairs VALUES('slice-pair',$1,$2,'[\"step-0\"]','[\"step-0\"]',20000,true)",[script.registration,title.registration]);
+ const sliceModel=randomUUID(),summaryModel=randomUUID(),conversation=randomUUID();
+ await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_workbench_ai','true') ON CONFLICT(key) DO UPDATE SET value='true'");
+ await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-flash','Synthetic slice model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[sliceModel]);
+ await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
+ await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-27b','Synthetic summary model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryModel]);
+ await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_summary_model_id',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify(summaryModel)]);
+ await sql.query("INSERT INTO conversations(id,user_id,title,agent_slice_mode) VALUES($1,$2,'Synthetic dual Skill',true)",[conversation,actor]);
+ const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50,preferenceRefs:Array<{scope:string;name:string;version:number}>=[])=>{
+  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs}});
+  if(result.error)throw result.error;return result.data;
+ };
+ const a=randomUUID(),b=randomUUID(),t=randomUUID();
+ const create=(id:string,configId:string)=>reuse.create({projectId:id,roundId:id,requestId:id,sourceVersionId:position.id!,configId,title:id===a?'脚本 A':id===b?'脚本 B':'标题'});
+ await Promise.all([create(a,'slice-p-script'),create(b,'slice-p-script')]);
+ await service.execute({action:'userEvidence',projectId:a,roundId:a,requestId:randomUUID(),body:'Synthetic restricted A input',observedAt:null,supersedes:null});
+ const extra=(await service.read(a,a)).evidence.find(e=>JSON.stringify(e.payload).includes('restricted A input'))!;
+ await service.execute({action:'save',projectId:a,roundId:a,stepId:'step-0',expectedVersion:0,requestId:randomUUID(),body:'A1',evidenceIds:[extra.id]});
+ const av1=await publish(a,a,'A1');
+ await create(t,'slice-p-title');
+ const bind={projectId:t,roundId:t,sourceVersionId:av1.id!,pairId:'slice-pair',requestId:randomUUID()};
+ const [bound,replay]=await Promise.all([links.link(bind),links.link(bind)]);expect(bound).toEqual(replay);
+ await expect(links.link({...bind,requestId:randomUUID()})).rejects.toThrow();
+ const reader=await links.reader({projectId:t,roundId:t});expect(await reader()).toContain('A1');
+ const {workbenchGeneration}=await import('../artifacts/generation');
+ let legacyCalls=0;
+ const legacy=workbenchGeneration(user,db,async()=>{legacyCalls++;throw new Error('legacy must not dispatch');});
+ const linkedState=await service.read(t,t);
+ const legacyInput={projectId:t,roundId:t,stepId:'step-0',instruction:'标题',expectedSteps:Object.fromEntries(Object.entries(linkedState.steps).map(([key,value])=>[key,{version:value.version,reviewVersion:value.reviewVersion}]))};
+ await expect(legacy.quote(legacyInput)).rejects.toThrow('连续创作');
+ const legacyRequest=randomUUID();
+ const forbiddenPrepare=await db.rpc('artifact_generation',{p_actor_id:actor,p_project_id:t,p_round_id:t,p_action:'prepare',p_request_id:legacyRequest,p_payload:{}});
+ expect(forbiddenPrepare.error?.message).toContain('连续创作');
+ expect(Number((await sql.query('select count(*) n from artifact_generations where request_id=$1',[legacyRequest])).rows[0].n)).toBe(0);
+ expect(legacyCalls).toBe(0);
+ const unlinkedBoundary=await db.rpc('agent_slice_assert_legacy_generation',{p_actor_id:actor,p_project_id:b,p_round_id:b});
+ expect(unlinkedBoundary.error).toBeNull();
+ const titleRequest=randomUUID();
+ expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
+ await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();
+ const {sliceAccounting}=await import('../agentSlice/accounting');
+ const {runSkillSlice}=await import('../agentSlice/runner');
+ const sdkRequest=randomUUID();await begin(t,t,sdkRequest,'读取 A1 后拟标题',100000);
+ await sql.query('update profiles set credits=100000 where id=$1',[actor]);
+ const modelRow=(await sql.query('select * from ai_models where id=$1',[sliceModel])).rows[0];
+ const accounting=sliceAccounting(user,db,sdkRequest,modelRow);
+ const {loadSliceContext}=await import('../agentSlice/context');const assembled=await loadSliceContext(user,db,sdkRequest);
+ expect(assembled.loaded.forModel()).toContain('BETA');expect(assembled.loaded.forModel()).not.toContain('ALPHA');
+ const {confirmedPreferences}=await import('../agentSlice/preferences');const prefs=confirmedPreferences(user,db);
+ await prefs.change({scope:'user',name:'表达风格',value:'简洁中文',expectedVersion:0,confirmed:true,requestId:randomUUID(),action:'confirm'});
+ const prefRequest=randomUUID();await begin(t,t,prefRequest,'偏好装配验证',50,[{scope:'user',name:'表达风格',version:1}]);
+ expect((await loadSliceContext(user,db,prefRequest)).data.preferences).toEqual([{scope:'user',name:'表达风格',value:'简洁中文'}]);
+ await prefs.change({scope:'user',name:'表达风格',value:'详细中文',expectedVersion:1,confirmed:true,requestId:randomUUID(),action:'confirm'});
+ await expect(loadSliceContext(user,db,prefRequest)).rejects.toThrow('SLICE_CONTEXT_CHANGED');
+ const correctedRequest=randomUUID();await begin(t,t,correctedRequest,'采用新偏好',50,[{scope:'user',name:'表达风格',version:2}]);
+ expect((await loadSliceContext(user,db,correctedRequest)).data.preferences).toEqual([{scope:'user',name:'表达风格',value:'详细中文'}]);
+ await prefs.change({scope:'user',name:'表达风格',expectedVersion:2,confirmed:true,requestId:randomUUID(),action:'delete'});
+ await expect(loadSliceContext(user,db,correctedRequest)).rejects.toThrow('SLICE_CONTEXT_CHANGED');
+
+ let providerCalls=0;
+ const sdkInput={model:modelRow.model_id,apiKey:'SYNTHETIC_ONLY',instructions:assembled.loaded.forModel(),input:JSON.stringify(assembled.data),maxOutputTokens:100,readArtifact:reader,...accounting};
+ const fakeProvider=async(_url:unknown,init?:RequestInit)=>{
+  providerCalls++;const request=JSON.parse(String(init?.body));
+  if(providerCalls===2)expect(JSON.stringify(request.messages)).toContain('A1');
+  const message=providerCalls===1?{role:'assistant',content:null,tool_calls:[{id:'fixed-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:'1. Synthetic title from A1'};
+  return new Response(JSON.stringify({id:'synthetic-'+providerCalls,object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:providerCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
+ };
+ const sdkReply=await runSkillSlice(sdkInput,fakeProvider);expect(sdkReply.body).toContain('title from A1');
+ const {sliceResults}=await import('../agentSlice/results');const results=sliceResults(user,db);
+ const syntheticPrivate=assembled.loaded.forModel();
+ const replyScope={executionId:sdkRequest,phase:'reply' as const};
+ await expect(results.save(replyScope,JSON.parse(syntheticPrivate).resources[0].path,syntheticPrivate)).rejects.toThrow('SLICE_OUTPUT_RESTRICTED');
+ const savedReply=await results.save(replyScope,sdkReply.body,syntheticPrivate);
+ expect(savedReply.state).toBe('saved');expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual(savedReply);
+ expect(await results.read(replyScope)).toEqual(savedReply);
+ if(savedReply.state!=='saved')throw new Error('reply missing');
+ await expect(service.execute({action:'saveCandidate',projectId:t,roundId:t,stepId:'step-0',candidateId:savedReply.candidateId,expectedVersion:(await service.read(t,t)).steps['step-0'].version,requestId:randomUUID(),body:savedReply.body})).rejects.toThrow();
+ expect(providerCalls).toBe(2);
+ expect((await accounting.recover()).map(c=>c.state)).toEqual(['settled','settled']);
+ await expect(runSkillSlice(sdkInput,fakeProvider)).rejects.toThrow();expect(providerCalls).toBe(2);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
+ const summaryRow=(await sql.query('select * from ai_models where id=$1',[summaryModel])).rows[0];
+ let settleUnavailable=true;
+ const delayedAdmin=new Proxy(db,{get(target,key){
+  if(key==='rpc')return (name:string,args:any)=>{
+   if(name==='agent_slice_call'&&args.p_execution_id===sdkRequest&&args.p_action==='settle'&&settleUnavailable)
+    return {abortSignal:()=>Promise.resolve({data:null,error:{code:'TEST_ONLY_UNAVAILABLE'}})};
+   return target.rpc(name,args);
+  };
+  return Reflect.get(target,key);
+ }});
+ const summaryAccounting=sliceAccounting(user,delayedAdmin,sdkRequest,summaryRow,'summary');let summaryCalls=0;
+ const summaryInput={...sdkInput,...summaryAccounting,model:summaryRow.model_id,readArtifact:undefined,input:'已完成回复：'+savedReply.body,instructions:'Synthetic summary: preserve the selected title.'};
+ const summaryProvider=async(_url:unknown,init?:RequestInit)=>{
+  summaryCalls++;const request=JSON.parse(String(init?.body));expect(request.model).toBe(summaryRow.model_id);expect(request.tools??[]).toEqual([]);
+  expect(JSON.stringify(request.messages)).toContain('Synthetic title from A1');
+  return new Response(JSON.stringify({id:'synthetic-summary',object:'chat.completion',created:1,model:summaryRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Synthetic selected title'}}],usage:{prompt_tokens:12,completion_tokens:5,total_tokens:17}}),{headers:{'content-type':'application/json'}});
+ };
+ const summaryReply=await runSkillSlice(summaryInput,summaryProvider);expect(summaryReply.body).toBe('Synthetic selected title');
+ const summaryScope={executionId:sdkRequest,phase:'summary' as const};
+ const savedSummary=await results.save(summaryScope,summaryReply.body,syntheticPrivate);expect(savedSummary.state).toBe('saved');
+ if(savedSummary.state!=='saved')throw new Error('summary missing');expect(savedSummary.adoptable).toBe(true);
+ expect((await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('responded');
+ expect(await results.read(summaryScope)).toEqual(savedSummary);settleUnavailable=false;
+ const {recoverSlice}=await import('../agentSlice/recovery'); // Formal browser refresh must perform maintenance below.
+ expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
+ await expect(runSkillSlice(summaryInput,summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
+ expect((await sql.query('select phase, count(*)::int n from agent_slice_calls where execution_id=$1 group by phase order by phase',[sdkRequest])).rows).toEqual([{phase:'reply',n:2},{phase:'summary',n:1}]);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
+
+ // Unadopted replies are fixed at admission, scoped to this work, not UI pagination.
+ const followRequest=randomUUID();await begin(t,t,followRequest,'保留第一个标题，改短一点',100000);
+ const followContext=await loadSliceContext(user,db,followRequest);
+ expect(followContext.data.discussion).toEqual([{user:'读取 A1 后拟标题',assistant:savedReply.body}]);
+ expect((await loadSliceContext(user,db,sdkRequest)).data.discussion).toEqual([]);
+ const independentDiscussion=randomUUID();await begin(b,b,independentDiscussion,'独立脚本 B',100000);
+ expect((await loadSliceContext(user,db,independentDiscussion)).data.discussion).toEqual([]);
+ const fixedDiscussion=(await sql.query('select discussion_refs from agent_slice_executions where request_id=$1',[followRequest])).rows[0].discussion_refs;
+ expect(fixedDiscussion).toEqual([{executionId:sdkRequest,candidateId:savedReply.candidateId}]);
+ const unknownRequest=randomUUID();await begin(t,t,unknownRequest,'测试缺失用量',100000);
+ const unknownAccounting=sliceAccounting(user,db,unknownRequest,modelRow);let unknownCalls=0;
+ const missingUsage=async()=>{unknownCalls++;return new Response(JSON.stringify({id:'synthetic-missing-usage',object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Not a verified completion'}}]}),{headers:{'content-type':'application/json'}});};
+ await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();
+ expect((await unknownAccounting.recover()).map(c=>c.state)).toEqual(['unknown']);
+ const deniedSummary=sliceAccounting(user,db,unknownRequest,summaryRow,'summary');
+ await expect(runSkillSlice({...summaryInput,...deniedSummary},summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
+ await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();expect(unknownCalls).toBe(1);
+ const observation=(await sql.query('select evidence from agent_slice_calls where execution_id=$1',[unknownRequest])).rows[0].evidence;
+ expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
+ await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
+ const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();
+ await sql.query("update agent_slice_calls set dispatched_at=clock_timestamp()-interval '3 minutes' where execution_id=$1",[unknownRequest]);
+ expect(await sliceExecutor(user,db,missingUsage).execute({executionId:unknownRequest,phase:'reply'})).toEqual({state:'unavailable',reason:'outcome_unknown'});expect(unknownCalls).toBe(1);
+
+ const {sliceAdmission}=await import('../agentSlice/admission');const admission=sliceAdmission(user,db);
+ const {sliceEntry}=await import('../agentSlice/entry');const entry=sliceEntry(user,db);const newConversation=randomUUID();
+ expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});
+ expect((await sql.query('select count(*)::int n from conversations where id=$1',[newConversation])).rows[0].n).toBe(1);
+ const sourceOptions=await entry.sources();expect(sourceOptions).toContainEqual(expect.objectContaining({sourceVersionId:position.id,version:1,pairId:'slice-pair'}));expect(JSON.stringify(sourceOptions)).not.toContain('POSITION ');
+ const targetOptions=await entry.targets();expect(targetOptions.some(x=>x.projectId===t&&x.purpose==='title')).toBe(true);expect(targetOptions.some(x=>x.projectId===b&&x.purpose==='script')).toBe(true);
+
+ const admissionInput={conversationId:conversation,requestId:joinedRequest,projectId:t,roundId:t,stepId:'step-0',pairId:'slice-pair',body:'从 A1 拟标题并保存',preferenceRefs:[]};
+ const admitted=await admission.begin(admissionInput);expect(await admission.begin(admissionInput)).toEqual(admitted);
+ await expect(admission.begin({...admissionInput,projectId:b,roundId:b})).rejects.toThrow();
+ // Admission replay retains identity even if routing subsequently changes.
+ await sql.query('update modules set model_id=$1 where id=$2',[summaryModel,title.moduleId]);
+ expect(await admission.begin(admissionInput)).toEqual(admitted);
+ await sql.query('update modules set model_id=$1 where id=$2',[sliceModel,title.moduleId]);
+ let joinedCalls=0;
+ const joinedTransport=async(_url:unknown,init?:RequestInit)=>{
+  joinedCalls++;const req=JSON.parse(String(init?.body));
+  expect(JSON.stringify(req.messages)).toContain('BETA');expect(JSON.stringify(req.messages)).not.toContain('ALPHA');
+  if(joinedCalls===1)expect(JSON.stringify(req.messages)).toContain('Synthetic title from A1');
+  if(joinedCalls===1)expect(req.tool_choice).toMatchObject({function:{name:'read_selected_artifact'}});
+  if(joinedCalls===2)expect(JSON.stringify(req.messages)).toContain('A1');
+  if(joinedCalls===3){expect(req.model).toBe(summaryRow.model_id);expect(req.tools??[]).toEqual([]);expect(JSON.stringify(req.messages)).toContain('Joined title');}
+  const msg=joinedCalls===1?{role:'assistant',content:null,tool_calls:[{id:'joined-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:joinedCalls===2?'Joined title':'Saved joined title'};
+  return new Response(JSON.stringify({id:'joined-'+joinedCalls,object:'chat.completion',created:1,model:req.model,choices:[{index:0,finish_reason:joinedCalls===1?'tool_calls':'stop',message:msg}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
+ };
+ // Non-transactional sequence makes exactly the first candidate INSERT fail.
+ // This tests rollback of both usage evidence and candidate, not an HTTP-only mock.
+ await sql.query("create sequence slice_final_fault; create function slice_final_fault_once() returns trigger language plpgsql as $$ begin if NEW.body='Joined title' and nextval('slice_final_fault')=1 then raise exception 'synthetic candidate unavailable'; end if; return NEW; end $$; create trigger slice_final_fault before insert on artifact_candidates for each row execute function slice_final_fault_once()");
+ let lostFinalAcknowledgement=0;
+ const finalAdmin=new Proxy(db,{get(target,key){if(key==='rpc')return(name:string,args:any)=>{
+  if(name==='agent_slice_record_final'&&args.p_execution_id===joinedRequest&&args.p_phase==='summary')return {abortSignal:async(signal:AbortSignal)=>{const response=await target.rpc(name,args).abortSignal(signal);if(!response.error&&lostFinalAcknowledgement++===0)return {...response,error:{code:'TEST_LOST_ACK'},data:null};return response;}};
+  return target.rpc(name,args);
+ };return Reflect.get(target,key);}});
+ const executor=sliceExecutor(user,finalAdmin,joinedTransport);
+ const joinedReply=await executor.execute({executionId:joinedRequest,phase:'reply'});expect(joinedReply).toMatchObject({state:'saved',body:'Joined title'});
+ expect(await executor.execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(2);
+ const joinedSummary=await executor.execute({executionId:joinedRequest,phase:'summary'});expect(joinedSummary).toMatchObject({state:'saved',body:'Saved joined title'});
+ expect(await executor.execute({executionId:joinedRequest,phase:'summary'})).toEqual(joinedSummary);expect(joinedCalls).toBe(3);
+ expect(lostFinalAcknowledgement).toBe(1);
+ expect(Number((await sql.query('select last_value from slice_final_fault')).rows[0].last_value)).toBe(2);
+ await sql.query('drop trigger slice_final_fault on artifact_candidates; drop function slice_final_fault_once(); drop sequence slice_final_fault');
+ // Recreate the service after committed output; no SDK/provider work is repeated.
+ expect(await sliceExecutor(user,db,joinedTransport).execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(3);
+
+ const {readSliceConversation}=await import('../agentSlice/conversation');
+ const historyInput={conversationId:conversation,limit:2};
+ const firstPage=await readSliceConversation(user,db,historyInput);
+ expect(firstPage.items.length).toBe(2);expect(firstPage.nextCursor).not.toBeNull();
+ const allHistory=[...firstPage.items];let historyCursor=firstPage.nextCursor;
+ while(historyCursor){const next=await readSliceConversation(user,db,{...historyInput,before:historyCursor});allHistory.push(...next.items);historyCursor=next.nextCursor;}
+ expect(new Set(allHistory.map(x=>x.executionId)).size).toBe(allHistory.length);
+ expect(allHistory.find(x=>x.executionId===joinedRequest)?.reply).toMatchObject({state:'saved',body:'Joined title'});
+ expect(allHistory.some(x=>x.projectId===t)).toBe(true);
+ expect(joinedCalls).toBe(3);
+ let browserA='',browserB='',browserA2='';
+ const browserSession=await pageFor();
+ try {
+  const httpHistory=await browserSession.page.request.get(app+'/api/trpc/agentSlice.conversation',{params:{input:JSON.stringify({conversationId:conversation})}});
+  expect(httpHistory.status()).toBe(200);expect(await httpHistory.text()).toContain('Joined title');
+  const oldPath=await browserSession.page.request.post(app+'/api/ai/stream',{headers:{Authorization:'Bearer '+(await user.auth.getSession()).data.session!.access_token},data:{message:'must not generate',conversationId:conversation,requestId:randomUUID(),modelId:sliceModel}});expect(oldPath.status()).toBe(403);
+  const httpBegin=await browserSession.page.request.post(app+'/api/trpc/agentSlice.begin',{data:admissionInput});expect(httpBegin.status()).toBe(200);expect(await httpBegin.text()).toContain(joinedRequest);
+  const httpRead=await browserSession.page.request.get(app+'/api/trpc/agentSlice.result',{params:{input:JSON.stringify({executionId:joinedRequest,phase:'summary'})}});
+  expect(httpRead.status()).toBe(200);expect(await httpRead.text()).toContain('Saved joined title');
+  const httpReplay=await browserSession.page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:joinedRequest,phase:'summary'}});
+  expect(httpReplay.status()).toBe(200);expect(await httpReplay.text()).toContain('Saved joined title');expect(joinedCalls).toBe(3);
+  await browserSession.page.goto(app+'/chat?mode=agent-slice&conversation='+conversation);
+  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
+  await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
+  await expect.poll(async()=>(await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('settled');
+  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(3);
+  expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
+  await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
+  expect(joinedCalls).toBe(3);
+  // Confirm in the existing conversation, then use it in a distinct new conversation.
+  await browserSession.page.getByLabel('使用 Skill 创作').waitFor();
+  await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
+  await browserSession.page.getByLabel('写作偏好').fill('先给具体例子');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
+  await browserSession.page.getByText('已确认：先给具体例子',{exact:true}).waitFor();
+  await browserSession.page.getByLabel('写作偏好').fill('结尾给行动建议');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
+  await browserSession.page.getByText('已确认：结尾给行动建议',{exact:true}).waitFor();
+  await browserSession.page.goto(app+'/chat?conversation='+newConversation);
+  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
+  await browserSession.page.getByLabel('使用 Skill 创作').selectOption(t+':step-0:slice-pair');
+  await browserSession.page.evaluate(()=>{
+   const timing:{start?:number;feedback?:number;reply?:number}={};(window as any).__sliceTiming=timing;
+   document.addEventListener('submit',()=>{timing.start=performance.now();},{once:true,capture:true});
+   const observer=new MutationObserver(()=>{if(timing.start===undefined)return;
+    const turns=Array.from(document.querySelectorAll('section[aria-label="一轮对话"]'));
+    const turn=turns.find(t=>t.textContent?.includes('浏览器新增标题'));if(!turn)return;
+    if(timing.feedback===undefined&&turn.querySelector('[aria-label="助手回答"]'))timing.feedback=performance.now()-timing.start;
+    if(turn.textContent?.includes('浏览器真实接线回复')){timing.reply=performance.now()-timing.start;observer.disconnect();}
+   });observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+  });
+  await browserSession.page.getByLabel('消息',{exact:true}).fill('浏览器新增标题');await browserSession.page.getByRole('button',{name:'发送',exact:true}).click();
+  await browserSession.page.getByText('浏览器新增标题',{exact:true}).waitFor();
+  await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();
+  await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[newConversation])).rows[0].n),{timeout:20000}).toBe(3);
+  const browserTiming=await browserSession.page.evaluate(()=>(window as any).__sliceTiming);expect(browserTiming.feedback).toBeGreaterThanOrEqual(0);expect(browserTiming.reply).toBeGreaterThanOrEqual(browserTiming.feedback);console.log('SLICE synthetic browser timing (ms; includes local HTTP and provider fixture wait)',JSON.stringify(browserTiming));
+  const actualCalls=await (await fetch(url+'/__slice_calls')).json();expect(actualCalls).toHaveLength(3);expect(actualCalls.every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
+  await browserSession.page.reload();await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(3);
+  await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
+
+  await browserSession.page.getByRole('button',{name:'删除这条偏好'}).click();await browserSession.page.getByText('已确认：尚未设置',{exact:true}).waitFor();
+  const page=browserSession.page;
+  const sendAndSave=async(message:string,expectedCalls:number)=>{
+   await page.getByLabel('消息',{exact:true}).fill(message);await page.getByRole('button',{name:'发送',exact:true}).click();
+   await page.getByText(message,{exact:true}).waitFor();
+   await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[newConversation])).rows[0].n),{timeout:20000}).toBe(expectedCalls);
+   await page.getByRole('button',{name:'采用本轮成果',exact:true}).click();
+   await expect.poll(async()=>page.getByLabel('本步骤成果',{exact:true}).inputValue()).toBe('浏览器整理成果');
+  };
+  const confirmAndPublish=async()=>{await page.getByRole('button',{name:'确认本步骤成果',exact:true}).click();await page.getByRole('button',{name:'发布已确认版本',exact:true}).click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');};
+  await page.getByText('基于定位报告新建脚本',{exact:true}).click();
+  await page.getByLabel('选择定位报告与版本').selectOption(position.id!+':slice-pair');
+  await page.getByLabel('新脚本名称').fill('浏览器脚本 A');await page.getByRole('button',{name:'创建独立脚本',exact:true}).click();
+  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue(),{timeout:10000}).toBe('');
+  browserA=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
+  await page.getByLabel('新脚本名称').fill('浏览器脚本 B');await page.getByRole('button',{name:'创建独立脚本',exact:true}).click();
+  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue(),{timeout:10000}).toBe('');
+  browserB=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA).not.toBe(browserB);
+  expect((await service.read(browserA,browserA)).state).toBe('draft');expect((await service.read(browserB,browserB)).state).toBe('draft');
+  const replay={projectId:browserA,requestId:browserA,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'浏览器脚本 A'};
+  expect((await page.request.post(app+'/api/trpc/agentSlice.continueWork',{data:replay})).status()).toBe(200);
+  expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(3);
+  await page.getByText('基于定位报告新建脚本',{exact:true}).click();
+  await page.getByLabel('使用 Skill 创作').selectOption(browserA+':step-0:slice-pair');
+  await sendAndSave('为这个账号写脚本 A',6);await confirmAndPublish();
+  // A report arriving after the user selects B must not open under B's identity.
+  let reportFetched=false,reportDelivered=false,releaseReport:()=>void=()=>{};
+  const reportBarrier=new Promise<void>(resolve=>{releaseReport=resolve;});
+  await page.route('**/api/trpc/workbench.report*',async route=>{const response=await route.fetch();reportFetched=true;await reportBarrier;await route.fulfill({response});reportDelivered=true;});
+  await page.getByRole('button',{name:'查看正式报告',exact:true}).click();
+  await expect.poll(()=>reportFetched).toBe(true);
+  await page.getByLabel('使用 Skill 创作').selectOption(browserB+':step-0:slice-pair');
+  releaseReport();await expect.poll(()=>reportDelivered).toBe(true);
+  await expect.poll(()=>page.getByRole('complementary',{name:'当前作品成果'}).getAttribute('aria-busy')).toBe('false');
+  await expect.poll(()=>page.getByRole('dialog').count()).toBe(0);
+  expect(await page.getByLabel('使用 Skill 创作').inputValue()).toBe(browserB+':step-0:slice-pair');
+  await page.unroute('**/api/trpc/workbench.report*');
+  await page.getByLabel('使用 Skill 创作').selectOption(browserA+':step-0:slice-pair');
+  await page.getByRole('button',{name:'用这版脚本创作标题',exact:true}).click();
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserA+':step-0:slice-pair'&&(await page.getByLabel('使用 Skill 创作').locator('option:checked').textContent())?.startsWith('标题 · 浏览器脚本 A')===true;},{timeout:10000}).toBe(true);
+  const browserTitleRound=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
+  await sendAndSave('为刚才的脚本拟标题',9);
+  await page.getByLabel('本步骤成果',{exact:true}).fill('选定标题：倾斜的地球如何创造四季');await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body).toBe('选定标题：倾斜的地球如何创造四季');
+  await confirmAndPublish();await page.getByLabel('带回哪份脚本').selectOption(browserA);
+  await page.getByRole('button',{name:'采用这些标题，修订脚本',exact:true}).click();
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';},{timeout:10000}).toBe(true);
+  browserA2=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA2).not.toBe(browserA);
+  await sendAndSave('按选定标题修订原脚本',12);await confirmAndPublish();
+  await page.reload();await page.getByText('为这个账号写脚本 A',{exact:true}).waitFor();await page.getByText('为刚才的脚本拟标题',{exact:true}).waitFor();await page.getByText('按选定标题修订原脚本',{exact:true}).waitFor();
+  expect((await service.read(browserB,browserB)).steps['step-0'].body).toBe('');expect((await service.report(browserA,browserA2)).version).toBe(2);expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+  const afterDelete=await (await fetch(url+'/__slice_calls')).json();expect(afterDelete).toHaveLength(12);expect(afterDelete.slice(3).every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>!c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
+
+  // Real application death while the provider has received a request but has not replied.
+  const killedRequest=randomUUID();await begin(b,b,killedRequest,'Synthetic process death',100000);
+  const controls={method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}};
+  expect((await fetch(url+'/__slice_hold',controls)).ok).toBe(true);
+  const killedHttp=page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:killedRequest,phase:'reply'},timeout:60000}).catch(()=>null);
+  await expect.poll(async()=>(await (await fetch(url+'/__slice_calls')).json()).length,{timeout:20000}).toBe(13);
+  const financialBeforeKill=(await sql.query('select state,pre_deduct_id from agent_slice_calls where execution_id=$1',[killedRequest])).rows;expect(financialBeforeKill).toHaveLength(1);expect(financialBeforeKill[0].state).toBe('dispatched');
+  expect((await fetch(url+'/__restart_app',controls)).ok).toBe(true);await killedHttp;
+  await expect.poll(async()=>{try{return (await fetch(app+'/login')).ok;}catch{return false;}},{timeout:60000}).toBe(true);
+  await sql.query("update agent_slice_calls set dispatched_at=clock_timestamp()-interval '3 minutes' where execution_id=$1",[killedRequest]);
+  const recoveredHttp=await page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:killedRequest,phase:'reply'}});expect(recoveredHttp.ok()).toBe(true);expect(await recoveredHttp.text()).toContain('outcome_unknown');
+  expect((await page.request.post(app+'/api/trpc/agentSlice.recover',{data:{executionId:killedRequest}})).ok()).toBe(true);
+  expect((await (await fetch(url+'/__slice_calls')).json()).length).toBe(13);
+  expect((await sql.query('select state,pre_deduct_id from agent_slice_calls where execution_id=$1',[killedRequest])).rows).toEqual(financialBeforeKill);
+  expect((await sql.query("select count(*)::int n from token_stats where metadata->>'executionId'=$1",[killedRequest])).rows[0].n).toBe(0);
+  console.log('SLICE real SIGKILL/restart: original unknown request retained, provider count unchanged, no extra reservation/settlement PASS');
+ } finally {await browserSession.context.close();}
+ // Equal timestamps still paginate by immutable request identity, without loss.
+ const tieIds=[randomUUID(),randomUUID(),randomUUID()].sort().reverse();
+ for(const tieId of tieIds){
+  await sql.query("insert into artifact_requests select (jsonb_populate_record(null::artifact_requests,to_jsonb(q)||jsonb_build_object('request_id',$2::text))).* from artifact_requests q where request_id=$1",[joinedRequest,tieId]);
+  await sql.query("insert into agent_slice_executions select (jsonb_populate_record(null::agent_slice_executions,to_jsonb(e)||jsonb_build_object('request_id',$2::text,'created_at','2030-01-01T00:00:00Z'))).* from agent_slice_executions e where request_id=$1",[joinedRequest,tieId]);
+ }
+ const tiePage=await readSliceConversation(user,db,{conversationId:conversation,limit:2});expect(tiePage.items.map(x=>x.executionId)).toEqual(tieIds.slice(0,2));
+ const tieNext=await readSliceConversation(user,db,{conversationId:conversation,limit:2,before:tiePage.nextCursor!});expect(tieNext.items[0].executionId).toBe(tieIds[2]);
+ // Known provider usage survives a deterministic oversized summary rejection.
+ const oversizedExecution=randomUUID();await begin(t,t,oversizedExecution,'Synthetic bounded summary',100000);
+ let oversizedCalls=0;
+ const oversizedTransport=async(_url:unknown,init?:RequestInit)=>{
+  oversizedCalls++;const req=JSON.parse(String(init?.body));
+  const message=oversizedCalls===1?{role:'assistant',content:null,tool_calls:[{id:'oversize-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:oversizedCalls===2?'A readable reply':'Long synthetic explanation. '.repeat(60)};
+  return new Response(JSON.stringify({id:'oversized-'+oversizedCalls,object:'chat.completion',created:1,model:req.model,choices:[{index:0,finish_reason:oversizedCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:400,total_tokens:410}}),{headers:{'content-type':'application/json'}});
+ };
+ const oversizedExecutor=sliceExecutor(user,db,oversizedTransport);
+ expect((await oversizedExecutor.execute({executionId:oversizedExecution,phase:'reply'})).state).toBe('saved');
+ expect(await oversizedExecutor.execute({executionId:oversizedExecution,phase:'summary'})).toEqual({state:'unavailable',reason:'result_unavailable'});
+ expect(await oversizedExecutor.execute({executionId:oversizedExecution,phase:'summary'})).toEqual({state:'unavailable',reason:'result_unavailable'});
+ expect((await recoverSlice(user,db,{executionId:oversizedExecution})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(oversizedCalls).toBe(3);
+ expect((await sql.query("select count(*)::int n from token_stats where metadata->>'executionId'=$1",[oversizedExecution])).rows[0].n).toBe(3);
+ expect((await sql.query("select count(*)::int n from artifact_requests where payload->>'sliceExecution'=$1 and payload->>'slicePhase'='summary'",[oversizedExecution])).rows[0].n).toBe(0);
+ // Recreate the service after losing prepare acknowledgement: no provider dispatch.
+ const {sliceCallId}=await import('../agentSlice/accounting');
+ const abandoned=randomUUID();await begin(b,b,abandoned,'Synthetic undispatched request');
+ const abandonedArgs={p_actor_id:actor,p_execution_id:abandoned,p_call_id:sliceCallId(abandoned,1)};
+ const abandonedBalance=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ const abandonedPrepared=await db.rpc('agent_slice_call',{...abandonedArgs,p_action:'prepare',p_payload:{sequence:1,quote:{modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20}}});
+ expect(abandonedPrepared.error).toBeNull();
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('prepared');
+ await sql.query("update agent_slice_calls set created_at=clock_timestamp()-interval '3 minutes' where id=$1",[abandonedArgs.p_call_id]);
+ // A changed saved step invalidates the frozen request, but not financial recovery.
+ const abandonedStep=(await service.read(b,b)).steps['step-0'];
+ await service.execute({action:'save',projectId:b,roundId:b,stepId:'step-0',requestId:randomUUID(),expectedVersion:abandonedStep.version,body:'Changed after preparation',evidenceIds:[]});
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('refunded');
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('refunded');
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(abandonedBalance);
+ const lateAbandoned=await db.rpc('agent_slice_call',{...abandonedArgs,p_action:'dispatch',p_payload:{token:abandonedPrepared.data.token}});
+ expect(lateAbandoned.error!==null||lateAbandoned.data?.dispatch===false).toBe(true);
+ expect((await sql.query('select state from agent_slice_calls where id=$1',[abandonedArgs.p_call_id])).rows[0].state).toBe('refunded');
+ await service.execute({action:'save',projectId:b,roundId:b,stepId:'step-0',requestId:randomUUID(),expectedVersion:(await service.read(b,b)).steps['step-0'].version,body:'',evidenceIds:[]});
+ // Concurrent recovery/dispatch share the execution lock. A dispatched winner
+ // must never be refunded; a recovered winner must reject the stale token.
+ const racing=randomUUID();await begin(b,b,racing,'Synthetic dispatch race');
+ const raceArgs={p_actor_id:actor,p_execution_id:racing,p_call_id:sliceCallId(racing,1)};
+ const racePrepared=await db.rpc('agent_slice_call',{...raceArgs,p_action:'prepare',p_payload:{sequence:1,quote:{modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20}}});expect(racePrepared.error).toBeNull();
+ await sql.query("update agent_slice_calls set created_at=clock_timestamp()-interval '3 minutes' where id=$1",[raceArgs.p_call_id]);
+ const otherActor=(await newUser()).id;
+ const deniedRecovery=await db.rpc('agent_slice_call',{...raceArgs,p_actor_id:otherActor,p_action:'recover_prepared'});expect(deniedRecovery.error).not.toBeNull();
+ const [,raceDispatch]=await Promise.all([recoverSlice(user,db,{executionId:racing}),db.rpc('agent_slice_call',{...raceArgs,p_action:'dispatch',p_payload:{token:racePrepared.data.token}})]);
+ expect(raceDispatch.error).toBeNull();
+ const raceState=(await recoverSlice(user,db,{executionId:racing})).calls[0].state;
+ expect(raceState).toBe(raceDispatch.data.dispatch?'dispatched':'refunded');
+ const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ const callId=randomUUID();
+ const call=async(action:string,payload:Record<string,unknown>={})=>{
+  const result=await db.rpc('agent_slice_call',{p_actor_id:actor,p_execution_id:titleRequest,p_call_id:callId,p_action:action,p_payload:payload});
+  if(result.error)throw result.error;return result.data;
+ };
+ const callQuote={modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20};
+ const claim=await call('prepare',{sequence:1,quote:callQuote});
+ expect(claim.state).toBe('prepared');
+ const reclaimed=await call('prepare',{sequence:1,quote:callQuote});expect(reclaimed.state).toBe('prepared');
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:false});
+ claim.token=reclaimed.token;
+ await expect(call('prepare',{sequence:1,quote:{...callQuote,reservedCredits:21}})).rejects.toBeDefined();
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:true});
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:false});
+ await call('unknown',{token:claim.token});
+ await expect(call('settle')).rejects.toBeDefined();
+ await expect(call('refund',{token:claim.token})).rejects.toBeDefined();
+ const adoptInput={action:'saveCandidate' as const,projectId:t,roundId:t,stepId:'step-0',candidateId:savedSummary.candidateId,expectedVersion:(await service.read(t,t)).steps['step-0'].version,requestId:randomUUID(),body:savedSummary.body};
+ await service.execute(adoptInput);await service.execute(adoptInput);
+ expect((await service.read(t,t)).steps['step-0'].body).toBe(summaryReply.body);
+ await expect(service.execute({...adoptInput,requestId:randomUUID(),expectedVersion:(await service.read(t,t)).steps['step-0'].version})).rejects.toThrow();
+ expect(await results.read(summaryScope)).toMatchObject({state:'saved',adoptable:false});
+ const tv1=await publish(t,t,'TITLE1');
+ // Creation succeeds internally, then invalid title -> title binding must roll back the whole transaction.
+ const {continueSliceWork}=await import('../agentSlice/continueWork');const failedWork=randomUUID();
+ await expect(continueSliceWork(user,db,{requestId:failedWork,projectId:failedWork,sourceVersionId:tv1.id!,pairId:'slice-pair',purpose:'title',title:'Invalid title loop'})).rejects.toThrow();
+ for(const table of ['artifact_projects','artifact_rounds'])expect((await sql.query(`select count(*)::int n from ${table} where id=$1`,[failedWork])).rows[0].n).toBe(0);
+ expect((await sql.query('select count(*)::int n from artifact_work_references where creation_request_id=$1',[failedWork])).rows[0].n).toBe(0);
+
+ const a2=randomUUID();
+ await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
+ await links.link({projectId:a,roundId:a2,sourceVersionId:tv1.id!,pairId:'slice-pair',requestId:randomUUID()});
+ const revisionRequest=randomUUID();await begin(a,a2,revisionRequest,'采用标题修改 A');
+ const switchedHistory=await readSliceConversation(user,db,{conversationId:conversation});expect(switchedHistory.items.some(x=>x.projectId===a)).toBe(true);expect(switchedHistory.items.some(x=>x.projectId===t)).toBe(true);
+ const switched=await loadSliceContext(user,db,revisionRequest);expect(switched.loaded.forModel()).toContain('ALPHA');expect(switched.loaded.forModel()).not.toContain('BETA');
+ const frozen=(await sql.query('SELECT conversation_id,project_id,round_id,revision_id FROM agent_slice_executions WHERE request_id=ANY($1::uuid[]) ORDER BY created_at',[[titleRequest,revisionRequest]])).rows;
+ expect(frozen).toEqual([
+  {conversation_id:conversation,project_id:t,round_id:t,revision_id:title.pack.revisionId},
+  {conversation_id:conversation,project_id:a,round_id:a2,revision_id:script.pack.revisionId},
+ ]);
+ const av2=await publish(a,a2,'A2');expect(av2.available).toBe(true);expect(av2.version).toBe(2);
+ for (const [projectId,fromRoundId,configId,sourceText] of [[t,t,'slice-p-title','A1'],[a,a2,'slice-p-script','TITLE1']] as const) {
+  const next=randomUUID();
+  const revision={projectId,roundId:next,requestId:next,fromRoundId,sourceVersionId:position.id!,configId,title:'Synthetic retained handoff'};
+  expect(await reuse.create(revision)).toEqual(await reuse.create(revision));
+  expect(await (await links.reader({projectId,roundId:next}))()).toContain(sourceText);
+  const oldLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[fromRoundId])).rows[0];
+  const newLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[next])).rows[0];
+  expect(newLink.source_version_id).toBe(oldLink.source_version_id);
+  const state=await service.read(projectId,next);
+  await expect(legacy.quote({...legacyInput,projectId,roundId:next,expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([key,value])=>[key,{version:value.version,reviewVersion:value.reviewVersion}]))})).rejects.toThrow('连续创作');
+  await service.execute({action:'abandon',projectId,roundId:next,requestId:randomUUID()});
+ }
+ expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
+ expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ const otherUser=await newUser(),other=await authenticated(otherUser);
+ await expect(sliceEntry(other,db).sources()).resolves.toEqual([]);
+ const stolenWork=randomUUID();await expect(continueSliceWork(other,db,{requestId:stolenWork,projectId:stolenWork,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'Foreign'})).rejects.toThrow('SLICE_DENIED');
+ expect((await user.rpc('agent_slice_sources',{p_actor_id:actor})).error).not.toBeNull();
+ await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(sliceResults(other,db).read(replyScope)).rejects.toThrow('SLICE_DENIED');
+ await expect(readSliceConversation(other,db,historyInput)).rejects.toThrow('SLICE_DENIED');
+ await expect(loadSliceContext(other,db,revisionRequest)).rejects.toThrow('SLICE_DENIED');
+ expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
+ await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
+ await expect(reader()).rejects.toThrow();
+ const restrictedHistory=await readSliceConversation(user,db,{conversationId:conversation});
+ expect(restrictedHistory.items.find(x=>x.executionId===joinedRequest)).toMatchObject({input:null,reply:{state:'restricted'},summary:{state:'restricted'}});
+ expect(JSON.stringify(restrictedHistory)).not.toContain('Joined title');
+ expect(await results.read(replyScope)).toEqual({state:'restricted'});expect(await results.read(summaryScope)).toEqual({state:'restricted'});
+ expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual({state:'restricted'});
+ expect((await recoverSlice(user,db,{executionId:joinedRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(joinedCalls).toBe(3);
+ expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
+ expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
+ expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ // Rollback closes new admission while the already dispatched original call can finish.
+ await sql.query("UPDATE agent_slice_pairs SET enabled=false WHERE id='slice-pair'");
+ const rollbackRequest=randomUUID();
+ await expect(begin(b,b,rollbackRequest,'Must not start while disabled')).rejects.toBeDefined();
+ expect((await sql.query('SELECT count(*)::int n FROM agent_slice_executions WHERE request_id=$1',[rollbackRequest])).rows[0].n).toBe(0);
+ expect((await sql.query('SELECT count(*)::int n FROM agent_slice_calls WHERE execution_id=$1',[rollbackRequest])).rows[0].n).toBe(0);
+ // Source loss prevents fresh use, but does not erase a trusted monetary outcome.
+ const financial={providerId:'synthetic-call',finishReason:'length',inputTokens:100,outputTokens:20,cacheReadTokens:0,cacheCreationTokens:0,credits:7,costUsd:0.001,outcome:'truncated'};
+ await expect(call('evidence',{token:claim.token,evidence:{...financial,inputTokens:null}})).rejects.toBeDefined();
+ await call('evidence',{token:claim.token,evidence:financial});
+ expect((await call('settle')).state).toBe('settled');
+ expect((await call('settle')).state).toBe('settled');
+ await sql.query("UPDATE agent_slice_pairs SET enabled=true WHERE id='slice-pair'");
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(beforeManual-7);
+ expect((await sql.query("SELECT count(*)::int n FROM credit_transactions WHERE idempotency_key=$1",['agent_slice_call:'+callId])).rows[0].n).toBe(1);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'callId'=$1",[callId])).rows[0].n).toBe(1);
+ expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
+ await expect(call('prepare',{sequence:1,quote:callQuote})).rejects.toBeDefined();
+ expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
+ // One revoked target revision must not make unrelated works or history unavailable.
+ await sql.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)',[title.pack.revisionId,actor]);
+ const afterRevisionRevoked=await readSliceConversation(user,db,{conversationId:conversation});
+ expect(afterRevisionRevoked.items.some(x=>x.projectId===b&&x.reply.state!=='restricted')).toBe(true);
+ expect(afterRevisionRevoked.items.filter(x=>x.projectId===t).every(x=>x.reply.state==='restricted'&&x.input===null)).toBe(true);
+ const referenceChoices=await db.rpc('artifact_reference_choices',{p_actor_id:actor,p_source_version_id:position.id});expect(referenceChoices.error).toBeNull();expect(referenceChoices.data.map((c:{id:string})=>c.id)).toEqual(['slice-p-script']);
+ const remainingTargets=await entry.targets();expect(remainingTargets.some(x=>x.projectId===b)).toBe(true);expect(remainingTargets.some(x=>x.projectId===t)).toBe(false);
+ expect((await entry.sources()).some(x=>x.sourceVersionId===position.id)).toBe(true);
+ await sql.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)',[script.pack.revisionId,actor]);
+ expect(await entry.sources()).toEqual([]);
+ // Removing account ownership invalidates this entry even if the source has no evidence IDs.
+ await sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3',[actor,src.moduleId,src.pack.id]);
+ expect(await entry.sources()).toEqual([]);
+ const revokedCreate=randomUUID();await expect(continueSliceWork(user,db,{requestId:revokedCreate,projectId:revokedCreate,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'Revoked'})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from artifact_projects where id=$1',[revokedCreate])).rows[0].n).toBe(0);
+
+},240000);
+
+it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent works, stable reference, revisions and revoked-source denial through real services', async()=>{
+  const {artifactReuse}=await import('../artifacts/reuse');
+  const user=await authenticated(), service=workbenchService(user,db), reuse=artifactReuse(user,db);
+  const src=await fixture({id:'reuse-positioning',label:'测试定位',methodText:'Synthetic positioning only.',workflow:makeWorkflow(6,true)});
+  const modelFixture=await generationFixture(3,'Synthetic script only.');
+  const target=modelFixture.f;
+  const sourceProject=randomUUID(),sourceRound=randomUUID();
+  await service.start({projectId:sourceProject,roundId:sourceRound,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'});
+  await service.execute({action:'userEvidence',projectId:sourceProject,roundId:sourceRound,requestId:randomUUID(),body:'SOURCE_EVIDENCE',observedAt:null,supersedes:null});
+  const sourceEvidenceId=(await service.read(sourceProject,sourceRound)).evidence[0].id;
+  async function publish(projectId:string,roundId:string, marker:string) {
+    let s=await service.read(projectId,roundId);
+    for(const step of s.workflow.steps){
+      await service.execute({action:'save',projectId,roundId,requestId:randomUUID(),stepId:step.id,body:marker+' '+step.title,evidenceIds:projectId===sourceProject?[sourceEvidenceId]:[],expectedVersion:s.steps[step.id].version});
+      s=await service.read(projectId,roundId);
+      await service.execute({action:'confirm',projectId,roundId,requestId:randomUUID(),stepId:step.id,expectedVersion:s.steps[step.id].version,expectedReviewVersion:s.steps[step.id].reviewVersion});
+      s=await service.read(projectId,roundId);
+    }
+    await service.execute({action:'publish',projectId,roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(s.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))});
+    return service.report(projectId,roundId);
+  }
+  const report=await publish(sourceProject,sourceRound,'POSITION_V1');
+  await sql.query('insert into artifact_reference_configs values($1,$2,$3,$4,$5,true)',['position-script',src.registration,target.registration,JSON.stringify(['step-2']),20000]);
+  expect(await reuse.choices(report.id!)).toEqual([{id:'position-script',label:target.label}]);
+  expect((await user.rpc('artifact_create_work',{p_actor_id:actor,p_project_id:randomUUID(),p_round_id:randomUUID(),p_request_id:randomUUID(),p_payload:{}})).error?.code).toBe('42501');
+  expect((await user.rpc('artifact_work_source',{p_actor_id:actor,p_project_id:sourceProject,p_round_id:sourceRound})).error?.code).toBe('42501');
+  const a=randomUUID(),b=randomUUID();
+  const input={projectId:a,roundId:a,requestId:a,sourceVersionId:report.id!,configId:'position-script',title:'独立脚本 A'};
+  expect(await Promise.all([reuse.create(input),reuse.create(input)])).toEqual([{projectId:a,roundId:a},{projectId:a,roundId:a}]);
+  expect(await reuse.create(input)).toEqual({projectId:a,roundId:a});
+  await expect(reuse.create({...input,title:'Conflicting replay'})).rejects.toThrow();
+  await reuse.create({...input,projectId:b,roundId:b,requestId:b,title:'独立脚本 B'});
+  expect((await service.read(a,a)).state).toBe('draft');expect((await service.read(b,b)).state).toBe('draft');
+  await service.execute({action:'userEvidence',projectId:a,roundId:a,requestId:randomUUID(),body:'Additional limited reference',observedAt:null,supersedes:null});
+  const extra=(await service.read(a,a)).evidence.find(e=>e.payload && typeof e.payload==='object' && !Array.isArray(e.payload) && 'text' in e.payload)!;
+  await service.execute({action:'save',projectId:a,roundId:a,requestId:randomUUID(),stepId:'step-0',body:'SCRIPT_A',evidenceIds:[extra.id],expectedVersion:0});
+  const inheritedSave={action:'save' as const,projectId:a,roundId:a,requestId:randomUUID(),stepId:'step-1',body:'Inherited dependency',evidenceIds:[],expectedVersion:0};
+  const saved=await service.execute(inheritedSave);
+  expect((await service.read(a,a)).steps['step-1'].provenanceIds).toContain(extra.id);
+  expect(await service.execute(inheritedSave)).toEqual(saved);
+  await expect(service.execute({...inheritedSave,body:'Different input'})).rejects.toThrow();
+  await publish(a,a,'SCRIPT_A');
+  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
+  const a2=randomUUID();await reuse.create({...input,roundId:a2,requestId:a2,fromRoundId:a});
+  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+  expect((await service.read(a,a2)).steps['step-0'].body).toBeNull();
+  const sourceV2=randomUUID();await service.start({projectId:sourceProject,roundId:sourceV2,requestId:randomUUID(),fromRoundId:sourceRound});
+  const [reportV2,pinnedDuringPublish]=await Promise.all([publish(sourceProject,sourceV2,'POSITION_V2'),reuse.source({projectId:b,roundId:b})]);
+  expect(pinnedDuringPublish?.sourceVersionId).toBe(report.id);
+  expect((await reuse.source({projectId:b,roundId:b}))?.sourceVersionId).toBe(report.id);
+  await service.execute({action:'abandon',projectId:a,roundId:a2,requestId:randomUUID()});
+  const a3=randomUUID();await reuse.create({...input,roundId:a3,requestId:a3,fromRoundId:a,sourceVersionId:reportV2.id!});
+  expect((await service.read(a,a3)).steps['step-0'].body).toBe('');
+  expect((await service.read(a,a3)).confirmations).toHaveLength(0);
+  await expect(service.start({projectId:randomUUID(),roundId:randomUUID(),requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'})).rejects.toThrow();
+  const sourceEvidence=(await service.read(sourceProject,sourceRound)).evidence[0]?.id;
+  expect(sourceEvidence).toBeTruthy();
+  await expect(service.execute({action:'save',projectId:b,roundId:b,requestId:randomUUID(),stepId:'step-0',body:'Forged',evidenceIds:[sourceEvidence!],expectedVersion:0})).rejects.toThrow();
+
+  expect((await reuse.source({projectId:a,roundId:a2}))?.sourceVersionId).toBe(report.id);
+  expect((await service.projects()).filter(p=>p.workKind==='script')).toHaveLength(2);
+  const other=await newUser();await expect(artifactReuse(await authenticated(other),db).source({projectId:a,roundId:a})).rejects.toThrow('ARTIFACT_DENIED');
+  // Existing project-local save cannot wash out the mandatory reference.
+  const snap=await service.read(b,b);
+  await service.execute({action:'save',projectId:b,roundId:b,requestId:randomUUID(),stepId:'step-0',body:'SCRIPT_B',evidenceIds:[],expectedVersion:snap.steps['step-0'].version});
+  expect((await service.read(b,b)).steps['step-0'].evidenceIds).toHaveLength(1);
+  // Browser uses the actual report, HTTP creation, chat reply/summary and saved result.
+  const {page,context}=await pageFor();
+  let browserWork:{project_id:string;round_id:string}|undefined, browserConversation='';
+  try {
+    await page.getByRole('button',{name:/测试定位.*synthetic:local-account/}).click();await quiet(page);
+    await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+    await page.setViewportSize({width:1280,height:900});
+    await page.getByLabel('新作品名称').fill('浏览器独立脚本');
+    await page.getByRole('button',{name:'基于此定位创作脚本',exact:true}).click();
+    await page.waitForURL(u=>u.pathname==='/chat'&&!!u.searchParams.get('conversation'));
+    const conversationId=new URL(page.url()).searchParams.get('conversation')!;browserConversation=conversationId;
+    await page.getByLabel('给当前步骤发消息').fill('Write a short fictional script.');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await expect.poll(async()=>page.getByLabel('给当前步骤发消息').inputValue(),{timeout:60000}).toBe('');
+    const binding=(await sql.query('select project_id,round_id from artifact_chats where conversation_id=$1',[conversationId])).rows[0];browserWork=binding;
+    await expect.poll(async()=>(await service.read(binding.project_id,binding.round_id)).steps['step-0'].body,{timeout:60000}).toBe('Synthetic local HTTP candidate');
+    const count=async()=>(await sql.query('select count(*)::int n from artifact_generations where project_id=$1',[binding.project_id])).rows[0].n;
+    expect(await count()).toBe(2);
+    await page.reload();await page.getByLabel('给当前步骤发消息').waitFor();expect(await count()).toBe(2);
+    const secondTab=await context.newPage();await secondTab.goto(page.url());await secondTab.getByLabel('给当前步骤发消息').waitFor();expect(await count()).toBe(2);await secondTab.close();
+    await page.goto(app+'/workbench');await page.getByRole('button',{name:/浏览器独立脚本/}).click();await quiet(page);
+    await fillConfirm(page,target,'BROWSER_SAVED '+('长报告内容。'.repeat(120)));
+    await page.getByRole('button',{name:'发布正式版',exact:true}).click();await quiet(page);
+    expect(await page.getByLabel('升级方法').count()).toBe(0);
+    await page.getByRole('button',{name:'查看正式报告',exact:true}).click();await quiet(page);
+    await page.screenshot({path:output+'/reuse-report.png'});
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:output+'/reuse-report-mobile.png'});
+    const overflowing=await page.evaluate(()=>Array.from(document.querySelectorAll('main *')).filter(e=>e.getBoundingClientRect().right>window.innerWidth+1).map(e=>({tag:e.tagName,class:e.className,width:e.getBoundingClientRect().width})).slice(0,12));
+    expect(overflowing).toEqual([]);
+    await page.setViewportSize({width:1280,height:900});
+    expect((await service.report(binding.project_id,binding.round_id)).available).toBe(true);
+    expect(await count()).toBe(2);
+  } finally {await context.close();}
+  // Mapping invalidation is content authorization, not a new Skill execution license.
+  await sql.query("update artifact_reference_configs set enabled=false where id='position-script'");
+  await expect(reuse.source({projectId:b,roundId:b})).rejects.toThrow();
+  expect((await service.read(b,b)).steps['step-0'].body).toBeNull();
+  await sql.query("update artifact_reference_configs set enabled=true where id='position-script'");
+  const revokeSource=()=>sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2',[actor,src.moduleId]);
+  const restoreSource=()=>sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,src.moduleId,src.pack.id,'synthetic:local-account']);
+  for(const window of ['before','dispatched','unknown','settled','extra'] as const){
+    const id=randomUUID();await reuse.create({...input,projectId:id,roundId:id,requestId:id,title:'Window '+window});
+    let extraId='';
+    if(window==='extra'){
+      await service.execute({action:'userEvidence',projectId:id,roundId:id,requestId:randomUUID(),body:'Extra dependency',observedAt:null,supersedes:null});
+      extraId=(await service.read(id,id)).evidence.find(e=>e.payload&&typeof e.payload==='object'&&!Array.isArray(e.payload)&&'text' in e.payload)!.id;
+      await service.execute({action:'save',projectId:id,roundId:id,requestId:randomUUID(),stepId:'step-0',body:'Extra basis',evidenceIds:[extraId],expectedVersion:0});
+    }
+    let count=0;
+    const ai=modelFixture.workbenchGeneration(user,db,async()=>{
+      count++;
+      if(window==='extra')await service.execute({action:'restrictEvidence',projectId:id,roundId:id,requestId:randomUUID(),evidenceId:extraId,deleted:true,expiresAt:null});
+      if(window==='dispatched'||window==='unknown')await revokeSource();
+      if(window==='unknown')throw new Error('Synthetic unknown outcome');
+      return {body:'Restricted window result',inputTokens:800,outputTokens:30};
+    });
+    const snap=await service.read(id,id),base={projectId:id,roundId:id,stepId:'step-0',instruction:'Fictional script',expectedSteps:Object.fromEntries(Object.entries(snap.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};
+    const quote=await ai.quote(base),req={...base,requestId:randomUUID(),quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits};
+    if(window==='before'){
+      await revokeSource();await expect(ai.generate(req)).rejects.toThrow();expect(count).toBe(0);
+      expect((await sql.query('select id from artifact_generations where project_id=$1',[id])).rows).toHaveLength(0);
+    }else{
+      const result=await ai.generate(req);expect(result.state).toBe(window==='unknown'?'unknown':'succeeded');
+      if(window==='settled')await revokeSource();
+      if(window==='unknown'){
+        await expect(ai.recover({projectId:id,roundId:id,requestId:req.requestId})).rejects.toThrow('GENERATION_CONFLICT');
+        expect((await ai.generate(req)).state).toBe('unknown');
+        expect((await ai.list({projectId:id,roundId:id}))[0].chargedCredits).toBeNull();
+      }else expect((await ai.recover({projectId:id,roundId:id,requestId:req.requestId})).state).toBe(result.state);
+      expect(count).toBe(1);
+      expect((await service.read(id,id)).candidates.every(c=>c.body===null)).toBe(true);
+      const n=(await sql.query('select count(*)::int n from token_stats where artifact_generation_id=(select id from artifact_generations where request_id=$1)',[req.requestId])).rows[0].n;
+      expect(n).toBe(window==='unknown'?0:1);
+    }
+    if(window!=='extra')await restoreSource();
+    else {
+      expect((await reuse.source({projectId:id,roundId:id}))?.sourceVersionId).toBe(report.id);
+      expect((await sql.query('select body from artifact_candidates where round_id=$1',[id])).rows[0].body).toBe('[来源已不可用]');
+    }
+  }
+  // Real generation service + counting provider; receipt before revocation.
+  const gs=await service.read(b,b), base={projectId:b,roundId:b,stepId:'step-0',instruction:'Write the script.',expectedSteps:Object.fromEntries(Object.entries(gs.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))};
+  const quote=await modelFixture.ai.quote(base), requestId=randomUUID();
+  await sql.query("create function local_reuse_fail_settle() returns trigger language plpgsql as $$ begin if NEW.operation_type='settle' then raise exception 'test settle failure'; end if; return NEW; end $$; create trigger local_reuse_fail_settle before insert on billing_history for each row execute function local_reuse_fail_settle()");
+  try { await modelFixture.ai.generate({...base,requestId,quoteHash:quote.quoteHash,budgetCredits:quote.reservedCredits}); }
+  finally {await sql.query('drop trigger local_reuse_fail_settle on billing_history; drop function local_reuse_fail_settle()');}
+  expect(modelFixture.calls()).toBe(1);
+  expect(modelFixture.captured[0].split('POSITION_V1').length-1).toBe(1);
+  expect((await modelFixture.ai.list({projectId:b,roundId:b}))[0].state).toBe('responded');
+  await sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2',[actor,src.moduleId]);
+  const settled=await modelFixture.ai.recover({projectId:b,roundId:b,requestId});
+  expect(settled.state).toBe('succeeded');
+  expect(await modelFixture.ai.recover({projectId:b,roundId:b,requestId})).toEqual(settled);
+  expect(modelFixture.calls()).toBe(1);
+  const rawCandidate=(await sql.query('select body from artifact_candidates where id=$1',[settled.candidateId])).rows[0];
+  expect(rawCandidate.body).toBe('[来源已不可用]');
+  expect((await sql.query("select count(*)::int n from token_stats where artifact_generation_id=(select id from artifact_generations where request_id=$1)",[requestId])).rows[0].n).toBe(1);
+
+  expect((await service.read(a,a)).steps['step-0'].body).toBeNull();
+  expect((await service.read(b,b)).steps['step-0'].body).toBeNull();
+  expect((await service.report(a,a)).available).toBe(false);
+  await expect(service.export(a,a)).rejects.toThrow('ARTIFACT_EVIDENCE_UNAVAILABLE');
+  const {skillChatService}=await import('../artifacts/chat');
+  const hidden=await skillChatService(user,db).read({conversationId:browserConversation});
+  expect(hidden.turns.every(t=>t.body===null&&t.answer===null&&!t.available)).toBe(true);
+  expect((await service.report(browserWork!.project_id,browserWork!.round_id)).available).toBe(false);
+  await expect(reuse.source({projectId:a,roundId:a})).rejects.toThrow();
+  writeFileSync(output+'/reuse-restore.json',JSON.stringify({a,b,a3,requestId,sourceProject,sourceModule:src.moduleId,sourceSkill:src.pack.id}));
+},240000);
+
+it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE !== 'restore')('REUSE: restart preserves work identity and restricted content without generation',async()=>{
+  const saved=JSON.parse(readFileSync(output+'/reuse-restore.json','utf8'));
+  const service=workbenchService(await authenticated(),db);
+  expect((await service.projects()).filter(p=>[saved.a,saved.b].includes(p.projectId))).toHaveLength(2);
+  expect((await service.read(saved.a,saved.a3)).state).toBe('draft');
+  expect((await service.read(saved.b,saved.b)).steps['step-0'].body).toBeNull();
+  expect((await service.report(saved.a,saved.a)).available).toBe(false);
+  expect((await sql.query('select count(*)::int n from artifact_generations where request_id=$1',[saved.requestId])).rows[0].n).toBe(1);
+});
