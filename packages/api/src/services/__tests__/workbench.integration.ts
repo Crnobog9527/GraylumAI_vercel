@@ -4672,8 +4672,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserA+':step-0:slice-pair'&&(await page.getByLabel('使用 Skill 创作').locator('option:checked').textContent())?.startsWith('标题 · 浏览器脚本 A')===true;},{timeout:10000}).toBe(true);
   const browserTitleRound=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
   await sendAndSave('为刚才的脚本拟标题',9);
-  await page.getByLabel('本步骤成果',{exact:true}).fill('选定标题：倾斜的地球如何创造四季');await page.getByRole('button',{name:'保存修改',exact:true}).click();
-  await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body).toBe('选定标题：倾斜的地球如何创造四季');
+  await page.getByLabel('本步骤成果',{exact:true}).fill('选定标题：倾斜的地球如何创造四季');
+  const titleSaveResponse=page.waitForResponse(response=>response.url().includes('/api/trpc/workbench.execute')&&response.request().method()==='POST',{timeout:15000});
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  const titleSaved=await titleSaveResponse;expect(titleSaved.ok()).toBe(true);
+  expect(JSON.stringify(await titleSaved.json())).not.toContain('"error"');
+  await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body,{timeout:15000}).toBe('选定标题：倾斜的地球如何创造四季');
   await confirmAndPublish();await page.getByLabel('带回哪份脚本').selectOption(browserA);
   await page.getByRole('button',{name:'采用这些标题，修订脚本',exact:true}).click();
   await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';},{timeout:10000}).toBe(true);
