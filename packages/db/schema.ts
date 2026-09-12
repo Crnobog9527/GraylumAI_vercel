@@ -25,6 +25,7 @@ export const conversations = pgTable('conversations', {
   title: text('title').notNull(),
   modelId: uuid('model_id').references(() => aiModels.id),
   skillMode: boolean('skill_mode').default(false).notNull(),
+  agentSliceMode: boolean('agent_slice_mode').default(false).notNull(),
   moduleId: uuid('module_id').references(() => modules.id),
   summary: text('summary'), // Conversation summary for context compression
   summaryTokens: integer('summary_tokens'), // Token count of summary

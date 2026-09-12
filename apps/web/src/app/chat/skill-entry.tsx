@@ -70,6 +70,7 @@ export function ChatEntry() {
     if (location.isPending) return <PreparingConversation navigate={navigate} />;
     if (location.error || !conversation)
       return <EntryNotice>对话不可用，请从聊天记录重新选择。</EntryNotice>;
+    if(conversation.agent_slice_mode) return <AgentSliceConversation key={conversationId} conversationId={conversationId} navigate={navigate} />;
     return conversation.skill_mode ? (
       <SkillConversation
         key={conversationId}
@@ -86,6 +87,7 @@ export function ChatEntry() {
       />
     );
   }
+  if (params.get("mode") === "agent-slice") return <SliceStart />;
   if (moduleId && mode.isPending)
     return <PreparingConversation navigate={navigate} />;
   if (moduleId && mode.error)
@@ -276,4 +278,12 @@ function PreparingConversation({ title, navigate }: { title?: string; navigate: 
       </div>
     </div>
   );
+}
+
+function SliceStart(){
+ const router=useRouter(),open=trpc.agentSlice.open.useMutation();
+ const request=useRef<string|null>(null);
+ return <EntryNotice><h1 className="text-xl">连续创作</h1><p className="my-4">在同一对话中使用脚本和标题 Skill，继续已保存的作品。</p>
+ <Button disabled={open.isPending} onClick={()=>{request.current??=crypto.randomUUID();void open.mutateAsync({requestId:request.current}).then(result=>router.replace('/chat?conversation='+result.conversationId)).catch(()=>{});}}>开始新聊天</Button>
+ {open.error&&<p role="alert">暂时无法打开，请重试。</p>}</EntryNotice>;
 }

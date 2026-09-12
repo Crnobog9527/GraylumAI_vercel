@@ -199,7 +199,7 @@ try {
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   // Full and ordinary-chat regression use the current durable request schema.
   // Historical chat wrapper baselines supply their own migration choice.
-  if(!aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only')){
+  if(!aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only') || args.includes('--agent-slice-only')){
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
   }
@@ -226,6 +226,8 @@ try {
   apply("packages/db/migrations/0089_agent_slice_admission_replay.sql");
   apply("packages/db/migrations/0090_agent_slice_conversation.sql");
   apply("packages/db/migrations/0090_agent_slice_conversation.sql");
+  apply("packages/db/migrations/0091_agent_slice_entry.sql");
+  apply("packages/db/migrations/0091_agent_slice_entry.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -300,10 +302,22 @@ try {
     if (!ok) throw new Error("local service not ready");
   }
   let modelCalls = 0;
+  const sliceCalls=[];
   const documentCalls=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
+    if(req.url==='/__slice_calls'){res.writeHead(200).end(JSON.stringify(sliceCalls));return;}
+    if(req.url==='/__slice_model_fixture'){
+      const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>2097152){res.writeHead(413).end();return;}chunks.push(chunk);}
+      const body=JSON.parse(Buffer.concat(chunks).toString());const messages=JSON.stringify(body.messages);
+      const tool=body.tool_choice?.function?.name==='read_selected_artifact';
+      if(req.method!=='POST'||body.stream||body.provider?.allow_fallbacks!==false){res.writeHead(400).end();return;}
+      sliceCalls.push({model:body.model,tool,hasConfirmedPreference:messages.includes('结尾给行动建议'),hasOldPreference:messages.includes('先给具体例子')});
+      await new Promise(resolve=>setTimeout(resolve,150));
+      const message=tool?{role:'assistant',content:null,tool_calls:[{id:'read-'+sliceCalls.length,type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:body.tools?.length?'浏览器真实接线回复':'浏览器整理成果'};
+      res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({id:'local-slice-'+sliceCalls.length,object:'chat.completion',created:1,model:body.model,choices:[{index:0,finish_reason:tool?'tool_calls':'stop',message}],usage:{prompt_tokens:800,completion_tokens:30,total_tokens:830}}));return;
+    }
     if (req.url === '/__workbench_model_fixture') {
       const chunks = []; let bytes = 0;
       for await (const chunk of req) { bytes += chunk.length; if (bytes > 2097152) { res.writeHead(413).end(); return; } chunks.push(chunk); }
@@ -406,6 +420,9 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
+  const slicePath=resolve(root,'packages/api/src/services/agentSlice/runner.ts'),sliceSource=readFileSync(slicePath,'utf8');
+  if(sliceSource.split('await transport(url,').length!==2)throw new Error('slice transport fixture boundary changed');
+  writeFileSync(slicePath,sliceSource.replace('await transport(url,',`await transport('${apiUrl}/__slice_model_fixture',`));
   const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
   if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
   writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));

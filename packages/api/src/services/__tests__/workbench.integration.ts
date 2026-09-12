@@ -4392,7 +4392,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
  await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-27b','Synthetic summary model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryModel]);
  await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_summary_model_id',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify(summaryModel)]);
- await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
+ await sql.query("INSERT INTO conversations(id,user_id,title,agent_slice_mode) VALUES($1,$2,'Synthetic dual Skill',true)",[conversation,actor]);
  const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50,preferenceRefs:Array<{scope:string;name:string;version:number}>=[])=>{
   const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs}});
   if(result.error)throw result.error;return result.data;
@@ -4497,6 +4497,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
  const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();
  const {sliceAdmission}=await import('../agentSlice/admission');const admission=sliceAdmission(user,db);
+ const {sliceEntry}=await import('../agentSlice/entry');const entry=sliceEntry(user,db);const newConversation=randomUUID();
+ expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});
+ expect((await sql.query('select count(*)::int n from conversations where id=$1',[newConversation])).rows[0].n).toBe(1);
+ const targetOptions=await entry.targets();expect(targetOptions.some(x=>x.projectId===t&&x.purpose==='title')).toBe(true);expect(targetOptions.some(x=>x.projectId===b&&x.purpose==='script')).toBe(true);
+
  const admissionInput={conversationId:conversation,requestId:joinedRequest,projectId:t,roundId:t,stepId:'step-0',pairId:'slice-pair',body:'从 A1 拟标题并保存',preferenceRefs:[]};
  const admitted=await admission.begin(admissionInput);expect(await admission.begin(admissionInput)).toEqual(admitted);
  await expect(admission.begin({...admissionInput,projectId:b,roundId:b})).rejects.toThrow();
@@ -4533,6 +4538,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  try {
   const httpHistory=await browserSession.page.request.get(app+'/api/trpc/agentSlice.conversation',{params:{input:JSON.stringify({conversationId:conversation})}});
   expect(httpHistory.status()).toBe(200);expect(await httpHistory.text()).toContain('Joined title');
+  const oldPath=await browserSession.page.request.post(app+'/api/ai/stream',{headers:{Authorization:'Bearer '+(await user.auth.getSession()).data.session!.access_token},data:{message:'must not generate',conversationId:conversation,requestId:randomUUID(),modelId:sliceModel}});expect(oldPath.status()).toBe(403);
   const httpBegin=await browserSession.page.request.post(app+'/api/trpc/agentSlice.begin',{data:admissionInput});expect(httpBegin.status()).toBe(200);expect(await httpBegin.text()).toContain(joinedRequest);
   const httpRead=await browserSession.page.request.get(app+'/api/trpc/agentSlice.result',{params:{input:JSON.stringify({executionId:joinedRequest,phase:'summary'})}});
   expect(httpRead.status()).toBe(200);expect(await httpRead.text()).toContain('Saved joined title');
@@ -4543,6 +4549,24 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
   await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
   expect(joinedCalls).toBe(3);
+  await browserSession.page.goto(app+'/chat?conversation='+newConversation);
+  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
+  await browserSession.page.getByLabel('使用 Skill 创作').waitFor();
+  await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
+  await browserSession.page.getByLabel('写作偏好').fill('先给具体例子');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
+  await browserSession.page.getByText('已确认：先给具体例子',{exact:true}).waitFor();
+  await browserSession.page.getByLabel('写作偏好').fill('结尾给行动建议');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
+  await browserSession.page.getByText('已确认：结尾给行动建议',{exact:true}).waitFor();
+  await browserSession.page.getByLabel('使用 Skill 创作').selectOption(t+':step-0:slice-pair');
+  await browserSession.page.getByLabel('消息',{exact:true}).fill('浏览器新增标题');await browserSession.page.getByRole('button',{name:'发送',exact:true}).click();
+  await browserSession.page.getByText('浏览器新增标题',{exact:true}).waitFor();
+  await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();
+  await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[newConversation])).rows[0].n),{timeout:20000}).toBe(3);
+  const actualCalls=await (await fetch(url+'/__slice_calls')).json();expect(actualCalls).toHaveLength(3);expect(actualCalls.every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
+  await browserSession.page.reload();await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(3);
+  await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
+
+  await browserSession.page.getByRole('button',{name:'删除这条偏好'}).click();await browserSession.page.getByText('已确认：尚未设置',{exact:true}).waitFor();
  } finally {await browserSession.context.close();}
  // Equal timestamps still paginate by immutable request identity, without loss.
  const tieIds=[randomUUID(),randomUUID(),randomUUID()].sort().reverse();

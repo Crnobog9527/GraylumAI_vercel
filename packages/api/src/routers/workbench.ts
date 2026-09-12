@@ -102,10 +102,10 @@ export const workbenchRouter = router({
   // statistics. The subsequent Skill/ordinary reads retain their own gates.
   chatLocate: procedure.input(chatScope).query(async ({ ctx, input }) => {
     const { data, error } = await ctx.userScopedSupabase.from('conversations')
-      .select('id,module_id,skill_mode').eq('id',input.conversationId)
+      .select('id,module_id,skill_mode,agent_slice_mode').eq('id',input.conversationId)
       .eq('user_id',ctx.profileId).eq('is_deleted','false').single();
     if (error || !data) throw new Error('ARTIFACT_DENIED');
-    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable()}).parse(data);
+    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable(),agent_slice_mode:z.boolean()}).parse(data);
   }),
   cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
   search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
