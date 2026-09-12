@@ -4362,6 +4362,77 @@ consumptionTest.each([0,'0',null,'',-1,1000000])('CONSUMPTION: invalid or zero p
  try{const before=await consumptionCounts();expect((await consumptionHttp(t.user,'search',search.input)).status).toBe(503);expect(search.fixture.events).toEqual([]);expect((await consumptionCounts()).pre).toBe(before.pre);}finally{await search.fixture.stop();}
 },90000);
 
+it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title to revised A retains dependency restrictions and leaves B independent',async()=>{
+ const {artifactReuse}=await import('../artifacts/reuse');
+ const {sliceLinks}=await import('../agentSlice/links');
+ const user=await authenticated(),service=workbenchService(user,db),reuse=artifactReuse(user,db),links=sliceLinks(user,db);
+ const src=await fixture({id:'slice-position',label:'虚构定位',methodText:'Synthetic positioning.',workflow:makeWorkflow(6,true)});
+ const script=await fixture({id:'slice-script',label:'虚构脚本',methodText:'Synthetic script ALPHA: prose only.',workflow:makeWorkflow(1,false)});
+ const title=await fixture({id:'slice-title',label:'虚构标题',methodText:'Synthetic title BETA: numbered titles only.',workflow:makeWorkflow(1,false)});
+ const p=randomUUID(),r=randomUUID();
+ await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'});
+ async function publish(projectId:string,roundId:string,body:string){
+  let state=await service.read(projectId,roundId);
+  for(const step of state.workflow.steps){
+   await service.execute({action:'save',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,body:body+' '+step.title,evidenceIds:[]});
+   state=await service.read(projectId,roundId);
+   await service.execute({action:'confirm',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,expectedReviewVersion:state.steps[step.id].reviewVersion});
+   state=await service.read(projectId,roundId);
+  }
+  await service.execute({action:'publish',projectId,roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))});
+  return service.report(projectId,roundId);
+ }
+ const position=await publish(p,r,'POSITION');
+ for(const [id,target] of [['slice-p-script',script],['slice-p-title',title]] as const)
+  await sql.query('INSERT INTO artifact_reference_configs VALUES($1,$2,$3,$4,20000,true)',[id,src.registration,target.registration,JSON.stringify(['step-2'])]);
+ await sql.query("INSERT INTO agent_slice_pairs VALUES('slice-pair',$1,$2,'[\"step-0\"]','[\"step-0\"]',20000,true)",[script.registration,title.registration]);
+ const sliceModel=randomUUID(),conversation=randomUUID();
+ await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-flash','Synthetic slice model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[sliceModel]);
+ await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
+ await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
+ const begin=async(projectId:string,roundId:string,requestId:string,body:string)=>{
+  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits:50,body,preferenceRefs:[]}});
+  if(result.error)throw result.error;return result.data;
+ };
+ const a=randomUUID(),b=randomUUID(),t=randomUUID();
+ const create=(id:string,configId:string)=>reuse.create({projectId:id,roundId:id,requestId:id,sourceVersionId:position.id!,configId,title:id===a?'脚本 A':id===b?'脚本 B':'标题'});
+ await Promise.all([create(a,'slice-p-script'),create(b,'slice-p-script')]);
+ await service.execute({action:'userEvidence',projectId:a,roundId:a,requestId:randomUUID(),body:'Synthetic restricted A input',observedAt:null,supersedes:null});
+ const extra=(await service.read(a,a)).evidence.find(e=>JSON.stringify(e.payload).includes('restricted A input'))!;
+ await service.execute({action:'save',projectId:a,roundId:a,stepId:'step-0',expectedVersion:0,requestId:randomUUID(),body:'A1',evidenceIds:[extra.id]});
+ const av1=await publish(a,a,'A1');
+ await create(t,'slice-p-title');
+ const bind={projectId:t,roundId:t,sourceVersionId:av1.id!,pairId:'slice-pair',requestId:randomUUID()};
+ const [bound,replay]=await Promise.all([links.link(bind),links.link(bind)]);expect(bound).toEqual(replay);
+ await expect(links.link({...bind,requestId:randomUUID()})).rejects.toThrow();
+ const reader=await links.reader({projectId:t,roundId:t});expect(await reader()).toContain('A1');
+ const titleRequest=randomUUID();
+ expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
+ await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();
+ const tv1=await publish(t,t,'TITLE1');
+ const a2=randomUUID();
+ await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
+ await links.link({projectId:a,roundId:a2,sourceVersionId:tv1.id!,pairId:'slice-pair',requestId:randomUUID()});
+ const revisionRequest=randomUUID();await begin(a,a2,revisionRequest,'采用标题修改 A');
+ const frozen=(await sql.query('SELECT conversation_id,project_id,round_id,revision_id FROM agent_slice_executions WHERE request_id=ANY($1::uuid[]) ORDER BY created_at',[[titleRequest,revisionRequest]])).rows;
+ expect(frozen).toEqual([
+  {conversation_id:conversation,project_id:t,round_id:t,revision_id:title.pack.revisionId},
+  {conversation_id:conversation,project_id:a,round_id:a2,revision_id:script.pack.revisionId},
+ ]);
+ const av2=await publish(a,a2,'A2');expect(av2.available).toBe(true);expect(av2.version).toBe(2);
+ expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
+ expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ const otherUser=await newUser(),other=await authenticated(otherUser);
+ await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
+ expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
+ await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
+ await expect(reader()).rejects.toThrow();
+ expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
+ expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
+ expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
+},120000);
+
 it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent works, stable reference, revisions and revoked-source denial through real services', async()=>{
   const {artifactReuse}=await import('../artifacts/reuse');
   const user=await authenticated(), service=workbenchService(user,db), reuse=artifactReuse(user,db);
