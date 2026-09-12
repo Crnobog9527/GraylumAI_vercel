@@ -4793,6 +4793,18 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   {conversation_id:conversation,project_id:a,round_id:a2,revision_id:script.pack.revisionId},
  ]);
  const av2=await publish(a,a2,'A2');expect(av2.available).toBe(true);expect(av2.version).toBe(2);
+ for (const [projectId,fromRoundId,configId,sourceText] of [[t,t,'slice-p-title','A1'],[a,a2,'slice-p-script','TITLE1']] as const) {
+  const next=randomUUID();
+  const revision={projectId,roundId:next,requestId:next,fromRoundId,sourceVersionId:position.id!,configId,title:'Synthetic retained handoff'};
+  expect(await reuse.create(revision)).toEqual(await reuse.create(revision));
+  expect(await (await links.reader({projectId,roundId:next}))()).toContain(sourceText);
+  const oldLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[fromRoundId])).rows[0];
+  const newLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[next])).rows[0];
+  expect(newLink.source_version_id).toBe(oldLink.source_version_id);
+  const state=await service.read(projectId,next);
+  await expect(legacy.quote({...legacyInput,projectId,roundId:next,expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([key,value])=>[key,{version:value.version,reviewVersion:value.reviewVersion}]))})).rejects.toThrow('连续创作');
+  await service.execute({action:'abandon',projectId,roundId:next,requestId:randomUUID()});
+ }
  expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
  const otherUser=await newUser(),other=await authenticated(otherUser);
