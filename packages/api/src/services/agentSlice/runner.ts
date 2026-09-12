@@ -26,6 +26,7 @@ export type SliceRunInput = {
   recordCall: (evidence: CallEvidence) => Promise<void>;
   /** Bound by the service to one explicitly selected, fixed artifact identity. */
   readArtifact?: () => Promise<string>;
+  requireArtifact?: boolean;
   signal?: AbortSignal;
 };
 export class SliceRunError extends Error {
@@ -51,6 +52,7 @@ export async function runSkillSlice(input: SliceRunInput, transport: typeof fetc
     // No provider fallbacks, searches, parallel tool fanout or SDK-inferred provider choice.
     body.provider = { allow_fallbacks: false, require_parameters: true };
     body.parallel_tool_calls = false;
+    if(input.requireArtifact&&sequence===1)body.tool_choice={type:'function',function:{name:'read_selected_artifact'}};
     await input.beforeCall(sequence, body);
     let recorded = false;
     let item: CallEvidence = { sequence, providerId: null, finishReason: null, inputTokens: null, outputTokens: null, usageEvidence: null, state: 'unknown' };
@@ -105,6 +107,7 @@ export async function runSkillSlice(input: SliceRunInput, transport: typeof fetc
   const runner = new Runner({tracingDisabled:true, traceIncludeSensitiveData:false, model});
   try {
     const result = await runner.run(agent, input.input, {maxTurns:input.readArtifact ? 2 : 1, signal});
+    if(input.requireArtifact&&toolCalls!==1)throw new SliceRunError('OUTCOME_UNKNOWN');
     if (typeof result.finalOutput !== 'string' || !result.finalOutput.trim()) throw new SliceRunError('OUTCOME_UNKNOWN');
     return {body:result.finalOutput, calls:evidence, toolCalls};
   } catch (error) {

@@ -21,6 +21,11 @@ describe('real SDK bounded model/tool boundary with synthetic transport',()=>{
   const out=await runSkillSlice({...t.input,readArtifact:undefined},transport);
   expect(out.body).toBe('Synthetic final');expect(out.toolCalls).toBe(0);expect(transport).toHaveBeenCalledTimes(1);expect(t.input.readArtifact).not.toHaveBeenCalled();
  });
+ it('requires the selected artifact when the executor requests grounding',async()=>{
+  const t=setup();const transport=vi.fn(async(_url:any,init:any)=>{expect(JSON.parse(init.body).tool_choice).toMatchObject({function:{name:'read_selected_artifact'}});return completion();});
+  await expect(runSkillSlice({...t.input,requireArtifact:true},transport)).rejects.toThrow('OUTCOME_UNKNOWN');
+  expect(transport).toHaveBeenCalledTimes(1);expect(t.calls[0].state).toBe('responded');
+ });
  it('never retries an uncertain provider failure',async()=>{
   const t=setup(),transport=vi.fn(async()=>{throw new Error('private SDK detail');});
   await expect(runSkillSlice(t.input,transport)).rejects.toThrow('OUTCOME_UNKNOWN');expect(transport).toHaveBeenCalledTimes(1);expect(t.calls[0].state).toBe('unknown');

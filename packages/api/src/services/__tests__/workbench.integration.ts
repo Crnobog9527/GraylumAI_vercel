@@ -4494,6 +4494,29 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
  await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
+ const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();await begin(t,t,joinedRequest,'从 A1 拟标题并保存',100000);
+ let joinedCalls=0;
+ const joinedTransport=async(_url:unknown,init?:RequestInit)=>{
+  joinedCalls++;const req=JSON.parse(String(init?.body));
+  expect(JSON.stringify(req.messages)).toContain('BETA');expect(JSON.stringify(req.messages)).not.toContain('ALPHA');
+  if(joinedCalls===1)expect(req.tool_choice).toMatchObject({function:{name:'read_selected_artifact'}});
+  if(joinedCalls===2)expect(JSON.stringify(req.messages)).toContain('A1');
+  if(joinedCalls===3){expect(req.model).toBe(summaryRow.model_id);expect(req.tools??[]).toEqual([]);expect(JSON.stringify(req.messages)).toContain('Joined title');}
+  const msg=joinedCalls===1?{role:'assistant',content:null,tool_calls:[{id:'joined-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:joinedCalls===2?'Joined title':'Saved joined title'};
+  return new Response(JSON.stringify({id:'joined-'+joinedCalls,object:'chat.completion',created:1,model:req.model,choices:[{index:0,finish_reason:joinedCalls===1?'tool_calls':'stop',message:msg}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
+ };
+ const executor=sliceExecutor(user,db,joinedTransport);
+ const joinedReply=await executor.execute({executionId:joinedRequest,phase:'reply'});expect(joinedReply).toMatchObject({state:'saved',body:'Joined title'});
+ expect(await executor.execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(2);
+ const joinedSummary=await executor.execute({executionId:joinedRequest,phase:'summary'});expect(joinedSummary).toMatchObject({state:'saved',body:'Saved joined title'});
+ expect(await executor.execute({executionId:joinedRequest,phase:'summary'})).toEqual(joinedSummary);expect(joinedCalls).toBe(3);
+ const browserSession=await pageFor();
+ try {
+  const httpRead=await browserSession.page.request.get(app+'/api/trpc/agentSlice.result',{params:{input:JSON.stringify({executionId:joinedRequest,phase:'summary'})}});
+  expect(httpRead.status()).toBe(200);expect(await httpRead.text()).toContain('Saved joined title');
+  const httpReplay=await browserSession.page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:joinedRequest,phase:'summary'}});
+  expect(httpReplay.status()).toBe(200);expect(await httpReplay.text()).toContain('Saved joined title');expect(joinedCalls).toBe(3);
+ } finally {await browserSession.context.close();}
  const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
  const callId=randomUUID();
  const call=async(action:string,payload:Record<string,unknown>={})=>{
