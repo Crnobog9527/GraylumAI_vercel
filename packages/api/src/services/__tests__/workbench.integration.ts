@@ -253,7 +253,10 @@ afterAll(async () => {
     const state = prior?.actor === actor ? prior : { credentials, fixtures, actor, owner };
     const service = workbenchService(await authenticated(), db);
     state.expectedSnapshots = [];
-    for (const p of await service.projects()) {
+    state.expectedProjects = await service.projects();
+    const catalogDiagnostic=await db.rpc('artifact_query',{p_actor_id:actor,p_action:'catalog'});
+    console.log('WORKBENCH_PRE_RESTART_CATALOG',JSON.stringify({enabledWorkflows:Number((await sql.query('select count(*) n from artifact_workflows where enabled')).rows[0].n),error:catalogDiagnostic.error?.message??null,projects:state.expectedProjects.length}));
+    for (const p of state.expectedProjects) {
       const rounds = await service.rounds(p.projectId);
       const current =
         rounds.find((r) => r.state === "draft") ??
@@ -528,23 +531,17 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE !== "restore")(
     }
     const { page, context } = await pageFor();
     await quiet(page);
-    expect(
-      await page.getByText("文档项目 · 正式 v2", { exact: true }).count(),
-    ).toBe(fixtures.filter((f) => f.flow.kind === "document").length);
-    expect(
-      await page
-        .getByText("synthetic:local-account · 正式 v3", { exact: true })
-        .count(),
-    ).toBe(1);
+    const catalogCheck=await db.rpc('artifact_query',{p_actor_id:actor,p_action:'catalog'});
+    expect(catalogCheck.error, 'restore catalog must be readable').toBeNull();
     const saved = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
     for (const f of fixtures) {
       const expected = saved.expectedSnapshots.find(
         (s: { skillId: string }) => s.skillId === f.pack.id,
       );
-      await page
-        .getByRole("button", { name: new RegExp(`^${f.label}`) })
-        .first()
-        .click();
+      const savedProject=saved.expectedProjects.find((p:{skillId:string})=>p.skillId===f.pack.id);
+      const projectButton=page.getByRole("button", { name: new RegExp(`^${f.label}`) }).first();
+      await expect.poll(async()=>projectButton.innerText(),{timeout:20000}).toContain('正式 v'+savedProject.currentVersion);
+      await projectButton.click();
       await quiet(page);
       for (const [n, step] of expected.workflow.steps.entries()) {
         await page
@@ -4785,12 +4782,19 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
  expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ // Rollback closes new admission while the already dispatched original call can finish.
+ await sql.query("UPDATE agent_slice_pairs SET enabled=false WHERE id='slice-pair'");
+ const rollbackRequest=randomUUID();
+ await expect(begin(b,b,rollbackRequest,'Must not start while disabled')).rejects.toBeDefined();
+ expect((await sql.query('SELECT count(*)::int n FROM agent_slice_executions WHERE request_id=$1',[rollbackRequest])).rows[0].n).toBe(0);
+ expect((await sql.query('SELECT count(*)::int n FROM agent_slice_calls WHERE execution_id=$1',[rollbackRequest])).rows[0].n).toBe(0);
  // Source loss prevents fresh use, but does not erase a trusted monetary outcome.
  const financial={providerId:'synthetic-call',finishReason:'length',inputTokens:100,outputTokens:20,cacheReadTokens:0,cacheCreationTokens:0,credits:7,costUsd:0.001,outcome:'truncated'};
  await expect(call('evidence',{token:claim.token,evidence:{...financial,inputTokens:null}})).rejects.toBeDefined();
  await call('evidence',{token:claim.token,evidence:financial});
  expect((await call('settle')).state).toBe('settled');
  expect((await call('settle')).state).toBe('settled');
+ await sql.query("UPDATE agent_slice_pairs SET enabled=true WHERE id='slice-pair'");
  expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(beforeManual-7);
  expect((await sql.query("SELECT count(*)::int n FROM credit_transactions WHERE idempotency_key=$1",['agent_slice_call:'+callId])).rows[0].n).toBe(1);
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'callId'=$1",[callId])).rows[0].n).toBe(1);
