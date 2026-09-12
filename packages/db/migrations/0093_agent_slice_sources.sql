@@ -17,6 +17,7 @@ BEGIN
  JOIN agent_slice_pairs pair ON pair.script_workflow=cfg.target_workflow AND pair.enabled
  JOIN artifact_workflows tw ON tw.id=pair.script_workflow AND tw.enabled
  WHERE p.actor_id=p_actor_id AND p.work_kind='legacy'
+ AND EXISTS(SELECT 1 FROM artifact_accounts ac WHERE ac.actor_id=p_actor_id AND ac.module_id=p.module_id AND ac.skill_id=p.skill_id AND ac.account=p.account)
  AND (SELECT count(*) FROM artifact_reference_configs c JOIN artifact_workflows w ON w.id=c.source_workflow AND w.enabled
       WHERE c.enabled AND c.target_workflow=pair.script_workflow AND w.module_id=p.module_id AND w.skill_id=p.skill_id AND w.workflow->>'id'=r.workflow->>'id')=1
  ORDER BY p.created_at DESC,p.id,v.version DESC,pair.id LIMIT 100

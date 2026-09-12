@@ -4500,6 +4500,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const {sliceEntry}=await import('../agentSlice/entry');const entry=sliceEntry(user,db);const newConversation=randomUUID();
  expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});
  expect((await sql.query('select count(*)::int n from conversations where id=$1',[newConversation])).rows[0].n).toBe(1);
+ const sourceOptions=await entry.sources();expect(sourceOptions).toContainEqual(expect.objectContaining({sourceVersionId:position.id,version:1,pairId:'slice-pair'}));expect(JSON.stringify(sourceOptions)).not.toContain('POSITION ');
  const targetOptions=await entry.targets();expect(targetOptions.some(x=>x.projectId===t&&x.purpose==='title')).toBe(true);expect(targetOptions.some(x=>x.projectId===b&&x.purpose==='script')).toBe(true);
 
  const admissionInput={conversationId:conversation,requestId:joinedRequest,projectId:t,roundId:t,stepId:'step-0',pairId:'slice-pair',body:'从 A1 拟标题并保存',preferenceRefs:[]};
@@ -4640,6 +4641,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await expect(service.execute({...adoptInput,requestId:randomUUID(),expectedVersion:(await service.read(t,t)).steps['step-0'].version})).rejects.toThrow();
  expect(await results.read(summaryScope)).toMatchObject({state:'saved',adoptable:false});
  const tv1=await publish(t,t,'TITLE1');
+ // Creation succeeds internally, then invalid title -> title binding must roll back the whole transaction.
+ const {continueSliceWork}=await import('../agentSlice/continueWork');const failedWork=randomUUID();
+ await expect(continueSliceWork(user,db,{requestId:failedWork,projectId:failedWork,sourceVersionId:tv1.id!,pairId:'slice-pair',purpose:'title',title:'Invalid title loop'})).rejects.toThrow();
+ for(const table of ['artifact_projects','artifact_rounds'])expect((await sql.query(`select count(*)::int n from ${table} where id=$1`,[failedWork])).rows[0].n).toBe(0);
+ expect((await sql.query('select count(*)::int n from artifact_work_references where creation_request_id=$1',[failedWork])).rows[0].n).toBe(0);
+
  const a2=randomUUID();
  await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
  await links.link({projectId:a,roundId:a2,sourceVersionId:tv1.id!,pairId:'slice-pair',requestId:randomUUID()});
@@ -4655,6 +4662,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
  const otherUser=await newUser(),other=await authenticated(otherUser);
+ await expect(sliceEntry(other,db).sources()).resolves.toEqual([]);
+ const stolenWork=randomUUID();await expect(continueSliceWork(other,db,{requestId:stolenWork,projectId:stolenWork,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'Foreign'})).rejects.toThrow('SLICE_DENIED');
+ expect((await user.rpc('agent_slice_sources',{p_actor_id:actor})).error).not.toBeNull();
  await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
  await expect(sliceResults(other,db).read(replyScope)).rejects.toThrow('SLICE_DENIED');
  await expect(readSliceConversation(other,db,historyInput)).rejects.toThrow('SLICE_DENIED');
@@ -4683,6 +4693,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
  await expect(call('prepare',{sequence:1,quote:callQuote})).rejects.toBeDefined();
  expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
+ // Removing account ownership invalidates this entry even if the source has no evidence IDs.
+ await sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3',[actor,src.moduleId,src.pack.id]);
+ expect(await entry.sources()).toEqual([]);
+ const revokedCreate=randomUUID();await expect(continueSliceWork(user,db,{requestId:revokedCreate,projectId:revokedCreate,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'Revoked'})).rejects.toThrow();
+ expect((await sql.query('select count(*)::int n from artifact_projects where id=$1',[revokedCreate])).rows[0].n).toBe(0);
+
 },240000);
 
 it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent works, stable reference, revisions and revoked-source denial through real services', async()=>{
