@@ -16,12 +16,12 @@ export function SlicePreferences({account}:{account?:string|null}){
   try{setError('');await change.mutateAsync({...payload,requestId:request.current.id});setValue('');await query.refetch();}catch{setError('偏好未能保存，请重新读取后重试。');}
  };
  return <details className="my-3 text-sm"><summary>我的创作偏好</summary><div className="space-y-2 py-3">
- {account&&<label><input type="checkbox" checked={accountOnly} onChange={e=>{setAccountOnly(e.target.checked);setValue('');}}/> 仅用于当前账号</label>}
+ {account&&<label><input type="checkbox" disabled={change.isPending} checked={accountOnly} onChange={e=>{setAccountOnly(e.target.checked);setValue('');}}/> 仅用于当前账号</label>}
  <p>{scope==='user'?'用于我的新请求，也用于新聊天。':'仅用于这个账号的新请求。'}只有点击确认后才会保存。</p>
  {query.isPending?<p>正在读取偏好…</p>:query.error?<p role="alert">暂时无法读取偏好。</p>:<p>已确认：{current?.active?current.value:'尚未设置'}</p>}
- <textarea aria-label="写作偏好" value={value} maxLength={1000} onChange={e=>setValue(e.target.value)} placeholder="例如：口播稿使用简洁中文，先给具体例子。" className="w-full rounded-lg bg-[var(--bg-secondary)] p-2"/>
- <Button disabled={!value.trim()||change.isPending||!query.data} onClick={()=>void save('confirm')}>确认保存偏好</Button>
- {current?.active&&<Button variant="outline" disabled={change.isPending} onClick={()=>void save('delete')}>删除这条偏好</Button>}
+ <textarea aria-label="写作偏好" disabled={change.isPending} value={value} maxLength={1000} onChange={e=>setValue(e.target.value)} placeholder="例如：口播稿使用简洁中文，先给具体例子。" className="w-full rounded-lg bg-[var(--bg-secondary)] p-2"/>
+ <Button type="button" disabled={!value.trim()||change.isPending||!query.data} onClick={()=>void save('confirm')}>确认保存偏好</Button>
+ {current?.active&&<Button type="button" variant="outline" disabled={change.isPending} onClick={()=>void save('delete')}>删除这条偏好</Button>}
  {error&&<p role="alert">{error}</p>}
  </div></details>;
 }

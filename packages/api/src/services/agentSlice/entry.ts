@@ -3,7 +3,7 @@ import {z} from 'zod';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {isEmailVerified} from '../../lib/auth';
 export const sliceOpenInput=z.object({requestId:z.string().uuid()}).strict();
-const targets=z.array(z.object({projectId:z.string().uuid(),roundId:z.string().uuid(),pairId:z.string(),purpose:z.enum(['script','title']),title:z.string(),account:z.string().nullable(),steps:z.array(z.object({id:z.string(),title:z.string()})).min(1)})).max(100);
+const targets=z.array(z.object({projectId:z.string().uuid(),roundId:z.string().uuid(),pairId:z.string(),purpose:z.enum(['script','title']),state:z.enum(['draft','published']),version:z.number().int().positive().nullable(),sourceVersion:z.number().int().positive().nullable(),sourceTitle:z.string(),title:z.string(),account:z.string().nullable(),steps:z.array(z.object({id:z.string(),title:z.string()})).min(1)})).max(100);
 export function sliceEntry(user:SupabaseClient,admin:SupabaseClient){
  async function call(name:'agent_slice_open'|'agent_slice_targets',requestId?:string){
   let timer:ReturnType<typeof setTimeout>|undefined;

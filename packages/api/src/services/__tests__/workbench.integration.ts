@@ -4534,8 +4534,14 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(allHistory.find(x=>x.executionId===joinedRequest)?.reply).toMatchObject({state:'saved',body:'Joined title'});
  expect(allHistory.some(x=>x.projectId===t)).toBe(true);
  expect(joinedCalls).toBe(3);
+ const browserA=randomUUID();let browserA2='';
  const browserSession=await pageFor();
  try {
+  const createBrowserA={projectId:browserA,requestId:browserA,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'浏览器脚本 A'};
+  const made=await browserSession.page.request.post(app+'/api/trpc/agentSlice.continueWork',{data:createBrowserA});
+  if(made.status()!==200){const diagnostic=await db.rpc('agent_slice_continue_work',{p_actor_id:actor,p_request_id:browserA,p_project_id:browserA,p_source_version_id:position.id!,p_pair_id:'slice-pair',p_purpose:'script',p_title:'浏览器脚本 A'});throw new Error('Local continuation failure: '+diagnostic.error?.message);}
+  expect(made.status()).toBe(200);
+  expect((await browserSession.page.request.post(app+'/api/trpc/agentSlice.continueWork',{data:createBrowserA})).status()).toBe(200);
   const httpHistory=await browserSession.page.request.get(app+'/api/trpc/agentSlice.conversation',{params:{input:JSON.stringify({conversationId:conversation})}});
   expect(httpHistory.status()).toBe(200);expect(await httpHistory.text()).toContain('Joined title');
   const oldPath=await browserSession.page.request.post(app+'/api/ai/stream',{headers:{Authorization:'Bearer '+(await user.auth.getSession()).data.session!.access_token},data:{message:'must not generate',conversationId:conversation,requestId:randomUUID(),modelId:sliceModel}});expect(oldPath.status()).toBe(403);
@@ -4567,6 +4573,32 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
 
   await browserSession.page.getByRole('button',{name:'删除这条偏好'}).click();await browserSession.page.getByText('已确认：尚未设置',{exact:true}).waitFor();
+  const page=browserSession.page;
+  const sendAndSave=async(message:string,expectedCalls:number)=>{
+   await page.getByLabel('消息',{exact:true}).fill(message);await page.getByRole('button',{name:'发送',exact:true}).click();
+   await page.getByText(message,{exact:true}).waitFor();
+   await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[newConversation])).rows[0].n),{timeout:20000}).toBe(expectedCalls);
+   await page.getByRole('button',{name:'采用本轮成果',exact:true}).click();
+   await expect.poll(async()=>page.getByLabel('本步骤成果',{exact:true}).inputValue()).toBe('浏览器整理成果');
+  };
+  const confirmAndPublish=async()=>{await page.getByRole('button',{name:'确认本步骤成果',exact:true}).click();await page.getByRole('button',{name:'发布已确认版本',exact:true}).click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');};
+  await page.getByLabel('使用 Skill 创作').selectOption(browserA+':step-0:slice-pair');
+  await sendAndSave('为这个账号写脚本 A',6);await confirmAndPublish();
+  await page.getByRole('button',{name:'用这版脚本创作标题',exact:true}).click();
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserA+':step-0:slice-pair';}).toBe(true);
+  const browserTitleRound=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
+  await sendAndSave('为刚才的脚本拟标题',9);
+  await page.getByLabel('本步骤成果',{exact:true}).fill('选定标题：倾斜的地球如何创造四季');await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body).toBe('选定标题：倾斜的地球如何创造四季');
+  await confirmAndPublish();await page.getByLabel('带回哪份脚本').selectOption(browserA);
+  await page.getByRole('button',{name:'采用这些标题，修订脚本',exact:true}).click();
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';}).toBe(true);
+  browserA2=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA2).not.toBe(browserA);
+  await sendAndSave('按选定标题修订原脚本',12);await confirmAndPublish();
+  await page.reload();await page.getByText('为这个账号写脚本 A',{exact:true}).waitFor();await page.getByText('为刚才的脚本拟标题',{exact:true}).waitFor();await page.getByText('按选定标题修订原脚本',{exact:true}).waitFor();
+  expect((await service.report(browserA,browserA2)).version).toBe(2);expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+  expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(12);
+
  } finally {await browserSession.context.close();}
  // Equal timestamps still paginate by immutable request identity, without loss.
  const tieIds=[randomUUID(),randomUUID(),randomUUID()].sort().reverse();
@@ -4643,7 +4675,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
  await expect(call('prepare',{sequence:1,quote:callQuote})).rejects.toBeDefined();
  expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
-},120000);
+},240000);
 
 it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE === 'restore')('REUSE: independent works, stable reference, revisions and revoked-source denial through real services', async()=>{
   const {artifactReuse}=await import('../artifacts/reuse');
