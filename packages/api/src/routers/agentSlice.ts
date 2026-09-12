@@ -2,6 +2,8 @@
 import {TRPCError} from '@trpc/server';
 import {protectedProcedure, router} from '../trpc';
 import {confirmedPreferences, preferenceScope, preferenceChange} from '../services/agentSlice/preferences';
+import {recoverSlice,sliceRecoveryInput} from '../services/agentSlice/recovery';
+import {sliceAdmission,sliceAdmissionInput} from '../services/agentSlice/admission';
 import {sliceExecutor,slicePhase} from '../services/agentSlice/execute';
 import {sliceResults} from '../services/agentSlice/results';
 import {sliceLinks,sliceLinkInput,sliceLinkScope} from '../services/agentSlice/links';
@@ -22,6 +24,14 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
  return result;
 });
 export const agentSliceRouter=router({
+ recover:procedure.input(sliceRecoveryInput).mutation(({ctx,input})=>{
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
+  return recoverSlice(ctx.userScopedSupabase,ctx.supabaseAdmin,input);
+ }),
+ begin:procedure.input(sliceAdmissionInput).mutation(({ctx,input})=>{
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
+  return sliceAdmission(ctx.userScopedSupabase,ctx.supabaseAdmin).begin(input);
+ }),
  executePhase:procedure.input(slicePhase).mutation(({ctx,input})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
   return sliceExecutor(ctx.userScopedSupabase,ctx.supabaseAdmin).execute(input);

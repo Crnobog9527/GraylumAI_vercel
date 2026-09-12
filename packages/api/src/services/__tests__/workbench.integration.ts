@@ -4476,6 +4476,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  if(savedSummary.state!=='saved')throw new Error('summary missing');expect(savedSummary.adoptable).toBe(true);
  expect((await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('responded');
  expect(await results.read(summaryScope)).toEqual(savedSummary);settleUnavailable=false;
+ const {recoverSlice}=await import('../agentSlice/recovery');expect((await recoverSlice(user,db,{executionId:sdkRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);
  expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
  expect((await summaryAccounting.recover()).map(c=>c.state)).toEqual(['settled']);
  await expect(runSkillSlice(summaryInput,summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
@@ -4494,7 +4495,15 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
  await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
- const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();await begin(t,t,joinedRequest,'从 A1 拟标题并保存',100000);
+ const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();
+ const {sliceAdmission}=await import('../agentSlice/admission');const admission=sliceAdmission(user,db);
+ const admissionInput={conversationId:conversation,requestId:joinedRequest,projectId:t,roundId:t,stepId:'step-0',pairId:'slice-pair',body:'从 A1 拟标题并保存',preferenceRefs:[]};
+ const admitted=await admission.begin(admissionInput);expect(await admission.begin(admissionInput)).toEqual(admitted);
+ await expect(admission.begin({...admissionInput,projectId:b,roundId:b})).rejects.toThrow();
+ // Admission replay retains identity even if routing subsequently changes.
+ await sql.query('update modules set model_id=$1 where id=$2',[summaryModel,title.moduleId]);
+ expect(await admission.begin(admissionInput)).toEqual(admitted);
+ await sql.query('update modules set model_id=$1 where id=$2',[sliceModel,title.moduleId]);
  let joinedCalls=0;
  const joinedTransport=async(_url:unknown,init?:RequestInit)=>{
   joinedCalls++;const req=JSON.parse(String(init?.body));
@@ -4512,6 +4521,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(await executor.execute({executionId:joinedRequest,phase:'summary'})).toEqual(joinedSummary);expect(joinedCalls).toBe(3);
  const browserSession=await pageFor();
  try {
+  const httpBegin=await browserSession.page.request.post(app+'/api/trpc/agentSlice.begin',{data:admissionInput});expect(httpBegin.status()).toBe(200);expect(await httpBegin.text()).toContain(joinedRequest);
   const httpRead=await browserSession.page.request.get(app+'/api/trpc/agentSlice.result',{params:{input:JSON.stringify({executionId:joinedRequest,phase:'summary'})}});
   expect(httpRead.status()).toBe(200);expect(await httpRead.text()).toContain('Saved joined title');
   const httpReplay=await browserSession.page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:joinedRequest,phase:'summary'}});
@@ -4563,6 +4573,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await expect(reader()).rejects.toThrow();
  expect(await results.read(replyScope)).toEqual({state:'restricted'});expect(await results.read(summaryScope)).toEqual({state:'restricted'});
  expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual({state:'restricted'});
+ expect((await recoverSlice(user,db,{executionId:joinedRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(joinedCalls).toBe(3);
  expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
  expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
