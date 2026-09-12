@@ -7,6 +7,7 @@ import {trpc} from '@/trpc/client';
 import {AppHeader} from '@/components/layout/AppHeader';
 import {ChatSidebar} from '@/components/chat/ChatSidebar';
 import {SliceArtifact,type SliceTarget} from './agent-slice-artifact';
+import {SliceStartWork} from './agent-slice-start-work';
 import {SlicePreferences} from './agent-slice-preferences';
 import {Button} from '@/components/ui/button';
 type Page=inferRouterOutputs<AppRouter>['agentSlice']['conversation'];
@@ -25,6 +26,8 @@ export function AgentSliceConversation({conversationId,navigate}:{conversationId
  // Server supplies descending tuple order; preserve it rather than reparsing timestamps.
  const turns=rows.slice().reverse();
  const choices=(targets.data??[]).flatMap(work=>work.steps.map(step=>({...work,stepId:step.id,stepTitle:step.title})));
+ // Keep the selected identity renderable while the query cache catches up.
+ if(heldTarget&&!choices.some(r=>r.roundId===heldTarget.roundId&&r.stepId===heldTarget.stepId&&r.pairId===heldTarget.pairId))choices.push(heldTarget);
  const target=choices.find(r=>r.roundId===heldTarget?.roundId&&r.stepId===heldTarget.stepId&&r.pairId===heldTarget.pairId)??heldTarget??choices.find(r=>r.state==='draft')??choices[0];
  useEffect(()=>{if(!heldTarget&&target)setHeldTarget(target);},[heldTarget,target]);
  const onContinue=async(projectId:string,roundId:string,pairId:string)=>{const options=await api.targets.query();const work=options.find(w=>w.projectId===projectId&&w.roundId===roundId&&w.pairId===pairId);if(!work)throw new Error('target unavailable');setHeldTarget({...work,stepId:work.steps[0].id,stepTitle:work.steps[0].title});await targets.refetch();await load();};
@@ -44,7 +47,7 @@ export function AgentSliceConversation({conversationId,navigate}:{conversationId
  };
  const send=()=>{if(!target||target.state!=='draft'||!input.trim()||locked.current)return;const turn:Turn={projectId:target.projectId,roundId:target.roundId,stepId:target.stepId,stepTitle:target.stepTitle,pairId:target.pairId,executionId:crypto.randomUUID(),createdAt:new Date().toISOString(),input:input.trim(),reply:{state:'pending'},summary:{state:'pending'}};setLocal(turn);setInput('');follow.current=true;void run(turn,true);};
  return <div className="flex h-dvh flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]"><AppHeader/><div className="flex min-h-0 flex-1"><ChatSidebar onNewChat={()=>navigate()} onSelectConversation={navigate}/><main className="flex min-w-0 flex-1 flex-col" aria-label="双 Skill 对话">
- <header className="border-b border-[var(--border-primary)] p-4"><h1>连续创作</h1><p className="text-sm text-[var(--text-secondary)]">切换创作步骤后，之前的讨论仍保留在这里。</p><a href="/workbench" className="underline">查看作品与正式报告</a><Button variant="ghost" onClick={()=>setShowArtifact(v=>!v)}>步骤与成果</Button></header>
+ <header className="border-b border-[var(--border-primary)] p-4"><h1>连续创作</h1><p className="text-sm text-[var(--text-secondary)]">切换创作步骤后，之前的讨论仍保留在这里。</p><a href="/workbench" className="underline">查看作品与正式报告</a><Button variant="ghost" onClick={()=>setShowArtifact(v=>!v)}>步骤与成果</Button><SliceStartWork onCreated={onContinue}/></header>
  <div ref={scroll} onScroll={()=>{const el=scroll.current;if(el)follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<80;}} className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-6">
  {page?.nextCursor&&<Button variant="outline" onClick={()=>{const before=page.nextCursor;if(!before)return;void deadline(api.conversation.query({conversationId,before})).then(older=>setPage(current=>current?{items:[...current.items,...older.items.filter(x=>!current.items.some(y=>y.executionId===x.executionId))],nextCursor:older.nextCursor}:older)).catch(()=>setError('更早的记录暂时无法读取。'));}}>加载更早的对话</Button>}
  {!page&&!error&&<p role="status">正在读取对话…</p>}

@@ -35,6 +35,10 @@ export const agentSliceRouter=router({
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
   return sliceEntry(ctx.userScopedSupabase,ctx.supabaseAdmin).open(input);
  }),
+ sources:procedure.query(({ctx})=>{
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
+  return sliceEntry(ctx.userScopedSupabase,ctx.supabaseAdmin).sources();
+ }),
  targets:procedure.query(({ctx})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
   return sliceEntry(ctx.userScopedSupabase,ctx.supabaseAdmin).targets();
