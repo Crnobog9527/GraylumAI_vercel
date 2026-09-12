@@ -232,6 +232,8 @@ try {
   apply("packages/db/migrations/0092_agent_slice_continue_work.sql");
   apply("packages/db/migrations/0093_agent_slice_sources.sql");
   apply("packages/db/migrations/0093_agent_slice_sources.sql");
+  apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
+  apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

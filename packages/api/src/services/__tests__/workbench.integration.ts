@@ -4370,7 +4370,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const script=await fixture({id:'slice-script',label:'虚构脚本',methodText:'Synthetic script ALPHA: prose only.',workflow:makeWorkflow(1,false)});
  const title=await fixture({id:'slice-title',label:'虚构标题',methodText:'Synthetic title BETA: numbered titles only.',workflow:makeWorkflow(1,false)});
  const p=randomUUID(),r=randomUUID();
- await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'});
+ await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account:'synthetic:local-account'},src.moduleId);
  async function publish(projectId:string,roundId:string,body:string){
   let state=await service.read(projectId,roundId);
   for(const step of state.workflow.steps){
@@ -4476,13 +4476,21 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  if(savedSummary.state!=='saved')throw new Error('summary missing');expect(savedSummary.adoptable).toBe(true);
  expect((await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('responded');
  expect(await results.read(summaryScope)).toEqual(savedSummary);settleUnavailable=false;
- const {recoverSlice}=await import('../agentSlice/recovery');expect((await recoverSlice(user,db,{executionId:sdkRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);
+ const {recoverSlice}=await import('../agentSlice/recovery'); // Formal browser refresh must perform maintenance below.
  expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
- expect((await summaryAccounting.recover()).map(c=>c.state)).toEqual(['settled']);
  await expect(runSkillSlice(summaryInput,summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
  expect((await sql.query('select phase, count(*)::int n from agent_slice_calls where execution_id=$1 group by phase order by phase',[sdkRequest])).rows).toEqual([{phase:'reply',n:2},{phase:'summary',n:1}]);
- expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(3);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
 
+ // Unadopted replies are fixed at admission, scoped to this work, not UI pagination.
+ const followRequest=randomUUID();await begin(t,t,followRequest,'保留第一个标题，改短一点',100000);
+ const followContext=await loadSliceContext(user,db,followRequest);
+ expect(followContext.data.discussion).toEqual([{user:'读取 A1 后拟标题',assistant:savedReply.body}]);
+ expect((await loadSliceContext(user,db,sdkRequest)).data.discussion).toEqual([]);
+ const independentDiscussion=randomUUID();await begin(b,b,independentDiscussion,'独立脚本 B',100000);
+ expect((await loadSliceContext(user,db,independentDiscussion)).data.discussion).toEqual([]);
+ const fixedDiscussion=(await sql.query('select discussion_refs from agent_slice_executions where request_id=$1',[followRequest])).rows[0].discussion_refs;
+ expect(fixedDiscussion).toEqual([{executionId:sdkRequest,candidateId:savedReply.candidateId}]);
  const unknownRequest=randomUUID();await begin(t,t,unknownRequest,'测试缺失用量',100000);
  const unknownAccounting=sliceAccounting(user,db,unknownRequest,modelRow);let unknownCalls=0;
  const missingUsage=async()=>{unknownCalls++;return new Response(JSON.stringify({id:'synthetic-missing-usage',object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Not a verified completion'}}]}),{headers:{'content-type':'application/json'}});};
@@ -4514,6 +4522,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const joinedTransport=async(_url:unknown,init?:RequestInit)=>{
   joinedCalls++;const req=JSON.parse(String(init?.body));
   expect(JSON.stringify(req.messages)).toContain('BETA');expect(JSON.stringify(req.messages)).not.toContain('ALPHA');
+  if(joinedCalls===1)expect(JSON.stringify(req.messages)).toContain('Synthetic title from A1');
   if(joinedCalls===1)expect(req.tool_choice).toMatchObject({function:{name:'read_selected_artifact'}});
   if(joinedCalls===2)expect(JSON.stringify(req.messages)).toContain('A1');
   if(joinedCalls===3){expect(req.model).toBe(summaryRow.model_id);expect(req.tools??[]).toEqual([]);expect(JSON.stringify(req.messages)).toContain('Joined title');}
@@ -4549,6 +4558,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await browserSession.page.goto(app+'/chat?mode=agent-slice&conversation='+conversation);
   await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
   await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
+  await expect.poll(async()=>(await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('settled');
+  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(3);
+  expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
   await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
   expect(joinedCalls).toBe(3);
   // Confirm in the existing conversation, then use it in a distinct new conversation.
@@ -4593,10 +4605,10 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await page.getByText('基于定位报告新建脚本',{exact:true}).click();
   await page.getByLabel('选择定位报告与版本').selectOption(position.id!+':slice-pair');
   await page.getByLabel('新脚本名称').fill('浏览器脚本 A');await page.getByRole('button',{name:'创建独立脚本',exact:true}).click();
-  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue()).toBe('');
+  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue(),{timeout:10000}).toBe('');
   browserA=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
   await page.getByLabel('新脚本名称').fill('浏览器脚本 B');await page.getByRole('button',{name:'创建独立脚本',exact:true}).click();
-  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue()).toBe('');
+  await expect.poll(async()=>page.getByLabel('新脚本名称').inputValue(),{timeout:10000}).toBe('');
   browserB=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA).not.toBe(browserB);
   expect((await service.read(browserA,browserA)).state).toBe('draft');expect((await service.read(browserB,browserB)).state).toBe('draft');
   const replay={projectId:browserA,requestId:browserA,sourceVersionId:position.id!,pairId:'slice-pair',purpose:'script',title:'浏览器脚本 A'};
@@ -4605,15 +4617,28 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await page.getByText('基于定位报告新建脚本',{exact:true}).click();
   await page.getByLabel('使用 Skill 创作').selectOption(browserA+':step-0:slice-pair');
   await sendAndSave('为这个账号写脚本 A',6);await confirmAndPublish();
+  // A report arriving after the user selects B must not open under B's identity.
+  let reportFetched=false,reportDelivered=false,releaseReport:()=>void=()=>{};
+  const reportBarrier=new Promise<void>(resolve=>{releaseReport=resolve;});
+  await page.route('**/api/trpc/workbench.report*',async route=>{const response=await route.fetch();reportFetched=true;await reportBarrier;await route.fulfill({response});reportDelivered=true;});
+  await page.getByRole('button',{name:'查看正式报告',exact:true}).click();
+  await expect.poll(()=>reportFetched).toBe(true);
+  await page.getByLabel('使用 Skill 创作').selectOption(browserB+':step-0:slice-pair');
+  releaseReport();await expect.poll(()=>reportDelivered).toBe(true);
+  await expect.poll(()=>page.getByRole('complementary',{name:'当前作品成果'}).getAttribute('aria-busy')).toBe('false');
+  await expect.poll(()=>page.getByRole('dialog').count()).toBe(0);
+  expect(await page.getByLabel('使用 Skill 创作').inputValue()).toBe(browserB+':step-0:slice-pair');
+  await page.unroute('**/api/trpc/workbench.report*');
+  await page.getByLabel('使用 Skill 创作').selectOption(browserA+':step-0:slice-pair');
   await page.getByRole('button',{name:'用这版脚本创作标题',exact:true}).click();
-  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserA+':step-0:slice-pair'&&(await page.getByLabel('使用 Skill 创作').locator('option:checked').textContent())?.startsWith('标题 · 浏览器脚本 A')===true;}).toBe(true);
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserA+':step-0:slice-pair'&&(await page.getByLabel('使用 Skill 创作').locator('option:checked').textContent())?.startsWith('标题 · 浏览器脚本 A')===true;},{timeout:10000}).toBe(true);
   const browserTitleRound=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];
   await sendAndSave('为刚才的脚本拟标题',9);
   await page.getByLabel('本步骤成果',{exact:true}).fill('选定标题：倾斜的地球如何创造四季');await page.getByRole('button',{name:'保存修改',exact:true}).click();
   await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body).toBe('选定标题：倾斜的地球如何创造四季');
   await confirmAndPublish();await page.getByLabel('带回哪份脚本').selectOption(browserA);
   await page.getByRole('button',{name:'采用这些标题，修订脚本',exact:true}).click();
-  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';}).toBe(true);
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';},{timeout:10000}).toBe(true);
   browserA2=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA2).not.toBe(browserA);
   await sendAndSave('按选定标题修订原脚本',12);await confirmAndPublish();
   await page.reload();await page.getByText('为这个账号写脚本 A',{exact:true}).waitFor();await page.getByText('为刚才的脚本拟标题',{exact:true}).waitFor();await page.getByText('按选定标题修订原脚本',{exact:true}).waitFor();

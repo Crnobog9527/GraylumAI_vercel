@@ -9,7 +9,8 @@ import {workflowSchema} from '../artifacts/workflow';
 import {workbenchService} from '../artifacts/workbench';
 import {confirmedPreferences,preferenceReference} from './preferences';
 const uuid=z.string().uuid();
-const context=z.object({executionId:uuid,conversationId:uuid,projectId:uuid,roundId:uuid,stepId:z.string(),moduleId:uuid,skillId:uuid,revisionId:uuid,packageHash:z.string(),workflow:workflowSchema,
+const discussion=z.array(z.object({user:z.string().max(2000),assistant:z.string().max(20000)})).max(8);
+const context=z.object({discussion,executionId:uuid,conversationId:uuid,projectId:uuid,roundId:uuid,stepId:z.string(),moduleId:uuid,skillId:uuid,revisionId:uuid,packageHash:z.string(),workflow:workflowSchema,
  modelId:uuid,providerModel:z.string(),summaryModelId:uuid.nullable(),summaryProviderModel:z.string().nullable(),summaryMaxTokens:z.number().nullable(),
  preferenceRefs:preferenceReference.array().max(40),evidenceIds:uuid.array(),basis:z.record(z.string(),z.object({version:z.number(),reviewVersion:z.number()})),body:z.string().max(2000)});
 async function deadline<T>(value:PromiseLike<T>):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;
@@ -32,7 +33,7 @@ export async function loadSliceContext(user:SupabaseClient,admin:SupabaseClient,
  if(!descriptor||descriptor.packageHash!==fixed.packageHash)throw new Error('SLICE_CONTEXT_CHANGED');
  const loaded=await deadline(activateSkill(source,identityOf(descriptor),{resources:step.resources,maxContextBytes:2097152}));
  const preferences=await deadline(confirmedPreferences(user,admin).resolve(fixed.preferenceRefs));
- const data={instruction:fixed.body,preferences:preferences.map(p=>({scope:p.scope,name:p.name,value:p.value})),
+ const data={instruction:fixed.body,discussion:fixed.discussion,preferences:preferences.map(p=>({scope:p.scope,name:p.name,value:p.value})),
   step:{id:step.id,title:step.title,minLength:step.minLength,maxLength:step.maxLength},
   currentStepResult:{body:snapshot.steps[step.id].body,version:snapshot.steps[step.id].version},
   steps:Object.fromEntries(Object.keys(fixed.basis).filter(key=>key!==step.id).map(key=>[key,{body:snapshot.steps[key].body,version:snapshot.steps[key].version}]))};

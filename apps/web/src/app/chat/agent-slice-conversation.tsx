@@ -22,6 +22,15 @@ export function AgentSliceConversation({conversationId,navigate}:{conversationId
  const [heldTarget,setHeldTarget]=useState<SliceTarget|null>(null),[showArtifact,setShowArtifact]=useState(false);const epoch=useRef(0),locked=useRef(false),scroll=useRef<HTMLDivElement>(null),follow=useRef(true);
  const load=async()=>{const value=await deadline(api.conversation.query({conversationId}));setPage(value);return value;};
  useEffect(()=>{let alive=true;const refresh=()=>{void deadline(api.conversation.query({conversationId})).then(value=>{if(alive){setPage(value);setError('');}}).catch(()=>{if(alive){setPage(null);setError('暂时无法读取对话，请重试。');}});};refresh();const visible=()=>{if(document.visibilityState==='visible')refresh();};window.addEventListener('online',refresh);document.addEventListener('visibilitychange',visible);return()=>{alive=false;epoch.current++;window.removeEventListener('online',refresh);document.removeEventListener('visibilitychange',visible);};},[api,conversationId]);
+ // Financial maintenance is separate from the pure history query and never
+ // blocks rendering saved text. Refresh/online repeats only unfinished work.
+ const settling=useRef(new Set<string>()),settled=useRef(new Set<string>());
+ useEffect(()=>{for(const turn of page?.items??[]){const id=turn.executionId;
+  if(settling.current.has(id)||settled.current.has(id))continue;settling.current.add(id);
+  void deadline(api.recover.mutate({executionId:id}),35000).then(value=>{
+   if(value.calls.length===3&&value.calls.every(call=>call.state==='settled'||call.state==='refunded'))settled.current.add(id);
+  }).catch(()=>{/* Retry on the next authoritative refresh; never regenerate. */}).finally(()=>settling.current.delete(id));
+ }},[api,page]);
  const rows=[...(page?.items??[])];if(local&&!rows.some(r=>r.executionId===local.executionId))rows.unshift(local);
  // Server supplies descending tuple order; preserve it rather than reparsing timestamps.
  const turns=rows.slice().reverse();

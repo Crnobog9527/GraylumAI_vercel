@@ -49,6 +49,7 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
   async beforeCall(sequence:number,request:unknown){
    // Only a proven undispatched reservation can be reclaimed. SQL rotates its
    // dispatch token under lock; an older process then loses dispatch authority.
+   if(sequence>1){const previous=await call(sequence-1,'get');if(previous&&state.parse(previous).state==='responded')await call(sequence-1,'settle');}
    const prior=await call(sequence,'get');
    if(prior&&state.parse(prior).state!=='prepared')throw new Error('SLICE_ALREADY_STARTED');
    const q=await quote(request);
