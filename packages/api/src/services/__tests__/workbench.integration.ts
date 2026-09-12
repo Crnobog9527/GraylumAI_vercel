@@ -4393,8 +4393,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-27b','Synthetic summary model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryModel]);
  await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_summary_model_id',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify(summaryModel)]);
  await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
- const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50)=>{
-  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs:[]}});
+ const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50,preferenceRefs:Array<{scope:string;name:string;version:number}>=[])=>{
+  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs}});
   if(result.error)throw result.error;return result.data;
  };
  const a=randomUUID(),b=randomUUID(),t=randomUUID();
@@ -4418,8 +4418,21 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await sql.query('update profiles set credits=100000 where id=$1',[actor]);
  const modelRow=(await sql.query('select * from ai_models where id=$1',[sliceModel])).rows[0];
  const accounting=sliceAccounting(user,db,sdkRequest,modelRow);
+ const {loadSliceContext}=await import('../agentSlice/context');const assembled=await loadSliceContext(user,db,sdkRequest);
+ expect(assembled.loaded.forModel()).toContain('BETA');expect(assembled.loaded.forModel()).not.toContain('ALPHA');
+ const {confirmedPreferences}=await import('../agentSlice/preferences');const prefs=confirmedPreferences(user,db);
+ await prefs.change({scope:'user',name:'表达风格',value:'简洁中文',expectedVersion:0,confirmed:true,requestId:randomUUID(),action:'confirm'});
+ const prefRequest=randomUUID();await begin(t,t,prefRequest,'偏好装配验证',50,[{scope:'user',name:'表达风格',version:1}]);
+ expect((await loadSliceContext(user,db,prefRequest)).data.preferences).toEqual([{scope:'user',name:'表达风格',value:'简洁中文'}]);
+ await prefs.change({scope:'user',name:'表达风格',value:'详细中文',expectedVersion:1,confirmed:true,requestId:randomUUID(),action:'confirm'});
+ await expect(loadSliceContext(user,db,prefRequest)).rejects.toThrow('SLICE_CONTEXT_CHANGED');
+ const correctedRequest=randomUUID();await begin(t,t,correctedRequest,'采用新偏好',50,[{scope:'user',name:'表达风格',version:2}]);
+ expect((await loadSliceContext(user,db,correctedRequest)).data.preferences).toEqual([{scope:'user',name:'表达风格',value:'详细中文'}]);
+ await prefs.change({scope:'user',name:'表达风格',expectedVersion:2,confirmed:true,requestId:randomUUID(),action:'delete'});
+ await expect(loadSliceContext(user,db,correctedRequest)).rejects.toThrow('SLICE_CONTEXT_CHANGED');
+
  let providerCalls=0;
- const sdkInput={model:modelRow.model_id,apiKey:'SYNTHETIC_ONLY',instructions:'Synthetic title BETA: numbered titles only.',input:'读取所选成果并拟标题。',maxOutputTokens:100,readArtifact:reader,...accounting};
+ const sdkInput={model:modelRow.model_id,apiKey:'SYNTHETIC_ONLY',instructions:assembled.loaded.forModel(),input:JSON.stringify(assembled.data),maxOutputTokens:100,readArtifact:reader,...accounting};
  const fakeProvider=async(_url:unknown,init?:RequestInit)=>{
   providerCalls++;const request=JSON.parse(String(init?.body));
   if(providerCalls===2)expect(JSON.stringify(request.messages)).toContain('A1');
@@ -4428,9 +4441,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  };
  const sdkReply=await runSkillSlice(sdkInput,fakeProvider);expect(sdkReply.body).toContain('title from A1');
  const {sliceResults}=await import('../agentSlice/results');const results=sliceResults(user,db);
- const syntheticPrivate=JSON.stringify({resources:[{path:'method.md',content:'SYNTHETIC_PRIVATE_METHOD_CANARY'}]});
+ const syntheticPrivate=assembled.loaded.forModel();
  const replyScope={executionId:sdkRequest,phase:'reply' as const};
- await expect(results.save(replyScope,'SYNTHETIC_PRIVATE_METHOD_CANARY',syntheticPrivate)).rejects.toThrow('SLICE_OUTPUT_RESTRICTED');
+ await expect(results.save(replyScope,JSON.parse(syntheticPrivate).resources[0].path,syntheticPrivate)).rejects.toThrow('SLICE_OUTPUT_RESTRICTED');
  const savedReply=await results.save(replyScope,sdkReply.body,syntheticPrivate);
  expect(savedReply.state).toBe('saved');expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual(savedReply);
  expect(await results.read(replyScope)).toEqual(savedReply);
@@ -4509,6 +4522,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
  await links.link({projectId:a,roundId:a2,sourceVersionId:tv1.id!,pairId:'slice-pair',requestId:randomUUID()});
  const revisionRequest=randomUUID();await begin(a,a2,revisionRequest,'采用标题修改 A');
+ const switched=await loadSliceContext(user,db,revisionRequest);expect(switched.loaded.forModel()).toContain('ALPHA');expect(switched.loaded.forModel()).not.toContain('BETA');
  const frozen=(await sql.query('SELECT conversation_id,project_id,round_id,revision_id FROM agent_slice_executions WHERE request_id=ANY($1::uuid[]) ORDER BY created_at',[[titleRequest,revisionRequest]])).rows;
  expect(frozen).toEqual([
   {conversation_id:conversation,project_id:t,round_id:t,revision_id:title.pack.revisionId},
@@ -4520,6 +4534,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const otherUser=await newUser(),other=await authenticated(otherUser);
  await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
  await expect(sliceResults(other,db).read(replyScope)).rejects.toThrow('SLICE_DENIED');
+ await expect(loadSliceContext(other,db,revisionRequest)).rejects.toThrow('SLICE_DENIED');
  expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
  await expect(reader()).rejects.toThrow();
