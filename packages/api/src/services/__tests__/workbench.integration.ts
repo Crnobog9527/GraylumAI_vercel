@@ -4551,19 +4551,31 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
   await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
   expect(joinedCalls).toBe(3);
-  await browserSession.page.goto(app+'/chat?conversation='+newConversation);
-  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
+  // Confirm in the existing conversation, then use it in a distinct new conversation.
   await browserSession.page.getByLabel('使用 Skill 创作').waitFor();
   await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
   await browserSession.page.getByLabel('写作偏好').fill('先给具体例子');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
   await browserSession.page.getByText('已确认：先给具体例子',{exact:true}).waitFor();
   await browserSession.page.getByLabel('写作偏好').fill('结尾给行动建议');await browserSession.page.getByRole('button',{name:'确认保存偏好'}).click();
   await browserSession.page.getByText('已确认：结尾给行动建议',{exact:true}).waitFor();
+  await browserSession.page.goto(app+'/chat?conversation='+newConversation);
+  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
   await browserSession.page.getByLabel('使用 Skill 创作').selectOption(t+':step-0:slice-pair');
+  await browserSession.page.evaluate(()=>{
+   const timing:{start?:number;feedback?:number;reply?:number}={};(window as any).__sliceTiming=timing;
+   document.addEventListener('submit',()=>{timing.start=performance.now();},{once:true,capture:true});
+   const observer=new MutationObserver(()=>{if(timing.start===undefined)return;
+    const turns=Array.from(document.querySelectorAll('section[aria-label="一轮对话"]'));
+    const turn=turns.find(t=>t.textContent?.includes('浏览器新增标题'));if(!turn)return;
+    if(timing.feedback===undefined&&turn.querySelector('[aria-label="助手回答"]'))timing.feedback=performance.now()-timing.start;
+    if(turn.textContent?.includes('浏览器真实接线回复')){timing.reply=performance.now()-timing.start;observer.disconnect();}
+   });observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+  });
   await browserSession.page.getByLabel('消息',{exact:true}).fill('浏览器新增标题');await browserSession.page.getByRole('button',{name:'发送',exact:true}).click();
   await browserSession.page.getByText('浏览器新增标题',{exact:true}).waitFor();
   await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();
   await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[newConversation])).rows[0].n),{timeout:20000}).toBe(3);
+  const browserTiming=await browserSession.page.evaluate(()=>(window as any).__sliceTiming);expect(browserTiming.feedback).toBeGreaterThanOrEqual(0);expect(browserTiming.reply).toBeGreaterThanOrEqual(browserTiming.feedback);console.log('SLICE synthetic browser timing (ms; includes local HTTP and provider fixture wait)',JSON.stringify(browserTiming));
   const actualCalls=await (await fetch(url+'/__slice_calls')).json();expect(actualCalls).toHaveLength(3);expect(actualCalls.every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
   await browserSession.page.reload();await browserSession.page.getByText('浏览器真实接线回复',{exact:true}).waitFor();expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(3);
   await browserSession.page.getByText('我的创作偏好',{exact:true}).click();
@@ -4606,7 +4618,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await sendAndSave('按选定标题修订原脚本',12);await confirmAndPublish();
   await page.reload();await page.getByText('为这个账号写脚本 A',{exact:true}).waitFor();await page.getByText('为刚才的脚本拟标题',{exact:true}).waitFor();await page.getByText('按选定标题修订原脚本',{exact:true}).waitFor();
   expect((await service.read(browserB,browserB)).steps['step-0'].body).toBe('');expect((await service.report(browserA,browserA2)).version).toBe(2);expect((await service.read(b,b)).steps['step-0'].body).toBe('');
-  expect(await (await fetch(url+'/__slice_calls')).json()).toHaveLength(12);
+  const afterDelete=await (await fetch(url+'/__slice_calls')).json();expect(afterDelete).toHaveLength(12);expect(afterDelete.slice(3).every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>!c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
 
  } finally {await browserSession.context.close();}
  // Equal timestamps still paginate by immutable request identity, without loss.
