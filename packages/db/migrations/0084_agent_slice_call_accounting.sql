@@ -63,7 +63,11 @@ BEGIN
     VALUES(e.conversation_id,p_actor_id,c.id::text,c.quote->>'providerModel',CASE WHEN c.evidence->>'outcome'='truncated' THEN 'failed' ELSE 'success' END,jsonb_build_object('executionId',e.request_id,'callId',c.id,'finishReason',c.evidence->'finishReason'));
    UPDATE agent_slice_calls SET state='settled' WHERE id=c.id RETURNING * INTO c;
   ELSIF p_action='unknown' THEN
-   IF c.state='dispatched' AND c.dispatch_token=(p_payload->>'token')::uuid THEN UPDATE agent_slice_calls SET state='unknown' WHERE id=c.id RETURNING * INTO c; END IF;
+   IF c.state='dispatched' AND c.dispatch_token=(p_payload->>'token')::uuid THEN
+    ev:=p_payload->'observation';
+    IF ev IS NOT NULL AND (jsonb_typeof(ev) IS DISTINCT FROM 'object' OR (ev-'providerId'-'finishReason'-'inputTokens'-'outputTokens'-'usageEvidence')<>'{}') THEN RAISE EXCEPTION 'slice observation invalid'; END IF;
+    UPDATE agent_slice_calls SET state='unknown',evidence=ev WHERE id=c.id RETURNING * INTO c;
+   END IF;
   ELSIF p_action='refund' AND c.state<>'refunded' THEN
    IF c.state<>'prepared' OR c.dispatch_token IS DISTINCT FROM (p_payload->>'token')::uuid THEN RAISE EXCEPTION 'slice refund denied'; END IF;
    PERFORM atomic_refund(p_actor_id,c.pre_deduct_id,'Skill call not dispatched');
@@ -85,6 +89,10 @@ BEGIN
    seq:=(p_payload->>'sequence')::integer;
    IF c.id IS NOT NULL THEN
     IF c.sequence IS DISTINCT FROM seq OR c.quote IS DISTINCT FROM p_payload->'quote' THEN RAISE EXCEPTION 'slice call conflict'; END IF;
+    IF c.state='prepared' THEN
+     UPDATE agent_slice_calls SET dispatch_token=token WHERE id=c.id RETURNING * INTO c;
+     RETURN jsonb_build_object('callId',c.id,'state',c.state,'token',token);
+    END IF;
     RETURN jsonb_build_object('callId',c.id,'state',c.state);
    END IF;
    IF (seq BETWEEN 1 AND 2) IS DISTINCT FROM true OR EXISTS(SELECT 1 FROM agent_slice_calls WHERE execution_id=e.request_id AND state<>'settled')

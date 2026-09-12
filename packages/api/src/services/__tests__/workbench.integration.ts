@@ -4391,8 +4391,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-flash','Synthetic slice model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[sliceModel]);
  await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
  await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
- const begin=async(projectId:string,roundId:string,requestId:string,body:string)=>{
-  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits:50,body,preferenceRefs:[]}});
+ const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50)=>{
+  const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs:[]}});
   if(result.error)throw result.error;return result.data;
  };
  const a=randomUUID(),b=randomUUID(),t=randomUUID();
@@ -4410,8 +4410,36 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const titleRequest=randomUUID();
  expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
  await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();
+ const {sliceAccounting}=await import('../agentSlice/accounting');
+ const {runSkillSlice}=await import('../agentSlice/runner');
+ const sdkRequest=randomUUID();await begin(t,t,sdkRequest,'读取 A1 后拟标题',100000);
+ await sql.query('update profiles set credits=100000 where id=$1',[actor]);
+ const modelRow=(await sql.query('select * from ai_models where id=$1',[sliceModel])).rows[0];
+ const accounting=sliceAccounting(user,db,sdkRequest,modelRow);
+ let providerCalls=0;
+ const sdkInput={model:modelRow.model_id,apiKey:'SYNTHETIC_ONLY',instructions:'Synthetic title BETA: numbered titles only.',input:'读取所选成果并拟标题。',maxOutputTokens:100,readArtifact:reader,...accounting};
+ const fakeProvider=async(_url:unknown,init?:RequestInit)=>{
+  providerCalls++;const request=JSON.parse(String(init?.body));
+  if(providerCalls===2)expect(JSON.stringify(request.messages)).toContain('A1');
+  const message=providerCalls===1?{role:'assistant',content:null,tool_calls:[{id:'fixed-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:'1. Synthetic title from A1'};
+  return new Response(JSON.stringify({id:'synthetic-'+providerCalls,object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:providerCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
+ };
+ expect((await runSkillSlice(sdkInput,fakeProvider)).body).toContain('title from A1');
+ expect(providerCalls).toBe(2);
+ expect((await accounting.recover()).map(c=>c.state)).toEqual(['settled','settled']);
+ await expect(runSkillSlice(sdkInput,fakeProvider)).rejects.toThrow();expect(providerCalls).toBe(2);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
+ const unknownRequest=randomUUID();await begin(t,t,unknownRequest,'测试缺失用量',100000);
+ const unknownAccounting=sliceAccounting(user,db,unknownRequest,modelRow);let unknownCalls=0;
+ const missingUsage=async()=>{unknownCalls++;return new Response(JSON.stringify({id:'synthetic-missing-usage',object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Not a verified completion'}}]}),{headers:{'content-type':'application/json'}});};
+ await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();
+ expect((await unknownAccounting.recover()).map(c=>c.state)).toEqual(['unknown']);
+ await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();expect(unknownCalls).toBe(1);
+ const observation=(await sql.query('select evidence from agent_slice_calls where execution_id=$1',[unknownRequest])).rows[0].evidence;
+ expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
+ const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
  const callId=randomUUID();
- await sql.query('update profiles set credits=100 where id=$1',[actor]);
  const call=async(action:string,payload:Record<string,unknown>={})=>{
   const result=await db.rpc('agent_slice_call',{p_actor_id:actor,p_execution_id:titleRequest,p_call_id:callId,p_action:action,p_payload:payload});
   if(result.error)throw result.error;return result.data;
@@ -4419,7 +4447,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const callQuote={modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20};
  const claim=await call('prepare',{sequence:1,quote:callQuote});
  expect(claim.state).toBe('prepared');
- expect((await call('prepare',{sequence:1,quote:callQuote})).state).toBe('prepared');
+ const reclaimed=await call('prepare',{sequence:1,quote:callQuote});expect(reclaimed.state).toBe('prepared');
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:false});
+ claim.token=reclaimed.token;
  await expect(call('prepare',{sequence:1,quote:{...callQuote,reservedCredits:21}})).rejects.toBeDefined();
  expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:true});
  expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:false});
@@ -4453,7 +4483,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await call('evidence',{token:claim.token,evidence:financial});
  expect((await call('settle')).state).toBe('settled');
  expect((await call('settle')).state).toBe('settled');
- expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(93);
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(beforeManual-7);
  expect((await sql.query("SELECT count(*)::int n FROM credit_transactions WHERE idempotency_key=$1",['agent_slice_call:'+callId])).rows[0].n).toBe(1);
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'callId'=$1",[callId])).rows[0].n).toBe(1);
  expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
