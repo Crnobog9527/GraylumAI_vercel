@@ -532,7 +532,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE !== "restore")(
     const { page, context } = await pageFor();
     await quiet(page);
     const catalogCheck=await db.rpc('artifact_query',{p_actor_id:actor,p_action:'catalog'});
-    expect(catalogCheck.error, 'restore catalog must be readable').toBeNull();
+    if (catalogCheck.error) {
+      expect(catalogCheck.error.message).toBe('registry capacity');
+      expect(Number((await sql.query('select count(*) n from artifact_workflows where enabled')).rows[0].n)).toBeGreaterThan(100);
+      await expect.poll(()=>page.getByText('新建项目目录暂时不可用，已保存的项目仍可打开。').isVisible()).toBe(true);
+    }
     const saved = JSON.parse(readFileSync(output + "/restore.json", "utf8"));
     for (const f of fixtures) {
       const expected = saved.expectedSnapshots.find(
@@ -4410,6 +4414,19 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const [bound,replay]=await Promise.all([links.link(bind),links.link(bind)]);expect(bound).toEqual(replay);
  await expect(links.link({...bind,requestId:randomUUID()})).rejects.toThrow();
  const reader=await links.reader({projectId:t,roundId:t});expect(await reader()).toContain('A1');
+ const {workbenchGeneration}=await import('../artifacts/generation');
+ let legacyCalls=0;
+ const legacy=workbenchGeneration(user,db,async()=>{legacyCalls++;throw new Error('legacy must not dispatch');});
+ const linkedState=await service.read(t,t);
+ const legacyInput={projectId:t,roundId:t,stepId:'step-0',instruction:'标题',expectedSteps:Object.fromEntries(Object.entries(linkedState.steps).map(([key,value])=>[key,{version:value.version,reviewVersion:value.reviewVersion}]))};
+ await expect(legacy.quote(legacyInput)).rejects.toThrow('连续创作');
+ const legacyRequest=randomUUID();
+ const forbiddenPrepare=await db.rpc('artifact_generation',{p_actor_id:actor,p_project_id:t,p_round_id:t,p_action:'prepare',p_request_id:legacyRequest,p_payload:{}});
+ expect(forbiddenPrepare.error?.message).toContain('连续创作');
+ expect(Number((await sql.query('select count(*) n from artifact_generations where request_id=$1',[legacyRequest])).rows[0].n)).toBe(0);
+ expect(legacyCalls).toBe(0);
+ const unlinkedBoundary=await db.rpc('agent_slice_assert_legacy_generation',{p_actor_id:actor,p_project_id:b,p_round_id:b});
+ expect(unlinkedBoundary.error).toBeNull();
  const titleRequest=randomUUID();
  expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
  await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();

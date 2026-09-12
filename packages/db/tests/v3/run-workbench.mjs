@@ -246,6 +246,8 @@ try {
   apply("packages/db/migrations/0099_agent_slice_rejected_result_usage.sql");
   apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
   apply("packages/db/migrations/0100_artifact_reference_revision_isolation.sql");
+  apply("packages/db/migrations/0101_agent_slice_legacy_generation_boundary.sql");
+  apply("packages/db/migrations/0101_agent_slice_legacy_generation_boundary.sql");
 
 
   console.log("SQL additive migration and repeat application PASS");

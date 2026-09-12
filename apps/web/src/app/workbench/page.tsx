@@ -32,6 +32,7 @@ const label = "text-sm text-zinc-400";
 const id = () => crypto.randomUUID();
 export default function WorkbenchPage() {
   const api = trpc.useUtils().client.workbench;
+  const [catalogError, setCatalogError] = useState("");
   const [catalog, setCatalog] = useState<Catalog>([]),
     [projects, setProjects] = useState<ArtifactProject[]>([]),
     [rounds, setRounds] = useState<ArtifactRound[]>([]);
@@ -70,16 +71,20 @@ export default function WorkbenchPage() {
   const currentProject = projects.find(
     (p) => p.projectId === snapshot?.projectId,
   );
-  async function discover() {
-    const [c, p] = await Promise.all([
+  async function discover(allowPartialCatalog = false) {
+    const [c, p] = await Promise.allSettled([
       api.catalog.query(),
       api.projects.query(),
     ]);
-    return { catalog: c, projects: p };
+    if (p.status === "rejected") throw p.reason;
+    if (c.status === "rejected" && !allowPartialCatalog) throw c.reason;
+    return { catalog: c.status === "fulfilled" ? c.value : [], projects: p.value,
+      catalogError: c.status === "rejected" ? "新建项目目录暂时不可用，已保存的项目仍可打开。" : "" };
   }
   function applyDiscovery(result: Awaited<ReturnType<typeof discover>>) {
     setCatalog(result.catalog);
     setProjects(result.projects);
+    setCatalogError(result.catalogError);
   }
   async function readProject(projectId: string, roundId?: string) {
     const history = await api.rounds.query({ projectId });
@@ -151,7 +156,7 @@ export default function WorkbenchPage() {
   }
   useEffect(() => {
     void run(async () => {
-      const result = await discover();
+      const result = await discover(true);
       applyDiscovery(result);
       if (result.projects.length) await load(result.projects[0].projectId);
     });
@@ -430,6 +435,7 @@ export default function WorkbenchPage() {
         </div>
         {snapshot && currentProject?.workKind === "script" && <WorkSource projectId={snapshot.projectId} roundId={snapshot.roundId} title={currentProject.title} canRevise={!busy && !unsaved && snapshot.state === "published" && !rounds.some(r=>r.state === "draft")} onRevised={async roundId=>{await load(snapshot.projectId,roundId);applyDiscovery(await discover());}}/> }
         {snapshot && <Button className="mb-5" disabled={busy || unsaved} onClick={() => { const selected=snapshot; const requestId=crypto.randomUUID(); void run(async()=>{ const binding=await api.chatEnter.mutate({projectId:selected.projectId,roundId:selected.roundId,requestId});window.location.assign(`/chat?conversation=${binding.conversationId}`); }); }}>在聊天中继续此轮次</Button>}
+        {catalogError && <p role="status" className="mb-4 text-sm text-amber-300">{catalogError}</p>}
         {error && (
           <div
             role="alert"

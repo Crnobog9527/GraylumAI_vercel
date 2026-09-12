@@ -139,6 +139,12 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
   }
   async function prepare(input: z.infer<typeof generationQuoteInput>) {
     const v = generationQuoteInput.parse(input), id = await actor();
+    const legacyBoundary = await privateClient!.rpc('agent_slice_assert_legacy_generation', {
+      p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId,
+    }).abortSignal(AbortSignal.timeout(10000));
+    if (legacyBoundary.error) throw new Error(legacyBoundary.error.code === '42501'
+      ? 'ARTIFACT_DENIED' : legacyBoundary.error.message === '请在连续创作对话中继续此作品，以保留已选择的来源。'
+        ? legacyBoundary.error.message : 'GENERATION_UNAVAILABLE');
     const [flag, fixed] = await Promise.all([
       privateClient!.from('system_settings').select('value').eq('key', 'v3_workbench_ai').single(),
       privateClient!.rpc('artifact_query', { p_actor_id: id, p_project_id: v.projectId, p_round_id: v.roundId, p_action: 'resolve' }),
