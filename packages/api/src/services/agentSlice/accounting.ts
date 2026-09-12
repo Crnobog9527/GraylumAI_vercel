@@ -13,14 +13,14 @@ async function bounded<T>(promise:PromiseLike<T>):Promise<T>{
  let timer:ReturnType<typeof setTimeout>|undefined;
  return Promise.race([Promise.resolve(promise),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('SLICE_UNAVAILABLE')),10000);})]).finally(()=>clearTimeout(timer));
 }
-export function sliceCallId(executionId:string,sequence:number,phase:'reply'|'summary'='reply'){
+export function sliceCallId(executionId:string,sequence:number,phase:'reply'|'summary'='reply',checkFinal?:(body:string)=>string){
  z.string().uuid().parse(executionId);z.number().int().min(1).max(2).parse(sequence);
  const b=createHash('sha256').update(phase==='reply'?`graylum-slice-call:${executionId}:${sequence}`:`graylum-slice-summary:${executionId}:${sequence}`).digest().subarray(0,16);b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;
  const s=b.toString('hex');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`;
 }
 
 /** Private service adapter. No quote, model credential or dispatch token is public input. */
-export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executionId:string,configuredModel:unknown,phase:'reply'|'summary'='reply'){
+export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executionId:string,configuredModel:unknown,phase:'reply'|'summary'='reply',checkFinal?:(body:string)=>string){
  const model=workbenchModelSchema.parse(configuredModel);
  if(/(^openai\/|gpt)/i.test(model.model_id))throw new Error('SLICE_MODEL_DENIED');
  const owned=new Map<number,{token:string;quote:Awaited<ReturnType<typeof quote>>}>();
@@ -61,7 +61,7 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
    const dispatched=await call(sequence,'dispatch',{token:prepared.token});
    if(dispatched?.dispatch!==true)throw new Error('SLICE_ALREADY_STARTED');
   },
-  async recordCall(e:CallEvidence){
+  async recordCall(e:CallEvidence,finalBody?:string){
    const own=owned.get(e.sequence);if(!own)throw new Error('SLICE_CALL_CONFLICT');
    if(e.state==='unknown'||e.inputTokens===null||e.outputTokens===null||e.inputTokens>own.quote.inputTokens||e.outputTokens>own.quote.maxTokens){
     await call(e.sequence,'unknown',{token:own.token,observation:{providerId:e.providerId,finishReason:e.finishReason,inputTokens:e.inputTokens,outputTokens:e.outputTokens,usageEvidence:e.usageEvidence}});
@@ -73,10 +73,25 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
    const cost=calculateTokenCostWithPricing({inputTokens:e.inputTokens,outputTokens:e.outputTokens,cacheReadTokens:0,cacheCreationTokens:0},own.quote.pricing,{},own.quote.settings);
    const evidence={providerId:e.providerId,finishReason:e.finishReason,inputTokens:e.inputTokens,outputTokens:e.outputTokens,cacheReadTokens:0,cacheCreationTokens:0,
     credits:Math.min(cost.credits,own.quote.reservedCredits),costUsd:cost.costUsd,outcome:e.state,usageEvidence:e.usageEvidence};
-   await call(e.sequence,'evidence',{token:own.token,evidence});
+   let body:string|undefined,rejected=false;
+   if(finalBody!==undefined&&checkFinal){try{body=checkFinal(finalBody);}catch{rejected=true;}}
+   if(body!==undefined){
+    const args={p_actor_id:await actor(),p_execution_id:executionId,p_call_id:sliceCallId(executionId,e.sequence,phase),p_phase:phase,p_payload:{token:own.token,evidence},p_body:body};
+    const save=()=>admin.rpc('agent_slice_record_final',args).abortSignal(AbortSignal.timeout(10000));
+    const saved=await save();
+    if(saved.error){
+     // Inspect the original identity after an ambiguous commit before retrying.
+     const result=await admin.rpc('agent_slice_result',{p_actor_id:args.p_actor_id,p_execution_id:executionId,p_phase:phase,p_action:'read'}).abortSignal(AbortSignal.timeout(10000));
+     if(result.error)throw new Error('SLICE_UNAVAILABLE');
+     if(result.data?.state==='saved'){/* The original commit succeeded. */}
+     else if(result.data?.state==='restricted'){await call(e.sequence,'evidence',{token:own.token,evidence});}
+     else {const status=state.parse(await call(e.sequence,'get'));if(status.state!=='dispatched')throw new Error('SLICE_CALL_CONFLICT');const retried=await save();if(retried.error)throw new Error('SLICE_UNAVAILABLE');}
+    }
+   }else await call(e.sequence,'evidence',{token:own.token,evidence});
    // The trusted usage receipt is durable. Failure of this auxiliary settlement
    // must not discard a complete answer; recovery reads the original call.
    try { await call(e.sequence,'settle'); } catch { /* remains responded until read-back */ }
+   if(rejected)throw new Error('SLICE_OUTPUT_RESTRICTED');
   },
   async recover(){
    const statuses=[];

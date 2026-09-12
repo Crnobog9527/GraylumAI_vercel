@@ -4504,6 +4504,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
  await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
  const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();
+ await sql.query("update agent_slice_calls set dispatched_at=clock_timestamp()-interval '3 minutes' where execution_id=$1",[unknownRequest]);
+ expect(await sliceExecutor(user,db,missingUsage).execute({executionId:unknownRequest,phase:'reply'})).toEqual({state:'unavailable',reason:'outcome_unknown'});expect(unknownCalls).toBe(1);
+
  const {sliceAdmission}=await import('../agentSlice/admission');const admission=sliceAdmission(user,db);
  const {sliceEntry}=await import('../agentSlice/entry');const entry=sliceEntry(user,db);const newConversation=randomUUID();
  expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});expect(await entry.open({requestId:newConversation})).toEqual({conversationId:newConversation});
@@ -4529,11 +4532,25 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   const msg=joinedCalls===1?{role:'assistant',content:null,tool_calls:[{id:'joined-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:joinedCalls===2?'Joined title':'Saved joined title'};
   return new Response(JSON.stringify({id:'joined-'+joinedCalls,object:'chat.completion',created:1,model:req.model,choices:[{index:0,finish_reason:joinedCalls===1?'tool_calls':'stop',message:msg}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
  };
- const executor=sliceExecutor(user,db,joinedTransport);
+ // Non-transactional sequence makes exactly the first candidate INSERT fail.
+ // This tests rollback of both usage evidence and candidate, not an HTTP-only mock.
+ await sql.query("create sequence slice_final_fault; create function slice_final_fault_once() returns trigger language plpgsql as $$ begin if NEW.body='Joined title' and nextval('slice_final_fault')=1 then raise exception 'synthetic candidate unavailable'; end if; return NEW; end $$; create trigger slice_final_fault before insert on artifact_candidates for each row execute function slice_final_fault_once()");
+ let lostFinalAcknowledgement=0;
+ const finalAdmin=new Proxy(db,{get(target,key){if(key==='rpc')return(name:string,args:any)=>{
+  if(name==='agent_slice_record_final'&&args.p_execution_id===joinedRequest&&args.p_phase==='summary')return {abortSignal:async(signal:AbortSignal)=>{const response=await target.rpc(name,args).abortSignal(signal);if(!response.error&&lostFinalAcknowledgement++===0)return {...response,error:{code:'TEST_LOST_ACK'},data:null};return response;}};
+  return target.rpc(name,args);
+ };return Reflect.get(target,key);}});
+ const executor=sliceExecutor(user,finalAdmin,joinedTransport);
  const joinedReply=await executor.execute({executionId:joinedRequest,phase:'reply'});expect(joinedReply).toMatchObject({state:'saved',body:'Joined title'});
  expect(await executor.execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(2);
  const joinedSummary=await executor.execute({executionId:joinedRequest,phase:'summary'});expect(joinedSummary).toMatchObject({state:'saved',body:'Saved joined title'});
  expect(await executor.execute({executionId:joinedRequest,phase:'summary'})).toEqual(joinedSummary);expect(joinedCalls).toBe(3);
+ expect(lostFinalAcknowledgement).toBe(1);
+ expect(Number((await sql.query('select last_value from slice_final_fault')).rows[0].last_value)).toBe(2);
+ await sql.query('drop trigger slice_final_fault on artifact_candidates; drop function slice_final_fault_once(); drop sequence slice_final_fault');
+ // Recreate the service after committed output; no SDK/provider work is repeated.
+ expect(await sliceExecutor(user,db,joinedTransport).execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(3);
+
  const {readSliceConversation}=await import('../agentSlice/conversation');
  const historyInput={conversationId:conversation,limit:2};
  const firstPage=await readSliceConversation(user,db,historyInput);

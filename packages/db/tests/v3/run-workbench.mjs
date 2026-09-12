@@ -234,6 +234,10 @@ try {
   apply("packages/db/migrations/0093_agent_slice_sources.sql");
   apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
   apply("packages/db/migrations/0094_agent_slice_discussion_context.sql");
+  apply("packages/db/migrations/0095_agent_slice_final_commit.sql");
+  apply("packages/db/migrations/0095_agent_slice_final_commit.sql");
+  apply("packages/db/migrations/0096_agent_slice_bounded_unavailable.sql");
+  apply("packages/db/migrations/0096_agent_slice_bounded_unavailable.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

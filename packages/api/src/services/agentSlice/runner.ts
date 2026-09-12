@@ -23,7 +23,7 @@ export type SliceRunInput = {
   maxOutputTokens: number;
   /** Must durably claim this exact call and validate the frozen budget before dispatch. */
   beforeCall: (sequence: number, request: unknown) => Promise<void>;
-  recordCall: (evidence: CallEvidence) => Promise<void>;
+  recordCall: (evidence: CallEvidence, finalBody?:string) => Promise<void>;
   /** Bound by the service to one explicitly selected, fixed artifact identity. */
   readArtifact?: () => Promise<string>;
   requireArtifact?: boolean;
@@ -86,7 +86,9 @@ export async function runSkillSlice(input: SliceRunInput, transport: typeof fetc
       }
       item.state = 'responded';
       recorded = true;
-      await input.recordCall(item); evidence.push(item);
+      const final=raw.choices[0].message;
+      const finalBody=item.finishReason==='stop'&&final?.role==='assistant'&&typeof final.content==='string'&&!final.tool_calls?.length&&(!input.requireArtifact||toolCalls===1)?final.content:undefined;
+      await input.recordCall(item,finalBody); evidence.push(item);
       return new Response(rawText, { status: response.status, headers: {'content-type':'application/json'} });
     } catch (error) {
       // A transport or persistence failure never triggers a second provider attempt.
