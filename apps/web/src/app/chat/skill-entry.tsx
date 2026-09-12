@@ -7,6 +7,7 @@ import { trpc } from "@/trpc/client";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { Button } from "@/components/ui/button";
+import { AgentSliceConversation } from "./agent-slice-conversation";
 import { SkillConversation } from "./skill-conversation";
 import { StandardConversation } from "./standard-conversation";
 export function ChatEntry() {
@@ -64,6 +65,7 @@ export function ChatEntry() {
   if (ownedOrdinary && conversationId === ownedOrdinary.id)
     return <StandardConversation key={ownedOrdinary.key} moduleId={ownedOrdinary.moduleId}
       initialConversationId={ownedOrdinary.id} navigate={navigate} onCreated={persistOrdinary} />;
+  if (conversationId && params.get("mode") === "agent-slice") return <AgentSliceConversation key={conversationId} conversationId={conversationId} navigate={navigate} />;
   if (conversationId) {
     if (location.isPending) return <PreparingConversation navigate={navigate} />;
     if (location.error || !conversation)

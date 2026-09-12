@@ -224,6 +224,8 @@ try {
   apply("packages/db/migrations/0088_agent_slice_selected_source.sql");
   apply("packages/db/migrations/0089_agent_slice_admission_replay.sql");
   apply("packages/db/migrations/0089_agent_slice_admission_replay.sql");
+  apply("packages/db/migrations/0090_agent_slice_conversation.sql");
+  apply("packages/db/migrations/0090_agent_slice_conversation.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

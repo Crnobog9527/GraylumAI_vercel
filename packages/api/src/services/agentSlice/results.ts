@@ -5,7 +5,7 @@ import {isEmailVerified} from '../../lib/auth';
 import {filterAIOutput} from '../aiOutputFilter';
 import {echoesPrivateMethod} from '../artifacts/generation';
 const scope=z.object({executionId:z.string().uuid(),phase:z.enum(['reply','summary'])}).strict();
-const result=z.discriminatedUnion('state',[
+export const sliceResultSchema=z.discriminatedUnion('state',[
  z.object({state:z.literal('pending')}),z.object({state:z.literal('restricted')}),
  z.object({state:z.literal('saved'),candidateId:z.string().uuid(),body:z.string(),projectId:z.string().uuid(),roundId:z.string().uuid(),stepId:z.string(),adoptable:z.boolean()}),
 ]);
@@ -17,7 +17,7 @@ export function sliceResults(user:SupabaseClient,admin:SupabaseClient){
   if(auth.error||!auth.data.user||!isEmailVerified(auth.data.user))throw new Error('SLICE_DENIED');
   const response=await admin.rpc('agent_slice_result',{p_actor_id:auth.data.user.id,p_execution_id:v.executionId,p_phase:v.phase,p_action:action,p_body:body??null}).abortSignal(AbortSignal.timeout(10000));
   if(response.error)throw new Error(response.error.code==='42501'?'SLICE_DENIED':'SLICE_RESULT_CONFLICT');
-  return result.parse(response.data);
+  return sliceResultSchema.parse(response.data);
  }
  return {
   read:(input:z.infer<typeof scope>)=>call(input,'read'),

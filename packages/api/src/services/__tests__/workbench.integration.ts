@@ -4519,14 +4519,39 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(await executor.execute({executionId:joinedRequest,phase:'reply'})).toEqual(joinedReply);expect(joinedCalls).toBe(2);
  const joinedSummary=await executor.execute({executionId:joinedRequest,phase:'summary'});expect(joinedSummary).toMatchObject({state:'saved',body:'Saved joined title'});
  expect(await executor.execute({executionId:joinedRequest,phase:'summary'})).toEqual(joinedSummary);expect(joinedCalls).toBe(3);
+ const {readSliceConversation}=await import('../agentSlice/conversation');
+ const historyInput={conversationId:conversation,limit:2};
+ const firstPage=await readSliceConversation(user,db,historyInput);
+ expect(firstPage.items.length).toBe(2);expect(firstPage.nextCursor).not.toBeNull();
+ const allHistory=[...firstPage.items];let historyCursor=firstPage.nextCursor;
+ while(historyCursor){const next=await readSliceConversation(user,db,{...historyInput,before:historyCursor});allHistory.push(...next.items);historyCursor=next.nextCursor;}
+ expect(new Set(allHistory.map(x=>x.executionId)).size).toBe(allHistory.length);
+ expect(allHistory.find(x=>x.executionId===joinedRequest)?.reply).toMatchObject({state:'saved',body:'Joined title'});
+ expect(allHistory.some(x=>x.projectId===t)).toBe(true);
+ expect(joinedCalls).toBe(3);
  const browserSession=await pageFor();
  try {
+  const httpHistory=await browserSession.page.request.get(app+'/api/trpc/agentSlice.conversation',{params:{input:JSON.stringify({conversationId:conversation})}});
+  expect(httpHistory.status()).toBe(200);expect(await httpHistory.text()).toContain('Joined title');
   const httpBegin=await browserSession.page.request.post(app+'/api/trpc/agentSlice.begin',{data:admissionInput});expect(httpBegin.status()).toBe(200);expect(await httpBegin.text()).toContain(joinedRequest);
   const httpRead=await browserSession.page.request.get(app+'/api/trpc/agentSlice.result',{params:{input:JSON.stringify({executionId:joinedRequest,phase:'summary'})}});
   expect(httpRead.status()).toBe(200);expect(await httpRead.text()).toContain('Saved joined title');
   const httpReplay=await browserSession.page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:joinedRequest,phase:'summary'}});
   expect(httpReplay.status()).toBe(200);expect(await httpReplay.text()).toContain('Saved joined title');expect(joinedCalls).toBe(3);
+  await browserSession.page.goto(app+'/chat?mode=agent-slice&conversation='+conversation);
+  await browserSession.page.getByRole('main',{name:'双 Skill 对话'}).waitFor();
+  await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
+  await browserSession.page.reload();await browserSession.page.getByText('Joined title',{exact:true}).waitFor();
+  expect(joinedCalls).toBe(3);
  } finally {await browserSession.context.close();}
+ // Equal timestamps still paginate by immutable request identity, without loss.
+ const tieIds=[randomUUID(),randomUUID(),randomUUID()].sort().reverse();
+ for(const tieId of tieIds){
+  await sql.query("insert into artifact_requests select (jsonb_populate_record(null::artifact_requests,to_jsonb(q)||jsonb_build_object('request_id',$2::text))).* from artifact_requests q where request_id=$1",[joinedRequest,tieId]);
+  await sql.query("insert into agent_slice_executions select (jsonb_populate_record(null::agent_slice_executions,to_jsonb(e)||jsonb_build_object('request_id',$2::text,'created_at','2030-01-01T00:00:00Z'))).* from agent_slice_executions e where request_id=$1",[joinedRequest,tieId]);
+ }
+ const tiePage=await readSliceConversation(user,db,{conversationId:conversation,limit:2});expect(tiePage.items.map(x=>x.executionId)).toEqual(tieIds.slice(0,2));
+ const tieNext=await readSliceConversation(user,db,{conversationId:conversation,limit:2,before:tiePage.nextCursor!});expect(tieNext.items[0].executionId).toBe(tieIds[2]);
  const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
  const callId=randomUUID();
  const call=async(action:string,payload:Record<string,unknown>={})=>{
@@ -4555,6 +4580,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
  await links.link({projectId:a,roundId:a2,sourceVersionId:tv1.id!,pairId:'slice-pair',requestId:randomUUID()});
  const revisionRequest=randomUUID();await begin(a,a2,revisionRequest,'采用标题修改 A');
+ const switchedHistory=await readSliceConversation(user,db,{conversationId:conversation});expect(switchedHistory.items.some(x=>x.projectId===a)).toBe(true);expect(switchedHistory.items.some(x=>x.projectId===t)).toBe(true);
  const switched=await loadSliceContext(user,db,revisionRequest);expect(switched.loaded.forModel()).toContain('ALPHA');expect(switched.loaded.forModel()).not.toContain('BETA');
  const frozen=(await sql.query('SELECT conversation_id,project_id,round_id,revision_id FROM agent_slice_executions WHERE request_id=ANY($1::uuid[]) ORDER BY created_at',[[titleRequest,revisionRequest]])).rows;
  expect(frozen).toEqual([
@@ -4567,10 +4593,14 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const otherUser=await newUser(),other=await authenticated(otherUser);
  await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
  await expect(sliceResults(other,db).read(replyScope)).rejects.toThrow('SLICE_DENIED');
+ await expect(readSliceConversation(other,db,historyInput)).rejects.toThrow('SLICE_DENIED');
  await expect(loadSliceContext(other,db,revisionRequest)).rejects.toThrow('SLICE_DENIED');
  expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
  await expect(reader()).rejects.toThrow();
+ const restrictedHistory=await readSliceConversation(user,db,{conversationId:conversation});
+ expect(restrictedHistory.items.find(x=>x.executionId===joinedRequest)).toMatchObject({input:null,reply:{state:'restricted'},summary:{state:'restricted'}});
+ expect(JSON.stringify(restrictedHistory)).not.toContain('Joined title');
  expect(await results.read(replyScope)).toEqual({state:'restricted'});expect(await results.read(summaryScope)).toEqual({state:'restricted'});
  expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual({state:'restricted'});
  expect((await recoverSlice(user,db,{executionId:joinedRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(joinedCalls).toBe(3);

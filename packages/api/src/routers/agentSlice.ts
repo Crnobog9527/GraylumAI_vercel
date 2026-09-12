@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {readSliceConversation,sliceConversationInput} from '../services/agentSlice/conversation';
 import {TRPCError} from '@trpc/server';
 import {protectedProcedure, router} from '../trpc';
 import {confirmedPreferences, preferenceScope, preferenceChange} from '../services/agentSlice/preferences';
@@ -24,6 +25,10 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
  return result;
 });
 export const agentSliceRouter=router({
+ conversation:procedure.input(sliceConversationInput).query(({ctx,input})=>{
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
+  return readSliceConversation(ctx.userScopedSupabase,ctx.supabaseAdmin,input);
+ }),
  recover:procedure.input(sliceRecoveryInput).mutation(({ctx,input})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
   return recoverSlice(ctx.userScopedSupabase,ctx.supabaseAdmin,input);
