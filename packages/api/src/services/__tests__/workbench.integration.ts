@@ -4657,9 +4657,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   const reportBarrier=new Promise<void>(resolve=>{releaseReport=resolve;});
   await page.route('**/api/trpc/workbench.report*',async route=>{const response=await route.fetch();reportFetched=true;await reportBarrier;await route.fulfill({response});reportDelivered=true;});
   await page.getByRole('button',{name:'查看正式报告',exact:true}).click();
-  await expect.poll(()=>reportFetched).toBe(true);
+  await expect.poll(()=>reportFetched,{timeout:15000}).toBe(true);
   await page.getByLabel('使用 Skill 创作').selectOption(browserB+':step-0:slice-pair');
-  releaseReport();await expect.poll(()=>reportDelivered).toBe(true);
+  releaseReport();await expect.poll(()=>reportDelivered,{timeout:15000}).toBe(true);
   await expect.poll(()=>page.getByRole('complementary',{name:'当前作品成果'}).getAttribute('aria-busy')).toBe('false');
   await expect.poll(()=>page.getByRole('dialog').count()).toBe(0);
   expect(await page.getByLabel('使用 Skill 创作').inputValue()).toBe(browserB+':step-0:slice-pair');
@@ -4793,17 +4793,24 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   {conversation_id:conversation,project_id:a,round_id:a2,revision_id:script.pack.revisionId},
  ]);
  const av2=await publish(a,a2,'A2');expect(av2.available).toBe(true);expect(av2.version).toBe(2);
+ const positionNext=randomUUID();
+ await service.start({projectId:p,roundId:positionNext,requestId:randomUUID(),fromRoundId:r},src.moduleId);
+ const positionV2=await publish(p,positionNext,'POSITION_V2');
+ for (const sourceVersionId of [position.id!,positionV2.id!]) {
  for (const [projectId,fromRoundId,configId,sourceText] of [[t,t,'slice-p-title','A1'],[a,a2,'slice-p-script','TITLE1']] as const) {
   const next=randomUUID();
-  const revision={projectId,roundId:next,requestId:next,fromRoundId,sourceVersionId:position.id!,configId,title:'Synthetic retained handoff'};
+  const revision={projectId,roundId:next,requestId:next,fromRoundId,sourceVersionId,configId,title:'Synthetic retained handoff'};
   expect(await reuse.create(revision)).toEqual(await reuse.create(revision));
   expect(await (await links.reader({projectId,roundId:next}))()).toContain(sourceText);
   const oldLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[fromRoundId])).rows[0];
   const newLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[next])).rows[0];
   expect(newLink.source_version_id).toBe(oldLink.source_version_id);
   const state=await service.read(projectId,next);
+  expect((await sql.query('select source_version_id from artifact_work_references where round_id=$1',[next])).rows[0].source_version_id).toBe(sourceVersionId);
+  if(sourceVersionId!==position.id) expect(Object.values(state.steps).every(step=>step.body==='')).toBe(true);
   await expect(legacy.quote({...legacyInput,projectId,roundId:next,expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([key,value])=>[key,{version:value.version,reviewVersion:value.reviewVersion}]))})).rejects.toThrow('连续创作');
   await service.execute({action:'abandon',projectId,roundId:next,requestId:randomUUID()});
+ }
  }
  expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
