@@ -212,6 +212,8 @@ try {
   apply("packages/db/migrations/0082_agent_slice_artifact_links.sql");
   apply("packages/db/migrations/0083_agent_slice_execution_identity.sql");
   apply("packages/db/migrations/0083_agent_slice_execution_identity.sql");
+  apply("packages/db/migrations/0084_agent_slice_call_accounting.sql");
+  apply("packages/db/migrations/0084_agent_slice_call_accounting.sql");
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",

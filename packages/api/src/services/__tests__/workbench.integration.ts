@@ -4387,6 +4387,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await sql.query('INSERT INTO artifact_reference_configs VALUES($1,$2,$3,$4,20000,true)',[id,src.registration,target.registration,JSON.stringify(['step-2'])]);
  await sql.query("INSERT INTO agent_slice_pairs VALUES('slice-pair',$1,$2,'[\"step-0\"]','[\"step-0\"]',20000,true)",[script.registration,title.registration]);
  const sliceModel=randomUUID(),conversation=randomUUID();
+ await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_workbench_ai','true') ON CONFLICT(key) DO UPDATE SET value='true'");
  await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-flash','Synthetic slice model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[sliceModel]);
  await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
  await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
@@ -4409,6 +4410,22 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const titleRequest=randomUUID();
  expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
  await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();
+ const callId=randomUUID();
+ await sql.query('update profiles set credits=100 where id=$1',[actor]);
+ const call=async(action:string,payload:Record<string,unknown>={})=>{
+  const result=await db.rpc('agent_slice_call',{p_actor_id:actor,p_execution_id:titleRequest,p_call_id:callId,p_action:action,p_payload:payload});
+  if(result.error)throw result.error;return result.data;
+ };
+ const callQuote={modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20};
+ const claim=await call('prepare',{sequence:1,quote:callQuote});
+ expect(claim.state).toBe('prepared');
+ expect((await call('prepare',{sequence:1,quote:callQuote})).state).toBe('prepared');
+ await expect(call('prepare',{sequence:1,quote:{...callQuote,reservedCredits:21}})).rejects.toBeDefined();
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:true});
+ expect(await call('dispatch',{token:claim.token})).toEqual({dispatch:false});
+ await call('unknown',{token:claim.token});
+ await expect(call('settle')).rejects.toBeDefined();
+ await expect(call('refund',{token:claim.token})).rejects.toBeDefined();
  const tv1=await publish(t,t,'TITLE1');
  const a2=randomUUID();
  await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
@@ -4430,6 +4447,17 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
  expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
+ // Source loss prevents fresh use, but does not erase a trusted monetary outcome.
+ const financial={providerId:'synthetic-call',finishReason:'length',inputTokens:100,outputTokens:20,cacheReadTokens:0,cacheCreationTokens:0,credits:7,costUsd:0.001,outcome:'truncated'};
+ await expect(call('evidence',{token:claim.token,evidence:{...financial,inputTokens:null}})).rejects.toBeDefined();
+ await call('evidence',{token:claim.token,evidence:financial});
+ expect((await call('settle')).state).toBe('settled');
+ expect((await call('settle')).state).toBe('settled');
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(93);
+ expect((await sql.query("SELECT count(*)::int n FROM credit_transactions WHERE idempotency_key=$1",['agent_slice_call:'+callId])).rows[0].n).toBe(1);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'callId'=$1",[callId])).rows[0].n).toBe(1);
+ expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
+ await expect(call('prepare',{sequence:1,quote:callQuote})).rejects.toBeDefined();
  expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
 },120000);
 
