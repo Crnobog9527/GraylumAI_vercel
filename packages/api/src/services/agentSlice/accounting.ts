@@ -13,7 +13,7 @@ async function bounded<T>(promise:PromiseLike<T>):Promise<T>{
  let timer:ReturnType<typeof setTimeout>|undefined;
  return Promise.race([Promise.resolve(promise),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('SLICE_UNAVAILABLE')),10000);})]).finally(()=>clearTimeout(timer));
 }
-export function sliceCallId(executionId:string,sequence:number,phase:'reply'|'summary'='reply',checkFinal?:(body:string)=>string){
+export function sliceCallId(executionId:string,sequence:number,phase:'reply'|'summary'='reply'){
  z.string().uuid().parse(executionId);z.number().int().min(1).max(2).parse(sequence);
  const b=createHash('sha256').update(phase==='reply'?`graylum-slice-call:${executionId}:${sequence}`:`graylum-slice-summary:${executionId}:${sequence}`).digest().subarray(0,16);b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;
  const s=b.toString('hex');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`;
@@ -92,15 +92,6 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
    // must not discard a complete answer; recovery reads the original call.
    try { await call(e.sequence,'settle'); } catch { /* remains responded until read-back */ }
    if(rejected)throw new Error('SLICE_OUTPUT_RESTRICTED');
-  },
-  async recover(){
-   const statuses=[];
-   for(let sequence=1;sequence<=(phase==='summary'?1:2);sequence++){
-    const current=await call(sequence,'get');if(!current)continue;
-    const row=state.parse(current);
-    statuses.push(row.state==='responded'?state.parse(await call(sequence,'settle')):row);
-   }
-   return statuses;
   },
  };
 }

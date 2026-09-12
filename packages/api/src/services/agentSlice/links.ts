@@ -2,8 +2,7 @@
 import {z} from 'zod';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {isEmailVerified} from '../../lib/auth';
-import {formalArtifactSelection,bindFormalArtifactReader} from './artifactReader';
-import {workbenchService} from '../artifacts/workbench';
+import {formalArtifactSelection} from './artifactReader';
 export const sliceLinkScope=z.object({projectId:z.string().uuid(),roundId:z.string().uuid()}).strict();
 export const sliceLinkInput=sliceLinkScope.extend({sourceVersionId:z.string().uuid(),pairId:z.string().regex(/^[a-z][a-z0-9_-]{0,99}$/),requestId:z.string().uuid()}).strict();
 export function sliceLinks(user:SupabaseClient,admin:SupabaseClient|null){
@@ -20,13 +19,5 @@ export function sliceLinks(user:SupabaseClient,admin:SupabaseClient|null){
  return {
   async link(input:z.infer<typeof sliceLinkInput>){const v=sliceLinkInput.parse(input);return z.object({evidenceId:z.string().uuid()}).parse(await call('agent_slice_link',v,{p_source_version_id:v.sourceVersionId,p_pair_id:v.pairId,p_request_id:v.requestId}));},
   read,
-  async reader(input:z.infer<typeof sliceLinkScope>){
-   const frozen=await read(input);
-   return async()=>{
-    const current=await read(input);
-    if(JSON.stringify(current)!==JSON.stringify(frozen))throw new Error('ARTIFACT_EVIDENCE_UNAVAILABLE');
-    return bindFormalArtifactReader(workbenchService(user,admin),frozen)();
-   };
-  },
  };
 }

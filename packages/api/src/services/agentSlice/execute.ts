@@ -2,15 +2,15 @@
 import {z} from 'zod';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {isEmailVerified} from '../../lib/auth';
-import {checkRateLimitAsync,checkInputSecurity} from '../../middleware/securityChecks';
+import {checkRateLimitAsync} from '../../middleware/securityChecks';
 import {buildWorkbenchMessages} from '../artifacts/generation';
 import {workbenchModelSchema} from '../artifacts/modelPolicy';
 import {loadSliceContext} from './context';
 import {sliceResults,checkedSliceOutput} from './results';
 import {sliceAccounting} from './accounting';
 import {runSkillSlice} from './runner';
+import {readSelectedArtifact} from './artifactReader';
 export const slicePhase=z.object({executionId:z.string().uuid(),phase:z.enum(['reply','summary'])}).strict();
-const source=z.object({kind:z.literal('formal_report'),version:z.number().int().positive(),sections:z.array(z.object({title:z.string(),body:z.string()})).min(1).max(32)});
 async function bounded<T>(value:PromiseLike<T>):Promise<T>{let timer:ReturnType<typeof setTimeout>|undefined;
  return Promise.race([Promise.resolve(value),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('SLICE_UNAVAILABLE')),10000);})]).finally(()=>clearTimeout(timer));}
 /** One existing execution phase. Caller cannot supply model, method, source or body. */
@@ -36,12 +36,7 @@ export function sliceExecutor(user:SupabaseClient,admin:SupabaseClient,transport
     const reply=await results.read({executionId:v.executionId,phase:'reply'});
     if(reply.state!=='saved')throw new Error('SLICE_REPLY_UNAVAILABLE');currentReply=reply.body;
    }
-   const readArtifact=async()=>{
-    const current=await bounded(user.auth.getUser());if(current.error||!current.data.user||!isEmailVerified(current.data.user))throw new Error('SLICE_DENIED');
-    const selected=await admin.rpc('agent_slice_selected_source',{p_actor_id:current.data.user.id,p_execution_id:v.executionId}).abortSignal(AbortSignal.timeout(10000));
-    if(selected.error)throw new Error('SLICE_SOURCE_UNAVAILABLE');
-    const body=JSON.stringify(source.parse(selected.data));checkInputSecurity(body);return body;
-   };
+   const readArtifact=()=>readSelectedArtifact(user,admin,v.executionId);
    const messages=buildWorkbenchMessages(method,{...data,currentReply},v.phase);
    // Keep the existing summary instructions. The reply gets one specifically
    // bound read tool instead of the legacy executor's blanket tool prohibition.

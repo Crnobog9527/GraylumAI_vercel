@@ -4413,7 +4413,9 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const bind={projectId:t,roundId:t,sourceVersionId:av1.id!,pairId:'slice-pair',requestId:randomUUID()};
  const [bound,replay]=await Promise.all([links.link(bind),links.link(bind)]);expect(bound).toEqual(replay);
  await expect(links.link({...bind,requestId:randomUUID()})).rejects.toThrow();
- const reader=await links.reader({projectId:t,roundId:t});expect(await reader()).toContain('A1');
+ const {readSelectedArtifact}=await import('../agentSlice/artifactReader');
+ const {recoverSlice}=await import('../agentSlice/recovery');
+ const {sliceResults,checkedSliceOutput}=await import('../agentSlice/results');
  const {workbenchGeneration}=await import('../artifacts/generation');
  let legacyCalls=0;
  const legacy=workbenchGeneration(user,db,async()=>{legacyCalls++;throw new Error('legacy must not dispatch');});
@@ -4429,13 +4431,14 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect(unlinkedBoundary.error).toBeNull();
  const titleRequest=randomUUID();
  expect(await begin(t,t,titleRequest,'为 A1 写标题')).toEqual(await begin(t,t,titleRequest,'为 A1 写标题'));
+ const reader=()=>readSelectedArtifact(user,db,titleRequest);expect(await reader()).toContain('A1');
  await expect(begin(b,b,titleRequest,'改为 B')).rejects.toBeDefined();
  const {sliceAccounting}=await import('../agentSlice/accounting');
  const {runSkillSlice}=await import('../agentSlice/runner');
  const sdkRequest=randomUUID();await begin(t,t,sdkRequest,'读取 A1 后拟标题',100000);
  await sql.query('update profiles set credits=100000 where id=$1',[actor]);
  const modelRow=(await sql.query('select * from ai_models where id=$1',[sliceModel])).rows[0];
- const accounting=sliceAccounting(user,db,sdkRequest,modelRow);
+ const accounting=sliceAccounting(user,db,sdkRequest,modelRow,'reply',body=>checkedSliceOutput(body,assembled.loaded.forModel()));
  const {loadSliceContext}=await import('../agentSlice/context');const assembled=await loadSliceContext(user,db,sdkRequest);
  expect(assembled.loaded.forModel()).toContain('BETA');expect(assembled.loaded.forModel()).not.toContain('ALPHA');
  const {confirmedPreferences}=await import('../agentSlice/preferences');const prefs=confirmedPreferences(user,db);
@@ -4458,17 +4461,17 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   return new Response(JSON.stringify({id:'synthetic-'+providerCalls,object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:providerCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
  };
  const sdkReply=await runSkillSlice(sdkInput,fakeProvider);expect(sdkReply.body).toContain('title from A1');
- const {sliceResults}=await import('../agentSlice/results');const results=sliceResults(user,db);
+ const results=sliceResults(user,db);
  const syntheticPrivate=assembled.loaded.forModel();
  const replyScope={executionId:sdkRequest,phase:'reply' as const};
- await expect(results.save(replyScope,JSON.parse(syntheticPrivate).resources[0].path,syntheticPrivate)).rejects.toThrow('SLICE_OUTPUT_RESTRICTED');
- const savedReply=await results.save(replyScope,sdkReply.body,syntheticPrivate);
- expect(savedReply.state).toBe('saved');expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual(savedReply);
+ expect(()=>checkedSliceOutput(JSON.parse(syntheticPrivate).resources[0].path,syntheticPrivate)).toThrow('SLICE_OUTPUT_RESTRICTED');
+ const savedReply=await results.read(replyScope);
+ expect(savedReply.state).toBe('saved');expect(await results.read(replyScope)).toEqual(savedReply);
  expect(await results.read(replyScope)).toEqual(savedReply);
  if(savedReply.state!=='saved')throw new Error('reply missing');
  await expect(service.execute({action:'saveCandidate',projectId:t,roundId:t,stepId:'step-0',candidateId:savedReply.candidateId,expectedVersion:(await service.read(t,t)).steps['step-0'].version,requestId:randomUUID(),body:savedReply.body})).rejects.toThrow();
  expect(providerCalls).toBe(2);
- expect((await accounting.recover()).map(c=>c.state)).toEqual(['settled','settled']);
+ expect((await recoverSlice(user,db,{executionId:sdkRequest})).calls.map(c=>c.state)).toEqual(['settled','settled']);
  await expect(runSkillSlice(sdkInput,fakeProvider)).rejects.toThrow();expect(providerCalls).toBe(2);
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
  const summaryRow=(await sql.query('select * from ai_models where id=$1',[summaryModel])).rows[0];
@@ -4481,7 +4484,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   };
   return Reflect.get(target,key);
  }});
- const summaryAccounting=sliceAccounting(user,delayedAdmin,sdkRequest,summaryRow,'summary');let summaryCalls=0;
+ const summaryAccounting=sliceAccounting(user,delayedAdmin,sdkRequest,summaryRow,'summary',body=>checkedSliceOutput(body,syntheticPrivate));let summaryCalls=0;
  const summaryInput={...sdkInput,...summaryAccounting,model:summaryRow.model_id,readArtifact:undefined,input:'已完成回复：'+savedReply.body,instructions:'Synthetic summary: preserve the selected title.'};
  const summaryProvider=async(_url:unknown,init?:RequestInit)=>{
   summaryCalls++;const request=JSON.parse(String(init?.body));expect(request.model).toBe(summaryRow.model_id);expect(request.tools??[]).toEqual([]);
@@ -4490,11 +4493,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  };
  const summaryReply=await runSkillSlice(summaryInput,summaryProvider);expect(summaryReply.body).toBe('Synthetic selected title');
  const summaryScope={executionId:sdkRequest,phase:'summary' as const};
- const savedSummary=await results.save(summaryScope,summaryReply.body,syntheticPrivate);expect(savedSummary.state).toBe('saved');
+ const savedSummary=await results.read(summaryScope);expect(savedSummary.state).toBe('saved');
  if(savedSummary.state!=='saved')throw new Error('summary missing');expect(savedSummary.adoptable).toBe(true);
  expect((await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('responded');
  expect(await results.read(summaryScope)).toEqual(savedSummary);settleUnavailable=false;
- const {recoverSlice}=await import('../agentSlice/recovery'); // Formal browser refresh must perform maintenance below.
+ // Formal browser refresh must perform maintenance below.
  expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
  await expect(runSkillSlice(summaryInput,summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
  expect((await sql.query('select phase, count(*)::int n from agent_slice_calls where execution_id=$1 group by phase order by phase',[sdkRequest])).rows).toEqual([{phase:'reply',n:2},{phase:'summary',n:1}]);
@@ -4513,14 +4516,14 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  const unknownAccounting=sliceAccounting(user,db,unknownRequest,modelRow);let unknownCalls=0;
  const missingUsage=async()=>{unknownCalls++;return new Response(JSON.stringify({id:'synthetic-missing-usage',object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Not a verified completion'}}]}),{headers:{'content-type':'application/json'}});};
  await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();
- expect((await unknownAccounting.recover()).map(c=>c.state)).toEqual(['unknown']);
+ expect((await recoverSlice(user,db,{executionId:unknownRequest})).calls.map(c=>c.state)).toEqual(['unknown']);
  const deniedSummary=sliceAccounting(user,db,unknownRequest,summaryRow,'summary');
  await expect(runSkillSlice({...summaryInput,...deniedSummary},summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
  await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();expect(unknownCalls).toBe(1);
  const observation=(await sql.query('select evidence from agent_slice_calls where execution_id=$1',[unknownRequest])).rows[0].evidence;
  expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
- await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
+ expect((await db.rpc('agent_slice_result',{p_actor_id:actor,p_execution_id:unknownRequest,p_phase:'reply',p_action:'save',p_body:'Unknown body'})).error).not.toBeNull();
  const {sliceExecutor}=await import('../agentSlice/execute');const joinedRequest=randomUUID();
  await sql.query("update agent_slice_calls set dispatched_at=clock_timestamp()-interval '3 minutes' where execution_id=$1",[unknownRequest]);
  expect(await sliceExecutor(user,db,missingUsage).execute({executionId:unknownRequest,phase:'reply'})).toEqual({state:'unavailable',reason:'outcome_unknown'});expect(unknownCalls).toBe(1);
@@ -4801,7 +4804,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   const next=randomUUID();
   const revision={projectId,roundId:next,requestId:next,fromRoundId,sourceVersionId,configId,title:'Synthetic retained handoff'};
   expect(await reuse.create(revision)).toEqual(await reuse.create(revision));
-  expect(await (await links.reader({projectId,roundId:next}))()).toContain(sourceText);
+  const nextExecution=randomUUID();await begin(projectId,next,nextExecution,'Check fixed revised source');
+  expect(await readSelectedArtifact(user,db,nextExecution)).toContain(sourceText);
   const oldLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[fromRoundId])).rows[0];
   const newLink=(await sql.query('select source_version_id from agent_slice_links where round_id=$1',[next])).rows[0];
   expect(newLink.source_version_id).toBe(oldLink.source_version_id);
@@ -4812,7 +4816,8 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await service.execute({action:'abandon',projectId,roundId:next,requestId:randomUUID()});
  }
  }
- expect(await reader()).toContain('A1');expect(await reader()).not.toContain('A2');
+ expect((await links.read({projectId:t,roundId:t})).versionId).toBe(av1.id);
+ await expect(reader()).rejects.toThrow('SLICE_SOURCE_UNAVAILABLE'); // Published/changed execution cannot be resumed as a new tool read.
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
  const otherUser=await newUser(),other=await authenticated(otherUser);
  await expect(sliceEntry(other,db).sources()).resolves.toEqual([]);
@@ -4824,12 +4829,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await expect(loadSliceContext(other,db,revisionRequest)).rejects.toThrow('SLICE_DENIED');
  expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
- await expect(reader()).rejects.toThrow();
+ await expect(links.read({projectId:t,roundId:t})).rejects.toThrow();
  const restrictedHistory=await readSliceConversation(user,db,{conversationId:conversation});
  expect(restrictedHistory.items.find(x=>x.executionId===joinedRequest)).toMatchObject({input:null,reply:{state:'restricted'},summary:{state:'restricted'}});
  expect(JSON.stringify(restrictedHistory)).not.toContain('Joined title');
  expect(await results.read(replyScope)).toEqual({state:'restricted'});expect(await results.read(summaryScope)).toEqual({state:'restricted'});
- expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual({state:'restricted'});
+ expect((await db.rpc('agent_slice_result',{p_actor_id:actor,p_execution_id:sdkRequest,p_phase:'reply',p_action:'save',p_body:sdkReply.body})).data).toEqual({state:'restricted'});
  expect((await recoverSlice(user,db,{executionId:joinedRequest})).calls.map(c=>c.state)).toEqual(['settled','settled','settled']);expect(joinedCalls).toBe(3);
  expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
  expect((await service.read(t,t)).steps['step-0'].body).toBeNull();

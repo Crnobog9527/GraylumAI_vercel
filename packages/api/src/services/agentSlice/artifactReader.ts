@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
-import type {workbenchService} from '../artifacts/workbench';
+import type {SupabaseClient} from '@supabase/supabase-js';
+import {isEmailVerified} from '../../lib/auth';
+import {checkInputSecurity} from '../../middleware/securityChecks';
 
 const uuid=z.string().uuid();
 // Constructed and persisted by the admission service from a selected report,
@@ -14,30 +16,13 @@ export const formalArtifactSelection=z.object({
  maxChars:z.number().int().min(1).max(20000),
 }).strict();
 
-export function bindFormalArtifactReader(
- workbench:Pick<ReturnType<typeof workbenchService>,'projects'|'read'|'report'>,
- selection:z.infer<typeof formalArtifactSelection>,
-) {
- const fixed=formalArtifactSelection.parse(selection);
- return async()=>{
-  // Both endpoints remain subject to current ownership, method and evidence
-  // access. Reuse the existing report reader, not a copied source body.
-  const projects=await workbench.projects();
-  const source=projects.find(project=>project.projectId===fixed.projectId);
-  const target=projects.find(project=>project.projectId===fixed.targetProjectId);
-  if(!source||!target||(source.linkedAccount??source.account)!==fixed.account ||
-   (target.linkedAccount??target.account)!==fixed.account)throw new Error('ARTIFACT_DENIED');
-  await workbench.read(fixed.targetProjectId,fixed.targetRoundId);
-  const report=await workbench.report(fixed.projectId,fixed.roundId);
-  if(!report.available||!report.report||report.id!==fixed.versionId||report.version!==fixed.version||report.hash!==fixed.hash)throw new Error('ARTIFACT_EVIDENCE_UNAVAILABLE');
-  const sections=fixed.sections.map(id=>{
-   const section=report.report!.sections.find(section=>section.stepId===id);
-   if(!section)throw new Error('ARTIFACT_EVIDENCE_UNAVAILABLE');
-   return {title:section.title,body:section.body};
-  });
-  if(sections.reduce((count,section)=>count+section.body.length,0)>fixed.maxChars)throw new Error('GENERATION_CAPACITY');
-  // Evidence IDs are deliberately not exposed as target-project evidence.
-  // The execution admission/persistence path must bind target provenance.
-  return JSON.stringify({kind:'formal_report',version:fixed.version,sections});
- };
+const source=z.object({kind:z.literal('formal_report'),version:z.number().int().positive(),sections:z.array(z.object({title:z.string(),body:z.string()})).min(1).max(32)});
+/** One production reader: SQL resolves the execution's immutable source and current permission. */
+export async function readSelectedArtifact(user:SupabaseClient,admin:SupabaseClient,executionId:string){
+ uuid.parse(executionId);let timer:ReturnType<typeof setTimeout>|undefined;
+ const auth=await Promise.race([user.auth.getUser(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('SLICE_UNAVAILABLE')),10000);})]).finally(()=>clearTimeout(timer));
+ if(auth.error||!auth.data.user||!isEmailVerified(auth.data.user))throw new Error('SLICE_DENIED');
+ const selected=await admin.rpc('agent_slice_selected_source',{p_actor_id:auth.data.user.id,p_execution_id:executionId}).abortSignal(AbortSignal.timeout(10000));
+ if(selected.error)throw new Error('SLICE_SOURCE_UNAVAILABLE');
+ const body=JSON.stringify(source.parse(selected.data));checkInputSecurity(body);return body;
 }
