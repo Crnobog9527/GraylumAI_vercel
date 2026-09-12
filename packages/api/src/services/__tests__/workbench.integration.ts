@@ -4671,6 +4671,37 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  }
  const tiePage=await readSliceConversation(user,db,{conversationId:conversation,limit:2});expect(tiePage.items.map(x=>x.executionId)).toEqual(tieIds.slice(0,2));
  const tieNext=await readSliceConversation(user,db,{conversationId:conversation,limit:2,before:tiePage.nextCursor!});expect(tieNext.items[0].executionId).toBe(tieIds[2]);
+ // Recreate the service after losing prepare acknowledgement: no provider dispatch.
+ const {sliceCallId}=await import('../agentSlice/accounting');
+ const abandoned=randomUUID();await begin(b,b,abandoned,'Synthetic undispatched request');
+ const abandonedArgs={p_actor_id:actor,p_execution_id:abandoned,p_call_id:sliceCallId(abandoned,1)};
+ const abandonedBalance=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
+ const abandonedPrepared=await db.rpc('agent_slice_call',{...abandonedArgs,p_action:'prepare',p_payload:{sequence:1,quote:{modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20}}});
+ expect(abandonedPrepared.error).toBeNull();
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('prepared');
+ await sql.query("update agent_slice_calls set created_at=clock_timestamp()-interval '3 minutes' where id=$1",[abandonedArgs.p_call_id]);
+ // A changed saved step invalidates the frozen request, but not financial recovery.
+ const abandonedStep=(await service.read(b,b)).steps['step-0'];
+ await service.execute({action:'save',projectId:b,roundId:b,stepId:'step-0',requestId:randomUUID(),expectedVersion:abandonedStep.version,body:'Changed after preparation',evidenceIds:[]});
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('refunded');
+ expect((await recoverSlice(user,db,{executionId:abandoned})).calls[0].state).toBe('refunded');
+ expect((await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(abandonedBalance);
+ const lateAbandoned=await db.rpc('agent_slice_call',{...abandonedArgs,p_action:'dispatch',p_payload:{token:abandonedPrepared.data.token}});
+ expect(lateAbandoned.error!==null||lateAbandoned.data?.dispatch===false).toBe(true);
+ expect((await sql.query('select state from agent_slice_calls where id=$1',[abandonedArgs.p_call_id])).rows[0].state).toBe('refunded');
+ await service.execute({action:'save',projectId:b,roundId:b,stepId:'step-0',requestId:randomUUID(),expectedVersion:(await service.read(b,b)).steps['step-0'].version,body:'',evidenceIds:[]});
+ // Concurrent recovery/dispatch share the execution lock. A dispatched winner
+ // must never be refunded; a recovered winner must reject the stale token.
+ const racing=randomUUID();await begin(b,b,racing,'Synthetic dispatch race');
+ const raceArgs={p_actor_id:actor,p_execution_id:racing,p_call_id:sliceCallId(racing,1)};
+ const racePrepared=await db.rpc('agent_slice_call',{...raceArgs,p_action:'prepare',p_payload:{sequence:1,quote:{modelId:sliceModel,providerModel:'qwen/qwen3.8-flash',reservedCredits:20}}});expect(racePrepared.error).toBeNull();
+ await sql.query("update agent_slice_calls set created_at=clock_timestamp()-interval '3 minutes' where id=$1",[raceArgs.p_call_id]);
+ const otherActor=(await newUser()).id;
+ const deniedRecovery=await db.rpc('agent_slice_call',{...raceArgs,p_actor_id:otherActor,p_action:'recover_prepared'});expect(deniedRecovery.error).not.toBeNull();
+ const [,raceDispatch]=await Promise.all([recoverSlice(user,db,{executionId:racing}),db.rpc('agent_slice_call',{...raceArgs,p_action:'dispatch',p_payload:{token:racePrepared.data.token}})]);
+ expect(raceDispatch.error).toBeNull();
+ const raceState=(await recoverSlice(user,db,{executionId:racing})).calls[0].state;
+ expect(raceState).toBe(raceDispatch.data.dispatch?'dispatched':'refunded');
  const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
  const callId=randomUUID();
  const call=async(action:string,payload:Record<string,unknown>={})=>{
@@ -4747,6 +4778,15 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await sql.query("SELECT count(*)::int n FROM billing_history WHERE operation_type='pre_deduct' AND id=(SELECT pre_deduct_id FROM agent_slice_calls WHERE id=$1)",[callId])).rows[0].n).toBe(1);
  await expect(call('prepare',{sequence:1,quote:callQuote})).rejects.toBeDefined();
  expect((await sql.query('SELECT count(*)::int n FROM artifact_generations WHERE project_id=ANY($1::uuid[])',[[a,b,t]])).rows[0].n).toBe(0);
+ // One revoked target revision must not make unrelated works or history unavailable.
+ await sql.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)',[title.pack.revisionId,actor]);
+ const afterRevisionRevoked=await readSliceConversation(user,db,{conversationId:conversation});
+ expect(afterRevisionRevoked.items.some(x=>x.projectId===b&&x.reply.state!=='restricted')).toBe(true);
+ expect(afterRevisionRevoked.items.filter(x=>x.projectId===t).every(x=>x.reply.state==='restricted'&&x.input===null)).toBe(true);
+ const remainingTargets=await entry.targets();expect(remainingTargets.some(x=>x.projectId===b)).toBe(true);expect(remainingTargets.some(x=>x.projectId===t)).toBe(false);
+ expect((await entry.sources()).some(x=>x.sourceVersionId===position.id)).toBe(true);
+ await sql.query('insert into skill_revision_revocations(revision_id,revoked_by) values($1,$2)',[script.pack.revisionId,actor]);
+ expect(await entry.sources()).toEqual([]);
  // Removing account ownership invalidates this entry even if the source has no evidence IDs.
  await sql.query('delete from artifact_accounts where actor_id=$1 and module_id=$2 and skill_id=$3',[actor,src.moduleId,src.pack.id]);
  expect(await entry.sources()).toEqual([]);

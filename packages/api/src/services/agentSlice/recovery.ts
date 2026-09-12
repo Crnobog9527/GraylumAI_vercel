@@ -17,8 +17,8 @@ export async function recoverSlice(user:SupabaseClient,admin:SupabaseClient,inpu
   if(read.error)throw new Error(read.error.code==='42501'?'SLICE_DENIED':'SLICE_UNAVAILABLE');
   if(!read.data)continue;
   let current=callState.parse(read.data);
-  if(current.state==='responded'){
-   const settled=await admin.rpc('agent_slice_call',{...args,p_action:'settle'}).abortSignal(AbortSignal.timeout(10000));
+  if(current.state==='responded'||current.state==='prepared'){
+   const settled=await admin.rpc('agent_slice_call',{...args,p_action:current.state==='prepared'?'recover_prepared':'settle'}).abortSignal(AbortSignal.timeout(10000));
    if(settled.error)throw new Error('SLICE_UNAVAILABLE');current=callState.parse(settled.data);
   }
   statuses.push({phase,sequence,state:current.state});
