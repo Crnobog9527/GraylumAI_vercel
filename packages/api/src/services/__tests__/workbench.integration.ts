@@ -5137,6 +5137,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: explicit non-fir
   await expect.poll(async()=>(await sql.query('select project_id,round_id,step_id,pair_id from agent_slice_executions where conversation_id=$1',[conversation])).rows,{timeout:20000}).toEqual([{project_id:a,round_id:a,step_id:'step-1',pair_id:pair}]);
   await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[conversation])).rows[0].n),{timeout:20000}).toBe(3);
   expect(await service.read(b,b)).toEqual(beforeB);expect((await counts()).provider).toBe(initial.provider+3);
+  const originalAnswer=page.getByLabel('一轮对话',{exact:true}).filter({hasText:'Selection regression: send to A second step'}).getByLabel('本轮回答归属',{exact:true});
+  await pw(originalAnswer).toHaveText('Selection script A · Synthetic step 2');
+  await selected().selectOption(b0);await ready();await pw(page.getByLabel('当前创作目标')).toContainText('正在修改：Selection script B');
+  await pw(originalAnswer).toHaveText('Selection script A · Synthetic step 2');
+  await page.reload();await ready();await pw(originalAnswer).toHaveText('Selection script A · Synthetic step 2');
+  await selected().selectOption(a1);await ready();
   // A failed connection after admission retries the original A execution even after selecting B.
   let rejected=false;
   await page.route('**/api/trpc/**',async intercepted=>{if(!rejected&&intercepted.request().url().includes('agentSlice.executePhase')){rejected=true;await intercepted.abort();}else await intercepted.continue();});
@@ -5156,7 +5162,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: explicit non-fir
   const reference=beforeB.steps['step-0'].evidenceIds[0];await sql.query('update artifact_evidence_restrictions set deleted=true where evidence_id=$1',[reference]);
   await selected().selectOption(b0);await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(send()).toBeDisabled();expect(await counts()).toEqual(afterSend);
   await sql.query('update artifact_evidence_restrictions set deleted=false where evidence_id=$1',[reference]);await page.getByRole('button',{name:'重新检查',exact:true}).click();await ready();
-  await publish(a,a);await selected().selectOption(a1);await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await pw(send()).toBeDisabled();await pw(page.getByLabel('当前创作目标')).toContainText('正式 v1');
+  await publish(a,a);await selected().selectOption(a1);await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await pw(send()).toBeDisabled();await pw(page.getByLabel('当前创作目标')).toContainText('正式 v1');await pw(page.getByLabel('当前创作目标')).toContainText('正在查看：');
   const frozen=await counts(),missing=randomUUID();
   await page.evaluate(({key,id,pair})=>sessionStorage.setItem(key,JSON.stringify({projectId:id,roundId:id,stepId:'step-1',pairId:pair})),{key:`graylum:slice-selection:1:${actor}:${conversation}`,id:missing,pair});
   await page.reload();await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(selected()).toHaveValue('');await pw(send()).toBeDisabled();expect(await counts()).toEqual(frozen);
