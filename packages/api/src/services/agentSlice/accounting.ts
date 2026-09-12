@@ -13,20 +13,20 @@ async function bounded<T>(promise:PromiseLike<T>):Promise<T>{
  let timer:ReturnType<typeof setTimeout>|undefined;
  return Promise.race([Promise.resolve(promise),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('SLICE_UNAVAILABLE')),10000);})]).finally(()=>clearTimeout(timer));
 }
-export function sliceCallId(executionId:string,sequence:number){
+export function sliceCallId(executionId:string,sequence:number,phase:'reply'|'summary'='reply'){
  z.string().uuid().parse(executionId);z.number().int().min(1).max(2).parse(sequence);
- const b=createHash('sha256').update(`graylum-slice-call:${executionId}:${sequence}`).digest().subarray(0,16);b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;
+ const b=createHash('sha256').update(phase==='reply'?`graylum-slice-call:${executionId}:${sequence}`:`graylum-slice-summary:${executionId}:${sequence}`).digest().subarray(0,16);b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;
  const s=b.toString('hex');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`;
 }
 
 /** Private service adapter. No quote, model credential or dispatch token is public input. */
-export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executionId:string,configuredModel:unknown){
+export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executionId:string,configuredModel:unknown,phase:'reply'|'summary'='reply'){
  const model=workbenchModelSchema.parse(configuredModel);
  if(/(^openai\/|gpt)/i.test(model.model_id))throw new Error('SLICE_MODEL_DENIED');
  const owned=new Map<number,{token:string;quote:Awaited<ReturnType<typeof quote>>}>();
  async function actor(){const auth=await bounded(user.auth.getUser());if(auth.error||!auth.data.user||!isEmailVerified(auth.data.user))throw new Error('SLICE_DENIED');return auth.data.user.id;}
  async function call(sequence:number,action:string,payload:Record<string,unknown>={}){
-  const r=await admin.rpc('agent_slice_call',{p_actor_id:await actor(),p_execution_id:executionId,p_call_id:sliceCallId(executionId,sequence),p_action:action,p_payload:payload}).abortSignal(AbortSignal.timeout(10000));
+  const r=await admin.rpc('agent_slice_call',{p_actor_id:await actor(),p_execution_id:executionId,p_call_id:sliceCallId(executionId,sequence,phase),p_action:action,p_payload:payload}).abortSignal(AbortSignal.timeout(10000));
   if(r.error)throw new Error(r.error.code==='42501'?'SLICE_DENIED':'SLICE_CALL_CONFLICT');
   return r.data;
  }
@@ -53,7 +53,7 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
    if(prior&&state.parse(prior).state!=='prepared')throw new Error('SLICE_ALREADY_STARTED');
    const q=await quote(request);
    await bounded(preAICallSecurityChecks({supabase:user,userId:await actor()},prior?0:q.reservedCredits));
-   const prepared=state.parse(await call(sequence,'prepare',{sequence,quote:q}));
+   const prepared=state.parse(await call(sequence,'prepare',{phase,sequence,quote:q}));
    if(prepared.state!=='prepared'||!prepared.token)throw new Error('SLICE_ALREADY_STARTED');
    owned.set(sequence,{token:prepared.token,quote:q});
    // Lost dispatch acknowledgement is not permission to dispatch again or refund.
@@ -73,11 +73,13 @@ export function sliceAccounting(user:SupabaseClient,admin:SupabaseClient,executi
    const evidence={providerId:e.providerId,finishReason:e.finishReason,inputTokens:e.inputTokens,outputTokens:e.outputTokens,cacheReadTokens:0,cacheCreationTokens:0,
     credits:Math.min(cost.credits,own.quote.reservedCredits),costUsd:cost.costUsd,outcome:e.state,usageEvidence:e.usageEvidence};
    await call(e.sequence,'evidence',{token:own.token,evidence});
-   await call(e.sequence,'settle');
+   // The trusted usage receipt is durable. Failure of this auxiliary settlement
+   // must not discard a complete answer; recovery reads the original call.
+   try { await call(e.sequence,'settle'); } catch { /* remains responded until read-back */ }
   },
   async recover(){
    const statuses=[];
-   for(let sequence=1;sequence<=2;sequence++){
+   for(let sequence=1;sequence<=(phase==='summary'?1:2);sequence++){
     const current=await call(sequence,'get');if(!current)continue;
     const row=state.parse(current);
     statuses.push(row.state==='responded'?state.parse(await call(sequence,'settle')):row);

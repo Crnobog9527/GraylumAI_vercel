@@ -4386,10 +4386,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  for(const [id,target] of [['slice-p-script',script],['slice-p-title',title]] as const)
   await sql.query('INSERT INTO artifact_reference_configs VALUES($1,$2,$3,$4,20000,true)',[id,src.registration,target.registration,JSON.stringify(['step-2'])]);
  await sql.query("INSERT INTO agent_slice_pairs VALUES('slice-pair',$1,$2,'[\"step-0\"]','[\"step-0\"]',20000,true)",[script.registration,title.registration]);
- const sliceModel=randomUUID(),conversation=randomUUID();
+ const sliceModel=randomUUID(),summaryModel=randomUUID(),conversation=randomUUID();
  await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_workbench_ai','true') ON CONFLICT(key) DO UPDATE SET value='true'");
  await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-flash','Synthetic slice model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[sliceModel]);
  await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[sliceModel,[script.moduleId,title.moduleId]]);
+ await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,'qwen/qwen3.8-27b','Synthetic summary model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[summaryModel]);
+ await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_summary_model_id',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify(summaryModel)]);
  await sql.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'Synthetic dual Skill')",[conversation,actor]);
  const begin=async(projectId:string,roundId:string,requestId:string,body:string,budgetCredits=50)=>{
   const result=await db.rpc('agent_slice_begin',{p_actor_id:actor,p_conversation_id:conversation,p_request_id:requestId,p_payload:{projectId,roundId,stepId:'step-0',pairId:'slice-pair',modelId:sliceModel,budgetCredits,body,preferenceRefs:[]}});
@@ -4424,20 +4426,61 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   const message=providerCalls===1?{role:'assistant',content:null,tool_calls:[{id:'fixed-read',type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:'1. Synthetic title from A1'};
   return new Response(JSON.stringify({id:'synthetic-'+providerCalls,object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:providerCalls===1?'tool_calls':'stop',message}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}),{headers:{'content-type':'application/json'}});
  };
- expect((await runSkillSlice(sdkInput,fakeProvider)).body).toContain('title from A1');
+ const sdkReply=await runSkillSlice(sdkInput,fakeProvider);expect(sdkReply.body).toContain('title from A1');
+ const {sliceResults}=await import('../agentSlice/results');const results=sliceResults(user,db);
+ const syntheticPrivate=JSON.stringify({resources:[{path:'method.md',content:'SYNTHETIC_PRIVATE_METHOD_CANARY'}]});
+ const replyScope={executionId:sdkRequest,phase:'reply' as const};
+ await expect(results.save(replyScope,'SYNTHETIC_PRIVATE_METHOD_CANARY',syntheticPrivate)).rejects.toThrow('SLICE_OUTPUT_RESTRICTED');
+ const savedReply=await results.save(replyScope,sdkReply.body,syntheticPrivate);
+ expect(savedReply.state).toBe('saved');expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual(savedReply);
+ expect(await results.read(replyScope)).toEqual(savedReply);
+ if(savedReply.state!=='saved')throw new Error('reply missing');
+ await expect(service.execute({action:'saveCandidate',projectId:t,roundId:t,stepId:'step-0',candidateId:savedReply.candidateId,expectedVersion:(await service.read(t,t)).steps['step-0'].version,requestId:randomUUID(),body:savedReply.body})).rejects.toThrow();
  expect(providerCalls).toBe(2);
  expect((await accounting.recover()).map(c=>c.state)).toEqual(['settled','settled']);
  await expect(runSkillSlice(sdkInput,fakeProvider)).rejects.toThrow();expect(providerCalls).toBe(2);
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(2);
+ const summaryRow=(await sql.query('select * from ai_models where id=$1',[summaryModel])).rows[0];
+ let settleUnavailable=true;
+ const delayedAdmin=new Proxy(db,{get(target,key){
+  if(key==='rpc')return (name:string,args:any)=>{
+   if(name==='agent_slice_call'&&args.p_execution_id===sdkRequest&&args.p_action==='settle'&&settleUnavailable)
+    return {abortSignal:()=>Promise.resolve({data:null,error:{code:'TEST_ONLY_UNAVAILABLE'}})};
+   return target.rpc(name,args);
+  };
+  return Reflect.get(target,key);
+ }});
+ const summaryAccounting=sliceAccounting(user,delayedAdmin,sdkRequest,summaryRow,'summary');let summaryCalls=0;
+ const summaryInput={...sdkInput,...summaryAccounting,model:summaryRow.model_id,readArtifact:undefined,input:'已完成回复：'+savedReply.body,instructions:'Synthetic summary: preserve the selected title.'};
+ const summaryProvider=async(_url:unknown,init?:RequestInit)=>{
+  summaryCalls++;const request=JSON.parse(String(init?.body));expect(request.model).toBe(summaryRow.model_id);expect(request.tools??[]).toEqual([]);
+  expect(JSON.stringify(request.messages)).toContain('Synthetic title from A1');
+  return new Response(JSON.stringify({id:'synthetic-summary',object:'chat.completion',created:1,model:summaryRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Synthetic selected title'}}],usage:{prompt_tokens:12,completion_tokens:5,total_tokens:17}}),{headers:{'content-type':'application/json'}});
+ };
+ const summaryReply=await runSkillSlice(summaryInput,summaryProvider);expect(summaryReply.body).toBe('Synthetic selected title');
+ const summaryScope={executionId:sdkRequest,phase:'summary' as const};
+ const savedSummary=await results.save(summaryScope,summaryReply.body,syntheticPrivate);expect(savedSummary.state).toBe('saved');
+ if(savedSummary.state!=='saved')throw new Error('summary missing');expect(savedSummary.adoptable).toBe(true);
+ expect((await sql.query("select state from agent_slice_calls where execution_id=$1 and phase='summary'",[sdkRequest])).rows[0].state).toBe('responded');
+ expect(await results.read(summaryScope)).toEqual(savedSummary);settleUnavailable=false;
+ expect(summaryCalls).toBe(1);expect(providerCalls).toBe(2);
+ expect((await summaryAccounting.recover()).map(c=>c.state)).toEqual(['settled']);
+ await expect(runSkillSlice(summaryInput,summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
+ expect((await sql.query('select phase, count(*)::int n from agent_slice_calls where execution_id=$1 group by phase order by phase',[sdkRequest])).rows).toEqual([{phase:'reply',n:2},{phase:'summary',n:1}]);
+ expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[sdkRequest])).rows[0].n).toBe(3);
+
  const unknownRequest=randomUUID();await begin(t,t,unknownRequest,'测试缺失用量',100000);
  const unknownAccounting=sliceAccounting(user,db,unknownRequest,modelRow);let unknownCalls=0;
  const missingUsage=async()=>{unknownCalls++;return new Response(JSON.stringify({id:'synthetic-missing-usage',object:'chat.completion',created:1,model:modelRow.model_id,choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Not a verified completion'}}]}),{headers:{'content-type':'application/json'}});};
  await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();
  expect((await unknownAccounting.recover()).map(c=>c.state)).toEqual(['unknown']);
+ const deniedSummary=sliceAccounting(user,db,unknownRequest,summaryRow,'summary');
+ await expect(runSkillSlice({...summaryInput,...deniedSummary},summaryProvider)).rejects.toThrow();expect(summaryCalls).toBe(1);
  await expect(runSkillSlice({...sdkInput,...unknownAccounting},missingUsage)).rejects.toThrow();expect(unknownCalls).toBe(1);
  const observation=(await sql.query('select evidence from agent_slice_calls where execution_id=$1',[unknownRequest])).rows[0].evidence;
  expect(observation).toMatchObject({providerId:'synthetic-missing-usage',finishReason:'stop',inputTokens:null,outputTokens:null});
  expect((await sql.query("SELECT count(*)::int n FROM token_stats WHERE metadata->>'executionId'=$1",[unknownRequest])).rows[0].n).toBe(0);
+ await expect(results.save({executionId:unknownRequest,phase:'reply'},'Unknown body',syntheticPrivate)).rejects.toThrow();
  const beforeManual=(await sql.query('select credits from profiles where id=$1',[actor])).rows[0].credits;
  const callId=randomUUID();
  const call=async(action:string,payload:Record<string,unknown>={})=>{
@@ -4456,6 +4499,11 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  await call('unknown',{token:claim.token});
  await expect(call('settle')).rejects.toBeDefined();
  await expect(call('refund',{token:claim.token})).rejects.toBeDefined();
+ const adoptInput={action:'saveCandidate' as const,projectId:t,roundId:t,stepId:'step-0',candidateId:savedSummary.candidateId,expectedVersion:(await service.read(t,t)).steps['step-0'].version,requestId:randomUUID(),body:savedSummary.body};
+ await service.execute(adoptInput);await service.execute(adoptInput);
+ expect((await service.read(t,t)).steps['step-0'].body).toBe(summaryReply.body);
+ await expect(service.execute({...adoptInput,requestId:randomUUID(),expectedVersion:(await service.read(t,t)).steps['step-0'].version})).rejects.toThrow();
+ expect(await results.read(summaryScope)).toMatchObject({state:'saved',adoptable:false});
  const tv1=await publish(t,t,'TITLE1');
  const a2=randomUUID();
  await reuse.create({projectId:a,roundId:a2,requestId:a2,fromRoundId:a,sourceVersionId:position.id!,configId:'slice-p-script',title:'脚本 A'});
@@ -4471,9 +4519,12 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');
  const otherUser=await newUser(),other=await authenticated(otherUser);
  await expect(sliceLinks(other,db).read({projectId:t,roundId:t})).rejects.toThrow('ARTIFACT_DENIED');
+ await expect(sliceResults(other,db).read(replyScope)).rejects.toThrow('SLICE_DENIED');
  expect((await user.rpc('agent_slice_link_read',{p_actor_id:actor,p_project_id:t,p_round_id:t})).error).not.toBeNull();
  await service.execute({action:'restrictEvidence',projectId:a,roundId:a,requestId:randomUUID(),evidenceId:extra.id,deleted:true,expiresAt:null});
  await expect(reader()).rejects.toThrow();
+ expect(await results.read(replyScope)).toEqual({state:'restricted'});expect(await results.read(summaryScope)).toEqual({state:'restricted'});
+ expect(await results.save(replyScope,sdkReply.body,syntheticPrivate)).toEqual({state:'restricted'});
  expect((await service.report(t,t)).available).toBe(false);expect((await service.report(a,a2)).available).toBe(false);
  expect((await service.read(t,t)).steps['step-0'].body).toBeNull();
  expect((await service.read(b,b)).steps['step-0'].body).toBe('');

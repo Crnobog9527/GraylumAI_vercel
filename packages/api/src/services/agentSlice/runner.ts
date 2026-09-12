@@ -25,7 +25,7 @@ export type SliceRunInput = {
   beforeCall: (sequence: number, request: unknown) => Promise<void>;
   recordCall: (evidence: CallEvidence) => Promise<void>;
   /** Bound by the service to one explicitly selected, fixed artifact identity. */
-  readArtifact: () => Promise<string>;
+  readArtifact?: () => Promise<string>;
   signal?: AbortSignal;
 };
 export class SliceRunError extends Error {
@@ -44,7 +44,7 @@ export async function runSkillSlice(input: SliceRunInput, transport: typeof fetc
   const evidence: CallEvidence[] = [];
   const guardedFetch: typeof fetch = async (url, init) => {
     if (String(url) !== 'https://openrouter.ai/api/v1/chat/completions') throw new SliceRunError('MODEL_NOT_ALLOWED');
-    if (++calls > 2 || signal.aborted) throw new SliceRunError('CALL_LIMIT');
+    if (++calls > (input.readArtifact ? 2 : 1) || signal.aborted) throw new SliceRunError('CALL_LIMIT');
     const sequence = calls;
     const body = JSON.parse(String(init?.body));
     if (body.model !== input.model || body.stream) throw new SliceRunError('MODEL_NOT_ALLOWED');
@@ -99,12 +99,12 @@ export async function runSkillSlice(input: SliceRunInput, transport: typeof fetc
   const model = new OpenAIChatCompletionsModel(client, input.model, {strictFeatureValidation:true});
   const read = tool({name:'read_selected_artifact', description:'Read the exact artifact explicitly selected for this execution. No arbitrary IDs or versions.',
     parameters:z.object({}).strict(), errorFunction:null,
-    execute:async () => { if (++toolCalls > 1) throw new SliceRunError('CALL_LIMIT'); signal.throwIfAborted(); return input.readArtifact(); }});
-  const agent = new Agent({name:'Selected Skill', model, instructions:input.instructions, tools:[read],
+    execute:async () => { if (++toolCalls > 1) throw new SliceRunError('CALL_LIMIT'); signal.throwIfAborted(); if (!input.readArtifact) throw new SliceRunError('CALL_LIMIT'); return input.readArtifact(); }});
+  const agent = new Agent({name:'Selected Skill', model, instructions:input.instructions, tools:input.readArtifact ? [read] : [],
     modelSettings:{maxTokens:input.maxOutputTokens, parallelToolCalls:false, retry:{maxRetries:0}}});
   const runner = new Runner({tracingDisabled:true, traceIncludeSensitiveData:false, model});
   try {
-    const result = await runner.run(agent, input.input, {maxTurns:2, signal});
+    const result = await runner.run(agent, input.input, {maxTurns:input.readArtifact ? 2 : 1, signal});
     if (typeof result.finalOutput !== 'string' || !result.finalOutput.trim()) throw new SliceRunError('OUTCOME_UNKNOWN');
     return {body:result.finalOutput, calls:evidence, toolCalls};
   } catch (error) {

@@ -16,6 +16,11 @@ describe('real SDK bounded model/tool boundary with synthetic transport',()=>{
   expect(JSON.stringify(requests[1].messages)).toContain('Fixed synthetic script A v1');
   expect(out.calls.every(c=>c.inputTokens===10&&c.outputTokens===4&&c.state==='responded')).toBe(true);
  });
+ it('runs summary without tools or an extra model call',async()=>{
+  const t=setup();const transport=vi.fn(async(_url:any,init:any)=>{expect(JSON.parse(init.body).tools??[]).toEqual([]);return completion();});
+  const out=await runSkillSlice({...t.input,readArtifact:undefined},transport);
+  expect(out.body).toBe('Synthetic final');expect(out.toolCalls).toBe(0);expect(transport).toHaveBeenCalledTimes(1);expect(t.input.readArtifact).not.toHaveBeenCalled();
+ });
  it('never retries an uncertain provider failure',async()=>{
   const t=setup(),transport=vi.fn(async()=>{throw new Error('private SDK detail');});
   await expect(runSkillSlice(t.input,transport)).rejects.toThrow('OUTCOME_UNKNOWN');expect(transport).toHaveBeenCalledTimes(1);expect(t.calls[0].state).toBe('unknown');
