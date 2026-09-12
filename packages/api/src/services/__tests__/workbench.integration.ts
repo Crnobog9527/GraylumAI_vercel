@@ -4680,7 +4680,7 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   await expect.poll(async()=>(await service.read(browserTitleRound,browserTitleRound)).steps['step-0'].body,{timeout:15000}).toBe('选定标题：倾斜的地球如何创造四季');
   await confirmAndPublish();await page.getByLabel('带回哪份脚本').selectOption(browserA);
   await page.getByRole('button',{name:'采用这些标题，修订脚本',exact:true}).click();
-  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return value!==browserTitleRound+':step-0:slice-pair';},{timeout:10000}).toBe(true);
+  await expect.poll(async()=>{const value=await page.getByLabel('使用 Skill 创作').inputValue();return !!value&&value!==browserTitleRound+':step-0:slice-pair'&&(await page.getByLabel('使用 Skill 创作').locator('option:checked').textContent())?.startsWith('脚本 · 浏览器脚本 A')===true;},{timeout:10000}).toBe(true);
   browserA2=(await page.getByLabel('使用 Skill 创作').inputValue()).split(':')[0];expect(browserA2).not.toBe(browserA);
   await sendAndSave('按选定标题修订原脚本',12);await confirmAndPublish();
   await page.reload();await page.getByText('为这个账号写脚本 A',{exact:true}).waitFor();await page.getByText('为刚才的脚本拟标题',{exact:true}).waitFor();await page.getByText('按选定标题修订原脚本',{exact:true}).waitFor();
@@ -5068,3 +5068,99 @@ it.skipIf(!process.env.V3_REUSE_TEST || process.env.V3_WORKBENCH_PHASE !== 'rest
   expect((await service.report(saved.a,saved.a)).available).toBe(false);
   expect((await sql.query('select count(*)::int n from artifact_generations where request_id=$1',[saved.requestId])).rows[0].n).toBe(1);
 });
+
+it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: explicit non-first-step selection survives refresh, navigation, tabs and failed reads',async()=>{
+ const {artifactReuse}=await import('../artifacts/reuse');
+ const {readSliceTarget}=await import('../agentSlice/entry');
+ const user=await authenticated(),service=workbenchService(user,db),reuse=artifactReuse(user,db);
+ const src=await fixture({id:'selection-position',label:'Synthetic selection positioning',methodText:'Synthetic positioning only.',workflow:makeWorkflow(6,true)});
+ const script=await fixture({id:'selection-script',label:'Synthetic two-step script',methodText:'Synthetic script only.',workflow:makeWorkflow(2,false)});
+ const title=await fixture({id:'selection-title',label:'Synthetic title',methodText:'Synthetic title only.',workflow:makeWorkflow(1,false)});
+ const p=randomUUID(),r=randomUUID(),account='synthetic:selection-'+p;
+ await sql.query('update artifact_accounts set account=$1 where actor_id=$2 and module_id=$3 and skill_id=$4',[account,actor,src.moduleId,src.pack.id]);
+ await sql.query('update profiles set credits=100000 where id=$1',[actor]);
+ await service.start({projectId:p,roundId:r,requestId:randomUUID(),registration:src.registration,account},src.moduleId);
+ async function publish(projectId:string,roundId:string){
+  let state=await service.read(projectId,roundId);
+  for(const step of state.workflow.steps){
+   await service.execute({action:'save',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,body:'Synthetic confirmed '+step.title,evidenceIds:state.steps[step.id].evidenceIds});state=await service.read(projectId,roundId);
+   await service.execute({action:'confirm',projectId,roundId,stepId:step.id,requestId:randomUUID(),expectedVersion:state.steps[step.id].version,expectedReviewVersion:state.steps[step.id].reviewVersion});state=await service.read(projectId,roundId);
+  }
+  await service.execute({action:'publish',projectId,roundId,requestId:randomUUID(),expectedSteps:Object.fromEntries(Object.entries(state.steps).map(([k,v])=>[k,{version:v.version,reviewVersion:v.reviewVersion}]))});
+  return service.report(projectId,roundId);
+ }
+ const position=await publish(p,r),pair='selection-pair';
+ await sql.query("INSERT INTO artifact_reference_configs VALUES('selection-script-ref',$1,$2,'[\"step-2\"]',20000,true)",[src.registration,script.registration]);
+ await sql.query("INSERT INTO agent_slice_pairs VALUES($1,$2,$3,'[\"step-0\"]','[\"step-0\"]',20000,true)",[pair,script.registration,title.registration]);
+ const replyModel=randomUUID(),summaryModel=randomUUID();
+ for(const [id,name] of [[replyModel,'qwen/qwen3.8-flash'],[summaryModel,'qwen/qwen3.8-27b']])await sql.query("INSERT INTO ai_models(id,model_id,name,api_key,api_endpoint,input_token_cost,output_token_cost) VALUES($1,$2,'Synthetic selection model','LOCAL_SYNTHETIC_KEY','https://openrouter.ai/api/v1',150000,600000)",[id,name]);
+ await sql.query('UPDATE modules SET model_id=$1 WHERE id=ANY($2::uuid[])',[replyModel,[script.moduleId,title.moduleId]]);
+ await sql.query("INSERT INTO system_settings(key,value) VALUES('v3_workbench_ai','true'),('v3_summary_model_id',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify(summaryModel)]);
+ const a=randomUUID(),b=randomUUID(),conversation=randomUUID(),otherConversation=randomUUID();
+ for(const id of [a,b])await reuse.create({projectId:id,roundId:id,requestId:id,sourceVersionId:position.id!,configId:'selection-script-ref',title:id===a?'Selection script A':'Selection script B'});
+ for(const id of [conversation,otherConversation])await sql.query("INSERT INTO conversations(id,user_id,title,agent_slice_mode) VALUES($1,$2,'Synthetic selection conversation',true)",[id,actor]);
+ const beforeB=await service.read(b,b);
+ const counts=async()=>({db:(await sql.query('select (select count(*) from artifact_projects)::int projects,(select count(*) from artifact_rounds)::int rounds,(select count(*) from agent_slice_executions)::int executions,(select count(*) from agent_slice_calls where pre_deduct_id is not null)::int reservations')).rows[0],provider:(await(await fetch(url+'/__slice_calls')).json()).length});
+ const initial=await counts(),session=await pageFor(),page=session.page,pw=requireWeb('@playwright/test').expect;
+ const route=app+'/chat?conversation='+conversation,a1=a+':step-1:'+pair,a0=a+':step-0:'+pair,b0=b+':step-0:'+pair;
+ const selected=()=>page.getByLabel('使用 Skill 创作'),input=()=>page.getByLabel('消息',{exact:true}),send=()=>page.getByRole('button',{name:'发送',exact:true});
+ const ready=async()=>{await pw(input()).toBeEnabled({timeout:15000});};
+ try{
+  await page.goto(route);await selected().waitFor();await pw(selected()).toHaveValue('');await pw(send()).toBeDisabled();
+  await selected().selectOption(a1);await ready();await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await ready();
+  await page.goto(app+'/workbench');await page.goto(route);await pw(selected()).toHaveValue(a1,{timeout:15000});await ready();
+  await page.goto(app+'/chat?conversation='+otherConversation);await pw(selected()).toHaveValue('');await selected().selectOption(b0);await ready();
+  await page.goto(route);await pw(selected()).toHaveValue(a1,{timeout:15000});await ready();
+  const tab=await session.context.newPage();await tab.goto(route);await pw(tab.getByLabel('使用 Skill 创作')).toHaveValue('');await tab.getByLabel('使用 Skill 创作').selectOption(b0);await pw(tab.getByLabel('消息',{exact:true})).toBeEnabled({timeout:15000});await tab.reload();await pw(tab.getByLabel('使用 Skill 创作')).toHaveValue(b0,{timeout:15000});await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await ready();await tab.close();
+  expect(await counts()).toEqual(initial);
+  // A late response to A cannot replace B or authorize B using A's check.
+  let release!:()=>void,entered!:()=>void;const gate=new Promise<void>(resolve=>release=resolve),seen=new Promise<void>(resolve=>entered=resolve);
+  await page.route('**/api/trpc/**',async intercepted=>{
+   const u=new URL(intercepted.request().url());if(u.pathname.split('/').pop()?.split(',').includes('agentSlice.target')&&decodeURIComponent(u.search).includes(a)){
+    const response=await intercepted.fetch();entered();await gate;await intercepted.fulfill({response});
+   }else await intercepted.continue();
+  });
+  await selected().selectOption(a0);await seen;await selected().selectOption(b0);await ready();release();await page.waitForTimeout(100);await pw(selected()).toHaveValue(b0);await page.unroute('**/api/trpc/**');
+  // Unsaved step editors retain their contents across target changes.
+  await selected().selectOption(a0);await ready();await page.getByLabel('本步骤成果',{exact:true}).fill('Unsaved A first step');
+  await selected().selectOption(b0);await ready();await page.getByLabel('本步骤成果',{exact:true}).fill('Unsaved B first step');
+  await selected().selectOption(a0);await ready();await pw(page.getByLabel('本步骤成果',{exact:true})).toHaveValue('Unsaved A first step');
+  await sql.query('update artifact_workflows set enabled=false where id=$1',[script.registration]);
+  await session.context.setOffline(true);await session.context.setOffline(false);
+  await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(send()).toBeDisabled();
+  await sql.query('update artifact_workflows set enabled=true where id=$1',[script.registration]);
+  await page.getByRole('button',{name:'重新检查',exact:true}).click();await ready();await pw(selected()).toHaveValue(a0);await pw(page.getByLabel('本步骤成果',{exact:true})).toHaveValue('Unsaved A first step');
+  await selected().selectOption(a1);await ready();
+  await input().fill('Selection regression: send to A second step');
+  const started=page.waitForRequest(req=>req.url().includes('agentSlice.begin')&&req.method()==='POST');await send().click();
+  const request=await started;expect(request.postData()).toContain(a);expect(request.postData()).toContain('step-1');expect(request.postData()).not.toContain(b);
+  await expect.poll(async()=>(await sql.query('select project_id,round_id,step_id,pair_id from agent_slice_executions where conversation_id=$1',[conversation])).rows,{timeout:20000}).toEqual([{project_id:a,round_id:a,step_id:'step-1',pair_id:pair}]);
+  await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls c join agent_slice_executions e on e.request_id=c.execution_id where e.conversation_id=$1 and c.state='settled'",[conversation])).rows[0].n),{timeout:20000}).toBe(3);
+  expect(await service.read(b,b)).toEqual(beforeB);expect((await counts()).provider).toBe(initial.provider+3);
+  // A failed connection after admission retries the original A execution even after selecting B.
+  let rejected=false;
+  await page.route('**/api/trpc/**',async intercepted=>{if(!rejected&&intercepted.request().url().includes('agentSlice.executePhase')){rejected=true;await intercepted.abort();}else await intercepted.continue();});
+  await input().fill('Selection retry remains on A');await send().click();await page.getByText('请在本轮点击重试。',{exact:true}).waitFor({timeout:15000});
+  const original=(await sql.query('select request_id,project_id,round_id,step_id from agent_slice_executions where conversation_id=$1 order by created_at desc',[conversation])).rows[0];expect(original).toMatchObject({project_id:a,round_id:a,step_id:'step-1'});
+  await selected().selectOption(b0);await ready();await page.unroute('**/api/trpc/**');await page.getByRole('button',{name:'重试',exact:true}).click();
+  await expect.poll(async()=>Number((await sql.query("select count(*) n from agent_slice_calls where execution_id=$1 and state='settled'",[original.request_id])).rows[0].n),{timeout:20000}).toBe(3);
+  expect((await sql.query('select count(*)::int n from agent_slice_executions where conversation_id=$1',[conversation])).rows[0].n).toBe(2);expect(await service.read(b,b)).toEqual(beforeB);
+  await selected().selectOption(a1);await ready();
+  const afterSend=await counts();await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await ready();expect(await counts()).toEqual(afterSend);
+  // A hung read has a deadline; it must not permit sending or erase input.
+  await input().fill('Keep this unsent input');
+  let unblock!:()=>void;const pending=new Promise<void>(resolve=>unblock=resolve);
+  await page.route('**/api/trpc/**',async intercepted=>{if(new URL(intercepted.request().url()).pathname.split('/').pop()?.split(',').includes('agentSlice.target')){await pending;await intercepted.abort();}else await intercepted.continue();});
+  await page.evaluate(()=>window.dispatchEvent(new Event('online')));await pw(send()).toBeDisabled();await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(input()).toHaveValue('Keep this unsent input');unblock();await page.unroute('**/api/trpc/**');await page.getByRole('button',{name:'重新检查',exact:true}).click();await ready();expect(await counts()).toEqual(afterSend);
+  // Source revocation blocks this target through the real read API, without generation.
+  const reference=beforeB.steps['step-0'].evidenceIds[0];await sql.query('update artifact_evidence_restrictions set deleted=true where evidence_id=$1',[reference]);
+  await selected().selectOption(b0);await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(send()).toBeDisabled();expect(await counts()).toEqual(afterSend);
+  await sql.query('update artifact_evidence_restrictions set deleted=false where evidence_id=$1',[reference]);await page.getByRole('button',{name:'重新检查',exact:true}).click();await ready();
+  await publish(a,a);await selected().selectOption(a1);await page.reload();await pw(selected()).toHaveValue(a1,{timeout:15000});await pw(send()).toBeDisabled();await pw(page.getByLabel('当前创作目标')).toContainText('正式 v1');
+  const frozen=await counts(),missing=randomUUID();
+  await page.evaluate(({key,id,pair})=>sessionStorage.setItem(key,JSON.stringify({projectId:id,roundId:id,stepId:'step-1',pairId:pair})),{key:`graylum:slice-selection:1:${actor}:${conversation}`,id:missing,pair});
+  await page.reload();await page.getByText('所选作品或引用目前无法继续创作，原选择和输入已保留。',{exact:false}).waitFor({timeout:15000});await pw(selected()).toHaveValue('');await pw(send()).toBeDisabled();expect(await counts()).toEqual(frozen);
+  const stranger=await authenticated(await newUser());expect(await readSliceTarget(stranger,db,{projectId:a,roundId:a,stepId:'step-1',pairId:pair})).toEqual({target:null,executable:false});
+  console.log('SLICE selection PASS: non-first A execution persisted; B unchanged; unsent refresh/navigation/tabs/late read/timeout/revocation/published target; selection-only provider and reservation counts unchanged');
+ }finally{await session.context.close();}
+},240000);

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {continueSliceWork,continueWorkInput} from '../services/agentSlice/continueWork';
-import {sliceEntry,sliceOpenInput} from '../services/agentSlice/entry';
+import {sliceEntry,sliceOpenInput,readSliceTarget,sliceTargetInput} from '../services/agentSlice/entry';
 import {readSliceConversation,sliceConversationInput} from '../services/agentSlice/conversation';
 import {TRPCError} from '@trpc/server';
 import {protectedProcedure, router} from '../trpc';
@@ -27,6 +27,10 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
  return result;
 });
 export const agentSliceRouter=router({
+ target:procedure.input(sliceTargetInput).query(({ctx,input})=>{
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
+  return readSliceTarget(ctx.userScopedSupabase,ctx.supabaseAdmin,input);
+ }),
  continueWork:procedure.input(continueWorkInput).mutation(({ctx,input})=>{
   if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new Error('SLICE_UNAVAILABLE');
   return continueSliceWork(ctx.userScopedSupabase,ctx.supabaseAdmin,input);

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useRef,useState,type Dispatch,type SetStateAction} from 'react';
 import type {inferRouterOutputs} from '@trpc/server';
 import type {AppRouter} from '@repo/api/src/root';
 import {trpc} from '@/trpc/client';
@@ -8,10 +8,10 @@ import {Button} from '@/components/ui/button';
 import {Dialog,DialogContent,DialogTitle} from '@/components/ui/dialog';
 export type SliceWork=inferRouterOutputs<AppRouter>['agentSlice']['targets'][number];
 export type SliceTarget=SliceWork&{stepId:string;stepTitle:string};
-export function SliceArtifact({target,works,candidate,onChanged,onContinue}:{target:SliceTarget;works:SliceWork[];candidate?:{candidateId:string;body:string;adoptable:boolean};onChanged:()=>void;onContinue:(projectId:string,roundId:string,pairId:string)=>Promise<void>}){
+export type SliceDrafts=Record<string,{body:string;version:number;id:string}>;
+export function SliceArtifact({target,works,candidate,onChanged,onContinue,drafts,setDrafts}:{target:SliceTarget;works:SliceWork[];drafts:SliceDrafts;setDrafts:Dispatch<SetStateAction<SliceDrafts>>;candidate?:{candidateId:string;body:string;adoptable:boolean};onChanged:()=>void;onContinue:(projectId:string,roundId:string,pairId:string)=>Promise<void>}){
  const utils=trpc.useUtils(),scope={projectId:target.projectId,roundId:target.roundId};
  const query=trpc.workbench.read.useQuery(scope,{retry:false,refetchOnWindowFocus:true});
- const [drafts,setDrafts]=useState<Record<string,{body:string;version:number;id:string}>>({});
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[returnRound,setReturnRound]=useState('');
  const [report,setReport]=useState<inferRouterOutputs<AppRouter>['workbench']['report']|null>(null);
  const requests=useRef(new Map<string,string>()),locked=useRef(false);
