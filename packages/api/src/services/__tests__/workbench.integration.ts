@@ -4663,6 +4663,22 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: fixed A to title
   expect((await service.read(browserB,browserB)).steps['step-0'].body).toBe('');expect((await service.report(browserA,browserA2)).version).toBe(2);expect((await service.read(b,b)).steps['step-0'].body).toBe('');
   const afterDelete=await (await fetch(url+'/__slice_calls')).json();expect(afterDelete).toHaveLength(12);expect(afterDelete.slice(3).every((c:{hasConfirmedPreference:boolean;hasOldPreference:boolean})=>!c.hasConfirmedPreference&&!c.hasOldPreference)).toBe(true);
 
+  // Real application death while the provider has received a request but has not replied.
+  const killedRequest=randomUUID();await begin(b,b,killedRequest,'Synthetic process death',100000);
+  const controls={method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}};
+  expect((await fetch(url+'/__slice_hold',controls)).ok).toBe(true);
+  const killedHttp=page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:killedRequest,phase:'reply'},timeout:60000}).catch(()=>null);
+  await expect.poll(async()=>(await (await fetch(url+'/__slice_calls')).json()).length,{timeout:20000}).toBe(13);
+  const financialBeforeKill=(await sql.query('select state,pre_deduct_id from agent_slice_calls where execution_id=$1',[killedRequest])).rows;expect(financialBeforeKill).toHaveLength(1);expect(financialBeforeKill[0].state).toBe('dispatched');
+  expect((await fetch(url+'/__restart_app',controls)).ok).toBe(true);await killedHttp;
+  await expect.poll(async()=>{try{return (await fetch(app+'/login')).ok;}catch{return false;}},{timeout:60000}).toBe(true);
+  await sql.query("update agent_slice_calls set dispatched_at=clock_timestamp()-interval '3 minutes' where execution_id=$1",[killedRequest]);
+  const recoveredHttp=await page.request.post(app+'/api/trpc/agentSlice.executePhase',{data:{executionId:killedRequest,phase:'reply'}});expect(recoveredHttp.ok()).toBe(true);expect(await recoveredHttp.text()).toContain('outcome_unknown');
+  expect((await page.request.post(app+'/api/trpc/agentSlice.recover',{data:{executionId:killedRequest}})).ok()).toBe(true);
+  expect((await (await fetch(url+'/__slice_calls')).json()).length).toBe(13);
+  expect((await sql.query('select state,pre_deduct_id from agent_slice_calls where execution_id=$1',[killedRequest])).rows).toEqual(financialBeforeKill);
+  expect((await sql.query("select count(*)::int n from token_stats where metadata->>'executionId'=$1",[killedRequest])).rows[0].n).toBe(0);
+  console.log('SLICE real SIGKILL/restart: original unknown request retained, provider count unchanged, no extra reservation/settlement PASS');
  } finally {await browserSession.context.close();}
  // Equal timestamps still paginate by immutable request identity, without loss.
  const tieIds=[randomUUID(),randomUUID(),randomUUID()].sort().reverse();

@@ -323,10 +323,15 @@ try {
   }
   let modelCalls = 0;
   const sliceCalls=[];
+  const controlToken=randomUUID();let holdSlice=false,restartApplication;
   const documentCalls=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
+    if(req.url==='/__slice_hold'||req.url==='/__restart_app'){
+      if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
+      try{if(req.url==='/__slice_hold')holdSlice=true;else await restartApplication();res.writeHead(200).end('ok');}catch{res.writeHead(500).end('local restart failed');}return;
+    }
     if(req.url==='/__slice_calls'){res.writeHead(200).end(JSON.stringify(sliceCalls));return;}
     if(req.url==='/__slice_model_fixture'){
       const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>2097152){res.writeHead(413).end();return;}chunks.push(chunk);}
@@ -334,6 +339,7 @@ try {
       const tool=body.tool_choice?.function?.name==='read_selected_artifact';
       if(req.method!=='POST'||body.stream||body.provider?.allow_fallbacks!==false){res.writeHead(400).end();return;}
       sliceCalls.push({model:body.model,tool,hasConfirmedPreference:messages.includes('结尾给行动建议'),hasOldPreference:messages.includes('先给具体例子')});
+      if(holdSlice){holdSlice=false;return;} // Keep the synthetic provider response pending until the app is killed.
       await new Promise(resolve=>setTimeout(resolve,150));
       const message=tool?{role:'assistant',content:null,tool_calls:[{id:'read-'+sliceCalls.length,type:'function',function:{name:'read_selected_artifact',arguments:'{}'}}]}:{role:'assistant',content:body.tools?.length?'浏览器真实接线回复':'浏览器整理成果'};
       res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({id:'local-slice-'+sliceCalls.length,object:'chat.completion',created:1,model:body.model,choices:[{index:0,finish_reason:tool?'tool_calls':'stop',message}],usage:{prompt_tokens:800,completion_tokens:30,total_tokens:830}}));return;
@@ -474,6 +480,7 @@ try {
     SUPABASE_SERVICE_ROLE_KEY: service,
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
+    V3_LOCAL_CONTROL: controlToken,
     V3_LOCAL_SERVICE_JWT: service,
     V3_LOCAL_USER_JWT: jwt("authenticated"),
     V3_LOCAL_JWT_SECRET: secret,
@@ -515,7 +522,8 @@ try {
       });
   };
   startApp();
-  // Test process can request a real process restart through a local-only pipe protocol.
+  restartApplication=async()=>{const previous=app;const exited=new Promise(resolve=>previous.once('exit',resolve));process.kill(-previous.pid,'SIGKILL');await exited;startApp();};
+  // Loopback test control restarts only this disposable application process group.
   const runTests = () =>
     spawn(
       "pnpm",
