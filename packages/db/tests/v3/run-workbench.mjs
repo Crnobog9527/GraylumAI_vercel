@@ -250,6 +250,8 @@ try {
   apply("packages/db/migrations/0101_agent_slice_legacy_generation_boundary.sql");
   apply("packages/db/migrations/0102_agent_slice_revision_handoff.sql");
   apply("packages/db/migrations/0102_agent_slice_revision_handoff.sql");
+  apply("packages/db/migrations/0104_workbench_provider_observations.sql");
+  apply("packages/db/migrations/0104_workbench_provider_observations.sql");
 
 
   console.log("SQL additive migration and repeat application PASS");

@@ -5170,3 +5170,28 @@ it.skipIf(process.env.V3_WORKBENCH_PHASE === 'restore')('SLICE: explicit non-fir
   console.log('SLICE selection PASS: non-first A execution persisted; B unchanged; unsent refresh/navigation/tabs/late read/timeout/revocation/published target; selection-only provider and reservation counts unchanged');
  }finally{await session.context.close();}
 },240000);
+
+
+aiTest('AI: BILL-1 observation survives unknown and replay without changing money or exposing private diagnostics', async () => {
+  const t = await generationFixture();
+  let calls = 0;
+  const ai = t.workbenchGeneration(t.user, db, async req => {
+    calls++;
+    await req.onObservation!({ phase: 'headers', httpStatus: 200, providerResponseId: 'gen-synthetic-retained', finishReason: null, usage: null });
+    await req.onObservation!({ phase: 'body', httpStatus: 200, providerResponseId: 'gen-synthetic-retained', finishReason: 'length', usage: { promptTokens: 800, completionTokens: 30, reportedCostUsd: 0.01 } });
+    throw new Error('synthetic incomplete provider result');
+  });
+  const v = await t.request(ai);
+  const balance = (await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits;
+  const result = await ai.generate(v);
+  expect(result.state).toBe('unknown');
+  expect(await ai.generate(v)).toEqual(result); expect(calls).toBe(1);
+  const row = (await sql.query('select * from artifact_generations where request_id=$1', [v.requestId])).rows[0];
+  expect(row.provider_observations.body.providerResponseId).toBe('gen-synthetic-retained');
+  expect(row.result).toBeNull(); expect(row.charged_credits).toBeNull();
+  expect((await sql.query('select credits from profiles where id=$1', [actor])).rows[0].credits).toBe(balance-result.reservedCredits);
+  expect((await sql.query("select operation_type from billing_history where id=$1 or metadata->>'preDeductId'=$2",[row.pre_deduct_id,row.pre_deduct_id])).rows.map(x=>x.operation_type)).toEqual(['pre_deduct']);
+  expect(JSON.stringify(await ai.list(t.scope))).not.toContain('gen-synthetic-retained');
+  expect(JSON.stringify(await ai.list(t.scope))).not.toContain('reportedCostUsd');
+  expect((await t.user.rpc('artifact_observe_generation', {p_actor_id:actor,p_project_id:v.projectId,p_round_id:v.roundId,p_request_id:v.requestId,p_token:row.dispatch_token,p_observation:row.provider_observations.body})).error).not.toBeNull();
+});

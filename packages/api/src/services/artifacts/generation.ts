@@ -70,7 +70,23 @@ export function echoesPrivateMethod(answer: string, privateContext: string): boo
 }
 
 type Model = z.infer<typeof modelSchema>;
-export type ModelRequest = { model: Model; messages: Array<{ role: 'system' | 'user'; content: string }>; maxTokens: number };
+export const providerObservationSchema = z.object({
+  phase: z.enum(['headers', 'body']),
+  httpStatus: z.number().int().min(100).max(599),
+  providerResponseId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/).nullable(),
+  finishReason: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).nullable(),
+  usage: z.object({
+    promptTokens: z.number().int().nonnegative().safe().nullable(),
+    completionTokens: z.number().int().nonnegative().safe().nullable(),
+    reportedCostUsd: z.number().finite().nonnegative().nullable(),
+  }).strict().nullable(),
+}).strict();
+export type ProviderObservation = z.infer<typeof providerObservationSchema>;
+export type ModelRequest = { model: Model; messages: Array<{ role: 'system' | 'user'; content: string }>; maxTokens: number;
+  // Private diagnostics only. Never accepts response content, credentials or a price decision.
+  onObservation?: (observation: ProviderObservation) => Promise<void> };
+const responseId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value) ? value : null;
+const observedTokens = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 export type GenerationTransport = (request: ModelRequest) => Promise<z.infer<typeof answerSchema>>;
 export class ProviderRateLimited extends Error {
   constructor() { super('PROVIDER_RATE_LIMITED'); }
@@ -78,13 +94,22 @@ export class ProviderRateLimited extends Error {
 
 // A fixed endpoint, explicit server credential, bounded reply and no redirects,
 // tools, inherited web plugin, fallback models or agent loop. No environment-key fallback.
-export const openRouterGeneration: GenerationTransport = async ({ model, messages, maxTokens }) => {
+export const openRouterGeneration: GenerationTransport = async ({ model, messages, maxTokens, onObservation }) => {
   modelSchema.parse(model);
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(45000),
     headers: { Authorization: `Bearer ${model.api_key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: model.model_id, messages, max_tokens: maxTokens, stream: false, ...openRouterSearchParameters(model.model_id,false), ...(['qwen/qwen3.8-flash','qwen/qwen3.8-27b'].includes(model.model_id) ? {reasoning:{enabled:false}} : model.model_id === 'openai/gpt-5.6-luna' ? {reasoning:{effort:'low'}} : {}), provider: { allow_fallbacks: false, require_parameters: true } }),
   });
+  // Preserve identity even when reading or validating the body subsequently fails.
+  // A diagnostics outage must not discard an otherwise recoverable result.
+  const observe = async (observation: ProviderObservation) => {
+    if (!onObservation) return;
+    try { await onObservation(providerObservationSchema.parse(observation)); }
+    catch { logger.warn('ai', 'workbench_provider_observation_not_saved', { phase: observation.phase }); }
+  };
+  const headerId = responseId(response.headers.get('x-generation-id'));
+  await observe({ phase: 'headers', httpStatus: response.status, providerResponseId: headerId, finishReason: null, usage: null });
   // No automatic refund after dispatch: even an HTTP/parse error may follow a
   // billed provider execution. Reconciliation never blindly resends the request.
   if (!response.body) throw new Error('GENERATION_OUTCOME_UNKNOWN');
@@ -93,7 +118,17 @@ export const openRouterGeneration: GenerationTransport = async ({ model, message
     for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 131072) throw new Error('GENERATION_OUTCOME_UNKNOWN'); chunks.push(value); }
   } finally { await reader.cancel(); }
   const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (response.status === 429 && payload?.error?.code === 429 &&
+  const bodyId = responseId(payload?.id);
+  const finish = payload?.choices?.[0]?.finish_reason;
+  const rawUsage = payload?.usage;
+  await observe({ phase: 'body', httpStatus: response.status, providerResponseId: bodyId,
+    finishReason: typeof finish === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(finish) ? finish : null,
+    usage: rawUsage && typeof rawUsage === 'object' ? {
+      promptTokens: observedTokens(rawUsage.prompt_tokens), completionTokens: observedTokens(rawUsage.completion_tokens),
+      reportedCostUsd: typeof rawUsage.cost === 'number' && Number.isFinite(rawUsage.cost) && rawUsage.cost >= 0 ? rawUsage.cost : null,
+    } : null });
+  if (headerId && bodyId && headerId !== bodyId) throw new Error('GENERATION_OUTCOME_UNKNOWN');
+  if (response.status === 429 && response.headers.get('x-generation-id') == null && payload?.id == null && payload?.error?.code === 429 &&
       payload.choices == null && payload.usage == null) throw new ProviderRateLimited();
   if (!response.ok) throw new Error('GENERATION_OUTCOME_UNKNOWN');
   if((openRouterSearchCount(payload.usage)??0)>0||payload.choices?.some((c:any)=>c.message?.annotations?.some((a:any)=>a.type==='url_citation')))throw new Error('GENERATION_OUTCOME_UNKNOWN');
@@ -327,7 +362,15 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
       let known: z.infer<typeof receiptSchema> | undefined;
       let exceededUsage: {inputTokens:number;outputTokens:number} | undefined;
       try {
-        const answer = answerSchema.parse(await transport({ model: ready.model, messages: ready.messages, maxTokens: ready.quote.maxTokens }));
+        const answer = answerSchema.parse(await transport({ model: ready.model, messages: ready.messages, maxTokens: ready.quote.maxTokens,
+          onObservation: async observation => {
+            const saved = await privateClient!.rpc('artifact_observe_generation', {
+              p_actor_id: ready.id, p_project_id: v.projectId, p_round_id: v.roundId,
+              p_request_id: v.requestId, p_token: reserved.token,
+              p_observation: providerObservationSchema.parse(observation),
+            }).abortSignal(AbortSignal.timeout(3000));
+            if (saved.error) throw new Error('GENERATION_OBSERVATION_NOT_SAVED');
+          } }));
         if(answer.inputTokens>ready.quote.inputTokens){exceededUsage={inputTokens:answer.inputTokens,outputTokens:answer.outputTokens};throw new Error('GENERATION_USAGE_EXCEEDED');}
         if (answer.outputTokens > ready.quote.maxTokens || !answer.body.trim() || [...answer.body].length > (v.purpose === 'reply' ? 20000 : ready.step.maxLength)) throw new Error('GENERATION_OUTCOME_UNKNOWN');
         const filtered = filterAIOutput(answer.body);
