@@ -29,18 +29,20 @@ runtime authorization, current-task writer state, or automatic-progression state
 
 ## Approved V3 delivery requirements
 
-[V3 specification](tasks/V3-standard-skills.md) defines these product slices. Only
-`V3.1-LOAD` (规格同步与标准 Skill 最小真实加载) is selected in this implementation
-window. Later rows express delivery dependencies, not permission or automatic task
-selection. `unassigned` does not reserve a migration number or authorize SQL.
+[V3 specification](tasks/V3-standard-skills.md) defines the historical product
+slices and [the 2026-09-13 OPC architecture](tasks/V3-OPC-growth-agent-architecture.md)
+defines the current product journey and runtime/billing re-baseline. Earlier task
+rows express delivery dependencies and historical identity, not permission or
+automatic task selection. `unassigned` does not reserve a migration number or
+authorize SQL.
 
 Preserve SKILL-1A/1B, BILL-1, PAY-1 and CI-1 as historical baseline deliveries;
 their merges do not complete V3. Code merges alone do not prove non-production
 runtime, private package permissions, provider behavior, billing or M3 acceptance.
 `V3-M3` requires the **entire** Master Plan §7 exit, including existing payment/auth/
-refund/yearly/cron acceptance and the new V3 cases. It cannot be satisfied by the
-first loader PR. Owner selection and separate external/production authorization
-remain necessary after every slice and after M3.
+refund/yearly/cron acceptance and the current V3 cases. It cannot be satisfied by
+the first loader or Agent SDK slice. Owner selection and separate external/
+production authorization remain necessary after every slice and after M3.
 
 ### 2026-09-07 product amendment: configurable workbench
 
@@ -49,6 +51,35 @@ Owner-approved [generic Skill and configurable workbench requirements](tasks/V3-
 - `V3-ARTIFACTS`: shared project/round/step results, evidence, snapshots, declared-dependency review, fixed workflow/template versions and deterministic report transactions; server isolation across users/projects/Skills/rounds/versions and durable recovery.
 - `V3-WORKBENCH`: one core for configured three-, six- and eight-step workflows, retaining the original social six-step template; shared AI/cost mechanisms, configuration-only onboarding of a further sample after the core is complete, and compatibility with non-workflow document Skills.
 - `V3-M3`: verify every [generic acceptance case](tasks/V3-standard-skills.md#generic-workbench-acceptance), original social behavior, first/subsequent iterations and the entire Master Plan §7 matrix. Generic samples do not replace any other applicable acceptance or prove product completion.
+
+### 2026-09-13 product re-baseline: OPC growth Agent
+
+The Owner-approved [Master Plan amendment](Graylum_Master_Plan_v10.2_OPC_Growth_Agent_Amendment.md) and [detailed architecture](tasks/V3-OPC-growth-agent-architecture.md) supersede conflicting assumptions that Graylum's primary experience is an unstructured global chat or that connectors require a first-level navigation page.
+
+Locked product semantics:
+
+- the existing six-step positioning Skill supplies the business method; a dedicated mentor-style page supplies the new interaction mechanism;
+- confirmed positioning creates platform-account projects and the first-week topic plan;
+- each topic/work item owns an independent persistent Agent SDK Session;
+- project memory is a sourced operating profile plus approved project facts and a searchable artifact index, not blanket transcript injection;
+- the top navigation is `首页｜项目｜技能广场｜个人中心`; the Skill marketplace remains a first-level top-nav page;
+- Skill invocation, files and Feishu/Notion/Slack connectors also live in the Agent composer; connectors do not receive a first-level nav item;
+- ordinary Agent, Skill, summarization and Fusion model roles follow deterministic Owner-approved responsibility boundaries;
+- one unified Agent Runtime ultimately replaces the old model router, regex search decision and handwritten context assembly;
+- multi-call billing reuses the canonical balance/ledger and adds provider-authoritative receipts plus one atomic final settlement;
+- membership-level automatic history expiry is removed; user-directed and legal deletion remain;
+- old routes and runtimes are removed only after the new path and recovery behavior are proven.
+
+The existing task graph is not silently rewritten by this documentation change, and no new Launch task is created or selected here. Before implementation begins, live completion evidence and overlap must be reviewed, and the Owner must explicitly select the bounded implementation scope. The recommended technical sequence is documented for planning only:
+
+1. provider-authoritative aggregate billing and persistent Agent Runtime foundation;
+2. the first vertical path from six-step positioning to one saved topic artifact;
+3. top-navigation Skill marketplace, project routes and composer capabilities;
+4. Feishu multidimensional-table connector;
+5. Gold multi-model panel after real low-cost reconciliation;
+6. final legacy-runtime, routing, context and retention-cleanup removal.
+
+A historical merge, including the bounded Agent SDK slice merged in PR #414, is reusable evidence but does not prove any of the new end-to-end product requirements complete.
 
 ## Ready-candidate derivation
 
