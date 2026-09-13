@@ -1,6 +1,6 @@
 # V3 标准 Skills、工作台与研究：规格及 V3.1 第一批
 
-状态：Owner 已批准产品扩展；本窗口仅选择 `V3.1-LOAD`。本规格不是完成证明或外部操作授权。V3 原方案（2026-09-06）为产品输入，V3.1《Codex 源码借鉴与实施修订》为复用及首批交付修订；不提交真实商业方法原文。
+状态：Owner 已批准产品扩展；原 2026-09-06 窗口仅选择 `V3.1-LOAD`。本规格不是完成证明或外部操作授权。V3 原方案（2026-09-06）为产品输入，V3.1《Codex 源码借鉴与实施修订》为复用及首批交付修订；不提交真实商业方法原文。
 
 2026-09-07 修订：Owner 已批准共享 Skill 基座与配置驱动多步骤工作台，详见[通用 Skill 与可配置工作台](#generic-skill-workbench)。本次仅补规格，通用工作台及新增验收尚待实现/运行；不选择或启动后续任务。下文“首批/本批/本窗口”及其 NOT_RUN 保留各历史阶段范围，不作为当前完成状态，也不改写既有验证的 FAIL/BLOCKED。
 
@@ -52,7 +52,7 @@ Graylum 建设共享 Skill 基座和配置驱动的多步骤工作台。社媒�
 
 ### 后续交付验收
 
-以下是后续实施的验收要求，本次文档 PR 不实施或声称这些测试通过。任务身份、依赖和顺序不变；所有项最终纳入 V3-M3，不能替代 Master Plan §7 的其他适用要求。
+以下是后续实施的验收要求，本次文档 PR 不实施或声称这些测试通过。本段保留当时任务身份、依赖和顺序；当前依赖由 [plan-core](../plan-core.md) 的 OPC 映射扩展，所有项仍最终纳入 V3-M3，不能替代 Master Plan §7 的其他适用要求。
 
 | 验收要求 | 既有交付节点 |
 | --- | --- |
@@ -117,6 +117,10 @@ Codex parser 的缺名回退、非法标量修复、超长描述兼容不用于 
 命令：`pnpm test:api`，定点 `pnpm --filter @repo/api exec vitest run src/services/__tests__/standardSkillLoader.test.ts`，以及 `pnpm --filter web lint`、`pnpm --filter web typecheck`、`pnpm build`、`git diff --check`。新测试匹配 API 的 `src/**/*.test.ts`，required Unit Tests 已调用 `pnpm test:api`；新核心显式加入 web tsconfig，现有两项 required TypeScript 检查覆盖它，不更改 workflow。最终执行结果及 exact candidate 以 PR/CI 证据为准，规格不预填 CI PASS。
 
 本批未实现：DB 文件来源/权限修复/原子包发布、工作台与成果落库、AgentKey、模型上下文适配/效果、费用适配、导入 UI。**NOT_RUN**：远端 DB/RLS、真实发布/撤销、模型效果、真实数据质量/价格/条款、费用/支付/退款、M3 产品流程、生产及部署。格式和文件加载 PASS 不能替代其中任何一项。
+
+## 2026-09-13 OPC 实施衔接
+
+[七阶段任务映射](V3-OPC-implementation.md) 复用 `V3-WORKBENCH` 的未完成交付并增加统一 Runtime 前置依赖；旧独立工作台宿主由 OPC 入口替代，通用三/六/八步、配置扩展、非工作流 Skill、版本、权限、研究和恢复验收保留。账务是新增 `V3-BILL-2`，不将旧 `BILL-1` 或下列历史切片重置为未实现，也不把合并记录升级为整个节点完成。当前窗口只交付映射和账务规格，未启动这些功能。
 
 ## 后续批次：V3-PACKAGE-RESEARCH（仓库与隔离验证）
 

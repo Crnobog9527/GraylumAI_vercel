@@ -603,6 +603,8 @@ Fusion 当前可作为实现候选，但不得把 Beta 能力当成永久协议�
 
 本文只确定顺序，不创建或自动选择新 Launch task。下列七批对应 Master Plan 第 10 节文档阶段之后的第 2–8 项：先账务，再 Runtime，不合并为一个实施批次。两批共用第 2.3 节的最小作用域/调用身份契约，第一批用隔离适配验证钱路，第二批再接持久 Session 与执行。
 
+七阶段现已映射至 [实施任务规格](V3-OPC-implementation.md) 和 [plan-core 依赖图](../plan-core.md)。第一批使用 [V3-BILL-2 开工契约](V3-BILL-2-provider-authoritative-billing.md)，第二批为 `V3-RUNTIME`；任务节点记录已确认工作，不表示授权或完成。以下产品顺序与范围保留。
+
 ### 第一批：Provider-authoritative 统一计费
 
 - 计费运行单、供应商收据、精确金额、原子最终结算；
