@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as security from '../../middleware/securityChecks';
 import { TRPCError } from '@trpc/server';
-import { workbenchGeneration, buildWorkbenchMessages, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, ProviderRateLimited, type ModelRequest } from '../artifacts/generation';
+import { workbenchGeneration, buildWorkbenchMessages, countWorkbenchTokens, echoesPrivateMethod, sealGenerationReceipt, openGenerationReceipt, generationInput, openRouterGeneration, ProviderRateLimited, type ModelRequest, type ProviderObservation } from '../artifacts/generation';
 import { activateSkill, identityOf, packageHash, type SkillSource } from '../skills/loader';
 import { makePackage } from './fixtures/artifacts';
 const model: ModelRequest['model'] = { id: '00000000-0000-4000-8000-000000000001', model_id: 'openai/gpt-4o-mini-2024-07-18', is_active: 'true', max_tokens: 4096, input_limit: 128000, api_key: 'SYNTHETIC_ONLY', api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', token_counting_supported: 'true', tokenizer_family: 'openai' };
@@ -165,4 +165,46 @@ it('preflights the actual summary framing even before the unknown reply exists',
  context.instruction='x'.repeat(capacity-100-size(buildWorkbenchMessages('',context,'reply')));
  expect(()=>providerInputReservation(secondary,buildWorkbenchMessages('',context,'reply'),2048)).not.toThrow();
  expect(()=>providerInputReservation(secondary,buildWorkbenchMessages('',{...context,currentReply:''},'summary'),2048)).toThrow('GENERATION_CAPACITY');
+});
+
+describe('BILL-1 provider evidence retention', () => {
+  it('preserves bounded identity and usage before rejecting an incomplete result', async () => {
+    const onObservation = vi.fn(async (_observation: ProviderObservation) => {});
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      id: 'gen-synthetic', choices: [{ finish_reason: 'length', message: { content: 'PRIVATE_OUTPUT' } }],
+      usage: { prompt_tokens: 9, completion_tokens: 10, cost: 0.003, secret: 'PRIVATE_VALUE' },
+    }), { headers: { 'x-generation-id': 'gen-synthetic' } }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(openRouterGeneration({ ...request, onObservation })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(onObservation.mock.calls.map(([v]) => v)).toEqual([
+      { phase: 'headers', httpStatus: 200, providerResponseId: 'gen-synthetic', finishReason: null, usage: null },
+      { phase: 'body', httpStatus: 200, providerResponseId: 'gen-synthetic', finishReason: 'length', usage: { promptTokens: 9, completionTokens: 10, reportedCostUsd: 0.003 } },
+    ]);
+    expect(JSON.stringify(onObservation.mock.calls)).not.toContain('PRIVATE');
+    expect(JSON.stringify(onObservation.mock.calls)).not.toContain(model.api_key);
+  });
+  it('saves a header ID even when the body is malformed, without inventing zero cost', async () => {
+    const onObservation = vi.fn(async (_observation: ProviderObservation) => {});
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{', { headers: { 'x-generation-id': 'gen-header' } })));
+    await expect(openRouterGeneration({ ...request, onObservation })).rejects.toThrow();
+    expect(onObservation).toHaveBeenCalledExactlyOnceWith({ phase: 'headers', httpStatus: 200, providerResponseId: 'gen-header', finishReason: null, usage: null });
+  });
+  it('retains conflicting identities without treating the result as billable', async () => {
+    const onObservation = vi.fn(async (_observation: ProviderObservation) => {});
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'gen-body', choices: [{ finish_reason: 'stop', message: { content: 'answer' } }], usage: { prompt_tokens: 1, completion_tokens: 2 } }), { headers: { 'x-generation-id': 'gen-header' } })));
+    await expect(openRouterGeneration({ ...request, onObservation })).rejects.toThrow('GENERATION_OUTCOME_UNKNOWN');
+    expect(onObservation).toHaveBeenCalledTimes(2);
+  });
+  it('keeps a complete result recoverable if diagnostics persistence fails', async () => {
+    const onObservation = vi.fn(async () => { throw new Error('synthetic database outage'); });
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ id: 'gen-body', choices: [{ finish_reason: 'stop', message: { content: 'answer' } }], usage: { prompt_tokens: 1, completion_tokens: 2 } })));
+    vi.stubGlobal('fetch', fetch);
+    expect(await openRouterGeneration({ ...request, onObservation })).toEqual({ body: 'answer', inputTokens: 1, outputTokens: 2 });
+    expect(onObservation).toHaveBeenCalledTimes(2); expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('does not classify a 429 carrying generation identity as a proven refusal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 429 }, id: 'gen-present' }), { status: 429 })));
+    await expect(openRouterGeneration(request)).rejects.not.toBeInstanceOf(ProviderRateLimited);
+  });
 });
