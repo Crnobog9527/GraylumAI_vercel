@@ -59,8 +59,9 @@ The Owner-approved [Master Plan amendment](Graylum_Master_Plan_v10.2_OPC_Growth_
 Locked product semantics:
 
 - the existing six-step positioning Skill supplies the business method; a dedicated mentor-style page supplies the new interaction mechanism;
-- confirmed positioning creates platform-account projects and the first-week topic plan;
-- each topic/work item owns an independent persistent Agent SDK Session;
+- before any account project exists, a user-owned positioning draft binds a stable Session, artifacts and per-operation billing identities; it uses the same Runtime and money path as project work items, not a placeholder project;
+- positioning and the first-week plan are generated, edited and versioned in that draft before the user confirms the source version, account targets and plan version; confirmation only idempotently creates/adopts the account projects and materializes the confirmed plan into work items, without model calls or repeated charges;
+- each topic/work item owns an independent persistent Agent SDK Session; the original positioning Session and billing identities remain attached to the draft, including when several account projects adopt its confirmed source;
 - project memory is a sourced operating profile plus approved project facts and a searchable artifact index, not blanket transcript injection;
 - the top navigation is `首页｜项目｜技能广场｜个人中心`; the Skill marketplace remains a first-level top-nav page;
 - Skill invocation, files and Feishu/Notion/Slack connectors also live in the Agent composer; connectors do not receive a first-level nav item;
@@ -72,8 +73,8 @@ Locked product semantics:
 
 The existing task graph is not silently rewritten by this documentation change, and no new Launch task is created or selected here. Before implementation begins, live completion evidence and overlap must be reviewed, and the Owner must explicitly select the bounded implementation scope. The recommended technical sequence is documented for planning only:
 
-1. provider-authoritative aggregate billing and persistent Agent Runtime foundation;
-2. the first vertical path from six-step positioning to one saved topic artifact;
+1. provider-authoritative aggregate billing and persistent Agent Runtime foundation, covering both positioning-draft and project-work-item scopes;
+2. the first vertical path from a zero-project user's positioning draft and reviewed weekly plan to one saved topic artifact;
 3. top-navigation Skill marketplace, project routes and composer capabilities;
 4. Feishu multidimensional-table connector;
 5. Gold multi-model panel after real low-cost reconciliation;
