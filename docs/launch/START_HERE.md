@@ -11,7 +11,9 @@ runtime ledger, or completion state.
 - [Master Plan v10.1 baseline](Graylum_Master_Plan_v10.1.md): all non-conflicting payment, auth, security, release, acceptance and Definition of Done requirements remain in force.
 - [Historical V3 specification and V3.1 delivery](tasks/V3-standard-skills.md): retain non-conflicting Skill package, artifact, evidence, version, report, permission and validation requirements.
 - [Generic Skill foundation and configurable workbench](tasks/V3-standard-skills.md#generic-skill-workbench): retained where consistent with the 2026-09-13 amendment. The social six-step Skill remains the business source; the new architecture changes the product journey and host runtime rather than replacing its business method.
-- `docs/launch/plan-core.md`.
+- [Launch task graph](plan-core.md).
+- [OPC 七阶段实施任务映射](tasks/V3-OPC-implementation.md)：任务身份、依赖、验收、历史复用和 V3-M3/REL-1 接入。
+- [V3-BILL-2 统一计费开工规格](tasks/V3-BILL-2-provider-authoritative-billing.md)：第一批独立实施契约；当前仅文档，功能开工须另行明确选择。
 - Stable task specifications under `docs/launch/tasks/`.
 
 PR #388 was closed without merge because its 2026-09-08 assumption—an existing global chat as the primary workflow without the newly approved account-project journey—was superseded by the 2026-09-13 Owner decision.
