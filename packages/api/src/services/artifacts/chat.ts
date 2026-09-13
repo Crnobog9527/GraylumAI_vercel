@@ -132,7 +132,7 @@ export function skillChatService(
           p.skillId === entry.skillId &&
           (entry.workflow.kind !== "social" || p.account === v.account),
       );
-      const project = projects[0];
+      const project = projects.find(p => p.workKind !== "script");
       if (project) {
         const rounds = await workbench.rounds(project.projectId);
         const round =

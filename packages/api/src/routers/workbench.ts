@@ -11,6 +11,7 @@ import {
   webCommandSchema,
 } from "../services/artifacts/workbench";
 import { skillChatService, chatScope, chatEntry, chatTurnInput } from '../services/artifacts/chat';
+import { artifactReuse, createWorkInput, workSourceScope } from "../services/artifacts/reuse";
 const scope = z
   .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
   .strict();
@@ -56,6 +57,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
       GENERATION_CONFLICT: { code: "CONFLICT", message: "生成状态或输入已变化，请刷新生成记录。不会自动重复调用模型。" },
       GENERATION_INPUT_UNAVAILABLE: { code: "BAD_REQUEST", message: "工作稿的来源或依赖已变化，请检查来源、重新保存工作稿并确认依赖后再生成。" },
       GENERATION_BUDGET: { code: "BAD_REQUEST", message: "生成费用超出允许范围，未扣费。" },
+      ARTIFACT_REFERENCE_UNAVAILABLE: {code:"CONFLICT",message:"定位来源或引用配置暂不可用，请重新查看来源。原作品已保留。"},
       ARTIFACT_ACCOUNT_CONFLICT: {
         code: "CONFLICT", message: "此账号已有另一功能的项目，暂不能在新功能中开始。请从已有项目查看历史，原成果不会被修改。",
       },
@@ -93,14 +95,17 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   return result;
 });
 export const workbenchRouter = router({
+  createWork: procedure.input(createWorkInput).mutation(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).create(input)),
+  workSource: procedure.input(workSourceScope).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).source(input)),
+  referenceChoices: procedure.input(z.object({sourceVersionId:z.string().uuid()}).strict()).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).choices(input.sourceVersionId)),
   // Route one owned conversation without loading history-wide message/credit
   // statistics. The subsequent Skill/ordinary reads retain their own gates.
   chatLocate: procedure.input(chatScope).query(async ({ ctx, input }) => {
     const { data, error } = await ctx.userScopedSupabase.from('conversations')
-      .select('id,module_id,skill_mode').eq('id',input.conversationId)
+      .select('id,module_id,skill_mode,agent_slice_mode').eq('id',input.conversationId)
       .eq('user_id',ctx.profileId).eq('is_deleted','false').single();
     if (error || !data) throw new Error('ARTIFACT_DENIED');
-    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable()}).parse(data);
+    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable(),agent_slice_mode:z.boolean()}).parse(data);
   }),
   cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
   search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),

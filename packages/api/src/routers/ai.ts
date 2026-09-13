@@ -62,7 +62,7 @@ async function getOrCreateConversation(
       .single();
 
     if (existing) {
-      if (existing.skill_mode === true || existing.module_id) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
+      if (existing.skill_mode === true || existing.agent_slice_mode === true || existing.module_id) throw new Error('请在对应 Skill 对话中发送，不能使用普通聊天生成。');
       return { id: existing.id, isNew: false };
     }
   }

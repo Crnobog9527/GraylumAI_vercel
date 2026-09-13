@@ -397,6 +397,14 @@ export async function POST(request: NextRequest) {
       return Response.json({error:denied?error.message:'账号或消费保护状态暂时无法验证，请稍后重试'},{status:denied?403:503});
     }
 
+    // Reject a different execution mode before new spending/runtime admission;
+    // original request recovery above retains its own identity and rules.
+    if (conversationId) {
+      const {data:bound,error:bindingError}=await supabaseAuth.from('conversations').select('*').eq('id',conversationId).eq('user_id',userId).eq('is_deleted','false').single();
+      if(bindingError||!bound||bound.skill_mode||bound.agent_slice_mode||(moduleId&&moduleId!==bound.module_id)) return new Response(JSON.stringify({error:'对话不可用或模式不匹配，请从聊天记录重新打开。'}),{status:403,headers:{'Content-Type':'application/json'}});
+      moduleId=bound.module_id??undefined;
+    }
+
     const maintenanceStartedAt = Date.now();
     const runtimeSettingsStartedAt = Date.now();
     const billingSettingsStartedAt = Date.now();
@@ -463,11 +471,6 @@ export async function POST(request: NextRequest) {
     }
     recordStageTiming(stageTimings, 'balance_lookup', balanceStartedAt);
 
-    if (conversationId) {
-      const {data:bound,error:bindingError}=await supabaseAuth.from('conversations').select('*').eq('id',conversationId).eq('user_id',userId).eq('is_deleted','false').single();
-      if(bindingError||!bound||bound.skill_mode||(moduleId&&moduleId!==bound.module_id)) return new Response(JSON.stringify({error:'对话不可用或模式不匹配，请从聊天记录重新打开。'}),{status:403,headers:{'Content-Type':'application/json'}});
-      moduleId=bound.module_id??undefined;
-    }
     const modulePromptStartedAt = Date.now();
     let activePrompt: Awaited<ReturnType<typeof resolveActiveModulePrompt>> | null = null;
     if (moduleId) {
