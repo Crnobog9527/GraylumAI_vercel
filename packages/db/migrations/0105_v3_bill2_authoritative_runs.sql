@@ -156,6 +156,9 @@ BEGIN
  FOR fx IN SELECT * FROM jsonb_each(p_payload->'rules'->'fx') LOOP
   IF fx.key !~ '^[A-Z]{3}$' OR coalesce(length(fx.value->>'version'),0)=0 OR bill2_decimal(fx.value->'usdPerUnit')<=0 THEN RAISE EXCEPTION 'BILL2_INVALID_FX';END IF;
  END LOOP;
+ -- Lock directly for update: admission must observe a suspension that won the profile lock, without a share-lock upgrade race.
+ PERFORM id FROM profiles WHERE id=p_actor_id AND status='active' AND is_deleted='false' FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ACTOR_DENIED' USING ERRCODE='42501';END IF;
  INSERT INTO bill2_runs(id,actor_id,request_id,scope,payload,reserved,budget_usd,credits_per_usd,multiplier,max_calls,deadline)
  VALUES(new_id,p_actor_id,p_request_id,p_payload->'scope',p_payload,reservation,b,rate,m,(p_payload->'limits'->>'maxCalls')::integer,(p_payload->'limits'->>'deadline')::timestamptz);
  -- Internal UUID is independent of public/legacy request IDs. Never adopt an old pre-deduction.
@@ -209,7 +212,7 @@ BEGIN
 END $$;
 
 CREATE OR REPLACE FUNCTION public.bill2_record(p_actor_id uuid,p_run_id uuid,p_call_id uuid,p_evidence jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE r bill2_runs;c bill2_calls;other_id uuid;h text;raw_cost numeric;cost numeric;bad boolean:=false;prior jsonb;currency text;piece jsonb;parts numeric:=0;
+DECLARE r bill2_runs;c bill2_calls;other_id uuid;h text;raw_cost numeric;cost numeric;bad boolean:=false;prior jsonb;currency text;piece jsonb;parts numeric:=0;detail_total numeric;total_observation jsonb;
 BEGIN
  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
  IF r.id IS NULL THEN RAISE EXCEPTION 'BILL2_RUN_DENIED' USING ERRCODE='42501';END IF;
@@ -245,6 +248,29 @@ BEGIN
   END LOOP;
   IF cost IS NOT NULL AND cost>c.upper_usd THEN bad:=true;END IF;
  END IF;
+ -- Independent detail observations are scoped to the parent generation and a stable detailId.
+ -- Never add them to an inline detail array; both describe portions of the same total.
+ IF p_evidence->>'coverage'='included_detail' AND coalesce(length(p_evidence->>'detailId'),0) NOT BETWEEN 1 AND 128 THEN bad:=true;END IF;
+ IF p_evidence->>'coverage'='included_detail' THEN
+  FOR prior IN SELECT payload FROM bill2_receipts WHERE call_id=c.id AND payload->>'coverage'='included_detail' AND payload->>'detailId'=p_evidence->>'detailId' AND payload->>'final'='true' AND payload->>'cost' IS NOT NULL LOOP
+   IF bill2_decimal(prior->'cost') IS DISTINCT FROM raw_cost OR prior->>'currency' IS DISTINCT FROM currency OR p_evidence->>'final' IS DISTINCT FROM 'true' THEN bad:=true;END IF;
+  END LOOP;
+ END IF;
+ FOR total_observation IN
+  SELECT payload FROM bill2_receipts WHERE call_id=c.id AND payload->>'coverage'='request_total' AND payload->>'final'='true' AND payload->>'cost' IS NOT NULL
+  UNION ALL SELECT p_evidence WHERE p_evidence->>'coverage'='request_total' AND p_evidence->>'final'='true' AND raw_cost IS NOT NULL
+ LOOP
+  WITH observations AS (
+   SELECT payload FROM bill2_receipts WHERE call_id=c.id
+   UNION ALL SELECT p_evidence),
+  details AS (SELECT payload->>'detailId' id,max(bill2_decimal(payload->'cost')) amount
+   FROM observations WHERE payload->>'coverage'='included_detail' AND payload->>'final'='true' AND payload->>'cost' IS NOT NULL AND payload->>'detailId' IS NOT NULL
+   GROUP BY payload->>'detailId')
+  SELECT coalesce(sum(amount),0) INTO detail_total FROM details;
+  IF detail_total>bill2_decimal(total_observation->'cost') OR EXISTS(
+   SELECT 1 FROM (SELECT payload FROM bill2_receipts WHERE call_id=c.id UNION ALL SELECT p_evidence) obs
+   WHERE payload->>'coverage'='included_detail' AND payload->>'cost' IS NOT NULL AND payload->>'currency' IS DISTINCT FROM total_observation->>'currency') THEN bad:=true;END IF;
+ END LOOP;
  INSERT INTO bill2_receipts(call_id,payload,payload_hash,conflict) VALUES(c.id,p_evidence,h,bad);
  IF bad THEN UPDATE bill2_runs SET conflict=true,version=version+1 WHERE id=r.id RETURNING * INTO r;
  ELSE

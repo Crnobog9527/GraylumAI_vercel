@@ -6,15 +6,15 @@ const amount = z.string().refine((v) => { try { decimal(v); return true; } catch
 const receipt = z.object({
   id: z.string().min(1).max(256).nullable(), model: z.string().min(1).max(256),
   final: z.boolean(), cost: amount.nullable(), currency: z.string().regex(/^[A-Z]{3}$/),
-  coverage: z.enum(['request_total', 'included_detail']),
+  coverage: z.enum(['request_total', 'included_detail']), detailId: z.string().min(1).max(128).optional(),
   includedDetails: z.array(z.object({ cost: amount, currency: z.string().regex(/^[A-Z]{3}$/) }).strict()).max(128).default([]),
   usage: z.record(z.string(), z.unknown()).optional(),
-}).strict();
+}).strict().refine(v=>v.coverage!=='included_detail'||Boolean(v.detailId));
 export type CallIdentity = { provider: string; account: string; model: string; protocol: 'fixture-cost-v1' };
 export function fixtureEvidence(raw: string, identity: CallIdentity, source: 'response' | 'lookup') {
   const parsed = receipt.parse(parseExactJson(raw));
   return { ...identity, model: parsed.model, providerId: parsed.id, cost: parsed.cost, currency: parsed.currency,
-    final: parsed.final, coverage: parsed.coverage, includedDetails: parsed.includedDetails, usage: parsed.usage ?? null,
+    final: parsed.final, coverage: parsed.coverage, detailId: parsed.detailId, includedDetails: parsed.includedDetails, usage: parsed.usage ?? null,
     source, sourceHash: createHash('sha256').update(raw).digest('hex'), observedAt: new Date().toISOString(), rawBody: raw };
 }
 /** Transport evidence survives schema rejection. Invalid money is never accepted for settlement. */

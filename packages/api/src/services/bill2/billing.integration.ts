@@ -37,6 +37,8 @@ async function snapshot(actor:string) {const rows=await db.query(`select p.credi
  (select coalesce(sum(-amount),0)::int from credit_transactions where user_id=p.id and counts_as_spend) spend,
  (select count(*)::int from billing_history where user_id=p.id and operation_type in ('settle','refund','abort_settle')) terminals,
  (select count(*)::int from token_stats where user_id=p.id) usage,
+ (select count(*)::int from ai_usage_logs where user_id=p.id) usageLogs,
+ (select coalesce(sum(consumed_amount),0)::int from subscription_credit_grants where user_id=p.id) sourceConsumed,
  (select count(*)::int from credit_transactions where user_id=p.id) rows from profiles p where p.id=$1`,[actor]);return rows.rows[0];}
 async function conservation(actor:string) {const s=await snapshot(actor);expect(s.credits).toBe(s.ledger);expect(s.credits).toBeGreaterThanOrEqual(0);return s;}
 beforeAll(async()=>{await db.connect();await db.query("insert into ai_models(id,model_id,name,provider,is_active) values($1,'m','Fixture','fixture','true')",[modelId]);
@@ -116,9 +118,21 @@ it('BILL2: over-budget actual cost and contradictory included components quarant
  for(const e of [{cost:'0.03'},{includedDetails:[{cost:'0.01',currency:'USD'}]}]){const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id);expect(await receipt(f.actor,r.id,id,'0.007',e)).toMatchObject({conflict:true});await close(f.actor,r.id);expect((await sqlRpc('bill2_finalize',[f.actor,r.id])).chargedCredits).toBeNull();await conservation(f.actor);}
 });
 
+async function auditState() {
+ const state=(await db.query(`select
+ (select coalesce(jsonb_agg(jsonb_build_object('id',id,'credits',credits) order by id),'[]') from profiles) balances,
+ (select coalesce(jsonb_agg(jsonb_build_object('id',id,'consumed',consumed_amount,'status',status) order by id),'[]') from subscription_credit_grants) grants,
+ (select count(*)::int from billing_history) history_rows,
+ (select count(*)::int from credit_transactions) ledger_rows,
+ (select coalesce(sum(amount),0)::text from credit_transactions) ledger_sum,
+ (select count(*)::int from token_stats) token_rows,
+ (select count(*)::int from ai_usage_logs) usage_rows,
+ (select count(*)::int from bill2_runs where state in ('settled','refunded')) terminal_runs`)).rows[0];
+ return {...state,providerCount,lookupCount};
+}
 // Two independent backend processes overlap behind an observed database lock, not sequential Promise calls.
 async function overlap(label:string,lockSql:string,lockArgs:unknown[],first:(c:pg.Client)=>Promise<unknown>,second:(c:pg.Client)=>Promise<unknown>) {
- const a=new pg.Client({connectionString}),b=new pg.Client({connectionString});await a.connect();await b.connect();
+ const before=await auditState();const a=new pg.Client({connectionString}),b=new pg.Client({connectionString});await a.connect();await b.connect();
  try {await a.query('begin');await a.query("set local statement_timeout='5s'");await b.query("set statement_timeout='5s'");
  const pa=(await a.query('select pg_backend_pid() pid')).rows[0].pid,pb=(await b.query('select pg_backend_pid() pid')).rows[0].pid;expect(pa).not.toBe(pb);
  await a.query(lockSql,lockArgs);
@@ -126,7 +140,7 @@ async function overlap(label:string,lockSql:string,lockArgs:unknown[],first:(c:p
  let blocked=false;for(let i=0;i<100;i++){const state=(await db.query('select wait_event_type,pg_blocking_pids(pid) blockers from pg_stat_activity where pid=$1',[pb])).rows[0];
  if(state?.wait_event_type==='Lock'&&state.blockers.includes(pa)){blocked=true;break;}await new Promise(r=>setTimeout(r,10));}
  expect(blocked).toBe(true);const value=await first(a);await a.query('commit');const other=await pending;
- events.push({label,backendPids:[pa,pb],barrierObserved:blocked,secondSucceeded:other.ok});return {value,other};
+ events.push({label,backendPids:[pa,pb],barrierObserved:blocked,secondSucceeded:other.ok,before,after:await auditState()});return {value,other};
  }finally{await a.query('rollback');await a.end();await b.end();}
 }
 it('BILL2: overlapping duplicate prepare and competing balances reserve exactly once',async()=>{
@@ -166,9 +180,9 @@ it.each(['profiles','billing_history','credit_transactions','token_stats','ai_us
  const filter=table==='profiles'?`NEW.id='${f.actor}'`:table==='bill2_runs'?`NEW.id='${r.id}'`: `NEW.user_id='${f.actor}'`;
  await db.query(`create function bill2_test_fault() returns trigger language plpgsql as $$ begin if ${filter} then raise exception 'injected_terminal_fault'; end if;return NEW;end $$;
  create trigger bill2_test_fault after insert or update on ${table} for each row execute function bill2_test_fault()`);
- try{await expect(sqlRpc('bill2_finalize',[f.actor,r.id])).rejects.toThrow('injected_terminal_fault');expect(await snapshot(f.actor)).toEqual(before);expect((await sqlRpc('bill2_read',[f.actor,r.id])).chargedCredits).toBeNull();}
+ try{await expect(sqlRpc('bill2_finalize',[f.actor,r.id])).rejects.toThrow('injected_terminal_fault');expect(await snapshot(f.actor)).toEqual(before);events.push({faultAfterWrite:table,before,afterRollback:await snapshot(f.actor),providerCount});expect((await sqlRpc('bill2_read',[f.actor,r.id])).chargedCredits).toBeNull();}
  finally{await db.query(`drop trigger bill2_test_fault on ${table};drop function bill2_test_fault()`);}
- await sqlRpc('bill2_finalize',[f.actor,r.id]);await sqlRpc('bill2_finalize',[f.actor,r.id]);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,usage:1,rows:4});expect(providerCount).toBe(count);
+ await sqlRpc('bill2_finalize',[f.actor,r.id]);await sqlRpc('bill2_finalize',[f.actor,r.id]);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,usage:1,rows:4});expect(providerCount).toBe(count);events.push({recoveredFault:table,afterRecovery:await snapshot(f.actor),providerCount});
 });
 it('BILL2: RPC privilege boundary denies anonymous, user and private legacy entrypoints',async()=>{
  for(const role of ['anon','authenticated','service_role']){const c=new pg.Client({connectionString});await c.connect();try{await c.query('set role '+role);
@@ -333,4 +347,21 @@ it('BILL2: maximum real INT balance permits wider intermediate release snapshots
 it('BILL2: canonical usage aggregates only reported integer counters and preserves unknown fields',async()=>{
  const f=await fixture(),r=await f.prepare();for(let i=1;i<=2;i++){const id=await call(f.actor,r.id,i);await receipt(f.actor,r.id,id,'0.001',{usage:{inputTokens:'10',outputTokens:'3',cachedTokens:'0',webSearchCount:'1'}});}await close(f.actor,r.id);await sqlRpc('bill2_finalize',[f.actor,r.id]);
  expect((await db.query('select input_tokens,output_tokens,cached_tokens,cache_creation_tokens,web_search_count from token_stats where bill2_run_id=$1',[r.id])).rows[0]).toEqual({input_tokens:20,output_tokens:6,cached_tokens:0,cache_creation_tokens:null,web_search_count:2});
+});
+it.each([true,false])('BILL2: separate included detail conflicts with parent total in either order, total first=%s',async totalFirst=>{
+ const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id);const total=()=>receipt(f.actor,r.id,id,'0.007');const detail=()=>receipt(f.actor,r.id,id,'0.010',{coverage:'included_detail',detailId:'child-1'});
+ if(totalFirst){await total();await detail();}else{await detail();await total();}await close(f.actor,r.id);expect(await sqlRpc('bill2_finalize',[f.actor,r.id])).toMatchObject({conflict:true,chargedCredits:null});expect((await conservation(f.actor)).credits).toBe(80);
+});
+it('BILL2: stable separate details deduplicate, sum distinctly and never add to inline details',async()=>{
+ const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id);await receipt(f.actor,r.id,id,'0.003',{coverage:'included_detail',detailId:'child-1'});await receipt(f.actor,r.id,id,'0.0030',{coverage:'included_detail',detailId:'child-1'});await receipt(f.actor,r.id,id,'0.003',{coverage:'included_detail',detailId:'child-2'});
+ await receipt(f.actor,r.id,id,'0.007',{includedDetails:[{cost:'0.003',currency:'USD'},{cost:'0.003',currency:'USD'}]});await close(f.actor,r.id);expect(await sqlRpc('bill2_finalize',[f.actor,r.id])).toMatchObject({chargedCredits:7,conflict:false});
+ const g=await fixture(),s=await g.prepare(),cid=await call(g.actor,s.id);await receipt(g.actor,s.id,cid,'0.004',{coverage:'included_detail',detailId:'a'});await receipt(g.actor,s.id,cid,'0.004',{coverage:'included_detail',detailId:'b'});await receipt(g.actor,s.id,cid,'0.007');await close(g.actor,s.id);expect((await sqlRpc('bill2_finalize',[g.actor,s.id])).conflict).toBe(true);
+});
+
+it.each(['suspended','deleted'])('BILL2: concurrent actor %s prevents a new reservation',async state=>{
+ const f=await fixture();const before=await snapshot(f.actor);const race=await overlap('actor '+state+'/prepare','select id from profiles where id=$1 for update',[f.actor],a=>a.query(state==='suspended'?"update profiles set status='suspended' where id=$1":"update profiles set is_deleted='true' where id=$1",[f.actor]),b=>f.prepare(f.payload,f.request,b));
+ expect(race.other.ok).toBe(false);expect(await snapshot(f.actor)).toEqual(before);expect((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
+});
+it('BILL2: final detail cannot regress to preliminary evidence',async()=>{
+ const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id);await receipt(f.actor,r.id,id,'0.003',{coverage:'included_detail',detailId:'a'});expect(await receipt(f.actor,r.id,id,'0.002',{coverage:'included_detail',detailId:'a',final:false})).toMatchObject({conflict:true});expect((await conservation(f.actor)).credits).toBe(80);
 });
