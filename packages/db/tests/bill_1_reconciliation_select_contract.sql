@@ -14,7 +14,8 @@ CREATE ROLE authenticated;
 GRANT USAGE ON SCHEMA public TO service_role, anon, authenticated;
 
 CREATE TABLE public.billing_history (
-  operation_type text, amount integer, created_at timestamptz, private_fixture text
+  operation_type text, amount integer, created_at timestamptz, private_fixture text,
+  id uuid, user_id uuid, metadata jsonb
 );
 CREATE TABLE public.credit_transactions (
   id text, user_id text, amount integer, type text, ledger_type text,
@@ -46,7 +47,7 @@ GRANT SELECT (
 ) ON public.subscription_credit_grants TO service_role;
 GRANT SELECT (id) ON public.credit_transactions TO authenticated;
 GRANT UPDATE (metadata) ON public.credit_transactions TO service_role;
-INSERT INTO public.billing_history VALUES ('settle', -10, '2026-09-03', 'unchanged');
+INSERT INTO public.billing_history (operation_type, amount, created_at, private_fixture) VALUES ('settle', -10, '2026-09-03', 'unchanged');
 INSERT INTO public.credit_transactions (id, amount) VALUES ('fixture', -10);
 INSERT INTO public.subscription_credit_grants (id, credits_granted) VALUES ('fixture', 10);
 
@@ -71,6 +72,8 @@ FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid
 WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped;
 
 \ir ../migrations/0063_bill_1_reconciliation_select_contract.sql
+\ir ../migrations/0103_bill_1_reservation_read_contract.sql
+\ir ../migrations/0103_bill_1_reservation_read_contract.sql
 -- A second application proves idempotency, without an additional migration file.
 \ir ../migrations/0063_bill_1_reconciliation_select_contract.sql
 
@@ -135,7 +138,7 @@ BEGIN
 END $$;
 
 SET LOCAL ROLE service_role;
-SELECT operation_type, amount, created_at FROM public.billing_history WHERE false;
+SELECT id, user_id, metadata, operation_type, amount, created_at FROM public.billing_history WHERE false;
 SELECT amount, type, ledger_type, reason_code, counts_as_spend, source_type,
   description, idempotency_key, created_at FROM public.credit_transactions WHERE false;
 SELECT id, user_id, amount, type, ledger_type, reason_code, counts_as_spend,

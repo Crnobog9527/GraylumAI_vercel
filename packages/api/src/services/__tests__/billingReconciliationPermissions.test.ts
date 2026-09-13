@@ -13,15 +13,15 @@ const migration = readFileSync(
   join(__dirname, '../../../../db/migrations/0063_bill_1_reconciliation_select_contract.sql'),
   'utf8',
 );
-const executableSql = migration.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
+const reservationMigration = readFileSync(join(__dirname, '../../../../db/migrations/0103_bill_1_reservation_read_contract.sql'), 'utf8');
+const executableSql = (migration + reservationMigration).replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
 const grants = [...executableSql.matchAll(
   /GRANT SELECT \(\s*([\s\S]*?)\s*\) ON TABLE public\.(\w+) TO service_role;/g,
 )];
-const columnsByTable = Object.fromEntries(grants.map((match) => [
-  match[2], match[1].split(',').map((column) => column.trim()).sort(),
-]));
+const columnsByTable: Record<string, string[]> = {};
+for (const match of grants) columnsByTable[match[2]] = [...(columnsByTable[match[2]] ?? []), ...match[1].split(',').map((column) => column.trim())].sort();
 const requiredColumns = {
-  billing_history: ['operation_type', 'amount', 'created_at'],
+  billing_history: ['id', 'user_id', 'metadata', 'operation_type', 'amount', 'created_at'],
   credit_transactions: [
     'id', 'user_id', 'amount', 'type', 'ledger_type', 'reason_code', 'counts_as_spend',
     'source_type', 'source_order_id', 'grant_period_key', 'idempotency_key',
@@ -35,7 +35,7 @@ const requiredColumns = {
   ],
 };
 const missingColumns = {
-  billing_history: ['operation_type', 'amount', 'created_at'],
+  billing_history: ['id', 'user_id', 'metadata', 'operation_type', 'amount', 'created_at'],
   credit_transactions: [
     'type', 'ledger_type', 'reason_code', 'counts_as_spend', 'source_type',
     'source_order_id', 'grant_period_key', 'balance_before', 'metadata', 'created_at', 'description',
@@ -103,7 +103,7 @@ function permissionScopedClient(rows: Record<string, Record<string, unknown>[]> 
 
 describe('BILL-1 column SELECT permission contract', () => {
   it('grants only the missing required columns on three tables, only to service_role', () => {
-    expect(grants).toHaveLength(3);
+    expect(grants).toHaveLength(4);
     expect(Object.keys(columnsByTable).sort()).toEqual(Object.keys(requiredColumns).sort());
     for (const [table, columns] of Object.entries(missingColumns)) {
       expect(columnsByTable[table]).toEqual([...columns].sort());
@@ -132,7 +132,7 @@ describe('BILL-1 column SELECT permission contract', () => {
       const match = assertions.match(new RegExp(`\\('${table}', ARRAY\\[([\\s\\S]*?)\\]\\)`));
       expect(match).not.toBeNull();
       expect([...match![1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]).sort())
-        .toEqual([...columns].sort());
+        .toEqual(columns.filter((column) => table !== 'billing_history' || !['id', 'user_id', 'metadata'].includes(column)).sort());
     }
   });
 
