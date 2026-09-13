@@ -16,10 +16,11 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!['--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
-const testPattern=args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
+const testPattern=args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -254,6 +255,10 @@ try {
   apply("packages/db/migrations/0104_workbench_provider_observations.sql");
 
 
+  if(bill2Mode) {
+    apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
+    apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
+  }
   console.log("SQL additive migration and repeat application PASS");
   docker(
     "run",
@@ -542,6 +547,7 @@ try {
         "--config",
         "vitest.integration.config.ts",
         "src/services/__tests__/workbench.integration.ts",
+        ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         "--reporter",
         "verbose",
         ...(env.V3_WORKBENCH_PHASE === "restore"
