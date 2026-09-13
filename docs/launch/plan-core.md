@@ -67,18 +67,21 @@ Locked product semantics:
 - Skill invocation, files and Feishu/Notion/Slack connectors also live in the Agent composer; connectors do not receive a first-level nav item;
 - ordinary Agent, Skill, summarization and Fusion model roles follow deterministic Owner-approved responsibility boundaries;
 - one unified Agent Runtime ultimately replaces the old model router, regex search decision and handwritten context assembly;
-- multi-call billing reuses the canonical balance/ledger and adds provider-authoritative receipts plus one atomic final settlement;
+- multi-call billing reuses the canonical balance/ledger and adds provider-authoritative receipts plus one atomic final settlement; local dispatch identities are durable before calls, and missing provider IDs preserve an explicit unknown path rather than an assumed lookup/retry/refund;
 - membership-level automatic history expiry is removed; user-directed and legal deletion remain;
 - old routes and runtimes are removed only after the new path and recovery behavior are proven.
 
-The existing task graph is not silently rewritten by this documentation change, and no new Launch task is created or selected here. Before implementation begins, live completion evidence and overlap must be reviewed, and the Owner must explicitly select the bounded implementation scope. The recommended technical sequence is documented for planning only:
+The existing task graph is not silently rewritten by this documentation change, and no new Launch task is created or selected here. Before implementation begins, live completion evidence and overlap must be reviewed, and the Owner must explicitly select the bounded implementation scope. The following planning phases are not selectable task IDs; their task-identity/dependency mapping must be established before any feature implementation starts. They correspond to Master Plan §10 items 2–8, after this documentation phase:
 
-1. provider-authoritative aggregate billing and persistent Agent Runtime foundation, covering both positioning-draft and project-work-item scopes;
-2. the first vertical path from a zero-project user's positioning draft and reviewed weekly plan to one saved topic artifact;
-3. top-navigation Skill marketplace, project routes and composer capabilities;
-4. Feishu multidimensional-table connector;
-5. Gold multi-model panel after real low-cost reconciliation;
-6. final legacy-runtime, routing, context and retention-cleanup removal.
+1. provider-authoritative aggregate billing, with positioning-draft/work-item identity contracts, exact costs and unknown-dispatch recovery;
+2. persistent Agent Runtime foundation, dependent on the validated billing interface and supporting both scopes;
+3. the first vertical path from a zero-project user's positioning draft and reviewed weekly plan to one saved topic artifact;
+4. top-navigation Skill marketplace, project routes and composer capabilities;
+5. Feishu multidimensional-table connector;
+6. Gold multi-model panel after real low-cost reconciliation;
+7. final legacy-runtime, routing, context and retention-cleanup removal.
+
+Billing and Runtime are separate sequential implementation phases, not one combined batch. This list grants neither task selection nor permission to bypass the task graph.
 
 A historical merge, including the bounded Agent SDK slice merged in PR #414, is reusable evidence but does not prove any of the new end-to-end product requirements complete.
 
