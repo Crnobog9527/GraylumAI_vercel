@@ -31,13 +31,18 @@ External evidence limits:
 
 - Vercel's query for the September 9 invocation returned
   `ExceedsBillingLimitError`. This is inaccessible history, not an empty log.
-- The available OpenRouter Activity browser is signed out. The documented
-  [generation query](https://openrouter.ai/docs/api/api-reference/generations/get-generation)
-  requires a provider generation ID, which this record lacks. Do not send the
-  local UUID as a generation ID, guess by time/model, or enumerate unrelated
-  account calls. No supplier usage query can currently be attributed to this
-  unknown request. An authenticated activity view or supplier-side correlation
-  evidence is still required, and approximate matching is insufficient.
+- The Owner's authenticated Chrome OpenRouter Logs page was read through native
+  accessibility after the independent automation browser was found signed out.
+  The UI interval September 9 00:00 through September 11 23:59 (local time)
+  displayed 16 dated rows. Adjacent Staging calls at September 10 00:43/00:44
+  were visible, but no record could be reliably bound to the unknown operation
+  at September 10 00:47:52. This is a UI observation, **not** proof of complete
+  supplier history, no dispatch or zero cost. No nearby call was assigned to it.
+  The documented [generation query](https://openrouter.ai/docs/api/api-reference/generations/get-generation)
+  requires a provider generation ID, which the original record lacks. Do not
+  substitute a local UUID or approximate time/model match. Supplier-side
+  correlation/retained original response evidence remains necessary; merely
+  logging into the supplier dashboard has not closed this gap.
 - Stripe connector initially required reauthentication; exact subscription and
   invoice were successfully read using the existing Staging **test** credential.
   Credentials and invoice/user identifiers were not copied into this PR.
