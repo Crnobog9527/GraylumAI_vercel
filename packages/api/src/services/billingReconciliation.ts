@@ -175,7 +175,17 @@ type MembershipPlanRow = {
   yearly_credits?: number | string | null;
 };
 
+type BillingHistoryRow = {
+  id?: string | null;
+  user_id?: string | null;
+  operation_type?: string | null;
+  amount?: number | string | null;
+  metadata?: unknown;
+  created_at?: string | null;
+};
+
 type BillingReadinessRows = {
+  billingHistory?: BillingHistoryRow[];
   profiles: ProfileRow[];
   creditTransactions: CreditTransactionRow[];
   paymentOrders: PaymentOrderRow[];
@@ -1029,11 +1039,34 @@ export function buildBillingEngineV15ReadinessAudit(
   for (const table of truncatedTables) {
     addFinding(findings, {
       code: 'readiness_scan_truncated',
-      severity: 'warning',
+      severity: table === 'billing_history' ? 'error' : 'warning',
       message: `${table} exceeded the PR7 readiness scan row limit (${rowLimit}); audit result is partial`,
       entityType: table,
       metadata: { rowLimit },
     });
+  }
+
+  // Diagnostic evidence only: never release a hold or infer provider outcome.
+  // A separate history scan is not a transactional balance snapshot.
+  const history = rows.billingHistory ?? [];
+  const historyComplete = rows.billingHistory !== undefined && !truncatedTables.includes('billing_history');
+  const unresolvedByUser = new Map<string, BillingHistoryRow[]>();
+  if (historyComplete) {
+    for (const hold of history) {
+      if (hold.operation_type !== 'pre_deduct' || !hold.id || !hold.user_id) continue;
+      const closed = history.some((entry) => entry.user_id === hold.user_id
+        && ['settle', 'refund', 'abort_settle'].includes(entry.operation_type ?? '')
+        && asRecord(entry.metadata).preDeductId === hold.id);
+      if (closed) continue;
+      unresolvedByUser.set(hold.user_id, [...(unresolvedByUser.get(hold.user_id) ?? []), hold]);
+      addFinding(findings, {
+        code: 'billing_reservation_unresolved', severity: 'error',
+        message: 'Billing reservation has no observed terminal record; preserve funds and verify outcome',
+        entityType: 'billing_history', entityId: hold.id,
+        metadata: { userId: hold.user_id, amount: hold.amount, createdAt: hold.created_at,
+          providerOutcome: 'unproven', automaticRefundAllowed: false },
+      });
+    }
   }
 
   const ledgerTotalsByUser = new Map<string, number>();
@@ -1063,7 +1096,15 @@ export function buildBillingEngineV15ReadinessAudit(
           message: `Profile credits (${profileCredits}) do not match credit ledger sum (${ledgerCredits})`,
           entityType: 'profiles',
           entityId: profile.id,
-          metadata: { profileCredits, ledgerCredits },
+          metadata: {
+            profileCredits, ledgerCredits,
+            unresolvedPreDeductIds: (unresolvedByUser.get(profile.id) ?? []).map((hold) => hold.id),
+            reservationEvidenceComplete: historyComplete,
+            // This is a historical contract candidate, not proof of a missing grant.
+            legacyOpeningCandidateCredits: (getCreatedAtMs(profile) ?? Infinity) < LEGACY_PROFILE_BOOTSTRAP_CUTOFF
+              ? LEGACY_OPENING_GRANT_CREDITS : 0,
+            balanceRepairAllowed: false,
+          },
         });
       }
     }
@@ -1246,7 +1287,9 @@ export function buildBillingEngineV15ReadinessAudit(
           transactionAmount !== grantCredits
           || transactionLedgerType !== 'grant'
           || transaction.counts_as_spend === true
-          || (transactionReasonCode !== 'subscription_grant' && transactionReasonCode !== 'annual_monthly_release')
+          || !(transactionReasonCode === 'subscription_grant'
+            || (transactionReasonCode === 'monthly_invoice' && grant.grant_type === 'monthly_invoice' && grant.billing_cycle === 'monthly')
+            || (transactionReasonCode === 'annual_monthly_release' && grant.grant_type === 'annual_monthly_release' && grant.billing_cycle === 'yearly'))
           || (grantPeriodKey && transactionGrantPeriodKey !== grantPeriodKey)
           || (grantUserId && transactionUserId !== grantUserId)
         ) {
@@ -1335,6 +1378,7 @@ export function buildBillingEngineV15ReadinessAudit(
     const reasonCode = transaction.reason_code ?? '';
     const isSubscriptionGrantTransaction = (
       reasonCode === 'subscription_grant'
+      || reasonCode === 'monthly_invoice'
       || reasonCode === 'annual_monthly_release'
       || transaction.idempotency_key?.startsWith('subscription_grant:')
     );
@@ -1528,6 +1572,12 @@ export function buildBillingEngineV15ReadinessAudit(
           stripeSubscriptionId: subscriptionId,
           dueGrantPeriodCount: dueGrantPeriodKeys.length,
           missingGrantPeriodKeys,
+          // Mirror the releaser's subscription-wide quarantine, including older invoices.
+          releaseBlockedByUntrustedGrantIds: rows.subscriptionCreditGrants
+            .filter((grant) => grant.stripe_subscription_id === subscriptionId
+              && grant.accounting_state !== undefined && grant.accounting_state !== 'trusted')
+            .map((grant) => grant.id ?? null),
+          automaticReleaseAuthorized: false,
         },
       });
     }
@@ -1636,6 +1686,7 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionCreditGrantsResult,
     subscriptionsResult,
     membershipPlansResult,
+    billingHistoryResult,
   ] = await Promise.all([
     readLimitedRows<ProfileRow>(supabase, 'profiles', 'id, credits, created_at', rowLimit),
     readLimitedRows<CreditTransactionRow>(
@@ -1668,6 +1719,8 @@ export async function runBillingEngineV15ReadinessAudit(
       'id, yearly_credits',
       rowLimit,
     ),
+    readLimitedRows<BillingHistoryRow>(supabase, 'billing_history',
+      'id, user_id, operation_type, amount, metadata, created_at', rowLimit),
   ]);
 
   const truncatedTables = [
@@ -1677,9 +1730,11 @@ export async function runBillingEngineV15ReadinessAudit(
     subscriptionCreditGrantsResult.truncated ? 'subscription_credit_grants' : null,
     subscriptionsResult.truncated ? 'user_subscriptions' : null,
     membershipPlansResult.truncated ? 'membership_plans' : null,
+    billingHistoryResult.truncated ? 'billing_history' : null,
   ].filter((table): table is string => Boolean(table));
 
   return buildBillingEngineV15ReadinessAudit({
+    billingHistory: billingHistoryResult.rows,
     profiles: profilesResult.rows,
     creditTransactions: creditTransactionsResult.rows,
     paymentOrders: paymentOrdersResult.rows,

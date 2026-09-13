@@ -417,6 +417,7 @@ function createReadinessAuditSupabase(
   launchBaselineAt: unknown = '2026-01-01T00:00:00.000Z',
 ) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
+    billing_history: (rows.billingHistory ?? []) as Array<Record<string, unknown>>,
     profiles: rows.profiles as Array<Record<string, unknown>>,
     credit_transactions: rows.creditTransactions as Array<Record<string, unknown>>,
     payment_orders: rows.paymentOrders as Array<Record<string, unknown>>,
@@ -2140,4 +2141,72 @@ describe('search settlement reconciliation',()=>{
   const r=await runDailyBillingReconciliation(db,new Date('2026-03-10T00:00:00Z'));
   expect(r.success).toBe(false);
  });
+});
+
+
+describe('BILL-1 acceptance repair', () => {
+  const baseline = { launchBaselineAt: new Date('2026-09-04T05:16:53Z'), now: new Date('2026-09-13T12:59:16Z') };
+  const hold = { id: 'hold', user_id: 'legacy', operation_type: 'pre_deduct', amount: -50, created_at: '2026-09-09T16:47:52Z' };
+  const holdRows = () => createReadinessRows({ profiles: [{ id: 'legacy', credits: 6891, created_at: '2026-05-22T10:47:23Z' }], creditTransactions: [{ user_id: 'legacy', amount: 6841 }], paymentOrders: [], subscriptions: [], subscriptionCreditGrants: [], billingHistory: [hold] });
+
+  it('keeps the 100 opening candidate minus 50 unknown hold blocked without modifying input', () => {
+    const rows = holdRows(); const before = JSON.stringify(rows);
+    const audit = buildBillingEngineV15ReadinessAudit(rows, baseline);
+    expect(audit.success).toBe(false);
+    expect(audit.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'billing_reservation_unresolved', scope: 'launch', metadata: expect.objectContaining({ automaticRefundAllowed: false }) }),
+      expect.objectContaining({ code: 'profile_ledger_balance_mismatch', metadata: expect.objectContaining({ legacyOpeningCandidateCredits: 100, unresolvedPreDeductIds: ['hold'], balanceRepairAllowed: false }) }),
+    ]));
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it.each(['settle', 'refund', 'abort_settle'])('recognizes an observed %s only for the same user and reservation', (operation_type) => {
+    const rows = holdRows(); rows.billingHistory!.push({ user_id: 'other', operation_type, metadata: { preDeductId: 'hold' } });
+    expect(buildBillingEngineV15ReadinessAudit(rows, baseline).findings.some(f => f.code === 'billing_reservation_unresolved')).toBe(true);
+    rows.billingHistory!.push({ user_id: 'legacy', operation_type, metadata: { preDeductId: 'hold' } });
+    expect(buildBillingEngineV15ReadinessAudit(rows, baseline).findings.some(f => f.code === 'billing_reservation_unresolved')).toBe(false);
+  });
+
+  it('does not infer unresolved holds from a truncated history or suppress balance errors', async () => {
+    const audit = await runBillingEngineV15ReadinessAudit(createReadinessAuditSupabase(holdRows(), { billing_history: 0 }), { ...baseline, rowLimit: 10 });
+    expect(audit.success).toBe(false);
+    expect(audit.summary.truncatedTables).toContain('billing_history');
+    expect(audit.findings.some(f => f.code === 'billing_reservation_unresolved')).toBe(false);
+    expect(audit.findings.find(f => f.code === 'profile_ledger_balance_mismatch')?.metadata?.reservationEvidenceComplete).toBe(false);
+  });
+
+  it('fails closed on truncated reservation evidence even when balances agree', () => {
+    const rows = createReadinessRows({ billingHistory: [], truncatedTables: ['billing_history'] });
+    expect(buildBillingEngineV15ReadinessAudit(rows).success).toBe(false);
+  });
+
+  it.each(['monthly_invoice', 'subscription_grant'])('accepts matching monthly RPC/legacy reason %s', (reason_code) => {
+    const rows = createReadinessRows();
+    rows.creditTransactions[0].reason_code = reason_code;
+    rows.subscriptionCreditGrants[0].grant_type = 'monthly_invoice';
+    rows.subscriptionCreditGrants[0].billing_cycle = 'monthly';
+    expect(buildBillingEngineV15ReadinessAudit(rows).findings.some(f => f.code === 'subscription_grant_credit_transaction_mismatch')).toBe(false);
+  });
+
+  it.each(['amount', 'user', 'period', 'spend', 'cycle', 'grantType', 'reason'])('still rejects a monthly grant with wrong %s', (field) => {
+    const rows = createReadinessRows(); const tx = rows.creditTransactions[0]; const grant = rows.subscriptionCreditGrants[0];
+    tx.reason_code = 'monthly_invoice'; grant.grant_type = 'monthly_invoice'; grant.billing_cycle = 'monthly';
+    if (field === 'amount') tx.amount = 999;
+    if (field === 'user') tx.user_id = 'other';
+    if (field === 'period') tx.grant_period_key = 'other';
+    if (field === 'spend') tx.counts_as_spend = true;
+    if (field === 'cycle') grant.billing_cycle = 'yearly';
+    if (field === 'grantType') grant.grant_type = 'annual_monthly_release';
+    if (field === 'reason') tx.reason_code = 'topup_purchase';
+    expect(buildBillingEngineV15ReadinessAudit(rows).findings.some(f => f.code === 'subscription_grant_credit_transaction_mismatch')).toBe(true);
+  });
+
+  it('reports quarantine as the release blocker without clearing missing due periods', () => {
+    const rows = createReadinessRows();
+    rows.subscriptionCreditGrants[0].accounting_state = 'review_required';
+    const audit = buildBillingEngineV15ReadinessAudit(rows, { now: new Date('2026-07-16T00:00:00Z') });
+    const finding = audit.findings.find(f => f.code === 'annual_monthly_release_period_missing');
+    expect(finding?.metadata).toMatchObject({ releaseBlockedByUntrustedGrantIds: [rows.subscriptionCreditGrants[0].id], automaticReleaseAuthorized: false });
+    expect(audit.success).toBe(false);
+  });
 });
