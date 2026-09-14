@@ -1886,3 +1886,34 @@ it("OPC: browser filled information produces administrator-organized artifact wi
     await browser.close();
   }
 }, 300000);
+
+it("OPC: browser stale account confirmation restarts only after definite rejection", async () => {
+  const {chromium}=await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f=await completed(3);
+  const saved=await f.service.savePlan({draftId:f.d.draftId,sourceVersionId:f.sourceVersionId,requestId:randomUUID(),expectedVersion:0,body:[{id:randomUUID(),platform:"x",account:"stale-browser",day:"2026-09-15",title:"Topic",brief:"Brief"}]});
+  const request={draftId:f.d.draftId,planId:saved.planId,requestId:randomUUID(),accounts:[{platform:"x",account:"stale-browser",expectedRevision:null}]};
+  await f.service.handoff(request);
+  const browser=await chromium.launch({headless:true,executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}),context=await browser.newContext(),page=await context.newPage();
+  page.setDefaultTimeout(90000);
+  try {
+    const url=process.env.V3_LOCAL_APP+"/positioning/"+f.d.draftId;
+    await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button",{name:"登录",exact:true}).last().click();
+    await page.waitForURL(url);
+    const button=page.getByRole("button",{name:"确认账号与计划，创建选题",exact:true});
+    await button.waitFor();
+    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
+    await f.service.handoff({...request,requestId:randomUUID(),accounts:[{...request.accounts[0],expectedRevision:1}]});
+    const failed=page.waitForResponse(r=>r.url().includes("/api/trpc/opc.handoff"));
+    await button.click();await failed;
+    await page.getByRole("alert").filter({hasText:"操作未完成"}).waitFor();
+    await page.getByRole("button",{name:"重新读取状态",exact:true}).click();
+    await expect.poll(()=>button.isEnabled(),{timeout:15000}).toBe(true);
+    await button.click();
+    await expect.poll(async()=>Number((await sql.query('select revision from opc_accounts where actor_id=$1',[f.actor])).rows[0].revision),{timeout:15000}).toBe(3);
+    expect((await sql.query('select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1',[f.actor])).rows[0].n).toBe(1);
+    expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
+  }finally{await browser.close();}
+},180000);

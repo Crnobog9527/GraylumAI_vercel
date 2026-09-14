@@ -3708,12 +3708,27 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes and opens
     await page.getByRole('heading', { name: input.module.title, exact: true }).waitFor({ timeout: 30000 });
     await page.getByRole('button', { name: /^1\. 需求确认/ }).waitFor();
     await page.screenshot({ path: output + '/admin-skill-conversation.png' });
+    const configured = (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    configured.planResources=['SKILL.md'];
+    configured.steps.forEach((step: any,i:number)=>{step.information=[{id:'goal',title:'Goal '+i,required:true,profileKey:'goal_'+i}];});
+    const original = await db.rpc('admin_read_skill_module',{p_actor_id:admin.id,p_module_id:module.id});
+    expect(original.error).toBeNull();
+    const timestamp=(await sql.query('select updated_at::text from modules where id=$1',[module.id])).rows[0].updated_at;
+    await saveModuleSkill(db,admin.id,{...input,moduleId:module.id,skillId:module.skill_id,revisionId:randomUUID(),requestId:randomUUID(),expectedVersion:original.data.expectedVersion,expectedUpdatedAt:timestamp,directoryName:original.data.directoryName,files:original.data.files,kind:configured.kind,planResources:configured.planResources,steps:configured.steps.map((step:any)=>({title:step.title,resources:step.resources,information:step.information}))});
     await page.goto(app + '/admin/prompts');
     const row = page.getByRole('row').filter({ hasText: input.module.title });
     await row.getByRole('button').first().click();
     await page.getByLabel('步骤 1 名称', { exact: true }).waitFor();
     await expect.poll(() => page.getByLabel('步骤 1 名称', { exact: true }).inputValue(), { timeout: 20000 }).toBe('需求确认');
     await page.screenshot({ path: output + '/admin-skill-editor.png' });
+    await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
+    await page.getByTestId('prompt-save').click();
+    await expect.poll(() => page.getByRole('dialog').count(), {timeout:30000}).toBe(0);
+    const republished=(await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
+    expect(republished.planResources).toEqual(configured.planResources);
+    expect(republished.steps.map((step:any)=>step.information)).toEqual(configured.steps.map((step:any)=>step.information));
+    await row.getByRole('button').first().click();
+    await page.getByLabel('步骤 1 名称', {exact:true}).waitFor();
     // A slow second import must revoke confirmation before bytes finish reading.
     await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
     await page.evaluate(() => {

@@ -397,7 +397,18 @@ export default function PositioningDraft({
       )
         throw new Error("confirmation pending");
       sessionStorage.setItem(key, JSON.stringify(fixed));
-      await handoff.mutateAsync(fixed);
+      try {
+        await handoff.mutateAsync(fixed);
+      } catch (cause) {
+        // This specific SQL rejection rolls the entire transaction back. An old
+        // expected account revision cannot become valid again (monotonic).
+        // Timeouts, lost replies and all other errors retain the original request.
+        if (cause instanceof Error && cause.message === "OPC_ACCOUNT_CONFLICT") {
+          sessionStorage.removeItem(key);
+          await list.refetch();
+        }
+        throw cause;
+      }
       sessionStorage.removeItem(key);
     });
   }
