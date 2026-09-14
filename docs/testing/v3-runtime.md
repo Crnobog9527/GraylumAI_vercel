@@ -1,0 +1,50 @@
+# V3-RUNTIME isolated validation
+
+This work implements the Runtime portion of the [growth Agent architecture](../launch/tasks/V3-OPC-growth-agent-architecture.md). Risk is **high**: persistent identity, private Session history, permission checks, additive SQL and billing integration. It does not enable a real supplier or replace existing application entrypoints.
+
+## Reproducible local checks
+
+Run from the repository root. The runner copies indexed files into a disposable directory, starts actual PostgreSQL/Auth/PostgREST, applies the actual migrations, and uses the locked official SDK against loopback HTTP fixtures. It prints the source digest and private evidence directory. A fixture response is not evidence of real supplier support, cost or payment.
+
+```sh
+node packages/db/tests/v3/run-workbench.mjs --runtime-only
+node packages/db/tests/v3/run-workbench.mjs --bill2-compat-only --with-runtime-schema --legacy-ref=e17277e3a456d1ac394d9289842402eb91fd38e5
+node packages/db/tests/v3/run-workbench.mjs --runtime-upgrade-only --legacy-ref=e17277e3a456d1ac394d9289842402eb91fd38e5
+node packages/db/tests/v3/run-workbench.mjs --runtime-only --serve
+```
+
+Migration selection and test selection are independent. `--with-runtime-schema` includes 0105 and 0106, each applied twice; it does not turn skipped categories into passed tests. The upgrade mode applies them after starting the archived old application. All application process switches retain the same database.
+
+`--serve` retains only the local disposable application after all selected tests pass. `runtime-acceptance.json` in the printed private evidence directory contains the tested Session URL and local-only login. The `runtime-demo` Skill has a distinct public name. The sample keeps its tested opening grant and ledger; the runner does not reset or top up its balance. Stop that runner to remove its disposable services. This is a bounded local process, not a persistent scheduler or remote deployment.
+
+## Observed local results and limits
+
+On 2026-09-14, the archived `e17277e3a456d1ac394d9289842402eb91fd38e5` compatibility suite passed 56 tests, with 99 scoped skips. It exercised the actual archived ordinary/SDK/research application against 0105 and 0106. Private application-log canary checks passed. This result predates later Runtime implementation changes; exact final-candidate validation is still required.
+
+The Runtime upgrade test passed its actual-process scenario: candidate saves a response with pending cost; the runner kills that process and starts the archived application; old HTTP ledger reading succeeds and a legacy terminal call rejects the new identity; candidate is started again under a different PID; a fresh login reads the saved response; concurrent recovery consumes the original receipt. Assertions cover unchanged database OID, Session history and call identities, one total supplier-fixture POST, 97 remaining synthetic credits and one settlement. The old terminal call is only a guard assertion; actual HTTP requests and PID/root checks establish the code rollback evidence.
+
+Runtime fault tests separately cover SDK Session append, result and receipt commit-response loss, dispatch commit-response loss, revoked-content financial recovery, source-history exclusion, controlled tools and attached organizer cancellation. A partial primary response is retained separately from a completed response. Recovery never authorizes unsent model phases; an interrupted operation may need explicit cancellation while preserving incurred costs and unresolved evidence.
+
+The actual HTTP-disconnect test holds a supplier-fixture response, aborts the client connection, starts another scope and then releases the original response. The saved output remains in its original Session. A second request is held while the real application process is killed and restarted; original run/reservation identities remain, no supplier ID is invented, repeated recovery/cancellation does not resend, and the unknown reservation remains unresolved. The original completed Session is retained alongside it.
+
+For `require_latest`, a successful persisted search tool result is required before delivering a response. If the model answers without search, the Runtime records `latest_unavailable`, cancels unsent work using the original billing evidence and excludes the unverified assistant output from subsequent history; it retains the raw records. It does not fabricate search evidence, free usage or a refund for incurred cost. The page explicitly reports unavailable current information.
+
+The fixture capacity contract counts complete UTF-8 request bytes as input units and reserves output units independently for each selected model. This is deliberately not a real-model tokenizer claim. Unverified real adapters remain disabled. Session and private diagnostic contents must not enter public errors or logs.
+
+Automatic matching is an explicit selection using the user's ordinary model. Its first SDK call receives only public Skill names/descriptions and opaque keys; the server freezes a bounded private candidate mapping and the maximum legal call budget before reservation. The selected key is persisted immutably on the same execution, then the existing loader activates that exact package identity. Matching messages remain in PostgreSQL as internal control history and are excluded from subsequent model conversation history. A no-match choice keeps the user's original ordinary model. An explicit Skill bypasses matching. Packages needing a private task plan are reported as unsupported by this minimal entry rather than guessing a task or exposing its resource map.
+
+The private billing permission helper binds a choice to the actual run ID, actor and stored payload. Unbound BILL2 admission still validates the complete policy. After selection, unselected models are not permanent history dependencies; a call insertion guard checks the complete policy of its selected phase, including limits, so a same-named unselected model cannot lend capacity. The forward definitions of the three existing BILL2 RPCs change only the call to this bound permission helper; their original dispatch/token/locking semantics remain. These changes require the BILL2 regressions against 0106 before final delivery.
+
+The current local suite has passed 34 Runtime scenarios, including the HTTP interruption and latest-information cases. A retained local sample was independently reopened with fresh browser authentication after the suite; the original ordinary and `runtime-demo` responses remained visible without a new model execution. The intermediate preview was stopped after inspection; final delivery must start the reviewed candidate's local entry again. BILL2/AI regressions against 0106 passed 112 tests with 121 scoped skips before the later latest-information guard addition.
+
+Tool-history capacity selection now treats the locked SDK's invocation/result dependency intervals as indivisible, including interleaved calls. Unit tests cover item and byte boundaries; actual SDK search history is persisted, followed by a new SDK/HTTP turn with a two-item history limit. No orphan tool result is sent, original history is unchanged, replay adds no POST, and the synthetic balance matches the ledger. The updated isolated suite passed 36 Runtime scenarios (155 scoped skips), including authenticated work-item SDK/HTTP/relogin/revocation, actual material-row locking and work-round v1/v2 snapshot tests.
+
+Scope material uses immutable Session-bound versions with request replay, expected-revision conflict checks and explicit revocation. Saved brief/material is data rather than instructions. An optional existing work round is explicitly selected and checked against the work item; the server projects permitted steps and configured source material through existing artifact permission functions, without copying candidate/generation history or private methods. No round is guessed. The current version is frozen at admission; later note edits do not rewrite an existing run. Normal step edits do not replace frozen text; the original evidence, package and configured source identity must remain available. Explicit revocation makes the old content unavailable. These material checks passed the isolated suite, including original v1 execution after a real workbench edit, v2 execution, and source revocation. A final additional first-receipt-write failure test is being verified.
+
+**Incomplete:** final first-receipt-write failure validation, final affected compatibility/regression checks, CI/Security and fresh independent full-candidate review. This document is not a clean-candidate declaration; final evidence must identify the complete reviewed base/head on the PR. Scoped skips and outstanding acceptance are not historical exemptions.
+
+## Supported rollback and external boundary
+
+Keep 0105 and 0106, original reservations, receipts, transport observations and all pending Session/execution records. The supported old application must include the two finance-reader compatibility fixes already present in `e17277e3a456d1ac394d9289842402eb91fd38e5`. Retain all six legacy finalizer protections. Do not down-migrate, delete evidence, reset balances or reclassify unresolved costs as zero. Return to compatible Runtime code to recover original identities; rollback itself does not complete unfinished Runtime phases.
+
+Remote migrations, real model/search calls, real payments/refunds, production effects and final commercial billing acceptance are **NOT_RUN** and require separate authorization. A future staging merge is not evidence that any remote migration has been applied. This task does not start the full Workbench/UI or another Launch task.

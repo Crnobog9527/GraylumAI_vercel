@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { transportEvidence, localFixtureAdapter, unknownEvidence, type CallIdentity } from './fixtureAdapter';
+import { transportEvidence, localFixtureAdapter, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 import { aggregateCredits } from './decimal';
 import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
@@ -60,8 +60,19 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
     }
     return state;
   }
+  async function recoverReceipts(runId: string) {
+      const calls = await rpc<string[]>('bill2_pending_calls', { p_run_id: uuid.parse(runId) });
+      for (const callId of calls.slice(0, 32)) {
+        const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
+        if (!identity) continue;
+        let evidence;
+        try { evidence = transportEvidence(await deps.adapter.lookup(identity.providerId), identity, 'lookup'); }
+        catch { continue; } // No receipt is not evidence of zero cost. SQL enforces attempt/time bounds.
+        await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId });
+      }
+  }
   return {
-    readRun, finalizeRun,
+    readRun, finalizeRun, recoverReceipts,
     /** Trusted server recovery of a retained transport observation; never exposed as a client receipt endpoint. */
     recordReceipt,
     createDraft: () => rpc<string>('bill2_create_draft', {}),
@@ -94,25 +105,18 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
       if (!permission.dispatch) return { dispatched: false };
       const identity: CallIdentity = capability.frozen;
       let evidence;
-      try { evidence = transportEvidence(await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }), identity, 'response'); }
+      let observation: TransportObservation | undefined;
+      try { observation = await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }); evidence = transportEvidence(observation, identity, 'response'); }
       catch { evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' }; }
       try { await recordReceipt(capability.runId, callId, evidence); }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
-      return { dispatched: true };
+      return { dispatched: true, observation }; // Private server composition only; never a public route result.
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>
       rpc<RunView>('bill2_close', { p_run_id: uuid.parse(runId), p_outcome: outcome, p_result: result }),
     requestCancel: (runId: string) => rpc<RunView>('bill2_cancel', { p_run_id: uuid.parse(runId) }),
     async recoverRun(runId: string) {
-      const calls = await rpc<string[]>('bill2_pending_calls', { p_run_id: uuid.parse(runId) });
-      for (const callId of calls.slice(0, 32)) {
-        const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
-        if (!identity) continue;
-        let evidence;
-        try { evidence = transportEvidence(await deps.adapter.lookup(identity.providerId), identity, 'lookup'); }
-        catch { continue; } // No receipt is not evidence of zero cost. SQL enforces attempt/time bounds.
-        await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId });
-      }
+      await recoverReceipts(runId);
       const state = await readRun(runId);
       return state.closed ? finalizeRun(runId) : state;
     },
