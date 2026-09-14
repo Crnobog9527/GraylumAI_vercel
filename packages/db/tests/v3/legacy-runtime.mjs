@@ -34,14 +34,19 @@ export function copyLegacyTests(candidate,legacy) {
  for(const path of ['packages/api/src/services/__tests__','packages/api/src/routers/ordinaryChatReliability.integration.ts','packages/api/vitest.integration.config.ts']) cpSync(resolve(candidate,path),resolve(legacy,path),{recursive:true});
 }
 
-// The supported rollback bundle retains this sole reader compatibility change.
-// Apply only after proving that the untouched archived reader rejects the new NULL row.
-export function patchLegacyFinanceReader(root, evidenceDirectory) {
+// The supported rollback bundle retains exactly these two reader compatibility changes.
+// Apply in stages to prove each untouched decoder failure through the actual old HTTP app.
+export function patchLegacyFinanceReader(root, evidenceDirectory, stage='complete') {
  const path='packages/api/src/routers/admin.ts', file=resolve(root,path), before=readFileSync(file,'utf8');
- const from='  cached_tokens: z.number().finite(),', to='  cached_tokens: z.number().finite().nullable(),';
- if(before.split(from).length!==2)throw new Error('legacy reader patch mismatch');
- const patch=`--- a/${path}\n+++ b/${path}\n@@ -80 +80 @@\n-${from}\n+${to}\n`;
+ const ledgerFrom="  type: z.enum(['deduction', 'addition', 'purchase', 'refund']),";
+ const ledgerTo="  type: z.enum(['deduction', 'addition', 'purchase', 'refund', 'consumption', 'adjustment']),";
+ const cacheFrom='  cached_tokens: z.number().finite(),', cacheTo='  cached_tokens: z.number().finite().nullable(),';
+ const from=stage==='ledger'?ledgerFrom:cacheFrom, to=stage==='ledger'?ledgerTo:cacheTo;
+ if(before.split(from).length!==2 || (stage==='complete'&&!before.includes(ledgerTo)))throw new Error('legacy reader patch mismatch');
+ const ledgerLine=before.slice(0,before.indexOf(stage==='ledger'?ledgerFrom:ledgerTo)).split('\n').length;
+ const cacheLine=before.slice(0,before.indexOf(cacheFrom)).split('\n').length;
+ const patch=`--- a/${path}\n+++ b/${path}\n@@ -${ledgerLine} +${ledgerLine} @@\n-${ledgerFrom}\n+${ledgerTo}\n`+(stage==='ledger'?'':`@@ -${cacheLine} +${cacheLine} @@\n-${cacheFrom}\n+${cacheTo}\n`);
  const sha256=createHash('sha256').update(patch).digest('hex');
- writeFileSync(resolve(evidenceDirectory,'legacy-reader-compat.patch'),patch);
- writeFileSync(file,before.replace(from,to));console.log('LEGACY_READER_COMPAT',JSON.stringify({path,sha256}));
+ writeFileSync(resolve(evidenceDirectory,stage==='ledger'?'legacy-ledger-reader-compat.patch':'legacy-reader-compat.patch'),patch);
+ writeFileSync(file,before.replace(from,to));console.log('LEGACY_READER_COMPAT',JSON.stringify({stage,path,sha256}));
 }

@@ -40,7 +40,7 @@ const adminScalarSettingValueSchema = z.union([
 ]);
 const adminFinanceCreditTransactionRowSchema = z.object({
   amount: z.number().finite(),
-  type: z.enum(['deduction', 'addition', 'purchase', 'refund']),
+  type: z.enum(['deduction', 'addition', 'purchase', 'refund', 'consumption', 'adjustment']),
   created_at: adminDateStringSchema,
   description: z.string().nullable().optional(),
 }).passthrough();

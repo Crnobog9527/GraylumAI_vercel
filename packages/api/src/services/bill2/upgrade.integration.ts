@@ -74,8 +74,9 @@ it('UPGRADE: exact old application survives 0105 and a real code rollback preser
   await finance(403); // A normal account must not gain cross-account finance access.
   await sql.query("update profiles set role='admin' where id=$1",[actor]);
   const unknownUsage=()=>sql.query("select cached_tokens,total_cost_usd from token_stats where bill2_run_id=$1",[paid.id]);
-  // Untouched old source must demonstrably fail before the supported one-line rollback patch.
+  // Untouched old source must demonstrably fail before the supported two-line rollback patch.
   const rawOld=await finance(500);expect(rawOld.error.data.code).toBe('INTERNAL_SERVER_ERROR');observations.push({label:'unpatched-old-finance-reader',status:500});
+  await control('/__legacy_ledger_reader_compat');await ready();const ledgerOnly=await finance(500);expect(ledgerOnly.error.data.code).toBe('INTERNAL_SERVER_ERROR');observations.push({label:'ledger-compatible-old-reader-still-rejects-null-cache',status:500});
   await control('/__legacy_reader_compat');await ready();
   const oldFinance=(await finance(200)).result.data;expect(oldFinance.financeOverview.creditsConsumed).toBe(expected.filter(r=>r.counts_as_spend).reduce((n,r)=>n-r.amount,0));
   const usageBefore=await unknownUsage();expect(usageBefore.rows).toHaveLength(1);expect(usageBefore.rows[0].cached_tokens).toBeNull();expect(Number(usageBefore.rows[0].total_cost_usd)).toBe(0.003);
