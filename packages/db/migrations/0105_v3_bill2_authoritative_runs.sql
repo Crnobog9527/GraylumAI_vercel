@@ -230,6 +230,17 @@ BEGIN
   bad:=other_id<>c.id OR (c.provider_id IS NOT NULL AND c.provider_id IS DISTINCT FROM p_evidence->>'providerId');
   IF NOT bad THEN UPDATE bill2_calls SET provider_id=p_evidence->>'providerId' WHERE id=c.id;END IF;
  END IF;
+ -- Transport observations preserve diagnostics/IDs but never assert cost, finality or delivery.
+ IF p_evidence->>'evidenceKind'='transport_observation' THEN
+  IF p_evidence->>'cost' IS NOT NULL OR p_evidence->>'final' IS DISTINCT FROM 'false' THEN RAISE EXCEPTION 'BILL2_UNTRUSTED_RECEIPT';END IF;
+  bad:=bad OR (p_evidence->>'providerId' IS NOT NULL AND p_evidence->>'expectedProviderId' IS NOT NULL AND p_evidence->>'expectedProviderId' IS DISTINCT FROM p_evidence->>'providerId');
+  INSERT INTO bill2_receipts(call_id,payload,payload_hash,conflict) VALUES(c.id,p_evidence,h,bad);
+  UPDATE bill2_runs SET conflict=conflict OR bad,version=version+1,
+   state=CASE WHEN state IN ('settled','refunded') OR c.selected_cost_usd IS NOT NULL THEN state
+    WHEN coalesce(c.provider_id,p_evidence->>'providerId') IS NULL THEN 'unknown' ELSE 'cost_pending' END
+   WHERE id=r.id RETURNING * INTO r;
+  RETURN bill2_public(r);
+ END IF;
  bad:=bad OR p_evidence->>'model' IS DISTINCT FROM c.model OR p_evidence->>'rejectedReason' IS NOT NULL OR (p_evidence->>'expectedProviderId' IS NOT NULL AND p_evidence->>'expectedProviderId' IS DISTINCT FROM p_evidence->>'providerId');
  IF p_evidence->>'cost' IS NOT NULL THEN raw_cost:=bill2_decimal(p_evidence->'cost');END IF;
  currency:=p_evidence->>'currency';

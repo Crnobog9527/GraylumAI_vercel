@@ -17,8 +17,8 @@ const db=new pg.Client({connectionString});
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
 const modelId=randomUUID();const events:unknown[]=[];
 const admin=createClient(process.env.V3_LOCAL_REST!,process.env.V3_LOCAL_SERVICE_JWT!,{auth:{persistSession:false}});
-let providerCount=0,lookupCount=0,raw='';let endpoint='';
-const server=createServer(async(req,res)=>{if(req.url?.startsWith('/receipt/'))lookupCount++;else providerCount++;for await(const _ of req){/* local fixture request */}res.setHeader('content-type','application/json');res.end(raw);});
+let providerCount=0,lookupCount=0,raw='',httpStatus=200,httpHang=false;let endpoint='';
+const server=createServer(async(req,res)=>{if(req.url?.startsWith('/receipt/'))lookupCount++;else providerCount++;for await(const _ of req){/* local fixture request */}res.statusCode=httpStatus;res.setHeader('content-type','application/json');if(httpHang)res.write(raw);else res.end(raw);});
 async function sqlRpc(name:string,args:unknown[],client=db) { const result=await client.query(`select public.${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) result`,args);return result.rows[0].result; }
 async function user(credits=100) {const id=randomUUID();await db.query('insert into profiles(id,credits) values($1,$2)',[id,credits]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)",[id,credits,'opening_grant:'+id]);return id;}
@@ -364,4 +364,39 @@ it.each(['suspended','deleted'])('BILL2: concurrent actor %s prevents a new rese
 });
 it('BILL2: final detail cannot regress to preliminary evidence',async()=>{
  const f=await fixture(),r=await f.prepare(),id=await call(f.actor,r.id);await receipt(f.actor,r.id,id,'0.003',{coverage:'included_detail',detailId:'a'});expect(await receipt(f.actor,r.id,id,'0.002',{coverage:'included_detail',detailId:'a',final:false})).toMatchObject({conflict:true});expect((await conservation(f.actor)).credits).toBe(80);
+});
+
+it('BILL2: error HTTP body and captured ID survive the actual service and RPC without settlement',async()=>{
+ const f=await fixture(),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall());
+ const before=providerCount;raw='{"id":"synthetic-gen-500","model":"m","final":false,"cost":null,"currency":"USD","coverage":"request_total"}';httpStatus=500;
+ try {await s.dispatchOnce(c.id,'hello');}finally{httpStatus=200;}
+ const e=(await db.query('select payload from bill2_receipts where call_id=$1',[c.id])).rows[0].payload;expect(e).toMatchObject({providerId:'synthetic-gen-500',rawBody:raw,cost:null,final:false});expect(providerCount-before).toBe(1);expect((await s.readRun(r.id)).preDeductId).toBe(r.preDeductId);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0,rows:2});expect(await s.dispatchOnce(c.id,'hello')).toEqual({dispatched:false});
+});
+
+it.each(['with_id','no_id','invalid','oversize','binary'])('BILL2: error transport %s preserves bounded private evidence without financial authority',async kind=>{
+ const f=await fixture(),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall());const before=providerCount,lookups=lookupCount,id='error-'+c.id;
+ raw=kind==='invalid'?'{"id":broken':kind==='oversize'?'x'.repeat(70000):kind==='binary'?'bad\0body':JSON.stringify({id:kind==='with_id'?id:null,model:'m',final:true,cost:0,currency:'USD',coverage:'request_total'});const original=raw;httpStatus=500;
+ try{await s.dispatchOnce(c.id,'hello');}finally{httpStatus=200;}
+ const e=(await db.query('select payload from bill2_receipts where call_id=$1',[c.id])).rows[0].payload;expect(e).toMatchObject({evidenceKind:'transport_observation',httpStatus:500,cost:null,final:false,providerId:kind==='with_id'?id:null});expect(Buffer.from(e.rawBodyBase64,'base64')).toEqual(Buffer.from(original).subarray(0,65536));expect(e.sourceHash).toBe(createHash('sha256').update(Buffer.from(original).subarray(0,65536)).digest('hex'));
+ const publicView=await s.readRun(r.id);expect(JSON.stringify(publicView)).not.toContain('rawBody');expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0,rows:2});await s.closeRun(r.id,'unknown');await s.finalizeRun(r.id);expect(await s.dispatchOnce(c.id,'hello')).toEqual({dispatched:false});expect(providerCount-before).toBe(1);
+ if(kind==='with_id'){
+  // Failed lookup lacking ID or carrying diagnostic final cost cannot invalidate a later trustworthy receipt.
+  raw='{"error":"PRIVATE_HTTP_ERROR"}';httpStatus=503;try{await s.recoverRun(r.id);}finally{httpStatus=200;}
+  expect((await s.readRun(r.id)).conflict).toBe(false);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});
+  raw=JSON.stringify({id,model:'m',final:true,cost:0.007,currency:'USD',coverage:'request_total'});await s.recoverRun(r.id);expect((await s.readRun(r.id)).chargedCredits).toBeNull(); // cost alone does not prove delivery
+  await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);await s.recoverRun(r.id);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1,spend:7});expect(lookupCount-lookups).toBe(2);
+ }else{await s.recoverRun(r.id);expect(lookupCount).toBe(lookups);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});}
+ expect((await s.readRun(r.id)).preDeductId).toBe(r.preDeductId);expect(providerCount-before).toBe(1);
+});
+it('BILL2: error-response receipt outage retains the same private evidence for original-identity recovery',async()=>{
+ const f=await fixture();let unavailable=true;const faulty={rpc:async(name:string,args:Record<string,unknown>)=>name==='bill2_record'&&unavailable?{data:null,error:new Error('outage')}:admin.rpc(name,args)};
+ const s=authoritativeBilling({admin:faulty,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall()),before=providerCount;
+ raw=JSON.stringify({id:'outage-'+c.id,model:'m',final:true,cost:0,currency:'USD',coverage:'request_total'});httpStatus=500;let out;try{out=await s.dispatchOnce(c.id,'hello');}finally{httpStatus=200;}
+ expect(out.pendingReceipt?.evidence).toMatchObject({providerId:'outage-'+c.id,cost:null,final:false,rawBody:raw});unavailable=false;await s.recordReceipt(r.id,c.id,out.pendingReceipt!.evidence);await s.recordReceipt(r.id,c.id,out.pendingReceipt!.evidence);expect((await db.query('select count(*)::int n from bill2_receipts where call_id=$1',[c.id])).rows[0].n).toBe(1);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});expect(providerCount-before).toBe(1);
+});
+
+it('BILL2: body timeout retains the bounded prefix but no guessed identity or financial verdict',async()=>{
+ const f=await fixture(),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall()),before=providerCount;
+ raw='{"id":"partial-id",';httpStatus=500;httpHang=true;const started=Date.now();try{await s.dispatchOnce(c.id,'hello');}finally{httpStatus=200;httpHang=false;}
+ const e=(await db.query('select payload from bill2_receipts where call_id=$1',[c.id])).rows[0].payload;expect(e).toMatchObject({rawBody:raw,complete:false,transportIssue:'body_interrupted',providerId:null,cost:null,final:false});expect(Date.now()-started).toBeLessThan(8000);expect(providerCount-before).toBe(1);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});
 });

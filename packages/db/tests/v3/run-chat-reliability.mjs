@@ -13,13 +13,13 @@ const searchEvidence = process.argv.includes('--search');
 const searchBaseline = process.argv.includes('--search-baseline');
 const openRouterSearch=liveProgress||process.argv.includes('--openrouter')||process.argv.includes('--openrouter-baseline');
 const openRouterBaseline=process.argv.includes('--openrouter-baseline');
-if (process.argv.slice(2).some(v => !['--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression','--balance-regression','--balance-baseline'].includes(v))) throw new Error('Invalid option');
+if (process.argv.slice(2).some(v => !['--with-bill2-schema','--baseline', '--regression', '--search', '--search-baseline','--openrouter','--openrouter-baseline','--live-progress','--live-progress-baseline','--delivery-regression','--balance-regression','--balance-baseline'].includes(v))) throw new Error('Invalid option');
 let source = readFileSync(new URL('./run-workbench.mjs', import.meta.url), 'utf8');
 function replace(from, to) {
   if (source.split(from).length !== 2) throw new Error('Shared fixture boundary changed: ' + from.slice(0, 80));
   source = source.replace(from, to);
 }
-replace('const args = process.argv.slice(2);', "const args = ['--chat-only'];");
+replace('const args = process.argv.slice(2);', "const args = ['--chat-only'"+(process.argv.includes('--with-bill2-schema')?",'--with-bill2-schema'":"")+"];");
 if (baseline) replace('const tag = `graylum-wb-', `
 // Reproduce the immutable admission-protected starting runtime, retaining this
 // task's test fixtures. No checkout, shared file, or remote ref is modified.

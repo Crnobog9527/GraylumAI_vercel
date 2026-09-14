@@ -33,20 +33,42 @@ export function unknownEvidence(identity: CallIdentity) {
   return { ...identity, providerId: null, cost: null, currency: 'USD', final: false, coverage: 'request_total',
     source: 'transport_unknown', sourceHash: createHash('sha256').update('transport_unknown').digest('hex'), observedAt: new Date().toISOString() };
 }
+/** Private bounded HTTP observation; receiving a response is not a receipt or delivery verdict. */
+export type TransportObservation = { rawBody: string; rawBodyBase64: string; sourceHash: string; httpStatus: number; complete: boolean; transportIssue: string | null };
+export function transportEvidence(observation: TransportObservation, identity: CallIdentity, source: 'response' | 'lookup') {
+  if (observation.httpStatus >= 200 && observation.httpStatus < 300 && observation.complete) {
+    return { ...observedFixtureEvidence(observation.rawBody, identity, source), transport: { httpStatus: observation.httpStatus, complete: observation.complete, transportIssue: observation.transportIssue } };
+  }
+  let providerId: string | null = null;
+  // Do not guess IDs from malformed JSON or a retained prefix of an incomplete response.
+  if (observation.complete) {
+    try { const value = parseExactJson(observation.rawBody) as Record<string, unknown>;
+      if (value && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 256) providerId = value.id;
+    } catch { /* exact bounded bytes remain private diagnostic evidence */ }
+  }
+  return { ...unknownEvidence(identity), evidenceKind: 'transport_observation', providerId, source,
+    ...observation }; // Financial fields remain unknown regardless of status/body cost/finality.
+}
 /** Only the explicit local protocol is implemented. This is not an OpenRouter/Fusion capability assertion. */
 export function localFixtureAdapter(endpoint: string) {
   const url = new URL(endpoint);
   if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) throw new Error('BILL2_REAL_PROVIDER_DISABLED');
-  async function request(path: string, body?: unknown) {
+  async function request(path: string, body?: unknown): Promise<TransportObservation> {
     const response = await fetch(new URL(path, url), { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
       headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(5000) });
-    // No retries and no inference from HTTP status. Preserve bounded raw evidence only on successful protocol responses.
-    if (!response.ok || !response.body) throw new Error('BILL2_TRANSPORT_UNKNOWN');
-    const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let bytes = 0;
-    try { for (;;) { const next = await reader.read(); if (next.done) break; bytes += next.value.length;
-      if (bytes > 65_536) throw new Error('BILL2_EVIDENCE_TOO_LARGE'); chunks.push(next.value); } }
-    finally { await reader.cancel(); }
-    return Buffer.concat(chunks).toString('utf8');
+    const chunks: Uint8Array[] = []; let bytes = 0, complete = false, transportIssue: string | null = null;
+    const reader = response.body?.getReader();
+    if (reader) {
+      try { for (;;) { const next = await reader.read(); if (next.done) { complete = true; break; }
+        const retained = next.value.subarray(0, 65_536 - bytes); chunks.push(retained); bytes += retained.length;
+        if (retained.length < next.value.length) { transportIssue = 'body_limit'; break; }
+      } } catch { transportIssue = 'body_interrupted'; }
+      finally { await reader.cancel().catch(() => {}); }
+    } else { complete = true; }
+    const retained = Buffer.concat(chunks); let rawBody: string;
+    try { rawBody = new TextDecoder('utf-8', { fatal: true }).decode(retained); if (rawBody.includes('\0')) throw new Error('invalid_text'); }
+    catch { rawBody = retained.toString('utf8').replaceAll('\0', '\uFFFD'); complete = false; transportIssue ??= 'invalid_text'; }
+    return { rawBody, rawBodyBase64: retained.toString('base64'), sourceHash: createHash('sha256').update(retained).digest('hex'), httpStatus: response.status, complete, transportIssue };
   }
   return { protocol: 'fixture-cost-v1' as const, lookupSupported: true,
     dispatch: (body: unknown) => request('/call', body),

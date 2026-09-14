@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
+import { legacyRuntime, instrumentLegacy, copyLegacyTests } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHmac, createHash } from "node:crypto";
@@ -16,11 +17,17 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!['--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!['--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
+const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
+if(legacyRef&&!/^[a-f0-9]{40}$/.test(legacyRef))throw new Error('exact legacy ref required');
+const upgradeMode=args.includes('--bill2-upgrade-only');
+if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
+let legacyRoot;
+const bill2Schema=args.includes('--with-bill2-schema');
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
-const testPattern=args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const testPattern=upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -127,6 +134,7 @@ try {
       stdio: "inherit",
     }),
   );
+  if(legacyRef){legacyRoot=legacyRuntime(legacyRef,source,cleanEnv);copyLegacyTests(root,legacyRoot);}
   docker("network", "create", tag);
   docker(
     "run",
@@ -200,7 +208,7 @@ try {
   apply("packages/db/migrations/0077_workbench_provider_rejection.sql");
   // Full and ordinary-chat regression use the current durable request schema.
   // Historical chat wrapper baselines supply their own migration choice.
-  if(!aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only') || args.includes('--agent-slice-only')){
+  if(bill2Schema || !aiOnly || args.includes('--ordinary-only') || args.includes('--usage-only') || args.includes('--agent-slice-only')){
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
     apply("packages/db/migrations/0078_ordinary_chat_requests.sql");
   }
@@ -255,7 +263,15 @@ try {
   apply("packages/db/migrations/0104_workbench_provider_observations.sql");
 
 
-  if(bill2Mode) {
+  if(upgradeMode){
+    const rls=readFileSync(resolve(root,'packages/db/migrations/0002_enable_rls_all_tables.sql'),'utf8');
+    const own=rls.indexOf('CREATE POLICY "credit_transactions_select_own"');if(own<0)throw new Error('missing canonical ledger read policy');
+    sql('ALTER TABLE credit_transactions ENABLE ROW LEVEL SECURITY; GRANT SELECT ON credit_transactions TO authenticated');
+    sql(rls.slice(own,rls.indexOf(';',own)+1));
+    sql('REVOKE SELECT ON billing_history FROM service_role; REVOKE SELECT(user_id) ON billing_history FROM service_role; GRANT SELECT(operation_type,amount,created_at) ON billing_history TO service_role');
+    sql('REVOKE ALL ON profiles FROM service_role; GRANT SELECT(id,email,nickname,role,status,membership_level,credits,created_at,is_deleted) ON profiles TO service_role');
+  }
+  if((bill2Mode || bill2Schema) && !upgradeMode) {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
@@ -333,12 +349,19 @@ try {
     if (!ok) throw new Error("local service not ready");
   }
   let modelCalls = 0;
+  const chatCompatibility=upgradeMode ? (await import('./chat-provider-fixture.mjs')).chatProviderFixture() : null;
   const sliceCalls=[];
   const controlToken=randomUUID();let holdSlice=false,restartApplication;
   const documentCalls=[];
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
+    if(chatCompatibility && await chatCompatibility(req,res))return;
+    if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy'].includes(req.url)){
+      if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');sql("NOTIFY pgrst, 'reload schema'");}
+      else await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
+    }
     if(req.url==='/__slice_hold'||req.url==='/__restart_app'){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
       try{if(req.url==='/__slice_hold')holdSlice=true;else await restartApplication();res.writeHead(200).end('ok');}catch{res.writeHead(500).end('local restart failed');}return;
@@ -474,6 +497,7 @@ try {
   if(searchSource.split(searchMarker).length!==2)throw new Error('research fixture boundary changed');
   searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();return connectLocalAgentKey(options,new URL(row.data.value));}");
   writeFileSync(searchPath,searchSource);
+  if(legacyRoot)instrumentLegacy(legacyRoot,apiUrl);
   const service = jwt("service_role"),
     anon = jwt("anon");
   const listener = createServer();
@@ -484,6 +508,7 @@ try {
     ...cleanEnv,
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
     ...(args.includes('--real-skill-only') ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
+    V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
     NEXT_PUBLIC_SUPABASE_URL: apiUrl,
@@ -503,6 +528,7 @@ try {
   };
   mkdirSync(env.V3_WORKBENCH_OUTPUT, { recursive: true });
 
+  let applicationRoot=legacyRoot??root;
   const startApp = () => {
     app = spawn(
       "pnpm",
@@ -518,7 +544,7 @@ try {
         "--port",
         String(appPort),
       ],
-      { cwd: root, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: applicationRoot, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
     );
     for (const output of [app.stdout, app.stderr])
       output.on("data", (x) => {
@@ -533,8 +559,11 @@ try {
       });
   };
   startApp();
-  restartApplication=async()=>{const previous=app;const exited=new Promise(resolve=>previous.once('exit',resolve));process.kill(-previous.pid,'SIGKILL');await exited;startApp();};
+  restartApplication=async(nextRoot)=>{const previous=app;const exited=new Promise(resolve=>previous.once('exit',resolve));process.kill(-previous.pid,'SIGKILL');await exited;applicationRoot=nextRoot??applicationRoot;startApp();};
   // Loopback test control restarts only this disposable application process group.
+  const primaryTestArgs = [
+    ...(aiOnly ? ["--testNamePattern", testPattern] : []),
+  ];
   const runTests = () =>
     spawn(
       "pnpm",
@@ -546,7 +575,7 @@ try {
         "run",
         "--config",
         "vitest.integration.config.ts",
-        "src/services/__tests__/workbench.integration.ts",
+        ...(upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         "--reporter",
         "verbose",
@@ -554,9 +583,9 @@ try {
           ? ["--testNamePattern", args.includes('--reuse-only')
               ? "^REUSE: restart preserves"
               : "^restores all projects in a new browser login after a real application process restart$"]
-          : aiOnly ? ["--testNamePattern", testPattern] : []),
+          : primaryTestArgs),
       ],
-      { cwd: root, env, stdio: "inherit" },
+      { cwd: legacyRoot&&!upgradeMode?legacyRoot:root, env, stdio: "inherit" },
     );
   await childExit(runTests());
   if (!aiOnly || args.includes('--reuse-only') || args.includes('--workbench-restart-only')) {
@@ -642,6 +671,8 @@ try {
     { force: true },
   );
   // Retain source copy only on request for explicit recovery; never original/user files.
-  if (!process.env.V3_KEEP_LOCAL)
+  if (!process.env.V3_KEEP_LOCAL) {
     rmSync(root, { recursive: true, force: true });
+    if(legacyRoot)rmSync(legacyRoot,{recursive:true,force:true});
+  }
 }

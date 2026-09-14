@@ -6,13 +6,13 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const baseline = process.argv.includes('--baseline');
 const regression = process.argv.includes('--regression');
-if ((baseline && regression) || process.argv.slice(2).some(v => !['--baseline','--regression'].includes(v))) throw new Error('Invalid option');
+if ((baseline && regression) || process.argv.slice(2).some(v => !['--with-bill2-schema','--baseline','--regression'].includes(v))) throw new Error('Invalid option');
 let source = readFileSync(new URL('./run-workbench.mjs', import.meta.url), 'utf8');
 function replace(from, to) {
   if (source.split(from).length !== 2) throw new Error('Shared fixture boundary changed: ' + from.slice(0, 80));
   source = source.replace(from, to);
 }
-replace('const args = process.argv.slice(2);', "const args = ['--ai-only'];");
+replace('const args = process.argv.slice(2);', "const args = ['--ai-only'"+(process.argv.includes('--with-bill2-schema')?",'--with-bill2-schema'":"")+"];");
 replace('...(aiOnly ? ["--testNamePattern", testPattern] : []),', baseline ? '"--testNamePattern", "^CONSUMPTION: .*narrow ACL hourly",' : regression ? '"--testNamePattern", "^(AI:|CHAT: (HTTP 429|summary HTTP 429|late initial read|durable multi-turn|[3468] configured steps|prepared|free and document UI))",' : '"--testNamePattern", "^CONSUMPTION:",');
 if (baseline) replace('const tag = `graylum-wb-', `
 for(const path of ['packages/api/src/middleware/securityChecks.ts','packages/api/src/services/artifacts/generation.ts','packages/api/src/services/research/workbenchSearch.ts']) {

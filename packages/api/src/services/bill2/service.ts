@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { observedFixtureEvidence, localFixtureAdapter, unknownEvidence, type CallIdentity } from './fixtureAdapter';
+import { transportEvidence, localFixtureAdapter, unknownEvidence, type CallIdentity } from './fixtureAdapter';
 import { aggregateCredits } from './decimal';
 import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
@@ -94,7 +94,7 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
       if (!permission.dispatch) return { dispatched: false };
       const identity: CallIdentity = capability.frozen;
       let evidence;
-      try { evidence = observedFixtureEvidence(await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }), identity, 'response'); }
+      try { evidence = transportEvidence(await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }), identity, 'response'); }
       catch { evidence = unknownEvidence(identity); }
       try { await recordReceipt(capability.runId, callId, evidence); }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
@@ -109,7 +109,7 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
         const identity = await rpc<(CallIdentity & { providerId: string }) | null>('bill2_recovery_claim', { p_run_id: runId, p_call_id: callId });
         if (!identity) continue;
         let evidence;
-        try { evidence = observedFixtureEvidence(await deps.adapter.lookup(identity.providerId), identity, 'lookup'); }
+        try { evidence = transportEvidence(await deps.adapter.lookup(identity.providerId), identity, 'lookup'); }
         catch { continue; } // No receipt is not evidence of zero cost. SQL enforces attempt/time bounds.
         await recordReceipt(runId, callId, { ...evidence, expectedProviderId: identity.providerId });
       }
