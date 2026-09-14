@@ -49,6 +49,7 @@ export default function PositioningDraft({
     { sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) },
   );
+  const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
     snap = d?.snapshot,
@@ -63,23 +64,26 @@ export default function PositioningDraft({
     savePlan.isPending ||
     handoff.isPending;
   useEffect(() => {
-    const raw = sessionStorage.getItem("opc-edit:" + draftId);
-    if (raw) {
-      try {
-        const local = JSON.parse(raw);
-        setEdits(local.edits ?? {});
-        setInfoEdits(local.infoEdits ?? {});
-        setPlanCandidate(local.planCandidate ?? null);
-        if (local.dirtyPlan) {
-          setItems(local.items);
-          setDirtyPlan(true);
-        }
-      } catch {
-        /* malformed local buffer is ignored */
-      }
+    // Hydrate before persisting: initial/StrictMode effects must not overwrite
+    // a saved buffer with the render's empty initial state.
+    let local: Record<string, any> = {};
+    try {
+      const raw = sessionStorage.getItem("opc-edit:" + draftId);
+      if (raw) local = JSON.parse(raw) ?? {};
+    } catch {
+      /* Ignore a malformed local buffer. */
     }
+    setEdits(local.edits ?? {});
+    setInfoEdits(local.infoEdits ?? {});
+    setPlanCandidate(
+      Array.isArray(local.planCandidate) ? local.planCandidate : null,
+    );
+    setDirtyPlan(Boolean(local.dirtyPlan));
+    setItems(local.dirtyPlan && Array.isArray(local.items) ? local.items : []);
+    setHydratedDraft(draftId);
   }, [draftId]);
   useEffect(() => {
+    if (hydratedDraft !== draftId) return;
     sessionStorage.setItem(
       "opc-edit:" + draftId,
       JSON.stringify({ edits, items, dirtyPlan, infoEdits, planCandidate }),
@@ -94,10 +98,19 @@ export default function PositioningDraft({
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [draftId, edits, items, dirtyPlan, infoEdits, planCandidate]);
+  }, [
+    draftId,
+    hydratedDraft,
+    edits,
+    items,
+    dirtyPlan,
+    infoEdits,
+    planCandidate,
+  ]);
   useEffect(() => {
-    if (!dirtyPlan && latest?.body) setItems(latest.body);
-  }, [latest?.planId, dirtyPlan]);
+    if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
+      setItems(latest.body);
+  }, [draftId, hydratedDraft, latest?.planId, dirtyPlan]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");

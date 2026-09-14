@@ -446,6 +446,15 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
   const browser = await chromium.launch({
     executablePath:
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -591,6 +600,19 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         .getByRole("button", { name: "确认正式定位版本", exact: true })
         .isEnabled(),
     ).toBe(false);
+    await page.reload();
+    await expect
+      .poll(
+        () =>
+          lastArticle
+            .getByRole("textbox", {
+              name: lastStep.information![0].title,
+              exact: true,
+            })
+            .inputValue(),
+        { timeout: 15000 },
+      )
+      .toBe("Updated confirmed decision before publication");
     await lastArticle
       .getByRole("button", { name: "保存信息状态", exact: true })
       .click();
@@ -620,6 +642,28 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page
       .getByRole("textbox", { name: "简报", exact: true })
       .fill("A clear brief");
+    await page
+      .getByRole("button", { name: "按已保存账号生成计划候选", exact: true })
+      .click();
+    await page
+      .getByRole("heading", {
+        name: "AI 计划候选 · 尚未替换你的编辑",
+        exact: true,
+      })
+      .waitFor();
+    await page.reload();
+    await page
+      .getByRole("heading", {
+        name: "AI 计划候选 · 尚未替换你的编辑",
+        exact: true,
+      })
+      .waitFor();
+    expect(
+      await page
+        .getByRole("textbox", { name: "title 0", exact: true })
+        .inputValue(),
+    ).toBe("Browser topic");
+    await page.getByRole("button", { name: "保留原计划", exact: true }).click();
     await page.getByRole("button", { name: "保存计划版本" }).click();
     let lostHandoff = false;
     await page.route("**/api/trpc/opc.handoff*", async (route) => {
@@ -671,6 +715,14 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     expect((await f.service.list()).accounts[0].profile.goal_2.value).toBe(
       "Updated confirmed decision before publication",
     );
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from bill2_runs where actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(1);
     expect(errors).toEqual([]);
   } finally {
     releaseInformation();
