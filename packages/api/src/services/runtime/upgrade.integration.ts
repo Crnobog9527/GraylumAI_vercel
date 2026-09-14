@@ -67,7 +67,7 @@ it('RUNTIME UPGRADE: revision-bearing legacy work identity survives 0105 to 0106
   const first=(probes[1] as PromiseFulfilledResult<any>).value;expect((await billing.dispatchOnce(first.id,body)).dispatched).toBe(true);
   expect((await billing.dispatchOnce(held.id,body)).dispatched).toBe(true);expect((await billing.dispatchOnce(held.id,body)).dispatched).toBe(false);
   const fresh=await billing.prepareRun(randomUUID(),payload);const c=await billing.claimCall(fresh.id,1,call);expect((await billing.dispatchOnce(c.id,body)).dispatched).toBe(true);
-  await billing.recoverReceipts(runs[2].id);expect(posts).toBe(4);expect(gets).toBe(1);
+  await billing.recoverRun(runs[2].id);expect(posts).toBe(4);expect(gets).toBe(1);
   const terminal={kind:'usable_result',body:'allowed result',evidenceRef:randomUUID(),evidenceHash:createHash('sha256').update('allowed result').digest('hex')};
   for(const r of [...runs,fresh]){await billing.closeRun(r.id,'delivered',terminal);expect((await billing.finalizeRun(r.id)).state).toBe('settled');expect((await billing.finalizeRun(r.id)).state).toBe('settled');}
   expect(posts).toBe(4);expect(gets).toBe(1);expect((await identities()).filter((r:any)=>runs.some(x=>x.id===r.id))).toEqual(before);
@@ -79,7 +79,10 @@ it('RUNTIME UPGRADE: revision-bearing legacy work identity survives 0105 to 0106
   expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[actor])).rows[0].n).toBe(4);
   await sql.query("update ai_models set is_active='false' where id=$1",[model]);await expect(billing.prepareRun(randomUUID(),payload)).rejects.toThrow();await expect(billing.readPrivateInput(runs[0].id)).rejects.toThrow();await sql.query("update ai_models set is_active='true' where id=$1",[model]);
   await expect(billing.prepareRun(randomUUID(),{...payload,scope:{...payload.scope,projectId:randomUUID()}})).rejects.toThrow();
-  const other=authoritativeBilling({admin,actor:async()=>randomUUID(),adapter:localFixtureAdapter('http://127.0.0.1:'+address.port)});
+  const otherEmail=randomUUID()+'@example.test';const otherCreated=await admin.auth.admin.createUser({email:otherEmail,password,email_confirm:true});if(otherCreated.error)throw otherCreated.error;
+  await sql.query('insert into profiles(id,email,credits) values($1,$2,0)',[otherCreated.data.user.id,otherEmail]);
+  const otherUser=createClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});expect((await otherUser.auth.signInWithPassword({email:otherEmail,password})).error).toBeNull();
+  const other=authoritativeBilling({admin,actor:async()=>{const r=await otherUser.auth.getUser();if(r.error||!r.data.user)throw new Error('auth');return r.data.user.id;},adapter:localFixtureAdapter('http://127.0.0.1:'+address.port)});
   await expect(other.prepareRun(randomUUID(),payload)).rejects.toThrow();await expect(other.readPrivateInput(runs[0].id)).rejects.toThrow();
   await sql.query('delete from artifact_accounts where actor_id=$1',[actor]);await expect(billing.prepareRun(randomUUID(),payload)).rejects.toThrow();await expect(billing.readPrivateInput(runs[0].id)).rejects.toThrow();await sql.query('insert into artifact_accounts values($1,$2,$3,$4)',[actor,module,pack.id,account]);
   await sql.query('update modules set active=false where id=$1',[module]);await expect(billing.prepareRun(randomUUID(),payload)).rejects.toThrow();await expect(billing.readPrivateInput(runs[0].id)).rejects.toThrow();await sql.query('update modules set active=true where id=$1',[module]);
