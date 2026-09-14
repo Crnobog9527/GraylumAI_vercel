@@ -82,7 +82,7 @@ it('RUNTIME: official SDK uses bound PostgreSQL Session and persists input/outpu
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
-it.each(['none','session','result_before','result_after','receipt_before','receipt_after','result_revoked'])('RUNTIME: SDK to receipt/Session/financial terminal, %s fault recovers without HTTP replay',async fault=>{
+it.each(['none','session','result_before','result_after','receipt_before','receipt_after','receipt_unavailable','result_revoked'])('RUNTIME: SDK to receipt/Session/financial terminal, %s fault recovers without HTTP replay',async fault=>{
  const f=await fixture();
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Fixture instruction',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:20};
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:{...f.billing,input:context}});let requests=0;
@@ -96,7 +96,7 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    const target=(fault==='session'&&name==='runtime_session_items'&&args.p_action==='append')
     ||(fault.startsWith('result_')&&name==='runtime_execution'&&args.p_action==='complete')
     ||(fault.startsWith('receipt_')&&name==='bill2_record');
-   if(target&&!injected){
+   if(target&&(!injected||fault==='receipt_unavailable')){
     injected=true;
     return (async()=>{
      if(fault==='result_revoked')await rpc('bill2_revoke_draft',{p_actor_id:f.actorId,p_draft_id:f.s.scope.draftId});
@@ -108,11 +108,11 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
   }};
   const options={database,actor:async()=>f.actorId,endpoint:'http://127.0.0.1:'+address.port};
   const first=await runtimeExecutor(options).execute(e.executionId);
-  if(fault!=='none'){expect(injected).toBe(true);expect(first).toEqual({state:'pending'});expect(requests).toBe(1);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(fault==='result_after'?97:80);}
+  if(!['none','receipt_before','receipt_after'].includes(fault)){expect(injected).toBe(true);expect(first).toEqual({state:'pending'});expect(requests).toBe(1);expect((await db.query('select credits from profiles where id=$1',[f.actorId])).rows[0].credits).toBe(fault==='result_after'?97:80);}
   else expect(first).toEqual({state:'completed',body:'Original durable answer'});
-  if(fault==='receipt_before'){
-   // HTTP returned the real fixture body/ID, but the first receipt write did
-   // not happen. A new executor has no durable evidence to invent or resend.
+  if(fault==='receipt_unavailable'){
+   // Every bounded persistence attempt is unavailable; process-local evidence
+   // cannot be reconstructed by a new host if no storage accepted it.
    expect(await runtimeExecutor(options).execute(e.executionId)).toEqual({state:'pending'});
    expect((await runtimeExecutor(options).cancel(e.executionId)).state).toBe('cost_pending');
    expect((await runtimeExecutor(options).execute(e.executionId)).state).toBe('cost_pending');
@@ -140,6 +140,13 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    expect(recovered).toEqual({state:'completed',body:'Original durable answer'});
   }
   expect(requests).toBe(1);
+  if(fault.startsWith('receipt_')){
+   expect(injected).toBe(true);
+   const call=(await db.query('select id,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[e.runId])).rows[0];
+   expect(call.provider_id).toBe(response.id);expect(Number(call.cost)).toBe(0.003);
+   const receipts=(await db.query('select payload from bill2_receipts where call_id=$1',[call.id])).rows;
+   expect(receipts).toHaveLength(1);expect(JSON.stringify(receipts)).toContain(response.id);expect(JSON.stringify(receipts)).toContain('Original durable answer');
+  }
   const money=(await db.query('select credits,(select count(*)::int from billing_history where user_id=$1 and operation_type=\'settle\') terminals from profiles where id=$1',[f.actorId])).rows[0];
   expect(money).toEqual({credits:97,terminals:1});
   expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(2);
@@ -473,6 +480,16 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'browser-doc-'+pack.id,actor]);
  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Browser document Skill',$2,true,$3)",[moduleId,pack.id,modelId]);
  await publishSkillPackage(admin,actor,pack);
+ // A second same-named package requires a task. Public names alone must not
+ // make it runnable in this task-less preview selector.
+ const taskPack=makePackage(),taskModule=randomUUID();
+ const taskEntry=Buffer.from(taskPack.files[0].base64,'base64').toString().replace('name: synthetic-method','name: runtime-demo');
+ taskPack.files[0].base64=Buffer.from(taskEntry).toString('base64');taskPack.descriptor.directoryName='runtime-demo';
+ taskPack.descriptor.files[0].bytes=Buffer.byteLength(taskEntry);taskPack.descriptor.files[0].sha256=createHash('sha256').update(taskEntry).digest('hex');
+ taskPack.descriptor.tasks={required:['SKILL.md']};taskPack.descriptor.packageHash=packageHash(taskPack.descriptor);
+ await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[taskPack.id,'task-demo-'+taskPack.id,actor]);
+ await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Requires task',$2,true,$3)",[taskModule,taskPack.id,modelId]);
+ await publishSkillPackage(admin,actor,taskPack);
  await db.query("update profiles set role='user' where id=$1",[actor]);
  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const context=await browser.newContext();
  await context.route('**/*',route=>{const url=new URL(route.request().url());return ['127.0.0.1','localhost'].includes(url.hostname)||['data:','blob:'].includes(url.protocol)?route.continue():route.abort();});
@@ -936,3 +953,70 @@ it('RUNTIME: actual HTTP disconnect keeps late output in original scope and kill
  expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:37,ledger:37});
  expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[first.sessionId])).rows[0].n).toBe(2);
 },180000);
+it('RUNTIME: work ownership and selected Skills stay separate with bounded actual history dependencies',async()=>{
+ const email=randomUUID()+'@example.test',password='Local-'+randomUUID()+'!';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;
+ await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,500,'addition','grant','opening_grant','system',$2,0,500)",[actor,'opening:'+actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
+ const packs=[] as Array<{moduleId:string;pack:ReturnType<typeof makePackage>}>;
+ for(let i=0;i<2;i++){
+  const pack=makePackage(),moduleId=randomUUID();
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'work-window-'+pack.id,actor]);
+  await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Work selected Skill',$2,true,$3)",[moduleId,pack.id,modelId]);
+  await publishSkillPackage(admin,actor,pack);packs.push({pack,moduleId});
+ }
+ await db.query("update profiles set role='user' where id=$1",[actor]);
+ const [a,b]=packs,parent=randomUUID(),work=randomUUID();
+ await db.query('insert into artifact_projects(id,actor_id,module_id,skill_id) values($1,$2,$3,$4)',[parent,actor,a.moduleId,a.pack.id]);
+ await db.query("insert into artifact_projects(id,actor_id,module_id,skill_id,work_kind,source_project_id) values($1,$2,$3,$4,'script',$5)",[work,actor,a.moduleId,a.pack.id,parent]);
+ const policy={account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:200,inputBytes:10000,historyItems:2};
+ const admission=runtimeAdmissionService(user,admin,policy),session=await admission.start(randomUUID(),{kind:'work_item',projectId:parent,workItemId:work});
+ const input={sessionId:session.sessionId,input:'Use selected method',network:'deny',selection:{kind:'skill',moduleId:b.moduleId,revisionId:b.pack.revisionId}};
+ await expect(admission.prepare({...input,requestId:randomUUID(),selection:{...input.selection,revisionId:a.pack.revisionId}})).rejects.toThrow();
+ await expect(admission.start(randomUUID(),{kind:'work_item',projectId:randomUUID(),workItemId:work})).rejects.toThrow();
+ const requests:unknown[]=[],ids:string[]=[];let nextMatch:string|null=null;
+ const server=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const request=JSON.parse(JSON.parse(raw).input);requests.push(request);
+  const id='bounded-'+randomUUID(),content=nextMatch?JSON.stringify({key:nextMatch}):'Window answer '+requests.length;nextMatch=null;
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:request.model,final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:4,total_tokens:14}}}}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+  const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port,activateSkill:c=>activateRuntimeCandidate(user,admin,c)});
+  for(const chosen of [a,b]){
+   const e=await admission.prepare({...input,requestId:randomUUID(),selection:{kind:'skill',moduleId:chosen.moduleId,revisionId:chosen.pack.revisionId}});ids.push(e.executionId);
+   expect((await executor.execute(e.executionId)).state).toBe('completed');
+   expect((await db.query('select payload from bill2_runs where id=$1',[e.runId])).rows[0].payload.moduleId).toBe(chosen.moduleId);
+  }
+  expect(requests).toHaveLength(2);expect(JSON.stringify(requests[1])).toContain('METHOD_CANARY');
+  await user.auth.signOut();expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
+  expect((await executor.execute(ids[1])).state).toBe('completed');expect(requests).toHaveLength(2);
+  const auto=await admission.prepare({...input,requestId:randomUUID(),selection:{kind:'auto',modelId}});ids.push(auto.executionId);
+  const frozen=(await db.query('select payload from runtime_executions where id=$1',[auto.executionId])).rows[0].payload;
+  nextMatch=frozen.matching.candidates.find((c:{moduleId:string})=>c.moduleId===b.moduleId).key;
+  expect((await executor.execute(auto.executionId)).state).toBe('completed');expect(requests).toHaveLength(4);
+  expect((await executor.execute(auto.executionId)).state).toBe('completed');expect(requests).toHaveLength(4);
+  for(let i=0;i<20;i++){
+   const e=await admission.prepare({...input,input:'Window turn '+i,requestId:randomUUID(),selection:{kind:'ordinary',modelId}});ids.push(e.executionId);
+   expect((await executor.execute(e.executionId)).state).toBe('completed');
+  }
+  const edges=(await db.query('select count(*)::int n from runtime_history_dependencies where execution_id=ANY($1::uuid[])',[ids])).rows[0].n;
+  expect(edges).toBeLessThanOrEqual(ids.length-1); // one prior execution in each two-item window, not N(N-1)/2.
+  const zero=runtimeAdmissionService(user,admin,{...policy,historyItems:0});
+  const independent=await zero.prepare({...input,input:'No old history',requestId:randomUUID(),selection:{kind:'ordinary',modelId}});
+  expect((await executor.execute(independent.executionId)).state).toBe('completed');
+  expect((await db.query('select count(*)::int n from runtime_history_dependencies where execution_id=$1',[independent.executionId])).rows[0].n).toBe(0);
+  expect(JSON.stringify(requests.at(-1))).not.toContain('Window answer');
+  await db.query('update modules set active=false where id=$1',[b.moduleId]);
+  for(const id of [ids[1],auto.executionId,ids.at(-1)])expect((await db.query('select runtime_history_available($1) allowed',[id])).rows[0].allowed).toBe(false);
+  expect((await db.query('select runtime_history_available($1) allowed',[independent.executionId])).rows[0].allowed).toBe(true);
+  await expect(admission.prepare({...input,requestId:randomUUID()})).rejects.toThrow();
+  expect((await db.query('select module_id,skill_id,source_project_id from artifact_projects where id=$1',[work])).rows[0]).toEqual({module_id:a.moduleId,skill_id:a.pack.id,source_project_id:parent});
+  expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:425,ledger:425});
+  expect(requests).toHaveLength(25);
+  expect((await db.query("select count(*)::int n from billing_history where user_id=$1 and operation_type='settle'",[actor])).rows[0].n).toBe(24);
+ }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+},120000);

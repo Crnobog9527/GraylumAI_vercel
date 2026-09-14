@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS public.runtime_executions (
  result jsonb,created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(actor_id,request_id),CHECK(octet_length(payload::text)<=262144)
 );
+ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS candidate_history bigint[] NOT NULL DEFAULT ARRAY[]::bigint[];
+ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS selected_history bigint[];
 ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS primary_result jsonb;
 ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS match_result jsonb;
 ALTER TABLE public.runtime_executions ADD COLUMN IF NOT EXISTS unavailable_reason text;
@@ -220,9 +222,13 @@ BEGIN
  b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
  INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,billing_run_id,history_revision)
  VALUES(p_actor_id,s.id,p_request_id,p_payload,(b->>'id')::uuid,s.revision) RETURNING * INTO e;
- INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
- SELECT DISTINCT e.id,h.execution_id FROM runtime_session_history h
- WHERE h.session_id=s.id AND h.revision<=s.revision AND runtime_history_available(h.execution_id);
+ -- Freeze only a bounded eligible item window, not every old execution.
+ -- The SDK capacity/tool selector freezes the actual suffix before dispatch.
+ UPDATE runtime_executions SET candidate_history=ARRAY(
+  SELECT revision FROM (SELECT h.revision,h.execution_id FROM runtime_session_history h
+   WHERE h.session_id=s.id AND h.revision<=s.revision AND NOT h.internal_control
+   ORDER BY h.revision DESC LIMIT CASE WHEN coalesce((p_payload->>'historyItems')::int,0)>0 THEN least(1000,(p_payload->>'historyItems')::int)+128 ELSE 0 END) bounded
+  WHERE runtime_history_available(execution_id) ORDER BY revision) WHERE id=e.id;
  UPDATE bill2_runs SET session_ref=s.id WHERE id=e.billing_run_id;
  UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
@@ -243,7 +249,7 @@ CREATE TRIGGER runtime_binding_guard BEFORE UPDATE OF session_ref ON bill2_runs 
 
 CREATE OR REPLACE FUNCTION public.runtime_session_items(p_actor_id uuid,p_session_id uuid,p_execution_id uuid,p_action text,p_items jsonb DEFAULT NULL,p_limit integer DEFAULT NULL,p_batch integer DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE s runtime_sessions;e runtime_executions;b runtime_session_batches;n integer;answer jsonb;
+DECLARE s runtime_sessions;e runtime_executions;b runtime_session_batches;n integer;answer jsonb;selected bigint[];
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR UPDATE;
@@ -255,8 +261,25 @@ BEGIN
   -- Freeze the SDK's initial history for replay; this execution's own batches
   -- are replayed by the host, never injected again as previous-turn history.
   SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM
-   (SELECT item,revision FROM runtime_session_history h WHERE session_id=s.id AND revision<=e.history_revision AND NOT internal_control AND EXISTS (SELECT 1 FROM runtime_history_dependencies d WHERE d.execution_id=e.id AND d.dependency_id=h.execution_id) AND runtime_history_available(h.execution_id) ORDER BY revision DESC LIMIT p_limit) x;
+   (SELECT jsonb_build_object('revision',revision,'item',item) item,revision FROM runtime_session_history h WHERE session_id=s.id AND revision=ANY(coalesce(e.selected_history,e.candidate_history)) AND NOT internal_control AND runtime_history_available(h.execution_id) ORDER BY revision DESC LIMIT p_limit) x;
   RETURN answer;
+ ELSIF p_action='freeze' THEN
+  IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items)>1000 THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+  SELECT coalesce(array_agg(v::bigint ORDER BY v::bigint),ARRAY[]::bigint[]) INTO selected FROM jsonb_array_elements_text(p_items) v;
+  IF e.selected_history IS NOT NULL THEN
+   IF e.selected_history IS DISTINCT FROM selected THEN RAISE EXCEPTION 'RUNTIME_HISTORY_CHANGED';END IF;
+   RETURN to_jsonb(selected);
+  END IF;
+  IF cardinality(selected)>greatest(0,least(1000,coalesce((e.payload->>'historyItems')::int,0)))
+   OR cardinality(selected)<>(SELECT count(DISTINCT v) FROM unnest(selected) v)
+   OR NOT selected<@e.candidate_history
+   OR cardinality(selected)<>(SELECT count(*) FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected) AND runtime_history_available(h.execution_id))
+   OR EXISTS(SELECT 1 FROM bill2_calls WHERE run_id=e.billing_run_id AND payload->>'phase'<>'skill_matching')
+  THEN RAISE EXCEPTION 'RUNTIME_HISTORY_SELECTION';END IF;
+  UPDATE runtime_executions SET selected_history=selected WHERE id=e.id;
+  INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
+   SELECT DISTINCT e.id,h.execution_id FROM runtime_session_history h WHERE h.session_id=s.id AND h.revision=ANY(selected);
+  RETURN to_jsonb(selected);
  ELSIF p_action='append' THEN
   IF EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (cancel_requested OR closed)) THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
   IF s.active_execution IS DISTINCT FROM e.id OR e.state IN ('completed','cancelled') THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
@@ -492,8 +515,10 @@ BEGIN
  rev:=(p->>'revisionId')::uuid;
  IF rev IS NOT NULL THEN
   m:=(p->>'moduleId')::uuid;k:=(p->>'skillId')::uuid;
-  IF p->'scope'->>'kind'='work_item' THEN SELECT module_id,skill_id INTO m,k FROM artifact_projects WHERE id=(p->'scope'->>'workItemId')::uuid;END IF;
-  PERFORM id FROM modules WHERE id=m ORDER BY id FOR SHARE;
+  -- Scope ownership/account/source checks above are independent of the
+  -- explicitly selected Skill; never replace its identity with the work owner.
+  PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND model_id=(p->>'modelId')::uuid FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
   PERFORM id FROM skills WHERE id=k FOR SHARE;
   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_REVISION_DENIED';END IF;

@@ -43,8 +43,14 @@ export const runtimeRouter=router({
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
   for(const m of modules.data){if(!m.skill_id)continue;try{
-   const list=await discoverSkills(databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id}));
-   for(const s of list.filter(s=>s.public.name==='runtime-demo'))skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:s.public.name});
+   const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id});
+   const descriptors=await source.list();
+   const list=await discoverSkills(source);
+   for(const s of list.filter(s=>s.public.name==='runtime-demo')){
+    const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
+    if(!descriptor||Object.keys(descriptor.tasks).length)continue;
+    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:s.public.name});
+   }
   }catch{/* unavailable packages are not advertised as runnable */}}
   return {models:models.data,skills};
  }),

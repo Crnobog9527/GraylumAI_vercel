@@ -77,7 +77,19 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported};
       const claim=await billing.claimCall(execution.runId,sequence,call);
       const dispatch=await billing.dispatchOnce(claim.id,request);
-      if(!dispatch.dispatched||dispatch.pendingReceipt)throw new Error('RUNTIME_RESPONSE_PENDING');
+      if(!dispatch.dispatched)throw new Error('RUNTIME_RESPONSE_PENDING');
+      if(dispatch.pendingReceipt){
+       // Keep the already obtained private observation while inspecting the
+       // original call. A lost commit response needs no duplicate write;
+       // a confirmed missing response permits bounded idempotent receipt replay.
+       const pending=dispatch.pendingReceipt;
+       for(let attempt=0;attempt<2;attempt++){
+        const prior=await rpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+        if(prior?.rawBody)break;
+        try{await billing.recordReceipt(pending.runId,pending.callId,pending.evidence);break;}
+        catch{if(attempt===1)throw new Error('RUNTIME_RECEIPT_STORAGE_UNAVAILABLE');}
+       }
+      }
       const saved=await rpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=saved?.rawBody;
      }
@@ -130,7 +142,7 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
      // the next SDK request bytes after recovery despite identical tool data.
      return JSON.stringify(committed.result);
     }}));
-   const body=await runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes:Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))))}),
+   const body=await runRuntime({...context,...effective,input:runtimeScopeInput(context.input,context.scopeMaterial),session,tools,selectHistory:async(history,incoming)=>{const selected=selectRuntimeHistory(history,incoming,{instructions:effective.instructions,inputBytes:primaryPolicy.inputLimit,historyItems:context.historyItems,toolBytes:Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description}))))});await session.freezeHistory(selected.length-incoming.length);return selected;},
     exchange:async(_sequence,request)=>{
      const envelope=await exchange(request,effective.role);
      // Local fixture carries the SDK response as private usage evidence. It is
