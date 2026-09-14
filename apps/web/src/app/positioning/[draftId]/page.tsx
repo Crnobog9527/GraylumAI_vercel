@@ -188,7 +188,11 @@ export default function PositioningDraft({
           requestId: admitted.executionId,
         });
       sessionStorage.removeItem(key);
-      setMentorInputs((old) => ({ ...old, [step.id]: "" }));
+      setMentorInputs((old) =>
+        old[step.id]?.trim() === fixed.input.trim()
+          ? { ...old, [step.id]: "" }
+          : old,
+      );
     });
   }
   async function save(step: Step) {

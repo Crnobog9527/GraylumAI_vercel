@@ -1558,12 +1558,32 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
         page.getByRole("textbox", { name: "给导师的回复" }).inputValue(),
       )
       .toBe("我想先明确我的受众");
+    let loseFirstReply = true;
+    await page.route("**/api/trpc/runtime.execute*", async (route) => {
+      if (!loseFirstReply) return route.continue();
+      loseFirstReply = false;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.abort();
+    });
+    await page
+      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .click();
+    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    await page
+      .getByRole("textbox", { name: "给导师的回复", exact: true })
+      .fill("恢复期间另写的未发送内容");
     await page
       .getByRole("button", { name: "请导师帮助这一步", exact: true })
       .click();
     await page
       .getByText("【分步模拟，仅验证流程】第 1 步示例：", { exact: false })
       .waitFor();
+    expect(
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .inputValue(),
+    ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
     const first = f.flow.steps[0];
