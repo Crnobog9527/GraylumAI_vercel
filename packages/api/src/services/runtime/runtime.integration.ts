@@ -14,6 +14,7 @@ import { artifactReuse } from '../artifacts/reuse';
 import { publishSkillPackage } from '../skills/publication';
 import { chromium } from '../../../../../apps/web/node_modules/@playwright/test';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
 const db=new pg.Client({connectionString});
@@ -806,7 +807,7 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
    await expect(rpc('runtime_execution',{p_actor_id:actor,p_execution_id:e.executionId,p_action:'complete',p_result:{kind:'usable_result',body:'Primary result',summary:'Late summary'}})).rejects.toThrow();
    await expect(rpc('runtime_session_items',{p_actor_id:actor,p_session_id:session.sessionId,p_execution_id:e.executionId,p_action:'append',p_batch:1,p_items:[{role:'assistant',content:'Late summary'}]})).rejects.toThrow();
    const view=await rpc('runtime_view',{p_actor_id:actor,p_session_id:session.sessionId});
-   expect(view.executions[0].primaryBody).toBe('Primary result');expect(view.executions[0].body).toBeNull();
+   expect(view.executions[0].primaryBody).toBe('Primary result');expect(view.executions[0].body).toBeNull();expect(view.executions[0].summary).toBeNull();
    expect(view.activeExecution).toBeNull();expect(requests).toHaveLength(1);
    expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n).toBe(2);
    expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:97,ledger:97});
@@ -817,10 +818,28 @@ it.each([{searchEnabled:false,stopAfterPrimary:false},{searchEnabled:true,stopAf
   }
   expect({injected,requests:requests.map(r=>r.model??r.tool)}).toEqual({injected:true,requests:searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']});
   const recovered=await runtimeExecutor(options).execute(e.executionId);
-  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result'},errors:[]});
+  expect({recovered,errors}).toEqual({recovered:{state:'completed',body:'Primary result',summary:'Organized primary result'},errors:[]});
   expect(requests.map(r=>r.model??r.tool)).toEqual(searchEnabled?['runtime-m','search','runtime-m','attached-summary']:['runtime-m','attached-summary']);expect(JSON.stringify(requests.at(-1)!.messages)).toContain('Primary result');
   const result=(await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result;
   expect(result.summary).toBe('Organized primary result');
+  const {createServerClient}=createRequire(new URL('../../../../../apps/web/package.json',import.meta.url))('@supabase/ssr');
+  const cookies=new Map<string,string>();
+  const browserClient=createServerClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[...cookies].map(([name,value])=>({name,value})),setAll:(items:Array<{name:string;value:string}>)=>items.forEach(c=>cookies.set(c.name,c.value))}});
+  async function viewHttp(){const response=await fetch(process.env.V3_LOCAL_APP!+'/api/trpc/runtime.view?input='+encodeURIComponent(JSON.stringify({sessionId:session.sessionId})),{headers:{Cookie:[...cookies].map(([k,v])=>k+'='+v).join('; ')}});expect(response.status).toBe(200);return (await response.json()).result.data;}
+  expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
+  const visible=await viewHttp();expect(visible.executions[0]).toMatchObject({body:'Primary result',summary:'Organized primary result',organizerComplete:true});
+  expect(await viewHttp()).toEqual(visible); // refresh uses the persisted, authorized projection.
+  await browserClient.auth.signOut();cookies.clear();expect((await browserClient.auth.signInWithPassword({email,password})).error).toBeNull();
+  expect(await viewHttp()).toEqual(visible);
+  expect(await runtimeExecutor(options).execute(e.executionId)).toEqual(recovered);
+  await db.query("update ai_models set is_active='false' where id=$1",[summaryModel]);
+  const hidden=await viewHttp();expect(hidden.executions[0]).toMatchObject({body:null,summary:null,contentAvailable:false});
+  expect(JSON.stringify(hidden)).not.toContain('Organized primary result');
+  await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+  expect((await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result).toEqual(result);
+  await db.query("update ai_models set is_active='true' where id=$1",[summaryModel]);
+  expect(await viewHttp()).toEqual(visible);
+
   expect((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[actor])).rows[0].n).toBe(1);
   expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(searchEnabled?4:2);
   expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[session.sessionId])).rows[0].n).toBe(searchEnabled?6:4);

@@ -378,6 +378,7 @@ BEGIN
   'body',CASE WHEN runtime_history_available(e.id) THEN e.result->>'body' ELSE NULL END,
   'primaryBody',CASE WHEN runtime_history_available(e.id) THEN e.primary_result->>'body' ELSE NULL END,
   'organizerComplete',e.result ? 'summary',
+  'summary',CASE WHEN runtime_history_available(e.id) THEN e.result->>'summary' ELSE NULL END,
   'needsTask',coalesce((SELECT (c->>'requiresTask')::boolean FROM jsonb_array_elements(e.payload->'matching'->'candidates') c WHERE c->>'key'=e.match_result->>'key'),false),
   'unavailableReason',e.unavailable_reason,
   'contentAvailable',runtime_history_available(e.id),'billing',bill2_public(b)) ORDER BY e.created_at,e.id),'[]') INTO items
@@ -532,11 +533,20 @@ BEGIN
  rev:=(p->>'revisionId')::uuid;
  IF rev IS NOT NULL THEN
   m:=(p->>'moduleId')::uuid;k:=(p->>'skillId')::uuid;
+  -- Preserve omitted-identity 0105 work requests only when no Runtime binding
+  -- exists. runtime_admit requires both selected IDs before calling BILL2;
+  -- no payload mode/version flag can opt a Runtime execution into this fallback.
+  IF (m IS NULL OR k IS NULL) AND p->'scope'->>'kind'='work_item'
+   AND NOT EXISTS(SELECT 1 FROM runtime_executions WHERE billing_run_id=p_run_id) THEN
+   SELECT module_id,skill_id INTO m,k FROM artifact_projects WHERE id=(p->'scope'->>'workItemId')::uuid;
+  END IF;
   -- Scope ownership/account/source checks above are independent of the
   -- explicitly selected Skill; never replace its identity with the work owner.
   IF EXISTS(SELECT 1 FROM runtime_executions WHERE billing_run_id=p_run_id AND actor_id=a) THEN
    PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND model_id=(p->>'modelId')::uuid FOR SHARE;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+  ELSE
+   PERFORM id FROM modules WHERE id=m FOR SHARE;
   END IF;
   PERFORM id FROM skills WHERE id=k FOR SHARE;
   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR UPDATE;

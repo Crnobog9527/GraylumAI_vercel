@@ -39,22 +39,22 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    return rpc<{executionId:string;runId:string;state:string;billing:unknown}>('runtime_financial_recovery',{...args,p_finish:true});
   },
   async execute(executionId:string){
-  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;context:unknown;billing:FrozenRun;result:{kind:string;evidenceRef:string;evidenceHash:string;body:string}|null};
+  type Execution={executionId:string;sessionId:string;runId:string;live:boolean;cancelRequested:boolean;state:string;context:unknown;billing:FrozenRun;result:{kind:string;evidenceRef:string;evidenceHash:string;body:string;summary?:string}|null};
   const args={p_execution_id:z.string().uuid().parse(executionId)};
   const execution=await rpc<Execution>('runtime_execution',{...args,p_action:'begin'});
   if(execution.state==='cancelled')return {state:'cancelled' as const};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
    const recovered=await rpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
-   return {state:recovered.state as 'completed'|'cancelled'|'cost_pending',...(execution.result?{body:execution.result.body}:{})};
+   return {state:recovered.state as 'completed'|'cancelled'|'cost_pending',...(execution.result?{body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{})}:{})};
   }
-  if(execution.state==='completed')return {body:execution.result?.body,state:'completed' as const};
+  if(execution.state==='completed')return {body:execution.result?.body,...(execution.result?.summary!==undefined?{summary:execution.result.summary}:{}),state:'completed' as const};
   if(execution.state==='cost_pending'&&execution.result){
    // Saved SDK output is immutable. Recover only the original billed calls;
    // this branch never starts the SDK or appends Session messages again.
    await billing.recoverRun(execution.runId);
    const recovered=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
-   return {body:execution.result.body,state:recovered.state};
+   return {body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{}),state:recovered.state};
   }
   const context=runtimeContext.parse(execution.context);
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
@@ -171,7 +171,7 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    }
    const result={kind:'usable_result',evidenceRef:executionId,evidenceHash:hash(JSON.stringify({body,summary})),body,...(summary?{summary}:{})};
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
-   return {body,state:completed.state};
+   return {body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch{
    // A replay has no authority to cancel or interrupt the still-live owner.
    // It may observe an unfinished response, but must leave shared state alone.
