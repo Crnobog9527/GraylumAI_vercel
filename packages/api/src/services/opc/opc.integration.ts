@@ -451,6 +451,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     headless: true,
   });
+  let releaseInformation = () => {};
   try {
     const context = await browser.newContext();
     await context.route("**/*", (route) => {
@@ -486,6 +487,25 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .click();
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
+    let firstInformation = true,
+      informationArrived!: () => void;
+    const heldInformation = new Promise<void>((resolve) => {
+      releaseInformation = resolve;
+    });
+    const informationReady = new Promise<void>((resolve) => {
+      informationArrived = resolve;
+    });
+    await page.route("**/api/trpc/opc.information*", async (route) => {
+      if (!firstInformation) {
+        await route.continue();
+        return;
+      }
+      firstInformation = false;
+      const response = await route.fetch();
+      informationArrived();
+      await heldInformation;
+      await route.fulfill({ response });
+    });
     for (const step of f.flow.steps) {
       const article = page.locator("article").filter({
         has: page.getByRole("textbox", { name: step.title + " 工作稿" }),
@@ -501,6 +521,20 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         .getByRole("combobox", { name: field.title + " 性质" })
         .selectOption("decision");
       await article.getByRole("button", { name: "保存信息状态" }).click();
+      if (step.id === f.flow.steps[0].id) {
+        await informationReady;
+        expect(
+          await article
+            .getByRole("textbox", { name: field.title, exact: true })
+            .isEnabled(),
+        ).toBe(false);
+        expect(
+          await article
+            .getByRole("textbox", { name: step.title + " 工作稿", exact: true })
+            .isEnabled(),
+        ).toBe(false);
+        releaseInformation();
+      }
       await expect
         .poll(
           () =>
@@ -639,6 +673,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     );
     expect(errors).toEqual([]);
   } finally {
+    releaseInformation();
     await browser.close();
   }
 }, 180000);

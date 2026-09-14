@@ -350,7 +350,7 @@ export default function PositioningDraft({
                           aria-label={field.title}
                           maxLength={400}
                           className="w-full rounded border bg-transparent p-2"
-                          disabled={snap.state !== "draft"}
+                          disabled={busy || snap.state !== "draft"}
                           value={value.value}
                           onChange={(e) =>
                             updateInfo({ value: e.target.value })
@@ -359,7 +359,7 @@ export default function PositioningDraft({
                         <select
                           aria-label={field.title + " 状态"}
                           value={value.status}
-                          disabled={snap.state !== "draft"}
+                          disabled={busy || snap.state !== "draft"}
                           onChange={(e) =>
                             updateInfo({
                               status: e.target.value as Information["status"],
@@ -381,7 +381,7 @@ export default function PositioningDraft({
                         <select
                           aria-label={field.title + " 性质"}
                           value={value.nature}
-                          disabled={snap.state !== "draft"}
+                          disabled={busy || snap.state !== "draft"}
                           onChange={(e) =>
                             updateInfo({
                               nature: e.target.value as Information["nature"],
@@ -431,7 +431,7 @@ export default function PositioningDraft({
               <Textarea
                 aria-label={step.title + " 工作稿"}
                 value={edits[step.id] ?? s.body ?? ""}
-                disabled={snap.state !== "draft"}
+                disabled={busy || snap.state !== "draft"}
                 onChange={(e) =>
                   setEdits((old) => ({ ...old, [step.id]: e.target.value }))
                 }
@@ -621,6 +621,7 @@ export default function PositioningDraft({
                     className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
                     aria-label={key + " " + index}
                     type={key === "day" ? "date" : "text"}
+                    disabled={busy}
                     value={item[key]}
                     onChange={(e) => update(index, key, e.target.value)}
                   />
@@ -629,12 +630,14 @@ export default function PositioningDraft({
               <label>
                 简报
                 <Textarea
+                  disabled={busy}
                   value={item.brief}
                   onChange={(e) => update(index, "brief", e.target.value)}
                 />
               </label>
               <Button
                 variant="outline"
+                disabled={busy}
                 onClick={() => {
                   setItems((old) => old.filter((_, n) => n !== index));
                   setDirtyPlan(true);
@@ -659,6 +662,7 @@ export default function PositioningDraft({
             </Button>
             <Button
               variant="outline"
+              disabled={busy}
               onClick={() => {
                 setItems((old) => [
                   ...old,
@@ -708,6 +712,7 @@ export default function PositioningDraft({
                 </p>
               ))}
               <Button
+                disabled={busy}
                 onClick={() => {
                   setItems(planCandidate);
                   setDirtyPlan(true);
@@ -716,7 +721,11 @@ export default function PositioningDraft({
               >
                 采用候选到计划工作稿
               </Button>
-              <Button variant="outline" onClick={() => setPlanCandidate(null)}>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setPlanCandidate(null)}
+              >
                 保留原计划
               </Button>
             </div>
