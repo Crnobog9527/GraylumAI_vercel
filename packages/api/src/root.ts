@@ -1,3 +1,4 @@
+import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
 import { agentSliceRouter } from './routers/agentSlice';
@@ -42,6 +43,7 @@ export const appRouter = router({
   workbench: workbenchRouter,
   agentSlice: agentSliceRouter,
   runtime: runtimeRouter,
+  opc: opcRouter,
 });
 
 /**

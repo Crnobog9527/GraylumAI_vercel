@@ -9,8 +9,10 @@ import { trpc } from '@/trpc/client';
 export default function RuntimePage(){
  const [sessionId,setSession]=useState(''),[input,setInput]=useState(''),[selection,setSelection]=useState(''),[error,setError]=useState('');
  useEffect(()=>{const id=new URL(location.href).searchParams.get('session');if(id)setSession(id);},[]);
- const choices=trpc.runtime.choices.useQuery();
+ const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{placeholderData:previous=>previous});
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
+ const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
+ const saveWork=trpc.opc.saveWorkResult.useMutation();
  const start=trpc.runtime.start.useMutation(),prepare=trpc.runtime.prepare.useMutation(),execute=trpc.runtime.execute.useMutation(),cancel=trpc.runtime.cancel.useMutation();
  const busy=start.isPending||prepare.isPending||execute.isPending;
  const ordinary=choices.data?.models[0]?.id??'';
@@ -47,16 +49,17 @@ export default function RuntimePage(){
     <div className="flex items-start gap-3"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--bg-primary)]"><Bot className="h-4 w-4"/></div><div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-sm border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3">
      <p className="whitespace-pre-wrap break-words">{e.contentAvailable?(e.body??e.primaryBody??'正在核实结果，请保留原任务。'):'来源已不可用，暂不展示此内容。'}</p>
      {e.primaryBody&&!e.organizerComplete&&<p role="status" className="mt-2 text-sm">主回复已保存，附属整理未完成。</p>}
+     {view.data?.scope?.kind==='work_item'&&e.state==='completed'&&<Button variant="outline" disabled={saveWork.isPending} onClick={async()=>{try{await saveWork.mutateAsync({executionId:e.executionId});await saved.refetch();}catch{setError('这条记录尚不能保存为 Skill 成果，请确认已完成 Skill 执行。');}}}>保存 Skill 成果</Button>}
      {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">已取消剩余执行，保留原记录。</p>}
      {e.state==='cost_pending'&&<p role="status" className="mt-2 text-sm">费用待核实；恢复只核对原调用。</p>}
      {e.needsTask&&<p className="mt-2 text-sm">当前入口暂不支持这个 Skill 的任务选择。可取消剩余执行后使用普通对话。</p>}
      {e.unavailableReason==='latest_unavailable'&&<p className="mt-2 text-sm">本次未取得搜索资料，无法提供已核实的最新信息。</p>}
      {e.state!=='completed'&&e.state!=='cancelled'&&<div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={()=>recover(e.executionId)}>恢复原任务</Button><Button size="sm" variant="ghost" disabled={cancel.isPending} onClick={()=>stop(e.executionId)}>取消剩余执行</Button></div>}
     </div></div>
-   </article>)}{busy&&<p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin"/>正在处理，请稍候…</p>}<div ref={end}/></section>
+   </article>)}{saved.data?.map((a:{artifactId:string;version:number;body:string|null})=><article key={a.artifactId} className="rounded-xl border border-[var(--border-primary)] p-4"><h2>已保存成果 · 第 {a.version} 版</h2><p className="whitespace-pre-wrap">{a.body??'来源不可用'}</p></article>)}{busy&&<p role="status" className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin"/>正在处理，请稍候…</p>}<div ref={end}/></section>
   </div>
   {sessionId&&<footer className="shrink-0 border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><div className="mx-auto max-w-3xl">
-   <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm"><label>对话方式 <select aria-label="对话方式" value={activeSelection} disabled={busy||Boolean(view.data?.activeExecution)} onChange={e=>setSelection(e.target.value)} className="ml-2 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-2"><option value={ordinary}>普通对话</option>{choices.data?.skills.map(s=><option key={s.moduleId} value={'skill:'+s.moduleId}>Skill 演示</option>)}</select></label><span className="text-xs text-[var(--text-tertiary)]" role="status">已保存独立工作记录，刷新后可继续。</span></div>
+   <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm"><label>对话方式 <select aria-label="对话方式" value={activeSelection} disabled={busy||Boolean(view.data?.activeExecution)} onChange={e=>setSelection(e.target.value)} className="ml-2 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-2"><option value={ordinary}>普通对话</option>{choices.data?.skills.map(s=><option key={s.moduleId} value={'skill:'+s.moduleId}>{view.data?.scope?.kind==='work_item'?s.name:'Skill 演示'}</option>)}</select></label><span className="text-xs text-[var(--text-tertiary)]" role="status">已保存独立工作记录，刷新后可继续。</span></div>
    <div className="flex items-end gap-2 rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 focus-within:border-[var(--color-primary)]">
     <Textarea aria-label="消息" placeholder="输入消息…" value={input} disabled={busy||Boolean(view.data?.activeExecution)} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy&&activeSelection&&input.trim()&&!view.data?.activeExecution)void send();}}} className="min-h-12 max-h-36 flex-1 resize-none border-0 bg-transparent px-2 focus-visible:ring-0" rows={2}/>
     <Button aria-label="发送" className="h-10 w-10 shrink-0 rounded-xl p-0" disabled={busy||!activeSelection||!input.trim()||Boolean(view.data?.activeExecution)} onClick={send}><Send className="h-4 w-4"/></Button>

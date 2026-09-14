@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from './loader';
 import { validatePublication } from './publication';
-import { validateWorkflow } from '../artifacts/workflow';
+import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { summaryModelOption } from '../artifacts/modelPolicy';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
@@ -13,7 +13,7 @@ export const moduleSkillInput = z.object({
   kind: z.enum(['document', 'social']),
   directoryName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64),
   files: z.array(z.object({ path: z.string().max(240), base64: z.string().max(2_800_000) }).strict()).min(1).max(64),
-  steps: z.array(z.object({ title: label, resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
+  steps: z.array(z.object({ title: label, information:z.array(informationSchema).max(24).optional(), resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
   resourcePlanReviewed: z.literal(true),
   module: z.object({
     title: z.string().trim().min(1).max(100), description: z.string().max(500).nullable(),
