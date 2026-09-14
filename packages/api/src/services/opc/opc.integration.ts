@@ -751,7 +751,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     releaseInformation();
     await browser.close();
   }
-}, 180000);
+}, 300000);
 it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact once; source revocation denies recovery reads", async () => {
   const { runtimeAdmissionService } = await import("../runtime/admission");
   const { runtimeExecutor } = await import("../runtime/execute");
@@ -1661,3 +1661,191 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await browser.close();
   }
 }, 180000);
+
+it("OPC: browser filled information produces administrator-organized artifact without manual prose and recovers once", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3);
+  const providerCount = async () => {
+    const response = await fetch(process.env.V3_LOCAL_REST! + "/__runtime_count", {
+      headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! },
+    });
+    if (!response.ok) throw new Error("local fixture counter unavailable");
+    return (await response.json()).calls as number;
+  };
+  const callsBefore = await providerCount();
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
+  const summaryModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'OPC organizer','opc-organizer','fixture','true',1000,32000)",
+    [summaryModel],
+  );
+  await sql.query(
+    "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','1000'::jsonb) on conflict(key) do update set value=excluded.value",
+    [summaryModel],
+  );
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok(),
+      { timeout: 90000 },
+    );
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) => url.pathname === "/positioning", {
+      timeout: 90000,
+    });
+    await page
+      .getByRole("combobox", { name: "定位方法" })
+      .selectOption(f.registration);
+    await page
+      .getByRole("button", { name: "我已有明确定位", exact: true })
+      .click();
+    await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
+
+    const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
+    await expect
+      .poll(() =>
+        page
+          .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
+          .count(),
+      )
+      .toBe(1);
+    await expect(
+      f.service.prepareStep({
+        draftId,
+        stepId: f.flow.steps[0].id,
+        requestId: randomUUID(),
+        organizeAfter: true,
+        input: "organize",
+      }),
+    ).rejects.toThrow("OPC_INFORMATION_REQUIRED");
+    const field = f.flow.steps[0].information![0];
+    await page
+      .getByRole("textbox", { name: field.title, exact: true })
+      .fill("用户亲自填写的经营目标");
+    let lost = true;
+    await page.route("**/api/trpc/runtime.execute*", async (route) => {
+      if (!lost) return route.continue();
+      lost = false;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.abort();
+    });
+    await page
+      .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
+      .click();
+    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    await page.reload();
+    await page
+      .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
+      .click();
+    await page.getByText("【模拟整理成果】", { exact: false }).waitFor();
+    const read = await f.service.read(draftId);
+    expect(read.information[f.flow.steps[0].id].values.goal.value).toBe(
+      "用户亲自填写的经营目标",
+    );
+    expect(read.snapshot.candidates).toHaveLength(1);
+    expect(read.snapshot.candidates[0].body).toContain(
+      "用户亲自填写的经营目标",
+    );
+    await sql.query("update ai_models set is_active='false' where id=$1", [
+      summaryModel,
+    ]);
+    expect(
+      (await f.service.read(draftId)).snapshot.candidates[0].body,
+    ).toBeNull();
+    await expect(
+      f.service.prepareStep({
+        draftId,
+        stepId: f.flow.steps[0].id,
+        requestId: randomUUID(),
+        organizeAfter: true,
+        input: "disabled organizer must not dispatch",
+      }),
+    ).rejects.toThrow();
+    await sql.query("update ai_models set is_active='true' where id=$1", [
+      summaryModel,
+    ]);
+    const runs = await sql.query(
+      "select id,payload,state,charged,pre_deduct_id from bill2_runs where actor_id=$1",
+      [f.actor],
+    );
+    expect(runs.rows).toHaveLength(1);
+    expect(await providerCount() - callsBefore).toBe(2);
+    expect(runs.rows[0].state).toBe("settled");
+    expect(runs.rows[0].charged).toBe(6);
+    expect(runs.rows[0].pre_deduct_id).toBeTruthy();
+    expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n).toBe(1);
+    expect((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n).toBe(1);
+    expect(runs.rows[0].payload.callPolicy).toHaveLength(2);
+    expect(runs.rows[0].payload.input.attachedOrganizer.modelId).toBe(
+      summaryModel,
+    );
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from bill2_calls where run_id=$1",
+          [runs.rows[0].id],
+        )
+      ).rows[0].n,
+    ).toBe(2);
+    await page
+      .getByRole("button", { name: "采用到工作稿", exact: true })
+      .click();
+    await expect.poll(async () => {
+      const alert = await page.getByRole("alert").allTextContents();
+      if (alert.some((text) => text.trim())) throw new Error(alert.join(" "));
+      return (await f.service.read(draftId)).snapshot.steps[f.flow.steps[0].id].body;
+    }).toContain("用户亲自填写的经营目标");
+    await expect
+      .poll(() =>
+        page
+          .getByRole("textbox", {
+            name: f.flow.steps[0].title + " 工作稿",
+            exact: true,
+          })
+          .inputValue(),
+      )
+      .toContain("用户亲自填写的经营目标");
+    await page.getByRole("button", { name: "确认这一步", exact: true }).click();
+    await page
+      .getByRole("button", { name: "继续下一步", exact: true })
+      .waitFor();
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);

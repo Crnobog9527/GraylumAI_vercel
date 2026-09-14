@@ -51,6 +51,7 @@ export const opcGenerate = z
     draftId: uuid,
     requestId: uuid,
     purpose: z.enum(["step", "plan"]).default("step"),
+    organizeAfter: z.boolean().default(false),
     stepId: z.string().min(1).max(64),
     input: z.string().trim().min(1).max(8000),
   })
@@ -152,6 +153,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient) {
         .every((f: { id: string }) =>
           ["confirmed", "deferred"].includes(state.values?.[f.id]?.status),
         );
+      if (v.organizeAfter && (v.purpose !== "step" || !complete))
+        throw new Error("OPC_INFORMATION_REQUIRED");
       const directive = complete
         ? "Required information is confirmed or explicitly deferred. Stop questioning and create the step artifact, stating deferred limitations. "
         : "Find the most valuable missing required information and ask only one concrete question. Do not produce a final artifact yet. ";
@@ -167,7 +170,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient) {
         costPerCall: "0.02",
         creditsPerUsd: "1000",
         multiplier: "1",
-        maxCalls: 1,
+        maxCalls: v.organizeAfter ? 2 : 1,
         maxOutputTokens: 1000,
         inputBytes: 64000,
         historyItems: 100,
@@ -183,6 +186,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient) {
         searchEnabled: false,
       }).prepare({
         sessionId: d.sessionId,
+        organizeAfter: v.organizeAfter,
         requestId: v.requestId,
         input: v.input,
         selection: {

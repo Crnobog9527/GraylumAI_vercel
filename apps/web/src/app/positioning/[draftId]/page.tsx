@@ -195,6 +195,103 @@ export default function PositioningDraft({
       );
     });
   }
+  async function organize(step: Step) {
+    const key = "opc-organize:" + draftId + ":" + step.id;
+    const prior = sessionStorage.getItem(key);
+    let fixed;
+    if (prior) {
+      try {
+        fixed = JSON.parse(prior);
+      } catch {
+        setError("原整理请求记录无法读取，已保留，请勿重新发起整理。");
+        return;
+      }
+    } else {
+      const schema = d.information[step.id].schema;
+      const values = Object.fromEntries(
+        schema.map((field: { id: string }) => {
+          const value: Information = infoEdits[step.id]?.[field.id] ??
+            d.information[step.id].values?.[field.id] ?? {
+              status: "unknown",
+              nature: "unknown",
+              value: "",
+            };
+          // This button explicitly confirms text supplied by the user. It never
+          // confirms a model inference or overrides an explicit uncertainty.
+          return [
+            field.id,
+            {
+              ...value,
+              status:
+                value.status === "unknown" && value.value.trim()
+                  ? "confirmed"
+                  : value.status,
+            },
+          ];
+        }),
+      );
+      const missing = schema.filter(
+        (field: { id: string; required: boolean }) =>
+          field.required &&
+          !["confirmed", "deferred"].includes(values[field.id].status),
+      );
+      if (missing.length) {
+        setError(
+          "请补充或明确延期这些必需信息：" +
+            missing.map((field: { title: string }) => field.title).join("、"),
+        );
+        return;
+      }
+      if (schema.some((field: { id: string }) =>
+        ["confirmed", "deferred"].includes(values[field.id].status) &&
+        !values[field.id].value.trim())) {
+        setError("已确认的信息需要填写内容；延期的信息请注明原因。");
+        return;
+      }
+      if (new TextEncoder().encode(JSON.stringify(values)).length > 12000) {
+        setError("本步信息过长，请精简后再整理。");
+        return;
+      }
+      fixed = {
+        information: {
+          draftId,
+          stepId: step.id,
+          requestId: crypto.randomUUID(),
+          expectedVersion: snap.steps[step.id].version,
+          values,
+        },
+        request: {
+          draftId,
+          stepId: step.id,
+          requestId: crypto.randomUUID(),
+          organizeAfter: true,
+          input:
+            "请基于本步已确认或明确延期的信息形成步骤成果，再由整理模型汇总；保留局限，不补造事实。",
+        },
+        editingSnapshot: JSON.stringify(infoEdits[step.id] ?? null),
+      };
+      sessionStorage.setItem(key, JSON.stringify(fixed));
+    }
+    await run(async () => {
+      await information.mutateAsync(fixed.information);
+      setInfoEdits((old) => {
+        if (JSON.stringify(old[step.id] ?? null) !== fixed.editingSnapshot)
+          return old;
+        const next = { ...old };
+        delete next[step.id];
+        return next;
+      });
+      const admitted = await prepareStep.mutateAsync(fixed.request);
+      await execute.mutateAsync({ executionId: admitted.executionId });
+      await saveResult.mutateAsync({
+        draftId,
+        stepId: step.id,
+        executionId: admitted.executionId,
+        requestId: admitted.executionId,
+      });
+      sessionStorage.removeItem(key);
+    });
+  }
   async function save(step: Step) {
     await run(async () => {
       await change.mutateAsync({
@@ -574,6 +671,18 @@ export default function PositioningDraft({
                     保存信息状态
                   </Button>
                 </div>
+                <p className="text-sm">
+                  下面的按钮会确认你填写的内容，并交给管理员配置的整理模型形成成果候选。明确标为待澄清或暂定的信息仍需核对；不会自动编造事实。
+                </p>
+                <Button
+                  disabled={busy || snap.state !== "draft"}
+                  onClick={() => organize(step)}
+                >
+                  确认所填信息并整理成果
+                </Button>
+                <p className="text-sm">
+                  已有成果可以在下方手动修改；无需重新抄写表单。
+                </p>
                 <Textarea
                   aria-label={step.title + " 工作稿"}
                   value={edits[step.id] ?? s.body ?? ""}
@@ -632,6 +741,7 @@ export default function PositioningDraft({
                         disabled={
                           busy ||
                           !c.body ||
+                          hasUnsavedInformation ||
                           snap.state !== "draft" ||
                           step.id in edits
                         }

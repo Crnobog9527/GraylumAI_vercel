@@ -375,13 +375,19 @@ try {
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
         try{
           const last=request.messages.filter(m=>m.role==='user').at(-1);
-          const input=JSON.parse(last.content);
+          const isOrganizer=request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Organize this operation result.'));
+          if(isOrganizer){content='【模拟整理成果】\n'+last.content;}
+          const input=isOrganizer ? {} : JSON.parse(last.content);
           const brief=input.scopeMaterial?.content?.brief ?? '';
           const stepId=brief.startsWith('step:') ? brief.slice(5) : null;
           const stepIndex=Object.keys(input.scopeMaterial?.content?.work?.steps ?? {}).indexOf(stepId);
           if(stepId){
             const questions=['你希望帮助哪类人解决什么问题？','你手里有哪些对标账号或内容例子？','你希望别人因为什么特点记住你？','你最容易持续制作哪一种内容？','你每周可以投入多少时间？','你希望先尝试哪一种变现方式？'];
             content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，或展开“核对本步信息与成果”。此示例不会理解或评估你的答案。';
+          }
+          if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){
+            const information=input.scopeMaterial.content.work.steps[stepId]?.information ?? {};
+            content='【模拟步骤素材】\n'+Object.entries(information).map(([key,value])=>key+'：'+value.value+'（'+value.status+'）').join('\n');
           }
           if(input.scopeMaterial?.content?.brief?.startsWith('plan:')){
             const accounts=JSON.parse(input.userRequest);
