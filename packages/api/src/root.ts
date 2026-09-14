@@ -1,3 +1,4 @@
+import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
 import { agentSliceRouter } from './routers/agentSlice';
 import { router } from './trpc';
@@ -40,6 +41,7 @@ export const appRouter = router({
   skills: skillsRouter,
   workbench: workbenchRouter,
   agentSlice: agentSliceRouter,
+  runtime: runtimeRouter,
 });
 
 /**
