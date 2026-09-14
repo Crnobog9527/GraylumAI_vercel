@@ -31,7 +31,9 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
 });
 export const runtimeRouter=router({
  choices:procedure.query(async({ctx})=>{
-  const models=await ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true').eq('provider','fixture');
+  // This loopback-only Owner entry advertises its two acceptance fixtures,
+  // not the unrelated fault/organizer fixtures left by the integration suite.
+  const models=await ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true').eq('provider','fixture').eq('name','Runtime local');
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
   const visible=await ctx.userScopedSupabase.from('modules').select('id,active').eq('active',true).limit(64);
   if(visible.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
@@ -42,7 +44,7 @@ export const runtimeRouter=router({
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
   for(const m of modules.data){if(!m.skill_id)continue;try{
    const list=await discoverSkills(databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id}));
-   for(const s of list)skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:s.public.name});
+   for(const s of list.filter(s=>s.public.name==='runtime-demo'))skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:s.public.name});
   }catch{/* unavailable packages are not advertised as runnable */}}
   return {models:models.data,skills};
  }),

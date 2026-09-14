@@ -487,11 +487,11 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
   expect((await choicesResponse).status()).toBe(200);
   await page.getByRole('button',{name:'新建定位草稿'}).click();await page.getByText('已保存独立工作记录，刷新后可继续。').waitFor();
-  const url=page.url();await page.getByLabel('模型或 Skill').selectOption(modelId);await page.getByLabel('消息',{exact:true}).fill('A persisted ordinary response');
+  const url=page.url();expect(await page.getByLabel('对话方式').inputValue()).toBe(modelId);expect(await page.getByLabel('对话方式').locator('option').allTextContents()).toEqual(['普通对话','Skill 演示']);await page.getByLabel('消息',{exact:true}).fill('A persisted ordinary response');
   await page.getByRole('button',{name:'发送',exact:true}).click();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});
   const getCount=async()=>{const r=await fetch(process.env.V3_LOCAL_REST!+'/__runtime_count',{headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});return (await r.json()).calls;};
   expect(await getCount()).toBe(1);await page.reload();await page.getByText('Saved runtime answer 1',{exact:true}).waitFor();
-  await page.getByLabel('模型或 Skill').selectOption('skill:'+moduleId);
+  await page.getByLabel('对话方式').selectOption('skill:'+moduleId);
   await page.getByLabel('消息',{exact:true}).fill('Use the published document method');
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await page.getByText('Saved runtime answer 2',{exact:true}).waitFor({timeout:60000});
