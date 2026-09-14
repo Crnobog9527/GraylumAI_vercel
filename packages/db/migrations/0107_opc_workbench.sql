@@ -10,6 +10,17 @@ CREATE TABLE IF NOT EXISTS opc_drafts (
  registration text NOT NULL REFERENCES artifact_workflows(id), mode text NOT NULL CHECK(mode IN ('mentor','manual')),
  UNIQUE(actor_id,request_id)
 );
+CREATE TABLE IF NOT EXISTS opc_turns (
+ token uuid PRIMARY KEY DEFAULT gen_random_uuid(),draft_id uuid NOT NULL REFERENCES opc_drafts(draft_id),
+ session_id uuid NOT NULL REFERENCES runtime_sessions(id),request_id uuid NOT NULL,
+ round_id uuid NOT NULL REFERENCES artifact_rounds(id),step_id text NOT NULL,purpose text NOT NULL CHECK(purpose IN ('step','plan')),
+ material_revision bigint NOT NULL,input_hash text NOT NULL,UNIQUE(session_id,request_id),
+ FOREIGN KEY(session_id,material_revision) REFERENCES runtime_scope_material(session_id,revision)
+);
+ALTER TABLE opc_turns ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON opc_turns FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS artifact_immutable ON opc_turns;
+CREATE TRIGGER artifact_immutable BEFORE UPDATE OR DELETE ON opc_turns FOR EACH ROW EXECUTE FUNCTION artifact_immutable();
 CREATE TABLE IF NOT EXISTS opc_plans (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),draft_id uuid NOT NULL REFERENCES opc_drafts(draft_id),
  version bigint NOT NULL CHECK(version>0),source_version_id uuid NOT NULL REFERENCES artifact_versions(id),
@@ -193,7 +204,7 @@ BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF p_draft_id IS NULL THEN
   RETURN jsonb_build_object('drafts',(SELECT coalesce(jsonb_agg(jsonb_build_object('draftId',draft_id,'sessionId',session_id,'projectId',project_id,'roundId',round_id,'mode',mode)),'[]') FROM opc_drafts WHERE actor_id=p_actor_id AND NOT EXISTS(SELECT 1 FROM bill2_drafts b WHERE b.id=opc_drafts.draft_id AND b.revoked)),
-   'accounts',(SELECT coalesce(jsonb_agg(jsonb_build_object('projectId',ac.project_id,'platform',platform,'account',account_key,'revision',revision,'sourceVersionId',ac.source_version_id,
+   'accounts',(SELECT coalesce(jsonb_agg(jsonb_build_object('projectId',ac.project_id,'platform',platform,'account',account_key,'revision',revision,'sourceVersionId',ac.source_version_id,'profile',CASE WHEN opc_source_allowed(p_actor_id,ac.source_version_id) THEN opc_profile(ac.source_version_id) ELSE NULL END,
     'items',(SELECT coalesce(jsonb_agg(jsonb_build_object('workItemId',i.work_item_id,'title',w.work_title,'day',i.day,'brief',CASE WHEN opc_source_allowed(p_actor_id,i.source_version_id) THEN i.brief ELSE NULL END,'sessionId',ss.id)),'[]') FROM opc_items i JOIN artifact_projects w ON w.id=i.work_item_id JOIN runtime_sessions ss ON ss.actor_id=p_actor_id AND ss.scope=jsonb_build_object('kind','work_item','projectId',ac.project_id,'workItemId',i.work_item_id) WHERE i.account_project_id=ac.project_id))),'[]') FROM opc_accounts ac WHERE actor_id=p_actor_id));
  END IF;
  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
@@ -229,7 +240,7 @@ BEGIN
  SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
- IF d.draft_id IS NULL OR e.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(e.id)
+ IF NOT EXISTS(SELECT 1 FROM opc_turns t WHERE t.session_id=d.session_id AND t.request_id=e.request_id AND t.token::text=e.payload->>'opcTurnToken' AND t.purpose='step' AND t.step_id=p_step_id AND t.round_id=r.id) OR d.draft_id IS NULL OR e.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(e.id)
   OR e.payload->>'revisionId' IS DISTINCT FROM r.revision_id::text OR e.payload->>'moduleId' IS DISTINCT FROM p.module_id::text
   OR e.payload->'scopeMaterial'->'content'->'work'->>'roundId' IS DISTINCT FROM r.id::text OR NOT(r.steps ? p_step_id) OR e.payload->'scopeMaterial'->'content'->>'brief' IS DISTINCT FROM 'step:'||p_step_id THEN RAISE EXCEPTION 'OPC_RESULT_DENIED';END IF;
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') st,jsonb_array_elements(st->'information') f WHERE st->>'id'=p_step_id AND (f->>'required')::boolean AND coalesce(e.payload->'scopeMaterial'->'content'->'work'->'steps'->p_step_id->'information'->(f->>'id')->>'status','unknown') NOT IN ('confirmed','deferred')) THEN RAISE EXCEPTION 'OPC_INFORMATION_REQUIRED';END IF;
@@ -262,9 +273,9 @@ BEGIN
  -- candidates and would recursively authorize the result currently being checked.
  RETURN jsonb_build_object('projectId',d.project_id,'roundId',r.id,'revisionId',r.revision_id,'packageHash',r.package_hash,'steps',r.steps,'source',NULL);
 END $$;
-CREATE OR REPLACE FUNCTION opc_step_material(p_actor_id uuid,p_draft_id uuid,p_request_id uuid,p_step_id text,p_purpose text DEFAULT 'step') RETURNS jsonb
+CREATE OR REPLACE FUNCTION opc_step_material(p_actor_id uuid,p_draft_id uuid,p_request_id uuid,p_step_id text,p_purpose text,p_input text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE d opc_drafts;m runtime_scope_material;n bigint;r artifact_rounds;
+DECLARE d opc_drafts;m runtime_scope_material;n bigint;r artifact_rounds;t opc_turns;result jsonb;spec jsonb;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO d FROM opc_drafts WHERE actor_id=p_actor_id AND draft_id=p_draft_id;
@@ -274,11 +285,16 @@ BEGIN
  IF p_purpose NOT IN ('step','plan') OR (p_purpose='step' AND r.state<>'draft') OR (p_purpose='plan' AND r.state<>'published') OR NOT(r.steps?p_step_id) THEN RAISE EXCEPTION 'OPC_STEP_DENIED';END IF;
  SELECT * INTO m FROM runtime_scope_material WHERE session_id=d.session_id AND request_id=p_request_id;
  IF FOUND THEN
-  IF m.content->>'brief' IS DISTINCT FROM p_purpose||':'||p_step_id OR m.revoked THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
-  RETURN jsonb_build_object('revision',m.revision);
+  SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=p_request_id;
+  IF t.token IS NULL OR t.purpose IS DISTINCT FROM p_purpose OR t.step_id IS DISTINCT FROM p_step_id OR t.input_hash IS DISTINCT FROM artifact_hash(to_jsonb(p_input)) OR m.content->>'brief' IS DISTINCT FROM p_purpose||':'||p_step_id OR m.revoked THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;
+  RETURN jsonb_build_object('revision',m.revision,'turnToken',t.token);
  END IF;
+ SELECT x INTO spec FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=p_step_id;
+ IF p_purpose='step' AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(spec->'dependsOn') dep WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN RAISE EXCEPTION 'OPC_DEPENDENCIES_UNCONFIRMED';END IF;
  SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=d.session_id;
- RETURN runtime_material(p_actor_id,d.session_id,'save',p_request_id,n,jsonb_build_object('brief',p_purpose||':'||p_step_id,'material','','roundId',r.id));
+ result:=runtime_material(p_actor_id,d.session_id,'save',p_request_id,n,jsonb_build_object('brief',p_purpose||':'||p_step_id,'material','','roundId',r.id));
+ INSERT INTO opc_turns(draft_id,session_id,request_id,round_id,step_id,purpose,material_revision,input_hash) VALUES(d.draft_id,d.session_id,p_request_id,r.id,p_step_id,p_purpose,(result->>'revision')::bigint,artifact_hash(to_jsonb(p_input))) RETURNING * INTO t;
+ RETURN result||jsonb_build_object('turnToken',t.token);
 END $$;
 DO $$ BEGIN
  IF to_regprocedure('artifact_save_candidate_before_opc(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text)') IS NULL THEN
@@ -297,8 +313,8 @@ BEGIN
  END IF;
  RETURN artifact_save_candidate_before_opc(p_actor_id,p_module_id,p_skill_id,p_project_id,p_round_id,p_request_id,p_step_id,p_candidate_id,p_expected_version,p_body);
 END $$;
-REVOKE ALL ON FUNCTION runtime_work_projection_before_opc(uuid,uuid,uuid),runtime_work_projection(uuid,uuid,uuid),opc_step_material(uuid,uuid,uuid,text,text),artifact_save_candidate_before_opc(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text),artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION opc_step_material(uuid,uuid,uuid,text,text),artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) TO service_role;
+REVOKE ALL ON FUNCTION runtime_work_projection_before_opc(uuid,uuid,uuid),runtime_work_projection(uuid,uuid,uuid),opc_step_material(uuid,uuid,uuid,text,text,text),artifact_save_candidate_before_opc(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text),artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION opc_step_material(uuid,uuid,uuid,text,text,text),artifact_save_candidate(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,integer,text) TO service_role;
 CREATE OR REPLACE FUNCTION opc_work_result(p_actor_id uuid,p_execution_id uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE e runtime_executions;s runtime_sessions;i opc_items;p artifact_projects;r artifact_rounds;v artifact_versions;ev uuid;flow jsonb;report jsonb;chosen jsonb;m uuid;k uuid;rev uuid;descriptor jsonb;
@@ -347,7 +363,7 @@ BEGIN
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id AND state='published';
  SELECT * INTO v FROM artifact_versions WHERE round_id=r.id;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=d.session_id AND actor_id=p_actor_id;
- IF e.payload->'scopeMaterial'->'content'->>'brief' NOT LIKE 'plan:%' OR v.id IS NULL OR e.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(e.id) OR NOT opc_source_allowed(p_actor_id,v.id)
+ IF NOT EXISTS(SELECT 1 FROM opc_turns t WHERE t.session_id=d.session_id AND t.request_id=e.request_id AND t.token::text=e.payload->>'opcTurnToken' AND t.purpose='plan' AND t.round_id=r.id) OR e.payload->'scopeMaterial'->'content'->>'brief' NOT LIKE 'plan:%' OR v.id IS NULL OR e.state IS DISTINCT FROM 'completed' OR NOT runtime_history_available(e.id) OR NOT opc_source_allowed(p_actor_id,v.id)
  OR e.payload->>'revisionId' IS DISTINCT FROM r.revision_id::text OR e.payload->'scopeMaterial'->'content'->'work'->>'roundId' IS DISTINCT FROM r.id::text THEN RAISE EXCEPTION 'OPC_RESULT_DENIED';END IF;
  RETURN jsonb_build_object('sourceVersionId',v.id,'body',e.result->>'body');
 END $$;
@@ -365,7 +381,7 @@ BEGIN
   IF d.draft_id IS NOT NULL THEN
    SELECT * INTO ap FROM artifact_projects WHERE id=d.project_id;
    SELECT * INTO r FROM artifact_rounds WHERE project_id=d.project_id AND id=(p->'input'->'scopeMaterial'->'content'->'work'->>'roundId')::uuid;
-   IF r.id IS NULL OR p->>'moduleId' IS DISTINCT FROM ap.module_id::text OR p->>'revisionId' IS DISTINCT FROM r.revision_id::text
+   IF NOT EXISTS(SELECT 1 FROM opc_turns t WHERE t.draft_id=d.draft_id AND t.token::text=p->'input'->>'opcTurnToken' AND t.request_id::text=p->'input'->'request'->>'requestId' AND t.material_revision::text=p->'input'->'scopeMaterial'->>'revision' AND t.round_id=r.id) OR r.id IS NULL OR p->>'moduleId' IS DISTINCT FROM ap.module_id::text OR p->>'revisionId' IS DISTINCT FROM r.revision_id::text
     OR p->'input'->>'role' IS DISTINCT FROM 'skill' OR p->'input'->'scopeMaterial'->'content'->'work'->>'roundId' IS DISTINCT FROM r.id::text
    THEN RAISE EXCEPTION 'OPC_POSITIONING_SCOPE_REQUIRED';END IF;
   END IF;
@@ -451,6 +467,7 @@ BEGIN
  IF d.draft_id IS NULL OR NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',p_draft_id)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  PERFORM 1 FROM artifact_projects WHERE id=d.project_id FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
+ PERFORM read_skill_package(p_actor_id,(SELECT module_id FROM artifact_projects WHERE id=d.project_id),(SELECT skill_id FROM artifact_projects WHERE id=d.project_id),r.revision_id,r.package_hash,NULL);
  payload:=jsonb_build_object('stepId',p_step_id,'expectedVersion',p_expected_version,'values',p_values);
  SELECT * INTO req FROM artifact_requests WHERE project_id=d.project_id AND request_id=p_request_id;
  IF FOUND THEN IF req.action<>'opc_information' OR req.payload<>payload THEN RAISE EXCEPTION 'OPC_REQUEST_CONFLICT';END IF;RETURN req.response;END IF;
@@ -471,7 +488,7 @@ DECLARE r artifact_rounds;v artifact_versions;result jsonb;
 BEGIN
  SELECT * INTO v FROM artifact_versions WHERE id=version_id;
  SELECT * INTO r FROM artifact_rounds WHERE id=v.round_id AND state='published';
- SELECT coalesce(jsonb_object_agg(f->>'profileKey',jsonb_build_object('value',r.steps->(s->>'id')->'information'->(f->>'id')->>'value','status',r.steps->(s->>'id')->'information'->(f->>'id')->>'status','nature',r.steps->(s->>'id')->'information'->(f->>'id')->>'nature','stepId',s->>'id','confirmationId',r.steps->(s->>'id')->>'confirmationId','updatedAt',r.steps->(s->>'id')->>'informationUpdatedAt','sourceVersionId',v.id,'validAtConfirmation',true)),'{}') INTO result FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f WHERE f?'profileKey';
+ SELECT coalesce(jsonb_object_agg(f->>'profileKey',jsonb_build_object('label',f->>'title','value',r.steps->(s->>'id')->'information'->(f->>'id')->>'value','status',r.steps->(s->>'id')->'information'->(f->>'id')->>'status','nature',r.steps->(s->>'id')->'information'->(f->>'id')->>'nature','stepId',s->>'id','confirmationId',r.steps->(s->>'id')->>'confirmationId','updatedAt',r.steps->(s->>'id')->>'informationUpdatedAt','sourceVersionId',v.id,'validAtConfirmation',true)),'{}') INTO result FROM jsonb_array_elements(r.workflow->'steps') s,jsonb_array_elements(s->'information') f WHERE f?'profileKey';
  IF octet_length(result::text)>20000 THEN RAISE EXCEPTION 'OPC_PROFILE_CAPACITY';END IF;
  RETURN result;
 END $$;
@@ -481,7 +498,7 @@ END $$;
 CREATE OR REPLACE FUNCTION artifact_transition(p_actor_id uuid,p_module_id uuid,p_skill_id uuid,p_action text,p_project_id uuid DEFAULT NULL,p_round_id uuid DEFAULT NULL,p_request_id uuid DEFAULT NULL,p_payload jsonb DEFAULT '{}') RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE r artifact_rounds;step jsonb;f jsonb;
 BEGIN
- IF p_action IN ('confirm','publish') AND EXISTS(SELECT 1 FROM opc_drafts WHERE project_id=p_project_id) THEN
+ IF p_action IN ('confirm','publish') AND EXISTS(SELECT 1 FROM opc_drafts WHERE project_id=p_project_id) AND NOT EXISTS(SELECT 1 FROM artifact_requests WHERE project_id=p_project_id AND request_id=p_request_id) THEN
   PERFORM 1 FROM artifact_projects WHERE id=p_project_id AND actor_id=p_actor_id FOR UPDATE;
   SELECT * INTO r FROM artifact_rounds WHERE id=p_round_id AND project_id=p_project_id;
   FOR step IN SELECT * FROM jsonb_array_elements(r.workflow->'steps') x WHERE p_action='publish' OR x->>'id'=p_payload->>'stepId' LOOP

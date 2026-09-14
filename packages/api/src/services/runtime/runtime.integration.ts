@@ -514,7 +514,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
  await db.query("update profiles set role='user' where id=$1",[actor]);
  const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});const context=await browser.newContext();
  await context.route('**/*',route=>{const url=new URL(route.request().url());return ['127.0.0.1','localhost'].includes(url.hostname)||['data:','blob:'].includes(url.protocol)?route.continue():route.abort();});
- const page=await context.newPage(),app=process.env.V3_LOCAL_APP!;
+ const page=await context.newPage(),app=process.env.V3_LOCAL_APP!;page.setDefaultNavigationTimeout(90000);
  try{
   // Disposable Next startup compiles both login and its first RPC route. This
   // is a bounded readiness observation, not another login or model request.

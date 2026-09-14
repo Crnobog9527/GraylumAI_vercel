@@ -22,7 +22,7 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
  ]),sources:z.array(z.object({projectId:uuid,roundId:uuid,sourceVersionId:uuid,hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).max(1).default([]),network:z.enum(['deny','allow','require_latest']).default('allow')}).strict();
 /** This explicit local deployment policy is server configuration, not request input.
  * Live protocol capability remains disabled until separately verified. */
-export type LocalRuntimePolicy={account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;expectedMaterialRevision?:number;skillResources?:readonly string[];searchEnabled?:boolean};
+export type LocalRuntimePolicy={account:string;costPerCall:string;creditsPerUsd:string;multiplier:string;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;expectedMaterialRevision?:number;opcTurnToken?:string;additionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean};
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
  z.number().int().min(1).max(32).parse(policy.maxCalls);
@@ -84,6 +84,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.
    const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(user,admin,policy):[];
+   if(policy.additionalInstructions)instructions+='\n'+z.string().max(8000).parse(policy.additionalInstructions);
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
    const primaryTurns=policy.maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length?2:1))throw new Error('RUNTIME_CALL_BUDGET');
@@ -93,7 +94,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
    selectRuntimeHistory([], [{role:'user',content:runtimeScopeInput(input.input,session.scopeMaterial)}],{instructions,inputBytes:inputLimit,historyItems:0,toolBytes:policy.searchEnabled?2048:0});
    const context={version:'runtime.v1',sdkVersion:'0.18.0',role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
-    ...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),
+    ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),...(session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems:policy.historyItems,network:input.network,
     tools:[...(searchAllowed?['search']:[]),...(input.sources.length?['read_source']:[])],maxToolCalls:(searchAllowed?1:0)+input.sources.length,
     request:input,...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};

@@ -91,6 +91,11 @@ export default function PositioningHome() {
             projectId: string;
             platform: string;
             account: string;
+            revision: number;
+            profile: Record<
+              string,
+              { label: string; value: string; status: string }
+            > | null;
             items: Array<{
               workItemId: string;
               sessionId: string;
@@ -105,6 +110,19 @@ export default function PositioningHome() {
               <h3>
                 {a.platform} · {a.account}
               </h3>
+              <details>
+                <summary>当前经营资料 · 第 {a.revision} 版</summary>
+                {a.profile ? (
+                  Object.entries(a.profile).map(([key, f]) => (
+                    <p key={key} className="mt-2">
+                      {f.label}：{f.value}
+                      {f.status === "deferred" ? "（已明确延期）" : ""}
+                    </p>
+                  ))
+                ) : (
+                  <p>来源暂不可用。</p>
+                )}
+              </details>
               {a.items.map((i) => (
                 <div className="mt-3" key={i.workItemId}>
                   <Link

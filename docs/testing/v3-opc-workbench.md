@@ -10,19 +10,27 @@ Plan confirmation freezes the selected version and concrete platform/account set
 
 Skill output without a workflow is stored as an immutable artifact result, not fabricated business steps. The dedicated result projection is used by the work-item screen. Result containers are excluded from legacy editable-project lists; their workflow edit/export resolver is deliberately denied. Generic read projects an empty step list. Existing standalone `/runtime` fixtures remain a legacy compatibility/demo entry, not an alternative OPC onboarding path.
 
-## Verification record (in progress)
+## Verification record
 
-- Local API unit suite: 82 files / 1,879 tests passed, process exit 0 before the final candidate review.
+- Initial local API unit suite: 82 files / 1,879 tests passed, exit 0. A later full run had 1,878 pass / one local MCP connection-timeout failure (200 ms fixture deadline), exit 1; its focused 32-test file subsequently passed, exit 0. This failed full run is not reported as a suite pass. The final full suite with bounded worker concurrency passed all 82 files / 1,879 tests, exit 0; no production timeout or acceptance assertion was relaxed.
 - BILL2 on 0105 + 0106 + 0107: 78 passed, 155 unrelated cases skipped, process exit 0. No real provider calls.
 - OPC integration iterations retain failures for source-check recursion, stale UI state, and non-workflow read compatibility. Their individual successful assertions are not suite passes.
-- Current OPC, Runtime, old-caller and upgrade/rollback acceptance, CI/Security and exact-candidate independent Codex review remain **IN_PROGRESS / NOT_RUN**, until replaced with actual final evidence.
+- Current OPC source digest `b5fdce3793cea7f0c7073527892053e4050b9b76ae345cfa227d84b8d4232f4a`: **16 passed / 155 unrelated skipped**, Vitest child exit 0, private-canary scan passed. The runner remains alive solely to serve the disposable Owner preview. This includes original-method publication, host-only purpose binding, required information/dependency checks, stale-candidate protection, bounded plan parsing, manual browser adoption with a lost response, source revocation and non-workflow result recovery.
+- Intermediate OPC snapshot: 13 passed / 155 unrelated skipped, exit 0. Upgrade/rollback against old app e17277e3a456d1ac394d9289842402eb91fd38e5: 2 passed, exit 0, new schema includes 0107. The current 16-case run supersedes this OPC snapshot; the old-app paths are unchanged by the later OPC-only binding checks.
+- Initial f5f2d28a8cea6ae373a0cd6712f8b9f3b634db95: ten required CI/Security checks passed and independent fresh Codex review found no actionable code issue, with explicit acceptance limits. Later content changes require fresh complete-candidate review; prior conclusions are not reused.
+- Runtime on the OPC schema: full run 45 pass / one browser failure, exit 1; the default selection defect was fixed. A second 45-pass run hit the cold-page navigation deadline; the affected browser case passed separately (1 pass / 200 unselected, exit 0) after an explicit bounded navigation wait.
+- Old ordinary chat and SDK callers on OPC schema: two full runs each had 55 pass / one failure, exit 1 (settlement observation timing, then summary-rate-limit UI timing). Both affected cases passed together afterward (2 pass / 153 unselected, exit 0). Unrelated successful assertions are reusable only where source and baseline remain applicable; neither failed full run is called PASS.
 - Integration runner logs include source tree digest, isolated DB/Auth/PostgREST identities and actual exit status. `--with-opc-schema` separates migration baseline from test selection. 0107 is applied twice within each relevant runner.
 
 ## Real evidence boundary
 
-The repository contains synthetic 3/4/6/8-step methods, not an exported complete original six-step private Skill. Real original-method productization, original-method information/profile mapping and Owner product acceptance are **NOT_RUN**. Do not substitute synthetic titles or new invented business questions for that method. The typed module publication input accepts reviewed information/profile configuration; publication to a real environment remains outside this task's authorization.
+The original private method was located in the adjacent project materials, `功能模块/6步定位分析skill/v1/social-media-commercial-strategist`. A local 1.1.0 productization artifact preserves all 12 reference/asset files byte-for-byte and narrowly replaces the legacy conversation protocol in SKILL.md and the bulk questionnaire instruction in references/01-intake.md. The source manifest, private publication input and 23-field reviewed profile mapping are retained outside Git in the task output folder `v3-workbench-original-method-v2`. The private publication input SHA-256 is `4e33b7521157ccddff42c159da644880cf3e3464fb39f72263d958c7f238ff9f`. Isolated publication/read-back verifies all 14 files, six configured steps, 23 provenance-bearing profile fields, original Session and model instructions, and account handoff. This is original-method wiring proof; real answer quality and Owner product acceptance remain NOT_RUN. Synthetic confirmations do not prove factual research or commercial advice quality. The typed module publication input accepts reviewed information/profile configuration; publication to a real environment remains outside this task's authorization.
 
 All new HTTP business routes require a loopback isolated database. Real research, models, remote 0105/0106/0107, payment, external reconciliation and production are **NOT_RUN**. Production/staging activation requires separately approved actions and prerequisite validation.
+
+## Owner business acceptance
+
+Use the retained disposable `/positioning` preview with the original method as its sole available method. Verify the six business outputs and required information, explicit deferral instead of invented facts, editable week-plan items and concrete account adoption; then enter a topic, save its Skill result, and find the same result after re-login. The fixed model response is labeled and only checks wiring. Do not evaluate it as real consulting quality. The existing ordinary-chat default is retained.
 
 ## Rollback
 

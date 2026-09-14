@@ -16,7 +16,7 @@ export const runtimeContext=z.object({
  tools:z.array(z.enum(['search','read_source'])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({modelId:z.string().uuid(),model:z.string().min(1),maxOutputTokens:z.number().int().positive()}).strict().optional(),
- matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
+ opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  request:z.unknown().optional(),moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
 }).strict();
 /** Trusted server host only. The public admission layer must construct this context.

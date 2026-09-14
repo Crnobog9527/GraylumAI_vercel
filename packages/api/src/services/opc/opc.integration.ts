@@ -35,6 +35,10 @@ async function fixture(n = 6) {
     "insert into profiles(id,email,role,credits) values($1,$2,'user',100)",
     [actor, email],
   );
+  await sql.query(
+    "insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",
+    [actor, randomUUID()],
+  );
   const user = createClient(
     process.env.V3_LOCAL_REST!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -73,6 +77,7 @@ async function fixture(n = 6) {
   );
   return {
     actor,
+    owner,
     user,
     pack,
     moduleId,
@@ -482,11 +487,9 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
     for (const step of f.flow.steps) {
-      const article = page
-        .locator("article")
-        .filter({
-          has: page.getByRole("textbox", { name: step.title + " 工作稿" }),
-        });
+      const article = page.locator("article").filter({
+        has: page.getByRole("textbox", { name: step.title + " 工作稿" }),
+      });
       const field = step.information![0];
       await article
         .getByRole("textbox", { name: field.title, exact: true })
@@ -539,6 +542,20 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .getByRole("textbox", { name: "简报", exact: true })
       .fill("A clear brief");
     await page.getByRole("button", { name: "保存计划版本" }).click();
+    let lostHandoff = false;
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      if (!lostHandoff) {
+        lostHandoff = true;
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        await route.abort();
+      } else await route.continue();
+    });
+    await page
+      .getByRole("button", { name: "确认账号与计划，创建选题" })
+      .click();
+    await page.getByRole("alert").waitFor();
+    await page.reload();
     await page
       .getByRole("button", { name: "确认账号与计划，创建选题" })
       .click();
@@ -696,7 +713,9 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       (await f.artifacts.read(saved.artifactId, saved.artifactId)).workflow
         .steps,
     ).toEqual([]);
-    await expect(f.artifacts.report(saved.artifactId,saved.artifactId)).rejects.toThrow('DENIED'); // Dedicated result projection above is readable; workflow mutation/export entry stays closed.
+    await expect(
+      f.artifacts.report(saved.artifactId, saved.artifactId),
+    ).rejects.toThrow("DENIED"); // Dedicated result projection above is readable; workflow mutation/export entry stays closed.
     await runtimeExecutor({
       database: admin,
       actor: async () => f.actor,
@@ -930,4 +949,361 @@ it("OPC: plan generation uses the original SDK session and returns a separate bo
       server.close((e) => (e ? reject(e) : resolve())),
     );
   }
+});
+it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
+  "OPC: original private six-step productization publishes intact resources and binds information/profile to the original Session",
+  async () => {
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const { createHash } = await import("node:crypto");
+    const { saveModuleSkill } = await import("../skills/modulePublication");
+    const input = JSON.parse(
+      readFileSync(process.env.V3_REAL_SKILL_INPUT!, "utf8"),
+    );
+    const f = await fixture(),
+      model = randomUUID();
+    input.moduleId = randomUUID();
+    input.skillId = randomUUID();
+    input.revisionId = randomUUID();
+    input.requestId = randomUUID();
+    input.expectedVersion = 0;
+    input.expectedUpdatedAt = null;
+    input.module.model_id = model;
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Runtime local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
+      [model],
+    );
+    await saveModuleSkill(admin, f.owner, input);
+    const stored = await admin.rpc("admin_read_skill_module", {
+      p_actor_id: f.owner,
+      p_module_id: input.moduleId,
+    });
+    expect(stored.error).toBeNull();
+    for (const file of input.files)
+      expect(
+        stored.data.files.find((v: any) => v.path === file.path).base64,
+      ).toBe(file.base64);
+    const registration = (
+      await sql.query(
+        "select id from artifact_workflows where module_id=$1 and revision_id=$2",
+        [input.moduleId, input.revisionId],
+      )
+    ).rows[0].id;
+    const d = await f.service.start({
+      requestId: randomUUID(),
+      registration,
+      mode: "manual",
+    });
+    const first = await f.service.read(d.draftId);
+    expect(first.snapshot.workflow.steps.map((s: any) => s.title)).toEqual(
+      input.steps.map((s: any) => s.title),
+    );
+    for (const [index, step] of first.snapshot.workflow.steps.entries()) {
+      const values = Object.fromEntries(
+        input.steps[index].information.map((field: any) => [
+          field.id,
+          {
+            status: "deferred",
+            nature: "unknown",
+            value: "隔离测试：真实研究与业务判断暂未验证，用户明确接受此局限。",
+          },
+        ]),
+      );
+      await f.service.information({
+        draftId: d.draftId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: 0,
+        values,
+      });
+      await f.artifacts.execute({
+        action: "save",
+        projectId: d.projectId,
+        roundId: d.roundId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: 1,
+        body:
+          "隔离验证草稿：" +
+          step.title +
+          "。不声明真实研究或商业建议质量通过。",
+        evidenceIds: [],
+      });
+      const current = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+        step.id
+      ];
+      await f.artifacts.execute({
+        action: "confirm",
+        projectId: d.projectId,
+        roundId: d.roundId,
+        stepId: step.id,
+        requestId: randomUUID(),
+        expectedVersion: current.version,
+        expectedReviewVersion: current.reviewVersion,
+      });
+    }
+    const snapshot = await f.artifacts.read(d.projectId, d.roundId);
+    await f.artifacts.execute({
+      action: "publish",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(snapshot.steps).map(([k, v]) => [
+          k,
+          { version: v.version, reviewVersion: v.reviewVersion },
+        ]),
+      ),
+    });
+    const report = (await f.service.read(d.draftId)).report;
+    const profile = (
+      await sql.query("select opc_profile($1) as p", [report.id])
+    ).rows[0].p;
+    expect(Object.keys(profile)).toHaveLength(23);
+    expect(
+      Object.values(profile).every(
+        (p: any) =>
+          p.sourceVersionId === report.id &&
+          p.confirmationId &&
+          p.status === "deferred",
+      ),
+    ).toBe(true);
+    const plan = await f.service.savePlan({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      expectedVersion: 0,
+      sourceVersionId: report.id,
+      body: [
+        {
+          id: randomUUID(),
+          platform: "x",
+          account: "original-local",
+          title: "原方法的隔离工作项",
+          brief: "仅验证原方法业务接线",
+          day: "2026-09-15",
+        },
+      ],
+    });
+    const [work] = await f.service.handoff({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      planId: plan.planId,
+      accounts: [
+        { platform: "x", account: "original-local", expectedRevision: null },
+      ],
+    });
+    const material = (
+      await sql.query(
+        "select content from runtime_scope_material where session_id=$1",
+        [work.sessionId],
+      )
+    ).rows[0].content;
+    expect(JSON.parse(material.material)).toEqual(profile);
+    expect(material.material).not.toContain("隔离验证草稿：");
+    await sql.query("update ai_models set provider='fixture' where id=$1", [
+      model,
+    ]);
+    const admitted = await f.service.prepareStep({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      purpose: "plan",
+      stepId: "step-6",
+      input: "x/original-local 2026-09-15",
+    });
+    const frozen = (
+      await sql.query("select payload from runtime_executions where id=$1", [
+        admitted.executionId,
+      ])
+    ).rows[0].payload;
+    expect(frozen.instructions).toContain("内容支柱");
+    expect(frozen.instructions).toContain("不编造数据");
+    expect(frozen.request.sessionId).toBe(d.sessionId);
+    const { runtimeExecutor } = await import("../runtime/execute");
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT!,
+    }).cancel(admitted.executionId);
+    writeFileSync(
+      process.env.V3_WORKBENCH_OUTPUT + "/opc-acceptance.json",
+      JSON.stringify({
+        url: process.env.V3_LOCAL_APP + "/positioning/" + d.draftId,
+        actor: f.actor,
+        credentials: { email: f.email, password: f.password },
+        sessionId: d.sessionId,
+        workSessionId: work.sessionId,
+        moduleId: input.moduleId,
+        modelId: model,
+        mode: "Original method, synthetic local responses only; no actual research or payment",
+      }),
+      { mode: 0o600 },
+    );
+    console.log(
+      "OPC_ORIGINAL_METHOD_PROOF",
+      JSON.stringify({
+        inputSha256: createHash("sha256")
+          .update(readFileSync(process.env.V3_REAL_SKILL_INPUT!))
+          .digest("hex"),
+        files: input.files.length,
+        steps: input.steps.length,
+        profileFields: Object.keys(profile).length,
+        realProviderCalls: 0,
+        methodQuality: "NOT_RUN",
+      }),
+    );
+  },
+);
+it("OPC: browser-shaped Runtime material cannot impersonate a host-bound step or plan turn", async () => {
+  const { runtimeAdmissionService } = await import("../runtime/admission");
+  const f = await fixture(3),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','forged-opc','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    model,
+    f.moduleId,
+  ]);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const generic = runtimeAdmissionService(f.user, admin, {
+    account: "local",
+    costPerCall: "0.02",
+    creditsPerUsd: "1000",
+    multiplier: "1",
+    maxCalls: 1,
+    maxOutputTokens: 1000,
+    inputBytes: 32000,
+    historyItems: 0,
+    searchEnabled: false,
+  });
+  await generic.saveMaterial({
+    sessionId: d.sessionId,
+    requestId: randomUUID(),
+    expectedRevision: 0,
+    brief: "plan:step-0",
+    material: "pretend host request",
+    roundId: d.roundId,
+  });
+  await expect(
+    generic.prepare({
+      sessionId: d.sessionId,
+      requestId: randomUUID(),
+      input: "Pretend this was a plan",
+      selection: {
+        kind: "skill",
+        moduleId: f.moduleId,
+        revisionId: f.pack.revisionId,
+      },
+      network: "deny",
+      sources: [],
+    }),
+  ).rejects.toThrow();
+  expect(
+    (
+      await sql.query(
+        "select count(*)::int n from bill2_runs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows[0].n,
+  ).toBe(0);
+  const legitimate = await f.service.prepareStep({
+    draftId: d.draftId,
+    requestId: randomUUID(),
+    stepId: "step-0",
+    input: "Ask the missing question",
+  });
+  const token = (
+    await sql.query("select payload from runtime_executions where id=$1", [
+      legitimate.executionId,
+    ])
+  ).rows[0].payload.opcTurnToken;
+  expect(token).toBeTruthy();
+  const view = await admin.rpc("runtime_view", {
+    p_actor_id: f.actor,
+    p_session_id: d.sessionId,
+  });
+  expect(view.error).toBeNull();
+  expect(JSON.stringify(view.data)).not.toContain(token);
+  expect(JSON.stringify(await f.service.read(d.draftId))).not.toContain(token);
+});
+
+it("OPC: configured dependencies deny premature generation and old confirmations replay after information changes", async () => {
+  const f = await fixture(3);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  await expect(
+    f.service.prepareStep({
+      draftId: d.draftId,
+      requestId: randomUUID(),
+      stepId: "step-1",
+      purpose: "step",
+      input: "premature",
+    }),
+  ).rejects.toThrow("OPC_DEPENDENCIES_UNCONFIRMED");
+  expect(
+    (
+      await sql.query(
+        "select count(*)::int n from bill2_runs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows[0].n,
+  ).toBe(0);
+  const values = {
+    goal: {
+      status: "confirmed",
+      nature: "fact",
+      value: "Local verified input",
+    },
+  };
+  await f.service.information({
+    draftId: d.draftId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    values,
+  });
+  await f.artifacts.execute({
+    action: "save",
+    projectId: d.projectId,
+    roundId: d.roundId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: 1,
+    body: "Local working result",
+    evidenceIds: [],
+  });
+  const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+    "step-0"
+  ];
+  const confirmation = {
+    action: "confirm" as const,
+    projectId: d.projectId,
+    roundId: d.roundId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: state.version,
+    expectedReviewVersion: state.reviewVersion,
+  };
+  const saved = await f.artifacts.execute(confirmation);
+  const fresh = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+    "step-0"
+  ];
+  await f.service.information({
+    draftId: d.draftId,
+    stepId: "step-0",
+    requestId: randomUUID(),
+    expectedVersion: fresh.version,
+    values: { goal: { status: "unknown", nature: "unknown", value: "" } },
+  });
+  expect(await f.artifacts.execute(confirmation)).toEqual(saved);
+  await expect(
+    f.artifacts.execute({ ...confirmation, requestId: randomUUID() }),
+  ).rejects.toThrow();
 });

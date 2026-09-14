@@ -240,8 +240,19 @@ export default function PositioningDraft({
         ? JSON.parse(previous)
         : { ...payload, requestId: crypto.randomUUID() };
       if (
-        JSON.stringify({ ...fixed, requestId: undefined }) !==
-        JSON.stringify({ ...payload, requestId: undefined })
+        fixed.draftId !== payload.draftId ||
+        fixed.planId !== payload.planId ||
+        JSON.stringify(
+          fixed.accounts
+            .map((a: { platform: string; account: string }) => [
+              a.platform,
+              a.account,
+            ])
+            .sort(),
+        ) !==
+          JSON.stringify(
+            payload.accounts.map((a) => [a.platform, a.account]).sort(),
+          )
       )
         throw new Error("confirmation pending");
       sessionStorage.setItem(key, JSON.stringify(fixed));
@@ -497,11 +508,13 @@ export default function PositioningDraft({
         {history.data?.executions.map(
           (e: {
             executionId: string;
+            input?: string | null;
             body: string | null;
             primaryBody: string | null;
             state: string;
           }) => (
             <article key={e.executionId} className="rounded-xl border p-3">
+              <p className="whitespace-pre-wrap">{e.input}</p>
               <p className="whitespace-pre-wrap">
                 {e.body ?? e.primaryBody ?? "等待原任务恢复"}
               </p>
@@ -649,6 +662,7 @@ export default function PositioningDraft({
                     sourceVersionId: d.report.id,
                     body: items,
                   });
+                  await read.refetch();
                   setDirtyPlan(false);
                 })
               }

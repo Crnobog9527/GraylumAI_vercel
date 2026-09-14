@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!['--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!['--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
 const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
@@ -32,7 +32,9 @@ const runtimeMode=args.includes('--runtime-only');
 const runtimeSchema=opcSchema||runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
-const testPattern=opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
+if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
+const testPattern=casePattern??(opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -549,7 +551,7 @@ try {
   const env = {
     ...cleanEnv,
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
-    ...(args.includes('--real-skill-only') ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
+    ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
@@ -652,7 +654,13 @@ try {
   );
   console.log("Private canary absent from application logs PASS");
   if(serve){
-    if(runtimeMode){
+    if(opcMode){
+      const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'opc-acceptance.json'),'utf8'));
+      if(![saved.moduleId,saved.modelId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid OPC preview identity');
+      // Curate only this disposable preview after assertions; retain every ledger row and receipt.
+      sql(`UPDATE modules SET active=false WHERE id<>'${saved.moduleId}'; UPDATE ai_models SET is_active=false WHERE id<>'${saved.modelId}';`);
+      console.log('LOCAL_OPC_ACCEPTANCE_READY '+saved.url);
+    }else if(runtimeMode){
       const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'runtime-acceptance.json'),'utf8'));
       if(![saved.actor,saved.sessionId,saved.modelId,saved.moduleId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid Runtime preview identity');
       // Preserve the verified opening grant and ledger; do not top up/reset the demo.

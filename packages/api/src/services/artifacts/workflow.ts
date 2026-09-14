@@ -6,6 +6,7 @@ const label=z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const informationSchema=z.object({id,title:label,required:z.boolean(),profileKey:id.optional()}).strict();
 export const workflowSchema=z.object({
  id, version:z.number().int().min(1).max(1000000), kind:z.enum(['social','document']),
+ planResources:z.array(z.string()).min(1).max(64).optional(),
  steps:z.array(z.object({id,title:label,dependsOn:z.array(id).max(32),resources:z.array(z.string()).min(1).max(64),
   minLength:z.number().int().min(1).max(20000),maxLength:z.number().int().min(1).max(20000),
   information:z.array(informationSchema).max(24).optional(),
@@ -19,6 +20,7 @@ export function validateWorkflow(input:unknown,descriptor:PackageDescriptor):Wor
  if(!parsed.success)throw new Error('ARTIFACT_INVALID_WORKFLOW');
  const flow=parsed.data,pkg=validateDescriptor(descriptor),ids=new Set(flow.steps.map(s=>s.id));
  if(ids.size!==flow.steps.length)throw new Error('ARTIFACT_INVALID_WORKFLOW');
+ if(flow.planResources?.some(path=>!pkg.files.some(f=>f.path===path)))throw new Error('ARTIFACT_INVALID_WORKFLOW');
  const visited=new Set<string>(),visiting=new Set<string>();
  function walk(key:string){
   if(visiting.has(key))throw new Error('ARTIFACT_INVALID_WORKFLOW');
