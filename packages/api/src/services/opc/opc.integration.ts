@@ -636,6 +636,8 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         { timeout: 15000 },
       )
       .toBe("Updated confirmed decision before publication");
+    expect(await lastArticle.getByRole("combobox", {name:lastStep.information![0].title + " 状态",exact:true}).inputValue()).toBe("unknown");
+    await lastArticle.getByRole("combobox", {name:lastStep.information![0].title + " 状态",exact:true}).selectOption("confirmed");
     await lastArticle
       .getByRole("button", { name: "保存信息状态", exact: true })
       .click();
@@ -1416,6 +1418,7 @@ it("OPC: configured dependencies deny premature generation and old confirmations
       input: "premature",
     }),
   ).rejects.toThrow("OPC_DEPENDENCIES_UNCONFIRMED");
+  await expect(f.service.prepareStep({draftId:d.draftId,requestId:randomUUID(),stepId:"step-1",purpose:"mentor",input:"premature discussion"})).rejects.toThrow("OPC_DEPENDENCIES_UNCONFIRMED");
   expect(
     (
       await sql.query(
@@ -1533,17 +1536,19 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
     await expect
       .poll(() =>
-        page.getByRole("textbox", { name: "给导师的回复" }).isVisible(),
+        page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true }).isVisible(),
       )
       .toBe(true);
-    expect(
-      await page
-        .getByRole("textbox", {
-          name: f.flow.steps[0].title + " 工作稿",
-          exact: true,
-        })
-        .isVisible(),
-    ).toBe(false);
+    expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(false);
+    await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
+    await page.getByRole("button",{name:"请导师帮助这一步",exact:true}).click();
+    expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
+    const order = await page.evaluate(() => {
+      const form = document.querySelector('[aria-label="本步填写信息"]')!;
+      const chat = document.querySelector('[aria-label="本步导师聊天"]')!;
+      return Boolean(form.compareDocumentPosition(chat) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(order).toBe(true);
     const nextButton = page
       .getByRole("navigation", { name: "定位步骤" })
       .getByRole("button")
@@ -1567,14 +1572,14 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
       await route.abort();
     });
     await page
-      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .getByRole("button", { name: "发送", exact: true })
       .click();
     await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
     await page
       .getByRole("textbox", { name: "给导师的回复", exact: true })
       .fill("恢复期间另写的未发送内容");
     await page
-      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .getByRole("button", { name: "发送", exact: true })
       .click();
     await page
       .getByText("【分步模拟，仅验证流程】第 1 步示例：", { exact: false })
@@ -1586,6 +1591,29 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
+    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"unknown"});
+    for (const reply of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]) {
+      if (reply === "我担心自己没有可以教的经验") await page.getByRole("combobox", {name:f.flow.steps[0].information![0].title + " 状态",exact:true}).selectOption("confirmed");
+      await page.getByRole("textbox",{name:"给导师的回复",exact:true}).fill(reply);
+      await page.getByRole("button",{name:"发送",exact:true}).click();
+      await expect.poll(() => page.getByRole("textbox",{name:"给导师的回复",exact:true}).inputValue(), {timeout:15000}).toBe("");
+    }
+    const count = await fetch(process.env.V3_LOCAL_REST!+"/__runtime_count", {headers:{"x-local-control":process.env.V3_LOCAL_CONTROL!}});
+    const observed = await count.json();
+    expect(observed.userRequests).toEqual(expect.arrayContaining(["我想先明确我的受众", "我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]));
+    const afterChat = await f.service.read(draftId);
+    const frozenChat = await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]);
+    expect(frozenChat.rows[0].payload.instructions).toContain("Confirmed fields do not end the conversation");
+    expect(frozenChat.rows[0].payload.scopeMaterial.content.brief).toBe("mentor:step-0");
+    await expect(f.service.saveResult({draftId,stepId:"step-0",executionId:afterChat.turns[0].executionId,requestId:randomUUID()})).rejects.toThrow("OPC_RESULT_DENIED");
+    expect(afterChat.information["step-0"].values.goal.status).toBe("confirmed");
+    expect(afterChat.snapshot.candidates).toHaveLength(0);
+    expect(afterChat.snapshot.steps["step-0"].valid).toBe(false);
+    expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>t.stepId==="step-0"&&t.kind==="mentor")).toHaveLength(3);
+    const box = await page.getByRole("log",{name:"本步导师消息"}).boundingBox();
+    expect(box!.height).toBeLessThanOrEqual(400);
+    await page.reload();
+    await expect.poll(()=>page.getByRole("log",{name:"本步导师消息"}).textContent()).toContain("我想帮助刚接触短视频的人");
     const first = f.flow.steps[0];
     await f.artifacts.execute({
       action: "save",
@@ -1595,7 +1623,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
       stepId: first.id,
       body: "User confirmed first step",
       evidenceIds: [],
-      expectedVersion: 0,
+      expectedVersion: afterChat.snapshot.steps[first.id].version,
     });
     let state = (await f.artifacts.read(d.projectId, d.roundId)).steps[
       first.id
@@ -1626,11 +1654,12 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page.reload();
     await expect.poll(() => nextButton.isEnabled()).toBe(true);
     await nextButton.click();
+    await page.getByRole("button",{name:"请导师帮助这一步",exact:true}).click();
     await page
       .getByRole("textbox", { name: "给导师的回复" })
       .fill("我有两个参考账号");
     await page
-      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .getByRole("button", { name: "发送", exact: true })
       .click();
     await page
       .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
@@ -1639,7 +1668,15 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page
       .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
       .waitFor();
+    await context.clearCookies();
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname));
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", {name:"登录",exact:true}).last().click();
+    await page.waitForURL(draftUrl,{timeout:90000});
+    await page.getByText("【分步模拟，仅验证流程】第 2 步示例：",{exact:false}).waitFor();
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
+    expect(await page.getByRole("log",{name:"本步导师消息"}).textContent()).not.toContain("我想帮助刚接触短视频的人");
     expect(
       (
         await sql.query(
@@ -1647,7 +1684,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
           [f.actor],
         )
       ).rows[0].n,
-    ).toBe(2);
+    ).toBe(4);
     expect(
       await page
         .getByRole("textbox", {
@@ -1660,7 +1697,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
   } finally {
     await browser.close();
   }
-}, 180000);
+}, 300000);
 
 it("OPC: browser filled information produces administrator-organized artifact without manual prose and recovers once", async () => {
   const { chromium } =

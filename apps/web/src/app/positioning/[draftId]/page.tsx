@@ -1,6 +1,6 @@
 "use client";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,8 @@ export default function PositioningDraft({
     { enabled: Boolean(read.data?.sessionId) },
   );
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const [mentorOpen, setMentorOpen] = useState<Record<string, boolean>>({});
+  const chatScroll = useRef<HTMLDivElement>(null);
   const [mentorInputs, setMentorInputs] = useState<Record<string, string>>({});
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
@@ -79,6 +81,7 @@ export default function PositioningDraft({
       typeof local.activeStep === "string" ? local.activeStep : null,
     );
     setMentorInputs(local.mentorInputs ?? {});
+    setMentorOpen(local.mentorOpen ?? {});
     setEdits(local.edits ?? {});
     setInfoEdits(local.infoEdits ?? {});
     setPlanCandidate(
@@ -100,6 +103,7 @@ export default function PositioningDraft({
         planCandidate,
         activeStep,
         mentorInputs,
+        mentorOpen,
       }),
     );
     const warn = (e: BeforeUnloadEvent) => {
@@ -122,6 +126,7 @@ export default function PositioningDraft({
     planCandidate,
     activeStep,
     mentorInputs,
+    mentorOpen,
   ]);
   useEffect(() => {
     if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
@@ -134,6 +139,9 @@ export default function PositioningDraft({
       snap.workflow.steps[0];
     setActiveStep(initial.id);
   }, [draftId, hydratedDraft, activeStep, snap]);
+  useEffect(() => {
+    if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
+  }, [activeStep, mentorOpen, history.data]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -152,47 +160,33 @@ export default function PositioningDraft({
   }
   async function ask(step: Step) {
     await run(async () => {
-      if (hasUnsavedInformation) throw new Error("save information first");
       const key = "opc-step:" + draftId + ":" + step.id;
       const prior = sessionStorage.getItem(key);
-      const fixed = prior
-        ? JSON.parse(prior)
-        : {
-            draftId,
-            stepId: step.id,
-            requestId: crypto.randomUUID(),
-            input:
-              mentorInputs[step.id]?.trim() ||
-              (edits[step.id] ??
-                snap.steps[step.id].body ??
-                "请根据当前步骤指导我补充必要信息。"),
-          };
-      if (!fixed.input.trim())
-        fixed.input = "请根据当前步骤指导我补充必要信息。";
+      const fixed = prior ? JSON.parse(prior) : {
+        request: {
+          draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
+          input: mentorInputs[step.id]?.trim() || "我还不确定这一步该怎么填写，请和我一起梳理。",
+        },
+        information: infoEdits[step.id] ? {
+          draftId, stepId: step.id, requestId: crypto.randomUUID(),
+          expectedVersion: snap.steps[step.id].version, values: infoEdits[step.id],
+        } : null,
+        editingSnapshot: JSON.stringify(infoEdits[step.id] ?? null),
+      };
       sessionStorage.setItem(key, JSON.stringify(fixed));
-      const admitted = await prepareStep.mutateAsync(fixed);
-      await execute.mutateAsync({ executionId: admitted.executionId });
-      if (
-        d.information[step.id].schema
-          .filter((f: { required: boolean }) => f.required)
-          .every((f: { id: string }) =>
-            ["confirmed", "deferred"].includes(
-              d.information[step.id].values?.[f.id]?.status,
-            ),
-          )
-      )
-        await saveResult.mutateAsync({
-          draftId,
-          executionId: admitted.executionId,
-          stepId: step.id,
-          requestId: admitted.executionId,
+      if (fixed.information) {
+        await information.mutateAsync(fixed.information);
+        setInfoEdits(old => {
+          if (JSON.stringify(old[step.id] ?? null) !== fixed.editingSnapshot) return old;
+          const next = {...old}; delete next[step.id]; return next;
         });
+      }
+      // Preserve pending requests from the previous UI without changing identity.
+      const request = fixed.request ?? fixed;
+      const admitted = await prepareStep.mutateAsync(request);
+      await execute.mutateAsync({ executionId: admitted.executionId });
       sessionStorage.removeItem(key);
-      setMentorInputs((old) =>
-        old[step.id]?.trim() === fixed.input.trim()
-          ? { ...old, [step.id]: "" }
-          : old,
-      );
+      setMentorInputs(old => old[step.id]?.trim() === request.input.trim() ? {...old, [step.id]: ""} : old);
     });
   }
   async function organize(step: Step) {
@@ -421,26 +415,22 @@ export default function PositioningDraft({
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 text-[var(--text-primary)]">
+    <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">定位与第一周计划</h1>
-          <p>
-            本地隔离体验 · AI 使用固定模拟回复，仅验证流程；真实研究尚未开放。
-          </p>
+          <p className="text-xs text-[var(--text-secondary)]">隔离模拟 · 未调用真实模型或研究服务</p>
         </div>
         <Link href="/positioning" className="underline">
           账号与定位列表
         </Link>
       </header>
       <div className="flex flex-wrap gap-3">
-        <span>导师对话与成果保存在当前定位中</span>
         <Button variant="outline" onClick={() => read.refetch()}>
           重新读取状态
         </Button>
       </div>
-      <p>一次完成一步。确认当前成果后继续，也可以返回查看和修改。</p>
-      <nav aria-label="定位步骤" className="flex flex-wrap gap-2">
+      <nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
         {steps.map((step, index) => (
           <Button
             key={step.id}
@@ -476,81 +466,8 @@ export default function PositioningDraft({
               <h2 className="text-lg">
                 {index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}
               </h2>
-              <section aria-label="导师记录" className="space-y-3">
-                <h3 className="font-semibold">
-                  导师对话 · 当前步骤：{step.title}
-                </h3>
-                <p className="text-sm">
-                  连续记录保留前面步骤的讨论。此处为分步模拟，不会分析你的真实情况，也不会查询外部资料。
-                </p>
-                {history.data?.executions.map(
-                  (e: {
-                    executionId: string;
-                    input?: string | null;
-                    body: string | null;
-                    primaryBody: string | null;
-                    state: string;
-                  }) => (
-                    <article
-                      key={e.executionId}
-                      className="rounded-xl border p-3"
-                    >
-                      <p className="whitespace-pre-wrap">{e.input}</p>
-                      <p className="whitespace-pre-wrap">
-                        {e.body ?? e.primaryBody ?? "等待原任务恢复"}
-                      </p>
-                      {e.state !== "completed" && e.state !== "cancelled" && (
-                        <Button
-                          onClick={() =>
-                            run(() =>
-                              execute.mutateAsync({
-                                executionId: e.executionId,
-                              }),
-                            )
-                          }
-                        >
-                          恢复原导师任务
-                        </Button>
-                      )}
-                    </article>
-                  ),
-                )}
-              </section>
-              <label className="block">
-                回复导师或说明你卡在哪里
-                <Textarea
-                  aria-label="给导师的回复"
-                  value={mentorInputs[step.id] ?? ""}
-                  disabled={busy || snap.state !== "draft"}
-                  onChange={(e) =>
-                    setMentorInputs((old) => ({
-                      ...old,
-                      [step.id]: e.target.value,
-                    }))
-                  }
-                  placeholder="用自己的话描述即可"
-                  maxLength={8000}
-                />
-              </label>
-              <Button
-                variant="outline"
-                disabled={
-                  busy || hasUnsavedInformation || snap.state !== "draft"
-                }
-                onClick={() => ask(step)}
-              >
-                {busy ? "正在处理…" : "请导师帮助这一步"}
-              </Button>
-              <details
-                key={step.id + ":information"}
-                open={d.mode === "manual"}
-              >
-                <summary className="cursor-pointer font-medium">
-                  核对本步信息与成果
-                </summary>
-                <p className="text-sm">
-                  仅确认你认可的信息；不清楚的内容可以明确延期，不必编造答案。
-                </p>
+              <div className={mentorOpen[step.id] ? "grid items-start gap-6 lg:grid-cols-2" : "max-w-3xl"}>
+              <section aria-label="本步填写信息" className="space-y-4">
                 <div className="space-y-2">
                   {d.information[step.id].schema.map(
                     (field: {
@@ -596,7 +513,7 @@ export default function PositioningDraft({
                             disabled={busy || snap.state !== "draft"}
                             value={value.value}
                             onChange={(e) =>
-                              updateInfo({ value: e.target.value })
+                              updateInfo({ value: e.target.value, status: value.status === "confirmed" ? "unknown" : value.status })
                             }
                           />
                           <select
@@ -671,6 +588,50 @@ export default function PositioningDraft({
                     保存信息状态
                   </Button>
                 </div>
+                <Button variant="outline" aria-expanded={Boolean(mentorOpen[step.id])}
+                  onClick={() => setMentorOpen(old => ({...old, [step.id]: !old[step.id]}))}>
+                  请导师帮助这一步
+                </Button>
+                <p className="text-xs text-[var(--text-secondary)]">不确定怎么填，可以与导师多聊几轮；讨论不会自动确认答案或进入下一步。</p>
+              </section>
+              {mentorOpen[step.id] && (
+                <aside aria-label="本步导师聊天" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold">和导师聊聊 · {step.title}</h3>
+                    <Button variant="outline" onClick={() => setMentorOpen(old => ({...old, [step.id]: false}))}>收起聊天</Button>
+                  </div>
+                  <div ref={chatScroll} role="log" aria-label="本步导师消息" aria-live="polite" className="max-h-[50vh] min-h-32 space-y-3 overflow-y-auto overscroll-contain pr-2">
+                    {(history.data?.executions ?? []).filter((e: {executionId: string}) =>
+                      d.turns?.some((t: {executionId: string; stepId: string; kind: string}) => t.executionId === e.executionId && t.stepId === step.id && t.kind === "mentor")
+                    ).map((e: {executionId: string; input: string | null; body: string | null; primaryBody: string | null; state: string}) => (
+                      <div key={e.executionId} className="space-y-2">
+                        <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span className="text-xs">你</span><p className="whitespace-pre-wrap break-words">{e.input ?? "内容暂不可用"}</p></div>
+                        <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className="text-xs">导师</span><p className="whitespace-pre-wrap break-words">{e.body ?? e.primaryBody ?? "等待原任务恢复"}</p></div>
+                        {e.state !== "completed" && e.state !== "cancelled" && <Button variant="outline" disabled={busy} onClick={() => run(() => execute.mutateAsync({executionId:e.executionId}))}>恢复原导师任务</Button>}
+                      </div>
+                    ))}
+                  </div>
+                  <label className="block text-sm">说说你卡在哪里，或继续回答导师
+                    <Textarea aria-label="给导师的回复" value={mentorInputs[step.id] ?? ""}
+                      disabled={busy || snap.state !== "draft"}
+                      onChange={e => setMentorInputs(old => ({...old, [step.id]:e.target.value}))}
+                      placeholder="可以慢慢聊，不必一次想清楚。" maxLength={8000} />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button disabled={busy || snap.state !== "draft" || !mentorInputs[step.id]?.trim()} onClick={() => ask(step)}>{busy ? "正在回复…" : "发送"}</Button>
+                    {!mentorInputs[step.id]?.trim() && <Button variant="outline" disabled={busy || snap.state !== "draft"} onClick={() => ask(step)}>帮我开始梳理</Button>}
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)]">对话随本步保存，可刷新后继续。当前回复为本地模拟。</p>
+                </aside>
+              )}
+              </div>
+              <section aria-label="本步成果" className="space-y-3 border-t border-[var(--border-primary)] pt-4">
+                {(history.data?.executions ?? []).filter((e: {executionId:string;state:string}) =>
+                  !["completed","cancelled"].includes(e.state) && d.turns?.some((t: {executionId:string;stepId:string;kind:string}) => t.executionId === e.executionId && t.stepId === step.id && t.kind !== "mentor")
+                ).map((e: {executionId:string}) => <div key={e.executionId} className="text-sm">
+                  本步有尚未完成的整理或计划。
+                  <Button variant="outline" disabled={busy} onClick={() => run(() => execute.mutateAsync({executionId:e.executionId}))}>恢复原处理</Button>
+                </div>)}
                 <p className="text-sm">
                   下面的按钮会确认你填写的内容，并交给管理员配置的整理模型形成成果候选。明确标为待澄清或暂定的信息仍需核对；不会自动编造事实。
                 </p>
@@ -764,7 +725,7 @@ export default function PositioningDraft({
                       </Button>
                     </aside>
                   ))}
-              </details>
+              </section>
               {s.valid && index < steps.length - 1 && (
                 <Button
                   disabled={busy || hasUnsavedInformation || step.id in edits}

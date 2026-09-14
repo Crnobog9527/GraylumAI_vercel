@@ -13,10 +13,12 @@ CREATE TABLE IF NOT EXISTS opc_drafts (
 CREATE TABLE IF NOT EXISTS opc_turns (
  token uuid PRIMARY KEY DEFAULT gen_random_uuid(),draft_id uuid NOT NULL REFERENCES opc_drafts(draft_id),
  session_id uuid NOT NULL REFERENCES runtime_sessions(id),request_id uuid NOT NULL,
- round_id uuid NOT NULL REFERENCES artifact_rounds(id),step_id text NOT NULL,purpose text NOT NULL CHECK(purpose IN ('step','plan')),
+ round_id uuid NOT NULL REFERENCES artifact_rounds(id),step_id text NOT NULL,purpose text NOT NULL CHECK(purpose IN ('step','mentor','plan')),
  material_revision bigint NOT NULL,input_hash text NOT NULL,UNIQUE(session_id,request_id),
  FOREIGN KEY(session_id,material_revision) REFERENCES runtime_scope_material(session_id,revision)
 );
+ALTER TABLE opc_turns DROP CONSTRAINT IF EXISTS opc_turns_purpose_check;
+ALTER TABLE opc_turns ADD CONSTRAINT opc_turns_purpose_check CHECK(purpose IN ('step','mentor','plan'));
 ALTER TABLE opc_turns ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON opc_turns FROM PUBLIC,anon,authenticated,service_role;
 DROP TRIGGER IF EXISTS artifact_immutable ON opc_turns;
@@ -211,6 +213,7 @@ BEGIN
  IF d.draft_id IS NULL OR NOT bill2_scope_allowed(p_actor_id,jsonb_build_object('kind','positioning_draft','draftId',d.draft_id)) THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  result:=artifact_query(p_actor_id,'read',d.project_id,d.round_id);
  RETURN jsonb_build_object('draftId',d.draft_id,'sessionId',d.session_id,'projectId',d.project_id,'roundId',d.round_id,'mode',d.mode,'snapshot',result,'information',(SELECT jsonb_object_agg(x->>'id',jsonb_build_object('schema',x->'information','values',r.steps->(x->>'id')->'information')) FROM artifact_rounds r,jsonb_array_elements(r.workflow->'steps') x WHERE r.id=d.round_id),
+ 'turns',(SELECT coalesce(jsonb_agg(jsonb_build_object('executionId',e.id,'stepId',t.step_id,'kind',CASE WHEN t.purpose='plan' THEN 'plan' WHEN e.payload->'request'->'organizeAfter'='true'::jsonb THEN 'organizer' ELSE 'mentor' END) ORDER BY e.created_at,e.id),'[]') FROM opc_turns t JOIN runtime_executions e ON e.session_id=t.session_id AND e.request_id=t.request_id AND e.actor_id=p_actor_id WHERE t.draft_id=d.draft_id AND t.session_id=d.session_id),
  'report',artifact_transition(p_actor_id,(SELECT module_id FROM artifact_projects WHERE id=d.project_id),(SELECT skill_id FROM artifact_projects WHERE id=d.project_id),'report',d.project_id,d.round_id),
  'plans',(SELECT coalesce(jsonb_agg(jsonb_build_object('planId',id,'version',version,'sourceVersionId',source_version_id,'body',CASE WHEN opc_source_allowed(p_actor_id,source_version_id) THEN body ELSE NULL END) ORDER BY version DESC),'[]') FROM opc_plans WHERE draft_id=d.draft_id),
  'handoffs',(SELECT coalesce(jsonb_agg(jsonb_build_object('requestId',request_id,'result',h.result)),'[]') FROM opc_handoffs h WHERE draft_id=d.draft_id));
@@ -284,7 +287,7 @@ BEGIN
  IF d.draft_id IS NULL THEN RAISE EXCEPTION 'OPC_DENIED';END IF;
  PERFORM 1 FROM runtime_sessions WHERE id=d.session_id FOR UPDATE;
  SELECT * INTO r FROM artifact_rounds WHERE id=d.round_id;
- IF p_purpose NOT IN ('step','plan') OR (p_purpose='step' AND r.state<>'draft') OR (p_purpose='plan' AND r.state<>'published') OR NOT(r.steps?p_step_id) THEN RAISE EXCEPTION 'OPC_STEP_DENIED';END IF;
+ IF p_purpose NOT IN ('step','mentor','plan') OR (p_purpose IN ('step','mentor') AND r.state<>'draft') OR (p_purpose='plan' AND r.state<>'published') OR NOT(r.steps?p_step_id) THEN RAISE EXCEPTION 'OPC_STEP_DENIED';END IF;
  SELECT * INTO m FROM runtime_scope_material WHERE session_id=d.session_id AND request_id=p_request_id;
  IF FOUND THEN
   SELECT * INTO t FROM opc_turns WHERE session_id=d.session_id AND request_id=p_request_id;
@@ -292,7 +295,7 @@ BEGIN
   RETURN jsonb_build_object('revision',m.revision,'turnToken',t.token);
  END IF;
  SELECT x INTO spec FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=p_step_id;
- IF p_purpose='step' AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(spec->'dependsOn') dep WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN RAISE EXCEPTION 'OPC_DEPENDENCIES_UNCONFIRMED';END IF;
+ IF p_purpose IN ('step','mentor') AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(spec->'dependsOn') dep WHERE (r.steps->dep->>'valid')::boolean IS DISTINCT FROM true) THEN RAISE EXCEPTION 'OPC_DEPENDENCIES_UNCONFIRMED';END IF;
  SELECT coalesce(max(revision),0) INTO n FROM runtime_scope_material WHERE session_id=d.session_id;
  result:=runtime_material(p_actor_id,d.session_id,'save',p_request_id,n,jsonb_build_object('brief',p_purpose||':'||p_step_id,'material','','roundId',r.id));
  INSERT INTO opc_turns(draft_id,session_id,request_id,round_id,step_id,purpose,material_revision,input_hash) VALUES(d.draft_id,d.session_id,p_request_id,r.id,p_step_id,p_purpose,(result->>'revision')::bigint,artifact_hash(to_jsonb(p_input))) RETURNING * INTO t;
