@@ -47,3 +47,11 @@ Use the retained disposable `/positioning` preview with the original method as i
 ## Rollback
 
 Retain 0105 + 0106 + 0107, every unresolved receipt/run and immutable source/report. An old app rollback retains the two financial read compatibility patches and six legacy finalizer protections. Do not reset credits, delete pending evidence, drop new tables or replay unknown provider requests. New OPC data is accessed through its dedicated projection; rollback cannot imply OPC business availability on an app that lacks it.
+
+## Owner stepwise experience correction
+
+Owner rejected the simultaneous six-step form as a mentor experience. The page now renders one configured step, preserves explicit step selection and per-step reply buffers, and offers next-step navigation after confirmation. Mentor mode places the continuous Session conversation first and collapses the current information/artifact review; manual mode opens only the current step. Local examples are explicitly synthetic and step-specific; they do not prove adaptive advice, information extraction or real research quality. All financial and source interfaces remain unchanged.
+
+The original browser counterexample expected one visible work-draft input but received three (`graylum-opc-step-red.log`, exit 1). Intermediate step-navigation and final validation results are recorded on the PR; prior candidate review does not cover this correction.
+
+Stepwise browser validation: the first intermediate manual run timed out (exit 1) while confirmation changed the implicit selection. Selection is now explicitly initialized and retained, so confirmation does not switch the article underneath the user. `graylum-opc-step-green2.log` passed the complete manual publication/plan/adoption/re-login regression with one rendered step, next-step navigation and refresh (1 pass / 171 unselected, exit 0). `graylum-opc-mentor-green.log` passed collapsed mentor details, typed-reply refresh, distinct two-step local examples, same Session and exactly two billing runs (1 pass / 171 unselected, exit 0). TypeScript and repository lint pass. The original Owner preview keeps its existing database and draft; only local page code and the disposable loopback reply fixture were updated, without resetting information or money.

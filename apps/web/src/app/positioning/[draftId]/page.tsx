@@ -49,6 +49,8 @@ export default function PositioningDraft({
     { sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) },
   );
+  const [activeStep, setActiveStep] = useState<string | null>(null);
+  const [mentorInputs, setMentorInputs] = useState<Record<string, string>>({});
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
@@ -73,6 +75,10 @@ export default function PositioningDraft({
     } catch {
       /* Ignore a malformed local buffer. */
     }
+    setActiveStep(
+      typeof local.activeStep === "string" ? local.activeStep : null,
+    );
+    setMentorInputs(local.mentorInputs ?? {});
     setEdits(local.edits ?? {});
     setInfoEdits(local.infoEdits ?? {});
     setPlanCandidate(
@@ -86,7 +92,15 @@ export default function PositioningDraft({
     if (hydratedDraft !== draftId) return;
     sessionStorage.setItem(
       "opc-edit:" + draftId,
-      JSON.stringify({ edits, items, dirtyPlan, infoEdits, planCandidate }),
+      JSON.stringify({
+        edits,
+        items,
+        dirtyPlan,
+        infoEdits,
+        planCandidate,
+        activeStep,
+        mentorInputs,
+      }),
     );
     const warn = (e: BeforeUnloadEvent) => {
       if (
@@ -106,11 +120,20 @@ export default function PositioningDraft({
     dirtyPlan,
     infoEdits,
     planCandidate,
+    activeStep,
+    mentorInputs,
   ]);
   useEffect(() => {
     if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
       setItems(latest.body);
   }, [draftId, hydratedDraft, latest?.planId, dirtyPlan]);
+  useEffect(() => {
+    if (hydratedDraft !== draftId || activeStep || !snap) return;
+    const initial =
+      snap.workflow.steps.find((step: Step) => !snap.steps[step.id].valid) ??
+      snap.workflow.steps[0];
+    setActiveStep(initial.id);
+  }, [draftId, hydratedDraft, activeStep, snap]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -139,9 +162,10 @@ export default function PositioningDraft({
             stepId: step.id,
             requestId: crypto.randomUUID(),
             input:
-              edits[step.id] ??
-              snap.steps[step.id].body ??
-              "请根据当前步骤指导我补充必要信息。",
+              mentorInputs[step.id]?.trim() ||
+              (edits[step.id] ??
+                snap.steps[step.id].body ??
+                "请根据当前步骤指导我补充必要信息。"),
           };
       if (!fixed.input.trim())
         fixed.input = "请根据当前步骤指导我补充必要信息。";
@@ -164,6 +188,7 @@ export default function PositioningDraft({
           requestId: admitted.executionId,
         });
       sessionStorage.removeItem(key);
+      setMentorInputs((old) => ({ ...old, [step.id]: "" }));
     });
   }
   async function save(step: Step) {
@@ -289,8 +314,13 @@ export default function PositioningDraft({
         <Link href="/positioning">返回定位列表</Link>
       </main>
     );
+  const steps: Step[] = snap.workflow.steps;
+  const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
+  const selectedStep =
+    steps.find((step) => step.id === activeStep) ??
+    steps[Math.max(0, firstPending)];
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 text-[var(--text-primary)]">
+    <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">定位与第一周计划</h1>
@@ -308,14 +338,34 @@ export default function PositioningDraft({
           重新读取状态
         </Button>
       </div>
-      <p>每一步先保存工作稿，再确认。手动填写和导师引导使用同一份定位成果。</p>
+      <p>一次完成一步。确认当前成果后继续，也可以返回查看和修改。</p>
+      <nav aria-label="定位步骤" className="flex flex-wrap gap-2">
+        {steps.map((step, index) => (
+          <Button
+            key={step.id}
+            variant={selectedStep.id === step.id ? "default" : "outline"}
+            aria-current={selectedStep.id === step.id ? "step" : undefined}
+            disabled={
+              busy ||
+              (firstPending >= 0 &&
+                index > firstPending &&
+                !snap.steps[step.id].valid)
+            }
+            onClick={() => setActiveStep(step.id)}
+          >
+            {index + 1}. {step.title}
+            {snap.steps[step.id].valid ? " · 已确认" : ""}
+          </Button>
+        ))}
+      </nav>
       {hasUnsavedInformation && (
         <p role="status">
           有未保存的信息，请先保存并重新确认受影响步骤，再发布定位或采用计划。
         </p>
       )}
-      <section className="grid gap-4 md:grid-cols-2">
+      <section aria-label="当前定位步骤" className="space-y-4">
         {snap.workflow.steps.map((step: Step, index: number) => {
+          if (step.id !== selectedStep.id) return null;
           const s = snap.steps[step.id];
           return (
             <article
@@ -325,243 +375,293 @@ export default function PositioningDraft({
               <h2 className="text-lg">
                 {index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}
               </h2>
-              <div className="space-y-2">
-                {d.information[step.id].schema.map(
-                  (field: { id: string; title: string; required: boolean }) => {
-                    const value = infoEdits[step.id]?.[field.id] ??
-                      d.information[step.id].values?.[field.id] ?? {
-                        status: "unknown",
-                        nature: "unknown",
-                        value: "",
-                      };
-                    function updateInfo(patch: Partial<Information>) {
-                      setInfoEdits((old) => ({
-                        ...old,
-                        [step.id]: {
-                          ...Object.fromEntries(
-                            d.information[step.id].schema.map(
-                              (f: { id: string }) => [
-                                f.id,
-                                old[step.id]?.[f.id] ??
-                                  d.information[step.id].values?.[f.id] ?? {
-                                    status: "unknown",
-                                    nature: "unknown",
-                                    value: "",
-                                  },
-                              ],
-                            ),
-                          ),
-                          [field.id]: { ...value, ...patch },
-                        },
-                      }));
-                    }
-                    return (
-                      <label key={field.id} className="block">
-                        {field.title}
-                        {field.required ? "（必需）" : ""}
-                        <input
-                          aria-label={field.title}
-                          maxLength={400}
-                          className="w-full rounded border bg-transparent p-2"
-                          disabled={busy || snap.state !== "draft"}
-                          value={value.value}
-                          onChange={(e) =>
-                            updateInfo({ value: e.target.value })
-                          }
-                        />
-                        <select
-                          aria-label={field.title + " 状态"}
-                          value={value.status}
-                          disabled={busy || snap.state !== "draft"}
-                          onChange={(e) =>
-                            updateInfo({
-                              status: e.target.value as Information["status"],
-                            })
-                          }
-                        >
-                          {Object.entries({
-                            unknown: "未知",
-                            unclear: "待澄清",
-                            provisional: "暂定",
-                            confirmed: "用户已确认",
-                            deferred: "明确延期，接受局限",
-                          }).map(([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          aria-label={field.title + " 性质"}
-                          value={value.nature}
-                          disabled={busy || snap.state !== "draft"}
-                          onChange={(e) =>
-                            updateInfo({
-                              nature: e.target.value as Information["nature"],
-                            })
-                          }
-                        >
-                          {Object.entries({
-                            unknown: "未知",
-                            fact: "事实",
-                            decision: "用户决定",
-                            hypothesis: "假设",
-                          }).map(([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    );
-                  },
-                )}
-                <Button
-                  variant="outline"
-                  disabled={
-                    busy || !infoEdits[step.id] || snap.state !== "draft"
-                  }
-                  onClick={() =>
-                    run(async () => {
-                      await information.mutateAsync({
-                        draftId,
-                        stepId: step.id,
-                        requestId: crypto.randomUUID(),
-                        expectedVersion: s.version,
-                        values: infoEdits[step.id],
-                      });
-                      setInfoEdits((old) => {
-                        const next = { ...old };
-                        delete next[step.id];
-                        return next;
-                      });
-                    })
-                  }
-                >
-                  保存信息状态
-                </Button>
-              </div>
-              <Textarea
-                aria-label={step.title + " 工作稿"}
-                value={edits[step.id] ?? s.body ?? ""}
-                disabled={busy || snap.state !== "draft"}
-                onChange={(e) =>
-                  setEdits((old) => ({ ...old, [step.id]: e.target.value }))
-                }
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  disabled={
-                    busy || hasUnsavedInformation || snap.state !== "draft"
-                  }
-                  onClick={() => ask(step)}
-                >
-                  请导师帮助这一步
-                </Button>
-                <Button
-                  disabled={
-                    busy || !(step.id in edits) || snap.state !== "draft"
-                  }
-                  onClick={() => save(step)}
-                >
-                  保存工作稿
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={
-                    busy ||
-                    step.id in edits ||
-                    step.id in infoEdits ||
-                    snap.state !== "draft"
-                  }
-                  onClick={() =>
-                    run(() =>
-                      change.mutateAsync({
-                        action: "confirm",
-                        projectId: d.projectId,
-                        roundId: d.roundId,
-                        requestId: crypto.randomUUID(),
-                        stepId: step.id,
-                        expectedVersion: s.version,
-                        expectedReviewVersion: s.reviewVersion,
-                      }),
-                    )
-                  }
-                >
-                  确认这一步
-                </Button>
-              </div>
-              {snap.candidates
-                .filter((c: { stepId: string }) => c.stepId === step.id)
-                .map((c: { id: string; body: string | null }) => (
-                  <aside
-                    key={c.id}
-                    className="space-y-2 border-t border-[var(--border-primary)] pt-3"
-                  >
-                    <p className="text-sm">AI 候选 · 尚未替换工作稿</p>
-                    <p className="whitespace-pre-wrap">
-                      {c.body ?? "来源不可用"}
-                    </p>
-                    <Button
-                      variant="outline"
-                      disabled={
-                        busy ||
-                        !c.body ||
-                        snap.state !== "draft" ||
-                        step.id in edits
-                      }
-                      onClick={() =>
-                        run(() =>
-                          change.mutateAsync({
-                            action: "saveCandidate",
-                            projectId: d.projectId,
-                            roundId: d.roundId,
-                            stepId: step.id,
-                            requestId: crypto.randomUUID(),
-                            expectedVersion: s.version,
-                            body: c.body!,
-                            candidateId: c.id,
-                          }),
-                        )
-                      }
+              <section aria-label="导师记录" className="space-y-3">
+                <h3 className="font-semibold">
+                  导师对话 · 当前步骤：{step.title}
+                </h3>
+                <p className="text-sm">
+                  连续记录保留前面步骤的讨论。此处为分步模拟，不会分析你的真实情况，也不会查询外部资料。
+                </p>
+                {history.data?.executions.map(
+                  (e: {
+                    executionId: string;
+                    input?: string | null;
+                    body: string | null;
+                    primaryBody: string | null;
+                    state: string;
+                  }) => (
+                    <article
+                      key={e.executionId}
+                      className="rounded-xl border p-3"
                     >
-                      采用到工作稿
-                    </Button>
-                  </aside>
-                ))}
-            </article>
-          );
-        })}
-      </section>
-      <section aria-label="导师记录" className="space-y-3">
-        {history.data?.executions.map(
-          (e: {
-            executionId: string;
-            input?: string | null;
-            body: string | null;
-            primaryBody: string | null;
-            state: string;
-          }) => (
-            <article key={e.executionId} className="rounded-xl border p-3">
-              <p className="whitespace-pre-wrap">{e.input}</p>
-              <p className="whitespace-pre-wrap">
-                {e.body ?? e.primaryBody ?? "等待原任务恢复"}
-              </p>
-              {e.state !== "completed" && e.state !== "cancelled" && (
-                <Button
-                  onClick={() =>
-                    run(() =>
-                      execute.mutateAsync({ executionId: e.executionId }),
-                    )
+                      <p className="whitespace-pre-wrap">{e.input}</p>
+                      <p className="whitespace-pre-wrap">
+                        {e.body ?? e.primaryBody ?? "等待原任务恢复"}
+                      </p>
+                      {e.state !== "completed" && e.state !== "cancelled" && (
+                        <Button
+                          onClick={() =>
+                            run(() =>
+                              execute.mutateAsync({
+                                executionId: e.executionId,
+                              }),
+                            )
+                          }
+                        >
+                          恢复原导师任务
+                        </Button>
+                      )}
+                    </article>
+                  ),
+                )}
+              </section>
+              <label className="block">
+                回复导师或说明你卡在哪里
+                <Textarea
+                  aria-label="给导师的回复"
+                  value={mentorInputs[step.id] ?? ""}
+                  disabled={busy || snap.state !== "draft"}
+                  onChange={(e) =>
+                    setMentorInputs((old) => ({
+                      ...old,
+                      [step.id]: e.target.value,
+                    }))
                   }
+                  placeholder="用自己的话描述即可"
+                  maxLength={8000}
+                />
+              </label>
+              <Button
+                variant="outline"
+                disabled={
+                  busy || hasUnsavedInformation || snap.state !== "draft"
+                }
+                onClick={() => ask(step)}
+              >
+                {busy ? "正在处理…" : "请导师帮助这一步"}
+              </Button>
+              <details
+                key={step.id + ":information"}
+                open={d.mode === "manual"}
+              >
+                <summary className="cursor-pointer font-medium">
+                  核对本步信息与成果
+                </summary>
+                <p className="text-sm">
+                  仅确认你认可的信息；不清楚的内容可以明确延期，不必编造答案。
+                </p>
+                <div className="space-y-2">
+                  {d.information[step.id].schema.map(
+                    (field: {
+                      id: string;
+                      title: string;
+                      required: boolean;
+                    }) => {
+                      const value = infoEdits[step.id]?.[field.id] ??
+                        d.information[step.id].values?.[field.id] ?? {
+                          status: "unknown",
+                          nature: "unknown",
+                          value: "",
+                        };
+                      function updateInfo(patch: Partial<Information>) {
+                        setInfoEdits((old) => ({
+                          ...old,
+                          [step.id]: {
+                            ...Object.fromEntries(
+                              d.information[step.id].schema.map(
+                                (f: { id: string }) => [
+                                  f.id,
+                                  old[step.id]?.[f.id] ??
+                                    d.information[step.id].values?.[f.id] ?? {
+                                      status: "unknown",
+                                      nature: "unknown",
+                                      value: "",
+                                    },
+                                ],
+                              ),
+                            ),
+                            [field.id]: { ...value, ...patch },
+                          },
+                        }));
+                      }
+                      return (
+                        <label key={field.id} className="block">
+                          {field.title}
+                          {field.required ? "（必需）" : ""}
+                          <input
+                            aria-label={field.title}
+                            maxLength={400}
+                            className="w-full rounded border bg-transparent p-2"
+                            disabled={busy || snap.state !== "draft"}
+                            value={value.value}
+                            onChange={(e) =>
+                              updateInfo({ value: e.target.value })
+                            }
+                          />
+                          <select
+                            aria-label={field.title + " 状态"}
+                            value={value.status}
+                            disabled={busy || snap.state !== "draft"}
+                            onChange={(e) =>
+                              updateInfo({
+                                status: e.target.value as Information["status"],
+                              })
+                            }
+                          >
+                            {Object.entries({
+                              unknown: "未知",
+                              unclear: "待澄清",
+                              provisional: "暂定",
+                              confirmed: "用户已确认",
+                              deferred: "明确延期，接受局限",
+                            }).map(([key, label]) => (
+                              <option key={key} value={key}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            aria-label={field.title + " 性质"}
+                            value={value.nature}
+                            disabled={busy || snap.state !== "draft"}
+                            onChange={(e) =>
+                              updateInfo({
+                                nature: e.target.value as Information["nature"],
+                              })
+                            }
+                          >
+                            {Object.entries({
+                              unknown: "未知",
+                              fact: "事实",
+                              decision: "用户决定",
+                              hypothesis: "假设",
+                            }).map(([key, label]) => (
+                              <option key={key} value={key}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    },
+                  )}
+                  <Button
+                    variant="outline"
+                    disabled={
+                      busy || !infoEdits[step.id] || snap.state !== "draft"
+                    }
+                    onClick={() =>
+                      run(async () => {
+                        await information.mutateAsync({
+                          draftId,
+                          stepId: step.id,
+                          requestId: crypto.randomUUID(),
+                          expectedVersion: s.version,
+                          values: infoEdits[step.id],
+                        });
+                        setInfoEdits((old) => {
+                          const next = { ...old };
+                          delete next[step.id];
+                          return next;
+                        });
+                      })
+                    }
+                  >
+                    保存信息状态
+                  </Button>
+                </div>
+                <Textarea
+                  aria-label={step.title + " 工作稿"}
+                  value={edits[step.id] ?? s.body ?? ""}
+                  disabled={busy || snap.state !== "draft"}
+                  onChange={(e) =>
+                    setEdits((old) => ({ ...old, [step.id]: e.target.value }))
+                  }
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={
+                      busy || !(step.id in edits) || snap.state !== "draft"
+                    }
+                    onClick={() => save(step)}
+                  >
+                    保存工作稿
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={
+                      busy ||
+                      step.id in edits ||
+                      step.id in infoEdits ||
+                      snap.state !== "draft"
+                    }
+                    onClick={() =>
+                      run(() =>
+                        change.mutateAsync({
+                          action: "confirm",
+                          projectId: d.projectId,
+                          roundId: d.roundId,
+                          requestId: crypto.randomUUID(),
+                          stepId: step.id,
+                          expectedVersion: s.version,
+                          expectedReviewVersion: s.reviewVersion,
+                        }),
+                      )
+                    }
+                  >
+                    确认这一步
+                  </Button>
+                </div>
+                {snap.candidates
+                  .filter((c: { stepId: string }) => c.stepId === step.id)
+                  .map((c: { id: string; body: string | null }) => (
+                    <aside
+                      key={c.id}
+                      className="space-y-2 border-t border-[var(--border-primary)] pt-3"
+                    >
+                      <p className="text-sm">AI 候选 · 尚未替换工作稿</p>
+                      <p className="whitespace-pre-wrap">
+                        {c.body ?? "来源不可用"}
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={
+                          busy ||
+                          !c.body ||
+                          snap.state !== "draft" ||
+                          step.id in edits
+                        }
+                        onClick={() =>
+                          run(() =>
+                            change.mutateAsync({
+                              action: "saveCandidate",
+                              projectId: d.projectId,
+                              roundId: d.roundId,
+                              stepId: step.id,
+                              requestId: crypto.randomUUID(),
+                              expectedVersion: s.version,
+                              body: c.body!,
+                              candidateId: c.id,
+                            }),
+                          )
+                        }
+                      >
+                        采用到工作稿
+                      </Button>
+                    </aside>
+                  ))}
+              </details>
+              {s.valid && index < steps.length - 1 && (
+                <Button
+                  disabled={busy || hasUnsavedInformation || step.id in edits}
+                  onClick={() => setActiveStep(steps[index + 1].id)}
                 >
-                  恢复原导师任务
+                  继续下一步
                 </Button>
               )}
             </article>
-          ),
-        )}
+          );
+        })}
       </section>
       {snap.state === "published" && (
         <Button
@@ -585,6 +685,7 @@ export default function PositioningDraft({
           busy ||
           hasUnsavedInformation ||
           Object.keys(edits).length > 0 ||
+          steps.some((step) => !snap.steps[step.id].valid) ||
           snap.state !== "draft"
         }
         onClick={() =>

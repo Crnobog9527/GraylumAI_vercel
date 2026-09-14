@@ -496,6 +496,9 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .click();
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
+    await expect
+      .poll(() => page.getByRole("textbox", { name: / 工作稿$/ }).count())
+      .toBe(1);
     let firstInformation = true,
       informationArrived!: () => void;
     const heldInformation = new Promise<void>((resolve) => {
@@ -572,6 +575,26 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       await expect
         .poll(() => article.textContent(), { timeout: 15000 })
         .toContain("已确认");
+      if (step.id !== f.flow.steps.at(-1)!.id) {
+        await page
+          .getByRole("button", { name: "继续下一步", exact: true })
+          .click();
+        await page.reload();
+        const next = f.flow.steps[f.flow.steps.indexOf(step) + 1];
+        await expect
+          .poll(() =>
+            page
+              .getByRole("textbox", {
+                name: next.title + " 工作稿",
+                exact: true,
+              })
+              .isVisible(),
+          )
+          .toBe(true);
+        expect(
+          await page.getByRole("textbox", { name: / 工作稿$/ }).count(),
+        ).toBe(1);
+      }
     }
     await expect
       .poll(
@@ -1453,3 +1476,168 @@ it("OPC: configured dependencies deny premature generation and old confirmations
     f.artifacts.execute({ ...confirmation, requestId: randomUUID() }),
   ).rejects.toThrow();
 });
+
+it("OPC: browser mentor is stepwise with replies, distinct local examples and original Session recovery", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(3);
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const ready = page.waitForResponse(
+      (r) => r.url().includes("/api/trpc/settings.getSystemSettings") && r.ok(),
+    );
+    await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=/positioning");
+    await ready;
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) => url.pathname === "/positioning", {
+      timeout: 90000,
+    });
+    await page
+      .getByRole("combobox", { name: "定位方法" })
+      .selectOption(f.registration);
+    await page.getByRole("button", { name: "导师引导", exact: true }).click();
+    await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
+
+    const draftUrl = page.url();
+    const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
+    await expect
+      .poll(() =>
+        page.getByRole("textbox", { name: "给导师的回复" }).isVisible(),
+      )
+      .toBe(true);
+    expect(
+      await page
+        .getByRole("textbox", {
+          name: f.flow.steps[0].title + " 工作稿",
+          exact: true,
+        })
+        .isVisible(),
+    ).toBe(false);
+    const nextButton = page
+      .getByRole("navigation", { name: "定位步骤" })
+      .getByRole("button")
+      .nth(1);
+    expect(await nextButton.isEnabled()).toBe(false);
+    await page
+      .getByRole("textbox", { name: "给导师的回复" })
+      .fill("我想先明确我的受众");
+    await page.reload();
+    await expect
+      .poll(() =>
+        page.getByRole("textbox", { name: "给导师的回复" }).inputValue(),
+      )
+      .toBe("我想先明确我的受众");
+    await page
+      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .click();
+    await page
+      .getByText("【分步模拟，仅验证流程】第 1 步示例：", { exact: false })
+      .waitFor();
+    const d = await f.service.read(draftId);
+    expect(d.sessionId).toBeTruthy();
+    const first = f.flow.steps[0];
+    await f.artifacts.execute({
+      action: "save",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: first.id,
+      body: "User confirmed first step",
+      evidenceIds: [],
+      expectedVersion: 0,
+    });
+    let state = (await f.artifacts.read(d.projectId, d.roundId)).steps[
+      first.id
+    ];
+    await f.service.information({
+      draftId,
+      stepId: first.id,
+      requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: {
+          status: "confirmed",
+          nature: "decision",
+          value: "A concrete user decision",
+        },
+      },
+    });
+    state = (await f.artifacts.read(d.projectId, d.roundId)).steps[first.id];
+    await f.artifacts.execute({
+      action: "confirm",
+      projectId: d.projectId,
+      roundId: d.roundId,
+      requestId: randomUUID(),
+      stepId: first.id,
+      expectedVersion: state.version,
+      expectedReviewVersion: state.reviewVersion,
+    });
+    await page.reload();
+    await expect.poll(() => nextButton.isEnabled()).toBe(true);
+    await nextButton.click();
+    await page
+      .getByRole("textbox", { name: "给导师的回复" })
+      .fill("我有两个参考账号");
+    await page
+      .getByRole("button", { name: "请导师帮助这一步", exact: true })
+      .click();
+    await page
+      .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
+      .waitFor();
+    await page.reload();
+    await page
+      .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
+      .waitFor();
+    expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from bill2_runs where actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(2);
+    expect(
+      await page
+        .getByRole("textbox", {
+          name: f.flow.steps[0].title + " 工作稿",
+          exact: true,
+        })
+        .count(),
+    ).toBe(0);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 180000);
