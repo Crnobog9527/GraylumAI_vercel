@@ -1059,3 +1059,41 @@ it('RUNTIME: work ownership and selected Skills stay separate with bounded actua
   expect((await db.query("select count(*)::int n from billing_history where user_id=$1 and operation_type='settle'",[actor])).rows[0].n).toBe(24);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 },120000);
+it('RUNTIME: historical revision admission and another Session dispatch never invert the profile lock',async()=>{
+ const email=randomUUID()+'@example.test',password='Local-'+randomUUID()+'!',created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;const actor=created.data.user.id;
+ await db.query("insert into profiles(id,email,credits,role) values($1,$2,100,'admin')",[actor,email]);await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actor,randomUUID()]);
+ const pack=makePackage(),moduleId=randomUUID();await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'lock-'+pack.id,actor]);await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Lock Skill',$2,true,$3)",[moduleId,pack.id,modelId]);await publishSkillPackage(admin,actor,pack);await db.query("update profiles set role='user' where id=$1",[actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
+ const policy={account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:100,inputBytes:10000,historyItems:2};const admission=runtimeAdmissionService(user,admin,policy);
+ const s=await admission.start(randomUUID(),{kind:'positioning_draft'}),other=await admission.start(randomUUID(),{kind:'positioning_draft'});
+ const choice={kind:'skill',moduleId,revisionId:pack.revisionId},old=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Original Skill history',selection:choice});
+ let posts=0;const server=createServer(async(req,res)=>{for await(const _ of req){}posts++;const id='lock-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'runtime-m',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'runtime-m',choices:[{index:0,message:{role:'assistant',content:'Keep this history'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ const holder=new pg.Client({connectionString}),waiter=new pg.Client({connectionString});await Promise.all([holder.connect(),waiter.connect()]);
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');expect((await runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(old.executionId)).state).toBe('completed');
+  const pending=await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'Concurrent Skill',selection:choice});
+  const frozen=(await db.query('select payload from bill2_runs where id=$1',[pending.runId])).rows[0].payload;
+  const call={...frozen.callPolicy[0],phase:'reply',requestHash:createHash('sha256').update('never resent').digest('hex')};delete call.modelId;
+  await holder.query("BEGIN; SET LOCAL lock_timeout='5s'");const claim=(await holder.query('select bill2_claim($1,$2,1,$3) c',[actor,pending.runId,call])).rows[0].c;
+  const holderPid=(await holder.query('select pg_backend_pid() p')).rows[0].p,waiterPid=(await waiter.query('select pg_backend_pid() p')).rows[0].p;
+  expect(holderPid).not.toBe(waiterPid);await waiter.query("BEGIN; SET LOCAL lock_timeout='5s'");
+  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Continue original history',instructions:'Ordinary',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:2};
+  const billing={...frozen,scope:s.scope,input:context};delete billing.moduleId;delete billing.skillId;delete billing.revisionId;
+  const admitting=waiter.query('select runtime_admit($1,$2,$3,$4,$5) e',[actor,s.sessionId,randomUUID(),context,billing]).then(async r=>{await waiter.query('COMMIT');return {value:r.rows[0].e,error:null};},async error=>{await waiter.query('ROLLBACK');return {value:null,error};});
+  let blocked=false;for(let i=0;i<100;i++){const p=(await db.query('select pg_blocking_pids($1) p',[waiterPid])).rows[0].p;if(p.includes(holderPid)){blocked=true;break;}await new Promise(r=>setTimeout(r,20));}expect(blocked).toBe(true);
+  const dispatched=(await holder.query('select bill2_dispatch($1,$2,$3,$4) d',[actor,pending.runId,claim.id,claim.dispatchToken])).rows[0].d;expect(dispatched.dispatch).toBe(true);await holder.query('COMMIT');
+  const admitted=await admitting;expect(admitted.error).toBeNull();expect(admitted.value).not.toBeNull();
+  const history=(await db.query('select candidate_history from runtime_executions where id=$1',[admitted.value.executionId])).rows[0].candidate_history;
+  expect(history).toHaveLength(2);expect(posts).toBe(1); // no synthetic network call for the separately claimed dispatch.
+  expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:57,ledger:57});
+ }finally{await Promise.allSettled([holder.query('ROLLBACK'),waiter.query('ROLLBACK')]);await Promise.all([holder.end(),waiter.end()]);await new Promise<void>(r=>server.close(()=>r()));}
+},30000);
+it('RUNTIME: database transaction errors cannot silently exclude authorized history',async()=>{
+ const f=await fixture(),e=await rpc('runtime_admit',f.admit);
+ const original=(await db.query("select pg_get_functiondef('runtime_context_allowed(uuid,jsonb)'::regprocedure) body")).rows[0].body;
+ try{
+  await db.query("CREATE OR REPLACE FUNCTION public.runtime_context_allowed(p_actor_id uuid,p_context jsonb) RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$ BEGIN RAISE EXCEPTION 'synthetic serialization failure' USING ERRCODE='40001';END $$");
+  await expect(db.query('select runtime_history_available($1)',[e.executionId])).rejects.toMatchObject({code:'40001'});
+ }finally{await db.query(original);}
+ expect((await db.query('select runtime_history_available($1) allowed',[e.executionId])).rows[0].allowed).toBe(true);
+});

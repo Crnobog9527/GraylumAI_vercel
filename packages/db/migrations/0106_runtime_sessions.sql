@@ -168,7 +168,7 @@ BEGIN
  PERFORM runtime_context_allowed(e.actor_id,e.payload);
 
  RETURN true;
-EXCEPTION WHEN OTHERS THEN RETURN false; -- Unavailable source is excluded from model history, never erased.
+EXCEPTION WHEN raise_exception OR insufficient_privilege THEN RETURN false; -- Permission denial excludes history; transaction/storage errors must propagate.
 END $$;
 
 CREATE OR REPLACE FUNCTION public.runtime_start(p_actor_id uuid,p_request_id uuid,p_payload jsonb)
@@ -197,7 +197,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.runtime_admit(p_actor_id uuid,p_session_id uuid,p_request_id uuid,p_payload jsonb,p_billing jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE s runtime_sessions;e runtime_executions;b jsonb;
+DECLARE s runtime_sessions;e runtime_executions;b jsonb;history_candidates bigint[];
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF p_request_id IS NULL THEN RAISE EXCEPTION 'RUNTIME_REQUEST_REQUIRED';END IF;
@@ -219,6 +219,13 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,105));
  -- Never adopt an old isolated run, even with a matching public request ID.
  IF EXISTS(SELECT 1 FROM bill2_runs WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN RAISE EXCEPTION 'RUNTIME_LEGACY_RUN_DENIED';END IF;
+ -- Freeze history membership and permission locks before bill2_prepare takes
+ -- the profile balance lock. Dispatch takes revision permissions before profile.
+ history_candidates:=ARRAY(
+  SELECT revision FROM (SELECT h.revision,h.execution_id FROM runtime_session_history h
+   WHERE h.session_id=s.id AND h.revision<=s.revision AND NOT h.internal_control
+   ORDER BY h.revision DESC LIMIT CASE WHEN coalesce((p_payload->>'historyItems')::int,0)>0 THEN least(1000,(p_payload->>'historyItems')::int)+128 ELSE 0 END) bounded
+  WHERE runtime_history_available(execution_id) ORDER BY revision);
  -- Runtime requires the administrator model binding; legacy unbound BILL2
  -- callers keep their existing package authorization contract.
  IF p_billing->>'revisionId' IS NOT NULL THEN
@@ -229,13 +236,7 @@ BEGIN
  b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
  INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,billing_run_id,history_revision)
  VALUES(p_actor_id,s.id,p_request_id,p_payload,(b->>'id')::uuid,s.revision) RETURNING * INTO e;
- -- Freeze only a bounded eligible item window, not every old execution.
- -- The SDK capacity/tool selector freezes the actual suffix before dispatch.
- UPDATE runtime_executions SET candidate_history=ARRAY(
-  SELECT revision FROM (SELECT h.revision,h.execution_id FROM runtime_session_history h
-   WHERE h.session_id=s.id AND h.revision<=s.revision AND NOT h.internal_control
-   ORDER BY h.revision DESC LIMIT CASE WHEN coalesce((p_payload->>'historyItems')::int,0)>0 THEN least(1000,(p_payload->>'historyItems')::int)+128 ELSE 0 END) bounded
-  WHERE runtime_history_available(execution_id) ORDER BY revision) WHERE id=e.id;
+ UPDATE runtime_executions SET candidate_history=history_candidates WHERE id=e.id;
  UPDATE bill2_runs SET session_ref=s.id WHERE id=e.billing_run_id;
  UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',e.billing_run_id,'state',e.state);
