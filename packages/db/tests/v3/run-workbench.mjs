@@ -370,7 +370,18 @@ try {
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       const id='local-runtime-'+runtimeCalls.length;
-      const content='Saved runtime answer '+runtimeCalls.length;
+      let content='Saved runtime answer '+runtimeCalls.length;
+      if(opcMode){
+        content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
+        try{
+          const last=request.messages.filter(m=>m.role==='user').at(-1);
+          const input=JSON.parse(last.content);
+          if(input.scopeMaterial?.content?.brief?.startsWith('plan:')){
+            const accounts=JSON.parse(input.userRequest);
+            content=JSON.stringify(accounts.map((a,index)=>({id:randomUUID(),platform:a.platform,account:a.account,day:a.day,title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
+          }
+        }catch{/* A malformed fixture input stays a labeled non-plan reply. */}
+      }
       const response=JSON.stringify({id,model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}}}});
       const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;

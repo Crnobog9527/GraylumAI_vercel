@@ -530,6 +530,51 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         .poll(() => article.textContent(), { timeout: 15000 })
         .toContain("已确认");
     }
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("button", { name: "确认正式定位版本", exact: true })
+            .isEnabled(),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    const lastStep = f.flow.steps.at(-1)!;
+    const lastArticle = page.locator("article").filter({
+      has: page.getByRole("textbox", {
+        name: lastStep.title + " 工作稿",
+        exact: true,
+      }),
+    });
+    await lastArticle
+      .getByRole("textbox", {
+        name: lastStep.information![0].title,
+        exact: true,
+      })
+      .fill("Updated confirmed decision before publication");
+    expect(
+      await page
+        .getByRole("button", { name: "确认正式定位版本", exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    await lastArticle
+      .getByRole("button", { name: "保存信息状态", exact: true })
+      .click();
+    await expect
+      .poll(
+        () =>
+          lastArticle
+            .getByRole("button", { name: "确认这一步", exact: true })
+            .isEnabled(),
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    await lastArticle
+      .getByRole("button", { name: "确认这一步", exact: true })
+      .click();
+    await expect
+      .poll(() => lastArticle.textContent(), { timeout: 15000 })
+      .toContain("已确认");
     await page.getByRole("button", { name: "确认正式定位版本" }).click();
     await page.getByRole("button", { name: "添加选题" }).click();
     await page
@@ -589,6 +634,9 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         .getByRole("link", { name: "进入选题工作空间" })
         .getAttribute("href"),
     ).toBe(href);
+    expect((await f.service.list()).accounts[0].profile.goal_2.value).toBe(
+      "Updated confirmed decision before publication",
+    );
     expect(errors).toEqual([]);
   } finally {
     await browser.close();
@@ -1107,7 +1155,9 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
       requestId: randomUUID(),
       purpose: "plan",
       stepId: "step-6",
-      input: "x/original-local 2026-09-15",
+      input: JSON.stringify([
+        { platform: "x", account: "original-local", day: "2026-09-15" },
+      ]),
     });
     const frozen = (
       await sql.query("select payload from runtime_executions where id=$1", [
@@ -1122,7 +1172,16 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
       database: admin,
       actor: async () => f.actor,
       endpoint: process.env.V3_RUNTIME_LOCAL_ENDPOINT!,
-    }).cancel(admitted.executionId);
+    }).execute(admitted.executionId);
+    const generated = await f.service.planResult(
+      d.draftId,
+      admitted.executionId,
+    );
+    expect(generated.body[0]).toMatchObject({
+      platform: "x",
+      account: "original-local",
+      title: "模拟选题 1",
+    });
     writeFileSync(
       process.env.V3_WORKBENCH_OUTPUT + "/opc-acceptance.json",
       JSON.stringify({

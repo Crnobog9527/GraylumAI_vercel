@@ -49,6 +49,7 @@ export default function PositioningDraft({
     { sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) },
   );
+  const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
     snap = d?.snapshot,
     latest = d?.plans?.[0];
@@ -115,6 +116,7 @@ export default function PositioningDraft({
   }
   async function ask(step: Step) {
     await run(async () => {
+      if (hasUnsavedInformation) throw new Error("save information first");
       const key = "opc-step:" + draftId + ":" + step.id;
       const prior = sessionStorage.getItem(key);
       const fixed = prior
@@ -178,6 +180,7 @@ export default function PositioningDraft({
   }
   async function generatePlan() {
     await run(async () => {
+      if (hasUnsavedInformation) throw new Error("save information first");
       const accountInput = items.length
         ? JSON.stringify(
             items.map((i) => ({
@@ -212,7 +215,12 @@ export default function PositioningDraft({
   }
   async function confirmPlan() {
     await run(async () => {
-      if (!latest || dirtyPlan || Object.keys(edits).length)
+      if (
+        !latest ||
+        dirtyPlan ||
+        Object.keys(edits).length ||
+        hasUnsavedInformation
+      )
         throw new Error("save edits first");
       const accounts = Array.from(
         new Map(
@@ -273,7 +281,9 @@ export default function PositioningDraft({
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">定位与第一周计划</h1>
-          <p>本地隔离体验 · 未执行真实研究</p>
+          <p>
+            本地隔离体验 · AI 使用固定模拟回复，仅验证流程；真实研究尚未开放。
+          </p>
         </div>
         <Link href="/positioning" className="underline">
           账号与定位列表
@@ -286,6 +296,11 @@ export default function PositioningDraft({
         </Button>
       </div>
       <p>每一步先保存工作稿，再确认。手动填写和导师引导使用同一份定位成果。</p>
+      {hasUnsavedInformation && (
+        <p role="status">
+          有未保存的信息，请先保存并重新确认受影响步骤，再发布定位或采用计划。
+        </p>
+      )}
       <section className="grid gap-4 md:grid-cols-2">
         {snap.workflow.steps.map((step: Step, index: number) => {
           const s = snap.steps[step.id];
@@ -424,7 +439,9 @@ export default function PositioningDraft({
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
-                  disabled={busy || snap.state !== "draft"}
+                  disabled={
+                    busy || hasUnsavedInformation || snap.state !== "draft"
+                  }
                   onClick={() => ask(step)}
                 >
                   请导师帮助这一步
@@ -552,7 +569,10 @@ export default function PositioningDraft({
       )}
       <Button
         disabled={
-          busy || Object.keys(edits).length > 0 || snap.state !== "draft"
+          busy ||
+          hasUnsavedInformation ||
+          Object.keys(edits).length > 0 ||
+          snap.state !== "draft"
         }
         onClick={() =>
           run(() =>
@@ -627,7 +647,12 @@ export default function PositioningDraft({
           <div className="flex flex-wrap gap-3">
             <Button
               variant="outline"
-              disabled={busy || !items.length || items.some((i) => !i.account)}
+              disabled={
+                busy ||
+                hasUnsavedInformation ||
+                !items.length ||
+                items.some((i) => !i.account)
+              }
               onClick={generatePlan}
             >
               按已保存账号生成计划候选
@@ -652,9 +677,13 @@ export default function PositioningDraft({
               添加选题
             </Button>
             <Button
-              disabled={busy || !dirtyPlan || !items.length}
+              disabled={
+                busy || hasUnsavedInformation || !dirtyPlan || !items.length
+              }
               onClick={() =>
                 run(async () => {
+                  if (hasUnsavedInformation)
+                    throw new Error("save information first");
                   await savePlan.mutateAsync({
                     draftId,
                     requestId: crypto.randomUUID(),
@@ -699,7 +728,9 @@ export default function PositioningDraft({
                 将为以上具体账号创建选题；已有账号将采用当前定位，原有工作项保持原版本。
               </p>
               <Button
-                disabled={busy || Object.keys(edits).length > 0}
+                disabled={
+                  busy || hasUnsavedInformation || Object.keys(edits).length > 0
+                }
                 onClick={confirmPlan}
               >
                 确认账号与计划，创建选题
