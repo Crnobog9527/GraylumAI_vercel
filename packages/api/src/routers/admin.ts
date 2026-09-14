@@ -40,7 +40,7 @@ const adminScalarSettingValueSchema = z.union([
 ]);
 const adminFinanceCreditTransactionRowSchema = z.object({
   amount: z.number().finite(),
-  type: z.enum(['deduction', 'addition', 'purchase', 'refund']),
+  type: z.enum(['deduction', 'addition', 'purchase', 'refund', 'consumption', 'adjustment']),
   created_at: adminDateStringSchema,
   description: z.string().nullable().optional(),
 }).passthrough();
@@ -77,7 +77,7 @@ const adminFinanceTokenStatRowSchema = z.object({
   model_used: z.string().min(1),
   total_credits: z.number().finite(),
   total_cost_usd: adminFiniteNumericValueSchema,
-  cached_tokens: z.number().finite(),
+  cached_tokens: z.number().finite().nullable(),
   created_at: adminDateStringSchema,
 }).passthrough();
 const adminFinancePaymentOrderRowSchema = z.object({

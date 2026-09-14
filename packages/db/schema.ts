@@ -47,10 +47,11 @@ export const messages = pgTable('messages', {
 });
 
 export const creditTransactions = pgTable('credit_transactions', {
+  bill2RunId: uuid('bill2_run_id'),
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   amount: integer('amount').notNull(),
-  type: text('type', { enum: ['deduction', 'addition', 'purchase', 'refund'] }).notNull(),
+  type: text('type', { enum: ['deduction', 'addition', 'purchase', 'refund', 'adjustment', 'consumption'] }).notNull(),
   ledgerType: text('ledger_type', { enum: ['grant', 'spend', 'refund_clawback', 'adjustment', 'expiration'] }),
   reasonCode: text('reason_code'),
   countsAsSpend: boolean('counts_as_spend').default(false).notNull(),
@@ -61,8 +62,8 @@ export const creditTransactions = pgTable('credit_transactions', {
   grantPeriodKey: text('grant_period_key'),
   description: text('description'),
   idempotencyKey: text('idempotency_key'),
-  balanceBefore: integer('balance_before'),
-  balanceAfter: integer('balance_after'),
+  balanceBefore: bigint('balance_before', { mode: 'number' }),
+  balanceAfter: bigint('balance_after', { mode: 'number' }),
   metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
@@ -316,17 +317,18 @@ export const conversationContextSnapshots = pgTable('conversation_context_snapsh
 export const tokenStats = pgTable('token_stats', {
   id: uuid('id').primaryKey().defaultRandom(),
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
-  // The SQL migration enforces exactly one chat or workbench execution scope.
+  // SQL enforces exactly one chat, workbench or BILL-2 run execution scope.
   artifactGenerationId: uuid('artifact_generation_id'),
+  bill2RunId: uuid('bill2_run_id'),
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }).notNull(),
   messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
   modelUsed: text('model_used').notNull(), // 实际使用的模型 ID (如 claude-sonnet-4-20250514)
-  inputTokens: integer('input_tokens').notNull(), // 输入 Token 数
-  outputTokens: integer('output_tokens').notNull(), // 输出 Token 数
-  cachedTokens: integer('cached_tokens').default(0).notNull(), // 缓存命中的 Token 数
-  cacheCreationTokens: integer('cache_creation_tokens').default(0).notNull(), // 缓存创建的 Token 数
-  webSearchCount: integer('web_search_count').default(0).notNull(), // Web 搜索次数
-  totalCostUsd: decimal('total_cost_usd', { precision: 12, scale: 6 }).notNull(), // 美元成本 (精确到微美元)
+  inputTokens: integer('input_tokens'), // NULL only for unknown BILL-2 usage; legacy SQL rows remain required.
+  outputTokens: integer('output_tokens'), // 输出 Token 数
+  cachedTokens: integer('cached_tokens').default(0), // 缓存命中的 Token 数
+  cacheCreationTokens: integer('cache_creation_tokens').default(0), // 缓存创建的 Token 数
+  webSearchCount: integer('web_search_count').default(0), // Web 搜索次数
+  totalCostUsd: decimal('total_cost_usd').notNull(), // Full provider decimal/FX precision; money stays a string.
   totalCredits: integer('total_credits').notNull(), // 消耗的积分
   metadata: jsonb('metadata').default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -453,6 +455,7 @@ export const aiUsageLogs = pgTable('ai_usage_logs', {
   userId: uuid('user_id').references(() => profiles.id, { onDelete: 'set null' }),
   conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
   artifactGenerationId: uuid('artifact_generation_id'),
+  bill2RunId: uuid('bill2_run_id'),
   requestId: text('request_id'), // Claude API 返回的请求 ID
   modelId: text('model_id').notNull(), // 请求的模型 ID
   status: text('status', { enum: ['success', 'failed', 'timeout', 'rate_limited', 'moderation_blocked'] }).notNull(),

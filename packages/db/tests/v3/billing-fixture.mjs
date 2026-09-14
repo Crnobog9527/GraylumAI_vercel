@@ -21,7 +21,7 @@ GRANT SELECT(id,name,model_id,provider,description,enable_web_search,max_tokens,
 ALTER TABLE modules ADD COLUMN description text DEFAULT 'Synthetic local module', ADD COLUMN full_description text DEFAULT '', ADD COLUMN icon text DEFAULT 'Bot', ADD COLUMN features jsonb DEFAULT '[]', ADD COLUMN examples jsonb DEFAULT '[]', ADD COLUMN preparation_questions jsonb DEFAULT '[]', ADD COLUMN usage_count integer DEFAULT 0, ADD COLUMN credits_multiplier numeric DEFAULT 1, ADD COLUMN sort_order integer DEFAULT 0, ADD COLUMN is_featured boolean DEFAULT false, ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN updated_at timestamptz DEFAULT now(), ADD COLUMN image_url text, ADD COLUMN badge_type text, ADD COLUMN badge_text text, ADD COLUMN credits_display text, ADD COLUMN link_url text, ADD COLUMN link_module_id uuid;
 GRANT SELECT(id,title,description,full_description,icon,category,platform,features,examples,preparation_questions,usage_count,credits_multiplier,sort_order,is_featured,active,created_at,updated_at,image_url,badge_type,badge_text,credits_display,link_url,link_module_id) ON modules TO anon,authenticated;`);
   sql(`CREATE TABLE conversations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid REFERENCES profiles(id),title text NOT NULL DEFAULT 'Chat',model_id uuid,summary text,summary_tokens integer,summary_updated_at timestamptz,summary_metadata jsonb,is_deleted text NOT NULL DEFAULT 'false',deleted_at timestamptz,created_at timestamptz DEFAULT now()); CREATE TABLE messages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),conversation_id uuid REFERENCES conversations(id),role text,content text,is_deleted text NOT NULL DEFAULT 'false',created_at timestamptz DEFAULT now()); CREATE TABLE payment_orders(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),status text,amount_total integer,created_at timestamptz DEFAULT now());`);
-  sql(`CREATE TABLE credit_transactions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid REFERENCES profiles(id),amount integer NOT NULL,type text NOT NULL,description text,idempotency_key text,created_at timestamptz DEFAULT now());
+  sql(`CREATE TABLE credit_transactions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid REFERENCES profiles(id),amount integer NOT NULL,type text NOT NULL,description text,idempotency_key text,balance_before integer,balance_after integer,created_at timestamptz DEFAULT now());
 CREATE UNIQUE INDEX idx_credit_transactions_user_idempotency_key ON credit_transactions(user_id,idempotency_key);
 ALTER TABLE billing_history ADD COLUMN transaction_id uuid REFERENCES credit_transactions(id);
 REVOKE ALL ON credit_transactions FROM PUBLIC,anon,authenticated; GRANT SELECT ON credit_transactions TO service_role;`);
@@ -55,6 +55,7 @@ GRANT SELECT ON token_stats TO authenticated; CREATE POLICY token_stats_select_o
     ['0061_refund_1b_expired_quarantine_repair.sql', 'atomic_pre_deduct'],
     ['0057_refund_1b_actual_refund_accounting_repair.sql', 'atomic_settle'],
     ['0057_refund_1b_actual_refund_accounting_repair.sql', 'atomic_refund'],
+    ['0057_refund_1b_actual_refund_accounting_repair.sql', 'atomic_abort_settle'],
     ['0058_refund_1b_canonical_metadata_merge_repair.sql', 'atomic_finalize_ai_success'],
     ['0059_refund_1b_failure_period_metadata_repair.sql', 'atomic_finalize_ai_failure'],
     ['0058_refund_1b_canonical_metadata_merge_repair.sql', 'atomic_finalize_ai_abort'],
@@ -66,5 +67,5 @@ GRANT SELECT ON token_stats TO authenticated; CREATE POLICY token_stats_select_o
     if (end <= start) throw new Error('invalid billing function boundary');
     sql(source.slice(start, end));
   }
-  sql(`DO $$ DECLARE sig text; BEGIN FOR sig IN SELECT oid::regprocedure::text FROM pg_proc WHERE proname IN ('atomic_pre_deduct','atomic_settle','atomic_refund','refund_1b_is_canonical_period_identity','atomic_finalize_ai_success','atomic_finalize_ai_failure','atomic_finalize_ai_abort') LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated',sig); EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',sig); END LOOP; END $$;`);
+  sql(`DO $$ DECLARE sig text; BEGIN FOR sig IN SELECT oid::regprocedure::text FROM pg_proc WHERE proname IN ('atomic_pre_deduct','atomic_settle','atomic_refund','atomic_abort_settle','refund_1b_is_canonical_period_identity','atomic_finalize_ai_success','atomic_finalize_ai_failure','atomic_finalize_ai_abort') LOOP EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated',sig); EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',sig); END LOOP; END $$;`);
 }
