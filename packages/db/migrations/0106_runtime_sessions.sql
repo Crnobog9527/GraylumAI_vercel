@@ -219,6 +219,13 @@ BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,105));
  -- Never adopt an old isolated run, even with a matching public request ID.
  IF EXISTS(SELECT 1 FROM bill2_runs WHERE actor_id=p_actor_id AND request_id=p_request_id) THEN RAISE EXCEPTION 'RUNTIME_LEGACY_RUN_DENIED';END IF;
+ -- Runtime requires the administrator model binding; legacy unbound BILL2
+ -- callers keep their existing package authorization contract.
+ IF p_billing->>'revisionId' IS NOT NULL THEN
+  PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
+   AND skill_id=(p_billing->>'skillId')::uuid AND active AND model_id=(p_billing->>'modelId')::uuid FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+ END IF;
  b:=bill2_prepare(p_actor_id,p_request_id,p_billing);
  INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,billing_run_id,history_revision)
  VALUES(p_actor_id,s.id,p_request_id,p_payload,(b->>'id')::uuid,s.revision) RETURNING * INTO e;
@@ -458,6 +465,16 @@ BEGIN
  RETURN jsonb_build_object('executionId',e.id,'sessionId',s.id,'runId',b.id,'state',e.state,
   'live',live,'cancelRequested',b.cancel_requested,'context',e.payload,'billing',b.payload,'result',e.result,'primaryResult',e.primary_result,'matchResult',e.match_result);
 END $$;
+-- Private original-identity receipt inspection does not authorize content access.
+CREATE OR REPLACE FUNCTION public.runtime_receipt_saved(p_actor_id uuid,p_execution_id uuid,p_run_id uuid,p_call_id uuid,p_evidence jsonb)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
+  JOIN bill2_calls c ON c.run_id=r.id WHERE e.id=p_execution_id AND e.actor_id=p_actor_id
+  AND r.actor_id=p_actor_id AND r.id=p_run_id AND r.session_ref=e.session_id AND c.id=p_call_id)
+ THEN RAISE EXCEPTION 'RUNTIME_BINDING_DENIED';END IF;
+ RETURN EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=p_call_id AND payload=p_evidence);
+END $$;
 CREATE OR REPLACE FUNCTION public.runtime_response(p_actor_id uuid,p_execution_id uuid,p_sequence integer,p_request_hash text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE e runtime_executions;s runtime_sessions;c bill2_calls;raw text;
@@ -517,8 +534,10 @@ BEGIN
   m:=(p->>'moduleId')::uuid;k:=(p->>'skillId')::uuid;
   -- Scope ownership/account/source checks above are independent of the
   -- explicitly selected Skill; never replace its identity with the work owner.
-  PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND model_id=(p->>'modelId')::uuid FOR SHARE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+  IF EXISTS(SELECT 1 FROM runtime_executions WHERE billing_run_id=p_run_id AND actor_id=a) THEN
+   PERFORM id FROM modules WHERE id=m AND skill_id=k AND active AND model_id=(p->>'modelId')::uuid FOR SHARE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_SKILL_MODEL_DENIED';END IF;
+  END IF;
   PERFORM id FROM skills WHERE id=k FOR SHARE;
   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_REVISION_DENIED';END IF;
@@ -710,7 +729,7 @@ DO $$ DECLARE t text;f record;BEGIN
  END LOOP;
  FOR f IN SELECT oid::regprocedure sig,proname FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'runtime_%' LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);
-  IF f.proname IN ('runtime_material','runtime_start','runtime_admit','runtime_session_items','runtime_execution','runtime_response','runtime_session_context','runtime_admission_replay','runtime_tool','runtime_source','runtime_view','runtime_financial_recovery','runtime_cancel') THEN EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig);END IF;
+  IF f.proname IN ('runtime_material','runtime_start','runtime_admit','runtime_session_items','runtime_execution','runtime_response','runtime_receipt_saved','runtime_session_context','runtime_admission_replay','runtime_tool','runtime_source','runtime_view','runtime_financial_recovery','runtime_cancel') THEN EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig);END IF;
  END LOOP;
 END $$;
 COMMIT;

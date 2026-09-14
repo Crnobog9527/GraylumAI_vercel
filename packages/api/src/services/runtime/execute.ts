@@ -84,8 +84,8 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
        // a confirmed missing response permits bounded idempotent receipt replay.
        const pending=dispatch.pendingReceipt;
        for(let attempt=0;attempt<2;attempt++){
-        const prior=await rpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
-        if(prior?.rawBody)break;
+        const savedReceipt=await rpc<boolean>('runtime_receipt_saved',{...args,p_run_id:pending.runId,p_call_id:pending.callId,p_evidence:pending.evidence});
+        if(savedReceipt)break;
         try{await billing.recordReceipt(pending.runId,pending.callId,pending.evidence);break;}
         catch{if(attempt===1)throw new Error('RUNTIME_RECEIPT_STORAGE_UNAVAILABLE');}
        }

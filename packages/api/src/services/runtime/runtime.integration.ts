@@ -82,7 +82,7 @@ it('RUNTIME: official SDK uses bound PostgreSQL Session and persists input/outpu
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
-it.each(['none','session','result_before','result_after','receipt_before','receipt_after','receipt_unavailable','result_revoked'])('RUNTIME: SDK to receipt/Session/financial terminal, %s fault recovers without HTTP replay',async fault=>{
+it.each(['none','session','result_before','result_after','receipt_before','receipt_after','receipt_unavailable','receipt_revoked','result_revoked'])('RUNTIME: SDK to receipt/Session/financial terminal, %s fault recovers without HTTP replay',async fault=>{
  const f=await fixture();
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Fixture instruction',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:20};
  const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:{...f.billing,input:context}});let requests=0;
@@ -99,7 +99,7 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    if(target&&(!injected||fault==='receipt_unavailable')){
     injected=true;
     return (async()=>{
-     if(fault==='result_revoked')await rpc('bill2_revoke_draft',{p_actor_id:f.actorId,p_draft_id:f.s.scope.draftId});
+     if(fault==='result_revoked'||fault==='receipt_revoked')await rpc('bill2_revoke_draft',{p_actor_id:f.actorId,p_draft_id:f.s.scope.draftId});
      if(fault.endsWith('_after')){const committed=await admin.rpc(name,args);if(committed.error)throw committed.error;}
      return {data:null,error:{message:'synthetic durable response failure'}};
     })();
@@ -123,6 +123,26 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
    expect((await db.query('select result from runtime_executions where id=$1',[e.executionId])).rows[0].result).toBeNull();
    expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(0);
    expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits:80,ledger:80});
+   return;
+  }
+  if(fault==='receipt_revoked'){
+   const calls=(await db.query('select id,provider_id,selected_cost_usd::text cost from bill2_calls where run_id=$1',[e.runId])).rows;
+   expect(calls).toHaveLength(1);expect(calls[0].provider_id).toBe(response.id);expect(Number(calls[0].cost)).toBe(0.003);
+   const receipts=(await db.query('select payload from bill2_receipts where call_id=$1',[calls[0].id])).rows;
+   expect(receipts).toHaveLength(1);expect(JSON.stringify(receipts)).toContain('Original durable answer');
+   const inspection={p_actor_id:f.actorId,p_execution_id:e.executionId,p_run_id:e.runId,p_call_id:calls[0].id,p_evidence:receipts[0].payload};
+   expect(await rpc('runtime_receipt_saved',inspection)).toBe(true);
+   await expect(rpc('runtime_receipt_saved',{...inspection,p_actor_id:randomUUID()})).rejects.toThrow('DENIED');
+   await expect(rpc('runtime_receipt_saved',{...inspection,p_call_id:randomUUID()})).rejects.toThrow('DENIED');
+   const anonymous=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+   expect((await anonymous.rpc('runtime_receipt_saved',inspection)).error).not.toBeNull();
+   await expect(runtimeExecutor(options).execute(e.executionId)).rejects.toThrow('UNAVAILABLE');
+   const financial=await runtimeExecutor(options).recoverFinancial(e.executionId);
+   expect(financial.state).toBe('cancelled');expect(JSON.stringify(financial)).not.toContain('Original durable answer');
+   expect(await runtimeExecutor(options).recoverFinancial(e.executionId)).toEqual(financial);
+   expect(requests).toBe(1);
+   expect((await db.query('select count(*)::int n from runtime_session_history where session_id=$1',[f.s.sessionId])).rows[0].n).toBe(0);
+   expect((await db.query("select credits,(select count(*)::int from billing_history where user_id=$1 and operation_type='settle') terminals from profiles where id=$1",[f.actorId])).rows[0]).toEqual({credits:97,terminals:1});
    return;
   }
   if(fault==='result_revoked'){
