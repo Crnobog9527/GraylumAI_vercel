@@ -550,7 +550,7 @@ BEGIN
    PERFORM id FROM modules WHERE id=m FOR SHARE;
   END IF;
   PERFORM id FROM skills WHERE id=k FOR SHARE;
-  PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR UPDATE;
+  PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_REVISION_DENIED';END IF;
   PERFORM read_skill_package(a,m,k,rev,NULL,'');
  END IF;
@@ -566,11 +566,22 @@ BEGIN
    PERFORM id FROM modules WHERE id=m AND active AND model_id=(chosen->>'modelId')::uuid FOR SHARE;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
    PERFORM id FROM skills WHERE id=k FOR SHARE;
-   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR UPDATE;
+   PERFORM id FROM skill_revisions WHERE id=rev AND skill_id=k FOR SHARE;
    IF NOT FOUND THEN RAISE EXCEPTION 'RUNTIME_MATCH_REVOKED';END IF;
    PERFORM read_skill_package(a,m,k,rev,chosen->>'packageHash','');
   END IF;
  END IF;
+END $$;
+
+-- Permission readers can hold different current/history revisions concurrently.
+-- Serialize the existing authorized revocation writer explicitly; its FK insert
+-- alone takes KEY SHARE, which would not conflict with these reader SHARE locks.
+-- CREATE OR REPLACE retains the existing service-only ACL and admin requirement.
+CREATE OR REPLACE FUNCTION public.revoke_skill_revision(p_revision_id uuid,p_actor_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE id=p_actor_id AND role='admin' AND status='active') THEN RAISE EXCEPTION 'administrator required' USING ERRCODE='42501'; END IF;
+ PERFORM id FROM public.skill_revisions WHERE id=p_revision_id FOR UPDATE;
+ INSERT INTO public.skill_revision_revocations(revision_id,revoked_by) VALUES(p_revision_id,p_actor_id) ON CONFLICT DO NOTHING;
 END $$;
 
 -- Unbound BILL2 admission always checks the full frozen policy. Only a server

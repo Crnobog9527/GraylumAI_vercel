@@ -1074,7 +1074,7 @@ it('RUNTIME: historical revision admission and another Session dispatch never in
   const pending=await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'Concurrent Skill',selection:choice});
   const frozen=(await db.query('select payload from bill2_runs where id=$1',[pending.runId])).rows[0].payload;
   const call={...frozen.callPolicy[0],phase:'reply',requestHash:createHash('sha256').update('never resent').digest('hex')};delete call.modelId;
-  await holder.query("BEGIN; SET LOCAL lock_timeout='5s'");const claim=(await holder.query('select bill2_claim($1,$2,1,$3) c',[actor,pending.runId,call])).rows[0].c;
+  await holder.query("BEGIN; SET LOCAL lock_timeout='5s'");await holder.query('select id from skill_revisions where id=$1 for update',[pack.revisionId]);const claim=(await holder.query('select bill2_claim($1,$2,1,$3) c',[actor,pending.runId,call])).rows[0].c;
   const holderPid=(await holder.query('select pg_backend_pid() p')).rows[0].p,waiterPid=(await waiter.query('select pg_backend_pid() p')).rows[0].p;
   expect(holderPid).not.toBe(waiterPid);await waiter.query("BEGIN; SET LOCAL lock_timeout='5s'");
   const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Continue original history',instructions:'Ordinary',model:'runtime-m',maxOutputTokens:100,maxTurns:1,historyItems:2};
@@ -1097,3 +1097,64 @@ it('RUNTIME: database transaction errors cannot silently exclude authorized hist
  }finally{await db.query(original);}
  expect((await db.query('select runtime_history_available($1) allowed',[e.executionId])).rows[0].allowed).toBe(true);
 });
+
+it('RUNTIME: opposite Skill history dependencies allow concurrent claim and dispatch',async()=>{
+ const email=randomUUID()+'@example.test',password='Local-'+randomUUID()+'!',created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;const actor=created.data.user.id;
+ await db.query("insert into profiles(id,email,credits,role) values($1,$2,100,'admin')",[actor,email]);await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actor,randomUUID()]);
+ const pack=makePackage(),moduleId=randomUUID();await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,'lock-'+pack.id,actor]);await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Lock Skill',$2,true,$3)",[moduleId,pack.id,modelId]);await publishSkillPackage(admin,actor,pack);const packB=makePackage(),moduleB=randomUUID();await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[packB.id,'cross-'+packB.id,actor]);await db.query("insert into modules(id,title,skill_id,active,model_id) values($1,'Cross Skill',$2,true,$3)",[moduleB,packB.id,modelId]);await publishSkillPackage(admin,actor,packB);await db.query("update profiles set role='user' where id=$1",[actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});expect((await user.auth.signInWithPassword({email,password})).error).toBeNull();
+ const policy={account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:100,inputBytes:10000,historyItems:2};const admission=runtimeAdmissionService(user,admin,policy);
+ const s=await admission.start(randomUUID(),{kind:'positioning_draft'}),other=await admission.start(randomUUID(),{kind:'positioning_draft'});
+ const choice={kind:'skill',moduleId,revisionId:pack.revisionId},old=await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Original Skill history',selection:choice});
+ const choiceB={kind:'skill',moduleId:moduleB,revisionId:packB.revisionId};const oldB=await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'Original B history',selection:choiceB});
+ let posts=0;const server=createServer(async(req,res)=>{for await(const _ of req){}posts++;const id='lock-'+randomUUID();res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'runtime-m',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:'runtime-m',choices:[{index:0,message:{role:'assistant',content:'Keep this history'},finish_reason:'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}}}));});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ const clients=[new pg.Client({connectionString}),new pg.Client({connectionString})];await Promise.all(clients.map(c=>c.connect()));
+ try{
+  const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');const executor=runtimeExecutor({database:admin,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port});
+  for(const e of [old,oldB])expect((await executor.execute(e.executionId)).state).toBe('completed');
+  const pending=[await admission.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'A history with B',selection:choiceB}),await admission.prepare({sessionId:other.sessionId,requestId:randomUUID(),input:'B history with A',selection:choice})];
+  const frozen=[];const calls:Record<string,unknown>[]=[];
+  for(let i=0;i<2;i++){
+   const session=new PostgresSession(admin,{actorId:actor,sessionId:[s,other][i].sessionId,executionId:pending[i].executionId});expect(await session.getItems()).toHaveLength(2);await session.freezeHistory(2);
+   expect((await db.query('select dependency_id id from runtime_history_dependencies where execution_id=$1',[pending[i].executionId])).rows).toEqual([{id:[old,oldB][i].executionId}]);
+   frozen[i]=(await db.query('select payload from bill2_runs where id=$1',[pending[i].runId])).rows[0].payload;
+   calls[i]={...frozen[i].callPolicy[0],phase:'reply',requestHash:createHash('sha256').update('cross-'+i).digest('hex')};delete calls[i].modelId;
+  }
+  for(let i=0;i<2;i++){
+   await clients[i].query("BEGIN; SET LOCAL lock_timeout='5s'");
+   // Real direct permission reads hold B and A respectively, then the normal
+   // guarded claim rechecks the actual persisted opposite history dependencies.
+   await clients[i].query('select runtime_direct_billing_allowed($1,$2,$3)',[actor,frozen[i],pending[i].runId]);
+  }
+  console.log('RUNTIME_CROSS_LOCK_READY',JSON.stringify({sessions:2,oppositeDependencies:true}));
+  const outcomes=await Promise.all(clients.map(async(c,i)=>{
+   try{
+    const claim=(await c.query('select bill2_claim($1,$2,1,$3) c',[actor,pending[i].runId,calls[i]])).rows[0].c;
+    const dispatched=(await c.query('select bill2_dispatch($1,$2,$3,$4) d',[actor,pending[i].runId,claim.id,claim.dispatchToken])).rows[0].d;
+    await c.query('COMMIT');return {error:null,dispatched};
+   }catch(error){await c.query('ROLLBACK');return {error,dispatched:null};}
+  }));
+  console.log('RUNTIME_CROSS_LOCK_OUTCOME',JSON.stringify(outcomes.map(o=>({code:(o.error as {code?:string}|null)?.code??null,dispatch:o.dispatched?.dispatch??false}))));
+  expect(outcomes.map(o=>o.error)).toEqual([null,null]);expect(outcomes.map(o=>o.dispatched?.dispatch)).toEqual([true,true]);
+  expect(posts).toBe(2); // Permission/claim/dispatch RPCs do not send another HTTP call.
+  expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:54,ledger:54});
+  expect((await admin.rpc('revoke_skill_revision',{p_revision_id:pack.revisionId,p_actor_id:actor})).error).not.toBeNull();
+  expect((await user.rpc('revoke_skill_revision',{p_revision_id:pack.revisionId,p_actor_id:actor})).error).not.toBeNull();
+  expect((await db.query("select has_function_privilege('service_role','revoke_skill_revision(uuid,uuid)','execute') service,has_function_privilege('authenticated','revoke_skill_revision(uuid,uuid)','execute') browser")).rows[0]).toEqual({service:true,browser:false});
+  await db.query("update profiles set role='admin' where id=$1",[actor]);
+  const pids=await Promise.all(clients.map(async c=>(await c.query('select pg_backend_pid() p')).rows[0].p));
+  const waitForBlock=async(waiter:number,holder:number)=>{for(let i=0;i<100;i++){if((await db.query('select pg_blocking_pids($1) p',[waiter])).rows[0].p.includes(holder))return true;await new Promise(r=>setTimeout(r,20));}return false;};
+  await clients[0].query("BEGIN; SET LOCAL lock_timeout='5s'");await clients[0].query('select runtime_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId]);
+  await clients[1].query("BEGIN; SET LOCAL lock_timeout='5s'");
+  const revoking=clients[1].query('select revoke_skill_revision($1,$2)',[pack.revisionId,actor]).then(async()=>{await clients[1].query('COMMIT');return null;},async error=>{await clients[1].query('ROLLBACK');return error;});
+  expect(await waitForBlock(pids[1],pids[0])).toBe(true);await clients[0].query('COMMIT');expect(await revoking).toBeNull();
+  await expect(db.query('select runtime_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId])).rejects.toThrow();
+  // Reverse winner: the real revoke RPC itself holds the lock before a late reader.
+  await clients[1].query("BEGIN; SET LOCAL lock_timeout='5s'");await clients[1].query('select revoke_skill_revision($1,$2)',[packB.revisionId,actor]);
+  await clients[0].query("BEGIN; SET LOCAL lock_timeout='5s'");
+  const late=clients[0].query('select runtime_direct_billing_allowed($1,$2,$3)',[actor,frozen[0],pending[0].runId]).then(()=>null,error=>error);
+  expect(await waitForBlock(pids[0],pids[1])).toBe(true);await clients[1].query('COMMIT');expect(await late).not.toBeNull();await clients[0].query('ROLLBACK');
+  expect(posts).toBe(2);expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(54);
+
+ }finally{await Promise.allSettled(clients.map(c=>c.query('ROLLBACK')));await Promise.all(clients.map(c=>c.end()));await new Promise<void>(r=>server.close(()=>r()));}
+},30000);
