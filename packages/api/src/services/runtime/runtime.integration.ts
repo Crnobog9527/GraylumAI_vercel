@@ -146,6 +146,46 @@ it.each(['none','session','result_before','result_after','receipt_before','recei
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
+it.each(['before_dispatch','before_tool'] as const)('RUNTIME: concurrent replay %s cannot interrupt the live SDK owner',async mode=>{
+ const f=await fixture(),context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Concurrent request',instructions:'Use permitted tools when needed',model:'runtime-m',maxOutputTokens:100,maxTurns:2,historyItems:20,network:'allow',tools:['search'],maxToolCalls:1};
+ const billing={...f.billing,input:context,limits:{...f.billing.limits,costUsd:'0.06',credits:60,maxPreDeduct:60,maxCalls:3}};
+ const e=await rpc('runtime_admit',{...f.admit,p_payload:context,p_billing:billing});
+ let signalReady!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>{signalReady=resolve;}),held=new Promise<void>(resolve=>{release=resolve;});
+ let posts=0;
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(JSON.parse(raw).input);const n=++posts;
+  if(mode==='before_tool'&&n===1){signalReady();await held;}
+  const id='concurrent-'+e.executionId+'-'+n;
+  const tool=n===1&&mode==='before_tool';
+  const usage=input.tool?{toolResult:{body:'Local search evidence',sources:[{id:'isolated',version:'v1',status:'available'}]}}:
+   {sdkResponse:{id,object:'chat.completion',created:1,model:'runtime-m',choices:[{index:0,message:tool?{role:'assistant',content:null,tool_calls:[{id:'concurrent-search',type:'function',function:{name:'search',arguments:'{"query":"material"}'}}]}:{role:'assistant',content:'Original concurrent answer'},finish_reason:tool?'tool_calls':'stop'}],usage:{prompt_tokens:4,completion_tokens:3,total_tokens:7}}};
+  res.setHeader('content-type','application/json');res.end(JSON.stringify({id,model:'runtime-m',final:true,cost:'0.003',currency:'USD',coverage:'request_total',usage}));
+ });
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const address=server.address();if(!address||typeof address==='string')throw new Error('fixture');
+ const endpoint='http://127.0.0.1:'+address.port,actor=async()=>f.actorId;
+ const database={rpc:async(name:string,args:Record<string,unknown>)=>{
+  const result=await admin.rpc(name,args);
+  if(mode==='before_dispatch'&&name==='runtime_execution'&&args.p_action==='begin'&&result.data?.live){signalReady();await held;}
+  return result;
+ }};
+ const original=runtimeExecutor({database,actor,endpoint}).execute(e.executionId);
+ try{
+  await ready;
+  expect((await runtimeExecutor({database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('pending');
+  expect((await db.query('select state from runtime_executions where id=$1',[e.executionId])).rows[0].state).toBe('running');
+  expect(posts).toBe(mode==='before_dispatch'?0:1);
+  release();expect(await original).toEqual({state:'completed',body:'Original concurrent answer'});
+  expect((await runtimeExecutor({database:admin,actor,endpoint}).execute(e.executionId)).state).toBe('completed');
+  expect(posts).toBe(mode==='before_dispatch'?1:3);
+  expect((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actorId])).rows[0].n).toBe(1);
+  expect((await db.query('select session_ref from bill2_runs where id=$1',[e.runId])).rows[0].session_ref).toBe(f.s.sessionId);
+  const credits=mode==='before_dispatch'?97:91;
+  expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[f.actorId])).rows[0]).toEqual({credits,ledger:credits});
+  expect((await db.query('select count(*)::int n from runtime_session_history where execution_id=$1',[e.executionId])).rows[0].n).toBe(mode==='before_dispatch'?2:4);
+ }finally{release();await original.catch(()=>{});await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
+
 it('RUNTIME: actual Auth admission resolves configured ordinary model and rejects anonymous/foreign/missing models',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;

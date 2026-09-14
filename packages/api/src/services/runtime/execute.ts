@@ -161,6 +161,9 @@ export function runtimeExecutor(options:{database:SessionRpc;actor:()=>Promise<s
    const completed=await rpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {body,state:completed.state};
   }catch{
+   // A replay has no authority to cancel or interrupt the still-live owner.
+   // It may observe an unfinished response, but must leave shared state alone.
+   if(!execution.live)return {state:'pending' as const};
    // A lost durable response is inspected by later recovery, never a network retry.
    const failed=await rpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch'}).catch(()=>null);
    if(failed?.state==='cancelled')return {state:'cancelled' as const};
