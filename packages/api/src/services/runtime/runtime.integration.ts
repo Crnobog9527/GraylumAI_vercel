@@ -701,7 +701,12 @@ it('RUNTIME: real published source revocation excludes derived Session history w
   await expect(rpc('runtime_source',{p_actor_id:actor,p_source:selected})).rejects.toThrow();
   for(const id of ids)expect((await db.query('select runtime_history_available($1) allowed',[id])).rows[0].allowed).toBe(false);
   const next=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'A new independent question',selection:{kind:'ordinary',modelId},sources:[]});
+  // Admission froze no dependency on the disabled source. Re-enabling it
+  // before SDK history read must not expand that original snapshot.
+  await db.query('update artifact_reference_configs set enabled=true where id=$1',[configId]);
   expect((await executor.execute(next.executionId)).state).toBe('completed');expect(requests).toHaveLength(6);expect(JSON.stringify(requests[5])).not.toContain(canary);
+  await db.query('update artifact_reference_configs set enabled=false where id=$1',[configId]);
+  expect((await db.query('select runtime_history_available($1) allowed',[next.executionId])).rows[0].allowed).toBe(true);
   const view=await rpc('runtime_view',{p_actor_id:actor,p_session_id:session.sessionId});expect(JSON.stringify(view)).not.toContain(canary);
   const originals=(await db.query('select item from runtime_session_history where session_id=$1',[session.sessionId])).rows;
   expect(originals).toHaveLength(8);expect(JSON.stringify(originals)).toContain(canary);

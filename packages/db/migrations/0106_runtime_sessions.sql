@@ -255,7 +255,7 @@ BEGIN
   -- Freeze the SDK's initial history for replay; this execution's own batches
   -- are replayed by the host, never injected again as previous-turn history.
   SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM
-   (SELECT item,revision FROM runtime_session_history WHERE session_id=s.id AND revision<=e.history_revision AND NOT internal_control AND runtime_history_available(execution_id) ORDER BY revision DESC LIMIT p_limit) x;
+   (SELECT item,revision FROM runtime_session_history h WHERE session_id=s.id AND revision<=e.history_revision AND NOT internal_control AND EXISTS (SELECT 1 FROM runtime_history_dependencies d WHERE d.execution_id=e.id AND d.dependency_id=h.execution_id) AND runtime_history_available(h.execution_id) ORDER BY revision DESC LIMIT p_limit) x;
   RETURN answer;
  ELSIF p_action='append' THEN
   IF EXISTS(SELECT 1 FROM bill2_runs WHERE id=e.billing_run_id AND (cancel_requested OR closed)) THEN RAISE EXCEPTION 'RUNTIME_SESSION_CLOSED';END IF;
