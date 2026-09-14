@@ -245,7 +245,7 @@ BEGIN
   OR e.payload->'scopeMaterial'->'content'->'work'->>'roundId' IS DISTINCT FROM r.id::text OR NOT(r.steps ? p_step_id) OR e.payload->'scopeMaterial'->'content'->>'brief' IS DISTINCT FROM 'step:'||p_step_id THEN RAISE EXCEPTION 'OPC_RESULT_DENIED';END IF;
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(r.workflow->'steps') st,jsonb_array_elements(st->'information') f WHERE st->>'id'=p_step_id AND (f->>'required')::boolean AND coalesce(e.payload->'scopeMaterial'->'content'->'work'->'steps'->p_step_id->'information'->(f->>'id')->>'status','unknown') NOT IN ('confirmed','deferred')) THEN RAISE EXCEPTION 'OPC_INFORMATION_REQUIRED';END IF;
  -- Only this explicit host-bound step flow projects its requested organizer output.
- -- Generic Session summaries remain private and are not exposed by runtime_view.
+ -- Existing Runtime result-read permissions stay unchanged; private inputs and receipts stay server-side.
  body:=CASE WHEN e.payload->'request'->'organizeAfter'='true'::jsonb AND e.payload ? 'attachedOrganizer' THEN e.result->>'summary' ELSE e.result->>'body' END;
  IF body IS NULL THEN RAISE EXCEPTION 'OPC_RESULT_PENDING';END IF;
  SELECT * INTO link FROM opc_result_links WHERE execution_id=e.id AND round_id=r.id AND step_id=p_step_id;
