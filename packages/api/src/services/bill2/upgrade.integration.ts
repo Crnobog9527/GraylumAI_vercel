@@ -44,7 +44,7 @@ it('UPGRADE: exact old application survives 0105 and a real code rollback preser
   for(const pre of [inFlight,failFlight,abortFlight])expect((await sql.query("select count(*)::int n from billing_history where metadata->>'preDeductId'=$1 and operation_type in ('settle','refund','abort_settle')",[pre.preDeductId])).rows[0].n).toBe(1);
   expect((await request('OK')).body).toContain('"type":"complete"');expect((await request('REFUSED')).body).toContain('"type":"error"');
   await control('/__runtime_candidate');await ready();
-  const fixtureModel=randomUUID();await sql.query("insert into ai_models(id,model_id,name,provider,is_active) values($1,'m','BILL2 fixture','fixture','true')",[fixtureModel]);
+  const fixtureModel=randomUUID();await sql.query("insert into ai_models(id,model_id,name,provider,is_active,input_token_cost,output_token_cost) values($1,'m','BILL2 fixture','fixture','true',0,0)",[fixtureModel]);
   const adapter=localFixtureAdapter('http://127.0.0.1:'+(provider.address() as {port:number}).port),service=authoritativeBilling({admin,actor:async()=>actor,adapter});const draft=await service.createDraft();
   const payload:FrozenRun={contractVersion:'bill2.v1',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},operation:'question',modelId:fixtureModel,input:{private:'RETAIN_ACROSS_ROLLBACK'},sourceHash:hash('input'),rules:{version:'v1',quoteVersion:'v1',creditsPerUsd:'1000',multiplier:'1',fx:{}},limits:{costUsd:'0.02',credits:20,maxPreDeduct:20,maxCalls:2,deadline:new Date(Date.now()+3600000).toISOString()},callPolicy:[{modelId:fixtureModel,provider:'fixture',account:'sandbox',model:'m',protocol:'fixture-cost-v1',upperUsd:'0.01',inputLimit:1000,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported:true}]};
   const prepared=await service.prepareRun(randomUUID(),payload),run=await service.prepareRun(randomUUID(),payload),call=await service.claimCall(run.id,1,{provider:'fixture',account:'sandbox',model:'m',protocol:'fixture-cost-v1',requestHash:hash('hello'),upperUsd:'0.01',inputLimit:1000,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported:true,phase:'reply'});
@@ -60,7 +60,7 @@ it('UPGRADE: exact old application survives 0105 and a real code rollback preser
   const {createServerClient}=createRequire(new URL('../../../../../apps/web/package.json',import.meta.url))('@supabase/ssr');const cookies=new Map<string,string>();
   const sessionClient=createServerClient(api,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{cookies:{getAll:()=>[...cookies].map(([name,value])=>({name,value})),setAll:(items:Array<{name:string;value:string}>)=>items.forEach(c=>cookies.set(c.name,c.value))}});
   const cookieLogin=await sessionClient.auth.signInWithPassword({email,password});expect(cookieLogin.error).toBeNull();
-  async function query(name:string,input:unknown){const response=await fetch(app+'/api/trpc/credits.'+name+'?input='+encodeURIComponent(JSON.stringify({json:input})),{headers:{Cookie:[...cookies].map(([name,value])=>name+'='+value).join('; ')}});const body=await response.json();expect(response.status,JSON.stringify(body)).toBe(200);return body.result.data.json;}
+  async function query(name:string,input:unknown){const response=await fetch(app+'/api/trpc/credits.'+name+'?input='+encodeURIComponent(JSON.stringify(input)),{headers:{Cookie:[...cookies].map(([name,value])=>name+'='+value).join('; ')}});const body=await response.json();expect(response.status,JSON.stringify(body)).toBe(200);return body.result.data;}
   const page=await query('getCreditTransactions',{limit:100});const expected=(await sql.query('select * from credit_transactions where user_id=$1',[actor])).rows;
   expect(page.items.map((r:any)=>r.id).sort()).toEqual(expected.map(r=>r.id).sort());expect(JSON.stringify(page)).not.toContain('RETAIN_ACROSS_ROLLBACK');
   expect(page.items.filter((r:any)=>r.bill2_run_id===run.id).every((r:any)=>r.counts_as_spend===false)).toBe(true);
@@ -68,7 +68,23 @@ it('UPGRADE: exact old application survives 0105 and a real code rollback preser
   const ids:string[]=[];let cursor;for(let n=0;n<100;n++){const p=await query('getCreditTransactions',{limit:1,...(cursor?{cursor}:{})});ids.push(...p.items.map((r:any)=>r.id));if(!p.hasNextPage)break;cursor=p.nextCursor;}
   expect(ids.sort()).toEqual(expected.map(r=>r.id).sort());
   const summary=await query('getCreditsSummary',{period:'all'});expect(summary.totalSpent).toBe(expected.filter(r=>r.counts_as_spend).reduce((n,r)=>n-r.amount,0));
+  // Admin read requires 0103's actual diagnostic grants, restored after the narrower old-finalizer checks.
+  await control('/__finance_read_context');await new Promise(r=>setTimeout(r,500));
+  async function finance(expectedStatus:number){const response=await fetch(app+'/api/trpc/admin.getFinanceStats',{headers:{Cookie:[...cookies].map(([name,value])=>name+'='+value).join('; ')}});const body=await response.json();expect(response.status,JSON.stringify(body)).toBe(expectedStatus);return body;}
+  await finance(403); // A normal account must not gain cross-account finance access.
+  await sql.query("update profiles set role='admin' where id=$1",[actor]);
+  const unknownUsage=()=>sql.query("select cached_tokens,total_cost_usd from token_stats where bill2_run_id=$1",[paid.id]);
+  // Untouched old source must demonstrably fail before the supported one-line rollback patch.
+  const rawOld=await finance(500);expect(rawOld.error.data.code).toBe('INTERNAL_SERVER_ERROR');observations.push({label:'unpatched-old-finance-reader',status:500});
+  await control('/__legacy_reader_compat');await ready();
+  const oldFinance=(await finance(200)).result.data;expect(oldFinance.financeOverview.creditsConsumed).toBe(expected.filter(r=>r.counts_as_spend).reduce((n,r)=>n-r.amount,0));
+  const usageBefore=await unknownUsage();expect(usageBefore.rows).toHaveLength(1);expect(usageBefore.rows[0].cached_tokens).toBeNull();expect(Number(usageBefore.rows[0].total_cost_usd)).toBe(0.003);
+  expect(await retained()).toEqual(saved);expect(calls).toBe(2);expect((await request('OK')).body).toContain('"type":"complete"');
+  const patchedRefund=await billing.preDeduct(10,{requestId:randomUUID()});await billing.refund(patchedRefund.preDeductId,'confirmed unsent after reader patch');expect(await retained()).toEqual(saved);
+  observations.push({label:'supported-old-ref-plus-reader-patch-finance',status:200});
   await control('/__runtime_candidate');await ready();
+  const finalSpent=(await sql.query('select sum(-amount)::int n from credit_transactions where user_id=$1 and counts_as_spend',[actor])).rows[0].n;expect((await finance(200)).result.data.financeOverview.creditsConsumed).toBe(finalSpent);
+  expect((await unknownUsage()).rows).toEqual(usageBefore.rows);
   expect(await service.readPrivateInput(run.id)).toMatchObject({input:payload.input});raw=JSON.stringify({id:'rollback-'+call.id,model:'m',final:true,cost:0.007,currency:'USD',coverage:'request_total'});await service.closeRun(run.id,'delivered',{kind:'usable_result',evidenceRef:'restored',evidenceHash:hash('result'),body:'retained result'});await service.recoverRun(run.id);await service.recoverRun(run.id);expect((await service.readRun(run.id)).chargedCredits).toBe(7);expect((await service.readRun(prepared.id)).state).toBe('prepared');expect(calls).toBe(2);await snapshot('same-identity-recovered-after-forward-return');
   writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'upgrade-compatibility.json'),JSON.stringify({ref,inFlight:inFlight.preDeductId,newRun:run.id,newCall:call.id,observations},null,2));
  }finally{await sql.end();provider.closeAllConnections();await new Promise<void>(r=>provider.close(()=>r()));}

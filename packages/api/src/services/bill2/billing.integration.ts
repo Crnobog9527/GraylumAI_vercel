@@ -17,8 +17,8 @@ const db=new pg.Client({connectionString});
 const hash=(v:string)=>createHash('sha256').update(v).digest('hex');
 const modelId=randomUUID();const events:unknown[]=[];
 const admin=createClient(process.env.V3_LOCAL_REST!,process.env.V3_LOCAL_SERVICE_JWT!,{auth:{persistSession:false}});
-let providerCount=0,lookupCount=0,raw='',httpStatus=200,httpHang=false;let endpoint='';
-const server=createServer(async(req,res)=>{if(req.url?.startsWith('/receipt/'))lookupCount++;else providerCount++;for await(const _ of req){/* local fixture request */}res.statusCode=httpStatus;res.setHeader('content-type','application/json');if(httpHang)res.write(raw);else res.end(raw);});
+let providerCount=0,lookupCount=0,raw='',httpStatus=200,httpHang=false,httpDisconnect=false;let beforeHttpReply:(()=>Promise<void>)|undefined;let endpoint='';
+const server=createServer(async(req,res)=>{if(req.url?.startsWith('/receipt/'))lookupCount++;else providerCount++;for await(const _ of req){/* local fixture request */}if(beforeHttpReply)await beforeHttpReply();if(httpDisconnect){res.destroy();return;}res.statusCode=httpStatus;res.setHeader('content-type','application/json');if(httpHang)res.write(raw);else res.end(raw);});
 async function sqlRpc(name:string,args:unknown[],client=db) { const result=await client.query(`select public.${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) result`,args);return result.rows[0].result; }
 async function user(credits=100) {const id=randomUUID();await db.query('insert into profiles(id,credits) values($1,$2)',[id,credits]);
  await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)",[id,credits,'opening_grant:'+id]);return id;}
@@ -399,4 +399,11 @@ it('BILL2: body timeout retains the bounded prefix but no guessed identity or fi
  const f=await fixture(),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall()),before=providerCount;
  raw='{"id":"partial-id",';httpStatus=500;httpHang=true;const started=Date.now();try{await s.dispatchOnce(c.id,'hello');}finally{httpStatus=200;httpHang=false;}
  const e=(await db.query('select payload from bill2_receipts where call_id=$1',[c.id])).rows[0].payload;expect(e).toMatchObject({rawBody:raw,complete:false,transportIssue:'body_interrupted',providerId:null,cost:null,final:false});expect(Date.now()-started).toBeLessThan(8000);expect(providerCount-before).toBe(1);expect(await conservation(f.actor)).toMatchObject({credits:80,terminals:0});
+});
+
+it('BILL2: a later network failure cannot invalidate an earlier authoritative receipt',async()=>{
+ const f=await fixture(),s=authoritativeBilling({admin,actor:async()=>f.actor,adapter:localFixtureAdapter(endpoint)}),r=await s.prepareRun(f.request,f.payload),c=await s.claimCall(r.id,1,frozenCall()),before=providerCount;
+ beforeHttpReply=async()=>{await receipt(f.actor,r.id,c.id,'0.007');};httpDisconnect=true;
+ try{await s.dispatchOnce(c.id,'hello');}finally{beforeHttpReply=undefined;httpDisconnect=false;}
+ expect((await s.readRun(r.id)).conflict).toBe(false);await s.closeRun(r.id,'delivered',result());await s.finalizeRun(r.id);expect(await conservation(f.actor)).toMatchObject({credits:93,terminals:1});expect(providerCount-before).toBe(1);
 });

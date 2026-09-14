@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Disposable exact-ref runtime. Candidate code supplies only tests and local transport instrumentation.
+import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, cpSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -31,4 +32,16 @@ export function instrumentLegacy(root, apiUrl) {
 export function copyLegacyTests(candidate,legacy) {
  // Test-only files; the actual services, routes, schema TS and dependency lock remain the old version.
  for(const path of ['packages/api/src/services/__tests__','packages/api/src/routers/ordinaryChatReliability.integration.ts','packages/api/vitest.integration.config.ts']) cpSync(resolve(candidate,path),resolve(legacy,path),{recursive:true});
+}
+
+// The supported rollback bundle retains this sole reader compatibility change.
+// Apply only after proving that the untouched archived reader rejects the new NULL row.
+export function patchLegacyFinanceReader(root, evidenceDirectory) {
+ const path='packages/api/src/routers/admin.ts', file=resolve(root,path), before=readFileSync(file,'utf8');
+ const from='  cached_tokens: z.number().finite(),', to='  cached_tokens: z.number().finite().nullable(),';
+ if(before.split(from).length!==2)throw new Error('legacy reader patch mismatch');
+ const patch=`--- a/${path}\n+++ b/${path}\n@@ -80 +80 @@\n-${from}\n+${to}\n`;
+ const sha256=createHash('sha256').update(patch).digest('hex');
+ writeFileSync(resolve(evidenceDirectory,'legacy-reader-compat.patch'),patch);
+ writeFileSync(file,before.replace(from,to));console.log('LEGACY_READER_COMPAT',JSON.stringify({path,sha256}));
 }

@@ -77,7 +77,7 @@ const adminFinanceTokenStatRowSchema = z.object({
   model_used: z.string().min(1),
   total_credits: z.number().finite(),
   total_cost_usd: adminFiniteNumericValueSchema,
-  cached_tokens: z.number().finite(),
+  cached_tokens: z.number().finite().nullable(),
   created_at: adminDateStringSchema,
 }).passthrough();
 const adminFinancePaymentOrderRowSchema = z.object({

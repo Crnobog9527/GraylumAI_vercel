@@ -95,7 +95,7 @@ export function authoritativeBilling(deps: { admin: BillingRpc; actor: () => Pro
       const identity: CallIdentity = capability.frozen;
       let evidence;
       try { evidence = transportEvidence(await deps.adapter.dispatch({ input: body, maxOutputTokens: capability.frozen.outputLimit, automaticRetry: false, hiddenTools: false }), identity, 'response'); }
-      catch { evidence = unknownEvidence(identity); }
+      catch { evidence = { ...unknownEvidence(identity), evidenceKind: 'transport_observation' }; }
       try { await recordReceipt(capability.runId, callId, evidence); }
       catch { return { dispatched: true, pendingReceipt: { runId: capability.runId, callId, evidence } }; }
       return { dispatched: true };

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Real local Auth + Next HTTP + PostgREST + disposable SQL, with a credential-free source copy.
-import { legacyRuntime, instrumentLegacy, copyLegacyTests } from './legacy-runtime.mjs';
+import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID, createHmac, createHash } from "node:crypto";
@@ -264,6 +264,7 @@ try {
 
 
   if(upgradeMode){
+    sql("CREATE TABLE credit_packages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL,price integer NOT NULL,credits_amount integer NOT NULL,active text NOT NULL DEFAULT 'true'); REVOKE ALL ON credit_packages FROM PUBLIC,anon,authenticated; GRANT SELECT ON credit_packages TO service_role; ALTER TABLE payment_orders ADD COLUMN currency text, ADD COLUMN payment_status text;");
     const rls=readFileSync(resolve(root,'packages/db/migrations/0002_enable_rls_all_tables.sql'),'utf8');
     const own=rls.indexOf('CREATE POLICY "credit_transactions_select_own"');if(own<0)throw new Error('missing canonical ledger read policy');
     sql('ALTER TABLE credit_transactions ENABLE ROW LEVEL SECURITY; GRANT SELECT ON credit_transactions TO authenticated');
@@ -357,10 +358,11 @@ try {
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
     if(chatCompatibility && await chatCompatibility(req,res))return;
-    if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy'].includes(req.url)){
+    if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
       try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');sql("NOTIFY pgrst, 'reload schema'");}
-      else await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
+      else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
+      else {if(req.url==='/__legacy_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory);await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }
     if(req.url==='/__slice_hold'||req.url==='/__restart_app'){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}

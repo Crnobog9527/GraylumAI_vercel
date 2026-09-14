@@ -1129,6 +1129,13 @@ describe('adminRouter finance stats runtime billing summary', () => {
     },
   );
 
+  it('accepts unknown BILL2 cache usage without losing recorded cost or fabricating usage', async () => {
+    const rows = [{ model_used: 'model-a', total_credits: 3, total_cost_usd: '0.003', cached_tokens: null, created_at: '2026-03-29T08:00:00.000Z' }];
+    const result = await createAdminCaller(createFinanceStatsSupabase({ token_stats: rows })).getFinanceStats();
+    expect(result.modelStats).toEqual(expect.arrayContaining([expect.objectContaining({ costUsd: 0.003 })]));
+    expect(rows[0].cached_tokens).toBeNull();
+  });
+
   it('accepts genuinely empty datasets and keeps missing-setting fallbacks', async () => {
     const emptyOverrides = Object.fromEntries(
       financeTables.map((table) => [table, []]),

@@ -66,7 +66,7 @@ export function localFixtureAdapter(endpoint: string) {
       finally { await reader.cancel().catch(() => {}); }
     } else { complete = true; }
     const retained = Buffer.concat(chunks); let rawBody: string;
-    try { rawBody = new TextDecoder('utf-8', { fatal: true }).decode(retained); if (rawBody.includes('\0')) throw new Error('invalid_text'); }
+    try { rawBody = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(retained); if (rawBody.includes('\0')) throw new Error('invalid_text'); }
     catch { rawBody = retained.toString('utf8').replaceAll('\0', '\uFFFD'); complete = false; transportIssue ??= 'invalid_text'; }
     return { rawBody, rawBodyBase64: retained.toString('base64'), sourceHash: createHash('sha256').update(retained).digest('hex'), httpStatus: response.status, complete, transportIssue };
   }
