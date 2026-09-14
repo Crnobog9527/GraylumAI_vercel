@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS public.runtime_scope_material (
 );
 CREATE OR REPLACE FUNCTION public.runtime_work_projection(p_actor_id uuid,p_session_id uuid,p_round_id uuid) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE s runtime_sessions;r artifact_rounds;v jsonb;source jsonb;
+DECLARE s runtime_sessions;r artifact_rounds;v jsonb;source jsonb;ref jsonb;
 BEGIN
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
  IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
@@ -70,9 +70,9 @@ BEGIN
  SELECT * INTO r FROM artifact_rounds WHERE id=p_round_id AND project_id=(s.scope->>'workItemId')::uuid;
  IF r.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_WORK_ROUND_DENIED';END IF;
  v:=artifact_query(p_actor_id,'read',r.project_id,r.id);
- IF EXISTS(SELECT 1 FROM artifact_work_references WHERE project_id=r.project_id AND round_id=r.id) THEN
-  source:=artifact_work_source(p_actor_id,r.project_id,r.id);
- END IF;
+ SELECT jsonb_build_object('projectId',project_id,'roundId',round_id,'sourceVersionId',source_version_id,'hash',source_hash) INTO ref
+ FROM artifact_work_references WHERE project_id=r.project_id AND round_id=r.id;
+ IF ref IS NOT NULL THEN source:=runtime_source(p_actor_id,ref);END IF;
  -- No candidate/generation history or private workflow instructions are copied.
  RETURN jsonb_build_object('projectId',r.project_id,'roundId',r.id,'revisionId',r.revision_id,
   'packageHash',r.package_hash,'steps',v->'steps','source',source);
@@ -130,6 +130,15 @@ DECLARE v jsonb;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF jsonb_typeof(p_source) IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'RUNTIME_SOURCE_DENIED';END IF;
+ IF NOT EXISTS(SELECT 1 FROM artifact_projects WHERE id=(p_source->>'projectId')::uuid AND actor_id=p_actor_id) THEN RAISE EXCEPTION 'RUNTIME_SOURCE_DENIED';END IF;
+ PERFORM cfg.id FROM artifact_reference_configs cfg JOIN artifact_work_references ref ON ref.config_id=cfg.id
+ WHERE ref.project_id=(p_source->>'projectId')::uuid AND ref.round_id=(p_source->>'roundId')::uuid FOR SHARE OF cfg;
+ PERFORM src.id FROM artifact_projects src JOIN artifact_versions ver ON ver.project_id=src.id JOIN artifact_work_references ref ON ref.source_version_id=ver.id
+ WHERE ref.project_id=(p_source->>'projectId')::uuid AND ref.round_id=(p_source->>'roundId')::uuid FOR SHARE OF src;
+ PERFORM ac.actor_id FROM artifact_accounts ac JOIN artifact_projects src ON src.actor_id=ac.actor_id AND src.module_id=ac.module_id AND src.skill_id=ac.skill_id AND src.account=ac.account
+ JOIN artifact_versions ver ON ver.project_id=src.id JOIN artifact_work_references ref ON ref.source_version_id=ver.id
+ WHERE ref.project_id=(p_source->>'projectId')::uuid AND ref.round_id=(p_source->>'roundId')::uuid FOR KEY SHARE OF ac;
+ PERFORM id FROM artifact_projects WHERE id=(p_source->>'projectId')::uuid AND actor_id=p_actor_id FOR SHARE;
  v:=artifact_work_source(p_actor_id,(p_source->>'projectId')::uuid,(p_source->>'roundId')::uuid);
  IF v IS NULL OR v='null'::jsonb OR v->>'sourceVersionId' IS DISTINCT FROM p_source->>'sourceVersionId'
  OR v->>'hash' IS DISTINCT FROM p_source->>'hash' THEN RAISE EXCEPTION 'RUNTIME_SOURCE_STALE';END IF;
@@ -148,17 +157,14 @@ BEGIN
 END $$;
 CREATE OR REPLACE FUNCTION public.runtime_history_available(p_execution_id uuid) RETURNS boolean
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE e runtime_executions;b bill2_runs;dependency record;
+DECLARE e runtime_executions;b bill2_runs;
 BEGIN
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id;
  SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id;
  IF e.id IS NULL OR e.unavailable_reason IS NOT NULL THEN RETURN false;END IF;
  PERFORM runtime_billing_allowed(e.actor_id,b.payload,b.id);
  PERFORM runtime_context_allowed(e.actor_id,e.payload);
- FOR dependency IN SELECT r.id run_id,r.payload,x.payload runtime_payload FROM runtime_history_dependencies d JOIN runtime_executions x ON x.id=d.dependency_id JOIN bill2_runs r ON r.id=x.billing_run_id WHERE d.execution_id=e.id LOOP
-  PERFORM runtime_billing_allowed(e.actor_id,dependency.payload,dependency.run_id);
-  PERFORM runtime_context_allowed(e.actor_id,dependency.runtime_payload);
- END LOOP;
+
  RETURN true;
 EXCEPTION WHEN OTHERS THEN RETURN false; -- Unavailable source is excluded from model history, never erased.
 END $$;
@@ -447,7 +453,7 @@ BEGIN
  RETURN jsonb_build_object('callId',c.id,'state',c.state,'rawBody',raw);
 END $$;
 
-CREATE OR REPLACE FUNCTION public.runtime_billing_allowed(a uuid,p jsonb,p_run_id uuid) RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+CREATE OR REPLACE FUNCTION public.runtime_direct_billing_allowed(a uuid,p jsonb,p_run_id uuid) RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE v jsonb;m uuid;k uuid;rev uuid; policy jsonb; entry jsonb; chosen jsonb;matched jsonb;
 BEGIN
  PERFORM bill2_actor(a);
@@ -514,6 +520,32 @@ END $$;
 
 -- Unbound BILL2 admission always checks the full frozen policy. Only a server
 -- path holding the real run identity may resolve a Runtime choice.
+-- Final claim/dispatch/private-input authority covers the frozen history lineage,
+-- not just direct sources. UNION visits each ancestor once, even for shared
+-- dependencies; this avoids recursively revalidating the same dense graph.
+CREATE OR REPLACE FUNCTION public.runtime_billing_allowed(a uuid,p jsonb,p_run_id uuid) RETURNS void
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE e runtime_executions;dependency record;
+BEGIN
+ PERFORM runtime_direct_billing_allowed(a,p,p_run_id);
+ SELECT * INTO e FROM runtime_executions WHERE billing_run_id=p_run_id AND actor_id=a;
+ IF e.id IS NULL THEN RETURN;END IF;
+ IF e.unavailable_reason IS NOT NULL THEN RAISE EXCEPTION 'RUNTIME_HISTORY_UNAVAILABLE';END IF;
+ PERFORM runtime_context_allowed(a,e.payload);
+ FOR dependency IN
+  WITH RECURSIVE lineage(id) AS (
+   SELECT dependency_id FROM runtime_history_dependencies WHERE execution_id=e.id
+   UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
+  )
+  SELECT x.actor_id,x.unavailable_reason,x.payload runtime_payload,r.id run_id,r.payload
+  FROM lineage l JOIN runtime_executions x ON x.id=l.id JOIN bill2_runs r ON r.id=x.billing_run_id ORDER BY x.id
+ LOOP
+  IF dependency.actor_id<>a OR dependency.unavailable_reason IS NOT NULL THEN RAISE EXCEPTION 'RUNTIME_HISTORY_UNAVAILABLE';END IF;
+  PERFORM runtime_direct_billing_allowed(a,dependency.payload,dependency.run_id);
+  PERFORM runtime_context_allowed(a,dependency.runtime_payload);
+ END LOOP;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.bill2_execution_allowed(a uuid,p jsonb) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 BEGIN PERFORM runtime_billing_allowed(a,p,NULL);END $$;

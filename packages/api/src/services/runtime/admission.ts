@@ -112,7 +112,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(attachedOrganizer)assertSeparateSummaryModel(candidate.model,attachedOrganizer.model);
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
-   return query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});
+   try{return await query('runtime_admit',{p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});}
+   catch(error){
+    // A competing identical request may have frozen its deadline/config first,
+    // or the commit response may have been lost. Read its immutable identity;
+    // never retry admission/reservation or replace the winner's frozen context.
+    const committed=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:input});
+    if(committed)return committed;
+    throw error;
+   }
   },
  };
 }

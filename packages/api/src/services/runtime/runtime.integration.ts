@@ -186,6 +186,36 @@ it.each(['before_dispatch','before_tool'] as const)('RUNTIME: concurrent replay 
  }finally{release();await original.catch(()=>{});await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
+it('RUNTIME: simultaneous authenticated prepare returns the first immutable run despite regenerated deadlines',async()=>{
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query('insert into profiles(id,email,credits) values($1,$2,100)',[actor,email]);
+ await db.query("insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",[actor,'opening:'+actor]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ const policy={account:'sandbox',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:100,inputBytes:10000,historyItems:20};
+ const service=runtimeAdmissionService(user,admin,policy),session=await service.start(randomUUID(),{kind:'positioning_draft'});
+ let empty=0,bothReady!:()=>void,firstReady!:()=>void;const both=new Promise<void>(resolve=>{bothReady=resolve;}),first=new Promise<void>(resolve=>{firstReady=resolve;}),deadlines:string[]=[];
+ const racing=Object.create(admin) as typeof admin;
+ racing.rpc=(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_admit'){deadlines.push((args.p_billing as {limits:{deadline:string}}).limits.deadline);firstReady();}
+  const result=await admin.rpc(name,args);
+  if(name==='runtime_admission_replay'&&!result.error&&!result.data){
+   const n=++empty;if(n===2)bothReady();await both;
+   if(n===2){await first;await new Promise(resolve=>setTimeout(resolve,20));}
+  }
+  return result;
+ }) as unknown as typeof admin.rpc;
+ const request={sessionId:session.sessionId,requestId:randomUUID(),input:'Same public request',selection:{kind:'ordinary',modelId}};
+ const admission=runtimeAdmissionService(user,racing,policy);
+ const results=await Promise.all([admission.prepare(request),admission.prepare(request)]);
+ expect(results[0]).toEqual(results[1]);expect(empty).toBe(2);expect(new Set(deadlines).size).toBe(2);
+ await expect(admission.prepare({...request,input:'Different request'})).rejects.toThrow();
+ const run=(await db.query('select id,request_id,session_ref from bill2_runs where actor_id=$1',[actor])).rows;
+ expect(run).toEqual([{id:results[0].runId,request_id:request.requestId,session_ref:session.sessionId}]);
+ expect((await db.query('select credits,(select sum(amount)::int from credit_transactions where user_id=$1) ledger from profiles where id=$1',[actor])).rows[0]).toEqual({credits:80,ledger:80});
+});
+
 it('RUNTIME: actual Auth admission resolves configured ordinary model and rejects anonymous/foreign/missing models',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
@@ -649,7 +679,22 @@ it('RUNTIME: real published source revocation excludes derived Session history w
   const editedRun=await admission.prepare({sessionId:workSession.sessionId,requestId:randomUUID(),input:'Use edited work material',selection:{kind:'ordinary',modelId}});
   expect((await executor.execute(editedRun.executionId)).state).toBe('completed');expect(requests).toHaveLength(5);expect(JSON.stringify(requests[4])).toContain(edited);
   expect((await executor.execute(workRun.executionId)).state).toBe('completed');expect(requests).toHaveLength(5);
+  const raced=await admission.prepare({sessionId:session.sessionId,requestId:randomUUID(),input:'Use my existing history',selection:{kind:'ordinary',modelId},sources:[]});
+  let reached!:()=>void,release!:()=>void,readPrivateHistory=false;
+  const ready=new Promise<void>(resolve=>{reached=resolve;}),hold=new Promise<void>(resolve=>{release=resolve;});
+  const guarded={rpc:async(name:string,args:Record<string,unknown>)=>{
+   if(name==='bill2_dispatch'){reached();await hold;}
+   const result=await admin.rpc(name,args);
+   if(name==='runtime_session_items'&&args.p_action==='read'&&JSON.stringify(result.data).includes(canary))readPrivateHistory=true;
+   return result;
+  }};
+  const racing=runtimeExecutor({database:guarded,actor:async()=>actor,endpoint:'http://127.0.0.1:'+address.port}).execute(raced.executionId);
+  await ready;expect(readPrivateHistory).toBe(true);
   await db.query('update artifact_reference_configs set enabled=false where id=$1',[configId]);
+  release();expect((await racing).state).toBe('pending');expect(requests).toHaveLength(5);
+  expect((await db.query('select state,provider_id from bill2_calls where run_id=$1',[raced.runId])).rows).toEqual([{state:'prepared',provider_id:null}]);
+  expect((await executor.recoverFinancial(raced.executionId)).state).toBe('cancelled');expect(requests).toHaveLength(5);
+  expect((await db.query('select count(*)::int n from runtime_session_history where execution_id=$1',[raced.executionId])).rows[0].n).toBe(0);
   for(const run of [workRun,editedRun])expect((await db.query('select runtime_history_available($1) allowed',[run.executionId])).rows[0].allowed).toBe(false);
   await expect(executor.execute(workRun.executionId)).rejects.toThrow();expect(requests).toHaveLength(5);
 
