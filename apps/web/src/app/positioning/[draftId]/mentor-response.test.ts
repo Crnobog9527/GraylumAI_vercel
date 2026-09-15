@@ -46,3 +46,11 @@ it("uses only the requested existing step's fields for a proposed revision", () 
   expect(readWorkflowMentorResponse(raw,"second",fields)).toEqual({message:"调整目标",targetStepId:"first",informationPatch:{goal:{value:"new goal",status:"provisional",nature:"decision"}}});
   expect(readWorkflowMentorResponse(raw.replace('"first"','"__proto__"'),"second",fields).targetStepId).toBe("second");
 });
+
+it("does not redirect an explicitly invalid target into a same-named current field", () => {
+  for (const targetStepId of ["missing", "__proto__", null, 3]) {
+    const result=readWorkflowMentorResponse(JSON.stringify({message:"suggestion",targetStepId,informationPatch:{goal:{value:"must not be applied",nature:"decision"}}}),"first",{first:{schema:[{id:"goal"}]}});
+    expect(result.message).toBe("suggestion");
+    expect(result.informationPatch).toEqual({});
+  }
+});

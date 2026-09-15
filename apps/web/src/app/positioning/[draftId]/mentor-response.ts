@@ -78,12 +78,17 @@ export function readWorkflowMentorResponse(
   fields: Record<string, { schema: Array<{ id: string }> }>,
 ) {
   let targetStepId = originalStepId;
+  let invalidTarget = false;
   try {
-    const target = JSON.parse(raw ?? "null")?.targetStepId;
-    if (typeof target === "string" && Object.hasOwn(fields, target)) targetStepId = target;
+    const parsed = JSON.parse(raw ?? "null");
+    if (parsed && typeof parsed === "object" && Object.hasOwn(parsed, "targetStepId")) {
+      const target = parsed.targetStepId;
+      if (typeof target === "string" && Object.hasOwn(fields, target)) targetStepId = target;
+      else invalidTarget = true;
+    }
   } catch { /* Legacy plain text remains readable. */ }
   return {
-    ...readMentorResponse(raw, new Set((fields[targetStepId]?.schema ?? []).map(f => f.id))),
+    ...readMentorResponse(raw, new Set(invalidTarget ? [] : (fields[targetStepId]?.schema ?? []).map(f => f.id))),
     targetStepId,
   };
 }

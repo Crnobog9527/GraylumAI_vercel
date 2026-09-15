@@ -134,3 +134,5 @@ Owner 要求保留全程同一对话，切步立即引导、回看已完成步�
 - `pr422-flow-api-unit.log`：82 文件 / 1,879 单测通过，退出 0；`pr422-flow-unit.log`：3 项受控响应投影测试通过，退出 0；lint、TypeScript 通过。首次本地 build 缺构建所需非凭证环境变量，退出 1；按仓库 CI 的 local.invalid/非凭证值重新运行 `pr422-flow-build-ci-env.log`，退出 0。
 - 原 Owner 体验环境原址保留，未重建草稿或数据库；`pr422-flow-preview.png` 是更新后的真实本地浏览器截图，仅证明界面与已有结果读取。Staging 真实接入准备与费用/操作边界见 [真实对话准备方案](v3-workbench-staging-dialogue-plan.md)。
 - 聚焦第一轮 `pr422-flow-focused.log` 退出 1：新回复尚未投影时测试命中了旧建议入口。现每步骤仅保留最新可采用建议（聊天原文不删除），并等待本次具体修改内容后操作；对应复验 `pr422-flow-focused2.log`，最终状态在候选 PR 记录。
+- 独立审查 P2：显式无效 targetStepId 不得回退后把同名字段写入当前步。`pr422-invalid-target-red.log` 对 95d07830 原函数运行反例，退出 1；修复后 `pr422-flow-projection-final.log` 4 项通过，退出 0，覆盖缺失目标、原型名、null、数字目标；仅目标字段省略时沿用原步骤。
+- 聚焦第2/3轮仍为失败，分别在自动保存前读取 null、历史尚未加载前采集对比基准；保留 `pr422-flow-focused2.log`、`pr422-flow-focused3.log`。现等待实际持久状态/第三条历史出现后再保留原业务断言，最终运行 `pr422-flow-focused4.log` 的真实退出和结果由精确候选 PR 记录，不拼接为完整套件 PASS。

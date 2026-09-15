@@ -1808,6 +1808,9 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.reload();
     await expect.poll(() => nextButton.isEnabled()).toBe(true);
     const sharedLog = page.getByRole("log", { name: "完整导师消息" });
+    // The step response and Session history are separate authenticated reads.
+    // Wait for the history itself before comparing it across navigation.
+    await expect.poll(()=>sharedLog.textContent(),{timeout:15000}).toContain("我担心自己没有可以教的经验");
     const conversationBeforeStepChange = await sharedLog.textContent();
     await page
       .getByRole("textbox", { name: "给导师的回复", exact: true })
@@ -1839,7 +1842,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       )
       .toBe("我有两个参考账号");
     await expect.poll(async () =>
-      (await f.service.read(draftId)).information["step-1"].values.goal.status,
+      (await f.service.read(draftId)).information["step-1"].values?.goal?.status,
+      {timeout:15000},
     ).toBe("provisional");
     const afterSecondChat = await f.service.read(draftId);
     const secondTurn = afterSecondChat.turns.find(
