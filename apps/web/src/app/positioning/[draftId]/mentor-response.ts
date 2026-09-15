@@ -70,3 +70,20 @@ export function readMentorResponse(
     return { message: raw, informationPatch: {} };
   }
 }
+
+/** The model can suggest a target, never invent a step or authorize a write. */
+export function readWorkflowMentorResponse(
+  raw: string | null | undefined,
+  originalStepId: string,
+  fields: Record<string, { schema: Array<{ id: string }> }>,
+) {
+  let targetStepId = originalStepId;
+  try {
+    const target = JSON.parse(raw ?? "null")?.targetStepId;
+    if (typeof target === "string" && Object.hasOwn(fields, target)) targetStepId = target;
+  } catch { /* Legacy plain text remains readable. */ }
+  return {
+    ...readMentorResponse(raw, new Set((fields[targetStepId]?.schema ?? []).map(f => f.id))),
+    targetStepId,
+  };
+}

@@ -119,3 +119,17 @@ The Runtime contract already stored every mentor turn in the same Session with a
 The first two focused runs correctly failed because the synthetic loopback fixture still recognized only the former field-allowlist wording and therefore returned an empty patch; extending the poll did not hide that failure. The fixture now accepts both bounded phrasings, and the same focused case passed **1 / 174 unselected**, process exit 0. Final complete OPC isolation with the retained private publication input passed **20 / 155 unselected**, process exit 0. It applied 0107 twice and covered 3/4/6/8-step workflows, the original 14-file six-step method and 23 profile fields, the shared conversation and frozen cross-step dependencies, browser refresh/re-login, authorization, recovery, autosave, plan adoption and handoff. The private-canary scan passed and real provider calls remained zero. API unit tests passed **82 files / 1,879 tests**; repository lint, TypeScript, diff/secret checks and the 45-page production build passed. Exact-head CI and fresh complete-candidate independent review are recorded separately on the PR.
 
 The first independent complete-candidate review of `f7f9baa095a9b55986cc76f5deb69078bdc82d7f` found one P2: a definite version/review conflict during step confirmation left its stale recovery envelope in browser storage forever. Confirmation now removes only that step's envelope after a named, definite server rollback and refreshes authoritative state; timeouts, unavailable responses and lost successful responses retain their original identities. The browser regression advances the information version outside the page, verifies the stale confirmation is rejected and removed, then combines that path with a lost successful save response and recovers exactly once. Its first combined run failed because the assertion reused the still-visible prior error and reloaded while the second request was active; it is retained as a failed run. Waiting for that prior error to clear produced **1 / 174 unselected**, process exit 0, and the subsequent complete OPC run again passed **20 / 155 unselected**, process exit 0. A fresh review is required for the repaired head.
+
+## 2026-09-15 连续引导与独立周计划修正
+
+Owner 要求保留全程同一对话，切步立即引导、回看已完成步骤不重做；聊天中可提出旧步骤修改，确认最终定位后进入独立周计划页。
+
+- `/positioning/[draftId]` 的步骤引导随当前表单即时更新，显示缺项或修改提示；它是确定性的步骤提示，不伪装成模型新回复。浏览步骤不派发、不追加伪造对话、不扣费。每次实际发送仍冻结当前步骤、服务端步骤状态与完整允许字段表，并使用原 Runtime Session 的有界历史。
+- 模型可提出另一合法步骤的 `targetStepId`，结果只按该步骤字段白名单投影。已有值先保持不变，Owner 显式采用后才沿现有版本化 information RPC 保存；已确认结果及受影响后续成果按既有规则失效待核对。未知保存响应保留原采用请求；明确版本拒绝后可重新核对。模型不能直接确认、发布或承接。
+- 最终定位确认成功后导航 `/positioning/[draftId]/plan`。新页面复用原草稿/计划/承接接口，展示定位摘要及平台、具体账号、选题、日期和简报表格；可返回原导师对话。定位尚未确认时不可从该路由绕过发布要求。
+- 修复前回归：`/private/tmp/pr422-step-guidance-red.log` 在真实 PostgreSQL/Auth/PostgREST/Next 浏览器中失败，旧切步提示未出现新阶段引导，child exit 1。此日志是失败证据。
+- 本轮真实模型理解、跨步骤意图识别与归纳质量仍 NOT_RUN；合成响应只验证投影、明确采用、保存恢复和唯一调用身份，不代表模型能力验收。
+
+- 本轮完整运行 `pr422-flow-full.log`：19 通过、1 失败、155 未选择，退出 1，不能称为套件 PASS。失败位于连续对话浏览器首次进入草稿后的表单加载等待，尚未到新增断言；已改为等待真实表单可见，保留原业务断言，聚焦复验见 `pr422-flow-focused.log`，最终结果记录在精确候选 PR 评论。
+- `pr422-flow-api-unit.log`：82 文件 / 1,879 单测通过，退出 0；`pr422-flow-unit.log`：3 项受控响应投影测试通过，退出 0；lint、TypeScript 通过。首次本地 build 缺构建所需非凭证环境变量，退出 1；按仓库 CI 的 local.invalid/非凭证值重新运行 `pr422-flow-build-ci-env.log`，退出 0。
+- 原 Owner 体验环境原址保留，未重建草稿或数据库；`pr422-flow-preview.png` 是更新后的真实本地浏览器截图，仅证明界面与已有结果读取。Staging 真实接入准备与费用/操作边界见 [真实对话准备方案](v3-workbench-staging-dialogue-plan.md)。

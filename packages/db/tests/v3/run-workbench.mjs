@@ -391,7 +391,8 @@ try {
               const fieldIds=match ? JSON.parse(match[1]) : [];
               const informationPatch=fieldIds[0] && typeof input.userRequest==='string' && input.userRequest.trim()
                 ? {[fieldIds[0]]:{value:input.userRequest.trim().slice(0,400),status:'provisional',nature:'hypothesis'}} : {};
-              content=JSON.stringify({message:'【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+' 此示例只验证持续对话和表单联动。',informationPatch});
+              if(input.userRequest==='模拟：修改第一步目标') { informationPatch.goal={value:'改为帮助独立开发者',status:'provisional',nature:'decision'}; }
+              content=JSON.stringify({...(input.userRequest==='模拟：修改第一步目标'?{targetStepId:'step-0'}:{}),message:'【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+' 此示例只验证持续对话和表单联动。',informationPatch});
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){

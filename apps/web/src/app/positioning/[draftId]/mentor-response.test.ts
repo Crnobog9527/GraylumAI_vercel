@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { readMentorResponse } from "./mentor-response";
+import { readMentorResponse, readWorkflowMentorResponse } from "./mentor-response";
 
 describe("readMentorResponse", () => {
   it("keeps the public reply and narrows form suggestions", () => {
@@ -38,4 +38,11 @@ describe("readMentorResponse", () => {
       informationPatch: {},
     });
   });
+});
+
+it("uses only the requested existing step's fields for a proposed revision", () => {
+  const fields = {first:{schema:[{id:"goal"}]}, second:{schema:[{id:"account"}]}};
+  const raw=JSON.stringify({message:"调整目标",targetStepId:"first",informationPatch:{goal:{value:"new goal",nature:"decision"},account:{value:"wrong field",nature:"fact"}}});
+  expect(readWorkflowMentorResponse(raw,"second",fields)).toEqual({message:"调整目标",targetStepId:"first",informationPatch:{goal:{value:"new goal",status:"provisional",nature:"decision"}}});
+  expect(readWorkflowMentorResponse(raw.replace('"first"','"__proto__"'),"second",fields).targetStepId).toBe("second");
 });

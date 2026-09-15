@@ -629,7 +629,11 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
       .toContain("已确认");
     await page.getByRole("button", { name: "确认正式定位版本" }).click();
+    await page.waitForURL(url => url.pathname.endsWith("/plan"));
+    expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
+    expect(await page.getByLabel("当前定位步骤").count()).toBe(0);
     await page.getByRole("button", { name: "添加选题" }).click();
+    expect(await page.getByRole("table", {name:"第一周选题计划"}).count()).toBe(1);
     await page
       .getByRole("textbox", { name: "account 0", exact: true })
       .fill("browser-account");
@@ -694,7 +698,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page.goto(
       process.env.V3_LOCAL_APP +
         "/login?redirect=" +
-        encodeURIComponent(new URL(draftUrl).pathname),
+        encodeURIComponent(new URL(draftUrl).pathname + "/plan"),
     );
     await page.getByPlaceholder("name@example.com").fill(f.email);
     await page.getByPlaceholder("输入你的密码").fill(f.password);
@@ -702,7 +706,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .getByRole("button", { name: "登录", exact: true })
       .last()
       .click();
-    await page.waitForURL(draftUrl);
+    await page.waitForURL(draftUrl + "/plan");
     await page.getByRole("link", { name: "进入选题工作空间" }).waitFor();
     expect(
       await page
@@ -758,7 +762,7 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
     await page.goto(
       process.env.V3_LOCAL_APP +
         "/login?redirect=" +
-        encodeURIComponent("/positioning/" + f.d.draftId),
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
     );
     await page.getByPlaceholder("name@example.com").fill(f.email);
     await page.getByPlaceholder("输入你的密码").fill(f.password);
@@ -767,7 +771,7 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
       .last()
       .click();
     await page.waitForURL((url) =>
-      url.pathname.endsWith("/positioning/" + f.d.draftId),
+      url.pathname.endsWith("/positioning/" + f.d.draftId + "/plan"),
     );
     await page.getByRole("button", { name: "添加选题" }).click();
     await page
@@ -1679,11 +1683,10 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
 
     const draftUrl = page.url();
     const draftId = new URL(draftUrl).pathname.split("/").at(-1)!;
-    await expect
-      .poll(() =>
-        page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true }).isVisible(),
-      )
-      .toBe(true);
+    // Await actual hydration, including the authenticated OPC response; URL
+    // navigation alone completes before the form exists under a cold build.
+    await page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true })
+      .waitFor({state:"visible",timeout:30000});
     expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
     await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
     const order = await page.evaluate(() => {
@@ -1810,6 +1813,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       .getByRole("textbox", { name: "给导师的回复", exact: true })
       .fill("跨步骤保留的未发送内容");
     await nextButton.click();
+    expect(await page.getByLabel("当前导师任务").textContent()).toContain("我们接下来一起完成");
     expect(await sharedLog.textContent()).toBe(conversationBeforeStepChange);
     expect(
       await page
@@ -1861,6 +1865,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(conversationAfterSecondStep).toContain("我有两个参考账号");
     const stepNavigation = page.getByRole("navigation", { name: "定位步骤" });
     await stepNavigation.getByRole("button").nth(0).click();
+    expect(await page.getByLabel("当前导师任务").textContent()).toContain("已有结果已保留");
     expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
     await stepNavigation.getByRole("button").nth(1).click();
     expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
@@ -1893,6 +1898,18 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
         })
         .count(),
     ).toBe(0);
+    // A model-proposed cross-step change stays separate until explicit acceptance.
+    await page.getByRole("textbox", {name:"给导师的回复"}).fill("模拟：修改第一步目标");
+    await page.getByRole("button", {name:"发送",exact:true}).click();
+    const adopt = page.getByRole("button", {name:'采用这些修改到“'+f.flow.steps[0].title+'”',exact:true}).last();
+    await adopt.waitFor();
+    expect((await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("A concrete user decision");
+    await adopt.click();
+    await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("改为帮助独立开发者");
+    await page.reload();
+    await expect.poll(()=>page.getByRole("textbox",{name:f.flow.steps[0].information![0].title,exact:true}).inputValue()).toBe("改为帮助独立开发者");
+    expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
+    expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1",[f.actor])).rows[0].n).toBe(5);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();
@@ -2101,7 +2118,7 @@ it("OPC: browser stale account confirmation restarts only after definite rejecti
   const browser=await chromium.launch({headless:true,executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}),context=await browser.newContext(),page=await context.newPage();
   page.setDefaultTimeout(90000);
   try {
-    const url=process.env.V3_LOCAL_APP+"/positioning/"+f.d.draftId;
+    const url=process.env.V3_LOCAL_APP+"/positioning/"+f.d.draftId+"/plan";
     await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
     await page.getByPlaceholder("name@example.com").fill(f.email);
     await page.getByPlaceholder("输入你的密码").fill(f.password);

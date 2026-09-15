@@ -2,6 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { readMentorResponse } from "./mentor-response";
+import { readWorkflowMentorResponse } from "./mentor-response";
 type Step = { id: string; title: string };
 type Information = {
   status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
@@ -75,6 +76,8 @@ export default function PositioningDraft({
   params: Promise<{ draftId: string }>;
 }) {
   const { draftId } = use(params);
+  const router = useRouter();
+  const planView = usePathname().endsWith("/plan");
   const utils = trpc.useUtils();
   const read = trpc.opc.read.useQuery({ draftId });
   const list = trpc.opc.list.useQuery();
@@ -344,12 +347,10 @@ export default function PositioningDraft({
       // exists, otherwise a later refresh can show the mentor reply without
       // ever applying its form suggestions.
       if (!rawResponse) continue;
-      const parsed = readMentorResponse(
-        rawResponse,
-        new Set(schema.map((field: { id: string }) => field.id)),
-      );
+      const parsed = readWorkflowMentorResponse(rawResponse, turn.stepId, d.information);
       appliedMentor.current.add(execution.executionId);
-      if (!Object.keys(parsed.informationPatch).length) continue;
+      if (!Object.keys(parsed.informationPatch).length || parsed.targetStepId !== turn.stepId ||
+          d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) continue;
       setInfoEdits((old) => {
         const values = Object.fromEntries(
           schema.map((field: { id: string }) => [
@@ -708,6 +709,27 @@ export default function PositioningDraft({
       sessionStorage.removeItem(key);
     });
   }
+  async function acceptSuggestion(executionId: string, stepId: string, patch: Record<string, Information>) {
+    await run(async () => {
+      await flushInformation(stepId);
+      const key = "opc-suggestion:" + draftId + ":" + executionId;
+      const prior = sessionStorage.getItem(key);
+      const current = (await read.refetch()).data;
+      if (!current || current.snapshot.state !== "draft") throw new Error("OPC_STEP_DENIED");
+      const values = Object.fromEntries(current.information[stepId].schema.map((f: {id:string}) =>
+        [f.id, patch[f.id] ?? current.information[stepId].values?.[f.id] ?? {value:"",nature:"unknown",status:"unknown"}]));
+      const request = prior ? JSON.parse(prior) : {draftId, stepId, requestId:crypto.randomUUID(),
+        expectedVersion:current.snapshot.steps[stepId].version, values};
+      sessionStorage.setItem(key, JSON.stringify(request));
+      try { await information.mutateAsync(request); }
+      catch (cause) {
+        if (isDefiniteConfirmConflict(cause)) sessionStorage.removeItem(key);
+        throw cause;
+      }
+      sessionStorage.removeItem(key);
+      setActiveStep(stepId);
+    });
+  }
   if (read.isLoading) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
     return (
@@ -752,7 +774,7 @@ export default function PositioningDraft({
     <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">定位与第一周计划</h1>
+          <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : "与导师确定定位"}</h1>
           <p className="text-xs text-[var(--text-secondary)]">隔离模拟 · 未调用真实模型或研究服务</p>
         </div>
         <Link href="/positioning" className="underline">
@@ -764,7 +786,7 @@ export default function PositioningDraft({
           重新读取状态
         </Button>
       </div>
-      <nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
+      {!planView && <><nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
         {steps.map((step, index) => (
           <Button
             key={step.id}
@@ -817,19 +839,6 @@ export default function PositioningDraft({
                     </h3>
                   </div>
                   <div
-                    aria-label="当前导师任务"
-                    className="rounded-xl bg-[var(--bg-tertiary)] p-3"
-                  >
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      当前正在梳理 · {step.title}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      {schema[0]
-                        ? `${schema[0].title}，你目前是怎么想的？`
-                        : "说说你现在最想解决的问题。"}
-                    </p>
-                  </div>
-                  <div
                     ref={chatScroll}
                     role="log"
                     aria-label="完整导师消息"
@@ -847,15 +856,10 @@ export default function PositioningDraft({
                       const turnStep = steps.find(
                         (candidate) => candidate.id === turn?.stepId,
                       );
-                      const turnSchema = turn
-                        ? (d.information[turn.stepId]?.schema ?? [])
-                        : [];
-                      const parsed = readMentorResponse(
-                        execution.body ?? execution.primaryBody,
-                        new Set(
-                          turnSchema.map((field: { id: string }) => field.id),
-                        ),
-                      );
+                      const parsed = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn?.stepId ?? step.id, d.information);
+                      const target = steps.find(candidate => candidate.id === parsed.targetStepId);
+                      const proposed = Object.entries(parsed.informationPatch).filter(([id, value]) =>
+                        value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
                       return (
                         <div key={execution.executionId} className="space-y-2">
                           <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
@@ -877,6 +881,15 @@ export default function PositioningDraft({
                                   : "这条回复还在核对原请求，不会重复发送或重复扣费。")}
                             </p>
                           </div>
+                          {execution.state === "completed" && target && proposed.length > 0 && (
+                            <div className="rounded border border-[var(--border-primary)] p-3">
+                              <p>导师建议调整 · {target.title}</p>
+                              {proposed.map(([id, value]) => <p key={id} className="text-sm">{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}：{value.value}</p>)}
+                              <Button variant="outline" disabled={busy || Boolean(pendingMentor) || snap.state !== "draft"}
+                                onClick={() => acceptSuggestion(execution.executionId, target.id, Object.fromEntries(proposed))}>采用这些修改到“{target.title}”</Button>
+                              <p className="text-xs">原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
+                            </div>
+                          )}
                           {!["completed", "cancelled"].includes(
                             execution.state,
                           ) && (
@@ -897,6 +910,15 @@ export default function PositioningDraft({
                         </div>
                       );
                     })}
+                  </div>
+                  <div aria-label="当前导师任务" role="status" className="rounded-xl bg-[var(--bg-tertiary)] p-3">
+                    <p className="text-xs text-[var(--text-secondary)]">步骤引导 · {step.title}</p>
+                    <p className="mt-1 text-sm">{s.valid
+                      ? "这一步已有结果已保留。你想调整哪一处？我们只修改需要改变的部分。"
+                      : `我们接下来一起完成“${step.title}”。${(() => {
+                          const missing = schema.find(f => !(infoEdits[step.id]?.[f.id] ?? d.information[step.id].values?.[f.id])?.value?.trim());
+                          return missing ? `先聊聊${missing.title}，你目前有什么想法？` : "已填写的信息都在右侧。还有哪里想继续讨论或调整？";
+                        })()}`}</p>
                   </div>
                   <label className="block text-sm">
                     回复导师
@@ -1095,7 +1117,8 @@ export default function PositioningDraft({
           );
         })}
       </section>
-      {snap.state === "published" && (
+      </>}
+      {!planView && snap.state === "published" && (
         <Button
           variant="outline"
           disabled={busy || dirtyPlan}
@@ -1112,7 +1135,7 @@ export default function PositioningDraft({
           修订定位，保留原版本
         </Button>
       )}
-      <Button
+      {!planView && <Button
         disabled={
           busy ||
           hasUnsavedInformation ||
@@ -1120,8 +1143,8 @@ export default function PositioningDraft({
           snap.state !== "draft"
         }
         onClick={() =>
-          run(() =>
-            change.mutateAsync({
+          run(async () => {
+            await change.mutateAsync({
               action: "publish",
               projectId: d.projectId,
               roundId: d.roundId,
@@ -1137,31 +1160,31 @@ export default function PositioningDraft({
                   { version: v.version, reviewVersion: v.reviewVersion },
                 ]),
               ),
-            }),
-          )
+            });
+            router.push(`/positioning/${draftId}/plan`);
+          })
         }
       >
         确认正式定位版本
-      </Button>
-      {d.report?.available && (
+      </Button>}
+      {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/plan`}>进入第一周计划</Link>}
+      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
+      {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
+      {planView && d.report?.available && <section aria-label="定位摘要" className="rounded-xl border border-[var(--border-primary)] p-4">
+        <h2 className="text-xl">已确认的定位</h2>
+        <dl className="grid gap-3 sm:grid-cols-2">{steps.flatMap(step => d.information[step.id].schema.map((field: {id:string;title:string}) =>
+          <div key={step.id+":"+field.id}><dt className="text-sm text-[var(--text-secondary)]">{field.title}</dt><dd className="whitespace-pre-wrap">{d.information[step.id].values?.[field.id]?.value || "未填写"}</dd></div>))}</dl>
+      </section>}
+      {planView && d.report?.available && (
         <section className="space-y-4">
           <h2 className="text-xl">第一周计划</h2>
           <p>可编辑账号、日期和简报。确认承接不会调用模型或产生新的费用。</p>
-          {items.map((item, index) => (
-            <article
-              key={item.id}
-              className="grid gap-3 rounded-xl border border-[var(--border-primary)] p-4 sm:grid-cols-2"
-            >
+          <div className="overflow-x-auto"><table aria-label="第一周选题计划" className="w-full text-left">
+            <thead><tr>{["平台","具体账号","选题","日期","简报","操作"].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
+            <tbody>{items.map((item, index) => (
+            <tr key={item.id} className="border-t border-[var(--border-primary)]">
               {(["platform", "account", "title", "day"] as const).map((key) => (
-                <label key={key}>
-                  {
-                    {
-                      platform: "平台",
-                      account: "具体账号",
-                      title: "选题",
-                      day: "日期",
-                    }[key]
-                  }
+                <td key={key} className="p-2">
                   <input
                     className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
                     aria-label={key + " " + index}
@@ -1170,18 +1193,18 @@ export default function PositioningDraft({
                     value={item[key]}
                     onChange={(e) => update(index, key, e.target.value)}
                   />
-                </label>
+                  {key === "account" && <p className="text-xs text-[var(--text-secondary)]">{list.data?.accounts?.some((a: {platform:string;account:string}) => a.platform === item.platform && a.account === item.account) ? "已有账号 · 保留原工作项" : "待承接账号 · 确认后创建"}</p>}
+                </td>
               ))}
-              <label>
-                简报
-                <Textarea
+              <td className="p-2">
+                <Textarea aria-label="简报"
                   className="resize-none"
                   disabled={busy}
                   value={item.brief}
                   onChange={(e) => update(index, "brief", e.target.value)}
                 />
-              </label>
-              <Button
+              </td>
+              <td className="p-2"><Button
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
@@ -1190,9 +1213,9 @@ export default function PositioningDraft({
                 }}
               >
                 删除选题
-              </Button>
-            </article>
-          ))}
+              </Button></td>
+            </tr>
+          ))}</tbody></table></div>
           <div className="flex flex-wrap gap-3">
             <Button
               variant="outline"
@@ -1294,7 +1317,7 @@ export default function PositioningDraft({
           )}
         </section>
       )}
-      {d.handoffs?.length > 0 && (
+      {planView && d.handoffs?.length > 0 && (
         <section>
           <h2 className="text-xl">已承接选题</h2>
           {d.handoffs
