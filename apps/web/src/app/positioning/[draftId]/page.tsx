@@ -58,6 +58,17 @@ type ConfirmStepEnvelope = {
     expectedReviewVersion: number | null;
   };
 };
+
+function isDefiniteConfirmConflict(cause: unknown) {
+  return (
+    cause instanceof Error &&
+    [
+      "OPC_INFORMATION_CONFLICT",
+      "ARTIFACT_VERSION_CONFLICT",
+      "ARTIFACT_REVIEW_REQUIRED",
+    ].some((code) => cause.message.includes(code))
+  );
+}
 export default function PositioningDraft({
   params,
 }: {
@@ -524,53 +535,64 @@ export default function PositioningDraft({
     }
     const request = fixed;
     await run(async () => {
-      if (request.phase === "information") {
-        await information.mutateAsync(request.information);
-        request.phase = "save";
-        sessionStorage.setItem(key, JSON.stringify(request));
-        setInfoEdits((old) => {
-          if (
-            JSON.stringify(old[step.id] ?? null) !== request.editingSnapshot
-          )
-            return old;
-          const next = { ...old };
-          delete next[step.id];
-          return next;
-        });
-      }
-      if (request.phase === "save") {
-        if (request.save.expectedVersion === null) {
-          const current = (await read.refetch()).data;
-          if (!current) throw new Error("OPC_UNAVAILABLE");
-          request.save.expectedVersion = current.snapshot.steps[step.id].version;
-          request.save.evidenceIds = current.snapshot.steps[step.id].evidenceIds;
+      try {
+        if (request.phase === "information") {
+          await information.mutateAsync(request.information);
+          request.phase = "save";
+          sessionStorage.setItem(key, JSON.stringify(request));
+          setInfoEdits((old) => {
+            if (
+              JSON.stringify(old[step.id] ?? null) !== request.editingSnapshot
+            )
+              return old;
+            const next = { ...old };
+            delete next[step.id];
+            return next;
+          });
+        }
+        if (request.phase === "save") {
+          if (request.save.expectedVersion === null) {
+            const current = (await read.refetch()).data;
+            if (!current) throw new Error("OPC_UNAVAILABLE");
+            request.save.expectedVersion = current.snapshot.steps[step.id].version;
+            request.save.evidenceIds = current.snapshot.steps[step.id].evidenceIds;
+            sessionStorage.setItem(key, JSON.stringify(request));
+          }
+          await change.mutateAsync({
+            ...request.save,
+            expectedVersion: request.save.expectedVersion!,
+          });
+          request.phase = "confirm";
           sessionStorage.setItem(key, JSON.stringify(request));
         }
-        await change.mutateAsync({
-          ...request.save,
-          expectedVersion: request.save.expectedVersion!,
-        });
-        request.phase = "confirm";
-        sessionStorage.setItem(key, JSON.stringify(request));
-      }
-      if (request.phase === "confirm") {
-        if (request.confirm.expectedVersion === null) {
-          const current = (await read.refetch()).data;
-          if (!current) throw new Error("OPC_UNAVAILABLE");
-          const state = current.snapshot.steps[step.id];
-          request.confirm.expectedVersion = state.version;
-          request.confirm.expectedReviewVersion = state.reviewVersion;
-          sessionStorage.setItem(key, JSON.stringify(request));
+        if (request.phase === "confirm") {
+          if (request.confirm.expectedVersion === null) {
+            const current = (await read.refetch()).data;
+            if (!current) throw new Error("OPC_UNAVAILABLE");
+            const state = current.snapshot.steps[step.id];
+            request.confirm.expectedVersion = state.version;
+            request.confirm.expectedReviewVersion = state.reviewVersion;
+            sessionStorage.setItem(key, JSON.stringify(request));
+          }
+          await change.mutateAsync({
+            ...request.confirm,
+            expectedVersion: request.confirm.expectedVersion!,
+            expectedReviewVersion: request.confirm.expectedReviewVersion!,
+          });
         }
-        await change.mutateAsync({
-          ...request.confirm,
-          expectedVersion: request.confirm.expectedVersion!,
-          expectedReviewVersion: request.confirm.expectedReviewVersion!,
-        });
+        sessionStorage.removeItem(key);
+        if (stepIndex < (snap.workflow.steps as Step[]).length - 1)
+          setActiveStep((snap.workflow.steps as Step[])[stepIndex + 1].id);
+      } catch (cause) {
+        if (isDefiniteConfirmConflict(cause)) {
+          // The server rolled this phase back. Drop only this stale browser
+          // envelope so the user's next explicit click can bind fresh versions.
+          // Timeouts and unavailable responses retain the original identities.
+          sessionStorage.removeItem(key);
+          await read.refetch();
+        }
+        throw cause;
       }
-      sessionStorage.removeItem(key);
-      if (stepIndex < (snap.workflow.steps as Step[]).length - 1)
-        setActiveStep((snap.workflow.steps as Step[])[stepIndex + 1].id);
     });
   }
   function update(index: number, key: keyof Item, value: string) {

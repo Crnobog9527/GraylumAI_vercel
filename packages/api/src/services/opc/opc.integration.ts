@@ -1988,6 +1988,48 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await page
       .getByRole("textbox", { name: field.title, exact: true })
       .fill("用户亲自填写的经营目标");
+    await expect
+      .poll(() => page.getByText("已自动保存", { exact: true }).count(), {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    let injectDefiniteConflict = true;
+    await page.route("**/api/trpc/opc.information*", async (route) => {
+      if (injectDefiniteConflict) {
+        injectDefiniteConflict = false;
+        const current = await f.service.read(draftId);
+        await f.service.information({
+          draftId,
+          stepId: f.flow.steps[0].id,
+          requestId: randomUUID(),
+          expectedVersion: current.snapshot.steps[f.flow.steps[0].id].version,
+          values: {
+            goal: {
+              status: "confirmed",
+              nature: "decision",
+              value: "用户亲自填写的经营目标",
+            },
+          },
+        });
+      }
+      await route.continue();
+    });
+    await page
+      .getByRole("button", { name: "确认本步骤", exact: true })
+      .click();
+    const operationAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "操作未完成" });
+    await operationAlert.waitFor();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (storageKey) => sessionStorage.getItem(storageKey),
+          `opc-confirm-step:${draftId}:${f.flow.steps[0].id}`,
+        ),
+      )
+      .toBeNull();
+    await page.unroute("**/api/trpc/opc.information*");
     let lost = true;
     await page.route("**/api/trpc/workbench.execute*", async (route) => {
       if (!lost) return route.continue();
@@ -1996,10 +2038,23 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       expect(response.ok()).toBe(true);
       await route.abort();
     });
+    const priorConflictCleared = operationAlert.waitFor({ state: "hidden" });
     await page
       .getByRole("button", { name: "确认本步骤", exact: true })
       .click();
-    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    await priorConflictCleared;
+    await operationAlert.waitFor();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (storageKey) => {
+            const raw = sessionStorage.getItem(storageKey);
+            return raw ? JSON.parse(raw).phase : null;
+          },
+          `opc-confirm-step:${draftId}:${f.flow.steps[0].id}`,
+        ),
+      )
+      .toBe("save");
     await page.reload();
     await page
       .getByRole("button", { name: "确认本步骤", exact: true })
