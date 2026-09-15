@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!['--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!['--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
 const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
@@ -26,11 +26,15 @@ const runtimeUpgrade=args.includes('--runtime-upgrade-only');
 const upgradeMode=args.includes('--bill2-upgrade-only')||runtimeUpgrade;
 if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
 let legacyRoot;
+const opcMode=args.includes('--opc-only');
+const opcSchema=opcMode||args.includes('--with-opc-schema');
 const runtimeMode=args.includes('--runtime-only');
-const runtimeSchema=runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
+const runtimeSchema=opcSchema||runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
-const testPattern=runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:';
+const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
+if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
+const testPattern=casePattern??(opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -279,7 +283,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
@@ -362,11 +366,47 @@ try {
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
-    if((runtimeMode||runtimeUpgrade) && req.url==='/call'){
+    if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/call'){
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       const id='local-runtime-'+runtimeCalls.length;
-      const content='Saved runtime answer '+runtimeCalls.length;
+      let content='Saved runtime answer '+runtimeCalls.length;
+      if(opcMode){
+        content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
+        try{
+          const last=request.messages.filter(m=>m.role==='user').at(-1);
+          const isOrganizer=request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Organize this operation result.'));
+          if(isOrganizer){content='【模拟整理成果】\n'+last.content;}
+          const input=isOrganizer ? {} : JSON.parse(last.content);
+          const brief=input.scopeMaterial?.content?.brief ?? '';
+          const stepId=/^(step|mentor):/.test(brief) ? brief.slice(brief.indexOf(':')+1) : null;
+          const stepIndex=Object.keys(input.scopeMaterial?.content?.work?.steps ?? {}).indexOf(stepId);
+          if(stepId){
+            const questions=['你希望帮助哪类人解决什么问题？','你手里有哪些对标账号或内容例子？','你希望别人因为什么特点记住你？','你最容易持续制作哪一种内容？','你每周可以投入多少时间？','你希望先尝试哪一种变现方式？'];
+            if(input.scopeMaterial?.content?.brief?.startsWith('mentor:')){
+              const instructionText=typeof request.instructions==='string'
+                ? request.instructions
+                : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
+              const match=/Allowed field IDs(?: for the current step)?: (\[[^\]]*\])/.exec(instructionText);
+              const fieldIds=match ? JSON.parse(match[1]) : [];
+              const informationPatch=fieldIds[0] && typeof input.userRequest==='string' && input.userRequest.trim()
+                ? {[fieldIds[0]]:{value:input.userRequest.trim().slice(0,400),status:'provisional',nature:'hypothesis'}} : {};
+              if(input.userRequest==='模拟：修改第一步目标') { informationPatch.goal={value:'改为帮助独立开发者',status:'provisional',nature:'decision'}; }
+              content=JSON.stringify({...(input.userRequest==='模拟：修改第一步目标'?{targetStepId:'step-0'}:{}),message:'【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+' 此示例只验证持续对话和表单联动。',informationPatch});
+            }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
+          }
+          if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){
+            const information=input.scopeMaterial.content.work.steps[stepId]?.information ?? {};
+            content='【模拟步骤素材】\n'+Object.entries(information).map(([key,value])=>key+'：'+value.value+'（'+value.status+'）').join('\n');
+          }
+          if(input.scopeMaterial?.content?.brief?.startsWith('plan:')){
+            const accounts=JSON.parse(input.userRequest);
+            content=accounts.some(a=>a.account==='invalid-plan')
+              ? 'This completed response is not a valid plan.'
+              : JSON.stringify(accounts.map((a,index)=>({id:randomUUID(),platform:a.platform,account:a.account,day:a.day,title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
+          }
+        }catch{/* A malformed fixture input stays a labeled non-plan reply. */}
+      }
       const response=JSON.stringify({id,model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}}}});
       const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;
@@ -377,9 +417,9 @@ try {
       else for(const send of heldRuntime.splice(0))send();
       res.writeHead(200).end('ok');return;
     }
-    if((runtimeMode||runtimeUpgrade) && req.url==='/__runtime_count'){
+    if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/__runtime_count'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({calls:runtimeCalls.length}));return;
+      res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({calls:runtimeCalls.length,userRequests:(runtimeCalls.at(-1)?.messages ?? []).filter(m=>m.role==='user').map(m=>{try{return JSON.parse(m.content).userRequest ?? null;}catch{return typeof m.content==='string'?m.content:null;}})}));return;
     }
 
     if(runtimeUpgrade && req.url?.startsWith('/receipt/local-runtime-')){
@@ -387,7 +427,7 @@ try {
       if(!request){res.writeHead(404).end();return;}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({id:'local-runtime-'+(index+1),model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total'}));return;
     }
-    if((runtimeMode||runtimeUpgrade) && req.url==='/__runtime_process'){
+    if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/__runtime_process'){
       if(req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
       res.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({pid:app.pid,root:applicationRoot}));return;
     }
@@ -398,7 +438,7 @@ try {
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');}sql("NOTIFY pgrst, 'reload schema'");}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}sql("NOTIFY pgrst, 'reload schema'");}
       else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
       else {if(req.url==='/__legacy_reader_compat'||req.url==='/__legacy_ledger_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory,req.url==='/__legacy_ledger_reader_compat'?'ledger':'complete');await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }
@@ -547,7 +587,7 @@ try {
   const env = {
     ...cleanEnv,
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
-    ...(args.includes('--real-skill-only') ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
+    ...((args.includes('--real-skill-only')||opcMode) ? {V3_REAL_SKILL_INPUT:process.env.V3_REAL_SKILL_INPUT} : {}),
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
@@ -556,7 +596,7 @@ try {
     SUPABASE_SERVICE_ROLE_KEY: service,
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
-    ...((runtimeMode||runtimeUpgrade)?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
+    ...((opcMode||runtimeMode||runtimeUpgrade)?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
     V3_LOCAL_CONTROL: controlToken,
     V3_LOCAL_SERVICE_JWT: service,
     V3_LOCAL_USER_JWT: jwt("authenticated"),
@@ -620,6 +660,7 @@ try {
         ...(runtimeUpgrade ? ["src/services/runtime/upgrade.integration.ts"] : upgradeMode ? ["src/services/bill2/upgrade.integration.ts"] : ["src/services/__tests__/workbench.integration.ts"]),
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         ...(runtimeMode ? ['src/services/runtime/runtime.integration.ts'] : []),
+        ...(opcMode ? ['src/services/opc/opc.integration.ts'] : []),
         "--reporter",
         "verbose",
         ...(env.V3_WORKBENCH_PHASE === "restore"
@@ -649,7 +690,13 @@ try {
   );
   console.log("Private canary absent from application logs PASS");
   if(serve){
-    if(runtimeMode){
+    if(opcMode){
+      const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'opc-acceptance.json'),'utf8'));
+      if(![saved.moduleId,saved.modelId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid OPC preview identity');
+      // Curate only this disposable preview after assertions; retain every ledger row and receipt.
+      sql(`UPDATE modules SET active=false WHERE id<>'${saved.moduleId}'; UPDATE ai_models SET is_active=false WHERE id<>'${saved.modelId}';`);
+      console.log('LOCAL_OPC_ACCEPTANCE_READY '+saved.url);
+    }else if(runtimeMode){
       const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'runtime-acceptance.json'),'utf8'));
       if(![saved.actor,saved.sessionId,saved.modelId,saved.moduleId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid Runtime preview identity');
       // Preserve the verified opening grant and ledger; do not top up/reset the demo.

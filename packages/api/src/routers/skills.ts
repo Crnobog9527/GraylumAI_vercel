@@ -49,7 +49,7 @@ export const skillsRouter = router({
     const { data, error } = await ctx.supabase.rpc('admin_read_skill_module', { p_actor_id: ctx.profileId, p_module_id: input.id });
     if (error) throw new TRPCError({ code: 'BAD_REQUEST', message: '读取 Skill 配置失败；旧版文本 Skill 请使用原有管理入口。' });
     return data as null | { skillId: string; expectedVersion: number; directoryName: string;
-      files: { path: string; base64: string }[]; workflow: { kind: 'document' | 'social'; steps: { title: string; resources: string[] }[] } };
+      files: { path: string; base64: string }[]; workflow: { kind: 'document' | 'social'; planResources?: string[]; steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string}[] }[] } };
   }),
   publishPackage: adminProcedure.input(packagePublicationInput).mutation(async ({ ctx, input }) => {
     try { return await publishSkillPackage(ctx.supabase, ctx.profileId, input); }

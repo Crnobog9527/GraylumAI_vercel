@@ -30,7 +30,10 @@ const procedure=protectedProcedure.use(async({ctx,next})=>{
  }catch{throw new TRPCError({code:'PRECONDITION_FAILED',message:'当前执行不可用，请检查原任务状态；未发送的请求不会自动重试。'});}
 });
 export const runtimeRouter=router({
- choices:procedure.query(async({ctx})=>{
+ choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
+  let work=false;
+  if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error)work=(listing.data.accounts??[]).some((a:{items:Array<{sessionId:string}>})=>a.items.some(i=>i.sessionId===input.sessionId));}
+
   // This loopback-only Owner entry advertises its two acceptance fixtures,
   // not the unrelated fault/organizer fixtures left by the integration suite.
   const models=await ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true').eq('provider','fixture').eq('name','Runtime local');
@@ -39,17 +42,17 @@ export const runtimeRouter=router({
   if(visible.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   // Respect the narrow public column grant; private metadata is fetched only
   // for visible modules and the loader independently rechecks current access.
-  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
+  const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
   for(const m of modules.data){if(!m.skill_id)continue;try{
    const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id});
    const descriptors=await source.list();
    const list=await discoverSkills(source);
-   for(const s of list.filter(s=>s.public.name==='runtime-demo')){
+   for(const s of list.filter(s=>work||s.public.name==='runtime-demo')){
     const descriptor=descriptors.find(d=>d.revisionId===s.public.revisionId);
     if(!descriptor||Object.keys(descriptor.tasks).length)continue;
-    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:s.public.name});
+    skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:work?m.title:s.public.name});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
   return {models:models.data,skills};

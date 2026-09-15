@@ -138,3 +138,12 @@ fallback authority.
 Base/head drift, failed checks, writer conflict, or failed transition must be
 resolved from fresh GitHub live state under current `AGENTS.md`. Never restore a
 retired governance writer as fallback.
+
+
+## 2026-09-14 Owner 批准：Workbench 开发与真实研究开放分开验收
+
+Owner 已选择 V3-WORKBENCH，并明确允许 AgentKey 真实研究验收延后至开放真实研究功能之前。现有研究、成果、账务及 Runtime 代码与适用隔离证据继续作为本批开发基座；仅研究的数据质量、当前报价及真实逐请求费用关联等外部验收不再阻挡本批隔离实施。其他前置及其缺项不因此豁免。
+
+本批须完成定位草稿、Skill 成果/周计划、明确确认及幂等账号/选题承接、独立 Session、成果与重新登录恢复；保留三/六/八步、配置扩展及无步骤 Skill。复用现有成果和唯一账务/Runtime，不新造执行链。
+
+真实 AgentKey 研究入口仍保持关闭。开放前需另行批准有界真实请求，核验必要平台/字段/分页/时效/来源适用性、逐请求身份与官方费用、原身份恢复及预算，记录实际 PASS/FAIL/NOT_RUN。模拟数据必须明确标识，不能宣称实际搜索。该调整不授权远端迁移、真实模型/取数、付款、合并或生产操作，也不启动 V3-OPC-UI 等后续任务。

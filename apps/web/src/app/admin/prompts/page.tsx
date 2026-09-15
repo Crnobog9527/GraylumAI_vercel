@@ -312,7 +312,8 @@ export default function AdminPromptsPage() {
         if (!data) throw new Error('Skill 配置不存在');
         setSkillIdentity(current => current?.moduleId === module.id ? { ...current, skillId: data.skillId, expectedVersion: data.expectedVersion } : current);
         setSkillForm({ directoryName: data.directoryName, kind: data.workflow.kind, files: data.files,
-          steps: data.workflow.steps.map(s => ({ title: s.title, resources: s.resources })), reviewed: false });
+          planResources: data.workflow.planResources,
+          steps: data.workflow.steps.map(s => ({ title: s.title, resources: s.resources, information:s.information })), reviewed: false });
       }).catch(e => { if (session === editorSession.current) setSkillError(e instanceof Error ? e.message : '读取 Skill 失败'); }).finally(() => { if (session === editorSession.current) setSkillLoading(false); });
     }
     setEditingModule(module);
@@ -386,7 +387,7 @@ export default function AdminPromptsPage() {
       setSkillError('');
       saveSkill.mutate({ ...skillIdentity, expectedUpdatedAt: editingModule?.updated_at ?? null,
         directoryName: skillForm.directoryName, kind: skillForm.kind, files: skillForm.files,
-        steps: skillForm.steps, resourcePlanReviewed: true,
+        steps: skillForm.steps, planResources:skillForm.planResources, resourcePlanReviewed: true,
         module: { title: formData.title, description: formData.description || null,
           full_description: formData.fullDescription || null, model_id: formData.modelId,
           platform: formData.platform, category: formData.category, icon: formData.icon,
