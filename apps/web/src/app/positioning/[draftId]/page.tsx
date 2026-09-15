@@ -767,6 +767,13 @@ export default function PositioningDraft({
         .map((execution) => [execution.executionId, execution]),
     ).values(),
   );
+  const latestSuggestion = new Map<string, string>();
+  for (const execution of mentorExecutions) {
+    const turn = mentorTurns.get(execution.executionId);
+    if (!turn || execution.state !== "completed") continue;
+    const response = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn.stepId, d.information);
+    if (Object.keys(response.informationPatch).length) latestSuggestion.set(response.targetStepId, execution.executionId);
+  }
   const pendingMentor = mentorExecutions.find(
     (execution) => !["completed", "cancelled"].includes(execution.state),
   );
@@ -881,7 +888,7 @@ export default function PositioningDraft({
                                   : "这条回复还在核对原请求，不会重复发送或重复扣费。")}
                             </p>
                           </div>
-                          {execution.state === "completed" && target && proposed.length > 0 && (
+                          {execution.state === "completed" && target && latestSuggestion.get(target.id) === execution.executionId && proposed.length > 0 && (
                             <div className="rounded border border-[var(--border-primary)] p-3">
                               <p>导师建议调整 · {target.title}</p>
                               {proposed.map(([id, value]) => <p key={id} className="text-sm">{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}：{value.value}</p>)}

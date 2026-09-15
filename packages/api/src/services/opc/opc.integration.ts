@@ -1901,7 +1901,9 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     // A model-proposed cross-step change stays separate until explicit acceptance.
     await page.getByRole("textbox", {name:"给导师的回复"}).fill("模拟：修改第一步目标");
     await page.getByRole("button", {name:"发送",exact:true}).click();
-    const adopt = page.getByRole("button", {name:'采用这些修改到“'+f.flow.steps[0].title+'”',exact:true}).last();
+    await expect.poll(()=>page.getByRole("textbox",{name:"给导师的回复"}).inputValue(),{timeout:15000}).toBe("");
+    await page.getByText("已知目标 0：改为帮助独立开发者",{exact:true}).waitFor();
+    const adopt = page.getByRole("button", {name:'采用这些修改到“'+f.flow.steps[0].title+'”',exact:true});
     await adopt.waitFor();
     expect((await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("A concrete user decision");
     await adopt.click();
