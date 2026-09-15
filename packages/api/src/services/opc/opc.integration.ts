@@ -1913,7 +1913,10 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await adopt.click();
     await expect.poll(async() => (await f.service.read(draftId)).information["step-0"].values.goal.value).toBe("改为帮助独立开发者");
     await page.reload();
-    await expect.poll(()=>page.getByRole("textbox",{name:f.flow.steps[0].information![0].title,exact:true}).inputValue()).toBe("改为帮助独立开发者");
+    // Reload selects the first incomplete step; explicitly reopen the revised
+    // step before inspecting its form, while keeping the shared Session.
+    await page.getByRole("navigation", {name:"定位步骤"}).getByRole("button").nth(0).click({timeout:15000});
+    await expect.poll(()=>page.getByRole("textbox",{name:f.flow.steps[0].information![0].title,exact:true}).inputValue({timeout:15000})).toBe("改为帮助独立开发者");
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
     expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1",[f.actor])).rows[0].n).toBe(5);
     expect(errors).toEqual([]);
