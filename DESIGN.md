@@ -69,7 +69,7 @@ The existing system stack supports mixed Chinese and Latin text. Headings use we
 
 ## Layout
 
-Pages use the existing responsive spacing scale and a maximum width of `90rem` for two-pane workspaces. Sequential step navigation stays horizontally scrollable. On wide screens, guided workflows place the persistent conversation on the left and the current structured result on the right. On narrow screens, conversation appears first and the form follows. Only the selected step occupies the working area.
+Pages use the existing responsive spacing scale and a maximum width of `90rem` for two-pane workspaces. Sequential step navigation stays horizontally scrollable. On wide screens, guided workflows keep one uninterrupted conversation on the left and switch only the current structured result on the right. On narrow screens, conversation appears first and the form follows. Changing steps must not filter, replace, or remount the conversation history; only the selected step's form changes.
 
 ## Elevation & Depth
 

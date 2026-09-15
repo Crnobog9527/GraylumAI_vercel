@@ -497,7 +497,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
     await expect
-      .poll(() => page.getByLabel("本步导师聊天").count(), {
+      .poll(() => page.getByLabel("全程导师聊天").count(), {
         timeout: 15000,
       })
       .toBe(1);
@@ -567,7 +567,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         }
         await page.reload();
         await expect
-          .poll(() => page.getByLabel("本步导师聊天").count(), {
+          .poll(() => page.getByLabel("全程导师聊天").count(), {
             timeout: 15000,
           })
           .toBe(1);
@@ -1625,7 +1625,7 @@ it("OPC: configured dependencies deny premature generation and old confirmations
   ).rejects.toThrow();
 });
 
-it("OPC: browser mentor is stepwise with replies, distinct local examples and original Session recovery", async () => {
+it("OPC: one mentor conversation persists across steps, refresh and original Session recovery", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
@@ -1688,7 +1688,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
     const order = await page.evaluate(() => {
       const form = document.querySelector('[aria-label="本步填写信息"]')!;
-      const chat = document.querySelector('[aria-label="本步导师聊天"]')!;
+      const chat = document.querySelector('[aria-label="全程导师聊天"]')!;
       return Boolean(chat.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
     expect(order).toBe(true);
@@ -1745,6 +1745,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     expect(observed.userRequests).toEqual(expect.arrayContaining(["我想先明确我的受众", "我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]));
     const afterChat = await f.service.read(draftId);
     const frozenChat = await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at desc limit 1", [f.actor]);
+    expect(frozenChat.rows[0].payload.instructions).toContain("single continuous mentor");
     expect(frozenChat.rows[0].payload.instructions).toContain("Confirmed fields do not end the conversation");
     expect(frozenChat.rows[0].payload.scopeMaterial.content.brief).toBe("mentor:step-0");
     await expect(f.service.saveResult({draftId,stepId:"step-0",executionId:afterChat.turns[0].executionId,requestId:randomUUID()})).rejects.toThrow("OPC_RESULT_DENIED");
@@ -1752,14 +1753,14 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     expect(afterChat.snapshot.candidates).toHaveLength(0);
     expect(afterChat.snapshot.steps["step-0"].valid).toBe(false);
     expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>t.stepId==="step-0"&&t.kind==="mentor")).toHaveLength(3);
-    const box = await page.getByRole("log",{name:"本步导师消息"}).boundingBox();
+    const box = await page.getByRole("log",{name:"完整导师消息"}).boundingBox();
     expect(box!.height).toBeLessThanOrEqual(400);
     await page.reload();
     await expect
       .poll(
         () =>
           page
-            .getByRole("log", { name: "本步导师消息" })
+            .getByRole("log", { name: "完整导师消息" })
             .textContent(),
         { timeout: 15000 },
       )
@@ -1803,7 +1804,18 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     });
     await page.reload();
     await expect.poll(() => nextButton.isEnabled()).toBe(true);
+    const sharedLog = page.getByRole("log", { name: "完整导师消息" });
+    const conversationBeforeStepChange = await sharedLog.textContent();
+    await page
+      .getByRole("textbox", { name: "给导师的回复", exact: true })
+      .fill("跨步骤保留的未发送内容");
     await nextButton.click();
+    expect(await sharedLog.textContent()).toBe(conversationBeforeStepChange);
+    expect(
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .inputValue(),
+    ).toBe("跨步骤保留的未发送内容");
     await page
       .getByRole("textbox", { name: "给导师的回复" })
       .fill("我有两个参考账号");
@@ -1819,11 +1831,39 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
         page
           .getByRole("textbox", { name: secondField.title, exact: true })
           .inputValue(),
+        { timeout: 15_000 },
       )
       .toBe("我有两个参考账号");
     await expect.poll(async () =>
       (await f.service.read(draftId)).information["step-1"].values.goal.status,
     ).toBe("provisional");
+    const afterSecondChat = await f.service.read(draftId);
+    const secondTurn = afterSecondChat.turns.find(
+      (turn: { executionId: string; stepId: string; kind: string }) =>
+        turn.stepId === "step-1" && turn.kind === "mentor",
+    );
+    expect(secondTurn).toBeTruthy();
+    const dependencies = new Set(
+      (
+        await sql.query(
+          "select dependency_id::text id from runtime_history_dependencies where execution_id=$1",
+          [secondTurn.executionId],
+        )
+      ).rows.map((row: { id: string }) => row.id),
+    );
+    for (const prior of afterChat.turns.filter(
+      (turn: { executionId: string; stepId: string; kind: string }) =>
+        turn.stepId === "step-0" && turn.kind === "mentor",
+    ))
+      expect(dependencies.has(prior.executionId)).toBe(true);
+    const conversationAfterSecondStep = await sharedLog.textContent();
+    expect(conversationAfterSecondStep).toContain("我想帮助刚接触短视频的人");
+    expect(conversationAfterSecondStep).toContain("我有两个参考账号");
+    const stepNavigation = page.getByRole("navigation", { name: "定位步骤" });
+    await stepNavigation.getByRole("button").nth(0).click();
+    expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
+    await stepNavigation.getByRole("button").nth(1).click();
+    expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
     await page.reload();
     await page
       .getByText("【分步模拟，仅验证流程】第 2 步：", { exact: false })
@@ -1836,7 +1876,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page.waitForURL(draftUrl,{timeout:90000});
     await page.getByText("【分步模拟，仅验证流程】第 2 步：",{exact:false}).waitFor();
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
-    expect(await page.getByRole("log",{name:"本步导师消息"}).textContent()).not.toContain("我想帮助刚接触短视频的人");
+    expect(await page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我想帮助刚接触短视频的人");
     expect(
       (
         await sql.query(

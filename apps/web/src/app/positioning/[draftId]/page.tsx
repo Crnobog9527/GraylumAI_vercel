@@ -88,7 +88,7 @@ export default function PositioningDraft({
   );
   const [activeStep, setActiveStep] = useState<string | null>(null);
   const chatScroll = useRef<HTMLDivElement>(null);
-  const [mentorInputs, setMentorInputs] = useState<Record<string, string>>({});
+  const [mentorInput, setMentorInput] = useState("");
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<
     Record<string, "idle" | "saving" | "saved" | "error">
@@ -120,10 +120,23 @@ export default function PositioningDraft({
     } catch {
       /* Ignore a malformed local buffer. */
     }
-    setActiveStep(
-      typeof local.activeStep === "string" ? local.activeStep : null,
+    const restoredActiveStep =
+      typeof local.activeStep === "string" ? local.activeStep : null;
+    const legacyMentorInputs =
+      local.mentorInputs && typeof local.mentorInputs === "object"
+        ? (local.mentorInputs as Record<string, string>)
+        : {};
+    setActiveStep(restoredActiveStep);
+    setMentorInput(
+      typeof local.mentorInput === "string"
+        ? local.mentorInput
+        : (restoredActiveStep &&
+              typeof legacyMentorInputs[restoredActiveStep] === "string"
+            ? legacyMentorInputs[restoredActiveStep]
+            : Object.values(legacyMentorInputs).find(
+                (value) => typeof value === "string" && value.trim(),
+              )) ?? "",
     );
-    setMentorInputs(local.mentorInputs ?? {});
     setInfoEdits(local.infoEdits ?? {});
     setPlanCandidate(
       Array.isArray(local.planCandidate) ? local.planCandidate : null,
@@ -142,7 +155,7 @@ export default function PositioningDraft({
         infoEdits,
         planCandidate,
         activeStep,
-        mentorInputs,
+        mentorInput,
       }),
     );
     const warn = (e: BeforeUnloadEvent) => {
@@ -162,7 +175,7 @@ export default function PositioningDraft({
     infoEdits,
     planCandidate,
     activeStep,
-    mentorInputs,
+    mentorInput,
   ]);
   useEffect(() => {
     infoEditsRef.current = infoEdits;
@@ -180,7 +193,7 @@ export default function PositioningDraft({
   }, [draftId, hydratedDraft, activeStep, snap]);
   useEffect(() => {
     if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
-  }, [activeStep, history.data]);
+  }, [history.data]);
   async function persistInformation(
     stepId: string,
     requestedValues: Record<string, Information>,
@@ -374,7 +387,7 @@ export default function PositioningDraft({
       const fixed = prior ? JSON.parse(prior) : {
         request: {
           draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: mentorInputs[step.id]?.trim(),
+          input: mentorInput.trim(),
         },
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
@@ -393,7 +406,9 @@ export default function PositioningDraft({
       const admitted = await prepareStep.mutateAsync(request);
       await execute.mutateAsync({ executionId: admitted.executionId });
       sessionStorage.removeItem(key);
-      setMentorInputs(old => old[step.id]?.trim() === request.input.trim() ? {...old, [step.id]: ""} : old);
+      setMentorInput((old) =>
+        old.trim() === request.input.trim() ? "" : old,
+      );
     });
   }
   async function confirmStep(step: Step, stepIndex: number) {
@@ -684,6 +699,33 @@ export default function PositioningDraft({
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
+  type MentorTurn = {
+    executionId: string;
+    stepId: string;
+    kind: string;
+  };
+  type MentorExecution = {
+    executionId: string;
+    input: string | null;
+    body: string | null;
+    primaryBody: string | null;
+    state: string;
+  };
+  const mentorTurns = new Map<string, MentorTurn>(
+    ((d.turns ?? []) as MentorTurn[])
+      .filter((turn) => turn.kind === "mentor")
+      .map((turn) => [turn.executionId, turn]),
+  );
+  const mentorExecutions = Array.from(
+    new Map(
+      ((history.data?.executions ?? []) as MentorExecution[])
+        .filter((execution) => mentorTurns.has(execution.executionId))
+        .map((execution) => [execution.executionId, execution]),
+    ).values(),
+  );
+  const pendingMentor = mentorExecutions.find(
+    (execution) => !["completed", "cancelled"].includes(execution.state),
+  );
   return (
     <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
@@ -733,41 +775,9 @@ export default function PositioningDraft({
             title: string;
             required: boolean;
           }>;
-          const allowedFields = new Set(schema.map((field) => field.id));
-          const mentorExecutions = Array.from(
-            new Map(
-              (history.data?.executions ?? [])
-                .filter((execution: { executionId: string }) =>
-                  d.turns?.some(
-                    (turn: {
-                      executionId: string;
-                      stepId: string;
-                      kind: string;
-                    }) =>
-                      turn.executionId === execution.executionId &&
-                      turn.stepId === step.id &&
-                      turn.kind === "mentor",
-                  ),
-                )
-                .map((execution: { executionId: string }) => [
-                  execution.executionId,
-                  execution,
-                ]),
-            ).values(),
-          ) as Array<{
-            executionId: string;
-            input: string | null;
-            body: string | null;
-            primaryBody: string | null;
-            state: string;
-          }>;
-          const pendingMentor = mentorExecutions.find(
-            (execution) =>
-              !["completed", "cancelled"].includes(execution.state),
-          );
           return (
             <article
-              key={step.id}
+              key="positioning-workspace"
               className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"
             >
               <h2 className="text-lg">
@@ -775,44 +785,69 @@ export default function PositioningDraft({
               </h2>
               <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
                 <aside
-                  aria-label="本步导师聊天"
+                  aria-label="全程导师聊天"
                   className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4"
                 >
                   <div>
-                    <p className="text-xs text-[var(--text-secondary)]">全程引导</p>
-                    <h3 className="font-semibold">和导师一起完成 · {step.title}</h3>
+                    <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
+                    <h3 className="font-semibold">
+                      和导师一起完成全部 {steps.length} 步
+                    </h3>
+                  </div>
+                  <div
+                    aria-label="当前导师任务"
+                    className="rounded-xl bg-[var(--bg-tertiary)] p-3"
+                  >
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      当前正在梳理 · {step.title}
+                    </p>
+                    <p className="mt-1 text-sm">
+                      {schema[0]
+                        ? `${schema[0].title}，你目前是怎么想的？`
+                        : "说说你现在最想解决的问题。"}
+                    </p>
                   </div>
                   <div
                     ref={chatScroll}
                     role="log"
-                    aria-label="本步导师消息"
+                    aria-label="完整导师消息"
                     aria-live="polite"
                     className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2"
                   >
                     <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                       <span className="text-xs text-[var(--text-secondary)]">导师</span>
                       <p className="mt-1 whitespace-pre-wrap break-words">
-                        我们先完成“{step.title}”。我会一次问一个问题，并把从你回答中梳理出的内容放到右侧，供你核对。
-                        {schema[0]
-                          ? `先从这里开始：${schema[0].title}，你目前是怎么想的？`
-                          : "先说说你现在最想解决的问题。"}
+                        我会在同一个对话里陪你完成全部步骤，一次问一个问题，并把从回答中梳理出的信息放到右侧对应表单，供你核对。
                       </p>
                     </div>
                     {mentorExecutions.map((execution) => {
+                      const turn = mentorTurns.get(execution.executionId);
+                      const turnStep = steps.find(
+                        (candidate) => candidate.id === turn?.stepId,
+                      );
+                      const turnSchema = turn
+                        ? (d.information[turn.stepId]?.schema ?? [])
+                        : [];
                       const parsed = readMentorResponse(
                         execution.body ?? execution.primaryBody,
-                        allowedFields,
+                        new Set(
+                          turnSchema.map((field: { id: string }) => field.id),
+                        ),
                       );
                       return (
                         <div key={execution.executionId} className="space-y-2">
                           <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                            <span className="text-xs text-[var(--text-secondary)]">你</span>
+                            <span className="text-xs text-[var(--text-secondary)]">
+                              你{turnStep ? ` · ${turnStep.title}` : ""}
+                            </span>
                             <p className="mt-1 whitespace-pre-wrap break-words">
                               {execution.input ?? "内容暂不可用"}
                             </p>
                           </div>
                           <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                            <span className="text-xs text-[var(--text-secondary)]">导师</span>
+                            <span className="text-xs text-[var(--text-secondary)]">
+                              导师{turnStep ? ` · ${turnStep.title}` : ""}
+                            </span>
                             <p className="mt-1 whitespace-pre-wrap break-words">
                               {parsed.message ||
                                 (execution.state === "cancelled"
@@ -846,14 +881,9 @@ export default function PositioningDraft({
                     <Textarea
                       className="resize-none"
                       aria-label="给导师的回复"
-                      value={mentorInputs[step.id] ?? ""}
+                      value={mentorInput}
                       disabled={busy || Boolean(pendingMentor) || snap.state !== "draft"}
-                      onChange={(event) =>
-                        setMentorInputs((old) => ({
-                          ...old,
-                          [step.id]: event.target.value,
-                        }))
-                      }
+                      onChange={(event) => setMentorInput(event.target.value)}
                       placeholder="用自己的话说就好，可以多聊几轮。"
                       maxLength={8000}
                     />
@@ -863,14 +893,14 @@ export default function PositioningDraft({
                       busy ||
                       Boolean(pendingMentor) ||
                       snap.state !== "draft" ||
-                      !mentorInputs[step.id]?.trim()
+                      !mentorInput.trim()
                     }
                     onClick={() => ask(step)}
                   >
                     {busy ? "正在回复…" : "发送"}
                   </Button>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    对话和右侧信息都会保存，刷新或重新登录后可继续。当前为隔离模拟，不调用真实模型。
+                    六个步骤共用这一条对话记录。右侧只切换当前表单；刷新或重新登录后仍从原 Session 继续。当前为隔离模拟，不调用真实模型。
                   </p>
                 </aside>
                 <section

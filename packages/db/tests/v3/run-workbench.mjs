@@ -387,7 +387,7 @@ try {
               const instructionText=typeof request.instructions==='string'
                 ? request.instructions
                 : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
-              const match=/Allowed field IDs: (\[[^\]]*\])/.exec(instructionText);
+              const match=/Allowed field IDs(?: for the current step)?: (\[[^\]]*\])/.exec(instructionText);
               const fieldIds=match ? JSON.parse(match[1]) : [];
               const informationPatch=fieldIds[0] && typeof input.userRequest==='string' && input.userRequest.trim()
                 ? {[fieldIds[0]]:{value:input.userRequest.trim().slice(0,400),status:'provisional',nature:'hypothesis'}} : {};
