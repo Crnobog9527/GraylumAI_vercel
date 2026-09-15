@@ -497,8 +497,12 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
     const draftUrl = page.url();
     await expect
-      .poll(() => page.getByRole("textbox", { name: / 工作稿$/ }).count())
+      .poll(() => page.getByLabel("本步导师聊天").count(), {
+        timeout: 15000,
+      })
       .toBe(1);
+    expect(await page.getByRole("button", { name: "保存信息状态" }).count()).toBe(0);
+    expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
     let firstInformation = true,
       informationArrived!: () => void;
     const heldInformation = new Promise<void>((resolve) => {
@@ -519,81 +523,54 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       await route.fulfill({ response });
     });
     for (const step of f.flow.steps) {
-      const article = page.locator("article").filter({
-        has: page.getByRole("textbox", { name: step.title + " 工作稿" }),
-      });
       const field = step.information![0];
+      const article = page.locator("article").filter({
+        has: page.getByRole("textbox", { name: field.title, exact: true }),
+      });
       await article
         .getByRole("textbox", { name: field.title, exact: true })
         .fill("Confirmed test decision");
-      await article
-        .getByRole("combobox", { name: field.title + " 状态" })
-        .selectOption("confirmed");
-      await article
-        .getByRole("combobox", { name: field.title + " 性质" })
-        .selectOption("decision");
-      await article.getByRole("button", { name: "保存信息状态" }).click();
       if (step.id === f.flow.steps[0].id) {
         await informationReady;
         expect(
           await article
             .getByRole("textbox", { name: field.title, exact: true })
             .isEnabled(),
-        ).toBe(false);
-        expect(
-          await article
-            .getByRole("textbox", { name: step.title + " 工作稿", exact: true })
-            .isEnabled(),
-        ).toBe(false);
+        ).toBe(true);
         releaseInformation();
       }
       await expect
         .poll(
-          () =>
-            article
-              .getByRole("button", { name: "确认这一步", exact: true })
-              .isEnabled(),
+          () => article.getByText("已自动保存", { exact: true }).count(),
           { timeout: 15000 },
         )
-        .toBe(true);
+        .toBe(1);
       await article
-        .getByRole("textbox", { name: step.title + " 工作稿" })
-        .fill("User supplied " + step.title);
-      await article
-        .getByRole("button", { name: "保存工作稿", exact: true })
+        .getByRole("button", { name: "确认本步骤", exact: true })
         .click();
-      await expect
-        .poll(() =>
-          article
-            .getByRole("button", { name: "保存工作稿", exact: true })
-            .isEnabled(),
-        )
-        .toBe(false);
-      await article
-        .getByRole("button", { name: "确认这一步", exact: true })
-        .click();
-      await expect
-        .poll(() => article.textContent(), { timeout: 15000 })
-        .toContain("已确认");
       if (step.id !== f.flow.steps.at(-1)!.id) {
-        await page
-          .getByRole("button", { name: "继续下一步", exact: true })
-          .click();
-        await page.reload();
         const next = f.flow.steps[f.flow.steps.indexOf(step) + 1];
+        const nextField = page.getByRole("textbox", {
+          name: next.information![0].title,
+          exact: true,
+        });
+        try {
+          await nextField.waitFor({ state: "visible", timeout: 15000 });
+        } catch {
+          throw new Error(
+            "next step unavailable: " +
+              JSON.stringify({
+                heading: await page.locator("article h2").allTextContents(),
+                screen: (await page.locator("main").innerText()).slice(0, 2000),
+              }),
+          );
+        }
+        await page.reload();
         await expect
-          .poll(() =>
-            page
-              .getByRole("textbox", {
-                name: next.title + " 工作稿",
-                exact: true,
-              })
-              .isVisible(),
-          )
-          .toBe(true);
-        expect(
-          await page.getByRole("textbox", { name: / 工作稿$/ }).count(),
-        ).toBe(1);
+          .poll(() => page.getByLabel("本步导师聊天").count(), {
+            timeout: 15000,
+          })
+          .toBe(1);
       }
     }
     await expect
@@ -608,7 +585,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     const lastStep = f.flow.steps.at(-1)!;
     const lastArticle = page.locator("article").filter({
       has: page.getByRole("textbox", {
-        name: lastStep.title + " 工作稿",
+        name: lastStep.information![0].title,
         exact: true,
       }),
     });
@@ -636,22 +613,17 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         { timeout: 15000 },
       )
       .toBe("Updated confirmed decision before publication");
-    expect(await lastArticle.getByRole("combobox", {name:lastStep.information![0].title + " 状态",exact:true}).inputValue()).toBe("unknown");
-    await lastArticle.getByRole("combobox", {name:lastStep.information![0].title + " 状态",exact:true}).selectOption("confirmed");
-    await lastArticle
-      .getByRole("button", { name: "保存信息状态", exact: true })
-      .click();
     await expect
       .poll(
         () =>
           lastArticle
-            .getByRole("button", { name: "确认这一步", exact: true })
+            .getByRole("button", { name: "确认本步骤", exact: true })
             .isEnabled(),
         { timeout: 15000 },
       )
       .toBe(true);
     await lastArticle
-      .getByRole("button", { name: "确认这一步", exact: true })
+      .getByRole("button", { name: "确认本步骤", exact: true })
       .click();
     await expect
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
@@ -1539,14 +1511,12 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
         page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true }).isVisible(),
       )
       .toBe(true);
-    expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(false);
-    await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
-    await page.getByRole("button",{name:"请导师帮助这一步",exact:true}).click();
     expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
+    await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
     const order = await page.evaluate(() => {
       const form = document.querySelector('[aria-label="本步填写信息"]')!;
       const chat = document.querySelector('[aria-label="本步导师聊天"]')!;
-      return Boolean(form.compareDocumentPosition(chat) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return Boolean(chat.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING);
     });
     expect(order).toBe(true);
     const nextButton = page
@@ -1582,7 +1552,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
       .getByRole("button", { name: "发送", exact: true })
       .click();
     await page
-      .getByText("【分步模拟，仅验证流程】第 1 步示例：", { exact: false })
+      .getByText("【分步模拟，仅验证流程】第 1 步：", { exact: false })
       .waitFor();
     expect(
       await page
@@ -1591,9 +1561,8 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
-    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"unknown"});
+    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"confirmed"});
     for (const reply of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]) {
-      if (reply === "我担心自己没有可以教的经验") await page.getByRole("combobox", {name:f.flow.steps[0].information![0].title + " 状态",exact:true}).selectOption("confirmed");
       await page.getByRole("textbox",{name:"给导师的回复",exact:true}).fill(reply);
       await page.getByRole("button",{name:"发送",exact:true}).click();
       await expect.poll(() => page.getByRole("textbox",{name:"给导师的回复",exact:true}).inputValue(), {timeout:15000}).toBe("");
@@ -1613,7 +1582,15 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     const box = await page.getByRole("log",{name:"本步导师消息"}).boundingBox();
     expect(box!.height).toBeLessThanOrEqual(400);
     await page.reload();
-    await expect.poll(()=>page.getByRole("log",{name:"本步导师消息"}).textContent()).toContain("我想帮助刚接触短视频的人");
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("log", { name: "本步导师消息" })
+            .textContent(),
+        { timeout: 15000 },
+      )
+      .toContain("我想帮助刚接触短视频的人");
     const first = f.flow.steps[0];
     await f.artifacts.execute({
       action: "save",
@@ -1654,7 +1631,6 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page.reload();
     await expect.poll(() => nextButton.isEnabled()).toBe(true);
     await nextButton.click();
-    await page.getByRole("button",{name:"请导师帮助这一步",exact:true}).click();
     await page
       .getByRole("textbox", { name: "给导师的回复" })
       .fill("我有两个参考账号");
@@ -1662,11 +1638,22 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
       .getByRole("button", { name: "发送", exact: true })
       .click();
     await page
-      .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
+      .getByText("【分步模拟，仅验证流程】第 2 步：", { exact: false })
       .waitFor();
+    const secondField = f.flow.steps[1].information![0];
+    await expect
+      .poll(() =>
+        page
+          .getByRole("textbox", { name: secondField.title, exact: true })
+          .inputValue(),
+      )
+      .toBe("我有两个参考账号");
+    await expect.poll(async () =>
+      (await f.service.read(draftId)).information["step-1"].values.goal.status,
+    ).toBe("provisional");
     await page.reload();
     await page
-      .getByText("【分步模拟，仅验证流程】第 2 步示例：", { exact: false })
+      .getByText("【分步模拟，仅验证流程】第 2 步：", { exact: false })
       .waitFor();
     await context.clearCookies();
     await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname));
@@ -1674,7 +1661,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
     await page.getByPlaceholder("输入你的密码").fill(f.password);
     await page.getByRole("button", {name:"登录",exact:true}).last().click();
     await page.waitForURL(draftUrl,{timeout:90000});
-    await page.getByText("【分步模拟，仅验证流程】第 2 步示例：",{exact:false}).waitFor();
+    await page.getByText("【分步模拟，仅验证流程】第 2 步：",{exact:false}).waitFor();
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
     expect(await page.getByRole("log",{name:"本步导师消息"}).textContent()).not.toContain("我想帮助刚接触短视频的人");
     expect(
@@ -1699,7 +1686,7 @@ it("OPC: browser mentor is stepwise with replies, distinct local examples and or
   }
 }, 300000);
 
-it("OPC: browser filled information produces administrator-organized artifact without manual prose and recovers once", async () => {
+it("OPC: browser confirms the autosaved form as the step result without a duplicate model pass and recovers once", async () => {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await fixture(3);
@@ -1773,13 +1760,8 @@ it("OPC: browser filled information produces administrator-organized artifact wi
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
 
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
-    await expect
-      .poll(() =>
-        page
-          .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
-          .count(),
-      )
-      .toBe(1);
+    await expect.poll(() => page.getByRole("button", { name: "确认本步骤", exact: true }).count()).toBe(1);
+    expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
     await expect(
       f.service.prepareStep({
         draftId,
@@ -1794,7 +1776,7 @@ it("OPC: browser filled information produces administrator-organized artifact wi
       .getByRole("textbox", { name: field.title, exact: true })
       .fill("用户亲自填写的经营目标");
     let lost = true;
-    await page.route("**/api/trpc/runtime.execute*", async (route) => {
+    await page.route("**/api/trpc/workbench.execute*", async (route) => {
       if (!lost) return route.continue();
       lost = false;
       const response = await route.fetch();
@@ -1802,85 +1784,40 @@ it("OPC: browser filled information produces administrator-organized artifact wi
       await route.abort();
     });
     await page
-      .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
+      .getByRole("button", { name: "确认本步骤", exact: true })
       .click();
     await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
     await page.reload();
     await page
-      .getByRole("button", { name: "确认所填信息并整理成果", exact: true })
+      .getByRole("button", { name: "确认本步骤", exact: true })
       .click();
-    await page.getByText("【模拟整理成果】", { exact: false }).waitFor();
+    await page
+      .getByRole("textbox", {
+        name: f.flow.steps[1].information![0].title,
+        exact: true,
+      })
+      .waitFor();
     const read = await f.service.read(draftId);
     expect(read.information[f.flow.steps[0].id].values.goal.value).toBe(
       "用户亲自填写的经营目标",
     );
-    expect(read.snapshot.candidates).toHaveLength(1);
-    expect(read.snapshot.candidates[0].body).toContain(
+    expect(read.snapshot.candidates).toHaveLength(0);
+    expect(read.snapshot.steps[f.flow.steps[0].id].body).toContain(
       "用户亲自填写的经营目标",
     );
+    expect(read.snapshot.steps[f.flow.steps[0].id].valid).toBe(true);
     await sql.query("update ai_models set is_active='false' where id=$1", [
-      summaryModel,
-    ]);
-    expect(
-      (await f.service.read(draftId)).snapshot.candidates[0].body,
-    ).toBeNull();
-    await expect(
-      f.service.prepareStep({
-        draftId,
-        stepId: f.flow.steps[0].id,
-        requestId: randomUUID(),
-        organizeAfter: true,
-        input: "disabled organizer must not dispatch",
-      }),
-    ).rejects.toThrow();
-    await sql.query("update ai_models set is_active='true' where id=$1", [
       summaryModel,
     ]);
     const runs = await sql.query(
       "select id,payload,state,charged,pre_deduct_id from bill2_runs where actor_id=$1",
       [f.actor],
     );
-    expect(runs.rows).toHaveLength(1);
-    expect(await providerCount() - callsBefore).toBe(2);
-    expect(runs.rows[0].state).toBe("settled");
-    expect(runs.rows[0].charged).toBe(6);
-    expect(runs.rows[0].pre_deduct_id).toBeTruthy();
-    expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n).toBe(1);
-    expect((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n).toBe(1);
-    expect(runs.rows[0].payload.callPolicy).toHaveLength(2);
-    expect(runs.rows[0].payload.input.attachedOrganizer.modelId).toBe(
-      summaryModel,
-    );
-    expect(
-      (
-        await sql.query(
-          "select count(*)::int n from bill2_calls where run_id=$1",
-          [runs.rows[0].id],
-        )
-      ).rows[0].n,
-    ).toBe(2);
-    await page
-      .getByRole("button", { name: "采用到工作稿", exact: true })
-      .click();
-    await expect.poll(async () => {
-      const alert = await page.getByRole("alert").allTextContents();
-      if (alert.some((text) => text.trim())) throw new Error(alert.join(" "));
-      return (await f.service.read(draftId)).snapshot.steps[f.flow.steps[0].id].body;
-    }).toContain("用户亲自填写的经营目标");
-    await expect
-      .poll(() =>
-        page
-          .getByRole("textbox", {
-            name: f.flow.steps[0].title + " 工作稿",
-            exact: true,
-          })
-          .inputValue(),
-      )
-      .toContain("用户亲自填写的经营目标");
-    await page.getByRole("button", { name: "确认这一步", exact: true }).click();
-    await page
-      .getByRole("button", { name: "继续下一步", exact: true })
-      .waitFor();
+    expect(runs.rows).toHaveLength(0);
+    expect(await providerCount() - callsBefore).toBe(0);
+    expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n).toBe(0);
+    expect((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n).toBe(0);
+    expect(await page.getByRole("textbox", { name: f.flow.steps[0].title + " 工作稿" }).count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();

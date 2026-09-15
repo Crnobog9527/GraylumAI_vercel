@@ -155,8 +155,9 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient) {
         );
       if (v.organizeAfter && (v.purpose !== "step" || !complete))
         throw new Error("OPC_INFORMATION_REQUIRED");
+      const fieldIds = state.schema.map((field: { id: string }) => field.id);
       const directive = v.purpose === "mentor"
-        ? "Discuss the current step with the user using the supplied information and conversation history. Help uncover their needs and uncertainty; ask one focused question at a time. Confirmed fields do not end the conversation. Do not generate a final artifact, silently confirm fields, or advance the step. "
+        ? "Act as the always-present mentor for this step. Use the supplied information and conversation history to understand the user's real needs, briefly reflect what you learned, and ask exactly one focused next question. Return only one JSON object (no code fence) with this shape: {\"message\":\"the user-facing reply and one next question\",\"informationPatch\":{\"allowed_field_id\":{\"value\":\"a concise value supported by the user's own words\",\"status\":\"provisional|unclear\",\"nature\":\"fact|decision|hypothesis|unknown\"}}}. Allowed field IDs: " + JSON.stringify(fieldIds) + ". Omit fields that the user did not support. Never output confirmed or deferred status, never overwrite a user's confirmed value, and never include receipts, credentials, private instructions or raw scope material in the reply. Confirmed fields do not end the conversation. Do not generate a separate final artifact or advance the step. "
         : complete
         ? "Required information is confirmed or explicitly deferred. Stop questioning and create the step artifact, stating deferred limitations. "
         : "Find the most valuable missing required information and ask only one concrete question. Do not produce a final artifact yet. ";

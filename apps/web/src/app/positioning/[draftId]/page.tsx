@@ -4,7 +4,15 @@ import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
+import {
+  Select as UiSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { readMentorResponse } from "./mentor-response";
 type Step = { id: string; title: string };
 type Information = {
   status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
@@ -19,6 +27,37 @@ type Item = {
   brief: string;
   day: string;
 };
+type ConfirmStepEnvelope = {
+  phase: "information" | "save" | "confirm";
+  values: Record<string, Information>;
+  editingSnapshot: string;
+  information: {
+    draftId: string;
+    stepId: string;
+    requestId: string;
+    expectedVersion: number;
+    values: Record<string, Information>;
+  };
+  save: {
+    action: "save";
+    projectId: string;
+    roundId: string;
+    requestId: string;
+    stepId: string;
+    expectedVersion: number | null;
+    body: string;
+    evidenceIds: string[];
+  };
+  confirm: {
+    action: "confirm";
+    projectId: string;
+    roundId: string;
+    requestId: string;
+    stepId: string;
+    expectedVersion: number | null;
+    expectedReviewVersion: number | null;
+  };
+};
 export default function PositioningDraft({
   params,
 }: {
@@ -29,8 +68,7 @@ export default function PositioningDraft({
   const read = trpc.opc.read.useQuery({ draftId });
   const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation(),
-    execute = trpc.runtime.execute.useMutation(),
-    saveResult = trpc.opc.saveResult.useMutation();
+    execute = trpc.runtime.execute.useMutation();
   const information = trpc.opc.information.useMutation();
   const [infoEdits, setInfoEdits] = useState<
     Record<string, Record<string, Information>>
@@ -40,8 +78,7 @@ export default function PositioningDraft({
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
-  const [edits, setEdits] = useState<Record<string, string>>({}),
-    [items, setItems] = useState<Item[]>([]),
+  const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
     [error, setError] = useState("");
@@ -50,10 +87,17 @@ export default function PositioningDraft({
     { enabled: Boolean(read.data?.sessionId) },
   );
   const [activeStep, setActiveStep] = useState<string | null>(null);
-  const [mentorOpen, setMentorOpen] = useState<Record<string, boolean>>({});
   const chatScroll = useRef<HTMLDivElement>(null);
   const [mentorInputs, setMentorInputs] = useState<Record<string, string>>({});
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<
+    Record<string, "idle" | "saving" | "saved" | "error">
+  >({});
+  const infoEditsRef = useRef(infoEdits);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveChain = useRef<Promise<void>>(Promise.resolve());
+  const appliedMentor = useRef(new Set<string>());
+  const composing = useRef(false);
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
     snap = d?.snapshot,
@@ -63,7 +107,6 @@ export default function PositioningDraft({
     revise.isPending ||
     prepareStep.isPending ||
     execute.isPending ||
-    saveResult.isPending ||
     change.isPending ||
     savePlan.isPending ||
     handoff.isPending;
@@ -81,8 +124,6 @@ export default function PositioningDraft({
       typeof local.activeStep === "string" ? local.activeStep : null,
     );
     setMentorInputs(local.mentorInputs ?? {});
-    setMentorOpen(local.mentorOpen ?? {});
-    setEdits(local.edits ?? {});
     setInfoEdits(local.infoEdits ?? {});
     setPlanCandidate(
       Array.isArray(local.planCandidate) ? local.planCandidate : null,
@@ -96,19 +137,16 @@ export default function PositioningDraft({
     sessionStorage.setItem(
       "opc-edit:" + draftId,
       JSON.stringify({
-        edits,
         items,
         dirtyPlan,
         infoEdits,
         planCandidate,
         activeStep,
         mentorInputs,
-        mentorOpen,
       }),
     );
     const warn = (e: BeforeUnloadEvent) => {
       if (
-        Object.keys(edits).length ||
         Object.keys(infoEdits).length ||
         dirtyPlan
       )
@@ -119,15 +157,16 @@ export default function PositioningDraft({
   }, [
     draftId,
     hydratedDraft,
-    edits,
     items,
     dirtyPlan,
     infoEdits,
     planCandidate,
     activeStep,
     mentorInputs,
-    mentorOpen,
   ]);
+  useEffect(() => {
+    infoEditsRef.current = infoEdits;
+  }, [infoEdits]);
   useEffect(() => {
     if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
       setItems(latest.body);
@@ -141,7 +180,176 @@ export default function PositioningDraft({
   }, [draftId, hydratedDraft, activeStep, snap]);
   useEffect(() => {
     if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
-  }, [activeStep, mentorOpen, history.data]);
+  }, [activeStep, history.data]);
+  async function persistInformation(
+    stepId: string,
+    requestedValues: Record<string, Information>,
+  ) {
+    const storageKey = "opc-information-autosave:" + draftId + ":" + stepId;
+    let wanted = requestedValues;
+    let retriedConflict = false;
+    setSaveState((old) => ({ ...old, [stepId]: "saving" }));
+    try {
+      for (;;) {
+        let fixed: {
+          draftId: string;
+          stepId: string;
+          requestId: string;
+          expectedVersion: number;
+          values: Record<string, Information>;
+          editingSnapshot: string;
+        } | null = null;
+        try {
+          const raw = sessionStorage.getItem(storageKey);
+          if (raw) fixed = JSON.parse(raw);
+        } catch {
+          throw new Error("OPC_AUTOSAVE_IDENTITY_UNREADABLE");
+        }
+        if (!fixed) {
+          const current = (await read.refetch()).data;
+          if (!current) throw new Error("OPC_UNAVAILABLE");
+          fixed = {
+            draftId,
+            stepId,
+            requestId: crypto.randomUUID(),
+            expectedVersion: current.snapshot.steps[stepId].version,
+            values: wanted,
+            editingSnapshot: JSON.stringify(wanted),
+          };
+          sessionStorage.setItem(storageKey, JSON.stringify(fixed));
+        }
+        try {
+          const { editingSnapshot: _editingSnapshot, ...request } = fixed;
+          await information.mutateAsync(request);
+        } catch (cause) {
+          if (
+            !retriedConflict &&
+            cause instanceof Error &&
+            cause.message.includes("OPC_INFORMATION_CONFLICT")
+          ) {
+            // A version conflict is a definite rollback. Refresh and create a
+            // new identity once; ambiguous failures retain the original ID.
+            retriedConflict = true;
+            sessionStorage.removeItem(storageKey);
+            await read.refetch();
+            continue;
+          }
+          throw cause;
+        }
+        sessionStorage.removeItem(storageKey);
+        await read.refetch();
+        setInfoEdits((old) => {
+          if (
+            JSON.stringify(old[stepId] ?? null) !== fixed!.editingSnapshot
+          )
+            return old;
+          const next = { ...old };
+          delete next[stepId];
+          return next;
+        });
+        const latestValues = infoEditsRef.current[stepId];
+        if (
+          !latestValues ||
+          JSON.stringify(latestValues) === fixed.editingSnapshot
+        )
+          break;
+        wanted = latestValues;
+        retriedConflict = false;
+      }
+      setSaveState((old) => ({ ...old, [stepId]: "saved" }));
+    } catch {
+      setSaveState((old) => ({ ...old, [stepId]: "error" }));
+      throw new Error("OPC_AUTOSAVE_FAILED");
+    }
+  }
+  function enqueueInformation(
+    stepId: string,
+    values: Record<string, Information>,
+  ) {
+    const task = autosaveChain.current.then(() =>
+      persistInformation(stepId, values),
+    );
+    autosaveChain.current = task.catch(() => undefined);
+    return task;
+  }
+  async function flushInformation(stepId: string) {
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = null;
+    const values = infoEditsRef.current[stepId];
+    if (values) await enqueueInformation(stepId, values);
+    else await autosaveChain.current;
+  }
+  useEffect(() => {
+    if (hydratedDraft !== draftId || composing.current) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    const pending = Object.entries(infoEdits);
+    if (!pending.length) return;
+    autosaveTimer.current = setTimeout(() => {
+      for (const [stepId, values] of pending)
+        void enqueueInformation(stepId, values).catch(() => {
+          setError("自动保存暂时失败。内容仍保留在本机，可重试保存。");
+        });
+    }, 700);
+    return () => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+  }, [draftId, hydratedDraft, infoEdits]);
+  useEffect(() => {
+    if (!d || !history.data) return;
+    const executions = history.data.executions ?? [];
+    for (const execution of executions as Array<{
+      executionId: string;
+      state: string;
+      body: string | null;
+      primaryBody: string | null;
+    }>) {
+      if (
+        execution.state !== "completed" ||
+        appliedMentor.current.has(execution.executionId)
+      )
+        continue;
+      const turn = d.turns?.find(
+        (item: { executionId: string; stepId: string; kind: string }) =>
+          item.executionId === execution.executionId && item.kind === "mentor",
+      );
+      if (!turn) continue;
+      const schema = d.information[turn.stepId]?.schema ?? [];
+      const rawResponse = execution.body ?? execution.primaryBody;
+      // A completed execution can become visible before its public result
+      // projection is readable. Do not consume that identity until the result
+      // exists, otherwise a later refresh can show the mentor reply without
+      // ever applying its form suggestions.
+      if (!rawResponse) continue;
+      const parsed = readMentorResponse(
+        rawResponse,
+        new Set(schema.map((field: { id: string }) => field.id)),
+      );
+      appliedMentor.current.add(execution.executionId);
+      if (!Object.keys(parsed.informationPatch).length) continue;
+      setInfoEdits((old) => {
+        const values = Object.fromEntries(
+          schema.map((field: { id: string }) => [
+            field.id,
+            old[turn.stepId]?.[field.id] ??
+              d.information[turn.stepId].values?.[field.id] ?? {
+                status: "unknown",
+                nature: "unknown",
+                value: "",
+              },
+          ]),
+        ) as Record<string, Information>;
+        let changed = false;
+        for (const [fieldId, suggestion] of Object.entries(
+          parsed.informationPatch,
+        )) {
+          if (values[fieldId]?.value.trim()) continue;
+          values[fieldId] = suggestion;
+          changed = true;
+        }
+        return changed ? { ...old, [turn.stepId]: values } : old;
+      });
+    }
+  }, [d, history.data]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -160,20 +368,18 @@ export default function PositioningDraft({
   }
   async function ask(step: Step) {
     await run(async () => {
+      await flushInformation(step.id);
       const key = "opc-step:" + draftId + ":" + step.id;
       const prior = sessionStorage.getItem(key);
       const fixed = prior ? JSON.parse(prior) : {
         request: {
           draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: mentorInputs[step.id]?.trim() || "我还不确定这一步该怎么填写，请和我一起梳理。",
+          input: mentorInputs[step.id]?.trim(),
         },
-        information: infoEdits[step.id] ? {
-          draftId, stepId: step.id, requestId: crypto.randomUUID(),
-          expectedVersion: snap.steps[step.id].version, values: infoEdits[step.id],
-        } : null,
-        editingSnapshot: JSON.stringify(infoEdits[step.id] ?? null),
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
+      // Finish a request retained by the previous UI using its original
+      // identities before accepting a newer message.
       if (fixed.information) {
         await information.mutateAsync(fixed.information);
         setInfoEdits(old => {
@@ -183,126 +389,173 @@ export default function PositioningDraft({
       }
       // Preserve pending requests from the previous UI without changing identity.
       const request = fixed.request ?? fixed;
+      if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
       const admitted = await prepareStep.mutateAsync(request);
       await execute.mutateAsync({ executionId: admitted.executionId });
       sessionStorage.removeItem(key);
       setMentorInputs(old => old[step.id]?.trim() === request.input.trim() ? {...old, [step.id]: ""} : old);
     });
   }
-  async function organize(step: Step) {
-    const key = "opc-organize:" + draftId + ":" + step.id;
-    const prior = sessionStorage.getItem(key);
-    let fixed;
-    if (prior) {
-      try {
-        fixed = JSON.parse(prior);
-      } catch {
-        setError("原整理请求记录无法读取，已保留，请勿重新发起整理。");
-        return;
-      }
-    } else {
-      const schema = d.information[step.id].schema;
+  async function confirmStep(step: Step, stepIndex: number) {
+    try {
+      await flushInformation(step.id);
+    } catch {
+      setError("请先完成自动保存。内容仍保留在本机，可点击重试自动保存。");
+      return;
+    }
+    const key = "opc-confirm-step:" + draftId + ":" + step.id;
+    let fixed: ConfirmStepEnvelope | null;
+    try {
+      const prior = sessionStorage.getItem(key);
+      fixed = prior ? (JSON.parse(prior) as ConfirmStepEnvelope) : null;
+    } catch {
+      setError("原确认请求无法读取。当前内容已保留，请重新读取状态后再试。");
+      return;
+    }
+    if (!fixed) {
+      const current = (await read.refetch()).data;
+      if (!current) return;
+      const schema = current.information[step.id].schema as Array<{
+        id: string;
+        title: string;
+        required: boolean;
+      }>;
       const values = Object.fromEntries(
-        schema.map((field: { id: string }) => {
-          const value: Information = infoEdits[step.id]?.[field.id] ??
-            d.information[step.id].values?.[field.id] ?? {
+        schema.map((field) => {
+          const value: Information =
+            infoEditsRef.current[step.id]?.[field.id] ??
+            current.information[step.id].values?.[field.id] ?? {
               status: "unknown",
               nature: "unknown",
               value: "",
             };
-          // This button explicitly confirms text supplied by the user. It never
-          // confirms a model inference or overrides an explicit uncertainty.
           return [
             field.id,
             {
               ...value,
+              value: value.value.trim(),
               status:
-                value.status === "unknown" && value.value.trim()
-                  ? "confirmed"
-                  : value.status,
+                value.status === "deferred"
+                  ? "deferred"
+                  : value.value.trim()
+                    ? "confirmed"
+                    : "unknown",
             },
           ];
         }),
-      );
+      ) as Record<string, Information>;
       const missing = schema.filter(
-        (field: { id: string; required: boolean }) =>
+        (field) =>
           field.required &&
           !["confirmed", "deferred"].includes(values[field.id].status),
       );
       if (missing.length) {
         setError(
-          "请补充或明确延期这些必需信息：" +
-            missing.map((field: { title: string }) => field.title).join("、"),
+          "还需要补充这些信息：" + missing.map((field) => field.title).join("、"),
         );
         return;
       }
-      if (schema.some((field: { id: string }) =>
-        ["confirmed", "deferred"].includes(values[field.id].status) &&
-        !values[field.id].value.trim())) {
-        setError("已确认的信息需要填写内容；延期的信息请注明原因。");
+      if (
+        schema.some(
+          (field) =>
+            values[field.id].status === "deferred" &&
+            !values[field.id].value.trim(),
+        )
+      ) {
+        setError("暂时无法确定的信息，请简单写明原因。");
         return;
       }
-      if (new TextEncoder().encode(JSON.stringify(values)).length > 12000) {
-        setError("本步信息过长，请精简后再整理。");
-        return;
-      }
+      const body = schema
+        .filter((field) => values[field.id].value)
+        .map(
+          (field) =>
+            `${field.title}\n${
+              values[field.id].status === "deferred" ? "（暂缓确认）" : ""
+            }${values[field.id].value}`,
+        )
+        .join("\n\n");
       fixed = {
+        phase: "information",
+        values,
+        editingSnapshot: JSON.stringify(infoEditsRef.current[step.id] ?? null),
         information: {
           draftId,
           stepId: step.id,
           requestId: crypto.randomUUID(),
-          expectedVersion: snap.steps[step.id].version,
+          expectedVersion: current.snapshot.steps[step.id].version,
           values,
         },
-        request: {
-          draftId,
-          stepId: step.id,
+        save: {
+          action: "save",
+          projectId: current.projectId,
+          roundId: current.roundId,
           requestId: crypto.randomUUID(),
-          organizeAfter: true,
-          input:
-            "请基于本步已确认或明确延期的信息形成步骤成果，再由整理模型汇总；保留局限，不补造事实。",
+          stepId: step.id,
+          expectedVersion: null,
+          body,
+          evidenceIds: current.snapshot.steps[step.id].evidenceIds,
         },
-        editingSnapshot: JSON.stringify(infoEdits[step.id] ?? null),
+        confirm: {
+          action: "confirm",
+          projectId: current.projectId,
+          roundId: current.roundId,
+          requestId: crypto.randomUUID(),
+          stepId: step.id,
+          expectedVersion: null,
+          expectedReviewVersion: null,
+        },
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
     }
+    const request = fixed;
     await run(async () => {
-      await information.mutateAsync(fixed.information);
-      setInfoEdits((old) => {
-        if (JSON.stringify(old[step.id] ?? null) !== fixed.editingSnapshot)
-          return old;
-        const next = { ...old };
-        delete next[step.id];
-        return next;
-      });
-      const admitted = await prepareStep.mutateAsync(fixed.request);
-      await execute.mutateAsync({ executionId: admitted.executionId });
-      await saveResult.mutateAsync({
-        draftId,
-        stepId: step.id,
-        executionId: admitted.executionId,
-        requestId: admitted.executionId,
-      });
+      if (request.phase === "information") {
+        await information.mutateAsync(request.information);
+        request.phase = "save";
+        sessionStorage.setItem(key, JSON.stringify(request));
+        setInfoEdits((old) => {
+          if (
+            JSON.stringify(old[step.id] ?? null) !== request.editingSnapshot
+          )
+            return old;
+          const next = { ...old };
+          delete next[step.id];
+          return next;
+        });
+      }
+      if (request.phase === "save") {
+        if (request.save.expectedVersion === null) {
+          const current = (await read.refetch()).data;
+          if (!current) throw new Error("OPC_UNAVAILABLE");
+          request.save.expectedVersion = current.snapshot.steps[step.id].version;
+          request.save.evidenceIds = current.snapshot.steps[step.id].evidenceIds;
+          sessionStorage.setItem(key, JSON.stringify(request));
+        }
+        await change.mutateAsync({
+          ...request.save,
+          expectedVersion: request.save.expectedVersion!,
+        });
+        request.phase = "confirm";
+        sessionStorage.setItem(key, JSON.stringify(request));
+      }
+      if (request.phase === "confirm") {
+        if (request.confirm.expectedVersion === null) {
+          const current = (await read.refetch()).data;
+          if (!current) throw new Error("OPC_UNAVAILABLE");
+          const state = current.snapshot.steps[step.id];
+          request.confirm.expectedVersion = state.version;
+          request.confirm.expectedReviewVersion = state.reviewVersion;
+          sessionStorage.setItem(key, JSON.stringify(request));
+        }
+        await change.mutateAsync({
+          ...request.confirm,
+          expectedVersion: request.confirm.expectedVersion!,
+          expectedReviewVersion: request.confirm.expectedReviewVersion!,
+        });
+      }
       sessionStorage.removeItem(key);
-    });
-  }
-  async function save(step: Step) {
-    await run(async () => {
-      await change.mutateAsync({
-        action: "save",
-        projectId: d.projectId,
-        roundId: d.roundId,
-        requestId: crypto.randomUUID(),
-        stepId: step.id,
-        expectedVersion: snap.steps[step.id].version,
-        body: edits[step.id],
-        evidenceIds: snap.steps[step.id].evidenceIds,
-      });
-      setEdits((e) => {
-        const next = { ...e };
-        delete next[step.id];
-        return next;
-      });
+      if (stepIndex < (snap.workflow.steps as Step[]).length - 1)
+        setActiveStep((snap.workflow.steps as Step[])[stepIndex + 1].id);
     });
   }
   function update(index: number, key: keyof Item, value: string) {
@@ -351,7 +604,6 @@ export default function PositioningDraft({
       if (
         !latest ||
         dirtyPlan ||
-        Object.keys(edits).length ||
         hasUnsavedInformation
       )
         throw new Error("save edits first");
@@ -426,7 +678,7 @@ export default function PositioningDraft({
     steps.find((step) => step.id === activeStep) ??
     steps[Math.max(0, firstPending)];
   return (
-    <main className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
+    <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">定位与第一周计划</h1>
@@ -462,13 +714,50 @@ export default function PositioningDraft({
       </nav>
       {hasUnsavedInformation && (
         <p role="status">
-          有未保存的信息，请先保存并重新确认受影响步骤，再发布定位或采用计划。
+          正在保存最新修改。保存完成前不会确认步骤或采用计划。
         </p>
       )}
       <section aria-label="当前定位步骤" className="space-y-4">
         {snap.workflow.steps.map((step: Step, index: number) => {
           if (step.id !== selectedStep.id) return null;
           const s = snap.steps[step.id];
+          const schema = d.information[step.id].schema as Array<{
+            id: string;
+            title: string;
+            required: boolean;
+          }>;
+          const allowedFields = new Set(schema.map((field) => field.id));
+          const mentorExecutions = Array.from(
+            new Map(
+              (history.data?.executions ?? [])
+                .filter((execution: { executionId: string }) =>
+                  d.turns?.some(
+                    (turn: {
+                      executionId: string;
+                      stepId: string;
+                      kind: string;
+                    }) =>
+                      turn.executionId === execution.executionId &&
+                      turn.stepId === step.id &&
+                      turn.kind === "mentor",
+                  ),
+                )
+                .map((execution: { executionId: string }) => [
+                  execution.executionId,
+                  execution,
+                ]),
+            ).values(),
+          ) as Array<{
+            executionId: string;
+            input: string | null;
+            body: string | null;
+            primaryBody: string | null;
+            state: string;
+          }>;
+          const pendingMentor = mentorExecutions.find(
+            (execution) =>
+              !["completed", "cancelled"].includes(execution.state),
+          );
           return (
             <article
               key={step.id}
@@ -477,15 +766,130 @@ export default function PositioningDraft({
               <h2 className="text-lg">
                 {index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}
               </h2>
-              <div className={mentorOpen[step.id] ? "grid items-start gap-6 lg:grid-cols-2" : "max-w-3xl"}>
-              <section aria-label="本步填写信息" className="space-y-4">
-                <div className="space-y-2">
-                  {d.information[step.id].schema.map(
-                    (field: {
-                      id: string;
-                      title: string;
-                      required: boolean;
-                    }) => {
+              <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
+                <aside
+                  aria-label="本步导师聊天"
+                  className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4"
+                >
+                  <div>
+                    <p className="text-xs text-[var(--text-secondary)]">全程引导</p>
+                    <h3 className="font-semibold">和导师一起完成 · {step.title}</h3>
+                  </div>
+                  <div
+                    ref={chatScroll}
+                    role="log"
+                    aria-label="本步导师消息"
+                    aria-live="polite"
+                    className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2"
+                  >
+                    <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+                      <span className="text-xs text-[var(--text-secondary)]">导师</span>
+                      <p className="mt-1 whitespace-pre-wrap break-words">
+                        我们先完成“{step.title}”。我会一次问一个问题，并把从你回答中梳理出的内容放到右侧，供你核对。
+                        {schema[0]
+                          ? `先从这里开始：${schema[0].title}，你目前是怎么想的？`
+                          : "先说说你现在最想解决的问题。"}
+                      </p>
+                    </div>
+                    {mentorExecutions.map((execution) => {
+                      const parsed = readMentorResponse(
+                        execution.body ?? execution.primaryBody,
+                        allowedFields,
+                      );
+                      return (
+                        <div key={execution.executionId} className="space-y-2">
+                          <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
+                            <span className="text-xs text-[var(--text-secondary)]">你</span>
+                            <p className="mt-1 whitespace-pre-wrap break-words">
+                              {execution.input ?? "内容暂不可用"}
+                            </p>
+                          </div>
+                          <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+                            <span className="text-xs text-[var(--text-secondary)]">导师</span>
+                            <p className="mt-1 whitespace-pre-wrap break-words">
+                              {parsed.message ||
+                                (execution.state === "cancelled"
+                                  ? "这条回复未发给模型，你可以直接重新描述问题。"
+                                  : "这条回复还在核对原请求，不会重复发送或重复扣费。")}
+                            </p>
+                          </div>
+                          {!["completed", "cancelled"].includes(
+                            execution.state,
+                          ) && (
+                            <Button
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                run(() =>
+                                  execute.mutateAsync({
+                                    executionId: execution.executionId,
+                                  }),
+                                )
+                              }
+                            >
+                              继续核对这条回复
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <label className="block text-sm">
+                    回复导师
+                    <Textarea
+                      className="resize-none"
+                      aria-label="给导师的回复"
+                      value={mentorInputs[step.id] ?? ""}
+                      disabled={busy || Boolean(pendingMentor) || snap.state !== "draft"}
+                      onChange={(event) =>
+                        setMentorInputs((old) => ({
+                          ...old,
+                          [step.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="用自己的话说就好，可以多聊几轮。"
+                      maxLength={8000}
+                    />
+                  </label>
+                  <Button
+                    disabled={
+                      busy ||
+                      Boolean(pendingMentor) ||
+                      snap.state !== "draft" ||
+                      !mentorInputs[step.id]?.trim()
+                    }
+                    onClick={() => ask(step)}
+                  >
+                    {busy ? "正在回复…" : "发送"}
+                  </Button>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    对话和右侧信息都会保存，刷新或重新登录后可继续。当前为隔离模拟，不调用真实模型。
+                  </p>
+                </aside>
+                <section
+                  aria-label="本步填写信息"
+                  className="space-y-4 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs text-[var(--text-secondary)]">当前步骤表单</p>
+                      <h3 className="font-semibold">核对导师梳理的信息</h3>
+                    </div>
+                    <p role="status" className="text-xs text-[var(--text-secondary)]">
+                      {saveState[step.id] === "saving"
+                        ? "正在自动保存…"
+                        : saveState[step.id] === "error"
+                          ? "自动保存失败"
+                          : saveState[step.id] === "saved"
+                            ? "已自动保存"
+                            : "修改后自动保存"}
+                    </p>
+                  </div>
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    你可以直接填写，也可以和左侧导师聊。导师建议会以“待核对”状态填入；只有你确认本步骤后才会成为正式结果。
+                  </p>
+                  <div className="space-y-4">
+                  {schema.map((field) => {
                       const value = infoEdits[step.id]?.[field.id] ??
                         d.information[step.id].values?.[field.id] ?? {
                           status: "unknown",
@@ -514,232 +918,115 @@ export default function PositioningDraft({
                         }));
                       }
                       return (
-                        <label key={field.id} className="block">
-                          {field.title}
-                          {field.required ? "（必需）" : ""}
-                          <input
+                        <div key={field.id} className="space-y-2">
+                          <label className="block font-medium" htmlFor={`${step.id}-${field.id}`}>
+                            {field.title}
+                            {field.required ? "（必需）" : ""}
+                          </label>
+                          <Textarea
+                            id={`${step.id}-${field.id}`}
                             aria-label={field.title}
                             maxLength={400}
-                            className="w-full rounded border bg-transparent p-2"
+                            className="min-h-20 resize-none"
                             disabled={busy || snap.state !== "draft"}
                             value={value.value}
-                            onChange={(e) =>
-                              updateInfo({ value: e.target.value, status: value.status === "confirmed" ? "unknown" : value.status })
+                            onCompositionStart={() => {
+                              composing.current = true;
+                            }}
+                            onCompositionEnd={() => {
+                              composing.current = false;
+                              const values = infoEditsRef.current[step.id];
+                              if (values)
+                                void enqueueInformation(step.id, values).catch(() =>
+                                  setError("自动保存暂时失败。内容仍保留在本机，可重试保存。"),
+                                );
+                            }}
+                            onChange={(event) =>
+                              updateInfo({
+                                value: event.target.value,
+                                status: event.target.value.trim()
+                                  ? "confirmed"
+                                  : "unknown",
+                                nature:
+                                  value.nature === "unknown"
+                                    ? "decision"
+                                    : value.nature,
+                              })
                             }
                           />
-                          <select
-                            aria-label={field.title + " 状态"}
-                            value={value.status}
-                            disabled={busy || snap.state !== "draft"}
-                            onChange={(e) =>
-                              updateInfo({
-                                status: e.target.value as Information["status"],
-                              })
-                            }
-                          >
-                            {Object.entries({
-                              unknown: "未知",
-                              unclear: "待澄清",
-                              provisional: "暂定",
-                              confirmed: "用户已确认",
-                              deferred: "明确延期，接受局限",
-                            }).map(([key, label]) => (
-                              <option key={key} value={key}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            aria-label={field.title + " 性质"}
-                            value={value.nature}
-                            disabled={busy || snap.state !== "draft"}
-                            onChange={(e) =>
-                              updateInfo({
-                                nature: e.target.value as Information["nature"],
-                              })
-                            }
-                          >
-                            {Object.entries({
-                              unknown: "未知",
-                              fact: "事实",
-                              decision: "用户决定",
-                              hypothesis: "假设",
-                            }).map(([key, label]) => (
-                              <option key={key} value={key}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                          {value.status === "provisional" && (
+                            <p className="text-xs text-[var(--text-secondary)]">
+                              导师已根据你的回答填入，请核对或修改。
+                            </p>
+                          )}
+                          <details className="text-sm text-[var(--text-secondary)]">
+                            <summary className="cursor-pointer">
+                              这项现在还不能确定
+                            </summary>
+                            <UiSelect
+                              value={value.status}
+                              disabled={busy || snap.state !== "draft"}
+                              onValueChange={(status) =>
+                                updateInfo({
+                                  status: status as Information["status"],
+                                })
+                              }
+                            >
+                              <SelectTrigger
+                                className="mt-2 w-full sm:w-56"
+                                aria-label={field.title + " 状态"}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries({
+                                  unknown: "尚未知",
+                                  unclear: "需要继续聊",
+                                  provisional: "导师已填写，待我核对",
+                                  confirmed: "我已确认",
+                                  deferred: "暂时无法确定",
+                                }).map(([key, label]) => (
+                                  <SelectItem key={key} value={key}>
+                                    {label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </UiSelect>
+                          </details>
+                        </div>
                       );
-                    },
+                    })}
+                  </div>
+                  {saveState[step.id] === "error" && (
+                    <Button
+                      variant="outline"
+                      disabled={information.isPending}
+                      onClick={() => {
+                        const values = infoEditsRef.current[step.id];
+                        if (values)
+                          void enqueueInformation(step.id, values).catch(() =>
+                            setError("自动保存仍未成功。内容已保留，请稍后重试。"),
+                          );
+                      }}
+                    >
+                      重试自动保存
+                    </Button>
                   )}
                   <Button
-                    variant="outline"
-                    disabled={
-                      busy || !infoEdits[step.id] || snap.state !== "draft"
-                    }
-                    onClick={() =>
-                      run(async () => {
-                        await information.mutateAsync({
-                          draftId,
-                          stepId: step.id,
-                          requestId: crypto.randomUUID(),
-                          expectedVersion: s.version,
-                          values: infoEdits[step.id],
-                        });
-                        setInfoEdits((old) => {
-                          const next = { ...old };
-                          delete next[step.id];
-                          return next;
-                        });
-                      })
-                    }
+                    className="w-full"
+                    disabled={busy || snap.state !== "draft"}
+                    onClick={() => confirmStep(step, index)}
                   >
-                    保存信息状态
+                    {s.valid ? "重新确认本步骤" : "确认本步骤"}
                   </Button>
-                </div>
-                <Button variant="outline" aria-expanded={Boolean(mentorOpen[step.id])}
-                  onClick={() => setMentorOpen(old => ({...old, [step.id]: !old[step.id]}))}>
-                  请导师帮助这一步
-                </Button>
-                <p className="text-xs text-[var(--text-secondary)]">不确定怎么填，可以与导师多聊几轮；讨论不会自动确认答案或进入下一步。</p>
-              </section>
-              {mentorOpen[step.id] && (
-                <aside aria-label="本步导师聊天" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 lg:sticky lg:top-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-semibold">和导师聊聊 · {step.title}</h3>
-                    <Button variant="outline" onClick={() => setMentorOpen(old => ({...old, [step.id]: false}))}>收起聊天</Button>
-                  </div>
-                  <div ref={chatScroll} role="log" aria-label="本步导师消息" aria-live="polite" className="max-h-[50vh] min-h-32 space-y-3 overflow-y-auto overscroll-contain pr-2">
-                    {(history.data?.executions ?? []).filter((e: {executionId: string}) =>
-                      d.turns?.some((t: {executionId: string; stepId: string; kind: string}) => t.executionId === e.executionId && t.stepId === step.id && t.kind === "mentor")
-                    ).map((e: {executionId: string; input: string | null; body: string | null; primaryBody: string | null; state: string}) => (
-                      <div key={e.executionId} className="space-y-2">
-                        <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3"><span className="text-xs">你</span><p className="whitespace-pre-wrap break-words">{e.input ?? "内容暂不可用"}</p></div>
-                        <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className="text-xs">导师</span><p className="whitespace-pre-wrap break-words">{e.body ?? e.primaryBody ?? "等待原任务恢复"}</p></div>
-                        {e.state !== "completed" && e.state !== "cancelled" && <Button variant="outline" disabled={busy} onClick={() => run(() => execute.mutateAsync({executionId:e.executionId}))}>恢复原导师任务</Button>}
-                      </div>
-                    ))}
-                  </div>
-                  <label className="block text-sm">说说你卡在哪里，或继续回答导师
-                    <Textarea aria-label="给导师的回复" value={mentorInputs[step.id] ?? ""}
-                      disabled={busy || snap.state !== "draft"}
-                      onChange={e => setMentorInputs(old => ({...old, [step.id]:e.target.value}))}
-                      placeholder="可以慢慢聊，不必一次想清楚。" maxLength={8000} />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button disabled={busy || snap.state !== "draft" || !mentorInputs[step.id]?.trim()} onClick={() => ask(step)}>{busy ? "正在回复…" : "发送"}</Button>
-                    {!mentorInputs[step.id]?.trim() && <Button variant="outline" disabled={busy || snap.state !== "draft"} onClick={() => ask(step)}>帮我开始梳理</Button>}
-                  </div>
-                  <p className="text-xs text-[var(--text-secondary)]">对话随本步保存，可刷新后继续。当前回复为本地模拟。</p>
-                </aside>
-              )}
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    确认会把右侧表单冻结为本步骤结果，不再额外生成一份重复成果。
+                  </p>
+                </section>
               </div>
-              <section aria-label="本步成果" className="space-y-3 border-t border-[var(--border-primary)] pt-4">
-                {(history.data?.executions ?? []).filter((e: {executionId:string;state:string}) =>
-                  !["completed","cancelled"].includes(e.state) && d.turns?.some((t: {executionId:string;stepId:string;kind:string}) => t.executionId === e.executionId && t.stepId === step.id && t.kind !== "mentor")
-                ).map((e: {executionId:string}) => <div key={e.executionId} className="text-sm">
-                  本步有尚未完成的整理或计划。
-                  <Button variant="outline" disabled={busy} onClick={() => run(() => execute.mutateAsync({executionId:e.executionId}))}>恢复原处理</Button>
-                </div>)}
-                <p className="text-sm">
-                  下面的按钮会确认你填写的内容，并交给管理员配置的整理模型形成成果候选。明确标为待澄清或暂定的信息仍需核对；不会自动编造事实。
-                </p>
-                <Button
-                  disabled={busy || snap.state !== "draft"}
-                  onClick={() => organize(step)}
-                >
-                  确认所填信息并整理成果
-                </Button>
-                <p className="text-sm">
-                  已有成果可以在下方手动修改；无需重新抄写表单。
-                </p>
-                <Textarea
-                  aria-label={step.title + " 工作稿"}
-                  value={edits[step.id] ?? s.body ?? ""}
-                  disabled={busy || snap.state !== "draft"}
-                  onChange={(e) =>
-                    setEdits((old) => ({ ...old, [step.id]: e.target.value }))
-                  }
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    disabled={
-                      busy || !(step.id in edits) || snap.state !== "draft"
-                    }
-                    onClick={() => save(step)}
-                  >
-                    保存工作稿
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={
-                      busy ||
-                      step.id in edits ||
-                      step.id in infoEdits ||
-                      snap.state !== "draft"
-                    }
-                    onClick={() =>
-                      run(() =>
-                        change.mutateAsync({
-                          action: "confirm",
-                          projectId: d.projectId,
-                          roundId: d.roundId,
-                          requestId: crypto.randomUUID(),
-                          stepId: step.id,
-                          expectedVersion: s.version,
-                          expectedReviewVersion: s.reviewVersion,
-                        }),
-                      )
-                    }
-                  >
-                    确认这一步
-                  </Button>
-                </div>
-                {snap.candidates
-                  .filter((c: { stepId: string }) => c.stepId === step.id)
-                  .map((c: { id: string; body: string | null }) => (
-                    <aside
-                      key={c.id}
-                      className="space-y-2 border-t border-[var(--border-primary)] pt-3"
-                    >
-                      <p className="text-sm">AI 候选 · 尚未替换工作稿</p>
-                      <p className="whitespace-pre-wrap">
-                        {c.body ?? "来源不可用"}
-                      </p>
-                      <Button
-                        variant="outline"
-                        disabled={
-                          busy ||
-                          !c.body ||
-                          hasUnsavedInformation ||
-                          snap.state !== "draft" ||
-                          step.id in edits
-                        }
-                        onClick={() =>
-                          run(() =>
-                            change.mutateAsync({
-                              action: "saveCandidate",
-                              projectId: d.projectId,
-                              roundId: d.roundId,
-                              stepId: step.id,
-                              requestId: crypto.randomUUID(),
-                              expectedVersion: s.version,
-                              body: c.body!,
-                              candidateId: c.id,
-                            }),
-                          )
-                        }
-                      >
-                        采用到工作稿
-                      </Button>
-                    </aside>
-                  ))}
-              </section>
               {s.valid && index < steps.length - 1 && (
                 <Button
-                  disabled={busy || hasUnsavedInformation || step.id in edits}
+                  disabled={busy || hasUnsavedInformation}
                   onClick={() => setActiveStep(steps[index + 1].id)}
                 >
                   继续下一步
@@ -770,7 +1057,6 @@ export default function PositioningDraft({
         disabled={
           busy ||
           hasUnsavedInformation ||
-          Object.keys(edits).length > 0 ||
           steps.some((step) => !snap.steps[step.id].valid) ||
           snap.state !== "draft"
         }
@@ -830,6 +1116,7 @@ export default function PositioningDraft({
               <label>
                 简报
                 <Textarea
+                  className="resize-none"
                   disabled={busy}
                   value={item.brief}
                   onChange={(e) => update(index, "brief", e.target.value)}
@@ -938,7 +1225,7 @@ export default function PositioningDraft({
               </p>
               <Button
                 disabled={
-                  busy || hasUnsavedInformation || Object.keys(edits).length > 0
+                  busy || hasUnsavedInformation
                 }
                 onClick={confirmPlan}
               >

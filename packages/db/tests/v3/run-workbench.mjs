@@ -383,7 +383,16 @@ try {
           const stepIndex=Object.keys(input.scopeMaterial?.content?.work?.steps ?? {}).indexOf(stepId);
           if(stepId){
             const questions=['你希望帮助哪类人解决什么问题？','你手里有哪些对标账号或内容例子？','你希望别人因为什么特点记住你？','你最容易持续制作哪一种内容？','你每周可以投入多少时间？','你希望先尝试哪一种变现方式？'];
-            content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
+            if(input.scopeMaterial?.content?.brief?.startsWith('mentor:')){
+              const instructionText=typeof request.instructions==='string'
+                ? request.instructions
+                : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
+              const match=/Allowed field IDs: (\[[^\]]*\])/.exec(instructionText);
+              const fieldIds=match ? JSON.parse(match[1]) : [];
+              const informationPatch=fieldIds[0] && typeof input.userRequest==='string' && input.userRequest.trim()
+                ? {[fieldIds[0]]:{value:input.userRequest.trim().slice(0,400),status:'provisional',nature:'hypothesis'}} : {};
+              content=JSON.stringify({message:'【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+' 此示例只验证持续对话和表单联动。',informationPatch});
+            }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){
             const information=input.scopeMaterial.content.work.steps[stepId]?.information ?? {};
