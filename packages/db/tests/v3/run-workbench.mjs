@@ -400,7 +400,9 @@ try {
           }
           if(input.scopeMaterial?.content?.brief?.startsWith('plan:')){
             const accounts=JSON.parse(input.userRequest);
-            content=JSON.stringify(accounts.map((a,index)=>({id:randomUUID(),platform:a.platform,account:a.account,day:a.day,title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
+            content=accounts.some(a=>a.account==='invalid-plan')
+              ? 'This completed response is not a valid plan.'
+              : JSON.stringify(accounts.map((a,index)=>({id:randomUUID(),platform:a.platform,account:a.account,day:a.day,title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
           }
         }catch{/* A malformed fixture input stays a labeled non-plan reply. */}
       }

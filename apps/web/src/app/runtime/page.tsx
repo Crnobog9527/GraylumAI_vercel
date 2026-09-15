@@ -34,7 +34,7 @@ export default function RuntimePage(){
  }catch{setError('请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  async function stop(executionId:string){setError('');try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{await execute.mutateAsync({executionId});await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
- const executions=view.data?.executions as Array<{executionId:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
+ const executions=view.data?.executions as Array<{executionId:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  return <main className="flex h-dvh min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
   <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 sm:px-6">
    <div className="flex items-center gap-3"><MessageSquare className="h-5 w-5 text-[var(--color-primary)]"/><div><h1 className="font-medium">工作对话</h1><p className="text-xs text-[var(--text-tertiary)]">本地模拟体验</p></div></div>
@@ -49,7 +49,7 @@ export default function RuntimePage(){
     <div className="flex items-start gap-3"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--bg-primary)]"><Bot className="h-4 w-4"/></div><div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-sm border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3">
      <p className="whitespace-pre-wrap break-words">{e.contentAvailable?(e.body??e.primaryBody??'正在核实结果，请保留原任务。'):'来源已不可用，暂不展示此内容。'}</p>
      {e.primaryBody&&!e.organizerComplete&&<p role="status" className="mt-2 text-sm">主回复已保存，附属整理未完成。</p>}
-     {view.data?.scope?.kind==='work_item'&&e.state==='completed'&&<Button variant="outline" disabled={saveWork.isPending} onClick={async()=>{try{await saveWork.mutateAsync({executionId:e.executionId});await saved.refetch();}catch{setError('这条记录尚不能保存为 Skill 成果，请确认已完成 Skill 执行。');}}}>保存 Skill 成果</Button>}
+     {view.data?.scope?.kind==='work_item'&&e.state==='completed'&&e.skillExecution&&<Button variant="outline" disabled={saveWork.isPending} onClick={async()=>{try{await saveWork.mutateAsync({executionId:e.executionId});await saved.refetch();}catch{setError('这条记录尚不能保存为 Skill 成果，请确认已完成 Skill 执行。');}}}>保存 Skill 成果</Button>}
      {e.state==='cancelled'&&<p role="status" className="mt-2 text-sm">已取消剩余执行，保留原记录。</p>}
      {e.state==='cost_pending'&&<p role="status" className="mt-2 text-sm">费用待核实；恢复只核对原调用。</p>}
      {e.needsTask&&<p className="mt-2 text-sm">当前入口暂不支持这个 Skill 的任务选择。可取消剩余执行后使用普通对话。</p>}

@@ -45,9 +45,21 @@ export const opcRouter = router({
         .object({ draftId: z.string().uuid(), executionId: z.string().uuid() })
         .strict(),
     )
-    .query(({ ctx, input }) =>
-      ctx.opc.planResult(input.draftId, input.executionId),
-    ),
+    .query(async ({ ctx, input }) => {
+      try {
+        return {
+          valid: true as const,
+          ...(await ctx.opc.planResult(input.draftId, input.executionId)),
+        };
+      } catch (cause) {
+        if (
+          cause instanceof Error &&
+          cause.message === "OPC_PLAN_RESPONSE_INVALID"
+        )
+          return { valid: false as const };
+        throw cause;
+      }
+    }),
   revise: procedure
     .input(
       z

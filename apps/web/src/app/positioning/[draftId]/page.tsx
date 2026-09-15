@@ -595,6 +595,13 @@ export default function PositioningDraft({
         draftId,
         executionId: prepared.executionId,
       });
+      if (!candidate.valid) {
+        // This execution completed and returned a body that cannot be used as
+        // a plan. It is safe to create a new request after the user edits the
+        // inputs; timeouts and unknown execution state retain identity.
+        sessionStorage.removeItem(key);
+        throw new Error("OPC_PLAN_RESPONSE_INVALID");
+      }
       setPlanCandidate(candidate.body);
       sessionStorage.removeItem(key);
     });

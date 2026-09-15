@@ -726,10 +726,111 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await browser.close();
   }
 }, 300000);
+it("OPC: browser can correct plan inputs after a definite invalid completed response", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await completed(3);
+  const browserModel = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [browserModel],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [
+    browserModel,
+    f.moduleId,
+  ]);
+  const browser = await chromium.launch({
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(90000);
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page
+      .getByRole("button", { name: "登录", exact: true })
+      .last()
+      .click();
+    await page.waitForURL((url) =>
+      url.pathname.endsWith("/positioning/" + f.d.draftId),
+    );
+    await page.getByRole("button", { name: "添加选题" }).click();
+    await page
+      .getByRole("textbox", { name: "account 0", exact: true })
+      .fill("invalid-plan");
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Original user title");
+    await page
+      .getByRole("textbox", { name: "简报", exact: true })
+      .fill("Original user brief");
+    const generate = page.getByRole("button", {
+      name: "按已保存账号生成计划候选",
+      exact: true,
+    });
+    const invalidResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/trpc/opc.planResult") && response.ok(),
+    );
+    await generate.click();
+    await invalidResponse;
+    await expect
+      .poll(() =>
+        page.evaluate((id) =>
+          sessionStorage.getItem("opc-plan-generation:" + id),
+        f.d.draftId),
+      )
+      .toBeNull();
+    await page
+      .getByRole("textbox", { name: "account 0", exact: true })
+      .fill("corrected-plan");
+    await generate.click();
+    await page
+      .getByRole("heading", {
+        name: "AI 计划候选 · 尚未替换你的编辑",
+        exact: true,
+      })
+      .waitFor();
+    expect(
+      await page
+        .getByRole("textbox", { name: "title 0", exact: true })
+        .inputValue(),
+    ).toBe("Original user title");
+    const requests = await sql.query(
+      "select request_id,state from runtime_executions where session_id=$1 order by created_at,id",
+      [f.d.sessionId],
+    );
+    expect(requests.rows).toHaveLength(2);
+    expect(new Set(requests.rows.map((row) => row.request_id)).size).toBe(2);
+    expect(requests.rows.map((row) => row.state)).toEqual([
+      "completed",
+      "completed",
+    ]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
 it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact once; source revocation denies recovery reads", async () => {
   const { runtimeAdmissionService } = await import("../runtime/admission");
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
   const f = await completed(),
     modelId = randomUUID();
   await sql.query(
@@ -792,7 +893,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify({
-        id: "work-" + prepared.executionId,
+        id: "work-" + calls,
         model: "opc-work",
         final: true,
         cost: "0.003",
@@ -835,8 +936,80 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       actor: async () => f.actor,
       endpoint,
     }).execute(prepared.executionId);
+    const ordinary = await admission.prepare({
+      sessionId: work.sessionId,
+      requestId: randomUUID(),
+      input: "Keep this as an ordinary conversation.",
+      selection: { kind: "ordinary", modelId },
+      network: "deny",
+      sources: [],
+    });
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint,
+    }).execute(ordinary.executionId);
+    const publicView = await admin.rpc("runtime_view", {
+      p_actor_id: f.actor,
+      p_session_id: work.sessionId,
+    });
+    expect(publicView.error).toBeNull();
+    expect(
+      publicView.data.executions.map((execution: any) => ({
+        executionId: execution.executionId,
+        skillExecution: execution.skillExecution,
+      })),
+    ).toEqual([
+      { executionId: prepared.executionId, skillExecution: true },
+      { executionId: ordinary.executionId, skillExecution: false },
+    ]);
+    const browser = await chromium.launch({
+      executablePath:
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      headless: true,
+    });
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", (route) => {
+        const u = new URL(route.request().url());
+        return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+          ["data:", "blob:"].includes(u.protocol)
+          ? route.continue()
+          : route.abort();
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(90000);
+      await page.goto(
+        process.env.V3_LOCAL_APP +
+          "/login?redirect=" +
+          encodeURIComponent("/runtime?session=" + work.sessionId),
+      );
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page
+        .getByRole("button", { name: "登录", exact: true })
+        .last()
+        .click();
+      await page.waitForURL((url) => url.pathname === "/runtime");
+      await expect
+        .poll(
+          () =>
+            page
+              .getByRole("button", { name: "保存 Skill 成果", exact: true })
+              .count(),
+          { timeout: 15000 },
+        )
+        .toBe(1);
+      await page
+        .getByRole("button", { name: "保存 Skill 成果", exact: true })
+        .click();
+      await page.getByText("已保存成果 · 第 1 版", { exact: true }).waitFor();
+    } finally {
+      await browser.close();
+    }
     const saved = await f.service.saveWorkResult(prepared.executionId);
     expect(await f.service.saveWorkResult(prepared.executionId)).toEqual(saved);
+    await expect(f.service.saveWorkResult(ordinary.executionId)).rejects.toThrow();
     expect((await f.service.workResults(work.sessionId))[0].body).toBe(
       "Saved Skill work artifact",
     );
@@ -853,7 +1026,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       actor: async () => f.actor,
       endpoint,
     }).execute(prepared.executionId);
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(
       (
         await sql.query(
@@ -873,7 +1046,7 @@ it("OPC: work item uses shared Runtime and saves non-workflow Skill artifact onc
       server.close((e) => (e ? reject(e) : resolve())),
     );
   }
-});
+}, 300000);
 it("OPC: revising positioning retains original version/session and invalidates only configured dependents", async () => {
   const f = await completed(3);
   const old = await f.service.read(f.d.draftId);

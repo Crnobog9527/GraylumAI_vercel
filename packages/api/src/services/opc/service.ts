@@ -215,10 +215,17 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient) {
         p_draft_id: uuid.parse(draftId),
         p_execution_id: uuid.parse(executionId),
       });
-      return {
-        ...value,
-        body: z.array(planItem).min(1).max(28).parse(JSON.parse(value.body)),
-      };
+      try {
+        return {
+          ...value,
+          body: z.array(planItem).min(1).max(28).parse(JSON.parse(value.body)),
+        };
+      } catch {
+        // The provider execution is already complete and the RPC proved that
+        // this is its authorized public body. A malformed plan is therefore a
+        // definite response validation failure, not an ambiguous dispatch.
+        throw new Error("OPC_PLAN_RESPONSE_INVALID");
+      }
     },
     revise: (draftId: string, requestId: string, expectedRoundId: string) =>
       rpc("opc_revise", {

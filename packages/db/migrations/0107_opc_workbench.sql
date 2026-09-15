@@ -516,4 +516,30 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION opc_information_schema(jsonb),opc_information(uuid,uuid,text,uuid,integer,jsonb),opc_profile(uuid),artifact_transition_before_opc(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb),artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION opc_information(uuid,uuid,text,uuid,integer,jsonb),artifact_transition(uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb) TO service_role;
+
+-- Expose only the fact that an execution used a frozen Skill identity. The UI
+-- needs this safe projection to offer Skill-result saving without revealing
+-- the private module/revision identity or inviting ordinary-chat failures.
+CREATE OR REPLACE FUNCTION public.runtime_view(p_actor_id uuid,p_session_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE s runtime_sessions;items jsonb;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
+ IF s.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED';END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('executionId',e.id,'state',e.state,
+  'input',CASE WHEN runtime_history_available(e.id) THEN e.payload->>'input' ELSE NULL END,
+  'body',CASE WHEN runtime_history_available(e.id) THEN e.result->>'body' ELSE NULL END,
+  'primaryBody',CASE WHEN runtime_history_available(e.id) THEN e.primary_result->>'body' ELSE NULL END,
+  'organizerComplete',e.result ? 'summary',
+  'summary',CASE WHEN runtime_history_available(e.id) THEN e.result->>'summary' ELSE NULL END,
+  'skillExecution',coalesce(e.payload->>'revisionId',(SELECT c->>'revisionId' FROM jsonb_array_elements(coalesce(e.payload->'matching'->'candidates','[]'::jsonb)) c WHERE c->>'key'=e.match_result->>'key' LIMIT 1)) IS NOT NULL,
+  'needsTask',coalesce((SELECT (c->>'requiresTask')::boolean FROM jsonb_array_elements(e.payload->'matching'->'candidates') c WHERE c->>'key'=e.match_result->>'key'),false),
+  'unavailableReason',e.unavailable_reason,
+  'contentAvailable',runtime_history_available(e.id),'billing',bill2_public(b)) ORDER BY e.created_at,e.id),'[]') INTO items
+ FROM runtime_executions e JOIN bill2_runs b ON b.id=e.billing_run_id WHERE e.session_id=s.id;
+ RETURN jsonb_build_object('sessionId',s.id,'scope',s.scope,'activeExecution',s.active_execution,'executions',items);
+END $$;
+REVOKE ALL ON FUNCTION runtime_view(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION runtime_view(uuid,uuid) TO service_role;
 COMMIT;
