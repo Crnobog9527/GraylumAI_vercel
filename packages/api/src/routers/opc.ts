@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
+import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
 import {
   opcService,
   opcStart,
@@ -12,7 +13,7 @@ import {
   opcInformation,
 } from "../services/opc/service";
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
-  // This batch is a local business acceptance surface. No remote database or provider.
+  // Remote access requires the explicit Staging target and server-side actor window.
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!url || !ctx.supabaseAdmin || !ctx.hasSupabaseAdminPrivileges)
     throw new TRPCError({
@@ -20,14 +21,20 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
       message: "当前工作空间尚未开放。",
     });
   const u = new URL(url);
-  if (u.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(u.hostname))
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "当前工作空间尚未开放。",
-    });
+  const local=u.protocol==='http:'&&['127.0.0.1','[::1]'].includes(u.hostname)&&!u.username&&!u.password;
+  let real;
+  if(!local)try{real=await loadStagingPolicy(ctx.supabaseAdmin,ctx.user.id,process.env);}
+  catch{throw new TRPCError({code:'PRECONDITION_FAILED',message:'当前工作空间尚未开放。'});}
   return next({
-    ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin) },
+    ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin,real) },
   });
+});
+const readProcedure=protectedProcedure.use(async({ctx,next})=>{
+ if(!ctx.supabaseAdmin||!ctx.hasSupabaseAdminPrivileges)throw new TRPCError({code:'PRECONDITION_FAILED'});
+ const u=new URL(process.env.NEXT_PUBLIC_SUPABASE_URL??'http://invalid.local');
+ const local=u.protocol==='http:'&&['127.0.0.1','[::1]'].includes(u.hostname)&&!u.username&&!u.password;
+ if(!local)await assertStagingReadAccess(ctx.supabaseAdmin,ctx.user.id,process.env);
+ return next({ctx:{...ctx,opc:opcService(ctx.userScopedSupabase,ctx.supabaseAdmin),stagingRead:!local}});
 });
 export const opcRouter = router({
   information: procedure
@@ -39,7 +46,7 @@ export const opcRouter = router({
   saveResult: procedure
     .input(opcSaveResult)
     .mutation(({ ctx, input }) => ctx.opc.saveResult(input)),
-  planResult: procedure
+  planResult: readProcedure
     .input(
       z
         .object({ draftId: z.string().uuid(), executionId: z.string().uuid() })
@@ -76,14 +83,14 @@ export const opcRouter = router({
   saveWorkResult: procedure
     .input(z.object({ executionId: z.string().uuid() }).strict())
     .mutation(({ ctx, input }) => ctx.opc.saveWorkResult(input.executionId)),
-  workResults: procedure
+  workResults: readProcedure
     .input(z.object({ sessionId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
   catalog: procedure.query(({ ctx }) => ctx.opc.catalog()),
-  list: procedure.query(({ ctx }) => ctx.opc.list()),
-  read: procedure
+  list: readProcedure.query(({ ctx }) => ctx.opc.list()),
+  read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
-    .query(({ ctx, input }) => ctx.opc.read(input.draftId)),
+    .query(async({ ctx, input }) => ({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
   start: procedure
     .input(opcStart)
     .mutation(({ ctx, input }) => ctx.opc.start(input)),

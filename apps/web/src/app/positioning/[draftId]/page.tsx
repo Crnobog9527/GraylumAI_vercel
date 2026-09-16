@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { mergeInformation } from "./information-merge";
 import { readWorkflowMentorResponse } from "./mentor-response";
 type Step = { id: string; title: string };
 type Information = {
@@ -107,6 +108,7 @@ export default function PositioningDraft({
   const [saveState, setSaveState] = useState<
     Record<string, "idle" | "saving" | "saved" | "error">
   >({});
+  const [informationConflicts, setInformationConflicts] = useState<Record<string, { current: Record<string, Information>; fields: string[] }>>({});
   const infoEditsRef = useRef(infoEdits);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveChain = useRef<Promise<void>>(Promise.resolve());
@@ -208,12 +210,18 @@ export default function PositioningDraft({
   useEffect(() => {
     if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
   }, [history.data]);
+  function captureInformationBase(stepId: string) {
+    const key = "opc-information-base:" + draftId + ":" + stepId;
+    if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
+  }
   async function persistInformation(
     stepId: string,
     requestedValues: Record<string, Information>,
   ) {
     const storageKey = "opc-information-autosave:" + draftId + ":" + stepId;
-    let wanted = requestedValues;
+    // A queued task may outlive the edit that scheduled it.
+    if (!infoEditsRef.current[stepId] && !sessionStorage.getItem(storageKey)) return;
+    let wanted = infoEditsRef.current[stepId] ?? requestedValues;
     let retriedConflict = false;
     setSaveState((old) => ({ ...old, [stepId]: "saving" }));
     try {
@@ -235,12 +243,22 @@ export default function PositioningDraft({
         if (!fixed) {
           const current = (await read.refetch()).data;
           if (!current) throw new Error("OPC_UNAVAILABLE");
+          const rawBase = sessionStorage.getItem("opc-information-base:" + draftId + ":" + stepId);
+          if (!rawBase) {
+            setInformationConflicts(old=>({...old,[stepId]:{current:current.information[stepId].values ?? {},fields:Object.keys(wanted)}}));
+            throw new Error("OPC_EDIT_BASE_MISSING");
+          }
+          const merged = mergeInformation(JSON.parse(rawBase), wanted, current.information[stepId].values ?? {});
+          if (merged.conflicts.length) {
+            setInformationConflicts(old=>({...old,[stepId]:{current:current.information[stepId].values ?? {},fields:merged.conflicts}}));
+            throw new Error("OPC_FIELD_CONFLICT:" + merged.conflicts.join(","));
+          }
           fixed = {
             draftId,
             stepId,
             requestId: crypto.randomUUID(),
             expectedVersion: current.snapshot.steps[stepId].version,
-            values: wanted,
+            values: merged.values as Record<string, Information>,
             editingSnapshot: JSON.stringify(wanted),
           };
           sessionStorage.setItem(storageKey, JSON.stringify(fixed));
@@ -265,28 +283,31 @@ export default function PositioningDraft({
         }
         sessionStorage.removeItem(storageKey);
         await read.refetch();
-        setInfoEdits((old) => {
-          if (
-            JSON.stringify(old[stepId] ?? null) !== fixed!.editingSnapshot
-          )
-            return old;
-          const next = { ...old };
-          delete next[stepId];
-          return next;
-        });
         const latestValues = infoEditsRef.current[stepId];
-        if (
-          !latestValues ||
-          JSON.stringify(latestValues) === fixed.editingSnapshot
-        )
+        const hasLaterEdit = latestValues && JSON.stringify(latestValues) !== fixed.editingSnapshot;
+        if (!hasLaterEdit) {
+          infoEditsRef.current = { ...infoEditsRef.current };
+          delete infoEditsRef.current[stepId];
+          setInfoEdits(infoEditsRef.current);
+          sessionStorage.removeItem("opc-information-base:" + draftId + ":" + stepId);
           break;
-        wanted = latestValues;
+        }
+        // Only edits made after this immutable request become the next request.
+        const pending = mergeInformation(JSON.parse(fixed.editingSnapshot), latestValues, fixed.values);
+        if (pending.conflicts.length) throw new Error("OPC_FIELD_CONFLICT:" + pending.conflicts.join(","));
+        wanted = pending.values as Record<string, Information>;
+        sessionStorage.setItem("opc-information-base:" + draftId + ":" + stepId, JSON.stringify(fixed.values));
+        infoEditsRef.current = { ...infoEditsRef.current, [stepId]: wanted };
+        setInfoEdits(infoEditsRef.current);
         retriedConflict = false;
       }
       setSaveState((old) => ({ ...old, [stepId]: "saved" }));
-    } catch {
+    } catch (cause) {
       setSaveState((old) => ({ ...old, [stepId]: "error" }));
-      throw new Error("OPC_AUTOSAVE_FAILED");
+      if (cause instanceof Error && /OPC_FIELD_CONFLICT|OPC_EDIT_BASE_MISSING/.test(cause.message)) {
+        setError("其他窗口修改了相同信息。你的输入仍保留，请核对后再保存，未覆盖服务器内容。");
+      }
+      throw cause;
     }
   }
   function enqueueInformation(
@@ -371,6 +392,7 @@ export default function PositioningDraft({
           values[fieldId] = suggestion;
           changed = true;
         }
+        if (changed) captureInformationBase(turn.stepId);
         return changed ? { ...old, [turn.stepId]: values } : old;
       });
     }
@@ -712,23 +734,35 @@ export default function PositioningDraft({
   async function acceptSuggestion(executionId: string, stepId: string, patch: Record<string, Information>) {
     await run(async () => {
       await flushInformation(stepId);
-      const key = "opc-suggestion:" + draftId + ":" + executionId;
-      const prior = sessionStorage.getItem(key);
-      const current = (await read.refetch()).data;
-      if (!current || current.snapshot.state !== "draft") throw new Error("OPC_STEP_DENIED");
-      const values = Object.fromEntries(current.information[stepId].schema.map((f: {id:string}) =>
-        [f.id, patch[f.id] ?? current.information[stepId].values?.[f.id] ?? {value:"",nature:"unknown",status:"unknown"}]));
-      const request = prior ? JSON.parse(prior) : {draftId, stepId, requestId:crypto.randomUUID(),
-        expectedVersion:current.snapshot.steps[stepId].version, values};
-      sessionStorage.setItem(key, JSON.stringify(request));
-      try { await information.mutateAsync(request); }
-      catch (cause) {
-        if (isDefiniteConfirmConflict(cause)) sessionStorage.removeItem(key);
-        throw cause;
+      // Recover any pre-upgrade immutable suggestion request before starting a new edit.
+      const legacyKey = "opc-suggestion:" + draftId + ":" + executionId;
+      const legacy = sessionStorage.getItem(legacyKey);
+      if (legacy) {
+        await information.mutateAsync(JSON.parse(legacy));
+        sessionStorage.removeItem(legacyKey);
+      } else {
+        captureInformationBase(stepId);
+        const values = {...d.information[stepId].values, ...patch};
+        infoEditsRef.current = {...infoEditsRef.current,[stepId]:values};
+        setInfoEdits(infoEditsRef.current);
+        await enqueueInformation(stepId,values);
       }
-      sessionStorage.removeItem(key);
       setActiveStep(stepId);
     });
+  }
+  function retainConflictingInput(stepId: string) {
+    const conflict=informationConflicts[stepId];
+    const edited=infoEditsRef.current[stepId];
+    const baseRaw=sessionStorage.getItem("opc-information-base:"+draftId+":"+stepId);
+    if (!conflict || !edited) return;
+    const merged=mergeInformation(baseRaw ? JSON.parse(baseRaw) : {},edited,conflict.current);
+    const values={...merged.values} as Record<string,Information>;
+    for(const field of conflict.fields) values[field]=edited[field];
+    // The user has compared these exact server values. Later changes still conflict.
+    sessionStorage.setItem("opc-information-base:"+draftId+":"+stepId,JSON.stringify(conflict.current));
+    infoEditsRef.current={...infoEditsRef.current,[stepId]:values};
+    setInfoEdits(infoEditsRef.current);
+    setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
   if (read.isLoading) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
@@ -782,7 +816,7 @@ export default function PositioningDraft({
       <header className="flex flex-wrap justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{planView ? "第一周计划" : "与导师确定定位"}</h1>
-          <p className="text-xs text-[var(--text-secondary)]">隔离模拟 · 未调用真实模型或研究服务</p>
+          <p className="text-xs text-[var(--text-secondary)]">{d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'隔离模拟 · 未调用真实模型或研究服务'}</p>
         </div>
         <Link href="/positioning" className="underline">
           账号与定位列表
@@ -951,7 +985,7 @@ export default function PositioningDraft({
                     {busy ? "正在回复…" : "发送"}
                   </Button>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    六个步骤共用这一条对话记录。右侧只切换当前表单；刷新或重新登录后仍从原 Session 继续。当前为隔离模拟，不调用真实模型。
+                    六个步骤共用这一条对话记录。右侧只切换当前表单；刷新或重新登录后仍从原 Session 继续。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
                 <section
@@ -976,6 +1010,11 @@ export default function PositioningDraft({
                   <p className="text-sm text-[var(--text-secondary)]">
                     你可以直接填写，也可以和左侧导师聊。导师建议会以“待核对”状态填入；只有你确认本步骤后才会成为正式结果。
                   </p>
+                  {informationConflicts[step.id] && <div role="alert">
+                    <p>其他窗口修改了相同字段。你的输入未提交，请比较后决定。</p>
+                    {informationConflicts[step.id].fields.map(id=><p key={id}>{schema.find(f=>f.id===id)?.title ?? id}：服务器「{informationConflicts[step.id].current[id]?.value ?? ""}」；你的输入「{infoEdits[step.id]?.[id]?.value ?? ""}」</p>)}
+                    <Button onClick={()=>retainConflictingInput(step.id)}>保留我的这些修改并重新保存</Button>
+                  </div>}
                   <div className="space-y-4">
                   {schema.map((field) => {
                       const value = infoEdits[step.id]?.[field.id] ??
@@ -985,6 +1024,7 @@ export default function PositioningDraft({
                           value: "",
                         };
                       function updateInfo(patch: Partial<Information>) {
+                        captureInformationBase(step.id);
                         setInfoEdits((old) => ({
                           ...old,
                           [step.id]: {

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeAll, afterAll, it, expect } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
 import { makePackage, makeWorkflow } from "../__tests__/fixtures/artifacts";
@@ -21,7 +21,7 @@ const admin = createClient(
 );
 beforeAll(() => sql.connect());
 afterAll(() => sql.end());
-async function fixture(n = 6) {
+async function fixture(n = 6, secondField = false) {
   const password = "Local-" + randomUUID() + "!",
     email = randomUUID() + "@example.test";
   const made = await admin.auth.admin.createUser({
@@ -62,6 +62,7 @@ async function fixture(n = 6) {
       },
     ];
   });
+  if (secondField) flow.steps[0].information!.push({id:"other",title:"Second independent field",required:false,profileKey:"other"});
   await sql.query(
     "insert into skills(id,skill_key,created_by) values($1,$2,$3)",
     [pack.id, registration, owner],
@@ -2148,3 +2149,228 @@ it("OPC: browser stale account confirmation restarts only after definite rejecti
     expect((await sql.query('select count(*)::int n from bill2_runs where actor_id=$1',[f.actor])).rows[0].n).toBe(0);
   }finally{await browser.close();}
 },180000);
+
+it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
+  "OPC: staging host protected browser route uses the bounded official protocol once",
+  async () => {
+    const { chromium } =
+      await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3),
+      modelId = randomUUID(),
+      key = "LOCAL_STAGING_" + randomUUID(),
+      windowId = process.env.V3_RUNTIME_STAGING_WINDOW_ID!;
+    expect(windowId).toMatch(/^[a-f0-9-]{36}$/);
+    const callPolicy = {
+      modelId,
+      provider: "openrouter",
+      account:
+        "openrouter-key:" + createHash("sha256").update(key).digest("hex"),
+      model: "test/opc-staging",
+      protocol: "openrouter-chat-v1",
+      upperUsd: "0.02",
+      inputLimit: 8000,
+      outputLimit: 100,
+      automaticRetry: false,
+      hiddenTools: false,
+      lookupSupported: true,
+      providerLimits: {
+        providerSlug: "synthetic",
+        contextTokens: 10000,
+        promptUsdPerMillion: "2",
+        completionUsdPerMillion: "0",
+        requestUsd: "0",
+      },
+    };
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit) values($1,'Synthetic Staging OPC','test/opc-staging','openai','true','https://openrouter.ai/api/v1',$2,1000,10000)",
+      [modelId, key],
+    );
+    await sql.query("update modules set model_id=$1 where id=$2", [
+      modelId,
+      f.moduleId,
+    ]);
+    await sql.query(
+      "insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",
+      [windowId, [f.actor], JSON.stringify([callPolicy])],
+    );
+    const draft = await f.service.start({
+      requestId: randomUUID(),
+      registration: f.registration,
+      mode: "mentor",
+    });
+    const browser = await chromium.launch({
+      executablePath:
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      headless: true,
+    });
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*", async (route) => {
+        const url = new URL(route.request().url());
+        if (url.hostname === "syntheticstaging.supabase.co") {
+          const response = await route.fetch({
+            url: process.env.V3_LOCAL_REST + url.pathname + url.search,
+          });
+          await route.fulfill({ response });
+          return;
+        }
+        if (
+          ["127.0.0.1", "localhost"].includes(url.hostname) ||
+          ["data:", "blob:"].includes(url.protocol)
+        ) {
+          await route.continue();
+          return;
+        }
+        await route.abort();
+      });
+      const page = await context.newPage();
+      page.setDefaultTimeout(90000);
+      const loginReady = page.waitForResponse(
+        (response) =>
+          response.url().includes("settings.getSystemSettings") &&
+          response.ok(),
+      );
+      await page.goto(
+        process.env.V3_LOCAL_APP +
+          "/login?redirect=" +
+          encodeURIComponent("/positioning/" + draft.draftId),
+      );
+      await loginReady;
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page
+        .getByRole("button", { name: "登录", exact: true })
+        .last()
+        .click();
+      await page.waitForURL(
+        (url) => url.pathname === "/positioning/" + draft.draftId,
+      );
+      await page
+        .getByText("Staging 真实模型测试 · 未开放联网研究", { exact: true })
+        .waitFor();
+      await page
+        .getByRole("textbox", { name: "给导师的回复", exact: true })
+        .fill("I want to teach photography beginners.");
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await page.getByText(/【分步模拟，仅验证流程】第 1 步/).waitFor();
+      expect(
+        (
+          await sql.query(
+            "select state,charged,provider_cost_usd::text cost,test_window_id from bill2_runs where actor_id=$1",
+            [f.actor],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          state: "settled",
+          charged: 3,
+          cost: "0.003",
+          test_window_id: windowId,
+        },
+      ]);
+      const count = await fetch(process.env.V3_LOCAL_REST + "/__runtime_count", {
+        headers: { "x-local-control": process.env.V3_LOCAL_CONTROL! },
+      });
+      expect(count.ok).toBe(true);
+      expect((await count.json()).calls).toBe(1);
+    } finally {
+      await browser.close();
+    }
+  },
+  180000,
+);
+
+for (const scenario of ["fresh", "retry", "same-field", "offline", "response-lost"]) {
+  const conflict=scenario!=="fresh";
+  it(`OPC: two browser tabs preserve edits (${scenario})`, async () => {
+    const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+    const f = await fixture(3, true);
+    const draft = await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"manual"});
+    const browser = await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+    let release: (()=>void) | undefined;
+    try {
+      const context = await browser.newContext();
+      await context.route("**/*",route => ["127.0.0.1","localhost"].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
+      const a = await context.newPage();
+      a.setDefaultTimeout(20000);
+      const loginReady=a.waitForResponse(r=>r.url().includes("settings.getSystemSettings") && r.ok(),{timeout:90000});
+      await a.goto(process.env.V3_LOCAL_APP+"/login?redirect=/positioning",{timeout:90000,waitUntil:"domcontentloaded"});
+      await loginReady;
+      await a.getByPlaceholder("name@example.com").fill(f.email);
+      await a.getByPlaceholder("输入你的密码").fill(f.password);
+      await a.getByRole("button",{name:"登录",exact:true}).last().click();
+      await a.waitForURL(url=>url.pathname==="/positioning",{timeout:90000});
+      const url=process.env.V3_LOCAL_APP+"/positioning/"+draft.draftId;
+      await a.goto(url);
+      if(scenario==="offline" || scenario==="response-lost") {
+        await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
+        const requests: string[]=[];
+        let blocked=true, committed=false;
+        await a.route("**/api/trpc/**",async route=>{
+          if(route.request().method()==="POST" && route.request().url().includes("opc.information")) {
+            requests.push(route.request().postData()!);
+            if(blocked) {
+              if(scenario==="response-lost" && !committed) { const response=await route.fetch(); expect(response.ok()).toBe(true);committed=true; }
+              return route.abort("connectionreset");
+            }
+          }
+          return route.continue();
+        });
+        await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Recover my original edit");
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        const original=requests[0]; expect(original).toBeTruthy();
+        expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(scenario==="response-lost"?1:0);
+        await context.clearCookies();
+        const readyAgain=a.waitForResponse(r=>r.url().includes("settings.getSystemSettings") && r.ok(),{timeout:90000});
+        await a.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));
+        await readyAgain;
+        await a.getByPlaceholder("name@example.com").fill(f.email);
+        await a.getByPlaceholder("输入你的密码").fill(f.password);
+        await a.getByRole("button",{name:"登录",exact:true}).last().click();
+        await a.waitForURL(url,{timeout:90000});
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).waitFor();
+        expect(await a.getByRole("textbox",{name:"已知目标 0",exact:true}).inputValue()).toBe("Recover my original edit");
+        blocked=false;
+        await a.getByRole("button",{name:"重试自动保存",exact:true}).click();
+        await expect.poll(async()=> (await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("Recover my original edit");
+        await expect.poll(()=>a.getByRole("button",{name:"重试自动保存",exact:true}).count()).toBe(0);
+        expect(new Set(requests).size).toBe(1);
+        expect((await sql.query("select count(*)::int n from artifact_requests where project_id=$1 and action='opc_information'",[draft.projectId])).rows[0].n).toBe(1);
+        expect((await f.service.read(draft.draftId)).sessionId).toBe(draft.sessionId);
+        return;
+      }
+      const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
+      await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+      const held=new Promise<void>(resolve=>{release=resolve;});
+      let reached!:()=>void;
+      const intercepted=new Promise<void>(resolve=>{reached=resolve;});
+      // Hold either B's fresh-version read or its first write, not the backend.
+      let once=true;
+      await b.route("**/api/trpc/**",async route=>{
+        const req=route.request();
+        if(once && (conflict ? req.method()==="POST" && req.url().includes("opc.information") : req.method()==="GET" && req.url().includes("opc.read"))) {
+          once=false; reached(); await held;
+        }
+        await route.continue();
+      });
+      await b.getByRole("textbox",{name:scenario==="same-field" ? "已知目标 0" : "Second independent field",exact:true}).fill("B original edit");
+      await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error("autosave barrier not reached")),20000))]);
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("A saved independently");
+      await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("A saved independently");
+      release!();
+      if(scenario==="same-field") {
+        await b.getByText("其他窗口修改了相同字段。你的输入未提交，请比较后决定。",{exact:true}).waitFor();
+        expect((await f.service.read(draft.draftId)).information["step-0"].values.goal.value).toBe("A saved independently");
+        await b.reload();
+        await b.getByText("其他窗口修改了相同字段。你的输入未提交，请比较后决定。",{exact:true}).waitFor();
+        expect(await b.getByRole("textbox",{name:"已知目标 0",exact:true}).inputValue()).toBe("B original edit");
+        await b.getByRole("button",{name:"保留我的这些修改并重新保存",exact:true}).click();
+        await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.value,{timeout:20000}).toBe("B original edit");
+        return;
+      }
+      await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.value,{timeout:20000}).toBe("B original edit");
+      expect((await f.service.read(draft.draftId)).information["step-0"].values.goal.value).toBe("A saved independently");
+    } finally { release?.(); await browser.close(); }
+  },180000);
+}

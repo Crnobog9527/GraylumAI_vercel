@@ -37,10 +37,10 @@ export default function RuntimePage(){
  const executions=view.data?.executions as Array<{executionId:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;contentAvailable:boolean}>|undefined;
  return <main className="flex h-dvh min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
   <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--border-primary)] px-4 sm:px-6">
-   <div className="flex items-center gap-3"><MessageSquare className="h-5 w-5 text-[var(--color-primary)]"/><div><h1 className="font-medium">工作对话</h1><p className="text-xs text-[var(--text-tertiary)]">本地模拟体验</p></div></div>
+   <div className="flex items-center gap-3"><MessageSquare className="h-5 w-5 text-[var(--color-primary)]"/><div><h1 className="font-medium">工作对话</h1><p className="text-xs text-[var(--text-tertiary)]">{(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试':'本地模拟体验'}</p></div></div>
    <Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())} onClick={open}><Plus className="mr-2 h-4 w-4"/>新建定位草稿</Button>
   </header>
-  <p className="shrink-0 border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3 text-center text-sm text-[var(--text-secondary)]">这里返回固定的模拟回复，用于体验发送、刷新和恢复记录，不能回答真实问题，也不会调用付费模型。</p>
+  <p className="shrink-0 border-b border-[var(--border-primary)] bg-[var(--bg-secondary)] px-4 py-3 text-center text-sm text-[var(--text-secondary)]">{(choices.data?.mode??view.data?.mode)==='staging_test'?'当前使用真实模型并消耗测试预算；仅处理你提供的资料，未开放联网研究。':'这里返回固定的模拟回复，用于体验发送、刷新和恢复记录，不能回答真实问题，也不会调用付费模型。'}</p>
   {(choices.error||view.error)&&<p role="alert" className="p-4 text-center">当前环境不可用，或你无权访问此工作。</p>}
   <div className="min-h-0 flex-1 overflow-y-auto" aria-label="对话记录">
    {!executions?.length&&<div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center"><Bot className="mb-4 h-9 w-9 text-[var(--color-primary)]"/><h2 className="text-2xl font-semibold">开始一段对话</h2><p className="mt-3 text-sm text-[var(--text-tertiary)]">{sessionId?'普通对话已默认选好。输入一条消息，发送后可刷新查看记录。':'点击右上角“新建定位草稿”，开始体验。'}</p></div>}

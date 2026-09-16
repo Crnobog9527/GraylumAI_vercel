@@ -4,7 +4,7 @@
 
 ## 当前事实与缺口
 
-2026-09-15 源码核对：OPC router 和 Runtime router 均只接受 loopback 数据库/执行端点；Runtime executor 直接使用本地 fixture 协议，OPC 准入使用 runtime-local 账户和固定测试报价。不能通过单纯去掉主机限制、填写真实 Key 或把 fixture 成本当成官方费用开放 Staging。未读取远端数据库，不推定 0105/0106/0107 的应用状态。
+2026-09-15 修复前源码核对：OPC router 和 Runtime router 均只接受 loopback 数据库/执行端点；Runtime executor 直接使用本地 fixture 协议，OPC 准入使用 runtime-local 账户和固定测试报价。不能通过单纯去掉主机限制、填写真实 Key 或把 fixture 成本当成官方费用开放 Staging。未读取远端数据库，不推定 0105/0106/0107 的应用状态。
 
 ## 可独立准备的接入工作
 
@@ -13,11 +13,13 @@
 3. 保持 AgentKey、搜索、第三方取数和外部写工具关闭。本轮只评价用户自己提供的信息；缺少真实对标资料时必须承认局限，不能编造研究。
 4. 对具体候选完成必要 CI、独立完整审查后，才提交可执行的远端操作清单。保留现有兼容修补、0105/0106、六旧终结保护和未决证据，不清库或补账。
 
-上述真实适配接线尚未在 #422 实施。后续实施必须与当前已批准规格及任务边界对齐，不能把这个准备文档当成新任务选择。
+上述真实适配接线已由 Owner 明确纳入当前 V3-WORKBENCH，正在 #422 原分支实施。私有 OpenRouter 响应观察与 BILL2/Runtime 协议分流已有本地实现；当前 router 已有默认关闭的 Staging 分支，0108 前向迁移提供私有测试窗口及基于现有 BILL2 记录的总预算约束。报价冻结、模型准入和原服务接线已有本地实现，完整入口/浏览器拒绝及恢复验证、精确候选 CI 和独立审查仍待完成；没有启用任何远端窗口，不能称为真实接通。
+
+官方路由文档提供 `provider.max_price`（prompt/completion 单位为 USD/百万 token，另有 request 上限），可用于拒绝超报价供应商；单次报价冻结必须与实际发送参数一致。总窗口限额仍须由已有 BILL2 持久身份约束，并计入未决调用，不能仅依赖此供应商筛选参数。依据：[OpenRouter Provider Routing](https://openrouter.ai/docs/guides/routing/provider-selection)。字节长度仅可作为本地传输限制，不能替代模型 token 能力或官方计费证据。
 
 ## 建议的首次真实体验边界（待另行批准）
 
-- 仅 Owner 明确指定的一个 Staging 测试账号、一个模型、一次体验窗口；不开放所有用户。
+- 仅 Owner 明确指定的一个 Staging 测试账号、明确绑定的对话、Skill 和整理模型集合、一次体验窗口；不开放所有用户。
 - 建议供应商累计成本上限 5 USD、最多 50 次调用，并按每次冻结上限先检查余量；两者先到即停止。最终可执行上限必须基于届时核实的模型报价，若单次上限不能容纳则拒绝调用，不能透支。
 - 不产生真实付款、不充值、不退款；真实模型使用会消耗供应商余额，这与“不付款”不同，需要明确同意。未决调用仍占用预算，不能按零成本释放。
 - 只读核对 Staging 迁移状态、配置目标和已部署提交后，仅准备确有缺失的前向迁移；实际应用及必要配置调整须单独列明再获批准。优先复用既有测试凭证，不打印、搬运或更换凭证。
@@ -35,3 +37,31 @@
 超出预算、身份不一致、证据无法关联或真实权限拒绝时停止新的派发，保留原执行与收据；关闭测试入口而非回滚/删除证据。应用回退继续保留兼容 schema 与两处财务读取修补，不意味着未决账务已结清。
 
 下一项 Owner 决定应在具体代码和外部操作方案准备完成后提出；本文件不请求提前批准尚未可审查的迁移、配置或供应商调用。
+
+## 当前本地验证进度（不授权启用）
+
+- `pr422-staging-window-isolation1.log`：官方格式本地 HTTP → 原 SDK/Session/BILL2 结算，重复执行不重发；窗口默认关闭和次数上限拒绝，1 通过 / 201 跳过，退出 0。
+- `pr422-staging-window-isolation2.log`：加入不同账号并发准入与 unknown 保留总预算，2 通过 / 201 跳过，退出 0。该轮匿名拒绝只证明缺少有效令牌不能调用；后续已改为真实 anon JWT 和函数权限断言，不将前者作为完整权限证明。
+- `pr422-staging-runtime-full1.log`：48 通过 / 155 跳过，退出 0，private-canary PASS。包含真实进程重启、旧隔离模型/Skill/整理、历史和撤权回归；源码快照早于后续价格与路由接线，且该轮尚未加载 0107，不能证明 OPC 外层绑定在 0108 下保留。
+- `pr422-staging-window-priced-isolation.log`：冻结官方路由价格约束后复验两个预算/结算场景，2 通过 / 201 跳过，退出 0。
+- `pr422-staging-admission-isolation1.log`：加入真实 Auth、原 admission 服务、服务端窗口配置读回、固定报价取代本地 fixture 报价，以及登出拒绝；3 通过 / 201 跳过，退出 0。以上供应商响应均为本地合成，非真实账户费用。
+- `pr422-staging-priced-adapter-unit.log`：环境拒绝、报价精确计算、请求限制与私有证据投影共 57 项通过，退出 0。
+
+Staging 由独立项目的 Vercel Production 环境承载，不能仅凭 `VERCEL_ENV` 判断主站生产。入口同时校验平台项目 ID、production domain、staging 分支、仓库和明确的数据库主机；缺项拒绝。依据：[Vercel 系统变量](https://vercel.com/docs/environment-variables/system-environment-variables)。当前代码未改变这些远端配置。
+
+受控 host 后续接线：OPC/Runtime router 的远端分支现在先校验 Staging 平台/数据库目标，再从 service-only RPC 读取该账号允许的窗口。实际模型、Skill 及整理角色继续走原 admission；报价来自窗口，旧本地 fixture 单价不参与真实预扣。所选模型私有 Key 的 SHA-256 命名空间必须与原冻结账户一致，不采用默认 Key 或切换模型。页面模式提示来自服务端投影。上述 host 浏览器完整验收仍待运行，不能以三项较早的服务隔离测试替代。
+
+`pr422-real-host-api-unit.log`：86 文件 / 1,936 测试通过，退出 0，使用 `--maxWorkers=2`；此前并发负载下的失败完整保留。随后补充的有效答案/未决费用分离与禁止 `:online`、`openrouter/auto`、Fusion 隐式路由，由最新聚焦测试单独验证。真实供应商、远端窗口配置、真实付款和 Owner 产品接受仍全部 NOT_RUN。
+
+### 中途独立复核后的恢复修复（未提交增量）
+
+- 0108 只扩展 `runtime_direct_billing_allowed_before_opc`，保留 0107 的 token/request/material/round 包装；`--with-staging-schema` 现在强制完整 0105→0106→0107→0108 顺序。窗口可用性在预留、新调用领取与真正派发时检查，不再使停窗后的历史内容失去来源权限。
+- `pr422-provider-observation-red.log`：5 失败 / 15 通过，退出 1，证明不完整/暂时失败响应缺少传输观察标识。修复后 `pr422-maintenance-unit.log` 3 文件 / 59 测试通过，退出 0；真正的身份矛盾仍拒绝，错误响应不能确认费用或退款。
+- `pr422-staging-recovery-stack1.log`：完整迁移栈下 4 通过 / 201 未选择，退出 0。真实本地 HTTP 首次 404、随后官方格式成本成功，原请求、预扣和 Session 保持不变，只发送一次、结算一次。
+- `pr422-staging-preflight-stack2.log`：6 通过 / 201 未选择，退出 0；缺失/错配的合成凭证在持久派发前失败，SQL 派发时间仍空，原未发送预留经既有接口归还。请求和凭证预检取得的私有 capability 只能使用一次。
+- `pr422-staging-maintenance-stack3.log`：7 通过 / 201 未选择，退出 0；加入数据库窗口关闭/到期、原冻结 policy 恢复、跨账号拒绝、历史仍可读、新准入拒绝。全部使用本地 HTTP/数据库，不能写成真实供应商验收。
+- 中途独立 Codex 复核还指出活跃窗口切换时的凭证漂移，以及只关闭环境开关时未派发任务的维护缺口。代码已按原 execution 加载冻结绑定，环境关闭分支先按原身份取消再检查财务状态；`pr422-staging-maintenance-stack4.log` 已补真实 Auth + 原 protected router 的 env-off/DB-active 未派发恢复与新准入拒绝，以及领取后关闭窗口的派发拒绝：8 通过 / 201 未选择，退出 0。`pr422-staging-rollover-stack5.log` 又验证实际 Auth/原 router/私有凭证读取/本地 HTTP/SQL 的关闭、到期、A→B 换模型与账户窗口三条恢复路径：3 通过 / 207 未选择，退出 0。旧 A 请求仍使用 A 原 Key namespace，POST 仅一次、两次 GET（404 后成功），Session 不重复追加、只有一次支出。该中途检查不是完整候选 PASS。
+
+当前增量尚未通过精确候选 CI/独立完整审查。原 ca03420a 的历史 PASS 不适用于这里，PR 仍 NOT clean。持有未决调用时不得更换原凭证；若原凭证已不可用，应记录具体恢复缺口，不切换账户查询或推断零成本。
+
+2026-09-16 补充：`pr422-maintenance-api-full.log` 86 文件 / 1,947 测试通过，退出 0；`pr422-recovery-type7.log` TypeScript 通过，退出 0。此前 type3/type5 的新增测试类型错误已修复，type1 命令不存在、type2 未匹配工作区，均不计为通过。`pr422-opc-full-staging-stack.log` 完整迁移栈上的 OPC 回归 24 通过 / 156 未选择，退出 0，private-canary PASS；五类自动保存、完整业务承接及 OPC 绑定防伪回归通过。该浏览器运行仍是 fixture host，不能当成 Staging host 浏览器证明。Runtime 全量及旧调用方兼容、Staging 专用浏览器入口、精确候选 CI 和完整独立审查继续进行。

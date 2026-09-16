@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 const source = resolve(import.meta.dirname, "../../../..");
 const args = process.argv.slice(2);
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!['--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
 const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
@@ -26,15 +26,19 @@ const runtimeUpgrade=args.includes('--runtime-upgrade-only');
 const upgradeMode=args.includes('--bill2-upgrade-only')||runtimeUpgrade;
 if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
 let legacyRoot;
+const stagingSchema=args.includes('--with-staging-schema');
 const opcMode=args.includes('--opc-only');
-const opcSchema=opcMode||args.includes('--with-opc-schema');
+const stagingHost=args.includes('--staging-host');
+if(stagingHost&&(!stagingSchema||!opcMode||serve))throw new Error('staging-host requires isolated OPC + staging schema and cannot be served to Owner');
+const syntheticStagingHost='syntheticstaging.supabase.co',stagingWindowId=randomUUID();
+const opcSchema=stagingSchema||opcMode||args.includes('--with-opc-schema');
 const runtimeMode=args.includes('--runtime-only');
-const runtimeSchema=opcSchema||runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
+const runtimeSchema=stagingSchema||opcSchema||runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
 const casePattern=args.find(arg=>arg.startsWith('--case-pattern='))?.slice(15);
 if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
-const testPattern=casePattern??(opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
+const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--agent-slice-only')?'^SLICE:':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
@@ -284,6 +288,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
   if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}
+  if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
     "run",
@@ -366,9 +371,9 @@ try {
   let rateLimitFixtureRejected = false;
   let summaryRateLimitFixtureRejected = false;
   gateway = createServer(async (req, res) => {
-    if((opcMode||runtimeMode||runtimeUpgrade) && req.url==='/call'){
+    if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
       let raw='';for await(const chunk of req)raw+=chunk;
-      const request=JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
+      const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
       const id='local-runtime-'+runtimeCalls.length;
       let content='Saved runtime answer '+runtimeCalls.length;
       if(opcMode){
@@ -408,7 +413,9 @@ try {
         }catch{/* A malformed fixture input stays a labeled non-plan reply. */}
       }
       const response=JSON.stringify({id,model:request.model,final:runtimeFinal,cost:runtimeFinal?'0.003':null,currency:'USD',coverage:'request_total',usage:{sdkResponse:{id,object:'chat.completion',created:1,model:request.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:5,total_tokens:15}}}});
-      const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(response);
+      const official=JSON.parse(response).usage.sdkResponse;
+      if(runtimeFinal)official.usage.cost=0.003;
+      const send=()=>res.writeHead(200,{'content-type':'application/json'}).end(req.url==='/__official_chat'?JSON.stringify(official):response);
       if(holdRuntime){holdRuntime=false;heldRuntime.push(send);}else send();return;
     }
     if(runtimeMode&&['/__runtime_hold','/__runtime_release'].includes(req.url)){
@@ -438,7 +445,7 @@ try {
     if(chatCompatibility && await chatCompatibility(req,res))return;
     if(upgradeMode && ['/__upgrade_bill2','/__runtime_candidate','/__runtime_legacy','/__legacy_reader_compat','/__legacy_ledger_reader_compat','/__finance_read_context'].includes(req.url)){
       if(req.method!=='POST'||req.headers['x-local-control']!==controlToken){res.writeHead(403).end();return;}
-      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}sql("NOTIFY pgrst, 'reload schema'");}
+      try{if(req.url==='/__upgrade_bill2'){apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');if(runtimeSchema){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}if(stagingSchema){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}sql("NOTIFY pgrst, 'reload schema'");}
       else if(req.url==='/__finance_read_context'){apply('packages/db/migrations/0103_bill_1_reservation_read_contract.sql');sql("NOTIFY pgrst, 'reload schema'");}
       else {if(req.url==='/__legacy_reader_compat'||req.url==='/__legacy_ledger_reader_compat')patchLegacyFinanceReader(legacyRoot,evidenceDirectory,req.url==='/__legacy_ledger_reader_compat'?'ledger':'complete');await restartApplication(req.url==='/__runtime_candidate'?root:legacyRoot);}res.writeHead(200).end('ok');}catch(error){console.error(String(error));res.writeHead(500).end('compatibility transition failed');}return;
     }
@@ -569,7 +576,11 @@ try {
   // Every fetch from the disposable Next process is constrained to loopback,
   // including optional routing helpers. No configured provider can be contacted.
   const networkGuard=resolve(root,'local-loopback-only.cjs');
-  writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
+  writeFileSync(networkGuard,`const original=globalThis.fetch;globalThis.fetch=(input,init)=>{const u=new URL(typeof input==='string'||input instanceof URL?input:input.url);let target=null;
+${stagingHost?`if(u.origin==='https://${syntheticStagingHost}')target='${apiUrl}'+u.pathname+u.search;
+if(u.origin==='https://openrouter.ai'&&u.pathname==='/api/v1/chat/completions')target='${apiUrl}/__official_chat';`:''}
+if(target)return original(input instanceof Request?new Request(target,input):target,init);
+if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCAL_ONLY_NETWORK');return original(input,init);};`);
   console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
   const searchPath=resolve(root,'packages/api/src/services/research/workbenchSearch.ts');
   let searchSource=readFileSync(searchPath,'utf8');
@@ -591,12 +602,14 @@ try {
     V3_LEGACY_ROOT:legacyRoot??'', V3_LEGACY_REF:legacyRef??'',
     NODE_ENV: "development",
     NODE_OPTIONS:`--require=${networkGuard}`,
-    NEXT_PUBLIC_SUPABASE_URL: apiUrl,
+    NEXT_PUBLIC_SUPABASE_URL: stagingHost?'https://'+syntheticStagingHost:apiUrl,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
+    V3_LOCAL_STAGING_SCHEMA: stagingSchema ? 'true' : 'false',
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
-    ...((opcMode||runtimeMode||runtimeUpgrade)?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
+    ...((opcMode||runtimeMode||runtimeUpgrade)&&!stagingHost?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
+    ...(stagingHost?{V3_LOCAL_STAGING_HOST:'true',V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',V3_RUNTIME_STAGING_DATABASE_HOST:syntheticStagingHost,V3_RUNTIME_STAGING_WINDOW_ID:stagingWindowId}:{}),
     V3_LOCAL_CONTROL: controlToken,
     V3_LOCAL_SERVICE_JWT: service,
     V3_LOCAL_USER_JWT: jwt("authenticated"),
