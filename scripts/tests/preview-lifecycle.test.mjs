@@ -16,7 +16,7 @@ import {
   structuralPreviewArgs,
   validateResumeState,
   writePreviewState,
-} from "./preview-lifecycle.mjs";
+} from "../../packages/db/tests/v3/preview-lifecycle.mjs";
 
 const roots = [];
 afterEach(() => {
