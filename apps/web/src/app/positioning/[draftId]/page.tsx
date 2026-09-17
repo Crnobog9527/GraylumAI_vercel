@@ -605,7 +605,8 @@ export default function PositioningDraft({
     // A pending envelope is a recovery, never a duplicate; server validity must
     // not disable it. Otherwise an unchanged confirmed answer needs no rewrite.
     if (confirmEnvelopeState(stepId).kind !== "none") return false;
-    return !infoEdits[stepId] && questionIsConfirmed(d.information[stepId].values?.[questionId]);
+    return !infoEdits[stepId] && questionIsConfirmed(d.information[stepId].values?.[questionId]) &&
+      (Boolean(nextInformationQuestion(d.information[stepId].schema, d.information[stepId].values)) || snap.steps[stepId].valid);
   }
   async function recoverCorruptConfirmation(stepId: string) {
     const state = confirmEnvelopeState(stepId);
@@ -639,7 +640,8 @@ export default function PositioningDraft({
     if (
       envelopeState.kind === "none" &&
       !infoEditsRef.current[step.id] &&
-      questionIsConfirmed(d.information[step.id].values?.[questionId])
+      questionIsConfirmed(d.information[step.id].values?.[questionId]) &&
+      (Boolean(nextInformationQuestion(d.information[step.id].schema, d.information[step.id].values)) || snap.steps[step.id].valid)
     ) {
       // The stored answer is already confirmed and unchanged. Re-running the
       // save/confirm phases would be a duplicate write, so do nothing.
@@ -1298,6 +1300,15 @@ export default function PositioningDraft({
                       重试自动保存
                     </Button>
                   )}
+                  {(() => {
+                    const pending = nextInformationQuestion(schema, d.information[step.id].values);
+                    return pending && pending.id !== activeQuestion.id ? (
+                      <Button variant="outline" className="w-full" disabled={busy || hasUnsavedInformation || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor)}
+                        onClick={() => setActiveQuestions(old => ({ ...old, [step.id]: pending.id }))}>
+                        继续当前待确认问题
+                      </Button>
+                    ) : null;
+                  })()}
                   {knownQuestions.some(field => field.id !== activeQuestion.id && questionIsConfirmed(d.information[step.id].values?.[field.id])) && (
                     <nav aria-label="已确认的问题" className="space-y-2 border-t border-[var(--border-primary)] pt-3">
                       <p className="text-xs text-[var(--text-secondary)]">回看已确认的内容</p>

@@ -547,7 +547,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
         )
         .toBe(1);
       await article
-        .getByRole("button", { name: "确认本步骤", exact: true })
+        .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
         .click();
       if (step.id !== f.flow.steps.at(-1)!.id) {
         const next = f.flow.steps[f.flow.steps.indexOf(step) + 1];
@@ -618,13 +618,13 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(
         () =>
           lastArticle
-            .getByRole("button", { name: "确认本步骤", exact: true })
+            .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
             .isEnabled(),
         { timeout: 15000 },
       )
       .toBe(true);
     await lastArticle
-      .getByRole("button", { name: "确认本步骤", exact: true })
+      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
       .click();
     await expect
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
@@ -1722,12 +1722,17 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
       .getByRole("button", { name: "发送", exact: true })
       .click();
     await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
-    await page
-      .getByRole("textbox", { name: "给导师的回复", exact: true })
-      .fill("恢复期间另写的未发送内容");
-    await page
-      .getByRole("button", { name: "发送", exact: true })
-      .click();
+    expect(await page.getByRole("button", { name: "发送", exact: true }).isEnabled()).toBe(false);
+    // Simulate a newer unsent buffer retained across an interrupted render.
+    // Recovery must use the original envelope, not a new send identity.
+    await page.evaluate((id) => {
+      const key = "opc-edit:" + id;
+      const saved = JSON.parse(sessionStorage.getItem(key)!);
+      saved.mentorInput = "恢复期间另写的未发送内容";
+      sessionStorage.setItem(key, JSON.stringify(saved));
+    }, draftId);
+    await page.reload();
+    await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
     await page
       .getByText("【分步模拟，仅验证流程】第 1 步：", { exact: false })
       .waitFor();
@@ -1738,7 +1743,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
-    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"confirmed"});
+    expect(d.information["step-0"].values.goal).toMatchObject({value:"尚未确定的用户想法",status:"provisional"});
     for (const reply of ["我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]) {
       await page.getByRole("textbox",{name:"给导师的回复",exact:true}).fill(reply);
       await page.getByRole("button",{name:"发送",exact:true}).click();
@@ -1753,7 +1758,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(frozenChat.rows[0].payload.instructions).toContain("Confirmed fields do not end the conversation");
     expect(frozenChat.rows[0].payload.scopeMaterial.content.brief).toBe("mentor:step-0");
     await expect(f.service.saveResult({draftId,stepId:"step-0",executionId:afterChat.turns[0].executionId,requestId:randomUUID()})).rejects.toThrow("OPC_RESULT_DENIED");
-    expect(afterChat.information["step-0"].values.goal.status).toBe("confirmed");
+    expect(afterChat.information["step-0"].values.goal.status).toBe("provisional");
     expect(afterChat.snapshot.candidates).toHaveLength(0);
     expect(afterChat.snapshot.steps["step-0"].valid).toBe(false);
     expect(afterChat.turns.filter((t: {stepId:string;kind:string})=>t.stepId==="step-0"&&t.kind==="mentor")).toHaveLength(3);
@@ -2000,7 +2005,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
 
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
-    await expect.poll(() => page.getByRole("button", { name: "确认本步骤", exact: true }).count()).toBe(1);
+    await expect.poll(() => page.getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true }).count()).toBe(1);
     expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
     await expect(
       f.service.prepareStep({
@@ -2042,7 +2047,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       await route.continue();
     });
     await page
-      .getByRole("button", { name: "确认本步骤", exact: true })
+      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
       .click();
     const operationAlert = page
       .getByRole("alert")
@@ -2067,7 +2072,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     });
     const priorConflictCleared = operationAlert.waitFor({ state: "hidden" });
     await page
-      .getByRole("button", { name: "确认本步骤", exact: true })
+      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
       .click();
     await priorConflictCleared;
     await operationAlert.waitFor();
@@ -2084,7 +2089,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
       .toBe("save");
     await page.reload();
     await page
-      .getByRole("button", { name: "确认本步骤", exact: true })
+      .getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true })
       .click();
     await page
       .getByRole("textbox", {
@@ -2339,9 +2344,15 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
         expect((await f.service.read(draft.draftId)).sessionId).toBe(draft.sessionId);
         return;
       }
+      // B reaches its next question only after A explicitly confirms the first.
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).fill("Initially confirmed goal");
+      await a.getByRole("button",{name:"确认本题并继续",exact:true}).click();
+      await a.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
       const b=await context.newPage(); b.setDefaultTimeout(20000); await b.goto(url);
-      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
       await b.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+      await a.getByRole("button",{name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
+      if(scenario==="same-field") await b.getByRole("button",{name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
+      await a.getByRole("textbox",{name:"已知目标 0",exact:true}).waitFor();
       const held=new Promise<void>(resolve=>{release=resolve;});
       let reached!:()=>void;
       const intercepted=new Promise<void>(resolve=>{reached=resolve;});
@@ -2374,3 +2385,100 @@ for (const scenario of ["fresh", "retry", "same-field", "offline", "response-los
     } finally { release?.(); await browser.close(); }
   },180000);
 }
+
+
+it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hidden fields aligned", async () => {
+  const {chromium} = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f=await fixture(3,true), model=randomUUID();
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Question local','opc-question','fixture','true',1000,32000)",[model]);
+  await sql.query("update modules set model_id=$1 where id=$2",[model,f.moduleId]);
+  const draft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"mentor"});
+  for (const questionId of ["other", "unknown-question", "constructor"])
+    await expect(f.service.prepareStep({draftId:draft.draftId,stepId:"step-0",purpose:"mentor",questionId,requestId:randomUUID(),input:"premature"})).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+  await expect(f.service.prepareStep({draftId:draft.draftId,stepId:"step-0",purpose:"mentor",questionId:17,requestId:randomUUID(),input:"invalid"})).rejects.toThrow();
+  expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1",[f.actor])).rows[0].n).toBe(0);
+  expect((await f.service.read(draft.draftId)).turns).toHaveLength(0);
+  const browser=await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  let release: (()=>void)|undefined;
+  try {
+    const url=process.env.V3_LOCAL_APP+"/positioning/"+draft.draftId;
+    async function login() {
+      const context=await browser.newContext();
+      await context.route("**/*",route=>["127.0.0.1","localhost"].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+      const page=await context.newPage();page.setDefaultTimeout(30000);page.setDefaultNavigationTimeout(90000);
+      const ready=page.waitForResponse(r=>r.url().includes("settings.getSystemSettings")&&r.ok(),{timeout:90000});
+      await page.goto(process.env.V3_LOCAL_APP+"/login?redirect="+encodeURIComponent(new URL(url).pathname));await ready;
+      await page.getByPlaceholder("name@example.com").fill(f.email);await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page.getByRole("button",{name:"登录",exact:true}).last().click();await page.waitForURL(url);return {context,page};
+    }
+    const {page}=await login();const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+    const first=()=>page.getByRole("textbox",{name:"已知目标 0",exact:true});
+    const second=()=>page.getByRole("textbox",{name:"Second independent field",exact:true});
+    const composer=()=>page.getByRole("textbox",{name:"给导师的回复",exact:true});
+    await first().waitFor();expect(await second().count()).toBe(0);
+    expect(await page.locator("body").textContent()).not.toContain("Second independent field");
+    expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).isVisible()).toBe(true);
+    expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
+    const admissions:any[]=[];const informationWrites:string[]=[];
+    page.on("request",r=>{
+      if(r.method()==="POST"&&r.url().includes("opc.prepareStep")){const body=r.postDataJSON();const v=body[0]??body;admissions.push(v.json??v);}
+      if(r.method()==="POST"&&r.url().includes("opc.information")) {
+        informationWrites.push(r.postData()??"");
+      }
+    });
+    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}
+    await send("我做 AI 赛道");
+    await expect.poll(()=>first().inputValue()).toBe("我做 AI 赛道");
+    // Autosave includes a 700ms debounce plus a fresh read and the write.
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.goal?.status,{timeout:30000}).toBe("provisional");
+    expect(await second().count()).toBe(0);
+    await send("不知道呢");await page.getByText("还没想清楚没关系",{exact:false}).waitFor();
+    expect(await first().inputValue()).toBe("我做 AI 赛道");expect(await second().count()).toBe(0);
+    const held=new Promise<void>(resolve=>{release=resolve;});let reached!:()=>void;
+    const intercepted=new Promise<void>(resolve=>{reached=resolve;});const confirmations:string[]=[];let hold=true;
+    await page.route("**/api/trpc/opc.information*",async route=>{
+      const raw=route.request().postData()??"";
+      if(raw.includes('"status":"confirmed"')) {
+        confirmations.push(raw);
+        if(hold){hold=false;const response=await route.fetch();expect(response.ok()).toBe(true);reached();await held;return route.abort("connectionreset");}
+      }
+      return route.continue();
+    });
+    await page.getByRole("button",{name:"确认本题并继续",exact:true}).click();
+    await Promise.race([intercepted,new Promise((_,reject)=>setTimeout(()=>reject(new Error("confirmation barrier not reached")),30000))]);
+    expect(await second().count()).toBe(0);expect(await first().isVisible()).toBe(true);
+    expect(confirmations).toHaveLength(1);release!();
+    await page.getByRole("alert").filter({hasText:"操作未完成"}).waitFor();
+    await page.reload();await first().waitFor();expect(await second().count()).toBe(0);
+    await page.getByRole("button",{name:"继续核对本题确认",exact:true}).click();
+    await second().waitFor();expect(await first().count()).toBe(0);expect(confirmations).toHaveLength(2);expect(new Set(confirmations).size).toBe(1);
+    await page.unroute("**/api/trpc/opc.information*");
+    expect(await page.getByRole("status",{name:"当前导师任务"}).textContent()).toContain("Second independent field");
+    expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
+    await page.getByRole("button", {name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
+    expect(await first().inputValue()).toBe("我做 AI 赛道");
+    expect(await page.getByRole("button", {name:"确认本题并继续",exact:true}).isEnabled()).toBe(false);
+    await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
+    await second().waitFor();
+    await send("摄影课程");await expect.poll(()=>second().inputValue()).toBe("摄影课程");
+    await expect.poll(()=>informationWrites.some(raw=>raw.includes('"other"')&&raw.includes('"摄影课程"')&&raw.includes('"status":"provisional"'))).toBe(true);
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.status).toBe("provisional");
+    const before=await f.service.read(draft.draftId);expect(before.information["step-0"].values.goal.value).toBe("我做 AI 赛道");
+    expect(admissions.at(-1).questionId).toBe("other");
+    const original=await f.service.prepareStep(admissions.at(-1));
+    await f.service.information({draftId:draft.draftId,stepId:"step-0",requestId:randomUUID(),expectedVersion:before.snapshot.steps["step-0"].version,values:{...before.information["step-0"].values,goal:{...before.information["step-0"].values.goal,status:"provisional"}}});
+    expect((await f.service.prepareStep(admissions.at(-1))).executionId).toBe(original.executionId);
+    await expect(f.service.prepareStep({...admissions.at(-1),questionId:"goal"})).rejects.toThrow("OPC_REQUEST_CONFLICT");
+    const revised=await f.service.read(draft.draftId);
+    await f.service.information({draftId:draft.draftId,stepId:"step-0",requestId:randomUUID(),expectedVersion:revised.snapshot.steps["step-0"].version,values:before.information["step-0"].values});
+    const fresh=await login();await fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
+    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我做 AI 赛道");await fresh.context.close();
+    await page.reload();await second().waitFor();expect(await second().inputValue()).toBe("摄影课程");
+    await page.getByRole("button",{name:"确认本题并继续",exact:true}).click();
+    await page.getByRole("textbox",{name:"已知目标 1",exact:true}).waitFor();
+    const result=await f.service.read(draft.draftId);expect(result.snapshot.steps["step-0"].valid).toBe(true);expect(result.sessionId).toBe(draft.sessionId);
+    const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);expect(runs.rows).toHaveLength(3);
+    expect(runs.rows.at(-1).payload.instructions).toContain('Current information question: {"id":"other","title":"Second independent field"}');
+    expect(errors).toEqual([]);
+  } finally { release?.();await browser.close(); }
+},300000);
