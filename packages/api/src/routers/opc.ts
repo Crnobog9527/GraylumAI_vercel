@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import {
   opcService,
   opcStart,
@@ -90,7 +91,7 @@ export const opcRouter = router({
   list: readProcedure.query(({ ctx }) => ctx.opc.list()),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
-    .query(async({ ctx, input }) => ({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
+    .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
   start: procedure
     .input(opcStart)
     .mutation(({ ctx, input }) => ctx.opc.start(input)),
