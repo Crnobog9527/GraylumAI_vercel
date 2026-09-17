@@ -5,16 +5,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
-import {
-  Select as UiSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { mergeInformation } from "./information-merge";
 import { readWorkflowMentorResponse } from "./mentor-response";
+import { confirmQuestionValues, displayedQuestion, nextInformationQuestion, questionIsConfirmed, reachedQuestions } from "@repo/api/src/shared/opcQuestions";
 type Step = { id: string; title: string };
 type Information = {
   status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
@@ -31,6 +25,8 @@ type Item = {
 };
 type ConfirmStepEnvelope = {
   phase: "information" | "save" | "confirm";
+  questionId?: string;
+  finishStep?: boolean;
   values: Record<string, Information>;
   editingSnapshot: string;
   information: {
@@ -71,6 +67,79 @@ function isDefiniteConfirmConflict(cause: unknown) {
     ].some((code) => cause.message.includes(code))
   );
 }
+type MentorRequest = {
+  draftId: string;
+  stepId: string;
+  purpose: "mentor";
+  requestId: string;
+  input: string;
+  questionId?: string;
+};
+type StepEnvelope = {
+  request: MentorRequest;
+  information?: ConfirmStepEnvelope["information"];
+  editingSnapshot?: string;
+};
+type ConfirmEnvelopeState =
+  | { kind: "none" }
+  | { kind: "valid"; envelope: ConfirmStepEnvelope; raw: string }
+  | { kind: "malformed"; raw: string };
+const confirmPhases: readonly string[] = ["information", "save", "confirm"];
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null;
+}
+/**
+ * A pre-upgrade envelope has the same core fields as the current shape.
+ * questionId/finishStep are optional, so a legacy envelope stays valid.
+ */
+function isConfirmStepEnvelope(value: unknown): value is ConfirmStepEnvelope {
+  if (!isRecord(value) || !confirmPhases.includes(value.phase)) return false;
+  if (
+    !isRecord(value.values) ||
+    !isRecord(value.information) ||
+    !isRecord(value.save) ||
+    !isRecord(value.confirm)
+  )
+    return false;
+  return (
+    typeof value.information.draftId === "string" &&
+    typeof value.information.stepId === "string" &&
+    typeof value.information.requestId === "string" &&
+    typeof value.information.expectedVersion === "number" &&
+    value.save.action === "save" &&
+    typeof value.save.requestId === "string" &&
+    value.confirm.action === "confirm" &&
+    typeof value.confirm.requestId === "string"
+  );
+}
+/** The retained mentor request is either wrapped in `request` or legacy top-level. */
+function parseStepEnvelope(raw: string): StepEnvelope | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  const candidate = isRecord(parsed.request) ? parsed.request : parsed;
+  if (
+    typeof candidate.draftId !== "string" ||
+    typeof candidate.stepId !== "string" ||
+    typeof candidate.requestId !== "string" ||
+    typeof candidate.input !== "string"
+  )
+    return null;
+  return {
+    request: candidate as MentorRequest,
+    information: isRecord(parsed.information)
+      ? (parsed.information as ConfirmStepEnvelope["information"])
+      : undefined,
+    editingSnapshot:
+      typeof parsed.editingSnapshot === "string"
+        ? parsed.editingSnapshot
+        : undefined,
+  };
+}
 export default function PositioningDraft({
   params,
 }: {
@@ -102,6 +171,9 @@ export default function PositioningDraft({
     { enabled: Boolean(read.data?.sessionId) },
   );
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const [activeQuestions, setActiveQuestions] = useState<Record<string, string>>({});
+  const [confirmingQuestion, setConfirmingQuestion] = useState(false);
+  const confirmationLock = useRef(false);
   const chatScroll = useRef<HTMLDivElement>(null);
   const [mentorInput, setMentorInput] = useState("");
   const [hydratedDraft, setHydratedDraft] = useState<string | null>(null);
@@ -119,7 +191,7 @@ export default function PositioningDraft({
     snap = d?.snapshot,
     latest = d?.plans?.[0];
   const busy =
-    running ||
+    running || confirmingQuestion ||
     revise.isPending ||
     prepareStep.isPending ||
     execute.isPending ||
@@ -143,6 +215,7 @@ export default function PositioningDraft({
         ? (local.mentorInputs as Record<string, string>)
         : {};
     setActiveStep(restoredActiveStep);
+    setActiveQuestions(local.activeQuestions ?? {});
     setMentorInput(
       typeof local.mentorInput === "string"
         ? local.mentorInput
@@ -171,6 +244,7 @@ export default function PositioningDraft({
         infoEdits,
         planCandidate,
         activeStep,
+        activeQuestions,
         mentorInput,
       }),
     );
@@ -191,6 +265,7 @@ export default function PositioningDraft({
     infoEdits,
     planCandidate,
     activeStep,
+    activeQuestions,
     mentorInput,
   ]);
   useEffect(() => {
@@ -330,7 +405,7 @@ export default function PositioningDraft({
   useEffect(() => {
     if (hydratedDraft !== draftId || composing.current) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    const pending = Object.entries(infoEdits);
+    const pending = Object.entries(infoEdits).filter(([stepId]) => !sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + stepId));
     if (!pending.length) return;
     autosaveTimer.current = setTimeout(() => {
       for (const [stepId, values] of pending)
@@ -388,15 +463,24 @@ export default function PositioningDraft({
         for (const [fieldId, suggestion] of Object.entries(
           parsed.informationPatch,
         )) {
-          if (values[fieldId]?.value.trim()) continue;
+          // A late response for a different question cannot fill an unseen field.
+          if (fieldId !== displayedQuestion(schema, d.information[turn.stepId].values, activeQuestions[turn.stepId])?.id || values[fieldId]?.value.trim()) continue;
           values[fieldId] = suggestion;
           changed = true;
         }
-        if (changed) captureInformationBase(turn.stepId);
-        return changed ? { ...old, [turn.stepId]: values } : old;
+        if (!changed) return old;
+        captureInformationBase(turn.stepId);
+        const next = { ...old, [turn.stepId]: values };
+        // Autosave reads the ref inside a queued async task. Keep it in sync
+        // with this mentor projection immediately instead of waiting for the
+        // follow-up effect, otherwise a fast save can persist the previous
+        // question's unknown value while the input already shows the mentor
+        // suggestion.
+        infoEditsRef.current = next;
+        return next;
       });
     }
-  }, [d, history.data]);
+  }, [d, history.data, activeQuestions]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -413,210 +497,251 @@ export default function PositioningDraft({
       setRunning(false);
     }
   }
-  async function ask(step: Step) {
+  function stepEnvelopeFor(
+    stepId: string,
+  ): { raw: string; parsed: StepEnvelope | null } | null {
+    if (hydratedDraft !== draftId || typeof window === "undefined") return null;
+    const raw = sessionStorage.getItem("opc-step:" + draftId + ":" + stepId);
+    return raw ? { raw, parsed: parseStepEnvelope(raw) } : null;
+  }
+  async function resumeStepEnvelope(step: Step, fixed: StepEnvelope) {
+    const key = "opc-step:" + draftId + ":" + step.id;
+    // Finish a request retained by the previous UI using its original
+    // identities before accepting a newer message.
+    if (fixed.information) {
+      await information.mutateAsync(fixed.information);
+      setInfoEdits(old => {
+        if (JSON.stringify(old[step.id] ?? null) !== fixed.editingSnapshot) return old;
+        const next = {...old}; delete next[step.id]; infoEditsRef.current = next; return next;
+      });
+    }
+    // Resume the retained request without changing its identity.
+    const request = fixed.request;
+    if (request.questionId)
+      setActiveQuestions((old) => ({ ...old, [step.id]: request.questionId! }));
+    if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
+    const admitted = await prepareStep.mutateAsync(request);
+    await execute.mutateAsync({ executionId: admitted.executionId });
+    // Pull the completed mentor execution while this request still owns the
+    // current question identity. The generic post-action refresh below also
+    // refreshes history, but read/list updates can re-render the query first;
+    // relying on that later refetch left a completed mentor result invisible
+    // to the form projection until a manual reload.
+    await history.refetch();
+    sessionStorage.removeItem(key);
+    // A newer typed message is not overwritten; only an exact match is cleared.
+    setMentorInput((old) => (old.trim() === request.input.trim() ? "" : old));
+  }
+  async function ask(step: Step, questionId: string) {
+    const key = "opc-step:" + draftId + ":" + step.id;
+    if (sessionStorage.getItem(key)) {
+      // A retained envelope still owns this step. Never create a second
+      // identity; the explicit recovery control resumes the original request.
+      setError("上一条发给导师的内容仍在核对。请先用“继续核对这条原请求”恢复，不会重复发送。");
+      return;
+    }
     await run(async () => {
       await flushInformation(step.id);
-      const key = "opc-step:" + draftId + ":" + step.id;
-      const prior = sessionStorage.getItem(key);
-      const fixed = prior ? JSON.parse(prior) : {
+      const fixed: StepEnvelope = {
         request: {
           draftId, stepId: step.id, purpose: "mentor", requestId: crypto.randomUUID(),
-          input: mentorInput.trim(),
+          input: mentorInput.trim(), questionId,
         },
       };
       sessionStorage.setItem(key, JSON.stringify(fixed));
-      // Finish a request retained by the previous UI using its original
-      // identities before accepting a newer message.
-      if (fixed.information) {
-        await information.mutateAsync(fixed.information);
-        setInfoEdits(old => {
-          if (JSON.stringify(old[step.id] ?? null) !== fixed.editingSnapshot) return old;
-          const next = {...old}; delete next[step.id]; return next;
-        });
-      }
-      // Preserve pending requests from the previous UI without changing identity.
-      const request = fixed.request ?? fixed;
-      if (!request.input?.trim()) throw new Error("OPC_INPUT_REQUIRED");
-      const admitted = await prepareStep.mutateAsync(request);
-      await execute.mutateAsync({ executionId: admitted.executionId });
-      sessionStorage.removeItem(key);
-      setMentorInput((old) =>
-        old.trim() === request.input.trim() ? "" : old,
-      );
+      await resumeStepEnvelope(step, fixed);
     });
   }
-  async function confirmStep(step: Step, stepIndex: number) {
-    try {
-      await flushInformation(step.id);
-    } catch {
-      setError("请先完成自动保存。内容仍保留在本机，可点击重试自动保存。");
-      return;
-    }
-    const key = "opc-confirm-step:" + draftId + ":" + step.id;
-    let fixed: ConfirmStepEnvelope | null;
-    try {
-      const prior = sessionStorage.getItem(key);
-      fixed = prior ? (JSON.parse(prior) as ConfirmStepEnvelope) : null;
-    } catch {
-      setError("原确认请求无法读取。当前内容已保留，请重新读取状态后再试。");
-      return;
-    }
-    if (!fixed) {
-      const current = (await read.refetch()).data;
-      if (!current) return;
-      const schema = current.information[step.id].schema as Array<{
-        id: string;
-        title: string;
-        required: boolean;
-      }>;
-      const values = Object.fromEntries(
-        schema.map((field) => {
-          const value: Information =
-            infoEditsRef.current[step.id]?.[field.id] ??
-            current.information[step.id].values?.[field.id] ?? {
-              status: "unknown",
-              nature: "unknown",
-              value: "",
-            };
-          return [
-            field.id,
-            {
-              ...value,
-              value: value.value.trim(),
-              status:
-                value.status === "deferred"
-                  ? "deferred"
-                  : value.value.trim()
-                    ? "confirmed"
-                    : "unknown",
-            },
-          ];
-        }),
-      ) as Record<string, Information>;
-      const missing = schema.filter(
-        (field) =>
-          field.required &&
-          !["confirmed", "deferred"].includes(values[field.id].status),
-      );
-      if (missing.length) {
-        setError(
-          "还需要补充这些信息：" + missing.map((field) => field.title).join("、"),
-        );
-        return;
-      }
-      if (
-        schema.some(
-          (field) =>
-            values[field.id].status === "deferred" &&
-            !values[field.id].value.trim(),
-        )
-      ) {
-        setError("暂时无法确定的信息，请简单写明原因。");
-        return;
-      }
-      const body = schema
-        .filter((field) => values[field.id].value)
-        .map(
-          (field) =>
-            `${field.title}\n${
-              values[field.id].status === "deferred" ? "（暂缓确认）" : ""
-            }${values[field.id].value}`,
-        )
-        .join("\n\n");
-      fixed = {
-        phase: "information",
-        values,
-        editingSnapshot: JSON.stringify(infoEditsRef.current[step.id] ?? null),
-        information: {
-          draftId,
-          stepId: step.id,
-          requestId: crypto.randomUUID(),
-          expectedVersion: current.snapshot.steps[step.id].version,
-          values,
-        },
-        save: {
-          action: "save",
-          projectId: current.projectId,
-          roundId: current.roundId,
-          requestId: crypto.randomUUID(),
-          stepId: step.id,
-          expectedVersion: null,
-          body,
-          evidenceIds: current.snapshot.steps[step.id].evidenceIds,
-        },
-        confirm: {
-          action: "confirm",
-          projectId: current.projectId,
-          roundId: current.roundId,
-          requestId: crypto.randomUUID(),
-          stepId: step.id,
-          expectedVersion: null,
-          expectedReviewVersion: null,
-        },
-      };
-      sessionStorage.setItem(key, JSON.stringify(fixed));
-    }
-    const request = fixed;
-    await run(async () => {
+  async function recoverStep(step: Step) {
+    const key = "opc-step:" + draftId + ":" + step.id;
+    const envelope = stepEnvelopeFor(step.id);
+    if (!envelope) return;
+    if (!envelope.parsed) {
+      // An unreadable envelope cannot be resumed. Keep its raw value as
+      // evidence, read server state first, then release the step.
+      setRunning(true);
+      setError("");
       try {
-        if (request.phase === "information") {
-          await information.mutateAsync(request.information);
-          request.phase = "save";
-          sessionStorage.setItem(key, JSON.stringify(request));
-          setInfoEdits((old) => {
-            if (
-              JSON.stringify(old[step.id] ?? null) !== request.editingSnapshot
-            )
-              return old;
-            const next = { ...old };
-            delete next[step.id];
-            return next;
-          });
-        }
-        if (request.phase === "save") {
-          if (request.save.expectedVersion === null) {
-            const current = (await read.refetch()).data;
-            if (!current) throw new Error("OPC_UNAVAILABLE");
-            request.save.expectedVersion = current.snapshot.steps[step.id].version;
-            request.save.evidenceIds = current.snapshot.steps[step.id].evidenceIds;
-            sessionStorage.setItem(key, JSON.stringify(request));
-          }
-          await change.mutateAsync({
-            ...request.save,
-            expectedVersion: request.save.expectedVersion!,
-          });
-          request.phase = "confirm";
-          sessionStorage.setItem(key, JSON.stringify(request));
-        }
-        if (request.phase === "confirm") {
-          if (request.confirm.expectedVersion === null) {
-            const current = (await read.refetch()).data;
-            if (!current) throw new Error("OPC_UNAVAILABLE");
-            const state = current.snapshot.steps[step.id];
-            request.confirm.expectedVersion = state.version;
-            request.confirm.expectedReviewVersion = state.reviewVersion;
-            sessionStorage.setItem(key, JSON.stringify(request));
-          }
-          await change.mutateAsync({
-            ...request.confirm,
-            expectedVersion: request.confirm.expectedVersion!,
-            expectedReviewVersion: request.confirm.expectedReviewVersion!,
-          });
-        }
+        sessionStorage.setItem("opc-step-archive:" + draftId + ":" + step.id, envelope.raw);
+        const result = await read.refetch();
+        if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
         sessionStorage.removeItem(key);
-        if (stepIndex < (snap.workflow.steps as Step[]).length - 1)
-          setActiveStep((snap.workflow.steps as Step[])[stepIndex + 1].id);
-      } catch (cause) {
-        if (isDefiniteConfirmConflict(cause)) {
-          // The server rolled this phase back. Drop only this stale browser
-          // envelope so the user's next explicit click can bind fresh versions.
-          // Timeouts and unavailable responses retain the original identities.
-          sessionStorage.removeItem(key);
-          await read.refetch();
-        }
-        throw cause;
+        await history.refetch();
+      } catch {
+        setError("恢复未完成。原始请求仍保留在本机，未发送新请求。");
+      } finally {
+        setRunning(false);
       }
+      return;
+    }
+    await run(async () => {
+      await resumeStepEnvelope(step, envelope.parsed!);
     });
+    // A mismatch or unknown outcome retains the original identity for a later
+    // explicit retry instead of orphaning the request.
+    if (sessionStorage.getItem(key))
+      setError("原请求仍未确认结果，已继续保留。请稍后再试“继续核对这条原请求”，不会重复发送或重复扣费。");
+  }
+  function confirmEnvelopeState(stepId: string): ConfirmEnvelopeState {
+    if (hydratedDraft !== draftId || typeof window === "undefined")
+      return { kind: "none" };
+    const raw = sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + stepId);
+    if (!raw) return { kind: "none" };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { kind: "malformed", raw };
+    }
+    return isConfirmStepEnvelope(parsed)
+      ? { kind: "valid", envelope: parsed, raw }
+      : { kind: "malformed", raw };
+  }
+  function pendingConfirmationFor(stepId: string): ConfirmStepEnvelope | null {
+    const state = confirmEnvelopeState(stepId);
+    return state.kind === "valid" ? state.envelope : null;
+  }
+  function confirmationRedundant(stepId: string, questionId: string) {
+    // A pending envelope is a recovery, never a duplicate; server validity must
+    // not disable it. Otherwise an unchanged confirmed answer needs no rewrite.
+    if (confirmEnvelopeState(stepId).kind !== "none") return false;
+    return !infoEdits[stepId] && questionIsConfirmed(d.information[stepId].values?.[questionId]);
+  }
+  async function recoverCorruptConfirmation(stepId: string) {
+    const state = confirmEnvelopeState(stepId);
+    if (state.kind !== "malformed") return;
+    setRunning(true);
+    setError("");
+    try {
+      // Retain the unreadable value as evidence before touching the pending key.
+      sessionStorage.setItem("opc-confirm-step-archive:" + draftId + ":" + stepId, state.raw);
+      // Read server state first; only then allow re-checking the question.
+      const result = await read.refetch();
+      if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
+      sessionStorage.removeItem("opc-confirm-step:" + draftId + ":" + stepId);
+      await history.refetch();
+    } catch {
+      setError("恢复未完成。原始确认记录已保留在本机，请稍后重试。");
+    } finally {
+      setRunning(false);
+    }
+  }
+  function sameInformation(a: Information | undefined, b: Information | undefined) {
+    return a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
+  }
+  async function confirmStep(step: Step, stepIndex: number, questionId: string, defer = false) {
+    if (confirmationLock.current) return;
+    const envelopeState = confirmEnvelopeState(step.id);
+    if (envelopeState.kind === "malformed") {
+      setError("上次的确认记录无法读取，结果未知。请先用“恢复上次确认记录并重新读取”保留原始内容，再重新核对本题。");
+      return;
+    }
+    if (
+      envelopeState.kind === "none" &&
+      !infoEditsRef.current[step.id] &&
+      questionIsConfirmed(d.information[step.id].values?.[questionId])
+    ) {
+      // The stored answer is already confirmed and unchanged. Re-running the
+      // save/confirm phases would be a duplicate write, so do nothing.
+      setError("");
+      return;
+    }
+    confirmationLock.current = true;
+    setConfirmingQuestion(true);
+    setError("");
+    setActiveQuestions(old => ({ ...old, [step.id]: questionId }));
+    const key = "opc-confirm-step:" + draftId + ":" + step.id;
+    try {
+      let fixed: ConfirmStepEnvelope | null = envelopeState.kind === "valid" ? envelopeState.envelope : null;
+      if (!fixed) {
+        // Confirm the answer the user actually saw, never a newer remote value.
+        const viewed = infoEditsRef.current[step.id]?.[questionId] ?? d.information[step.id].values?.[questionId];
+        await flushInformation(step.id);
+        const result = await read.refetch();
+        if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
+        const current = result.data;
+        const schema = current.information[step.id].schema;
+        const savedValue = current.information[step.id].values?.[questionId];
+        if ((viewed?.value ?? "") !== (savedValue?.value ?? "") || infoEditsRef.current[step.id])
+          throw new Error("OPC_INFORMATION_CONFLICT");
+        const { values, finishStep } = confirmQuestionValues(schema, current.information[step.id].values ?? {}, questionId, defer);
+        const body = schema.filter((field: {id:string}) => values[field.id].value).map((field: {id:string;title:string}) =>
+          `${field.title}\n${values[field.id].status === "deferred" ? "（暂缓确认）" : ""}${values[field.id].value}`).join("\n\n");
+        fixed = {
+          phase: "information", questionId, finishStep, values,
+          editingSnapshot: JSON.stringify(infoEditsRef.current[step.id] ?? null),
+          information: {draftId,stepId:step.id,requestId:crypto.randomUUID(),expectedVersion:current.snapshot.steps[step.id].version,values},
+          save: {action:"save",projectId:current.projectId,roundId:current.roundId,requestId:crypto.randomUUID(),stepId:step.id,expectedVersion:null,body,evidenceIds:current.snapshot.steps[step.id].evidenceIds},
+          confirm: {action:"confirm",projectId:current.projectId,roundId:current.roundId,requestId:crypto.randomUUID(),stepId:step.id,expectedVersion:null,expectedReviewVersion:null},
+        };
+        sessionStorage.setItem(key, JSON.stringify(fixed));
+      }
+      const request = fixed;
+      await run(async () => {
+        try {
+          if (request.phase === "information") {
+            await information.mutateAsync(request.information);
+            request.phase = "save";
+            sessionStorage.setItem(key, JSON.stringify(request));
+            setInfoEdits(old => {
+              if (JSON.stringify(old[step.id] ?? null) !== request.editingSnapshot) return old;
+              const next = {...old}; delete next[step.id]; infoEditsRef.current = next; return next;
+            });
+          }
+          // Mid-step confirmation saves only this question. The final question
+          // reuses the original step-result save/confirm identities, with no AI pass.
+          if (request.finishStep !== false && request.phase === "save") {
+            if (request.save.expectedVersion === null) {
+              const result = await read.refetch();
+              if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
+              const current = result.data;
+              if (Object.keys(request.values).some(id => !sameInformation(current.information[step.id].values[id], request.values[id])))
+                throw new Error("OPC_INFORMATION_CONFLICT");
+              request.save.expectedVersion = current.snapshot.steps[step.id].version;
+              request.save.evidenceIds = current.snapshot.steps[step.id].evidenceIds;
+              sessionStorage.setItem(key, JSON.stringify(request));
+            }
+            await change.mutateAsync({...request.save,expectedVersion:request.save.expectedVersion!});
+            request.phase = "confirm";
+            sessionStorage.setItem(key, JSON.stringify(request));
+          }
+          if (request.finishStep !== false && request.phase === "confirm") {
+            if (request.confirm.expectedVersion === null) {
+              const result = await read.refetch();
+              if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
+              const current = result.data, state = current.snapshot.steps[step.id];
+              if (state.body !== request.save.body || Object.keys(request.values).some(id => !sameInformation(current.information[step.id].values[id], request.values[id])))
+                throw new Error("OPC_INFORMATION_CONFLICT");
+              request.confirm.expectedVersion = state.version;
+              request.confirm.expectedReviewVersion = state.reviewVersion;
+              sessionStorage.setItem(key, JSON.stringify(request));
+            }
+            await change.mutateAsync({...request.confirm,expectedVersion:request.confirm.expectedVersion!,expectedReviewVersion:request.confirm.expectedReviewVersion!});
+          }
+          const result = await read.refetch();
+          if (result.error || !result.data) throw new Error("OPC_UNAVAILABLE");
+          sessionStorage.removeItem(key);
+          const current = result.data.information[step.id];
+          const next = nextInformationQuestion(current.schema, current.values);
+          setActiveQuestions(old => ({...old,[step.id]:next?.id ?? questionId}));
+          if (request.finishStep !== false && result.data.snapshot.steps[step.id].valid && stepIndex < snap.workflow.steps.length - 1)
+            setActiveStep(snap.workflow.steps[stepIndex + 1].id);
+        } catch (cause) {
+          if (isDefiniteConfirmConflict(cause)) {
+            sessionStorage.removeItem(key);
+            await read.refetch();
+          }
+          throw cause;
+        }
+      });
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message.includes("OPC_QUESTION_ANSWER_REQUIRED")
+        ? "请先补充当前问题的答案；暂时无法确定时，请写明原因后再暂缓确认。"
+        : "操作未完成或信息已变化。你的输入仍保留，请先核对自动保存与当前答案后重试确认。");
+    } finally {
+      confirmationLock.current = false;
+      setConfirmingQuestion(false);
+    }
   }
   function update(index: number, key: keyof Item, value: string) {
     setItems((old) =>
@@ -748,6 +873,7 @@ export default function PositioningDraft({
         await enqueueInformation(stepId,values);
       }
       setActiveStep(stepId);
+      setActiveQuestions(old => ({...old,[stepId]:Object.keys(patch)[0]}));
     });
   }
   function retainConflictingInput(stepId: string) {
@@ -764,7 +890,7 @@ export default function PositioningDraft({
     setInfoEdits(infoEditsRef.current);
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
-  if (read.isLoading) return <main className="p-6">正在恢复定位…</main>;
+  if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
     return (
       <main className="p-6" role="alert">
@@ -808,6 +934,17 @@ export default function PositioningDraft({
     const response = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn.stepId, d.information);
     if (Object.keys(response.informationPatch).length) latestSuggestion.set(response.targetStepId, execution.executionId);
   }
+  const hasPendingConfirmation = steps.some(step => Boolean(pendingConfirmationFor(step.id)));
+  // A retained mentor envelope can exist before its execution is visible in
+  // history (or after a lost reply), so recovery is driven by the envelope
+  // itself rather than the execution list.
+  const pendingStepRequests = steps
+    .map((step) => {
+      const envelope = stepEnvelopeFor(step.id);
+      return envelope ? { step, ...envelope } : null;
+    })
+    .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
+  const hasPendingStepRequest = pendingStepRequests.length > 0;
   const pendingMentor = mentorExecutions.find(
     (execution) => !["completed", "cancelled"].includes(execution.state),
   );
@@ -827,14 +964,38 @@ export default function PositioningDraft({
           重新读取状态
         </Button>
       </div>
-      {!planView && <><nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
+      {!planView && <>{hasPendingStepRequest && (
+        <section role="status" aria-label="待恢复的导师请求" className="space-y-2 rounded-xl border border-[var(--border-primary)] p-3">
+          <p>有一条发给导师的内容结果尚未确认。原始请求已保留；恢复前不会发送新请求、确认步骤或切换步骤。</p>
+          {pendingStepRequests.map(({ step, parsed }) => (
+            <div key={step.id} className="space-y-2">
+              <p className="text-sm">
+                {step.title}：{parsed
+                  ? "将用原来的问题和请求继续核对，不会重复发送或重复扣费。"
+                  : "原请求无法读取。将先保留原始记录，再读取服务器状态。"}
+              </p>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setActiveStep(step.id);
+                  void recoverStep(step);
+                }}
+              >
+                {parsed ? "继续核对这条原请求" : "保留原始记录并重新读取状态"}
+              </Button>
+            </div>
+          ))}
+        </section>
+      )}
+      <nav aria-label="定位步骤" className="flex gap-2 overflow-x-auto pb-1">
         {steps.map((step, index) => (
           <Button
             key={step.id}
             variant={selectedStep.id === step.id ? "default" : "outline"}
             aria-current={selectedStep.id === step.id ? "step" : undefined}
             disabled={
-              busy ||
+              busy || hasPendingConfirmation || hasPendingStepRequest ||
               (firstPending >= 0 &&
                 index > firstPending &&
                 !snap.steps[step.id].valid)
@@ -860,6 +1021,14 @@ export default function PositioningDraft({
             title: string;
             required: boolean;
           }>;
+          const confirmationState = confirmEnvelopeState(step.id);
+          const pendingConfirmation = pendingConfirmationFor(step.id);
+          const activeQuestion = (pendingConfirmation?.questionId && schema.find(f => f.id === pendingConfirmation.questionId)) || displayedQuestion(schema, d.information[step.id].values, activeQuestions[step.id]);
+          if (!activeQuestion) return null;
+          const knownQuestions = reachedQuestions(schema, d.information[step.id].values);
+          const questionConfirmed =
+            questionIsConfirmed(d.information[step.id].values?.[activeQuestion.id]) &&
+            !infoEdits[step.id];
           return (
             <article
               key="positioning-workspace"
@@ -876,7 +1045,7 @@ export default function PositioningDraft({
                   <div>
                     <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
                     <h3 className="font-semibold">
-                      和导师一起完成全部 {steps.length} 步
+                      和导师一起，一次确认一个问题
                     </h3>
                   </div>
                   <div
@@ -900,6 +1069,7 @@ export default function PositioningDraft({
                       const parsed = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn?.stepId ?? step.id, d.information);
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
                       const proposed = Object.entries(parsed.informationPatch).filter(([id, value]) =>
+                        reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
                       return (
                         <div key={execution.executionId} className="space-y-2">
@@ -926,7 +1096,7 @@ export default function PositioningDraft({
                             <div className="rounded border border-[var(--border-primary)] p-3">
                               <p>导师建议调整 · {target.title}</p>
                               {proposed.map(([id, value]) => <p key={id} className="text-sm">{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}：{value.value}</p>)}
-                              <Button variant="outline" disabled={busy || Boolean(pendingMentor) || snap.state !== "draft"}
+                              <Button variant="outline" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
                                 onClick={() => acceptSuggestion(execution.executionId, target.id, Object.fromEntries(proposed))}>采用这些修改到“{target.title}”</Button>
                               <p className="text-xs">原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
@@ -954,12 +1124,7 @@ export default function PositioningDraft({
                   </div>
                   <div aria-label="当前导师任务" role="status" className="rounded-xl bg-[var(--bg-tertiary)] p-3">
                     <p className="text-xs text-[var(--text-secondary)]">步骤引导 · {step.title}</p>
-                    <p className="mt-1 text-sm">{s.valid
-                      ? "这一步已有结果已保留。你想调整哪一处？我们只修改需要改变的部分。"
-                      : `我们接下来一起完成“${step.title}”。${(() => {
-                          const missing = schema.find(f => !(infoEdits[step.id]?.[f.id] ?? d.information[step.id].values?.[f.id])?.value?.trim());
-                          return missing ? `先聊聊${missing.title}，你目前有什么想法？` : "已填写的信息都在右侧。还有哪里想继续讨论或调整？";
-                        })()}`}</p>
+                    <p className="mt-1 text-sm">{s.valid ? "这一步已有结果已保留。" : `我们接下来一起完成“${step.title}”。`}现在只聊“{activeQuestion.title}”。你可以继续补充；核对后点击这道题下面的确认按钮，再进入下一题。</p>
                   </div>
                   <label className="block text-sm">
                     回复导师
@@ -967,7 +1132,7 @@ export default function PositioningDraft({
                       className="resize-none"
                       aria-label="给导师的回复"
                       value={mentorInput}
-                      disabled={busy || Boolean(pendingMentor) || snap.state !== "draft"}
+                      disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
                       onChange={(event) => setMentorInput(event.target.value)}
                       placeholder="用自己的话说就好，可以多聊几轮。"
                       maxLength={8000}
@@ -976,16 +1141,16 @@ export default function PositioningDraft({
                   <Button
                     disabled={
                       busy ||
-                      Boolean(pendingMentor) ||
+                      Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
                       snap.state !== "draft" ||
                       !mentorInput.trim()
                     }
-                    onClick={() => ask(step)}
+                    onClick={() => ask(step, activeQuestion.id)}
                   >
                     {busy ? "正在回复…" : "发送"}
                   </Button>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    六个步骤共用这一条对话记录。右侧只切换当前表单；刷新或重新登录后仍从原 Session 继续。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
+                    各步骤共用这一条对话记录。右侧每次只显示当前问题；确认后再继续，刷新或重新登录可恢复已保存进度。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
                 <section
@@ -994,8 +1159,8 @@ export default function PositioningDraft({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="text-xs text-[var(--text-secondary)]">当前步骤表单</p>
-                      <h3 className="font-semibold">核对导师梳理的信息</h3>
+                      <p className="text-xs text-[var(--text-secondary)]">当前问题</p>
+                      <h3 className="font-semibold">逐题核对，确认后继续</h3>
                     </div>
                     <p role="status" className="text-xs text-[var(--text-secondary)]">
                       {saveState[step.id] === "saving"
@@ -1007,16 +1172,34 @@ export default function PositioningDraft({
                             : "修改后自动保存"}
                     </p>
                   </div>
+                  {questionConfirmed && (
+                    <p role="status" className="text-sm">
+                      已确认当前问题「{activeQuestion.title}」
+                      {s.valid ? `；本步骤「${step.title}」已确认，无需重复确认。` : "。继续修改后可重新确认。"}
+                    </p>
+                  )}
                   <p className="text-sm text-[var(--text-secondary)]">
-                    你可以直接填写，也可以和左侧导师聊。导师建议会以“待核对”状态填入；只有你确认本步骤后才会成为正式结果。
+                    你可以直接填写，也可以和左侧导师聊。填写与自动保存不等于确认；当前答案由你核对确认后，我们再进入下一个问题。
                   </p>
                   {informationConflicts[step.id] && <div role="alert">
                     <p>其他窗口修改了相同字段。你的输入未提交，请比较后决定。</p>
                     {informationConflicts[step.id].fields.map(id=><p key={id}>{schema.find(f=>f.id===id)?.title ?? id}：服务器「{informationConflicts[step.id].current[id]?.value ?? ""}」；你的输入「{infoEdits[step.id]?.[id]?.value ?? ""}」</p>)}
                     <Button onClick={()=>retainConflictingInput(step.id)}>保留我的这些修改并重新保存</Button>
                   </div>}
+                  {confirmationState.kind === "malformed" && (
+                    <div role="alert" className="space-y-2">
+                      <p>上次的确认请求无法读取，确认结果未知。原始记录已在本机保留，不会被删除。恢复会先读取服务器状态，再允许你重新核对当前问题，不会当作已确认通过。</p>
+                      <Button
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void recoverCorruptConfirmation(step.id)}
+                      >
+                        恢复上次确认记录并重新读取
+                      </Button>
+                    </div>
+                  )}
                   <div className="space-y-4">
-                  {schema.map((field) => {
+                  {[activeQuestion].map((field) => {
                       const value = infoEdits[step.id]?.[field.id] ??
                         d.information[step.id].values?.[field.id] ?? {
                           status: "unknown",
@@ -1056,7 +1239,7 @@ export default function PositioningDraft({
                             aria-label={field.title}
                             maxLength={400}
                             className="min-h-20 resize-none"
-                            disabled={busy || snap.state !== "draft"}
+                            disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft"}
                             value={value.value}
                             onCompositionStart={() => {
                               composing.current = true;
@@ -1073,7 +1256,7 @@ export default function PositioningDraft({
                               updateInfo({
                                 value: event.target.value,
                                 status: event.target.value.trim()
-                                  ? "confirmed"
+                                  ? "provisional"
                                   : "unknown",
                                 nature:
                                   value.nature === "unknown"
@@ -1084,43 +1267,18 @@ export default function PositioningDraft({
                           />
                           {value.status === "provisional" && (
                             <p className="text-xs text-[var(--text-secondary)]">
-                              导师已根据你的回答填入，请核对或修改。
+                              答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <details className="text-sm text-[var(--text-secondary)]">
-                            <summary className="cursor-pointer">
-                              这项现在还不能确定
-                            </summary>
-                            <UiSelect
-                              value={value.status}
-                              disabled={busy || snap.state !== "draft"}
-                              onValueChange={(status) =>
-                                updateInfo({
-                                  status: status as Information["status"],
-                                })
-                              }
-                            >
-                              <SelectTrigger
-                                className="mt-2 w-full sm:w-56"
-                                aria-label={field.title + " 状态"}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Object.entries({
-                                  unknown: "尚未知",
-                                  unclear: "需要继续聊",
-                                  provisional: "导师已填写，待我核对",
-                                  confirmed: "我已确认",
-                                  deferred: "暂时无法确定",
-                                }).map(([key, label]) => (
-                                  <SelectItem key={key} value={key}>
-                                    {label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </UiSelect>
-                          </details>
+                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id)}>
+                            {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
+                          </Button>
+                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, true)}>
+                            {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
+                          </Button>
+                          <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
+                          {pendingConfirmation && <p role="status">正在核对原确认请求。确认成功前保持本题，不会跳过下一题。</p>}
+
                         </div>
                       );
                     })}
@@ -1128,7 +1286,7 @@ export default function PositioningDraft({
                   {saveState[step.id] === "error" && (
                     <Button
                       variant="outline"
-                      disabled={information.isPending}
+                      disabled={information.isPending || hasPendingConfirmation}
                       onClick={() => {
                         const values = infoEditsRef.current[step.id];
                         if (values)
@@ -1140,21 +1298,21 @@ export default function PositioningDraft({
                       重试自动保存
                     </Button>
                   )}
-                  <Button
-                    className="w-full"
-                    disabled={busy || snap.state !== "draft"}
-                    onClick={() => confirmStep(step, index)}
-                  >
-                    {s.valid ? "重新确认本步骤" : "确认本步骤"}
-                  </Button>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    确认会把右侧表单冻结为本步骤结果，不再额外生成一份重复成果。
-                  </p>
+                  {knownQuestions.some(field => field.id !== activeQuestion.id && questionIsConfirmed(d.information[step.id].values?.[field.id])) && (
+                    <nav aria-label="已确认的问题" className="space-y-2 border-t border-[var(--border-primary)] pt-3">
+                      <p className="text-xs text-[var(--text-secondary)]">回看已确认的内容</p>
+                      {knownQuestions.filter(field => field.id !== activeQuestion.id && questionIsConfirmed(d.information[step.id].values?.[field.id])).map(field => (
+                        <Button key={field.id} variant="outline" className="w-full justify-start whitespace-normal text-left" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor)} onClick={() => setActiveQuestions(old => ({...old,[step.id]:field.id}))}>
+                          已确认 · {field.title} · 回看修改
+                        </Button>
+                      ))}
+                    </nav>
+                  )}
                 </section>
               </div>
               {s.valid && index < steps.length - 1 && (
                 <Button
-                  disabled={busy || hasUnsavedInformation}
+                  disabled={busy || hasUnsavedInformation || hasPendingStepRequest}
                   onClick={() => setActiveStep(steps[index + 1].id)}
                 >
                   继续下一步
@@ -1186,7 +1344,7 @@ export default function PositioningDraft({
         disabled={
           busy ||
           hasUnsavedInformation ||
-          steps.some((step) => !snap.steps[step.id].valid) ||
+          hasPendingConfirmation || hasPendingStepRequest || steps.some((step) => !snap.steps[step.id].valid) ||
           snap.state !== "draft"
         }
         onClick={() =>

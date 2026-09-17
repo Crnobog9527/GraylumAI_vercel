@@ -3,7 +3,7 @@
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { randomUUID, createHmac, createHash } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   readFileSync,
   writeFileSync,
@@ -15,19 +15,42 @@ import {
 import { resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
+import { parsePreviewOptions, previewDecision, previewNames, previewStatePath, readPreviewState, runPreviewPhase, signPreviewJwt, structuralPreviewArgs, validateResumeState, writePreviewState } from "./preview-lifecycle.mjs";
+import { acquirePreviewLease, assertNewPreview, assertPreviewResources, controlPreview, previewLabelArgs, stopLocalApplication } from "./preview-resources.mjs";
 const source = resolve(import.meta.dirname, "../../../..");
-const args = process.argv.slice(2);
-if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
-if(args.includes('--real-skill-only')&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
+const docker = (...args) => execFileSync("docker", args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+async function main() {
+let releasePreviewLease;
+try {
+const initialArgs = process.argv.slice(2);
+const previewOptions = parsePreviewOptions(initialArgs);
+const lifecycle = previewDecision(previewOptions);
+let previewState;
+if (previewOptions.persistent) {
+  releasePreviewLease = acquirePreviewLease(previewOptions.id, source);
+  if (lifecycle.bootstrap) {
+    assertNewPreview(previewOptions.id);
+    previewState = { version: 1, id: previewOptions.id, ownerId: randomUUID(), initialized: false, names: previewNames(previewOptions.id), secret: randomUUID() + randomUUID(), structuralArgs: structuralPreviewArgs(initialArgs) };
+  } else previewState = readPreviewState(previewOptions.id);
+}
+// Resume defaults to the original schema/mode; it never guesses a new bootstrap.
+const args = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
+  ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
+if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--bill2-only','--workbench-restart-only','--agent-slice-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
+if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
+if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
+if(args.includes('--real-skill-only')&&lifecycle.runTests&&!process.env.V3_REAL_SKILL_INPUT)throw new Error('V3_REAL_SKILL_INPUT is required for real Skill acceptance');
 const serve=args.includes('--serve'),aiOnly=args.some(arg=>arg.endsWith('-only'));
 const legacyRef=args.find(arg=>arg.startsWith('--legacy-ref='))?.slice(13);
 if(legacyRef&&!/^[a-f0-9]{40}$/.test(legacyRef))throw new Error('exact legacy ref required');
 const runtimeUpgrade=args.includes('--runtime-upgrade-only');
 const upgradeMode=args.includes('--bill2-upgrade-only')||runtimeUpgrade;
+if (serve && legacyRef) throw new Error('persistent preview does not support legacy upgrade tests');
 if(upgradeMode&&!legacyRef)throw new Error('upgrade compatibility requires an exact old runtime');
 let legacyRoot;
 const stagingSchema=args.includes('--with-staging-schema');
 const opcMode=args.includes('--opc-only');
+if (opcMode && lifecycle.runTests) execFileSync(process.execPath, ['--test', resolve(source, 'packages/db/tests/v3/opc-mentor-fixture.test.mjs')], {stdio: 'inherit'});
 const stagingHost=args.includes('--staging-host');
 if(stagingHost&&(!stagingSchema||!opcMode||serve))throw new Error('staging-host requires isolated OPC + staging schema and cannot be served to Owner');
 const syntheticStagingHost='syntheticstaging.supabase.co',stagingWindowId=randomUUID();
@@ -42,7 +65,8 @@ const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:'
 const root = mkdtempSync(resolve(tmpdir(), "graylum-workbench-"));
 const evidenceRoot = resolve(process.env.V3_WORKBENCH_OUTPUT || tmpdir());
 mkdirSync(evidenceRoot, { recursive:true });
-const evidenceDirectory = mkdtempSync(resolve(evidenceRoot, "graylum-workbench-evidence-"));
+const evidenceDirectory = previewState ? previewStatePath(previewState.id).evidence : mkdtempSync(resolve(evidenceRoot, "graylum-workbench-evidence-"));
+mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
 console.log("LOCAL_EVIDENCE_DIRECTORY " + evidenceDirectory);
 const files = execFileSync("git", ["ls-files", "-z"], {
   cwd: source,
@@ -69,25 +93,13 @@ console.log(
     isolatedRoot: root,
   }),
 );
-const tag = `graylum-wb-${randomUUID().slice(0, 8)}`,
-  db = `${tag}-db`,
-  rest = `${tag}-rest`,
-  auth = `${tag}-auth`;
-const docker = (...args) =>
-  execFileSync("docker", args, {
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-  }).trim();
-const secret = randomUUID() + randomUUID();
-const jwt = (role) => {
-  const a = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString(
-      "base64url",
-    ),
-    b = Buffer.from(
-      JSON.stringify({ role, exp: Math.floor(Date.now() / 1000) + 7200 }),
-    ).toString("base64url");
-  return `${a}.${b}.${createHmac("sha256", secret).update(`${a}.${b}`).digest("base64url")}`;
-};
+const tag = previewState?.names.tag ?? `graylum-wb-${randomUUID().slice(0, 8)}`,
+  db = previewState?.names.db ?? `${tag}-db`,
+  rest = previewState?.names.rest ?? `${tag}-rest`,
+  auth = previewState?.names.auth ?? `${tag}-auth`;
+const labels = previewState ? previewLabelArgs(previewState) : [];
+const secret = previewState?.secret ?? randomUUID() + randomUUID();
+const jwt = (role) => signPreviewJwt(secret, role);
 const apply = (p) =>
   execFileSync(
     "docker",
@@ -122,7 +134,19 @@ const sql = (s) =>
     ],
     { input: s, stdio: ["pipe", "pipe", "pipe"] },
   );
-let gateway, app;
+let gateway, app, tokenWarning;
+let intentionalRestart = false;
+let stoppingApplication = false;
+let finishServing;
+const servingEnded = new Promise((resolve) => { finishServing = resolve; });
+const stopServing = () => finishServing();
+const waitForDb = async () => {
+  for (let i = 0; i < 100; i++) {
+    try { docker("exec", db, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"); return; }
+    catch { await new Promise((r) => setTimeout(r, 200)); }
+  }
+  throw new Error("local database not ready");
+};
 const appLog = [];
 const cleanEnv = {
   PATH: process.env.PATH,
@@ -138,6 +162,17 @@ const childExit = (child) =>
     );
   });
 try {
+  if (previewState) {
+    assertPreviewResources(previewState, docker, { requireAll: !lifecycle.bootstrap, mustBeAbsent: lifecycle.bootstrap });
+    if (lifecycle.bootstrap) {
+      const listeners = [createServer(), createServer()];
+      try {
+        for (const listener of listeners) await new Promise((resolve, reject) => { listener.once("error", reject); listener.listen(0, "127.0.0.1", resolve); });
+        previewState.ports = { gateway: listeners[0].address().port, app: listeners[1].address().port };
+        writePreviewState(previewState);
+      } finally { for (const listener of listeners) if (listener.listening) await new Promise((resolve) => listener.close(resolve)); }
+    } else if (![previewState.ports?.gateway, previewState.ports?.app].every((port) => Number.isInteger(port) && port > 0 && port < 65536) || previewState.ports.gateway === previewState.ports.app) throw new Error("PREVIEW_PORT_STATE_INVALID");
+  }
   await childExit(
     spawn("pnpm", ["install", "--frozen-lockfile", "--offline"], {
       cwd: root,
@@ -146,10 +181,14 @@ try {
     }),
   );
   if(legacyRef){legacyRoot=legacyRuntime(legacyRef,source,cleanEnv);copyLegacyTests(root,legacyRoot);}
-  docker("network", "create", tag);
+  await runPreviewPhase(previewOptions, "bootstrap", async () => {
+  docker("network", "create", ...labels, tag);
+  if (previewState) docker("volume", "create", ...labels, previewState.names.volume);
   docker(
     "run",
     "-d",
+    ...labels,
+    ...(previewState ? ["--mount", `type=volume,source=${previewState.names.volume},target=/var/lib/postgresql/data`] : []),
     "--name",
     db,
     "--network",
@@ -162,14 +201,7 @@ try {
     "POSTGRES_HOST_AUTH_METHOD=trust",
     "postgres:17-alpine",
   );
-  for (let i = 0; i < 100; i++) {
-    try {
-      docker("exec", db, "pg_isready", "-h", "127.0.0.1", "-U", "postgres");
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
+  await waitForDb();
   apply("packages/db/tests/v3/bootstrap.sql");
   sql(
     "CREATE ROLE workbench_auth LOGIN SUPERUSER; ALTER ROLE workbench_auth SET search_path=auth,public; CREATE TABLE system_settings(key text PRIMARY KEY,value jsonb); INSERT INTO system_settings VALUES ('maintenance_mode','false'); GRANT SELECT ON system_settings TO service_role,anon,authenticated;",
@@ -198,6 +230,7 @@ try {
   apply("packages/db/migrations/0068_v3_workbench_generation.sql");
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
   apply("packages/db/migrations/0069_v3_chat_skill.sql");
+  apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0070_v3_separate_summary.sql");
   apply("packages/db/migrations/0071_v3_research_billing.sql");
@@ -293,6 +326,7 @@ try {
   docker(
     "run",
     "-d",
+    ...labels,
     "--name",
     rest,
     "--network",
@@ -312,6 +346,7 @@ try {
   docker(
     "run",
     "-d",
+    ...labels,
     "--name",
     auth,
     "--network",
@@ -335,6 +370,8 @@ try {
     "-e",
     "GOTRUE_JWT_AUD=authenticated",
     "-e",
+    "GOTRUE_JWT_EXP=3600",
+    "-e",
     "GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated",
     "-e",
     "GOTRUE_JWT_ADMIN_ROLES=service_role",
@@ -346,6 +383,13 @@ try {
     "GOTRUE_DISABLE_SIGNUP=true",
     "public.ecr.aws/supabase/gotrue:v2.190.0",
   );
+  });
+  if (previewState && !lifecycle.bootstrap) {
+    docker("start", db);
+    await waitForDb();
+    docker("start", rest, auth);
+  }
+  if (previewState) assertPreviewResources(previewState, docker);
   const port = (n, p) => docker("port", n, p).split(":").at(-1);
   const restUrl = `http://127.0.0.1:${port(rest, "3000")}`,
     authUrl = `http://127.0.0.1:${port(auth, "9999")}`;
@@ -374,7 +418,7 @@ try {
     if((opcMode||runtimeMode||runtimeUpgrade) && (req.url==='/call'||(stagingHost&&req.url==='/__official_chat'))){
       let raw='';for await(const chunk of req)raw+=chunk;
       const request=req.url==='/__official_chat'?JSON.parse(raw):JSON.parse(JSON.parse(raw).input);runtimeCalls.push(request);
-      const id='local-runtime-'+runtimeCalls.length;
+      const id=serve ? 'local-runtime-'+randomUUID() : 'local-runtime-'+runtimeCalls.length;
       let content='Saved runtime answer '+runtimeCalls.length;
       if(opcMode){
         content='【固定模拟回复，仅验证流程】你最想帮助哪类人解决一个什么具体问题？';
@@ -392,12 +436,8 @@ try {
               const instructionText=typeof request.instructions==='string'
                 ? request.instructions
                 : request.messages.filter(m=>['system','developer'].includes(m.role)).map(m=>typeof m.content==='string'?m.content:'').join('\n');
-              const match=/Allowed field IDs(?: for the current step)?: (\[[^\]]*\])/.exec(instructionText);
-              const fieldIds=match ? JSON.parse(match[1]) : [];
-              const informationPatch=fieldIds[0] && typeof input.userRequest==='string' && input.userRequest.trim()
-                ? {[fieldIds[0]]:{value:input.userRequest.trim().slice(0,400),status:'provisional',nature:'hypothesis'}} : {};
-              if(input.userRequest==='模拟：修改第一步目标') { informationPatch.goal={value:'改为帮助独立开发者',status:'provisional',nature:'decision'}; }
-              content=JSON.stringify({...(input.userRequest==='模拟：修改第一步目标'?{targetStepId:'step-0'}:{}),message:'【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+' 此示例只验证持续对话和表单联动。',informationPatch});
+              const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
+              content=JSON.stringify(mentorQuestionFixture(instructionText,input.userRequest,stepIndex));
             }else content='【分步模拟，仅验证流程】第 '+(stepIndex+1)+' 步示例：'+(questions[stepIndex] ?? '这一步你最想确认什么？')+'\n你可以继续回复，也可以在表单里补充想法。此示例不会理解或评估你的答案。';
           }
           if(stepId && request.messages.some(m=>m.role!=='user' && typeof m.content==='string' && m.content.includes('Required information is confirmed or explicitly deferred.'))){
@@ -558,7 +598,7 @@ try {
       res.writeHead(502).end();
     }
   });
-  await new Promise((r) => gateway.listen(0, "127.0.0.1", r));
+  await new Promise((resolve, reject) => { gateway.once("error", reject); gateway.listen(previewState?.ports.gateway ?? 0, "127.0.0.1", resolve); });
   const apiUrl = `http://127.0.0.1:${gateway.address().port}`;
   // Only the disposable, credential-free source COPY receives this transport
   // substitution. Shipped code has no environment-controlled mock/provider URL.
@@ -591,10 +631,23 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   if(legacyRoot)instrumentLegacy(legacyRoot,apiUrl);
   const service = jwt("service_role"),
     anon = jwt("anon");
-  const listener = createServer();
-  await new Promise((r) => listener.listen(0, "127.0.0.1", r));
-  const appPort = listener.address().port;
-  await new Promise((r) => listener.close(r));
+  // Browser user sessions remain GoTrue access/refresh tokens; these role keys are separate.
+  if (previewState) {
+    const allowed = await fetch(restUrl, { headers: { authorization: `Bearer ${service}` }, signal: AbortSignal.timeout(5000) });
+    if (!allowed.ok) throw new Error("PREVIEW_CREDENTIAL_ALLOWED_PATH_FAILED");
+    for (const denied of [signPreviewJwt(randomUUID() + randomUUID(), "service_role"), signPreviewJwt(secret, "service_role", { nowSeconds: 0 })]) {
+      const response = await fetch(restUrl, { headers: { authorization: `Bearer ${denied}` }, signal: AbortSignal.timeout(5000) });
+      if (response.status !== 401) throw new Error("PREVIEW_CREDENTIAL_DENIED_PATH_FAILED");
+    }
+    console.log("Short-lived preview credential allowed/denied paths PASS; no business bootstrap on resume");
+  }
+  let appPort = previewState?.ports.app;
+  if (!appPort) {
+    const listener = createServer();
+    await new Promise((resolve, reject) => { listener.once("error", reject); listener.listen(0, "127.0.0.1", resolve); });
+    appPort = listener.address().port;
+    await new Promise((resolve) => listener.close(resolve));
+  }
   const env = {
     ...cleanEnv,
     ...(args.includes('--reuse-only') ? {V3_REUSE_TEST:'1'} : {}),
@@ -640,6 +693,13 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
       ],
       { cwd: applicationRoot, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
     );
+    app.once("exit", (code, signal) => {
+      if (serve && !intentionalRestart) {
+        if (code !== 0 && !stoppingApplication) { process.exitCode = 1; console.error("Preview application exited unexpectedly", { code, signal }); }
+        finishServing();
+      }
+    });
+    app.once("error", () => { process.exitCode = 1; if (serve) finishServing(); });
     console.log('APPLICATION_PROCESS '+JSON.stringify({pid:app.pid,root:applicationRoot,legacyRef:applicationRoot===legacyRoot?legacyRef:null}));
     for (const output of [app.stdout, app.stderr])
       output.on("data", (x) => {
@@ -653,8 +713,33 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
         );
       });
   };
+  const waitForApplication = async () => {
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      if (app.exitCode !== null || app.signalCode !== null) throw new Error("local application exited before readiness");
+      try { if ((await fetch(env.V3_LOCAL_APP + "/login", { signal: AbortSignal.timeout(2000) })).ok) return; } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error("local application not ready");
+  };
   startApp();
-  restartApplication=async(nextRoot)=>{const previous=app;const exited=new Promise(resolve=>previous.once('exit',resolve));process.kill(-previous.pid,'SIGKILL');await exited;applicationRoot=nextRoot??applicationRoot;startApp();};
+  await waitForApplication();
+  restartApplication=async(nextRoot)=>{
+    intentionalRestart = true;
+    try {
+      await stopLocalApplication(app);
+      applicationRoot = nextRoot ?? applicationRoot;
+      startApp();
+      await waitForApplication();
+    } catch (error) { if (serve) finishServing(); throw error; }
+    finally { intentionalRestart = false; }
+  };
+  if (serve) {
+    process.once("SIGINT", stopServing);
+    process.once("SIGTERM", stopServing);
+    tokenWarning = setTimeout(() => console.log("Preview role keys expire in 10 minutes. Ctrl+C, then run the same preview with --preview-action=renew. Browser sign-in refresh is separate; saved data is retained."), 6600 * 1000);
+    tokenWarning.unref();
+  }
   // Loopback test control restarts only this disposable application process group.
   const primaryTestArgs = [
     ...(aiOnly ? ["--testNamePattern", testPattern] : []),
@@ -684,14 +769,14 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
       ],
       { cwd: legacyRoot&&!upgradeMode?legacyRoot:root, env, stdio: "inherit" },
     );
+  await runPreviewPhase(previewOptions, "runTests", async () => {
   await childExit(runTests());
   if (!aiOnly || args.includes('--reuse-only') || args.includes('--workbench-restart-only')) {
-  process.kill(-app.pid, "SIGTERM");
-  await new Promise((r) => app.on("exit", r));
   env.V3_WORKBENCH_PHASE = "restore";
-  startApp();
+  await restartApplication();
   await childExit(runTests());
   }
+  });
   if (appLog.join("").includes("METHOD_CANARY"))
     throw new Error("private method leaked in application logs");
   writeFileSync(
@@ -703,6 +788,7 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   );
   console.log("Private canary absent from application logs PASS");
   if(serve){
+    await runPreviewPhase(previewOptions, "bootstrap", async () => {
     if(opcMode){
       const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'opc-acceptance.json'),'utf8'));
       if(![saved.moduleId,saved.modelId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid OPC preview identity');
@@ -730,7 +816,11 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     writeFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'acceptance.json'),JSON.stringify({url:env.V3_LOCAL_APP,credentials:saved.credentials,samples:saved.fixtures.map(f=>({label:f.label,moduleId:f.moduleId})),mode:'Synthetic local transport only; no production or provider access'},null,2),{mode:0o600});
     console.log('LOCAL_ACCEPTANCE_READY '+env.V3_LOCAL_APP);
     }
-    await new Promise(resolve=>{process.once('SIGINT',resolve);process.once('SIGTERM',resolve);app.once('exit',resolve);});
+    previewState.initialized = true;
+    writePreviewState(previewState);
+    });
+    console.log("PERSISTENT_PREVIEW_READY " + JSON.stringify({ id: previewState.id, url: env.V3_LOCAL_APP + (opcMode ? "/positioning" : runtimeMode ? "/runtime" : ""), action: previewOptions.action, volume: previewState.names.volume, bootstrap: lifecycle.bootstrap }));
+    await servingEnded;
   }
 } catch (error) {
   // Diagnostics are local-only and redact all temporary JWT material.
@@ -756,23 +846,35 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
   );
   process.exitCode = 1;
 } finally {
-  if (app) {
-    try {
-      process.kill(-app.pid, "SIGTERM");
-    } catch {}
-  }
+  clearTimeout(tokenWarning);
+  process.removeListener("SIGINT", stopServing);
+  process.removeListener("SIGTERM", stopServing);
+  stoppingApplication = true;
+  await stopLocalApplication(app);
   if (gateway) {
     gateway.closeAllConnections();
     await new Promise((r) => gateway.close(r));
   }
+  await runPreviewPhase(previewOptions, "destroyBackendsOnFinally", async () => {
   for (const n of [auth, rest, db]) {
     try {
-      docker("rm", "-f", n);
-    } catch {}
+      docker("rm", "-f", "-v", n);
+    } catch (error) {
+      // Partial setup may have no such container; other cleanup failures are real failures.
+      if (!/no such (object|container)/i.test(String(error.stderr ?? ""))) {
+        process.exitCode = 1;
+        console.error("Disposable container cleanup failed", n);
+      }
+    }
   }
   try {
     docker("network", "rm", tag);
-  } catch {}
+  } catch (error) {
+    if (!/no such network|network .* not found/i.test(String(error.stderr ?? ""))) {
+      process.exitCode = 1;
+      console.error("Disposable network cleanup failed", tag);
+    }
+  }
   rmSync(
     resolve(
       evidenceDirectory,
@@ -780,9 +882,14 @@ if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))throw new Error('LOCA
     ),
     { force: true },
   );
+  });
   // Retain source copy only on request for explicit recovery; never original/user files.
   if (!process.env.V3_KEEP_LOCAL) {
     rmSync(root, { recursive: true, force: true });
     if(legacyRoot)rmSync(legacyRoot,{recursive:true,force:true});
   }
 }
+
+} finally { releasePreviewLease?.(); }
+}
+await main();
