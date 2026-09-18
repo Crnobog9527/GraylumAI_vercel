@@ -657,7 +657,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .poll(
         () =>
           page
-            .getByRole("button", { name: "确认正式定位版本", exact: true })
+            .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
             .isEnabled(),
         { timeout: 15000 },
       )
@@ -677,7 +677,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .fill("Updated confirmed decision before publication");
     expect(
       await page
-        .getByRole("button", { name: "确认正式定位版本", exact: true })
+        .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
         .isEnabled(),
     ).toBe(false);
     await page.reload();
@@ -708,35 +708,15 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await expect
       .poll(() => lastArticle.textContent(), { timeout: 15000 })
       .toContain("已确认");
-    await page.getByRole("button", { name: "确认正式定位版本" }).click();
+    await page
+      .getByRole("button", { name: "确认正式定位并生成第一周计划", exact: true })
+      .click();
     await page.waitForURL(url => url.pathname.endsWith("/plan"));
     expect(await page.getByLabel("定位摘要").textContent()).toContain("Updated confirmed decision");
     expect(await page.getByLabel("当前定位步骤").count()).toBe(0);
-    await page.getByRole("button", { name: "添加选题" }).click();
     expect(await page.getByRole("table", {name:"第一周选题计划"}).count()).toBe(1);
-    await page
-      .getByRole("textbox", { name: "account 0", exact: true })
-      .fill("browser-account");
-    await page
-      .getByRole("textbox", { name: "title 0", exact: true })
-      .fill("Browser topic");
-    await page
-      .getByRole("textbox", { name: "简报", exact: true })
-      .fill("A clear brief");
-    // The user only supplies their own choices; the Agent produces the rows.
-    await page
-      .getByRole("textbox", { name: "具体账号", exact: true })
-      .fill("browser-account");
-    await page
-      .getByRole("button", { name: "由导师按已确认定位生成第一周计划", exact: true })
-      .click();
-    await page
-      .getByRole("heading", {
-        name: "AI 计划候选 · 尚未替换你的编辑",
-        exact: true,
-      })
-      .waitFor();
-    await page.reload();
+    // New flow: the final confirmation itself authorizes exactly one plan
+    // generation, so the candidate must appear with no generation click.
     await page
       .getByRole("heading", {
         name: "AI 计划候选 · 尚未替换你的编辑",
@@ -745,10 +725,37 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .waitFor();
     expect(
       await page
+        .getByRole("button", { name: "重新生成计划候选", exact: true })
+        .count(),
+    ).toBe(1);
+    await page
+      .getByRole("button", { name: "采用候选到计划工作稿", exact: true })
+      .click();
+    await page.getByRole("textbox", { name: "title 0", exact: true }).waitFor();
+    expect(
+      await page
         .getByRole("textbox", { name: "title 0", exact: true })
         .inputValue(),
-    ).toBe("Browser topic");
-    await page.getByRole("button", { name: "保留原计划", exact: true }).click();
+    ).toBe("模拟选题 1");
+    // Adopting the candidate ends the recovery envelope, so a reload must not
+    // generate a second one.
+    await page.reload();
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("heading", {
+              name: "AI 计划候选 · 尚未替换你的编辑",
+              exact: true,
+            })
+            .count(),
+        { timeout: 15000 },
+      )
+      .toBe(0);
+    // Manual editing stays available once a candidate has been adopted.
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Browser topic");
     await page.getByRole("button", { name: "保存计划版本" }).click();
     let lostHandoff = false;
     await page.route("**/api/trpc/opc.handoff*", async (route) => {
@@ -767,15 +774,15 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page
       .getByRole("button", { name: "确认账号与计划，创建选题" })
       .click();
-    await page.getByRole("link", { name: "进入选题工作空间" }).waitFor();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
     const href = await page
-      .getByRole("link", { name: "进入选题工作空间" })
+      .getByRole("link", { name: "进入选题工作空间" }).first()
       .getAttribute("href");
     await page.reload();
-    await page.getByRole("link", { name: "进入选题工作空间" }).waitFor();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
     expect(
       await page
-        .getByRole("link", { name: "进入选题工作空间" })
+        .getByRole("link", { name: "进入选题工作空间" }).first()
         .getAttribute("href"),
     ).toBe(href);
     await context.clearCookies();
@@ -791,15 +798,25 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
       .last()
       .click();
     await page.waitForURL(draftUrl + "/plan");
-    await page.getByRole("link", { name: "进入选题工作空间" }).waitFor();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
     expect(
       await page
-        .getByRole("link", { name: "进入选题工作空间" })
+        .getByRole("link", { name: "进入选题工作空间" }).first()
         .getAttribute("href"),
     ).toBe(href);
     expect((await f.service.list()).accounts[0].profile.goal_2.value).toBe(
       "Updated confirmed decision before publication",
     );
+    // The Agent produced the seven-row candidate that was adopted, so the
+    // handoff created exactly one work item per adopted row.
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    ).toBe(7);
     expect(
       (
         await sql.query(
@@ -874,7 +891,7 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
     });
     await accountChoice.fill("invalid-plan");
     const generate = page.getByRole("button", {
-      name: "由导师按已确认定位生成第一周计划",
+      name: "生成第一周计划",
       exact: true,
     });
     const invalidResponse = page.waitForResponse(
@@ -3446,3 +3463,430 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
   expect(legacyFact.instructions).toContain('"elicit":"user_fact"');
   expect(legacyFact.instructions).not.toContain('"elicit":"agent_proposal"');
 }, 180000);
+/**
+ * The state the new final-confirmation button acts on: every positioning step
+ * confirmed and the round not published yet. No mentor turn is involved, so the
+ * only money this draft can spend is its own plan generation.
+ */
+async function finalized(n = 3) {
+  const f = await fixture(n);
+  const d = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "manual",
+  });
+  for (const step of f.flow.steps) {
+    await f.artifacts.execute({
+      action: "save", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      body: "User confirmed " + step.title, evidenceIds: [], expectedVersion: 0,
+    });
+    const state = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.service.information({
+      draftId: d.draftId, stepId: step.id, requestId: randomUUID(),
+      expectedVersion: state.version,
+      values: {
+        goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" },
+      },
+    });
+    const updated = (await f.artifacts.read(d.projectId, d.roundId)).steps[step.id];
+    await f.artifacts.execute({
+      action: "confirm", projectId: d.projectId, roundId: d.roundId,
+      requestId: randomUUID(), stepId: step.id,
+      expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+    });
+  }
+  return { ...f, d };
+}
+/** A fixture-backed model bound to the module under test. */
+async function planFixtureModel(moduleId: string) {
+  const model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Runtime local','opc-browser','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, moduleId]);
+  return model;
+}
+/**
+ * Exact plan-purpose money and identity for one actor: nothing here is derived
+ * from a request the test itself made up.
+ */
+async function planIdentity(actor: string, draftId: string) {
+  const count = async (q: string, params: unknown[]) =>
+    Number((await sql.query(q, params)).rows[0].n);
+  return {
+    executions: await count(
+      "select count(*)::int n from runtime_executions where actor_id=$1", [actor]),
+    planExecutions: await count(
+      "select count(*)::int n from runtime_executions e join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where e.actor_id=$1 and t.purpose='plan'",
+      [actor],
+    ),
+    planRuns: await count(
+      "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='plan'",
+      [actor],
+    ),
+    reserves: await count(
+      "select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'",
+      [actor],
+    ),
+    plans: await count("select count(*)::int n from opc_plans where draft_id=$1", [draftId]),
+    accounts: await count(
+      "select count(*)::int n from opc_accounts where actor_id=$1", [actor]),
+    workItems: await count(
+      "select count(*)::int n from artifact_projects where actor_id=$1 and work_kind='account'",
+      [actor],
+    ),
+  };
+}
+/** Execution/billing/pre-deduct identity rows, compared before and after recovery. */
+async function planIdentityRows(actor: string) {
+  return (await sql.query(
+    `select e.id::text execution_id, e.request_id::text request_id,
+       b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id
+     from runtime_executions e
+     left join bill2_runs b on b.id=e.billing_run_id
+     where e.actor_id=$1`,
+    [actor],
+  )).rows.map((row) =>
+    JSON.stringify([row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id]),
+  ).sort();
+}
+/** The envelope the positioning page freezes after a successful publish. */
+function planEnvelopeFor(
+  f: { d: { draftId: string; roundId: string } },
+  options: { requestId?: string; sourceRoundId?: string; accounts?: string[] } = {},
+) {
+  return {
+    v: 2,
+    sourceRoundId: options.sourceRoundId ?? f.d.roundId,
+    request: {
+      draftId: f.d.draftId,
+      requestId: options.requestId ?? randomUUID(),
+      purpose: "plan",
+      stepId: "step-1",
+      input: JSON.stringify({
+        confirmedPositioning: { "已知目标 0": "A concrete user decision" },
+        platforms: [],
+        accounts: options.accounts ?? [],
+        startDate: "2026-09-21",
+        days: 7,
+      }),
+    },
+  };
+}
+/**
+ * Logs a browser page into an already published draft's plan page. The
+ * envelope is seeded afterwards so each case controls exactly what automatic
+ * recovery is allowed to see.
+ */
+async function planBrowser(
+  f: { email: string; password: string; d: { draftId: string } },
+  options: { envelope?: Record<string, unknown> | null; clearBuffer?: boolean } = {},
+) {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const path = "/positioning/" + f.d.draftId + "/plan";
+  await page.goto(
+    process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
+  );
+  await page.getByPlaceholder("name@example.com").fill(f.email);
+  await page.getByPlaceholder("输入你的密码").fill(f.password);
+  await page.getByRole("button", { name: "登录", exact: true }).last().click();
+  await page.waitForURL((url) => url.pathname.endsWith(path));
+  const key = "opc-plan-generation:" + f.d.draftId;
+  await page.evaluate(
+    ({ key, envelope, clearBuffer, draftId }) => {
+      sessionStorage.removeItem(key);
+      if (envelope) sessionStorage.setItem(key, JSON.stringify(envelope));
+      if (clearBuffer) sessionStorage.removeItem("opc-edit:" + draftId);
+    },
+    {
+      key,
+      envelope: options.envelope ?? null,
+      clearBuffer: options.clearBuffer ?? false,
+      draftId: f.d.draftId,
+    },
+  );
+  return { browser, context, page, key };
+}
+const CANDIDATE_HEADING = "AI 计划候选 · 尚未替换你的编辑";
+it("OPC: Stage C1 the final positioning confirmation itself generates one plan candidate", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await finalized(3);
+  await planFixtureModel(f.moduleId);
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  const draftPath = "/positioning/" + f.d.draftId;
+  const envelopeKey = "opc-plan-generation:" + f.d.draftId;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(draftPath),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath));
+    const finalButton = page.getByRole("button", {
+      name: "确认正式定位并生成第一周计划",
+      exact: true,
+    });
+    await expect.poll(() => finalButton.isEnabled(), { timeout: 30000 }).toBe(true);
+    // Nothing is authorized before the user confirms: no envelope, and no plan
+    // work of any kind. (The positioning page may open its mentor question on
+    // its own; that is not plan work and is excluded by the plan-purpose joins.)
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).toBeNull();
+    const before = await planIdentity(f.actor, f.d.draftId);
+    expect(before.planExecutions).toBe(0);
+    expect(before.planRuns).toBe(0);
+    await finalButton.click();
+    await page.waitForURL((url) => url.pathname.endsWith(draftPath + "/plan"));
+    // The user clicks nothing else: no generation button, no topic row.
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
+    // The envelope is retained while the candidate waits for a decision.
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), envelopeKey)).not.toBeNull();
+    const after = await planIdentity(f.actor, f.d.draftId);
+    // Exactly one plan execution, one BILL2 run and one reserve came from the
+    // confirmation itself, and nothing else was created.
+    expect(after.planExecutions - before.planExecutions).toBe(1);
+    expect(after.planRuns - before.planRuns).toBe(1);
+    expect(after.reserves - before.reserves).toBe(1);
+    expect(after.plans).toBe(0);
+    expect(after.accounts).toBe(0);
+    expect(after.workItems).toBe(0);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C2 a lost reply keeps one plan identity across refresh and re-login", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const envelope = planEnvelopeFor(f);
+  const { browser, context, page, key } = await planBrowser(f, { envelope });
+  try {
+    let releases = 0;
+    await page.route("**/api/trpc/opc.planResult*", async (route) => {
+      // The server admitted and finished the work; every client reply is lost,
+      // including any automatic query retry, so the page cannot confirm the
+      // outcome on its own.
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      releases += 1;
+      await route.abort();
+    });
+    await page.reload();
+    await expect.poll(() => page.getByText("这次生成的结果暂时无法确认").count(), {
+      timeout: 30000,
+    }).toBe(1);
+    expect(releases).toBeGreaterThan(0);
+    const afterLoss = await planIdentity(f.actor, f.d.draftId);
+    expect(afterLoss.planExecutions).toBe(1);
+    expect(afterLoss.planRuns).toBe(1);
+    expect(afterLoss.reserves).toBe(1);
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).not.toBeNull();
+    const identity = await planIdentityRows(f.actor);
+    expect(identity).toHaveLength(1);
+    // A reload with no local candidate must replay the same request, not make
+    // a new one: the buffer is cleared first so only recovery can help.
+    await page.unroute("**/api/trpc/opc.planResult*");
+    await page.evaluate(
+      (id) => sessionStorage.removeItem("opc-edit:" + id),
+      f.d.draftId,
+    );
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+    expect(
+      JSON.parse(
+        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+      ).request.requestId,
+    ).toBe(envelope.request.requestId);
+    // Re-login on a fresh session recovers the same identity again.
+    await context.clearCookies();
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith("/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await planIdentityRows(f.actor)).toEqual(identity);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C3 adopting or dismissing the candidate is a local edit, never a call", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c3-account"] }),
+  });
+  try {
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const generated = await planIdentity(f.actor, f.d.draftId);
+    expect(generated.planRuns).toBe(1);
+    // Dismissing ends the envelope without touching the working rows.
+    await page.getByRole("button", { name: "保留原计划", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
+      .toBeNull();
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(generated);
+    // A second, user-authorized generation adopts instead.
+    await page.evaluate(
+      ({ k, value }) => sessionStorage.setItem(k, JSON.stringify(value)),
+      { k: key, value: planEnvelopeFor(f, { accounts: ["c3-account"] }) },
+    );
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const second = await planIdentity(f.actor, f.d.draftId);
+    expect(second.planRuns).toBe(2);
+    await page.getByRole("button", { name: "采用候选到计划工作稿", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 15000 })
+      .toBeNull();
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    const titles = await page.getByRole("textbox", { name: /^title / }).all();
+    expect(titles).toHaveLength(7);
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).inputValue()).toBe("模拟选题 1");
+    // Adopting is local: no model call, no plan row, no account, no work item.
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(second);
+    await page.getByRole("button", { name: "保存计划版本" }).click();
+    await expect
+      .poll(async () => (await planIdentity(f.actor, f.d.draftId)).plans, { timeout: 30000 })
+      .toBe(1);
+    const saved = await planIdentity(f.actor, f.d.draftId);
+    expect(saved.executions).toBe(second.executions);
+    expect(saved.planRuns).toBe(second.planRuns);
+    expect(saved.reserves).toBe(second.reserves);
+    expect(saved.accounts).toBe(0);
+    expect(saved.workItems).toBe(0);
+    // Handoff stays a separate explicit action that has not happened yet.
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole("button", {
+              name: "确认账号与计划，创建选题",
+              exact: true,
+            })
+            .count(),
+        { timeout: 30000 },
+      )
+      .toBe(1);
+    expect((await planIdentity(f.actor, f.d.draftId)).workItems).toBe(0);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C4 an already published draft spends nothing by waiting or refreshing", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f);
+  try {
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
+    const generate = page.getByRole("button", { name: "生成第一周计划", exact: true });
+    await generate.waitFor();
+    await page.reload();
+    await generate.waitFor();
+    // Give an automatic generation every chance to (wrongly) fire.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await page.reload();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    expect(await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).count()).toBe(0);
+    // Only the explicit button may create one request.
+    await generate.click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C5 a retained request from another round is archived, never executed", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const staleRequestId = randomUUID();
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, {
+      requestId: staleRequestId,
+      sourceRoundId: randomUUID(),
+    }),
+  });
+  try {
+    await page.reload();
+    await page.getByText("上一轮定位留下的生成请求已在本机归档").waitFor();
+    // The stale request is released and archived verbatim, and never executed.
+    expect(await page.evaluate((k) => sessionStorage.getItem(k), key)).toBeNull();
+    const archived = await page.evaluate((k) => {
+      const found: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const name = sessionStorage.key(i);
+        if (name && name.startsWith(k + ":stale:")) found.push(name);
+      }
+      return found.map((name) => sessionStorage.getItem(name) as string);
+    }, key);
+    expect(archived).toHaveLength(1);
+    expect(JSON.parse(archived[0]).request.requestId).toBe(staleRequestId);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0, planExecutions: 0, planRuns: 0, reserves: 0,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    // The bounded notice offers an explicit regenerate path for this round.
+    await page.getByRole("button", { name: "生成第一周计划", exact: true }).click();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    // No migration: the new request is a new identity, not the archived one.
+    const fresh = JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    );
+    expect(fresh.request.requestId).not.toBe(staleRequestId);
+    expect(fresh.sourceRoundId).toBe(f.d.roundId);
+  } finally {
+    await browser.close();
+  }
+}, 300000);

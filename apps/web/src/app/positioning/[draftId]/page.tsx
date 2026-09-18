@@ -35,6 +35,70 @@ type Item = {
   brief: string;
   day: string;
 };
+/**
+ * The retained plan-generation envelope is the only thing that authorizes an
+ * automatic first-week plan generation. It freezes the exact request so a
+ * refresh, a re-login or a lost reply replays the same identity instead of
+ * paying twice. `sourceRoundId` is client recovery metadata only: the request
+ * itself stays the strict server shape.
+ */
+type PlanRequest = {
+  draftId: string;
+  requestId: string;
+  purpose: "plan";
+  stepId: string;
+  input: string;
+};
+type PlanEnvelope = { v: 2; sourceRoundId: string | null; request: PlanRequest };
+function planRequestShape(value: unknown): PlanRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.draftId !== "string" ||
+    typeof candidate.requestId !== "string" ||
+    candidate.purpose !== "plan" ||
+    typeof candidate.stepId !== "string" ||
+    typeof candidate.input !== "string"
+  )
+    return null;
+  return candidate as unknown as PlanRequest;
+}
+/**
+ * Read the retained value defensively. A pre-upgrade value stored the bare
+ * request; it is kept and reused by an explicit generation, but it carries no
+ * `sourceRoundId`, so it can never authorize an automatic one. Malformed data
+ * is reported as invalid instead of being reinterpreted.
+ */
+function readPlanEnvelope(
+  raw: string | null,
+):
+  | { kind: "envelope"; envelope: PlanEnvelope }
+  | { kind: "legacy"; request: PlanRequest }
+  | { kind: "invalid" }
+  | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { kind: "invalid" };
+  }
+  if (parsed && typeof parsed === "object" && "request" in parsed) {
+    const request = planRequestShape((parsed as { request: unknown }).request);
+    if (!request) return { kind: "invalid" };
+    const round = (parsed as { sourceRoundId?: unknown }).sourceRoundId;
+    return {
+      kind: "envelope",
+      envelope: {
+        v: 2,
+        sourceRoundId: typeof round === "string" ? round : null,
+        request,
+      },
+    };
+  }
+  const legacy = planRequestShape(parsed);
+  return legacy ? { kind: "legacy", request: legacy } : { kind: "invalid" };
+}
 type ConfirmStepEnvelope = {
   phase: "information" | "save" | "confirm";
   questionId?: string;
@@ -207,6 +271,17 @@ export default function PositioningDraft({
   const autosaveChain = useRef<Promise<void>>(Promise.resolve());
   const appliedMentor = useRef(new Set<string>());
   const composing = useRef(false);
+  /**
+   * Automatic plan recovery is bounded twice: one attempt per retained request
+   * id per page load, and one in-flight attempt at a time. A React effect must
+   * never be able to turn into a loop of provider calls.
+   */
+  const planAutoRunning = useRef(false);
+  const planAutoAttempts = useRef(new Set<string>());
+  const [planRecovery, setPlanRecovery] = useState<
+    "idle" | "running" | "invalid" | "unknown" | "stale"
+  >("idle");
+  const planEnvelopeKey = "opc-plan-generation:" + draftId;
   const hasUnsavedInformation = Object.keys(infoEdits).length > 0;
   const d = read.data,
     snap = d?.snapshot,
@@ -305,6 +380,84 @@ export default function PositioningDraft({
       snap.workflow.steps[0];
     setActiveStep(initial.id);
   }, [draftId, hydratedDraft, activeStep, snap]);
+  /**
+   * Bounded automatic generation of the first-week plan candidate.
+   *
+   * It runs only for an envelope frozen by the final positioning confirmation
+   * of the round currently on screen. Opening `/plan` for an older published
+   * draft carries no such envelope, so waiting or refreshing there can never
+   * call a model on its own.
+   */
+  useEffect(() => {
+    if (!planView || hydratedDraft !== draftId) return;
+    if (!d?.report?.available) return;
+    // A candidate is already waiting for the user's decision; re-running would
+    // only re-read the same idempotent execution.
+    if (planCandidate) return;
+    if (planAutoRunning.current) return;
+    const retained = readRetainedPlan();
+    if (!retained) return;
+    if (retained.kind === "invalid") {
+      releasePlanEnvelope();
+      setPlanRecovery("invalid");
+      setNotice(
+        "本机保存的计划生成记录无法读取，已停止自动生成。请手动点击生成；只有你确认后才会产生新的模型调用。",
+      );
+      return;
+    }
+    // No round binding: an explicit user action may reuse it, nothing else.
+    if (retained.kind === "legacy") return;
+    if (retained.envelope.request.draftId !== draftId) {
+      archiveStalePlanEnvelope(
+        "发现一条属于其它定位草稿的计划生成请求，已在本机归档。它不会被执行，也不会产生费用。",
+      );
+      return;
+    }
+    if (retained.envelope.sourceRoundId !== d.roundId) {
+      archiveStalePlanEnvelope(
+        "定位已修订，上一轮的计划生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。",
+      );
+      return;
+    }
+    const request = retained.envelope.request;
+    if (planAutoAttempts.current.has(request.requestId)) return;
+    planAutoAttempts.current.add(request.requestId);
+    planAutoRunning.current = true;
+    setPlanRecovery("running");
+    void (async () => {
+      try {
+        const prepared = await prepareStep.mutateAsync(request);
+        await execute.mutateAsync({ executionId: prepared.executionId });
+        const candidate = await utils.opc.planResult.fetch({
+          draftId,
+          executionId: prepared.executionId,
+        });
+        if (!candidate.valid) {
+          // A definite invalid result is terminal for this request: the
+          // execution completed and its body can never become a plan.
+          releasePlanEnvelope();
+          setPlanRecovery("invalid");
+          return;
+        }
+        persistPlanCandidate(candidate.body);
+        setPlanRecovery("idle");
+      } catch {
+        // Timeout, lost reply or unknown outcome: the same envelope and request
+        // id are retained, and replay is idempotent, so recovering cannot cost
+        // a second call.
+        setPlanRecovery("unknown");
+      } finally {
+        planAutoRunning.current = false;
+      }
+    })();
+  }, [
+    planView,
+    hydratedDraft,
+    draftId,
+    d?.report?.available,
+    d?.roundId,
+    planCandidate,
+  ]);
   useEffect(() => {
     if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
   }, [history.data]);
@@ -636,6 +789,42 @@ export default function PositioningDraft({
       setRunning(false);
     }
   }
+  function readRetainedPlan() {
+    return readPlanEnvelope(sessionStorage.getItem(planEnvelopeKey));
+  }
+  /**
+   * The candidate is written into the local buffer synchronously, before any
+   * React state is relied on, so a reload cannot lose a candidate the user has
+   * already paid for.
+   */
+  function persistPlanCandidate(candidate: Item[] | null) {
+    try {
+      const raw = sessionStorage.getItem("opc-edit:" + draftId);
+      const local = raw ? (JSON.parse(raw) ?? {}) : {};
+      sessionStorage.setItem(
+        "opc-edit:" + draftId,
+        JSON.stringify({ ...local, planCandidate: candidate }),
+      );
+    } catch {
+      /* A malformed local buffer must not block the candidate itself. */
+    }
+    setPlanCandidate(candidate);
+  }
+  function releasePlanEnvelope() {
+    sessionStorage.removeItem(planEnvelopeKey);
+  }
+  /**
+   * A retained request that cannot belong to the round on screen is archived
+   * verbatim, never migrated onto the new round, and never executed.
+   */
+  function archiveStalePlanEnvelope(message: string) {
+    const raw = sessionStorage.getItem(planEnvelopeKey);
+    if (raw)
+      sessionStorage.setItem(planEnvelopeKey + ":stale:" + Date.now(), raw);
+    sessionStorage.removeItem(planEnvelopeKey);
+    setPlanRecovery("stale");
+    setNotice(message);
+  }
   function stepEnvelopeFor(
     stepId: string,
   ): { raw: string; parsed: StepEnvelope | null } | null {
@@ -939,18 +1128,30 @@ export default function PositioningDraft({
         days: planDays,
       };
       const accountInput = JSON.stringify(constraints);
-      const key = "opc-plan-generation:" + draftId;
-      const old = sessionStorage.getItem(key);
-      const request = old
-        ? JSON.parse(old)
-        : {
-            draftId,
-            requestId: crypto.randomUUID(),
-            purpose: "plan" as const,
-            stepId: snap.workflow.steps.at(-1).id,
-            input: accountInput,
-          };
-      sessionStorage.setItem(key, JSON.stringify(request));
+      // An explicit user action may start a new request id, but a retained one
+      // for this round is reused so an interrupted attempt keeps its identity.
+      const retained = readRetainedPlan();
+      const reusable =
+        retained?.kind === "envelope" &&
+        retained.envelope.sourceRoundId === d.roundId &&
+        retained.envelope.request.draftId === draftId
+          ? retained.envelope.request
+          : retained?.kind === "legacy" && retained.request.draftId === draftId
+            ? retained.request
+            : null;
+      const request: PlanRequest = reusable ?? {
+        draftId,
+        requestId: crypto.randomUUID(),
+        purpose: "plan",
+        stepId: snap.workflow.steps.at(-1).id,
+        input: accountInput,
+      };
+      const envelope: PlanEnvelope = {
+        v: 2,
+        sourceRoundId: d.roundId,
+        request,
+      };
+      sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
       const prepared = await prepareStep.mutateAsync(request);
       await execute.mutateAsync({ executionId: prepared.executionId });
       const candidate = await utils.opc.planResult.fetch({
@@ -961,11 +1162,15 @@ export default function PositioningDraft({
         // This execution completed and returned a body that cannot be used as
         // a plan. It is safe to create a new request after the user edits the
         // inputs; timeouts and unknown execution state retain identity.
-        sessionStorage.removeItem(key);
+        releasePlanEnvelope();
+        setPlanRecovery("invalid");
         throw new Error("OPC_PLAN_RESPONSE_INVALID");
       }
-      setPlanCandidate(candidate.body);
-      sessionStorage.removeItem(key);
+      // The envelope is deliberately retained while the candidate waits for the
+      // user's decision: that is what lets a reload or a re-login recover the
+      // same execution instead of paying for another one.
+      persistPlanCandidate(candidate.body);
+      setPlanRecovery("idle");
     });
   }
   async function confirmPlan() {
@@ -1076,6 +1281,12 @@ export default function PositioningDraft({
       </main>
     );
   const steps: Step[] = snap.workflow.steps;
+  /**
+   * Until a candidate has been adopted and while no plan version is saved, the
+   * Agent produces the first proposal. Manual authoring stays available but
+   * must not be presented as the primary path.
+   */
+  const planNeedsCandidate = !planCandidate && !latest && !dirtyPlan;
   const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
@@ -1595,6 +1806,28 @@ export default function PositioningDraft({
         }
         onClick={() =>
           run(async () => {
+            // Freeze the future plan request from the confirmed information on
+            // screen, before anything navigates.
+            const request: PlanRequest = {
+              draftId,
+              requestId: crypto.randomUUID(),
+              purpose: "plan",
+              stepId: snap.workflow.steps.at(-1).id,
+              input: JSON.stringify({
+                confirmedPositioning: positioningSummary(),
+                platforms: planPlatform
+                  .split(",")
+                  .map((v) => v.trim())
+                  .filter(Boolean),
+                accounts: planAccount
+                  .split(",")
+                  .map((v) => v.trim())
+                  .filter(Boolean),
+                startDate: planStart,
+                days: planDays,
+              }),
+            };
+            const sourceRoundId = d.roundId;
             await change.mutateAsync({
               action: "publish",
               projectId: d.projectId,
@@ -1612,12 +1845,21 @@ export default function PositioningDraft({
                 ]),
               ),
             });
+            // Only a successful publish authorizes the automatic generation,
+            // and only for the round that was just published.
+            const envelope: PlanEnvelope = { v: 2, sourceRoundId, request };
+            sessionStorage.setItem(planEnvelopeKey, JSON.stringify(envelope));
             router.push(`/positioning/${draftId}/plan`);
           })
         }
       >
-        确认正式定位版本
+        确认正式定位并生成第一周计划
       </Button>}
+      {!planView && (
+        <p className="text-xs text-[var(--text-secondary)]">
+          确认后会先正式发布你的定位版本，然后自动生成一份第一周计划候选。生成走正常的模型与额度计费；候选不会自动保存为计划，也不会自动创建账号或选题。
+        </p>
+      )}
       {!planView && d.report?.available && <Link className="block underline" href={`/positioning/${draftId}/plan`}>进入第一周计划</Link>}
       {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
@@ -1630,6 +1872,66 @@ export default function PositioningDraft({
         <section className="space-y-4">
           <h2 className="text-xl">第一周计划</h2>
           <p>可编辑账号、日期和简报。确认承接不会调用模型或产生新的费用。</p>
+          {planRecovery !== "idle" && (
+            <div className="rounded-xl border border-[var(--border-primary)] p-4">
+              {planRecovery === "running" && (
+                <p role="status">
+                  正在按你刚确认的定位生成第一周计划候选，不需要你再点一次。生成完成后会显示在这里。
+                </p>
+              )}
+              {planRecovery === "unknown" && (
+                <p role="status">
+                  这次生成的结果暂时无法确认。原请求已保留，不会重复扣费；请刷新页面或重新登录，我们会用同一条请求恢复结果。
+                </p>
+              )}
+              {planRecovery === "invalid" && (
+                <p role="status">
+                  这次生成完成，但没有返回可用的计划内容，原请求已释放。请核对下方的平台、日期后手动点击生成。
+                </p>
+              )}
+              {planRecovery === "stale" && (
+                <p role="status">
+                  上一轮定位留下的生成请求已在本机归档，不会执行。请按当前定位重新生成计划候选。
+                </p>
+              )}
+            </div>
+          )}
+          {planCandidate && (
+            <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
+              <h3>AI 计划候选 · 尚未替换你的编辑</h3>
+              <p className="text-xs text-[var(--text-secondary)]">
+                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
+              </p>
+              {planCandidate.map((i) => (
+                <p key={i.id}>
+                  {i.day} · {i.platform}/{i.account} · {i.title}
+                </p>
+              ))}
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  // Adopting is a local edit only: no model call, and it ends
+                  // the recovery envelope for this candidate.
+                  setItems(planCandidate);
+                  setDirtyPlan(true);
+                  persistPlanCandidate(null);
+                  releasePlanEnvelope();
+                }}
+              >
+                采用候选到计划工作稿
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  persistPlanCandidate(null);
+                  releasePlanEnvelope();
+                }}
+              >
+                保留原计划
+              </Button>
+            </div>
+          )}
           <div className="overflow-x-auto"><table aria-label="第一周选题计划" className="w-full text-left">
             <thead><tr>{["平台","具体账号","选题","日期","简报","操作"].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
             <tbody>{items.map((item, index) => (
@@ -1728,11 +2030,11 @@ export default function PositioningDraft({
           </div>
           <div className="flex flex-wrap gap-3">
             <Button
-              variant="outline"
+              variant={planNeedsCandidate ? "default" : "outline"}
               disabled={busy || hasUnsavedInformation}
               onClick={generatePlan}
             >
-              由导师按已确认定位生成第一周计划
+              {planCandidate || latest ? "重新生成计划候选" : "生成第一周计划"}
             </Button>
             <Button
               variant="outline"
@@ -1755,6 +2057,7 @@ export default function PositioningDraft({
               添加选题
             </Button>
             <Button
+              variant={planNeedsCandidate ? "outline" : "default"}
               disabled={
                 busy || hasUnsavedInformation || !dirtyPlan || !items.length
               }
@@ -1777,35 +2080,10 @@ export default function PositioningDraft({
               保存计划版本
             </Button>
           </div>
-          {planCandidate && (
-            <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
-              <h3>AI 计划候选 · 尚未替换你的编辑</h3>
-              <p className="text-xs text-[var(--text-secondary)]">
-                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
-              </p>
-              {planCandidate.map((i) => (
-                <p key={i.id}>
-                  {i.day} · {i.platform}/{i.account} · {i.title}
-                </p>
-              ))}
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setItems(planCandidate);
-                  setDirtyPlan(true);
-                  setPlanCandidate(null);
-                }}
-              >
-                采用候选到计划工作稿
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => setPlanCandidate(null)}
-              >
-                保留原计划
-              </Button>
-            </div>
+          {planNeedsCandidate && (
+            <p className="text-xs text-[var(--text-secondary)]">
+              第一周计划默认由导师先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
+            </p>
           )}
           {latest && !dirtyPlan && (
             <div className="rounded-xl border border-[var(--border-primary)] p-4">
