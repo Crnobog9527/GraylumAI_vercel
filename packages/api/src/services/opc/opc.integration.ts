@@ -4206,3 +4206,262 @@ it("OPC: Stage C8 an ambiguous explicit regeneration recovers B behind candidate
     await browser.close();
   }
 }, 300000);
+/**
+ * The retained `opc-confirm:<draftId>` request owns a business intent: the
+ * draft, the plan version and the normalized platform/account set. A lost
+ * reply must keep replaying that exact intent, while a NEW current intent must
+ * be able to form its own explicit request instead of being refused locally
+ * with `confirmation pending` forever.
+ */
+it("OPC: a retained handoff request does not block a newly saved current plan", async () => {
+  const { chromium } =
+    await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await completed(3);
+  const planA = await f.service.savePlan({
+    draftId: f.d.draftId,
+    sourceVersionId: f.sourceVersionId,
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    body: [
+      {
+        id: randomUUID(),
+        platform: "x",
+        account: "f1-retained",
+        day: "2026-09-15",
+        title: "Plan A topic",
+        brief: "Plan A brief",
+      },
+    ],
+  });
+  const key = "opc-confirm:" + f.d.draftId;
+  const path = "/positioning/" + f.d.draftId + "/plan";
+  const handoffHistory = async () =>
+    (
+      await sql.query(
+        "select request_id::text request_id, payload, result from opc_handoffs where actor_id=$1",
+        [f.actor],
+      )
+    ).rows as Array<{
+      request_id: string;
+      payload: { draftId: string; planId: string; accounts: unknown[] };
+      result: Array<{ workItemId: string; sessionId: string }>;
+    }>;
+  const currentPlan = async () =>
+    (
+      await sql.query(
+        "select id::text id, version::int version from opc_plans where draft_id=$1 order by version desc limit 1",
+        [f.d.draftId],
+      )
+    ).rows[0] as { id: string; version: number };
+  const workItemCount = async () =>
+    Number(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_items i join artifact_projects p on p.id=i.work_item_id where p.actor_id=$1",
+          [f.actor],
+        )
+      ).rows[0].n,
+    );
+  const accountRevision = async () =>
+    Number(
+      (
+        await sql.query("select revision::int r from opc_accounts where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].r,
+    );
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  const context = await browser.newContext();
+  await context.route("**/*", (route) => {
+    const u = new URL(route.request().url());
+    return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+      ["data:", "blob:"].includes(u.protocol)
+      ? route.continue()
+      : route.abort();
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(90000);
+  /** The exact retained request body, or null when the key is gone. */
+  const retainedRequest = async () =>
+    (await page.evaluate(
+      (k) => sessionStorage.getItem(k) ?? "null",
+      key,
+    )) as string;
+  let lostHandoffs = 0;
+  try {
+    await page.goto(
+      process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(path),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith(path));
+    const confirm = page.getByRole("button", {
+      name: "确认账号与计划，创建选题",
+      exact: true,
+    });
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    // Steps 1-4. Plan A's handoff really completes on the server while the
+    // browser loses the successful reply, so the page keeps request A as an
+    // unresolved authorization for plan A.
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      lostHandoffs += 1;
+      await route.abort();
+    });
+    await confirm.click();
+    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(1);
+    await expect
+      .poll(async () => (await retainedRequest()) !== "null", { timeout: 30000 })
+      .toBe(true);
+    const retainedA = JSON.parse(await retainedRequest());
+    expect(retainedA.planId).toBe(planA.planId);
+    expect(retainedA.draftId).toBe(f.d.draftId);
+    expect(retainedA.accounts).toEqual([
+      { platform: "x", account: "f1-retained", expectedRevision: null },
+    ]);
+    const historyA = await handoffHistory();
+    expect(historyA.map((row) => row.request_id)).toEqual([
+      retainedA.requestId,
+    ]);
+    expect(historyA[0].payload.planId).toBe(planA.planId);
+    expect(historyA[0].result).toHaveLength(1);
+    // Step 5. Change the editable working plan and explicitly save plan B.
+    await page
+      .getByRole("textbox", { name: "title 0", exact: true })
+      .fill("Plan B topic");
+    await page.getByRole("button", { name: "保存计划版本" }).click();
+    await expect
+      .poll(async () => (await currentPlan()).version, { timeout: 30000 })
+      .toBe(2);
+    const planB = await currentPlan();
+    expect(planB.id).not.toBe(planA.planId);
+    // The page itself must have re-read plan B and cleared its dirty state
+    // before the reload, otherwise a reload correctly restores the pending
+    // local edits this test is not exercising.
+    await page
+      .getByRole("heading", { name: "确认采用定位与计划第 2 版", exact: true })
+      .waitFor();
+    // Step 6. Reload so plan B and the current account revision are what the
+    // page shows, while request A is still retained.
+    await page.reload();
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    expect(JSON.parse(await retainedRequest()).requestId).toBe(
+      retainedA.requestId,
+    );
+    // Steps 7-8. Confirming plan B is a new explicit authorization. A local
+    // `confirmation pending` refusal would issue no HTTP request at all, so the
+    // second interception is the proof the repair removed the deadlock.
+    await confirm.click();
+    await expect.poll(() => lostHandoffs, { timeout: 90000 }).toBe(2);
+    const retainedB = JSON.parse(await retainedRequest());
+    expect(retainedB.planId).toBe(planB.id);
+    expect(retainedB.requestId).not.toBe(retainedA.requestId);
+    expect(retainedB.accounts).toEqual([
+      { platform: "x", account: "f1-retained", expectedRevision: 1 },
+    ]);
+    const historyB = await handoffHistory();
+    expect(historyB).toHaveLength(2);
+    expect(historyB.map((row) => row.request_id).sort()).toEqual(
+      [retainedA.requestId, retainedB.requestId].sort(),
+    );
+    expect(
+      historyB.find((row) => row.request_id === retainedB.requestId)!.payload
+        .planId,
+    ).toBe(planB.id);
+    expect(await workItemCount()).toBe(2);
+    expect(await accountRevision()).toBe(2);
+    // The same-intent path still replays: B's unresolved request recovers its
+    // own committed result instead of creating anything new.
+    await page.unroute("**/api/trpc/opc.handoff*");
+    await page.reload();
+    await confirm.waitFor();
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    await confirm.click();
+    await expect
+      .poll(async () => await retainedRequest(), { timeout: 30000 })
+      .toBe("null");
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
+    ).toBe(2);
+    expect((await handoffHistory()).map((row) => row.request_id).sort()).toEqual(
+      historyB.map((row) => row.request_id).sort(),
+    );
+    expect(await workItemCount()).toBe(2);
+    // H3 for the version dimension: another writer saves a newer plan while this
+    // confirmation is in flight. The save runs strictly before the server sees
+    // the pending handoff, so the answer is a definite `OPC_VERSION_CONFLICT`
+    // rollback rather than a timing race. That transaction must leave no
+    // handoff history and release the local request for the current plan.
+    let planC: { planId: string; version: number } | null = null;
+    await page.route("**/api/trpc/opc.handoff*", async (route) => {
+      planC ??= await f.service.savePlan({
+        draftId: f.d.draftId,
+        sourceVersionId: f.sourceVersionId,
+        requestId: randomUUID(),
+        expectedVersion: 2,
+        body: [
+          {
+            id: randomUUID(),
+            platform: "x",
+            account: "f1-retained",
+            day: "2026-09-16",
+            title: "Plan C topic",
+            brief: "Plan C brief",
+          },
+        ],
+      });
+      await route.continue();
+    });
+    await confirm.click();
+    await page.getByRole("alert").filter({ hasText: "操作未完成" }).waitFor();
+    expect(planC).not.toBeNull();
+    expect(planC!.planId).not.toBe(planB.id);
+    expect(await handoffHistory()).toHaveLength(2);
+    expect(await workItemCount()).toBe(2);
+    await expect
+      .poll(async () => await retainedRequest(), { timeout: 30000 })
+      .toBe("null");
+    await page.unroute("**/api/trpc/opc.handoff*");
+    await expect.poll(() => confirm.isEnabled(), { timeout: 15000 }).toBe(true);
+    await confirm.click();
+    await expect
+      .poll(async () => (await handoffHistory()).length, { timeout: 90000 })
+      .toBe(3);
+    const historyC = await handoffHistory();
+    const requestC = historyC.find(
+      (row) =>
+        row.request_id !== retainedA.requestId &&
+        row.request_id !== retainedB.requestId,
+    )!;
+    expect(requestC.payload.planId).toBe(planC!.planId);
+    expect(await workItemCount()).toBe(3);
+    expect(await accountRevision()).toBe(3);
+    // Step 9. The current handoff result stays visible after a reload.
+    await page.reload();
+    await page.getByRole("link", { name: "进入选题工作空间" }).first().waitFor();
+    expect(
+      await page.getByRole("link", { name: "进入选题工作空间" }).count(),
+    ).toBe(3);
+    // Handoff itself is a financial no-op: no model execution, BILL2 run or
+    // reservation is introduced by any of the three explicit confirmations.
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 0,
+      planExecutions: 0,
+      planRuns: 0,
+      reserves: 0,
+      plans: 3,
+      accounts: 1,
+      workItems: 1,
+    });
+  } finally {
+    await browser.close();
+  }
+}, 300000);

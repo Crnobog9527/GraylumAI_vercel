@@ -188,6 +188,20 @@ function isConfirmStepEnvelope(value: unknown): value is ConfirmStepEnvelope {
     typeof value.confirm.requestId === "string"
   );
 }
+/**
+ * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
+ * below is raised before that function's single durable write, so an exception
+ * rolls the whole transaction back and a request carrying it can never commit:
+ * releasing the retained request and forming a new explicit one is safe.
+ * Timeouts, lost replies and every other error keep it for idempotent replay.
+ */
+const definiteHandoffRejections = new Set([
+  "OPC_ACCOUNT_CONFLICT",
+  "OPC_ACCOUNTS_INVALID",
+  "OPC_VERSION_CONFLICT",
+  "OPC_REQUEST_CONFLICT",
+  "OPC_DENIED",
+]);
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 function parseStepEnvelope(raw: string): StepEnvelope | null {
   let parsed: unknown;
@@ -1287,6 +1301,92 @@ export default function PositioningDraft({
       setPlanRecovery("idle");
     });
   }
+  /**
+   * The retained handoff request, or null when there is none or it cannot be
+   * read. An unreadable value is archived verbatim before the current intent
+   * replaces it, so the per-draft key can never become a local dead end.
+   */
+  function readRetainedHandoff(): {
+    draftId: string;
+    planId: string;
+    requestId: string;
+    accounts: Array<{
+      platform: string;
+      account: string;
+      expectedRevision: number | null;
+    }>;
+  } | null {
+    const raw = sessionStorage.getItem("opc-confirm:" + draftId);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) throw new Error("unreadable");
+      const { draftId: draft, planId, requestId } = parsed as Record<
+        string,
+        unknown
+      >;
+      if (
+        typeof draft !== "string" ||
+        typeof planId !== "string" ||
+        typeof requestId !== "string" ||
+        !Array.isArray(parsed.accounts)
+      )
+        throw new Error("unreadable");
+      // Only the fields the strict handoff contract accepts are carried over,
+      // so a hand-edited value cannot turn into a permanent schema rejection.
+      const accounts = (parsed.accounts as unknown[]).map((entry) => {
+        if (!isRecord(entry)) throw new Error("unreadable");
+        const { platform, account, expectedRevision } = entry as Record<
+          string,
+          unknown
+        >;
+        if (typeof platform !== "string" || typeof account !== "string")
+          throw new Error("unreadable");
+        if (expectedRevision !== null && typeof expectedRevision !== "number")
+          throw new Error("unreadable");
+        return {
+          platform,
+          account,
+          expectedRevision: expectedRevision as number | null,
+        };
+      });
+      return { draftId: draft, planId, requestId, accounts };
+    } catch {
+      try {
+        sessionStorage.setItem(
+          "opc-confirm-archive:" + draftId + ":" + Date.now(),
+          raw,
+        );
+      } catch {
+        /* The archive is evidence only; it never gates the next confirmation. */
+      }
+      return null;
+    }
+  }
+  /**
+   * The business intent one handoff request owns: the draft, the plan version
+   * and the normalized platform/account set. `expectedRevision` is an
+   * optimistic concurrency guard, so it is deliberately not part of it.
+   */
+  function handoffIntent(value: {
+    draftId: string;
+    planId: string;
+    accounts: readonly unknown[];
+  }) {
+    return JSON.stringify([
+      value.draftId,
+      value.planId,
+      value.accounts
+        .map((entry) => {
+          const account = entry as { platform?: unknown; account?: unknown };
+          return [
+            typeof account.platform === "string" ? account.platform : "",
+            typeof account.account === "string" ? account.account : "",
+          ];
+        })
+        .sort(),
+    ]);
+  }
   async function confirmPlan() {
     await run(async () => {
       if (
@@ -1316,36 +1416,33 @@ export default function PositioningDraft({
       );
       const payload = { draftId, planId: latest.planId, accounts };
       const key = "opc-confirm:" + draftId;
-      const previous = sessionStorage.getItem(key);
-      const fixed = previous
-        ? JSON.parse(previous)
-        : { ...payload, requestId: crypto.randomUUID() };
-      if (
-        fixed.draftId !== payload.draftId ||
-        fixed.planId !== payload.planId ||
-        JSON.stringify(
-          fixed.accounts
-            .map((a: { platform: string; account: string }) => [
-              a.platform,
-              a.account,
-            ])
-            .sort(),
-        ) !==
-          JSON.stringify(
-            payload.accounts.map((a) => [a.platform, a.account]).sort(),
-          )
-      )
-        throw new Error("confirmation pending");
+      const retained = readRetainedHandoff();
+      // The retained request is replayed verbatim — same request id and its own
+      // frozen expected revisions — only for the exact business intent it was
+      // frozen with. That is what makes a lost reply idempotent, and it must
+      // not be abandoned merely because the account revisions moved on.
+      // A different plan version or platform/account set is an explicit new
+      // confirmation: it carries a new request id, and the retained request's
+      // immutable server history is neither reused nor rewritten.
+      const fixed =
+        retained && handoffIntent(retained) === handoffIntent(payload)
+          ? retained
+          : { ...payload, requestId: crypto.randomUUID() };
       sessionStorage.setItem(key, JSON.stringify(fixed));
       try {
         await handoff.mutateAsync(fixed);
       } catch (cause) {
-        // This specific SQL rejection rolls the entire transaction back. An old
-        // expected account revision cannot become valid again (monotonic).
-        // Timeouts, lost replies and all other errors retain the original request.
-        if (cause instanceof Error && cause.message === "OPC_ACCOUNT_CONFLICT") {
+        // Only a provably definite rollback releases the retained request: that
+        // rejected intent can never commit, so the next click must be able to
+        // form a new one. Unknown and transport failures keep it for replay.
+        if (
+          cause instanceof Error &&
+          definiteHandoffRejections.has(cause.message)
+        ) {
           sessionStorage.removeItem(key);
-          await list.refetch();
+          // Read the current plan version and account revisions so an explicit
+          // retry needs no manual browser-storage reset.
+          await Promise.all([list.refetch(), read.refetch()]);
         }
         throw cause;
       }
