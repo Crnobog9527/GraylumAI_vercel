@@ -320,7 +320,7 @@ try {
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
     apply('packages/db/migrations/0105_v3_bill2_authoritative_runs.sql');
   }
-  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');}}
+  if(runtimeSchema&&!upgradeMode){apply('packages/db/migrations/0106_runtime_sessions.sql');apply('packages/db/migrations/0106_runtime_sessions.sql');if(opcSchema){apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0107_opc_workbench.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0109_opc_mentor_opening.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');apply('packages/db/migrations/0110_opc_turn_round_ownership.sql');}}
   if(stagingSchema&&!upgradeMode){apply('packages/db/migrations/0108_runtime_staging_window.sql');apply('packages/db/migrations/0108_runtime_staging_window.sql');}
   console.log("SQL additive migration and repeat application PASS; runtime schema="+runtimeSchema+"; deferred upgrade="+upgradeMode);
   docker(
@@ -445,10 +445,20 @@ try {
             content='【模拟步骤素材】\n'+Object.entries(information).map(([key,value])=>key+'：'+value.value+'（'+value.status+'）').join('\n');
           }
           if(input.scopeMaterial?.content?.brief?.startsWith('plan:')){
-            const accounts=JSON.parse(input.userRequest);
-            content=accounts.some(a=>a.account==='invalid-plan')
+            // The user supplies only their own choices; the Agent produces the
+            // topics, dates, titles and briefs from the confirmed positioning.
+            const payload=JSON.parse(input.userRequest);
+            const accounts=Array.isArray(payload)?payload:(payload.accounts??[]);
+            const platforms=Array.isArray(payload)?[]:(payload.platforms??[]);
+            const start=Array.isArray(payload)?'2026-09-21':(payload.startDate??'2026-09-21');
+            const days=Array.isArray(payload)?7:Math.max(1,Math.min(7,payload.days??7));
+            const invalid=accounts.some(a=>(typeof a==='string'?a:a?.account)==='invalid-plan');
+            const firstAccount=accounts[0];
+            const accountKey=typeof firstAccount==='string'?firstAccount:(firstAccount?.account??'agent-proposed-account');
+            const platformKey=platforms[0]??(typeof firstAccount==='object'?firstAccount?.platform:null)??'x';
+            content=invalid
               ? 'This completed response is not a valid plan.'
-              : JSON.stringify(accounts.map((a,index)=>({id:randomUUID(),platform:a.platform,account:a.account,day:a.day,title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
+              : JSON.stringify(Array.from({length:days},(_,index)=>({id:randomUUID(),platform:platformKey,account:accountKey,day:new Date(Date.parse(start)+index*86400000).toISOString().slice(0,10),title:'模拟选题 '+(index+1),brief:'固定模拟计划，用于确认和承接验证；不代表真实研究或选题建议。'})));
           }
         }catch{/* A malformed fixture input stays a labeled non-plan reply. */}
       }

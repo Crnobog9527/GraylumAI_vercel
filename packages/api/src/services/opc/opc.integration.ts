@@ -7,6 +7,7 @@ import { makePackage, makeWorkflow } from "../__tests__/fixtures/artifacts";
 import { publishSkillPackage } from "../skills/publication";
 import { opcService } from "./service";
 import { workbenchService } from "../artifacts/workbench";
+import { OPENING_INPUT } from "../../shared/opcQuestions";
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
   !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
@@ -21,6 +22,77 @@ const admin = createClient(
 );
 beforeAll(() => sql.connect());
 afterAll(() => sql.end());
+
+/** The exact business turns in a fixture, not just "one row per request ID". */
+type ExpectedMentorEffect = {
+  stepId: string;
+  questionId: string;
+  opening: boolean;
+  input: string;
+};
+type MentorEffectRow = {
+  execution_id: string;
+  request_id: string;
+  billing_id: string | null;
+  pre_deduct_id: string | null;
+  draft_id: string | null;
+  round_id: string | null;
+  step_id: string | null;
+  purpose: string | null;
+  task: string | null;
+  input: string | null;
+  execution_state: string;
+  billing_state: string | null;
+};
+async function expectExactMentorEffects(
+  actorId: string,
+  draftId: string,
+  roundId: string,
+  expected: readonly ExpectedMentorEffect[],
+) {
+  const readEffects = async () => (await sql.query<MentorEffectRow>(
+    `select e.id::text execution_id, e.request_id::text request_id,
+       b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id,
+       t.draft_id::text draft_id, t.round_id::text round_id, t.step_id, t.purpose,
+       e.payload->'request'->'selection'->>'task' task,
+       e.payload->'request'->>'input' input,
+       e.state execution_state, b.state billing_state
+     from runtime_executions e
+     left join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+     left join bill2_runs b on b.id=e.billing_run_id and b.actor_id=e.actor_id
+     where e.actor_id=$1`,
+    [actorId],
+  )).rows;
+  const expectedTurns = expected.map(turn => JSON.stringify({
+    draftId, roundId, stepId: turn.stepId, purpose: "mentor",
+    task: (turn.opening ? "opc-opening:" : "opc-question:") + turn.questionId,
+    input: turn.input, executionState: "completed", billingState: "settled",
+  })).sort();
+  const project = (rows: MentorEffectRow[]) => rows.map(row => JSON.stringify({
+    draftId: row.draft_id, roundId: row.round_id, stepId: row.step_id,
+    purpose: row.purpose, task: row.task, input: row.input,
+    executionState: row.execution_state, billingState: row.billing_state,
+  })).sort();
+  await expect.poll(async () => project(await readEffects()), { timeout: 30000 })
+    .toEqual(expectedTurns);
+  const rows = await readEffects();
+  expect(project(rows)).toEqual(expectedTurns);
+  // Also count all actor billing runs/reservations, so unlinked duplicate runs
+  // cannot be hidden by the join or by using a fresh random request ID.
+  expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [actorId])).rows[0].n)
+    .toBe(expected.length);
+  expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [actorId])).rows[0].n)
+    .toBe(expected.length);
+  expect(new Set(rows.map(row => row.request_id)).size).toBe(expected.length);
+  expect(rows.every(row => Boolean(row.billing_id && row.pre_deduct_id))).toBe(true);
+  expect(new Set(rows.map(row => row.billing_id)).size).toBe(expected.length);
+  expect(new Set(rows.map(row => row.pre_deduct_id)).size).toBe(expected.length);
+  // Identity sets are compared before/after navigation and authentication
+  // recovery; a replacement execution must not pass as a restored one.
+  return rows.map(row => JSON.stringify([
+    row.execution_id, row.request_id, row.billing_id, row.pre_deduct_id,
+  ])).sort();
+}
 async function fixture(n = 6, secondField = false) {
   const password = "Local-" + randomUUID() + "!",
     email = randomUUID() + "@example.test";
@@ -32,11 +104,11 @@ async function fixture(n = 6, secondField = false) {
   if (made.error) throw made.error;
   const actor = made.data.user.id;
   await sql.query(
-    "insert into profiles(id,email,role,credits) values($1,$2,'user',100)",
+    "insert into profiles(id,email,role,credits) values($1,$2,'user',1000)",
     [actor, email],
   );
   await sql.query(
-    "insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,0,100)",
+    "insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after) values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)",
     [actor, randomUUID()],
   );
   const user = createClient(
@@ -51,7 +123,10 @@ async function fixture(n = 6, secondField = false) {
   const pack = makePackage(),
     moduleId = randomUUID(),
     registration = "opc-" + randomUUID(),
-    flow = makeWorkflow(n, n === 6);
+    flow = makeWorkflow(n, n === 6),
+    // The published module always carries an administrator model binding, the
+    // same way the real product does, so the host can open a question itself.
+    fixtureModel = randomUUID();
   flow.steps.forEach((step, index) => {
     step.information = [
       {
@@ -68,8 +143,12 @@ async function fixture(n = 6, secondField = false) {
     [pack.id, registration, owner],
   );
   await sql.query(
-    "insert into modules(id,title,skill_id,active) values($1,$2,$3,true)",
-    [moduleId, "隔离定位 " + n, pack.id],
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Fixture default','opc-fixture-default','fixture','true',1000,32000)",
+    [fixtureModel],
+  );
+  await sql.query(
+    "insert into modules(id,title,skill_id,model_id,active) values($1,$2,$3,$4,true)",
+    [moduleId, "隔离定位 " + n, pack.id, fixtureModel],
   );
   await publishSkillPackage(admin, owner, pack);
   await sql.query(
@@ -251,7 +330,7 @@ it("OPC: confirmed multi-account handoff is atomic, concurrent/replayed once and
   expect(
     (await sql.query("select credits from profiles where id=$1", [f.actor]))
       .rows[0].credits,
-  ).toBe(100);
+  ).toBe(1000);
   await expect(
     f.service.handoff({ ...input, accounts: [input.accounts[0]] }),
   ).rejects.toThrow("CONFLICT");
@@ -644,8 +723,12 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     await page
       .getByRole("textbox", { name: "简报", exact: true })
       .fill("A clear brief");
+    // The user only supplies their own choices; the Agent produces the rows.
     await page
-      .getByRole("button", { name: "按已保存账号生成计划候选", exact: true })
+      .getByRole("textbox", { name: "具体账号", exact: true })
+      .fill("browser-account");
+    await page
+      .getByRole("button", { name: "由导师按已确认定位生成第一周计划", exact: true })
       .click();
     await page
       .getByRole("heading", {
@@ -720,7 +803,7 @@ it("OPC: browser manual positioning, versioned week plan, handoff and authentica
     expect(
       (
         await sql.query(
-          "select count(*)::int n from bill2_runs where actor_id=$1",
+          "select count(*)::int n from bill2_runs b join runtime_executions e on e.billing_run_id=b.id join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id where b.actor_id=$1 and t.purpose='plan'",
           [f.actor],
         )
       ).rows[0].n,
@@ -777,15 +860,21 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
     await page.getByRole("button", { name: "添加选题" }).click();
     await page
       .getByRole("textbox", { name: "account 0", exact: true })
-      .fill("invalid-plan");
+      .fill("manual-user-row");
     await page
       .getByRole("textbox", { name: "title 0", exact: true })
       .fill("Original user title");
     await page
       .getByRole("textbox", { name: "简报", exact: true })
       .fill("Original user brief");
+    // The user supplies their own choices; the Agent produces the rows.
+    const accountChoice = page.getByRole("textbox", {
+      name: "具体账号",
+      exact: true,
+    });
+    await accountChoice.fill("invalid-plan");
     const generate = page.getByRole("button", {
-      name: "按已保存账号生成计划候选",
+      name: "由导师按已确认定位生成第一周计划",
       exact: true,
     });
     const invalidResponse = page.waitForResponse(
@@ -801,9 +890,7 @@ it("OPC: browser can correct plan inputs after a definite invalid completed resp
         f.d.draftId),
       )
       .toBeNull();
-    await page
-      .getByRole("textbox", { name: "account 0", exact: true })
-      .fill("corrected-plan");
+    await accountChoice.fill("corrected-plan");
     await generate.click();
     await page
       .getByRole("heading", {
@@ -1689,6 +1776,15 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.getByRole("textbox", { name: f.flow.steps[0].information![0].title, exact: true })
       .waitFor({state:"visible",timeout:30000});
     expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    // No fill, send, reload or manual refetch is allowed to reveal this opening.
+    await expectOpening("1.1", f.flow.steps[0].information![0].title);
     await page.getByRole("textbox", {name:f.flow.steps[0].information![0].title,exact:true}).fill("尚未确定的用户想法");
     const order = await page.evaluate(() => {
       const form = document.querySelector('[aria-label="本步填写信息"]')!;
@@ -1733,9 +1829,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     }, draftId);
     await page.reload();
     await page.getByRole("button", { name: "继续核对这条原请求", exact: true }).click();
-    await page
-      .getByText("【分步模拟，仅验证流程】第 1 步：", { exact: false })
-      .waitFor();
+    await expect.poll(() => page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 1.1", { exact: true }).count(), { timeout: 30000 }).toBe(1);
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
@@ -1817,13 +1912,17 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     // The step response and Session history are separate authenticated reads.
     // Wait for the history itself before comparing it across navigation.
     await expect.poll(()=>sharedLog.textContent(),{timeout:15000}).toContain("我担心自己没有可以教的经验");
-    const conversationBeforeStepChange = await sharedLog.textContent();
     await page
       .getByRole("textbox", { name: "给导师的回复", exact: true })
       .fill("跨步骤保留的未发送内容");
     await nextButton.click();
-    expect(await page.getByLabel("当前导师任务").textContent()).toContain("我们接下来一起完成");
-    expect(await sharedLog.textContent()).toBe(conversationBeforeStepChange);
+    const formPanel = page.locator("section[aria-label='本步填写信息']");
+    // The current question carries its own hierarchical identity.
+    await expect.poll(() => formPanel.textContent(), { timeout: 20000 }).toContain("2.1");
+    expect(await sharedLog.textContent()).toContain("我担心自己没有可以教的经验");
+    // The Agent opens the newly reached question itself; the host never
+    // fabricates a user message to trigger it.
+    await expectOpening("2.1", f.flow.steps[1].information![0].title);
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
@@ -1835,9 +1934,8 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page
       .getByRole("button", { name: "发送", exact: true })
       .click();
-    await page
-      .getByText("【分步模拟，仅验证流程】第 2 步：", { exact: false })
-      .waitFor();
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
     const secondField = f.flow.steps[1].information![0];
     await expect
       .poll(() =>
@@ -1870,36 +1968,39 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
         turn.stepId === "step-0" && turn.kind === "mentor",
     ))
       expect(dependencies.has(prior.executionId)).toBe(true);
+    const expectedBeforeRevision: ExpectedMentorEffect[] = [
+      { stepId: "step-0", questionId: "goal", opening: true, input: OPENING_INPUT },
+      { stepId: "step-1", questionId: "goal", opening: true, input: OPENING_INPUT },
+      ...["我想先明确我的受众", "我想帮助刚接触短视频的人", "我担心自己没有可以教的经验"]
+        .map(input => ({ stepId: "step-0", questionId: "goal", opening: false, input })),
+      { stepId: "step-1", questionId: "goal", opening: false, input: "我有两个参考账号" },
+    ];
+    const beforeRecoveryEffects = await expectExactMentorEffects(
+      f.actor, draftId, d.roundId, expectedBeforeRevision,
+    );
     const conversationAfterSecondStep = await sharedLog.textContent();
     expect(conversationAfterSecondStep).toContain("我想帮助刚接触短视频的人");
     expect(conversationAfterSecondStep).toContain("我有两个参考账号");
     const stepNavigation = page.getByRole("navigation", { name: "定位步骤" });
     await stepNavigation.getByRole("button").nth(0).click();
-    expect(await page.getByLabel("当前导师任务").textContent()).toContain("已有结果已保留");
+    // Reviewing an already confirmed question restores it without dispatching.
+    await expect.poll(() => page.locator("section[aria-label='本步填写信息']").textContent()).toContain("1.1");
     expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
     await stepNavigation.getByRole("button").nth(1).click();
     expect(await sharedLog.textContent()).toBe(conversationAfterSecondStep);
     await page.reload();
-    await page
-      .getByText("【分步模拟，仅验证流程】第 2 步：", { exact: false })
-      .waitFor();
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
     await context.clearCookies();
     await page.goto(process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname));
     await page.getByPlaceholder("name@example.com").fill(f.email);
     await page.getByPlaceholder("输入你的密码").fill(f.password);
     await page.getByRole("button", {name:"登录",exact:true}).last().click();
     await page.waitForURL(draftUrl,{timeout:90000});
-    await page.getByText("【分步模拟，仅验证流程】第 2 步：",{exact:false}).waitFor();
+    await page.getByRole("log", { name: "完整导师消息" })
+      .getByText("导师 · 2.1", { exact: true }).waitFor();
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
     expect(await page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我想帮助刚接触短视频的人");
-    expect(
-      (
-        await sql.query(
-          "select count(*)::int n from bill2_runs where actor_id=$1",
-          [f.actor],
-        )
-      ).rows[0].n,
-    ).toBe(4);
     expect(
       await page
         .getByRole("textbox", {
@@ -1908,6 +2009,10 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
         })
         .count(),
     ).toBe(0);
+    // Four user messages plus two distinct step openings: exactly six effects,
+    // with identical execution/request/billing IDs after refresh and re-login.
+    expect(await expectExactMentorEffects(f.actor, draftId, d.roundId, expectedBeforeRevision))
+      .toEqual(beforeRecoveryEffects);
     // A model-proposed cross-step change stays separate until explicit acceptance.
     await page.getByRole("textbox", {name:"给导师的回复"}).fill("模拟：修改第一步目标");
     await page.getByRole("button", {name:"发送",exact:true}).click();
@@ -1924,7 +2029,12 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.getByRole("navigation", {name:"定位步骤"}).getByRole("button").nth(0).click({timeout:15000});
     await expect.poll(()=>page.getByRole("textbox",{name:f.flow.steps[0].information![0].title,exact:true}).inputValue({timeout:15000})).toBe("改为帮助独立开发者");
     expect((await f.service.read(draftId)).sessionId).toBe(d.sessionId);
-    expect((await sql.query("select count(*)::int n from bill2_runs where actor_id=$1",[f.actor])).rows[0].n).toBe(5);
+    const finalEffects = await expectExactMentorEffects(f.actor, draftId, d.roundId, [
+      ...expectedBeforeRevision,
+      { stepId: "step-1", questionId: "goal", opening: false, input: "模拟：修改第一步目标" },
+    ]);
+    expect(finalEffects.filter(identity => beforeRecoveryEffects.includes(identity)))
+      .toEqual(beforeRecoveryEffects);
     expect(errors).toEqual([]);
   } finally {
     await browser.close();
@@ -2005,6 +2115,14 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await page.waitForURL((url) => url.pathname.startsWith("/positioning/"));
 
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    await expectOpening("1.1", f.flow.steps[0].information![0].title);
     await expect.poll(() => page.getByRole("button", { name: /确认本题并继续|继续核对本题确认/, exact: true }).count()).toBe(1);
     expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
     await expect(
@@ -2097,6 +2215,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
         exact: true,
       })
       .waitFor();
+    await expectOpening("2.1", f.flow.steps[1].information![0].title);
     const read = await f.service.read(draftId);
     expect(read.information[f.flow.steps[0].id].values.goal.value).toBe(
       "用户亲自填写的经营目标",
@@ -2109,14 +2228,13 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     await sql.query("update ai_models set is_active='false' where id=$1", [
       summaryModel,
     ]);
-    const runs = await sql.query(
-      "select id,payload,state,charged,pre_deduct_id from bill2_runs where actor_id=$1",
-      [f.actor],
-    );
-    expect(runs.rows).toHaveLength(0);
-    expect(await providerCount() - callsBefore).toBe(0);
-    expect((await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n).toBe(0);
-    expect((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n).toBe(0);
+    // Saving, confirming and recovering the form do not make model calls.
+    // Only the initial and newly reached question each have one opening.
+    await expectExactMentorEffects(f.actor,draftId,read.roundId,[
+      {stepId:"step-0",questionId:"goal",opening:true,input:OPENING_INPUT},
+      {stepId:"step-1",questionId:"goal",opening:true,input:OPENING_INPUT},
+    ]);
+    expect(await providerCount() - callsBefore).toBe(2);
     expect(await page.getByRole("textbox", { name: f.flow.steps[0].title + " 工作稿" }).count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {
@@ -2416,6 +2534,15 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     const second=()=>page.getByRole("textbox",{name:"Second independent field",exact:true});
     const composer=()=>page.getByRole("textbox",{name:"给导师的回复",exact:true});
     await first().waitFor();expect(await second().count()).toBe(0);
+    async function expectOpening(label: string, title: string) {
+      const paragraph = page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .locator("..").locator("p");
+      await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
+        .toContain(`“${title}”`);
+    }
+    // The first actual mentor message must appear while the user is idle.
+    await expectOpening("1.1", "已知目标 0");
     expect(await page.locator("body").textContent()).not.toContain("Second independent field");
     expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).isVisible()).toBe(true);
     expect(await page.getByRole("button",{name:"确认本题并继续",exact:true}).evaluate(el=>Boolean(el.closest("details")))).toBe(false);
@@ -2453,7 +2580,13 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await page.getByRole("button",{name:"继续核对本题确认",exact:true}).click();
     await second().waitFor();expect(await first().count()).toBe(0);expect(confirmations).toHaveLength(2);expect(new Set(confirmations).size).toBe(1);
     await page.unroute("**/api/trpc/opc.information*");
-    expect(await page.getByRole("status",{name:"当前导师任务"}).textContent()).toContain("Second independent field");
+    // The current question carries its hierarchical identity in the form itself,
+    // instead of a static guide card repeating the step name.
+    const form = page.locator("section[aria-label='本步填写信息']");
+    await expect.poll(() => form.textContent()).toContain("1.2");
+    expect(await form.textContent()).toContain("Second independent field");
+    await expectOpening("1.2", "Second independent field");
+    expect(await page.getByRole("status", { name: "当前导师任务" }).count()).toBe(0);
     expect((await f.service.read(draft.draftId)).snapshot.steps["step-0"].valid).toBe(false);
     await page.getByRole("button", {name:"已确认 · 已知目标 0 · 回看修改",exact:true}).click();
     expect(await first().inputValue()).toBe("我做 AI 赛道");
@@ -2461,8 +2594,12 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await page.getByRole("button", {name:"继续当前待确认问题",exact:true}).click();
     await second().waitFor();
     await send("摄影课程");await expect.poll(()=>second().inputValue()).toBe("摄影课程");
-    await expect.poll(()=>informationWrites.some(raw=>raw.includes('"other"')&&raw.includes('"摄影课程"')&&raw.includes('"status":"provisional"'))).toBe(true);
-    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other?.status).toBe("provisional");
+    // The 700ms debounce plus authenticated read/write is not a 1000ms
+    // operation. Keep an explicit upper bound and assert durable content, not
+    // just that a matching HTTP request was sent.
+    await expect.poll(()=>informationWrites.some(raw=>raw.includes('"other"')&&raw.includes('"摄影课程"')&&raw.includes('"status":"provisional"')),{timeout:30000}).toBe(true);
+    await expect.poll(async()=>(await f.service.read(draft.draftId)).information["step-0"].values?.other,{timeout:30000})
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
     const before=await f.service.read(draft.draftId);expect(before.information["step-0"].values.goal.value).toBe("我做 AI 赛道");
     expect(admissions.at(-1).questionId).toBe("other");
     const original=await f.service.prepareStep(admissions.at(-1));
@@ -2471,14 +2608,608 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await expect(f.service.prepareStep({...admissions.at(-1),questionId:"goal"})).rejects.toThrow("OPC_REQUEST_CONFLICT");
     const revised=await f.service.read(draft.draftId);
     await f.service.information({draftId:draft.draftId,stepId:"step-0",requestId:randomUUID(),expectedVersion:revised.snapshot.steps["step-0"].version,values:before.information["step-0"].values});
+    const expectedBeforeRecovery: ExpectedMentorEffect[] = [
+      {stepId:"step-0",questionId:"goal",opening:true,input:OPENING_INPUT},
+      {stepId:"step-0",questionId:"other",opening:true,input:OPENING_INPUT},
+      {stepId:"step-0",questionId:"goal",opening:false,input:"我做 AI 赛道"},
+      {stepId:"step-0",questionId:"goal",opening:false,input:"不知道呢"},
+      {stepId:"step-0",questionId:"other",opening:false,input:"摄影课程"},
+    ];
+    const beforeRecoveryEffects=await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery);
     const fresh=await login();await fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).waitFor();
-    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我做 AI 赛道");await fresh.context.close();
+    await expect.poll(()=>fresh.page.getByRole("log",{name:"完整导师消息"}).textContent()).toContain("我做 AI 赛道");
+    await expect.poll(()=>fresh.page.getByRole("textbox",{name:"Second independent field",exact:true}).inputValue(),{timeout:30000}).toBe("摄影课程");
+    expect((await f.service.read(draft.draftId)).information["step-0"].values.other)
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
+    await fresh.context.close();
     await page.reload();await second().waitFor();expect(await second().inputValue()).toBe("摄影课程");
+    expect((await f.service.read(draft.draftId)).information["step-0"].values.other)
+      .toEqual({value:"摄影课程",nature:"hypothesis",status:"provisional"});
+    expect(await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,expectedBeforeRecovery))
+      .toEqual(beforeRecoveryEffects);
     await page.getByRole("button",{name:"确认本题并继续",exact:true}).click();
     await page.getByRole("textbox",{name:"已知目标 1",exact:true}).waitFor();
+    // Do not send another user message to make the new step's opening visible.
+    await expectOpening("2.1", "已知目标 1");
     const result=await f.service.read(draft.draftId);expect(result.snapshot.steps["step-0"].valid).toBe(true);expect(result.sessionId).toBe(draft.sessionId);
-    const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);expect(runs.rows).toHaveLength(3);
-    expect(runs.rows.at(-1).payload.instructions).toContain('Current information question: {"id":"other","title":"Second independent field"}');
+    // The host opened the current question itself, and every stored turn keeps
+    // the question identity it was asked under.
+    const opened=result.turns.filter((turn:any)=>turn.kind==="opening");
+    expect(opened.map((turn:{stepId:string;questionId:string|null})=>[turn.stepId,turn.questionId]))
+      .toEqual([["step-0","goal"],["step-0","other"],["step-1","goal"]]);
+    await expectExactMentorEffects(f.actor,draft.draftId,draft.roundId,[
+      ...expectedBeforeRecovery,
+      {stepId:"step-1",questionId:"goal",opening:true,input:OPENING_INPUT},
+    ]);
+    expect(result.turns.every((turn:any)=>turn.kind==="organizer"||Boolean(turn.questionId))).toBe(true);
+    const runs=await sql.query("select payload from runtime_executions where actor_id=$1 order by created_at",[f.actor]);
+    expect(runs.rows.some(row=>row.payload.instructions.includes('Current information question: {"id":"other","title":"Second independent field"}'))).toBe(true);
+    expect(runs.rows.some(row=>row.payload.instructions.includes("opened by the host, not by the user"))).toBe(true);
     expect(errors).toEqual([]);
   } finally { release?.();await browser.close(); }
 },300000);
+it("OPC: the Agent opens the current question once per entry and plans without user-authored topic rows", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { OPENING_INPUT, openingRequestId, questionLabel } =
+    await import("../../shared/opcQuestions");
+  const f = await fixture(2, true),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Opening local','opc-opening','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const schema = (await f.service.read(draft.draftId)).information["step-0"].schema;
+  // Hierarchical identity comes from the method's declared field order.
+  expect(questionLabel(0, schema, schema[0].id)).toBe("1.1");
+  expect(questionLabel(0, schema, schema[1].id)).toBe("1.2");
+  let calls = 0;
+  const instructions: string[] = [];
+  const server = createServer(async (req, res) => {
+    calls++;
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const request = JSON.parse(JSON.parse(raw).input);
+    instructions.push(
+      typeof request.instructions === "string"
+        ? request.instructions
+        : (request.messages ?? [])
+            .filter((m: { role: string }) => ["system", "developer"].includes(m.role))
+            .map((m: { content: unknown }) =>
+              typeof m.content === "string" ? m.content : "",
+            )
+            .join("\n"),
+    );
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "opening-" + calls,
+        model: "opc-opening",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "opening-" + calls,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-opening",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    message: "【隔离模拟】先把当前问题聊清楚。",
+                    inputKind: "answer",
+                    informationPatch: {},
+                  }),
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    });
+    const openingRequest = {
+      draftId: draft.draftId,
+      stepId: "step-0",
+      purpose: "mentor" as const,
+      requestId: openingRequestId(draft.draftId, draft.roundId, "step-0", schema[0].id),
+      input: OPENING_INPUT,
+    };
+    const opening = await f.service.prepareStep(openingRequest);
+    await executor.execute(opening.executionId);
+    // A future question cannot be opened before the current one is confirmed.
+    await expect(
+      f.service.prepareStep({
+        draftId: draft.draftId,
+        stepId: "step-0",
+        purpose: "mentor",
+        requestId: randomUUID(),
+        input: OPENING_INPUT,
+        questionId: schema[1].id,
+      }),
+    ).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+    // Refresh, re-login or a second tab reuses the same entry identity.
+    expect((await f.service.prepareStep(openingRequest)).executionId).toBe(
+      opening.executionId,
+    );
+    await executor.execute(opening.executionId);
+    expect(calls).toBe(1);
+    const after = await f.service.read(draft.draftId);
+    expect(after.turns).toEqual([
+      {
+        executionId: opening.executionId,
+        stepId: "step-0",
+        questionId: schema[0].id,
+        kind: "opening",
+      },
+    ]);
+    // The host marker is stored instead of fabricated user speech.
+    const history = await admin.rpc("runtime_view", {
+      p_actor_id: f.actor,
+      p_session_id: draft.sessionId,
+    });
+    expect(history.error).toBeNull();
+    expect(history.data.executions[0].input).toBe(OPENING_INPUT);
+    expect(instructions[0]).toContain("opened by the host, not by the user");
+    expect(instructions[0]).toContain('"elicit"');
+    expect(instructions[0]).toContain("inputKind");
+    // One entry is one charge.
+    expect(
+      (
+        await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+
+it("OPC: a confirmed positioning produces an editable first-week plan candidate without user-authored rows", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const f = await completed(2),
+    model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Plan local','opc-plan-free','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  // The user supplies only their own choices: no topic row is required.
+  const request = {
+    draftId: f.d.draftId,
+    requestId: randomUUID(),
+    purpose: "plan" as const,
+    stepId: "step-1",
+    input: JSON.stringify({
+      confirmedPositioning: { "已知目标 0": "A concrete user decision" },
+      platforms: [],
+      accounts: [],
+      startDate: "2026-09-21",
+      days: 7,
+    }),
+  };
+  const prepared = await f.service.prepareStep(request);
+  const body = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "proposed-handle",
+      title: "Agent proposed topic",
+      brief: "Generated from the confirmed positioning; the account name is only a proposal.",
+      day: "2026-09-21",
+    },
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "proposed-handle",
+      title: "Agent proposed topic 2",
+      brief: "Second proposed topic.",
+      day: "2026-09-23",
+    },
+  ];
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "plan-free-" + prepared.executionId,
+        model: "opc-plan-free",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "plan-free-" + prepared.executionId,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-plan-free",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: JSON.stringify(body) },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    await runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    }).execute(prepared.executionId);
+    const candidate = await f.service.planResult(f.d.draftId, prepared.executionId);
+    expect(candidate.body).toEqual(body);
+    expect(candidate.sourceVersionId).toBe(f.sourceVersionId);
+    // A proposal is a plan version only: no account or work item exists yet.
+    expect(
+      (
+        await sql.query("select count(*)::int n from opc_accounts where actor_id=$1", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(0);
+    const saved = await f.service.savePlan({
+      draftId: f.d.draftId,
+      requestId: randomUUID(),
+      expectedVersion: 0,
+      sourceVersionId: f.sourceVersionId,
+      body: candidate.body,
+    });
+    expect(saved.version).toBe(1);
+    const read = await f.service.read(f.d.draftId);
+    expect(read.plans[0].body).toEqual(body);
+    expect(
+      (
+        await sql.query("select count(*)::int n from artifact_projects where actor_id=$1 and work_kind='account'", [
+          f.actor,
+        ])
+      ).rows[0].n,
+    ).toBe(0);
+    expect(calls).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+it("OPC: a revised round opens the same question under its own identity without reusing or duplicating the original", async () => {
+  const { runtimeExecutor } = await import("../runtime/execute");
+  const { createServer } = await import("node:http");
+  const { OPENING_INPUT, openingRequestId } = await import("../../shared/opcQuestions");
+  const f = await fixture(2), model = randomUUID();
+  await sql.query(
+    "insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit) values($1,'Round local','opc-round','fixture','true',1000,32000)",
+    [model],
+  );
+  await sql.query("update modules set model_id=$1 where id=$2", [model, f.moduleId]);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const roundA = draft.roundId;
+  const schema = (await f.service.read(draft.draftId)).information["step-0"].schema;
+  const questionId = schema[0].id;
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    calls++;
+    for await (const _ of req) void _;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        id: "round-" + calls,
+        model: "opc-round",
+        final: true,
+        cost: "0.003",
+        currency: "USD",
+        coverage: "request_total",
+        usage: {
+          sdkResponse: {
+            id: "round-" + calls,
+            object: "chat.completion",
+            created: 1,
+            model: "opc-round",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    message: "【隔离模拟】第 " + calls + " 次开场。",
+                    inputKind: "answer",
+                    informationPatch: {},
+                  }),
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local server");
+    const executor = runtimeExecutor({
+      database: admin,
+      actor: async () => f.actor,
+      endpoint: "http://127.0.0.1:" + address.port,
+    });
+    const requestFor = (roundId: string) => ({
+      draftId: draft.draftId,
+      stepId: "step-0",
+      purpose: "mentor" as const,
+      requestId: openingRequestId(draft.draftId, roundId, "step-0", questionId),
+      input: OPENING_INPUT,
+      questionId,
+    });
+    const roundARequest = requestFor(roundA);
+    const openingA = await f.service.prepareStep(roundARequest);
+    // Prepared but not yet executed: an unresolved request is already owned by
+    // its own identity, so a retry adopts it instead of creating another
+    // execution, run or reservation.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(calls).toBe(0);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(1);
+    // The original round's request stays retryable and recoverable as itself.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(1);
+    // Publish round A so a revision is allowed, exactly as the product requires.
+    for (const step of f.flow.steps) {
+      await f.artifacts.execute({
+        action: "save", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id, body: "Round A " + step.title,
+        evidenceIds: [], expectedVersion: 0,
+      });
+      const state = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.service.information({
+        draftId: draft.draftId, stepId: step.id, requestId: randomUUID(),
+        expectedVersion: state.version,
+        values: { goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" } },
+      });
+      const updated = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id,
+        expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+      });
+    }
+    const published = await f.artifacts.read(draft.projectId, roundA);
+    await f.artifacts.execute({
+      action: "publish", projectId: draft.projectId, roundId: roundA,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+      ),
+    });
+    const revised = await f.service.revise(draft.draftId, randomUUID(), roundA);
+    const roundB = revised.roundId;
+    expect(roundB).not.toBe(roundA);
+    expect((await f.service.read(draft.draftId)).roundId).toBe(roundB);
+    // A revision legitimately needs a fresh opening for the same step/question.
+    const roundBRequest = requestFor(roundB);
+    expect(roundBRequest.requestId).not.toBe(roundARequest.requestId);
+    const openingB = await f.service.prepareStep(roundBRequest);
+    expect(openingB.executionId).not.toBe(openingA.executionId);
+    await executor.execute(openingB.executionId);
+    expect(calls).toBe(2);
+    // The older round keeps its own identity: it replays to its own execution
+    // and never adopts the revised round's turn.
+    expect((await f.service.prepareStep(roundARequest)).executionId).toBe(openingA.executionId);
+    await executor.execute(openingA.executionId);
+    expect(calls).toBe(2);
+    const after = await f.service.read(draft.draftId);
+    const openings = after.turns.filter((turn: any) => turn.kind === "opening");
+    expect(openings).toHaveLength(2);
+    expect(new Set(openings.map((turn: any) => turn.questionId))).toEqual(new Set([questionId]));
+    expect(new Set(openings.map((turn: any) => turn.roundId))).toEqual(new Set([roundA, roundB]));
+    expect(new Set(openings.map((turn: any) => turn.executionId))).toEqual(
+      new Set([openingA.executionId, openingB.executionId]),
+    );
+    // Each opening owns exactly one execution, one BILL2 run and one reservation.
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(2);
+    // The revised opening material belongs to the revised round.
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.purpose='mentor' and t.round_id=$2",
+          [draft.draftId, roundB],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    expect(
+      (
+        await sql.query(
+          "select count(*)::int n from opc_turns t where t.draft_id=$1 and t.purpose='mentor' and t.round_id=$2",
+          [draft.draftId, roundA],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  }
+}, 180000);
+it("OPC: a revision makes the page open the current question again in the new round without duplicating the original", async () => {
+  const { chromium } = await import("../../../../../apps/web/node_modules/@playwright/test");
+  const f = await fixture(2);
+  const draft = await f.service.start({
+    requestId: randomUUID(),
+    registration: f.registration,
+    mode: "mentor",
+  });
+  const roundA = draft.roundId;
+  const draftUrl = process.env.V3_LOCAL_APP + "/positioning/" + draft.draftId;
+  const browser = await chromium.launch({
+    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    headless: true,
+  });
+  try {
+    const context = await browser.newContext();
+    await context.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      return ["127.0.0.1", "localhost"].includes(u.hostname) ||
+        ["data:", "blob:"].includes(u.protocol)
+        ? route.continue()
+        : route.abort();
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(90000);
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    async function login() {
+      const ready = page.waitForResponse(
+        (r) => r.url().includes("settings.getSystemSettings") && r.ok(),
+        { timeout: 90000 },
+      );
+      await page.goto(
+        process.env.V3_LOCAL_APP + "/login?redirect=" + encodeURIComponent(new URL(draftUrl).pathname),
+      );
+      await ready;
+      await page.getByPlaceholder("name@example.com").fill(f.email);
+      await page.getByPlaceholder("输入你的密码").fill(f.password);
+      await page.getByRole("button", { name: "登录", exact: true }).last().click();
+      await page.waitForURL(draftUrl, { timeout: 90000 });
+    }
+    const openingFor = (label: string) =>
+      page.getByRole("log", { name: "完整导师消息" })
+        .getByText(`导师主动引导 · ${label}`, { exact: true });
+    await login();
+    // Round A opens its current question while the user is idle.
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(1);
+    const afterRoundA = await f.service.read(draft.draftId);
+    expect(afterRoundA.roundId).toBe(roundA);
+    const roundAOpening = afterRoundA.turns.find((turn: any) => turn.kind === "opening");
+    expect(roundAOpening?.roundId).toBe(roundA);
+    // Publish round A, then revise it, exactly as the product flow does.
+    for (const step of f.flow.steps) {
+      await f.artifacts.execute({
+        action: "save", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id, body: "Round A " + step.title,
+        evidenceIds: [], expectedVersion: 0,
+      });
+      const state = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.service.information({
+        draftId: draft.draftId, stepId: step.id, requestId: randomUUID(),
+        expectedVersion: state.version,
+        values: { goal: { status: "confirmed", nature: "decision", value: "A concrete user decision" } },
+      });
+      const updated = (await f.artifacts.read(draft.projectId, roundA)).steps[step.id];
+      await f.artifacts.execute({
+        action: "confirm", projectId: draft.projectId, roundId: roundA,
+        requestId: randomUUID(), stepId: step.id,
+        expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion,
+      });
+    }
+    const published = await f.artifacts.read(draft.projectId, roundA);
+    await f.artifacts.execute({
+      action: "publish", projectId: draft.projectId, roundId: roundA,
+      requestId: randomUUID(),
+      expectedSteps: Object.fromEntries(
+        Object.entries(published.steps).map(([k, v]) => [k, { version: v.version, reviewVersion: v.reviewVersion }]),
+      ),
+    });
+    const revised = await f.service.revise(draft.draftId, randomUUID(), roundA);
+    const roundB = revised.roundId;
+    expect(roundB).not.toBe(roundA);
+    // The user revisits and changes the answer, so the question is open again.
+    const roundBState = (await f.artifacts.read(draft.projectId, roundB)).steps["step-0"];
+    await f.service.information({
+      draftId: draft.draftId, stepId: "step-0", requestId: randomUUID(),
+      expectedVersion: roundBState.version,
+      values: { goal: { status: "provisional", nature: "decision", value: "修订后的定位目标" } },
+    });
+    await page.reload();
+    // The revised round must be opened again; the older round's reply must not
+    // suppress it and must not be reused for it.
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    const afterRoundB = await f.service.read(draft.draftId);
+    expect(afterRoundB.roundId).toBe(roundB);
+    const openings = afterRoundB.turns.filter((turn: any) => turn.kind === "opening");
+    expect(new Set(openings.map((turn: any) => turn.roundId))).toEqual(new Set([roundA, roundB]));
+    expect(new Set(openings.map((turn: any) => turn.executionId)).size).toBe(2);
+    const identities = async () =>
+      (
+        await sql.query(
+          "select e.id::text id, e.request_id::text request_id, b.id::text billing_id, b.pre_deduct_id::text pre_deduct_id from runtime_executions e join bill2_runs b on b.id=e.billing_run_id where e.actor_id=$1 order by e.id",
+          [f.actor],
+        )
+      ).rows.map((row: any) => JSON.stringify(row)).sort();
+    const beforeReload = await identities();
+    expect(beforeReload).toHaveLength(2);
+    // Refresh and re-login must not add a second execution, run or reservation.
+    await page.reload();
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    await context.clearCookies();
+    await login();
+    await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(2);
+    expect(await identities()).toEqual(beforeReload);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(2);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);

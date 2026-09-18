@@ -7,8 +7,20 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { mergeInformation } from "./information-merge";
-import { readWorkflowMentorResponse } from "./mentor-response";
-import { confirmQuestionValues, displayedQuestion, nextInformationQuestion, questionIsConfirmed, reachedQuestions } from "@repo/api/src/shared/opcQuestions";
+import { applyMentorTurnRules, readWorkflowMentorTurn } from "./mentor-response";
+import {
+  confirmQuestionValues,
+  displayedQuestion,
+  isOpeningInput,
+  nextInformationQuestion,
+  OPENING_INPUT,
+  openingEntryKey,
+  openingRequestId,
+  questionIsConfirmed,
+  questionLabel,
+  reachedQuestions,
+} from "@repo/api/src/shared/opcQuestions";
+import { isAgentProposal } from "@repo/api/src/shared/opcMethodPolicy";
 type Step = { id: string; title: string };
 type Information = {
   status: "unknown" | "unclear" | "provisional" | "confirmed" | "deferred";
@@ -166,6 +178,15 @@ export default function PositioningDraft({
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
     [error, setError] = useState("");
+  /**
+   * Plan generation needs the user's own choices only (platform, optional
+   * account, start date, horizon). Topics, dates, titles and briefs are the
+   * Agent's output, so no manually authored topic row is required.
+   */
+  const [planPlatform, setPlanPlatform] = useState("");
+  const [planAccount, setPlanAccount] = useState("");
+  const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
+  const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery(
     { sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) },
@@ -190,11 +211,13 @@ export default function PositioningDraft({
   const d = read.data,
     snap = d?.snapshot,
     latest = d?.plans?.[0];
+  // `prepareStep`/`execute` are deliberately excluded: the Agent's own opening
+  // uses them, and it must never disable the form the user is filling in. Every
+  // user-initiated use of them runs inside `run()` (or a named flag), which is
+  // what actually gates the controls.
   const busy =
     running || confirmingQuestion ||
     revise.isPending ||
-    prepareStep.isPending ||
-    execute.isPending ||
     change.isPending ||
     savePlan.isPending ||
     handoff.isPending;
@@ -288,6 +311,22 @@ export default function PositioningDraft({
   function captureInformationBase(stepId: string) {
     const key = "opc-information-base:" + draftId + ":" + stepId;
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
+  }
+  /**
+   * The form keeps only the three public fields. The mentor's turn
+   * classification (`inputKind`, `basis`) stays in the conversation and must
+   * never travel into the persisted information payload.
+   */
+  function toInformation(entry: {
+    value: string;
+    status: string;
+    nature: string;
+  }): Information {
+    return {
+      value: entry.value,
+      status: entry.status as Information["status"],
+      nature: entry.nature as Information["nature"],
+    };
   }
   async function persistInformation(
     stepId: string,
@@ -423,6 +462,7 @@ export default function PositioningDraft({
     for (const execution of executions as Array<{
       executionId: string;
       state: string;
+      input: string | null;
       body: string | null;
       primaryBody: string | null;
     }>) {
@@ -433,7 +473,8 @@ export default function PositioningDraft({
         continue;
       const turn = d.turns?.find(
         (item: { executionId: string; stepId: string; kind: string }) =>
-          item.executionId === execution.executionId && item.kind === "mentor",
+          item.executionId === execution.executionId &&
+          (item.kind === "mentor" || item.kind === "opening"),
       );
       if (!turn) continue;
       const schema = d.information[turn.stepId]?.schema ?? [];
@@ -443,9 +484,12 @@ export default function PositioningDraft({
       // exists, otherwise a later refresh can show the mentor reply without
       // ever applying its form suggestions.
       if (!rawResponse) continue;
-      const parsed = readWorkflowMentorResponse(rawResponse, turn.stepId, d.information);
+      const parsed = readWorkflowMentorTurn(rawResponse, turn.stepId, d.information);
+      // A non-substantive user turn (an acknowledgement, an uncertainty or a
+      // request for help) never becomes business content on its own.
+      const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
       appliedMentor.current.add(execution.executionId);
-      if (!Object.keys(parsed.informationPatch).length || parsed.targetStepId !== turn.stepId ||
+      if (!Object.keys(accepted).length || parsed.targetStepId !== turn.stepId ||
           d.snapshot.state !== "draft" || d.snapshot.steps[turn.stepId].valid) continue;
       setInfoEdits((old) => {
         const values = Object.fromEntries(
@@ -460,12 +504,10 @@ export default function PositioningDraft({
           ]),
         ) as Record<string, Information>;
         let changed = false;
-        for (const [fieldId, suggestion] of Object.entries(
-          parsed.informationPatch,
-        )) {
+        for (const [fieldId, suggestion] of Object.entries(accepted)) {
           // A late response for a different question cannot fill an unseen field.
           if (fieldId !== displayedQuestion(schema, d.information[turn.stepId].values, activeQuestions[turn.stepId])?.id || values[fieldId]?.value.trim()) continue;
-          values[fieldId] = suggestion;
+          values[fieldId] = toInformation(suggestion);
           changed = true;
         }
         if (!changed) return old;
@@ -481,6 +523,103 @@ export default function PositioningDraft({
       });
     }
   }, [d, history.data, activeQuestions]);
+  /**
+   * The Agent opens the current question itself, so a beginner is never asked to
+   * send a placeholder like "你好" or "继续" first. This runs on first entry into
+   * a question and again after a confirmation advances to the next one. The
+   * request identity is derived from the entry, so a refresh, a re-login, a
+   * second tab or a lost reply reuses the same turn instead of paying twice.
+   */
+  const autoOpening = useRef(new Set<string>());
+  const openingInFlight = useRef(new Set<string>());
+  const [openingSteps, setOpeningSteps] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (planView || hydratedDraft !== draftId || !d || !history.data) return;
+    if (d.snapshot.state !== "draft") return;
+    const flowSteps: Step[] = d.snapshot.workflow.steps;
+    const firstPending = flowSteps.findIndex(step => !d.snapshot.steps[step.id].valid);
+    const step =
+      flowSteps.find(candidate => candidate.id === activeStep) ??
+      flowSteps[Math.max(0, firstPending)];
+    if (!step) return;
+    const stepIndex = flowSteps.findIndex(candidate => candidate.id === step.id);
+    // Only a step whose dependencies are confirmed can be opened: the current
+    // pending step, or an already confirmed step being reviewed.
+    if (!d.snapshot.steps[step.id].valid && stepIndex !== firstPending) return;
+    const state = d.information[step.id];
+    const question = displayedQuestion(state.schema, state.values, activeQuestions[step.id]);
+    if (!question) return;
+    // Reviewing a question that is already confirmed restores its content; it
+    // does not generate another turn.
+    if (questionIsConfirmed(state.values?.[question.id])) return;
+    const turns = (d.turns ?? []) as Array<{
+      stepId: string;
+      questionId: string | null;
+      roundId?: string | null;
+      kind: string;
+    }>;
+    // One opening per round. A turn from an older round never suppresses the
+    // current round's opening, and never gets reused for it: the round is part
+    // of the request identity. A revision therefore produces a genuinely new
+    // opening for the same step/question, while the older round's request keeps
+    // its own identity and stays recoverable through its execution.
+    // A projection without round ownership (a database that predates it) keeps
+    // the previous round-blind behaviour instead of silently changing meaning.
+    const sameRound = (turn: { roundId?: string | null }) =>
+      !Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId;
+    if (turns.some(turn =>
+      turn.stepId === step.id && turn.questionId === question.id &&
+      sameRound(turn) &&
+      (turn.kind === "mentor" || turn.kind === "opening")))
+      return;
+    // A retained explicit mentor request already owns this step's next turn.
+    if (sessionStorage.getItem("opc-step:" + draftId + ":" + step.id)) return;
+    if (sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + step.id)) return;
+    const key = openingEntryKey(draftId, d.roundId, step.id, question.id);
+    if (autoOpening.current.has(key)) return;
+    autoOpening.current.add(key);
+    openingInFlight.current.add(step.id);
+    setOpeningSteps([...openingInFlight.current]);
+    void (async () => {
+      try {
+        sessionStorage.setItem(key, "pending");
+        // Finish any opening an interrupted page left running before admitting
+        // a new one: a busy session would refuse it, and the user's question
+        // would stay unopened.
+        await resumeInterruptedOpening();
+        const admitted = await prepareStep.mutateAsync({
+          draftId,
+          stepId: step.id,
+          purpose: "mentor",
+          requestId: openingRequestId(draftId, d.roundId, step.id, question.id),
+          input: OPENING_INPUT,
+          questionId: question.id,
+        });
+        await execute.mutateAsync({ executionId: admitted.executionId });
+        // The chat joins the execution history to opc.read's turn/question
+        // bindings. Refresh both projections; history alone leaves a completed
+        // opening invisible until an unrelated user action refreshes the draft.
+        const [draftRead, historyRead] = await Promise.all([
+          read.refetch(),
+          history.refetch(),
+        ]);
+        if (draftRead.error || !draftRead.data || historyRead.error || !historyRead.data)
+          throw new Error("OPC_OPENING_READBACK_UNAVAILABLE");
+        sessionStorage.removeItem(key);
+        setNotice("");
+      } catch {
+        // The Agent's opening is a convenience, never a gate on the form. The
+        // entry identity is deterministic, so a later retry reuses the same
+        // turn instead of producing a second one or a second charge.
+        sessionStorage.removeItem(key);
+        setNotice("导师引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
+      } finally {
+        openingInFlight.current.delete(step.id);
+        setOpeningSteps([...openingInFlight.current]);
+      }
+    })();
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, activeQuestions]);
   async function run(fn: () => Promise<unknown>) {
     setRunning(true);
     setError("");
@@ -532,6 +671,19 @@ export default function PositioningDraft({
     // A newer typed message is not overwritten; only an exact match is cleared.
     setMentorInput((old) => (old.trim() === request.input.trim() ? "" : old));
   }
+  async function resumeInterruptedOpening() {
+    // An Agent opening interrupted by a reload can still own the session's
+    // active execution. Resume that same execution before creating a new turn:
+    // a new admission would be refused while the session is busy, and the
+    // user's own action would be lost. Resuming is idempotent.
+    const interrupted = mentorExecutions.find(
+      execution =>
+        mentorTurns.get(execution.executionId)?.kind === "opening" &&
+        !["completed", "cancelled"].includes(execution.state),
+    );
+    if (interrupted)
+      await execute.mutateAsync({ executionId: interrupted.executionId });
+  }
   async function ask(step: Step, questionId: string) {
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
@@ -541,6 +693,7 @@ export default function PositioningDraft({
       return;
     }
     await run(async () => {
+      await resumeInterruptedOpening();
       await flushInformation(step.id);
       const fixed: StepEnvelope = {
         request: {
@@ -630,7 +783,7 @@ export default function PositioningDraft({
   function sameInformation(a: Information | undefined, b: Information | undefined) {
     return a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
   }
-  async function confirmStep(step: Step, stepIndex: number, questionId: string, defer = false) {
+  async function confirmStep(step: Step, stepIndex: number, questionId: string, defer = false, nonAnswers: readonly string[] = []) {
     if (confirmationLock.current) return;
     const envelopeState = confirmEnvelopeState(step.id);
     if (envelopeState.kind === "malformed") {
@@ -666,7 +819,7 @@ export default function PositioningDraft({
         const savedValue = current.information[step.id].values?.[questionId];
         if ((viewed?.value ?? "") !== (savedValue?.value ?? "") || infoEditsRef.current[step.id])
           throw new Error("OPC_INFORMATION_CONFLICT");
-        const { values, finishStep } = confirmQuestionValues(schema, current.information[step.id].values ?? {}, questionId, defer);
+        const { values, finishStep } = confirmQuestionValues(schema, current.information[step.id].values ?? {}, questionId, defer, { nonAnswers });
         const body = schema.filter((field: {id:string}) => values[field.id].value).map((field: {id:string;title:string}) =>
           `${field.title}\n${values[field.id].status === "deferred" ? "（暂缓确认）" : ""}${values[field.id].value}`).join("\n\n");
         fixed = {
@@ -739,7 +892,9 @@ export default function PositioningDraft({
     } catch (cause) {
       setError(cause instanceof Error && cause.message.includes("OPC_QUESTION_ANSWER_REQUIRED")
         ? "请先补充当前问题的答案；暂时无法确定时，请写明原因后再暂缓确认。"
-        : "操作未完成或信息已变化。你的输入仍保留，请先核对自动保存与当前答案后重试确认。");
+        : cause instanceof Error && cause.message.includes("OPC_QUESTION_ANSWER_NOT_SUBSTANTIVE")
+          ? "「好的」「不知道」这类回应本身不是本题的业务答案。请确认导师给出的建议内容，或写下你自己的答案。"
+          : "操作未完成或信息已变化。你的输入仍保留，请先核对自动保存与当前答案后重试确认。");
     } finally {
       confirmationLock.current = false;
       setConfirmingQuestion(false);
@@ -751,19 +906,39 @@ export default function PositioningDraft({
     );
     setDirtyPlan(true);
   }
+  /**
+   * The confirmed positioning the plan must be generated from. Only confirmed or
+   * explicitly deferred information is included, and the payload stays inside
+   * the host's input limit.
+   */
+  function positioningSummary() {
+    if (!d) return {} as Record<string, string>;
+    const summary: Record<string, string> = {};
+    for (const step of snap.workflow.steps as Step[]) {
+      for (const field of d.information[step.id]?.schema ?? []) {
+        const answer = d.information[step.id]?.values?.[field.id];
+        if (!answer?.value?.trim()) continue;
+        if (!["confirmed", "deferred"].includes(answer.status)) continue;
+        summary[field.title] = `${answer.value.trim().slice(0, 200)}${answer.status === "deferred" ? "（用户明确暂缓，接受局限）" : ""}`;
+        if (JSON.stringify(summary).length > 5000) return summary;
+      }
+    }
+    return summary;
+  }
   async function generatePlan() {
     await run(async () => {
+      await resumeInterruptedOpening();
       if (hasUnsavedInformation) throw new Error("save information first");
-      const accountInput = items.length
-        ? JSON.stringify(
-            items.map((i) => ({
-              platform: i.platform,
-              account: i.account,
-              day: i.day,
-            })),
-          )
-        : "";
-      if (!accountInput) throw new Error("add concrete accounts first");
+      // No manually authored topic row is required: the Agent produces the
+      // topics, dates, titles and briefs. Only user-owned choices are supplied.
+      const constraints = {
+        confirmedPositioning: positioningSummary(),
+        platforms: planPlatform.split(",").map(v => v.trim()).filter(Boolean),
+        accounts: planAccount.split(",").map(v => v.trim()).filter(Boolean),
+        startDate: planStart,
+        days: planDays,
+      };
+      const accountInput = JSON.stringify(constraints);
       const key = "opc-plan-generation:" + draftId;
       const old = sessionStorage.getItem(key);
       const request = old
@@ -908,6 +1083,7 @@ export default function PositioningDraft({
   type MentorTurn = {
     executionId: string;
     stepId: string;
+    questionId: string | null;
     kind: string;
   };
   type MentorExecution = {
@@ -919,7 +1095,7 @@ export default function PositioningDraft({
   };
   const mentorTurns = new Map<string, MentorTurn>(
     ((d.turns ?? []) as MentorTurn[])
-      .filter((turn) => turn.kind === "mentor")
+      .filter((turn) => turn.kind === "mentor" || turn.kind === "opening")
       .map((turn) => [turn.executionId, turn]),
   );
   const mentorExecutions = Array.from(
@@ -933,9 +1109,21 @@ export default function PositioningDraft({
   for (const execution of mentorExecutions) {
     const turn = mentorTurns.get(execution.executionId);
     if (!turn || execution.state !== "completed") continue;
-    const response = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn.stepId, d.information);
-    if (Object.keys(response.informationPatch).length) latestSuggestion.set(response.targetStepId, execution.executionId);
+    const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, turn.stepId, d.information);
+    if (Object.keys(applyMentorTurnRules(parsed, execution.input ?? "")).length) latestSuggestion.set(parsed.targetStepId, execution.executionId);
   }
+  /** Utterances the mentor classified as non-answers, per question. */
+  const nonAnswersFor = (stepId: string, questionId: string) =>
+    mentorExecutions
+      .filter((execution) => {
+        const turn = mentorTurns.get(execution.executionId);
+        return turn?.stepId === stepId && turn?.questionId === questionId;
+      })
+      .map((execution) => {
+        const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, stepId, d.information);
+        return parsed.inputKind === "answer" ? "" : execution.input ?? "";
+      })
+      .filter((value) => Boolean(value));
   const hasPendingConfirmation = steps.some(step => Boolean(pendingConfirmationFor(step.id)));
   // A retained mentor envelope can exist before its execution is visible in
   // history (or after a lost reply), so recovery is driven by the envelope
@@ -947,8 +1135,12 @@ export default function PositioningDraft({
     })
     .filter((entry): entry is { step: Step; raw: string; parsed: StepEnvelope | null } => Boolean(entry));
   const hasPendingStepRequest = pendingStepRequests.length > 0;
+  // Only a user-initiated mentor turn gates the page. The Agent's own opening
+  // is a convenience and must never block the form or the other controls.
   const pendingMentor = mentorExecutions.find(
-    (execution) => !["completed", "cancelled"].includes(execution.state),
+    (execution) =>
+      mentorTurns.get(execution.executionId)?.kind === "mentor" &&
+      !["completed", "cancelled"].includes(execution.state),
   );
   return (
     <main className="mx-auto max-w-[90rem] space-y-4 p-4 sm:p-6 text-[var(--text-primary)]">
@@ -1022,6 +1214,7 @@ export default function PositioningDraft({
             id: string;
             title: string;
             required: boolean;
+            elicitation?: "user_fact" | "agent_proposal";
           }>;
           const confirmationState = confirmEnvelopeState(step.id);
           const pendingConfirmation = pendingConfirmationFor(step.id);
@@ -1068,24 +1261,36 @@ export default function PositioningDraft({
                       const turnStep = steps.find(
                         (candidate) => candidate.id === turn?.stepId,
                       );
-                      const parsed = readWorkflowMentorResponse(execution.body ?? execution.primaryBody, turn?.stepId ?? step.id, d.information);
+                      const turnIndex = steps.findIndex(candidate => candidate.id === turn?.stepId);
+                      // A historical message keeps the question number it was
+                      // asked under, even after the form has moved on.
+                      const turnLabel = turnIndex >= 0
+                        ? questionLabel(turnIndex, d.information[turn!.stepId]?.schema ?? [], turn?.questionId)
+                        : null;
+                      const parsed = readWorkflowMentorTurn(execution.body ?? execution.primaryBody, turn?.stepId ?? step.id, d.information);
+                      const accepted = applyMentorTurnRules(parsed, execution.input ?? "");
+                      const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
                       const target = steps.find(candidate => candidate.id === parsed.targetStepId);
-                      const proposed = Object.entries(parsed.informationPatch).filter(([id, value]) =>
+                      const proposed = Object.entries(accepted).filter(([id, value]) =>
                         reachedQuestions(d.information[parsed.targetStepId]?.schema ?? [], d.information[parsed.targetStepId]?.values).some(f => f.id === id) &&
                         value.value !== (infoEdits[parsed.targetStepId]?.[id] ?? d.information[parsed.targetStepId]?.values?.[id])?.value);
                       return (
                         <div key={execution.executionId} className="space-y-2">
-                          <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                            <span className="text-xs text-[var(--text-secondary)]">
-                              你{turnStep ? ` · ${turnStep.title}` : ""}
-                            </span>
-                            <p className="mt-1 whitespace-pre-wrap break-words">
-                              {execution.input ?? "内容暂不可用"}
-                            </p>
-                          </div>
+                          {/* The host opens the question itself: no fabricated user message. */}
+                          {!openingTurn && (
+                            <div className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
+                              <span className="text-xs text-[var(--text-secondary)]">
+                                你{turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
+                              </span>
+                              <p className="mt-1 whitespace-pre-wrap break-words">
+                                {execution.input ?? "内容暂不可用"}
+                              </p>
+                            </div>
+                          )}
                           <div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className="text-xs text-[var(--text-secondary)]">
-                              导师{turnStep ? ` · ${turnStep.title}` : ""}
+                              {openingTurn ? "导师主动引导" : "导师"}
+                              {turnLabel ? ` · ${turnLabel}` : turnStep ? ` · ${turnStep.title}` : ""}
                             </span>
                             <p className="mt-1 whitespace-pre-wrap break-words">
                               {parsed.message ||
@@ -1099,7 +1304,7 @@ export default function PositioningDraft({
                               <p>导师建议调整 · {target.title}</p>
                               {proposed.map(([id, value]) => <p key={id} className="text-sm">{d.information[target.id].schema.find((f: {id:string}) => f.id === id)?.title}：{value.value}</p>)}
                               <Button variant="outline" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || Boolean(pendingMentor) || snap.state !== "draft"}
-                                onClick={() => acceptSuggestion(execution.executionId, target.id, Object.fromEntries(proposed))}>采用这些修改到“{target.title}”</Button>
+                                onClick={() => acceptSuggestion(execution.executionId, target.id, Object.fromEntries(proposed.map(([id, entry]) => [id, toInformation(entry)])))}>采用这些修改到“{target.title}”</Button>
                               <p className="text-xs">原有内容在采用前保持不变。采用后请核对本步骤及受影响的后续结果。</p>
                             </div>
                           )}
@@ -1124,10 +1329,6 @@ export default function PositioningDraft({
                       );
                     })}
                   </div>
-                  <div aria-label="当前导师任务" role="status" className="rounded-xl bg-[var(--bg-tertiary)] p-3">
-                    <p className="text-xs text-[var(--text-secondary)]">步骤引导 · {step.title}</p>
-                    <p className="mt-1 text-sm">{s.valid ? "这一步已有结果已保留。" : `我们接下来一起完成“${step.title}”。`}现在只聊“{activeQuestion.title}”。你可以继续补充；核对后点击这道题下面的确认按钮，再进入下一题。</p>
-                  </div>
                   <label className="block text-sm">
                     回复导师
                     <Textarea
@@ -1140,9 +1341,15 @@ export default function PositioningDraft({
                       maxLength={8000}
                     />
                   </label>
+                  {openingSteps.includes(step.id) && (
+                    <p role="status" className="text-xs text-[var(--text-secondary)]">
+                      导师正在准备这道题的引导，不需要你先发言；右侧表单现在就可以填写。
+                    </p>
+                  )}
                   <Button
                     disabled={
                       busy ||
+                      openingSteps.includes(step.id) ||
                       Boolean(pendingMentor) || hasPendingConfirmation || hasPendingStepRequest ||
                       snap.state !== "draft" ||
                       !mentorInput.trim()
@@ -1152,7 +1359,7 @@ export default function PositioningDraft({
                     {busy ? "正在回复…" : "发送"}
                   </Button>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    各步骤共用这一条对话记录。右侧每次只显示当前问题；确认后再继续，刷新或重新登录可恢复已保存进度。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
+                    导师会主动引导当前问题，不需要你先发“你好”或“继续”。各步骤共用这一条对话记录；右侧每次只显示当前问题，确认后再继续，刷新或重新登录可恢复已保存进度。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
                 <section
@@ -1161,8 +1368,13 @@ export default function PositioningDraft({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="text-xs text-[var(--text-secondary)]">当前问题</p>
-                      <h3 className="font-semibold">逐题核对，确认后继续</h3>
+                      <p className="text-xs text-[var(--text-secondary)]">
+                        当前问题 · {questionLabel(index, schema, activeQuestion.id)}
+                      </p>
+                      <h3 className="font-semibold">
+                        {questionLabel(index, schema, activeQuestion.id)} {activeQuestion.title}
+                        {activeQuestion.required ? "（必需）" : "（选填）"}
+                      </h3>
                     </div>
                     <p role="status" className="text-xs text-[var(--text-secondary)]">
                       {saveState[step.id] === "saving"
@@ -1233,9 +1445,32 @@ export default function PositioningDraft({
                       return (
                         <div key={field.id} className="space-y-2">
                           <label className="block font-medium" htmlFor={`${step.id}-${field.id}`}>
-                            {field.title}
+                            {questionLabel(index, schema, field.id)} {field.title}
                             {field.required ? "（必需）" : ""}
                           </label>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            {isAgentProposal(field)
+                              ? "这是导师要给出的成果建议：由导师根据已确认的资料先提出草案，你只需要核对、修改或确认，不需要自己从头写分析。"
+                              : "这是你自己的事实：请按你的真实情况填写，导师不会替你编造。"}
+                            {value.status === "provisional" && value.nature === "hypothesis"
+                              ? " 当前内容为导师提出的待验证建议。"
+                              : ""}
+                          </p>
+                          {value.value.trim() && (
+                            <p className="text-xs text-[var(--text-secondary)]">
+                              性质：
+                              {value.nature === "fact" ? "已陈述事实"
+                                : value.nature === "decision" ? "已作出的决定"
+                                  : value.nature === "hypothesis" ? "待验证假设"
+                                    : "尚未判断"}
+                              {" · 状态："}
+                              {value.status === "confirmed" ? "已确认"
+                                : value.status === "deferred" ? "已明确暂缓（接受局限）"
+                                  : value.status === "provisional" ? "待你核对"
+                                    : value.status === "unclear" ? "尚不充分"
+                                      : "尚未填写"}
+                            </p>
+                          )}
                           <Textarea
                             id={`${step.id}-${field.id}`}
                             aria-label={field.title}
@@ -1272,10 +1507,10 @@ export default function PositioningDraft({
                               答案已保存为待核对内容，请确认或继续修改。
                             </p>
                           )}
-                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id)}>
+                          <Button className="w-full" disabled={busy || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, false, nonAnswersFor(step.id, field.id))}>
                             {pendingConfirmation ? "继续核对本题确认" : "确认本题并继续"}
                           </Button>
-                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, true)}>
+                          <Button variant="outline" className="w-full" disabled={busy || hasPendingConfirmation || hasPendingStepRequest || snap.state !== "draft" || Boolean(pendingMentor) || confirmationState.kind === "malformed" || confirmationRedundant(step.id, field.id)} onClick={() => confirmStep(step, index, field.id, true, nonAnswersFor(step.id, field.id))}>
                             {field.required ? "按填写的原因暂缓本题并继续" : "暂时跳过本题"}
                           </Button>
                           <p className="text-xs text-[var(--text-secondary)]">还没想清楚可以继续和导师聊。{field.required ? "暂缓时请在上方写明原因，不会记成已确认事实。" : "选填问题可以明确选择跳过。"}</p>
@@ -1409,7 +1644,7 @@ export default function PositioningDraft({
                     value={item[key]}
                     onChange={(e) => update(index, key, e.target.value)}
                   />
-                  {key === "account" && <p className="text-xs text-[var(--text-secondary)]">{list.data?.accounts?.some((a: {platform:string;account:string}) => a.platform === item.platform && a.account === item.account) ? "已有账号 · 保留原工作项" : "待承接账号 · 确认后创建"}</p>}
+                  {key === "account" && <p className="text-xs text-[var(--text-secondary)]">{list.data?.accounts?.some((a: {platform:string;account:string}) => a.platform === item.platform && a.account === item.account) ? "已有账号 · 保留原工作项" : "待承接账号 · 尚未注册或验证 · 确认后创建"}</p>}
                 </td>
               ))}
               <td className="p-2">
@@ -1432,18 +1667,72 @@ export default function PositioningDraft({
               </Button></td>
             </tr>
           ))}</tbody></table></div>
+          <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
+            <h3>生成前只需要你的事实与选择</h3>
+            <p className="text-sm text-[var(--text-secondary)]">
+              定位已确认。下面这些是你自己的选择（可以留空由导师按已确认定位建议）；选题、日期、标题和简报由导师生成，不需要你先手动添加选题行。
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <label className="text-sm">
+                目标平台（逗号分隔，可留空）
+                <input
+                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
+                  aria-label="目标平台"
+                  disabled={busy}
+                  value={planPlatform}
+                  onChange={(e) => setPlanPlatform(e.target.value)}
+                  placeholder="例如 x,douyin"
+                />
+              </label>
+              <label className="text-sm">
+                具体账号（逗号分隔，可留空）
+                <input
+                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
+                  aria-label="具体账号"
+                  disabled={busy}
+                  value={planAccount}
+                  onChange={(e) => setPlanAccount(e.target.value)}
+                  placeholder="留空则由导师建议名称"
+                />
+              </label>
+              <label className="text-sm">
+                开始日期
+                <input
+                  className="ml-2 rounded border bg-[var(--bg-secondary)] p-2"
+                  aria-label="开始日期"
+                  type="date"
+                  disabled={busy}
+                  value={planStart}
+                  onChange={(e) => setPlanStart(e.target.value)}
+                />
+              </label>
+              <label className="text-sm">
+                天数
+                <input
+                  className="ml-2 w-20 rounded border bg-[var(--bg-secondary)] p-2"
+                  aria-label="计划天数"
+                  type="number"
+                  min={1}
+                  max={28}
+                  disabled={busy}
+                  value={planDays}
+                  onChange={(e) => setPlanDays(Math.min(28, Math.max(1, Number(e.target.value) || 7)))}
+                />
+              </label>
+            </div>
+            {planAccount.trim() === "" && (
+              <p className="text-xs text-[var(--text-secondary)]">
+                没有账号也可以生成。导师建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
+              </p>
+            )}
+          </div>
           <div className="flex flex-wrap gap-3">
             <Button
               variant="outline"
-              disabled={
-                busy ||
-                hasUnsavedInformation ||
-                !items.length ||
-                items.some((i) => !i.account)
-              }
+              disabled={busy || hasUnsavedInformation}
               onClick={generatePlan}
             >
-              按已保存账号生成计划候选
+              由导师按已确认定位生成第一周计划
             </Button>
             <Button
               variant="outline"
@@ -1491,6 +1780,9 @@ export default function PositioningDraft({
           {planCandidate && (
             <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
               <h3>AI 计划候选 · 尚未替换你的编辑</h3>
+              <p className="text-xs text-[var(--text-secondary)]">
+                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
+              </p>
               {planCandidate.map((i) => (
                 <p key={i.id}>
                   {i.day} · {i.platform}/{i.account} · {i.title}
@@ -1555,6 +1847,7 @@ export default function PositioningDraft({
         </section>
       )}
       {error && <p role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
     </main>
   );
 }
