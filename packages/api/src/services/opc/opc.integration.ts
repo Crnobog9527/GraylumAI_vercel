@@ -1420,6 +1420,42 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
         else expect(readSchema[fieldIndex].elicitation).toBe(field.elicitation);
       });
     }
+    // Per-field equality above only proves agreement with whatever the input
+    // declared. These counts make the input's own composition visible from
+    // inside the run, so a derived copy that declared nothing cannot pass by
+    // agreeing with nothing. Nothing here is hardcoded: every count comes from
+    // the loaded input or from a stored/read surface.
+    const roleCounts = (fields: any[]) => {
+      const counts = {
+        agent_proposal: 0,
+        user_fact: 0,
+        undeclared: 0,
+        total: fields.length,
+      };
+      for (const field of fields)
+        if (field?.elicitation === "agent_proposal") counts.agent_proposal += 1;
+        else if (field?.elicitation === "user_fact") counts.user_fact += 1;
+        else counts.undeclared += 1;
+      return counts;
+    };
+    const inputCounts = roleCounts(
+      input.steps.flatMap((step: any) => step.information),
+    );
+    const storedCounts = roleCounts(
+      storedWorkflow.steps.flatMap((step: any) => step.information),
+    );
+    const readCounts = roleCounts(
+      input.steps.flatMap(
+        (_step: any, index: number) =>
+          first.information[`step-${index + 1}`].schema as any[],
+      ),
+    );
+    for (const counts of [inputCounts, storedCounts, readCounts])
+      expect(
+        counts.agent_proposal + counts.user_fact + counts.undeclared,
+      ).toBe(counts.total);
+    expect(storedCounts).toEqual(inputCounts);
+    expect(readCounts).toEqual(inputCounts);
     for (const [index, step] of first.snapshot.workflow.steps.entries()) {
       const values = Object.fromEntries(
         input.steps[index].information.map((field: any) => [
@@ -1580,6 +1616,14 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
         files: input.files.length,
         steps: input.steps.length,
         profileFields: Object.keys(profile).length,
+        // Counts only, never ids/titles/bodies: the original unmodified input
+        // must report every field undeclared, a derived copy must report its
+        // own explicit split.
+        elicitation: {
+          input: inputCounts,
+          stored: storedCounts,
+          read: readCounts,
+        },
         realProviderCalls: 0,
         methodQuality: "NOT_RUN",
       }),
