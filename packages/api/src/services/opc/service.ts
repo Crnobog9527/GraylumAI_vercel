@@ -191,6 +191,13 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         });
         return replay.data;
       }
+      // A host-authored opening that does not freeze the question it is opening
+      // is malformed for a NEW admission: refuse it here, before any material,
+      // turn, runtime, billing or reservation state exists, instead of letting
+      // it degrade into a generic mentor turn with no question identity.
+      // An already admitted request never reaches this point: it is recovered
+      // above under its own frozen identity.
+      if (opening && !v.questionId) throw new Error("OPC_QUESTION_NOT_REACHED");
       // A new question must pass validation before creating turn/material state.
       if (questionNotReached) throw new Error("OPC_QUESTION_NOT_REACHED");
       const instruction =

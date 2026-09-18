@@ -2753,6 +2753,27 @@ it("OPC: the Agent opens the current question once per entry and plans without u
         questionId: schema[1].id,
       }),
     ).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+    // A NEW host opening that does not freeze the question it is opening is
+    // malformed: it must fail closed instead of degrading into a generic mentor
+    // turn, and it must not create any execution, BILL2 run or reservation.
+    await expect(
+      f.service.prepareStep({
+        draftId: draft.draftId,
+        stepId: "step-0",
+        purpose: "mentor",
+        requestId: randomUUID(),
+        input: OPENING_INPUT,
+      }),
+    ).rejects.toThrow("OPC_QUESTION_NOT_REACHED");
+    expect(
+      (await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from bill2_runs where actor_id=$1", [f.actor])).rows[0].n,
+    ).toBe(1);
+    expect(
+      (await sql.query("select count(*)::int n from credit_transactions where user_id=$1 and reason_code='bill2_reserve'", [f.actor])).rows[0].n,
+    ).toBe(1);
     // Refresh, re-login or a second tab reuses the same entry identity.
     expect((await f.service.prepareStep(openingRequest)).executionId).toBe(
       opening.executionId,
