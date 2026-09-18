@@ -3582,7 +3582,11 @@ function planEnvelopeFor(
  */
 async function planBrowser(
   f: { email: string; password: string; d: { draftId: string } },
-  options: { envelope?: Record<string, unknown> | null; clearBuffer?: boolean } = {},
+  options: {
+    envelope?: Record<string, unknown> | null;
+    clearBuffer?: boolean;
+    buffer?: Record<string, unknown> | null;
+  } = {},
 ) {
   const { chromium } =
     await import("../../../../../apps/web/node_modules/@playwright/test");
@@ -3610,15 +3614,18 @@ async function planBrowser(
   await page.waitForURL((url) => url.pathname.endsWith(path));
   const key = "opc-plan-generation:" + f.d.draftId;
   await page.evaluate(
-    ({ key, envelope, clearBuffer, draftId }) => {
+    ({ key, envelope, clearBuffer, buffer, draftId }) => {
       sessionStorage.removeItem(key);
       if (envelope) sessionStorage.setItem(key, JSON.stringify(envelope));
       if (clearBuffer) sessionStorage.removeItem("opc-edit:" + draftId);
+      if (buffer)
+        sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(buffer));
     },
     {
       key,
       envelope: options.envelope ?? null,
       clearBuffer: options.clearBuffer ?? false,
+      buffer: options.buffer ?? null,
       draftId: f.d.draftId,
     },
   );
@@ -3886,6 +3893,166 @@ it("OPC: Stage C5 a retained request from another round is archived, never execu
     );
     expect(fresh.request.requestId).not.toBe(staleRequestId);
     expect(fresh.sourceRoundId).toBe(f.d.roundId);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+/** The frozen plan requests this actor actually sent, in send order. */
+async function planRequests(actor: string) {
+  return (await sql.query(
+    `select e.request_id::text request_id, e.payload->'request'->>'input' input
+     from runtime_executions e
+     join opc_turns t on t.session_id=e.session_id and t.request_id=e.request_id
+     where e.actor_id=$1 and t.purpose='plan'
+     order by e.created_at, e.id`,
+    [actor],
+  )).rows;
+}
+it("OPC: Stage C6 explicit regeneration honours changed constraints and a new identity", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c6-account"] }),
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  try {
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const first = await planIdentity(f.actor, f.d.draftId);
+    expect(first.planRuns).toBe(1);
+    const sent = await planRequests(f.actor);
+    expect(sent).toHaveLength(1);
+    const firstRequestId = sent[0].request_id;
+    expect(JSON.parse(sent[0].input).accounts).toEqual(["c6-account"]);
+    expect(JSON.parse(sent[0].input).platforms).toEqual([]);
+    expect((await bufferOf()).planCandidateRequestId).toBe(firstRequestId);
+    // The user changes two optional constraints, then explicitly regenerates.
+    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
+    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
+      .toBe(2);
+    const after = await planRequests(f.actor);
+    // The new constraints really reached the model, on a new identity.
+    expect(JSON.parse(after[1].input).platforms).toEqual(["douyin"]);
+    expect(JSON.parse(after[1].input).startDate).toBe("2026-10-05");
+    expect(after[1].request_id).not.toBe(firstRequestId);
+    // Exactly one more generation was paid for.
+    const second = await planIdentity(f.actor, f.d.draftId);
+    expect(second.planExecutions - first.planExecutions).toBe(1);
+    expect(second.planRuns - first.planRuns).toBe(1);
+    expect(second.reserves - first.reserves).toBe(1);
+    // Only the candidate changed: the working rows were never overwritten.
+    expect(await page.getByRole("textbox", { name: "title 0", exact: true }).count()).toBe(0);
+    await expect
+      .poll(() => page.getByText("douyin").count(), { timeout: 30000 })
+      .toBeGreaterThan(0);
+    const buffer = await bufferOf();
+    expect(buffer.planCandidateRequestId).toBe(after[1].request_id);
+    expect(buffer.planCandidateSourceRoundId).toBe(f.d.roundId);
+    expect(
+      JSON.parse(
+        (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+      ).request.requestId,
+    ).toBe(after[1].request_id);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
+it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates the current round", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const staleRoundId = randomUUID();
+  const staleRequestId = randomUUID();
+  const staleCandidate = [
+    {
+      id: randomUUID(),
+      platform: "x",
+      account: "stale-round-a",
+      title: "上一轮候选",
+      brief: "上一轮生成的候选，不得作为当前轮展示",
+      day: "2026-01-01",
+    },
+  ];
+  const { browser, page } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f),
+    buffer: {
+      planCandidate: staleCandidate,
+      planCandidateSourceRoundId: staleRoundId,
+      planCandidateRequestId: staleRequestId,
+      items: [],
+      dirtyPlan: false,
+    },
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  try {
+    await page.reload();
+    // The round-A candidate is not rendered as this round's candidate, and it
+    // does not stop the round-B envelope from executing exactly once.
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    expect(await page.getByText("上一轮候选").count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    const generated = await bufferOf();
+    expect(generated.planCandidateSourceRoundId).toBe(f.d.roundId);
+    expect(generated.planCandidateRequestId).not.toBe(staleRequestId);
+    expect(
+      (generated.planCandidate as Array<{ title: string }>).map((i) => i.title),
+    ).not.toContain("上一轮候选");
+    expect(generated.planCandidate).toHaveLength(7);
+    // Repair B4, through the real revise button: a successful revision archives
+    // the previous round's candidate so it cannot become current again.
+    await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + f.d.draftId);
+    await page.evaluate(
+      ({ id, candidate, roundId }) =>
+        sessionStorage.setItem(
+          "opc-edit:" + id,
+          JSON.stringify({
+            planCandidate: candidate,
+            planCandidateSourceRoundId: roundId,
+            planCandidateRequestId: "round-a-request",
+            items: [],
+            dirtyPlan: false,
+          }),
+        ),
+      { id: f.d.draftId, candidate: staleCandidate, roundId: f.d.roundId },
+    );
+    const revise = page.getByRole("button", {
+      name: "修订定位，保留原版本",
+      exact: true,
+    });
+    await expect.poll(() => revise.isEnabled(), { timeout: 30000 }).toBe(true);
+    await revise.click();
+    await expect
+      .poll(
+        async () => {
+          const buffer = await bufferOf();
+          return [
+            Boolean(buffer.planCandidate),
+            (buffer.planCandidateArchive?.body ?? []).length,
+            buffer.planCandidateArchive?.roundId ?? null,
+          ];
+        },
+        { timeout: 30000 },
+      )
+      .toEqual([false, 1, f.d.roundId]);
   } finally {
     await browser.close();
   }

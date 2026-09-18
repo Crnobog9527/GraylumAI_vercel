@@ -241,6 +241,15 @@ export default function PositioningDraft({
   const [items, setItems] = useState<Item[]>([]),
     [dirtyPlan, setDirtyPlan] = useState(false),
     [planCandidate, setPlanCandidate] = useState<Item[] | null>(null),
+    /**
+     * The round that produced the local candidate. A candidate is only usable
+     * when it names the round on screen, so a candidate left over from an
+     * earlier round can neither be shown nor suppress a new one.
+     */
+    [planCandidateRound, setPlanCandidateRound] = useState<string | null>(null),
+    [planCandidateRequest, setPlanCandidateRequest] = useState<string | null>(
+      null,
+    ),
     [error, setError] = useState("");
   /**
    * Plan generation needs the user's own choices only (platform, optional
@@ -328,24 +337,47 @@ export default function PositioningDraft({
     setPlanCandidate(
       Array.isArray(local.planCandidate) ? local.planCandidate : null,
     );
+    // A pre-upgrade buffer stored a bare candidate with no round, so it is
+    // read as unowned rather than being assumed to belong to this round.
+    setPlanCandidateRound(
+      typeof local.planCandidateSourceRoundId === "string"
+        ? local.planCandidateSourceRoundId
+        : null,
+    );
+    setPlanCandidateRequest(
+      typeof local.planCandidateRequestId === "string"
+        ? local.planCandidateRequestId
+        : null,
+    );
     setDirtyPlan(Boolean(local.dirtyPlan));
     setItems(local.dirtyPlan && Array.isArray(local.items) ? local.items : []);
     setHydratedDraft(draftId);
   }, [draftId]);
   useEffect(() => {
     if (hydratedDraft !== draftId) return;
-    sessionStorage.setItem(
-      "opc-edit:" + draftId,
-      JSON.stringify({
-        items,
-        dirtyPlan,
-        infoEdits,
-        planCandidate,
-        activeStep,
-        activeQuestions,
-        mentorInput,
-      }),
-    );
+    try {
+      // Merge rather than replace: the buffer also carries the candidate's
+      // round ownership and any archive an earlier action left behind.
+      const raw = sessionStorage.getItem("opc-edit:" + draftId);
+      const previous = raw ? (JSON.parse(raw) ?? {}) : {};
+      sessionStorage.setItem(
+        "opc-edit:" + draftId,
+        JSON.stringify({
+          ...previous,
+          items,
+          dirtyPlan,
+          infoEdits,
+          planCandidate,
+          planCandidateSourceRoundId: planCandidateRound,
+          planCandidateRequestId: planCandidateRequest,
+          activeStep,
+          activeQuestions,
+          mentorInput,
+        }),
+      );
+    } catch {
+      /* A malformed local buffer must not break persistence. */
+    }
     const warn = (e: BeforeUnloadEvent) => {
       if (
         Object.keys(infoEdits).length ||
@@ -362,6 +394,8 @@ export default function PositioningDraft({
     dirtyPlan,
     infoEdits,
     planCandidate,
+    planCandidateRound,
+    planCandidateRequest,
     activeStep,
     activeQuestions,
     mentorInput,
@@ -391,9 +425,10 @@ export default function PositioningDraft({
   useEffect(() => {
     if (!planView || hydratedDraft !== draftId) return;
     if (!d?.report?.available) return;
-    // A candidate is already waiting for the user's decision; re-running would
-    // only re-read the same idempotent execution.
-    if (planCandidate) return;
+    // A candidate owned by this round is already waiting for the user's
+    // decision; re-running would only re-read the same idempotent execution.
+    // A candidate from another round must never suppress this one.
+    if (candidateBelongsToCurrentRound()) return;
     if (planAutoRunning.current) return;
     const retained = readRetainedPlan();
     if (!retained) return;
@@ -439,7 +474,11 @@ export default function PositioningDraft({
           setPlanRecovery("invalid");
           return;
         }
-        persistPlanCandidate(candidate.body);
+        persistPlanCandidate(
+          candidate.body,
+          retained.envelope.sourceRoundId,
+          request.requestId,
+        );
         setPlanRecovery("idle");
       } catch {
         // Timeout, lost reply or unknown outcome: the same envelope and request
@@ -457,6 +496,7 @@ export default function PositioningDraft({
     d?.report?.available,
     d?.roundId,
     planCandidate,
+    planCandidateRound,
   ]);
   useEffect(() => {
     if (chatScroll.current) chatScroll.current.scrollTop = chatScroll.current.scrollHeight;
@@ -797,18 +837,62 @@ export default function PositioningDraft({
    * React state is relied on, so a reload cannot lose a candidate the user has
    * already paid for.
    */
-  function persistPlanCandidate(candidate: Item[] | null) {
+  function persistPlanCandidate(
+    candidate: Item[] | null,
+    sourceRoundId: string | null,
+    requestId: string | null,
+  ) {
     try {
       const raw = sessionStorage.getItem("opc-edit:" + draftId);
       const local = raw ? (JSON.parse(raw) ?? {}) : {};
-      sessionStorage.setItem(
-        "opc-edit:" + draftId,
-        JSON.stringify({ ...local, planCandidate: candidate }),
-      );
+      const next: Record<string, unknown> = {
+        ...local,
+        planCandidateSourceRoundId: candidate ? sourceRoundId : null,
+        planCandidateRequestId: candidate ? requestId : null,
+      };
+      if (candidate) next.planCandidate = candidate;
+      else delete next.planCandidate;
+      sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(next));
     } catch {
       /* A malformed local buffer must not block the candidate itself. */
     }
     setPlanCandidate(candidate);
+    setPlanCandidateRound(candidate ? sourceRoundId : null);
+    setPlanCandidateRequest(candidate ? requestId : null);
+  }
+  /**
+   * Adopting or dismissing ends the candidate: its body, its round ownership
+   * and the authorization that produced it go away together.
+   */
+  function clearPlanCandidate() {
+    persistPlanCandidate(null, null, null);
+  }
+  /**
+   * A revision starts a new round, so the previous round's candidate must stop
+   * being current immediately. Its body is archived rather than destroyed.
+   */
+  function archivePlanCandidateForRevision() {
+    try {
+      const raw = sessionStorage.getItem("opc-edit:" + draftId);
+      const local = raw ? (JSON.parse(raw) ?? {}) : {};
+      if (Array.isArray(local.planCandidate))
+        local.planCandidateArchive = {
+          roundId:
+            typeof local.planCandidateSourceRoundId === "string"
+              ? local.planCandidateSourceRoundId
+              : null,
+          body: local.planCandidate,
+        };
+      delete local.planCandidate;
+      delete local.planCandidateSourceRoundId;
+      delete local.planCandidateRequestId;
+      sessionStorage.setItem("opc-edit:" + draftId, JSON.stringify(local));
+    } catch {
+      /* The revision itself must not depend on the local buffer. */
+    }
+    setPlanCandidate(null);
+    setPlanCandidateRound(null);
+    setPlanCandidateRequest(null);
   }
   function releasePlanEnvelope() {
     sessionStorage.removeItem(planEnvelopeKey);
@@ -824,6 +908,10 @@ export default function PositioningDraft({
     sessionStorage.removeItem(planEnvelopeKey);
     setPlanRecovery("stale");
     setNotice(message);
+  }
+  /** True when the local candidate was produced by the round on screen. */
+  function candidateBelongsToCurrentRound() {
+    return Boolean(planCandidate) && planCandidateRound === d?.roundId;
   }
   function stepEnvelopeFor(
     stepId: string,
@@ -1128,10 +1216,11 @@ export default function PositioningDraft({
         days: planDays,
       };
       const accountInput = JSON.stringify(constraints);
-      // An explicit user action may start a new request id, but a retained one
-      // for this round is reused so an interrupted attempt keeps its identity.
+      // A retained request may only be replayed when it is genuinely the same
+      // intent: nothing is waiting for a decision, and the user's constraints
+      // are unchanged. Anything else is a new explicit authorization.
       const retained = readRetainedPlan();
-      const reusable =
+      const retainedRequest =
         retained?.kind === "envelope" &&
         retained.envelope.sourceRoundId === d.roundId &&
         retained.envelope.request.draftId === draftId
@@ -1139,7 +1228,13 @@ export default function PositioningDraft({
           : retained?.kind === "legacy" && retained.request.draftId === draftId
             ? retained.request
             : null;
-      const request: PlanRequest = reusable ?? {
+      const reuse =
+        retainedRequest &&
+        !candidateBelongsToCurrentRound() &&
+        retainedRequest.input === accountInput
+          ? retainedRequest
+          : null;
+      const request: PlanRequest = reuse ?? {
         draftId,
         requestId: crypto.randomUUID(),
         purpose: "plan",
@@ -1169,7 +1264,7 @@ export default function PositioningDraft({
       // The envelope is deliberately retained while the candidate waits for the
       // user's decision: that is what lets a reload or a re-login recover the
       // same execution instead of paying for another one.
-      persistPlanCandidate(candidate.body);
+      persistPlanCandidate(candidate.body, d.roundId, request.requestId);
       setPlanRecovery("idle");
     });
   }
@@ -1286,7 +1381,17 @@ export default function PositioningDraft({
    * Agent produces the first proposal. Manual authoring stays available but
    * must not be presented as the primary path.
    */
-  const planNeedsCandidate = !planCandidate && !latest && !dirtyPlan;
+  /**
+   * Only a candidate that names the round on screen is shown as this round's
+   * candidate. A pre-upgrade candidate has no owner at all, so it stays
+   * reviewable but can never impersonate or suppress a round.
+   */
+  const shownPlanCandidate =
+    Boolean(planCandidate) &&
+    (planCandidateRound === null || planCandidateRound === d?.roundId)
+      ? planCandidate
+      : null;
+  const planNeedsCandidate = !shownPlanCandidate && !latest && !dirtyPlan;
   const firstPending = steps.findIndex((step) => !snap.steps[step.id].valid);
   const selectedStep =
     steps.find((step) => step.id === activeStep) ??
@@ -1785,13 +1890,16 @@ export default function PositioningDraft({
           variant="outline"
           disabled={busy || dirtyPlan}
           onClick={() =>
-            run(() =>
-              revise.mutateAsync({
+            run(async () => {
+              await revise.mutateAsync({
                 draftId,
                 requestId: crypto.randomUUID(),
                 expectedRoundId: d.roundId,
-              }),
-            )
+              });
+              // The revised round must not inherit the previous round's
+              // candidate, locally or in the buffer.
+              archivePlanCandidateForRevision();
+            })
           }
         >
           修订定位，保留原版本
@@ -1896,13 +2004,13 @@ export default function PositioningDraft({
               )}
             </div>
           )}
-          {planCandidate && (
+          {shownPlanCandidate && (
             <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
               <h3>AI 计划候选 · 尚未替换你的编辑</h3>
               <p className="text-xs text-[var(--text-secondary)]">
                 以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
               </p>
-              {planCandidate.map((i) => (
+              {shownPlanCandidate.map((i) => (
                 <p key={i.id}>
                   {i.day} · {i.platform}/{i.account} · {i.title}
                 </p>
@@ -1911,10 +2019,10 @@ export default function PositioningDraft({
                 disabled={busy}
                 onClick={() => {
                   // Adopting is a local edit only: no model call, and it ends
-                  // the recovery envelope for this candidate.
-                  setItems(planCandidate);
+                  // both the candidate and the envelope that produced it.
+                  setItems(shownPlanCandidate);
                   setDirtyPlan(true);
-                  persistPlanCandidate(null);
+                  clearPlanCandidate();
                   releasePlanEnvelope();
                 }}
               >
@@ -1924,7 +2032,7 @@ export default function PositioningDraft({
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
-                  persistPlanCandidate(null);
+                  clearPlanCandidate();
                   releasePlanEnvelope();
                 }}
               >
@@ -2034,7 +2142,7 @@ export default function PositioningDraft({
               disabled={busy || hasUnsavedInformation}
               onClick={generatePlan}
             >
-              {planCandidate || latest ? "重新生成计划候选" : "生成第一周计划"}
+              {shownPlanCandidate || latest ? "重新生成计划候选" : "生成第一周计划"}
             </Button>
             <Button
               variant="outline"
