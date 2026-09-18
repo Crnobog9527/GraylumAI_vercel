@@ -2736,6 +2736,9 @@ it("OPC: the Agent opens the current question once per entry and plans without u
       purpose: "mentor" as const,
       requestId: openingRequestId(draft.draftId, draft.roundId, "step-0", schema[0].id),
       input: OPENING_INPUT,
+      // The host always freezes the question it is opening with the request; the
+      // turn's projected question/kind identity comes from that frozen value.
+      questionId: schema[0].id,
     };
     const opening = await f.service.prepareStep(openingRequest);
     await executor.execute(opening.executionId);
@@ -2757,11 +2760,14 @@ it("OPC: the Agent opens the current question once per entry and plans without u
     await executor.execute(opening.executionId);
     expect(calls).toBe(1);
     const after = await f.service.read(draft.draftId);
+    // The turn is owned by the draft's current round, and every other projected
+    // value stays exact.
     expect(after.turns).toEqual([
       {
         executionId: opening.executionId,
         stepId: "step-0",
         questionId: schema[0].id,
+        roundId: draft.roundId,
         kind: "opening",
       },
     ]);
