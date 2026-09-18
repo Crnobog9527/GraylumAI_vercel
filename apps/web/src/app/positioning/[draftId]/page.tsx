@@ -425,12 +425,23 @@ export default function PositioningDraft({
   useEffect(() => {
     if (!planView || hydratedDraft !== draftId) return;
     if (!d?.report?.available) return;
-    // A candidate owned by this round is already waiting for the user's
-    // decision; re-running would only re-read the same idempotent execution.
-    // A candidate from another round must never suppress this one.
-    if (candidateBelongsToCurrentRound()) return;
     if (planAutoRunning.current) return;
     const retained = readRetainedPlan();
+    // A local candidate only proves the outcome of the exact request that
+    // produced it. It suppresses recovery only when it is that request's
+    // terminal result: it belongs to this round and it names the request the
+    // retained envelope still authorizes. Any other candidate is a visible
+    // fallback — an older request of this round, another round's, or a
+    // pre-upgrade buffer with no request identity at all — and the retained
+    // request stays an unresolved authorization that must be recovered under
+    // its own identity instead of being paid for again.
+    if (
+      candidateBelongsToCurrentRound() &&
+      planCandidateRequest !== null &&
+      retained?.kind === "envelope" &&
+      retained.envelope.request.requestId === planCandidateRequest
+    )
+      return;
     if (!retained) return;
     if (retained.kind === "invalid") {
       releasePlanEnvelope();
@@ -1217,8 +1228,12 @@ export default function PositioningDraft({
       };
       const accountInput = JSON.stringify(constraints);
       // A retained request may only be replayed when it is genuinely the same
-      // intent: nothing is waiting for a decision, and the user's constraints
-      // are unchanged. Anything else is a new explicit authorization.
+      // intent: the user's constraints are unchanged, and the visible candidate
+      // does not already close exactly this request. A candidate that names a
+      // different request is an older fallback, so the retained request is
+      // still an unconfirmed generation and reusing it is what prevents a
+      // second request — and a second charge — for the same intent. Anything
+      // else is a new explicit authorization.
       const retained = readRetainedPlan();
       const retainedRequest =
         retained?.kind === "envelope" &&
@@ -1230,7 +1245,11 @@ export default function PositioningDraft({
             : null;
       const reuse =
         retainedRequest &&
-        !candidateBelongsToCurrentRound() &&
+        !(
+          candidateBelongsToCurrentRound() &&
+          planCandidateRequest !== null &&
+          planCandidateRequest === retainedRequest.requestId
+        ) &&
         retainedRequest.input === accountInput
           ? retainedRequest
           : null;

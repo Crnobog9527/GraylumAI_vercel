@@ -4057,3 +4057,152 @@ it("OPC: Stage C7 a stale round candidate neither suppresses nor impersonates th
     await browser.close();
   }
 }, 300000);
+it("OPC: Stage C8 an ambiguous explicit regeneration recovers B behind candidate A without creating C", async () => {
+  const f = await completed(3);
+  await planFixtureModel(f.moduleId);
+  const { browser, context, page, key } = await planBrowser(f, {
+    envelope: planEnvelopeFor(f, { accounts: ["c8-account"] }),
+  });
+  const bufferOf = async () =>
+    JSON.parse(
+      (await page.evaluate(
+        (id) => sessionStorage.getItem("opc-edit:" + id),
+        f.d.draftId,
+      )) as string,
+    );
+  const envelopeOf = async () =>
+    JSON.parse(
+      (await page.evaluate((k) => sessionStorage.getItem(k), key)) as string,
+    );
+  const rowsOf = async () =>
+    (await planIdentityRows(f.actor)).map((row) => JSON.parse(row) as string[]);
+  try {
+    // Candidate A: the confirmation's own authorization, confirmed normally.
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    const first = await planRequests(f.actor);
+    expect(first).toHaveLength(1);
+    const aRequestId = first[0].request_id;
+    expect(JSON.parse(first[0].input).accounts).toEqual(["c8-account"]);
+    expect(JSON.parse(first[0].input).platforms).toEqual([]);
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    expect((await envelopeOf()).request.requestId).toBe(aRequestId);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual({
+      executions: 1, planExecutions: 1, planRuns: 1, reserves: 1,
+      plans: 0, accounts: 0, workItems: 0,
+    });
+    const rowsA = await rowsOf();
+    expect(rowsA).toHaveLength(1);
+    expect(rowsA[0][1]).toBe(aRequestId);
+    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
+
+    // B is a real second authorization: the user changes two optional
+    // constraints and clicks the regeneration control. The server admits,
+    // executes and reserves B, but every client reply for its plan result is
+    // fetched and then dropped, so the page cannot confirm what it paid for.
+    let releases = 0;
+    await page.route("**/api/trpc/opc.planResult*", async (route) => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      releases += 1;
+      await route.abort();
+    });
+    await page.getByRole("textbox", { name: "目标平台", exact: true }).fill("douyin");
+    await page.getByRole("textbox", { name: "开始日期", exact: true }).fill("2026-10-05");
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await planRequests(f.actor)).length, { timeout: 90000 })
+      .toBe(2);
+    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(0);
+    const sent = await planRequests(f.actor);
+    const bRequestId = sent[1].request_id;
+    expect(bRequestId).not.toBe(aRequestId);
+    // B really carries the changed constraints.
+    expect(JSON.parse(sent[1].input).platforms).toEqual(["douyin"]);
+    expect(JSON.parse(sent[1].input).startDate).toBe("2026-10-05");
+    // The old candidate A is still what the user sees; the retained envelope
+    // already names the newer, unconfirmed request B.
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    expect(await page.getByText("c8-account").count()).toBeGreaterThan(0);
+    expect(await page.getByText("douyin").count()).toBe(0);
+    const lost = await envelopeOf();
+    expect(lost.request.requestId).toBe(bRequestId);
+    expect(lost.sourceRoundId).toBe(f.d.roundId);
+    expect(JSON.parse(lost.request.input).platforms).toEqual(["douyin"]);
+    const afterLoss = await planIdentity(f.actor, f.d.draftId);
+    expect(afterLoss.planExecutions).toBe(2);
+    expect(afterLoss.planRuns).toBe(2);
+    expect(afterLoss.reserves).toBe(2);
+    const rowsAB = await rowsOf();
+    expect(rowsAB).toHaveLength(2);
+    expect(rowsAB.map((row) => row[1]).sort()).toEqual([aRequestId, bRequestId].sort());
+    const bBefore = rowsAB.find((row) => row[1] === bRequestId)!;
+    expect(bBefore.every((value) => typeof value === "string" && value.length > 0)).toBe(true);
+
+    // Explicit recovery of the same unresolved intent must reuse B, not create
+    // a third request C that would be a third charge.
+    await page
+      .getByRole("button", { name: "重新生成计划候选", exact: true })
+      .click();
+    await expect.poll(() => releases, { timeout: 90000 }).toBeGreaterThan(1);
+    expect((await envelopeOf()).request.requestId).toBe(bRequestId);
+    expect((await envelopeOf()).request.input).toBe(lost.request.input);
+    expect((await bufferOf()).planCandidateRequestId).toBe(aRequestId);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await rowsOf()).toEqual(rowsAB);
+
+    // With the interception removed, a reload recovers B on its own identity
+    // instead of stopping at the visible fallback candidate A.
+    await page.unroute("**/api/trpc/opc.planResult*");
+    await page.reload();
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await expect
+      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
+      .toBe(bRequestId);
+    const recovered = await envelopeOf();
+    expect(recovered.request.requestId).toBe(bRequestId);
+    expect(JSON.parse(recovered.request.input).platforms).toEqual(["douyin"]);
+    expect(await page.getByText("douyin").count()).toBeGreaterThan(0);
+    expect(await page.getByText("c8-account").count()).toBe(0);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    const rowsRecovered = await rowsOf();
+    expect(rowsRecovered).toEqual(rowsAB);
+    expect(rowsRecovered.find((row) => row[1] === bRequestId)).toEqual(bBefore);
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+
+    // A fresh login recovers the same identity once more and still cannot
+    // create a third request.
+    await context.clearCookies();
+    await page.goto(
+      process.env.V3_LOCAL_APP +
+        "/login?redirect=" +
+        encodeURIComponent("/positioning/" + f.d.draftId + "/plan"),
+    );
+    await page.getByPlaceholder("name@example.com").fill(f.email);
+    await page.getByPlaceholder("输入你的密码").fill(f.password);
+    await page.getByRole("button", { name: "登录", exact: true }).last().click();
+    await page.waitForURL((url) => url.pathname.endsWith("/plan"));
+    await page.getByRole("heading", { name: CANDIDATE_HEADING, exact: true }).waitFor();
+    await expect
+      .poll(async () => (await bufferOf()).planCandidateRequestId, { timeout: 30000 })
+      .toBe(bRequestId);
+    expect(await planIdentity(f.actor, f.d.draftId)).toEqual(afterLoss);
+    expect(await rowsOf()).toEqual(rowsAB);
+    expect((await planRequests(f.actor)).map((row) => row.request_id)).toEqual([
+      aRequestId,
+      bRequestId,
+    ]);
+  } finally {
+    await browser.close();
+  }
+}, 300000);
