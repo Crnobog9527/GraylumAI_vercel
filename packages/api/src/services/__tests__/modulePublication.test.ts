@@ -49,4 +49,39 @@ describe('administrator module publication', () => {
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,
     }));
   });
+  it('carries an explicit per-field elicitation declaration into the published workflow', () => {
+    const input = moduleInput();
+    input.steps[0].information = [
+      { id: 'owned_fact', title: '用户自有事实', required: true, elicitation: 'user_fact' },
+      { id: 'agent_deliverable', title: '导师成果建议', required: true, elicitation: 'agent_proposal' },
+    ];
+    const published = prepareModuleSkill(input).workflow.steps[0].information;
+    // Both values survive identically, and nothing rewrites them.
+    expect(published).toEqual([
+      { id: 'owned_fact', title: '用户自有事实', required: true, elicitation: 'user_fact' },
+      { id: 'agent_deliverable', title: '导师成果建议', required: true, elicitation: 'agent_proposal' },
+    ]);
+  });
+  it('keeps an older revision without the property valid and publishable', async () => {
+    const input = moduleInput();
+    input.steps[0].information = [{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }];
+    const published = prepareModuleSkill(input).workflow.steps[0].information;
+    expect(published).toEqual([{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }]);
+    expect(published?.[0]).not.toHaveProperty('elicitation');
+    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:''},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    await expect(saveModuleSkill(db as any, randomUUID(), input)).resolves.toBeTruthy();
+    expect(db.rpc).toHaveBeenCalledOnce();
+  });
+  it('rejects an invalid elicitation value and unknown field properties before any write', async () => {
+    for (const change of [
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, elicitation: 'proposal' as never }]; },
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, elicitation: 'AGENT_PROPOSAL' as never }]; },
+      (x: ModuleSkillInput) => { x.steps[0].information = [{ id: 'f', title: '字段', required: true, inferred: true } as never]; },
+    ]) {
+      const db = { rpc: vi.fn() }, input = moduleInput(); change(input);
+      expect(() => prepareModuleSkill(input)).toThrow();
+      await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow();
+      expect(db.rpc).not.toHaveBeenCalled();
+    }
+  });
 });

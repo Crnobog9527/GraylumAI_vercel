@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {validateDescriptor, type PackageDescriptor} from '../skills/loader';
 const id=z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const label=z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
-export const informationSchema=z.object({id,title:label,required:z.boolean(),profileKey:id.optional()}).strict();
+export const informationSchema=z.object({id,title:label,required:z.boolean(),profileKey:id.optional(),elicitation:z.enum(['user_fact','agent_proposal']).optional()}).strict();
 export const workflowSchema=z.object({
  id, version:z.number().int().min(1).max(1000000), kind:z.enum(['social','document']),
  planResources:z.array(z.string()).min(1).max(64).optional(),

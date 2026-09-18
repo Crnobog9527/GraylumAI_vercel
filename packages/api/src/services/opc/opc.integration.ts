@@ -1394,6 +1394,32 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     expect(first.snapshot.workflow.steps.map((s: any) => s.title)).toEqual(
       input.steps.map((s: any) => s.title),
     );
+    // The published revision is the only authority for a field's elicitation
+    // role: a declared role survives publication and read unchanged, and a
+    // revision that declares nothing stays valid without inventing one.
+    const storedWorkflow = (
+      await sql.query("select workflow from artifact_rounds where id=$1", [d.roundId])
+    ).rows[0].workflow;
+    for (const [index, step] of input.steps.entries()) {
+      const published = storedWorkflow.steps[index].information as any[];
+      expect(published).toHaveLength(step.information.length);
+      step.information.forEach((field: any, fieldIndex: number) => {
+        expect(published[fieldIndex].id).toBe(field.id);
+        if (field.elicitation === undefined)
+          expect(published[fieldIndex]).not.toHaveProperty("elicitation");
+        else expect(published[fieldIndex].elicitation).toBe(field.elicitation);
+      });
+    }
+    for (const [index, step] of input.steps.entries()) {
+      const readSchema = first.information[`step-${index + 1}`].schema as any[];
+      expect(readSchema).toHaveLength(step.information.length);
+      step.information.forEach((field: any, fieldIndex: number) => {
+        expect(readSchema[fieldIndex].id).toBe(field.id);
+        if (field.elicitation === undefined)
+          expect(readSchema[fieldIndex]).not.toHaveProperty("elicitation");
+        else expect(readSchema[fieldIndex].elicitation).toBe(field.elicitation);
+      });
+    }
     for (const [index, step] of first.snapshot.workflow.steps.entries()) {
       const values = Object.fromEntries(
         input.steps[index].information.map((field: any) => [
@@ -3240,3 +3266,139 @@ it("OPC: a revision makes the page open the current question again in the new ro
     await browser.close();
   }
 }, 300000);
+it("OPC: a published revision's per-field elicitation reaches the read schema and the mentor directive", async () => {
+  const { saveModuleSkill } = await import("../skills/modulePublication");
+  const f = await fixture(2);
+  const publishRevision = async (
+    steps: Array<{ title: string; resources: string[]; information: Array<Record<string, unknown>> }>,
+  ) => {
+    const pack = makePackage();
+    const model = randomUUID();
+    // Publication validates the administrator model binding; the runtime
+    // admission below needs the same row switched to the fixture protocol.
+    await sql.query(
+      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
+      [model],
+    );
+    const moduleId = randomUUID();
+    await saveModuleSkill(admin, f.owner, {
+      moduleId, skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
+      expectedUpdatedAt: null, expectedVersion: 0, directoryName: "synthetic-method", kind: "document",
+      files: pack.files, steps, resourcePlanReviewed: true,
+      module: {
+        title: "Stage B method", description: null, full_description: null, model_id: model,
+        platform: "all", category: "analysis", icon: "Wand2", image_url: null,
+        badge_type: null, badge_text: null, credits_display: null, sort_order: 0,
+        active: true, is_featured: false, features: null, examples: null, preparation_questions: null,
+      },
+    } as any);
+    await sql.query("update ai_models set provider='fixture' where id=$1", [model]);
+    const registration = (
+      await sql.query("select id from artifact_workflows where module_id=$1 and revision_id=$2", [
+        moduleId, pack.revisionId,
+      ])
+    ).rows[0].id;
+    return { registration, moduleId, model };
+  };
+  const directiveFor = async (executionId: string) =>
+    (await sql.query("select payload from runtime_executions where id=$1", [executionId])).rows[0]
+      .payload.instructions as string;
+  // One admission per draft keeps every session free; the directive is frozen
+  // at admission, so no provider call is needed to inspect it.
+  const directiveForQuestion = async (
+    registration: string,
+    questionId: string,
+    confirm: Array<{ id: string; title: string; required: boolean; profileKey?: string }> = [],
+  ) => {
+    const started = await f.service.start({
+      requestId: randomUUID(), registration, mode: "mentor",
+    });
+    if (confirm.length) {
+      await f.service.information({
+        draftId: started.draftId, stepId: "step-1", requestId: randomUUID(), expectedVersion: 0,
+        values: Object.fromEntries(
+          (await f.service.read(started.draftId)).information["step-1"].schema.map(
+            (field: { id: string }) => [
+              field.id,
+              confirm.some((entry) => entry.id === field.id)
+                ? { status: "confirmed", nature: "fact", value: "用户确认的自有事实" }
+                : { status: "unknown", nature: "unknown", value: "" },
+            ],
+          ),
+        ),
+      });
+    }
+    const prepared = await f.service.prepareStep({
+      draftId: started.draftId, stepId: "step-1", purpose: "mentor",
+      requestId: randomUUID(), input: "请开始", questionId,
+    });
+    return { started, instructions: await directiveFor(prepared.executionId) };
+  };
+
+  // A revision that declares both roles explicitly. The method-information
+  // contract still requires a distinct profileKey per declared field.
+  const declared = await publishRevision([
+    {
+      title: "需求确认",
+      resources: ["references/step-0.md"],
+      information: [
+        { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+        { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+      ],
+    },
+    { title: "成果", resources: ["SKILL.md"], information: [
+      { id: "summary", title: "结论", required: true, profileKey: "summary", elicitation: "agent_proposal" },
+    ] },
+  ]);
+  const readDraft = await f.service.start({
+    requestId: randomUUID(), registration: declared.registration, mode: "mentor",
+  });
+  const read = await f.service.read(readDraft.draftId);
+  // The stored workflow keeps both declared values.
+  const storedWorkflow = (
+    await sql.query("select workflow from artifact_rounds where id=$1", [readDraft.roundId])
+  ).rows[0].workflow;
+  expect(storedWorkflow.steps[0].information).toEqual([
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+    { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+  ]);
+  // The read projection exposes the same roles.
+  expect(read.information["step-1"].schema).toEqual([
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact", elicitation: "user_fact" },
+    { id: "agent_deliverable", title: "导师成果建议", required: true, profileKey: "agent_deliverable", elicitation: "agent_proposal" },
+  ]);
+  const fact = await directiveForQuestion(declared.registration, "owned_fact");
+  expect(fact.instructions).toContain('"id":"owned_fact"');
+  expect(fact.instructions).toContain('"elicit":"user_fact"');
+  expect(fact.instructions).not.toContain('"elicit":"agent_proposal"');
+  const proposal = await directiveForQuestion(declared.registration, "agent_deliverable", [
+    { id: "owned_fact", title: "用户自有事实", required: true, profileKey: "owned_fact" },
+  ]);
+  expect(proposal.instructions).toContain('"id":"agent_deliverable"');
+  expect(proposal.instructions).toContain('"elicit":"agent_proposal"');
+  expect(proposal.instructions).not.toContain('"elicit":"user_fact"');
+
+  // An older revision without the property stays valid and resolves to user_fact.
+  const legacy = await publishRevision([
+    {
+      title: "需求确认",
+      resources: ["references/step-0.md"],
+      information: [{ id: "position", title: "一句话核心商业定位", required: true, profileKey: "position" }],
+    },
+    { title: "成果", resources: ["SKILL.md"], information: [
+      { id: "summary", title: "结论", required: true, profileKey: "legacy_summary" },
+    ] },
+  ]);
+  const legacyDraft = await f.service.start({
+    requestId: randomUUID(), registration: legacy.registration, mode: "mentor",
+  });
+  expect((await f.service.read(legacyDraft.draftId)).information["step-1"].schema).toEqual([
+    { id: "position", title: "一句话核心商业定位", required: true, profileKey: "position" },
+  ]);
+  const legacyFact = await directiveForQuestion(legacy.registration, "position");
+  // The name `position` used to be classified as a deliverable; it must now
+  // resolve to a user-owned fact because the revision declares nothing.
+  expect(legacyFact.instructions).toContain('"id":"position"');
+  expect(legacyFact.instructions).toContain('"elicit":"user_fact"');
+  expect(legacyFact.instructions).not.toContain('"elicit":"agent_proposal"');
+}, 180000);

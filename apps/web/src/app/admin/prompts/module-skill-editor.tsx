@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 export type SkillForm = {
   kind: 'document' | 'social'; directoryName: string; files: { path: string; base64: string }[];
   planResources?: string[];
-  steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string}[] }[]; reviewed: boolean;
+  steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[]; reviewed: boolean;
 };
 export const emptySkillForm = (): SkillForm => ({ kind: 'document', directoryName: '', files: [],
   steps: [{ title: '', resources: ['SKILL.md'] }], reviewed: false });

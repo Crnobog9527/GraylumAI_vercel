@@ -9,9 +9,15 @@
  *   grounded proposal from what is already known and the user verifies, edits
  *   or defers it. A beginner is never required to author the analysis.
  *
- * The property is an optional, backward-compatible extension of the published
- * method's information schema. An older revision or an already saved draft
- * simply has no `elicitation` and keeps working.
+ * The published Skill revision is the only authority for this role. It declares
+ * the optional `elicitation` property per information field, which the shared
+ * `informationSchema` validates at publication and the read path preserves. A
+ * revision that predates the property keeps working and resolves conservatively
+ * to `user_fact`.
+ *
+ * Nothing here is inferred from a field's id, title, step number or position: a
+ * field named `position` or `offer` is a user fact unless its own revision says
+ * otherwise.
  */
 export type Elicitation = "user_fact" | "agent_proposal";
 export type MethodInformationField = {
@@ -20,61 +26,11 @@ export type MethodInformationField = {
   required?: boolean;
   elicitation?: Elicitation;
 };
-/**
- * Declared elicitation for the currently published positioning method, keyed by
- * the method's own field id. This is versioned method configuration, not a
- * "step number >= N" rule: it is data, it is applied per field, and any field
- * absent from this table is treated as a user-owned fact.
- *
- * The declared method revision is the one already published for the
- * six-step positioning workflow (需求确认 → 对标账号分析 → 账号定位 →
- * 内容规划 → 运营建议 → 商业变现路径规划). Publishing a revision that
- * declares `elicitation` in its own information schema takes precedence.
- */
-export const POSITIONING_METHOD_ELICITATION: Readonly<Record<string, Elicitation>> = Object.freeze({
-  // Step 1 — 需求确认: the user's own situation, goals and constraints.
-  niche: "user_fact",
-  supply: "user_fact",
-  audience: "user_fact",
-  short_goal: "user_fact",
-  long_goal: "user_fact",
-  constraints: "user_fact",
-  // Step 2 — 对标账号分析: the user supplies examples; the Agent analyses them.
-  benchmarks: "user_fact",
-  research_limits: "user_fact",
-  opportunity: "agent_proposal",
-  // Step 3 — 账号定位: Agent deliverables the user verifies.
-  names: "agent_proposal",
-  position: "agent_proposal",
-  value: "agent_proposal",
-  difference: "agent_proposal",
-  precise_audience: "agent_proposal",
-  priority: "agent_proposal",
-  feasibility: "agent_proposal",
-  // Step 4 — 内容规划.
-  formats: "agent_proposal",
-  pillars: "agent_proposal",
-  style: "agent_proposal",
-  cadence: "agent_proposal",
-  topics: "agent_proposal",
-  content_test: "agent_proposal",
-  // Step 5 — 运营建议.
-  segments: "agent_proposal",
-  interaction: "agent_proposal",
-  community: "agent_proposal",
-  operations: "agent_proposal",
-  // Step 6 — 商业变现路径规划.
-  routes: "agent_proposal",
-  offer: "agent_proposal",
-  economics: "agent_proposal",
-  timeline: "agent_proposal",
-});
+/** A revision that does not declare the role means the user owns the fact. */
 export const DEFAULT_ELICITATION: Elicitation = "user_fact";
-/** A published declaration always wins; otherwise the versioned table applies. */
+/** The field's own declaration decides; anything else is the conservative default. */
 export function fieldElicitation(field: MethodInformationField | null | undefined): Elicitation {
-  if (field?.elicitation === "user_fact" || field?.elicitation === "agent_proposal")
-    return field.elicitation;
-  return POSITIONING_METHOD_ELICITATION[field?.id ?? ""] ?? DEFAULT_ELICITATION;
+  return field?.elicitation === "agent_proposal" ? "agent_proposal" : DEFAULT_ELICITATION;
 }
 export function isAgentProposal(field: MethodInformationField | null | undefined) {
   return fieldElicitation(field) === "agent_proposal";
